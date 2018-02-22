@@ -820,14 +820,12 @@ XULDocument::ExecuteOnBroadcastHandlerFor(Element* aBroadcaster,
         // |onbroadcast| event handler
         WidgetEvent event(true, eXULBroadcast);
 
-        nsCOMPtr<nsIPresShell> shell = GetShell();
-        if (shell) {
-            RefPtr<nsPresContext> aPresContext = shell->GetPresContext();
-
-            // Handle the DOM event
-            nsEventStatus status = nsEventStatus_eIgnore;
-            EventDispatcher::Dispatch(child, aPresContext, &event, nullptr,
-                                      &status);
+        RefPtr<nsPresContext> presContext = GetPresContext();
+        if (presContext) {
+          // Handle the DOM event
+          nsEventStatus status = nsEventStatus_eIgnore;
+          EventDispatcher::Dispatch(child, presContext, &event, nullptr,
+                                    &status);
         }
     }
 
@@ -1576,9 +1574,7 @@ XULDocument::StartLayout(void)
         if (! docShell)
             return NS_ERROR_UNEXPECTED;
 
-        nsresult rv = NS_OK;
-        nsRect r = cx->GetVisibleArea();
-        rv = shell->Initialize(r.width, r.height);
+        nsresult rv = shell->Initialize();
         NS_ENSURE_SUCCESS(rv, rv);
     }
 

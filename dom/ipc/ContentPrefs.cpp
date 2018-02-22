@@ -30,6 +30,9 @@ const char* mozilla::dom::ContentPrefs::gEarlyPrefs[] = {
 #if defined(NIGHTLY_BUILD) || defined(DEBUG)
   "browser.startup.record",
 #endif
+#if defined(ANDROID)
+  "consoleservice.logcat",
+#endif
   "content.cors.disable",
   "content.cors.no_private_data",
   "content.notify.backoffcount",
@@ -304,6 +307,7 @@ const char* mozilla::dom::ContentPrefs::gEarlyPrefs[] = {
   "security.mixed_content.block_object_subrequest",
   "security.mixed_content.hsts_priming_cache_timeout",
   "security.mixed_content.send_hsts_priming",
+  "security.mixed_content.upgrade_display_content",
   "security.mixed_content.use_hsts",
   "security.sandbox.content.level",
   "security.sandbox.content.tempDirSuffix",

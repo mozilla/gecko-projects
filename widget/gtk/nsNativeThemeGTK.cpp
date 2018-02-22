@@ -37,6 +37,7 @@
 #include "mozilla/gfx/BorrowedContext.h"
 #include "mozilla/gfx/HelpersCairo.h"
 #include "mozilla/gfx/PathHelpers.h"
+#include "mozilla/Preferences.h"
 
 #ifdef MOZ_X11
 #  ifdef CAIRO_HAS_XLIB_SURFACE
@@ -58,6 +59,29 @@ NS_IMPL_ISUPPORTS_INHERITED(nsNativeThemeGTK, nsNativeTheme, nsITheme,
                                                              nsIObserver)
 
 static int gLastGdkError;
+
+// Return scale factor of the monitor where the window is located
+// by the most part or layout.css.devPixelsPerPx pref if set to > 0.
+static inline gint
+GetMonitorScaleFactor(nsIFrame* aFrame)
+{
+  // When the layout.css.devPixelsPerPx is set the scale can be < 1,
+  // the real monitor scale cannot go under 1.
+  double scale = nsIWidget::DefaultScaleOverride();
+  if (scale <= 0) {
+    nsIWidget* rootWidget = aFrame->PresContext()->GetRootWidget();
+    if (rootWidget) {
+        // We need to use GetDefaultScale() despite it returns monitor scale
+        // factor multiplied by font scale factor because it is the only scale
+        // updated in nsPuppetWidget.
+        // Since we don't want to apply font scale factor for UI elements
+        // (because GTK does not do so) we need to remove that from returned value.
+        return rootWidget->GetDefaultScale().scale / gfxPlatformGtk::GetFontScaleFactor();
+    }
+  }
+  // We cannot return zero scale because that would lead to divide by zero
+  return (scale < 1) ? 1 : int(round(scale));
+}
 
 nsNativeThemeGTK::nsNativeThemeGTK()
 {
@@ -1045,7 +1069,7 @@ nsNativeThemeGTK::GetExtraSizeForWidget(nsIFrame* aFrame, uint8_t aWidgetType,
   default:
     return false;
   }
-  gint scale = ScreenHelperGTK::GetGTKMonitorScaleFactor();
+  gint scale = GetMonitorScaleFactor(aFrame);
   aExtra->top *= scale;
   aExtra->right *= scale;
   aExtra->bottom *= scale;
@@ -1073,7 +1097,7 @@ nsNativeThemeGTK::DrawWidgetBackground(gfxContext* aContext,
 
   gfxRect rect = presContext->AppUnitsToGfxUnits(aRect);
   gfxRect dirtyRect = presContext->AppUnitsToGfxUnits(aDirtyRect);
-  gint scaleFactor = ScreenHelperGTK::GetGTKMonitorScaleFactor();
+  gint scaleFactor = GetMonitorScaleFactor(aFrame);
 
   // Align to device pixels where sensible
   // to provide crisper and faster drawing.
@@ -1125,6 +1149,10 @@ nsNativeThemeGTK::DrawWidgetBackground(gfxContext* aContext,
                            -drawingRect.y/scaleFactor,
                            widgetRect.width/scaleFactor,
                            widgetRect.height/scaleFactor};
+
+  // Save actual widget scale to GtkWidgetState as we don't provide
+  // nsFrame to gtk3drawing routines.
+  state.scale = scaleFactor;
 
   // translate everything so (0,0) is the top left of the drawingRect
   gfxPoint origin = rect.TopLeft() + drawingRect.TopLeft();
@@ -1319,7 +1347,7 @@ nsNativeThemeGTK::GetWidgetBorder(nsDeviceContext* aContext, nsIFrame* aFrame,
     }
   }
 
-  gint scale = ScreenHelperGTK::GetGTKMonitorScaleFactor();
+  gint scale = GetMonitorScaleFactor(aFrame);
   aResult->top *= scale;
   aResult->right *= scale;
   aResult->bottom *= scale;
@@ -1377,7 +1405,7 @@ nsNativeThemeGTK::GetWidgetPadding(nsDeviceContext* aContext,
         aResult->left += horizontal_padding;
         aResult->right += horizontal_padding;
 
-        gint scale = ScreenHelperGTK::GetGTKMonitorScaleFactor();
+        gint scale = GetMonitorScaleFactor(aFrame);
         aResult->top *= scale;
         aResult->right *= scale;
         aResult->bottom *= scale;
@@ -1626,8 +1654,7 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
       // box model may consider border and padding with child minimum sizes.
 
       nsIntMargin border;
-      nsNativeThemeGTK::GetWidgetBorder(aFrame->PresContext()->DeviceContext(),
-                                        aFrame, aWidgetType, &border);
+      GetCachedWidgetBorder(aFrame, aWidgetType, GetTextDirection(aFrame), &border);
       aResult->width += border.left + border.right;
       aResult->height += border.top + border.bottom;
     }
@@ -1679,7 +1706,7 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
     break;
   }
 
-  *aResult = *aResult * ScreenHelperGTK::GetGTKMonitorScaleFactor();
+  *aResult = *aResult * GetMonitorScaleFactor(aFrame);
 
   return NS_OK;
 }

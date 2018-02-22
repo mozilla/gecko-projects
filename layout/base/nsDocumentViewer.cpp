@@ -720,6 +720,7 @@ nsDocumentViewer::InitPresentationStuff(bool aDoInitialReflow)
   nscoord height = p2a * mBounds.height;
 
   mViewManager->SetWindowDimensions(width, height);
+  mPresContext->SetVisibleArea(nsRect(0, 0, width, height));
   mPresContext->SetTextZoom(mTextZoom);
   mPresContext->SetFullZoom(mPageZoom);
   mPresContext->SetOverrideDPPX(mOverrideDPPX);
@@ -731,11 +732,7 @@ nsDocumentViewer::InitPresentationStuff(bool aDoInitialReflow)
   if (aDoInitialReflow) {
     nsCOMPtr<nsIPresShell> shell = mPresShell;
     // Initial reflow
-    shell->Initialize(width, height);
-  } else {
-    // Store the visible area so it's available for other callers of
-    // Initialize, like nsContentSink::StartLayout.
-    mPresContext->SetVisibleArea(nsRect(0, 0, width, height));
+    shell->Initialize();
   }
 
   // now register ourselves as a selection listener, so that we get
@@ -1204,11 +1201,7 @@ nsDocumentViewer::PermitUnloadInternal(uint32_t *aPermitUnloadFlags,
 
   // Now, fire an BeforeUnload event to the document and see if it's ok
   // to unload...
-  nsIPresShell* shell = mDocument->GetShell();
-  nsPresContext* presContext = nullptr;
-  if (shell) {
-    presContext = shell->GetPresContext();
-  }
+  nsPresContext* presContext = mDocument->GetPresContext();
   RefPtr<BeforeUnloadEvent> event =
     new BeforeUnloadEvent(mDocument, presContext, nullptr);
   event->InitEvent(NS_LITERAL_STRING("beforeunload"), false, true);
@@ -2664,13 +2657,10 @@ nsDocumentViewer::CreateDeviceContext(nsView* aContainerView)
   if (doc) {
     NS_ASSERTION(!aContainerView, "External resource document embedded somewhere?");
     // We want to use our display document's device context if possible
-    nsIPresShell* shell = doc->GetShell();
-    if (shell) {
-      nsPresContext* ctx = shell->GetPresContext();
-      if (ctx) {
-        mDeviceContext = ctx->DeviceContext();
-        return NS_OK;
-      }
+    nsPresContext* ctx = doc->GetPresContext();
+    if (ctx) {
+      mDeviceContext = ctx->DeviceContext();
+      return NS_OK;
     }
   }
 
@@ -2953,13 +2943,10 @@ static bool
 SetExtResourceTextZoom(nsIDocument* aDocument, void* aClosure)
 {
   // Would it be better to enumerate external resource viewers instead?
-  nsIPresShell* shell = aDocument->GetShell();
-  if (shell) {
-    nsPresContext* ctxt = shell->GetPresContext();
-    if (ctxt) {
-      struct ZoomInfo* ZoomInfo = static_cast<struct ZoomInfo*>(aClosure);
-      ctxt->SetTextZoom(ZoomInfo->mZoom);
-    }
+  nsPresContext* ctxt = aDocument->GetPresContext();
+  if (ctxt) {
+    struct ZoomInfo* ZoomInfo = static_cast<struct ZoomInfo*>(aClosure);
+    ctxt->SetTextZoom(ZoomInfo->mZoom);
   }
 
   return true;
@@ -2968,12 +2955,9 @@ SetExtResourceTextZoom(nsIDocument* aDocument, void* aClosure)
 static bool
 SetExtResourceMinFontSize(nsIDocument* aDocument, void* aClosure)
 {
-  nsIPresShell* shell = aDocument->GetShell();
-  if (shell) {
-    nsPresContext* ctxt = shell->GetPresContext();
-    if (ctxt) {
-      ctxt->SetBaseMinFontSize(NS_PTR_TO_INT32(aClosure));
-    }
+  nsPresContext* ctxt = aDocument->GetPresContext();
+  if (ctxt) {
+    ctxt->SetBaseMinFontSize(NS_PTR_TO_INT32(aClosure));
   }
 
   return true;
@@ -2983,13 +2967,10 @@ static bool
 SetExtResourceFullZoom(nsIDocument* aDocument, void* aClosure)
 {
   // Would it be better to enumerate external resource viewers instead?
-  nsIPresShell* shell = aDocument->GetShell();
-  if (shell) {
-    nsPresContext* ctxt = shell->GetPresContext();
-    if (ctxt) {
-      struct ZoomInfo* ZoomInfo = static_cast<struct ZoomInfo*>(aClosure);
-      ctxt->SetFullZoom(ZoomInfo->mZoom);
-    }
+  nsPresContext* ctxt = aDocument->GetPresContext();
+  if (ctxt) {
+    struct ZoomInfo* ZoomInfo = static_cast<struct ZoomInfo*>(aClosure);
+    ctxt->SetFullZoom(ZoomInfo->mZoom);
   }
 
   return true;
@@ -2998,13 +2979,10 @@ SetExtResourceFullZoom(nsIDocument* aDocument, void* aClosure)
 static bool
 SetExtResourceOverrideDPPX(nsIDocument* aDocument, void* aClosure)
 {
-  nsIPresShell* shell = aDocument->GetShell();
-  if (shell) {
-    nsPresContext* ctxt = shell->GetPresContext();
-    if (ctxt) {
-      struct ZoomInfo* ZoomInfo = static_cast<struct ZoomInfo*>(aClosure);
-      ctxt->SetOverrideDPPX(ZoomInfo->mZoom);
-    }
+  nsPresContext* ctxt = aDocument->GetPresContext();
+  if (ctxt) {
+    struct ZoomInfo* ZoomInfo = static_cast<struct ZoomInfo*>(aClosure);
+    ctxt->SetOverrideDPPX(ZoomInfo->mZoom);
   }
 
   return true;
@@ -3273,13 +3251,10 @@ nsDocumentViewer::GetAuthorStyleDisabled(bool* aStyleDisabled)
 static bool
 ExtResourceEmulateMedium(nsIDocument* aDocument, void* aClosure)
 {
-  nsIPresShell* shell = aDocument->GetShell();
-  if (shell) {
-    nsPresContext* ctxt = shell->GetPresContext();
-    if (ctxt) {
-      const nsAString* mediaType = static_cast<nsAString*>(aClosure);
-      ctxt->EmulateMedium(*mediaType);
-    }
+  nsPresContext* ctxt = aDocument->GetPresContext();
+  if (ctxt) {
+    const nsAString* mediaType = static_cast<nsAString*>(aClosure);
+    ctxt->EmulateMedium(*mediaType);
   }
 
   return true;
@@ -3311,12 +3286,9 @@ nsDocumentViewer::EmulateMedium(const nsAString& aMediaType)
 static bool
 ExtResourceStopEmulatingMedium(nsIDocument* aDocument, void* aClosure)
 {
-  nsIPresShell* shell = aDocument->GetShell();
-  if (shell) {
-    nsPresContext* ctxt = shell->GetPresContext();
-    if (ctxt) {
-      ctxt->StopEmulatingMedium();
-    }
+  nsPresContext* ctxt = aDocument->GetPresContext();
+  if (ctxt) {
+    ctxt->StopEmulatingMedium();
   }
 
   return true;

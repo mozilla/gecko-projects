@@ -207,11 +207,13 @@ impl fmt::Debug for PropertyDeclarationBlock {
 
 impl PropertyDeclarationBlock {
     /// Returns the number of declarations in the block.
+    #[inline]
     pub fn len(&self) -> usize {
         self.declarations.len()
     }
 
     /// Create an empty block
+    #[inline]
     pub fn new() -> Self {
         PropertyDeclarationBlock {
             declarations: Vec::new(),
@@ -229,31 +231,36 @@ impl PropertyDeclarationBlock {
         PropertyDeclarationBlock {
             declarations: vec![declaration],
             declarations_importance: SmallBitVec::from_elem(1, importance.important()),
-            longhands: longhands,
+            longhands,
         }
     }
 
     /// The declarations in this block
+    #[inline]
     pub fn declarations(&self) -> &[PropertyDeclaration] {
         &self.declarations
     }
 
     /// The `important` flags for declarations in this block
+    #[inline]
     pub fn declarations_importance(&self) -> &SmallBitVec {
         &self.declarations_importance
     }
 
     /// Iterate over `(PropertyDeclaration, Importance)` pairs
+    #[inline]
     pub fn declaration_importance_iter(&self) -> DeclarationImportanceIterator {
         DeclarationImportanceIterator::new(&self.declarations, &self.declarations_importance)
     }
 
     /// Iterate over `PropertyDeclaration` for Importance::Normal
+    #[inline]
     pub fn normal_declaration_iter(&self) -> NormalDeclarationIterator {
         NormalDeclarationIterator::new(&self.declarations, &self.declarations_importance)
     }
 
     /// Return an iterator of (AnimatableLonghand, AnimationValue).
+    #[inline]
     pub fn to_animation_value_iter<'a, 'cx, 'cx_a:'cx>(
         &'a self,
         context: &'cx mut Context<'cx_a>,
@@ -267,6 +274,7 @@ impl PropertyDeclarationBlock {
     ///
     /// This is based on the `declarations_importance` bit-vector,
     /// which should be maintained whenever `declarations` is changed.
+    #[inline]
     pub fn any_important(&self) -> bool {
         !self.declarations_importance.all_false()
     }
@@ -275,11 +283,13 @@ impl PropertyDeclarationBlock {
     ///
     /// This is based on the `declarations_importance` bit-vector,
     /// which should be maintained whenever `declarations` is changed.
+    #[inline]
     pub fn any_normal(&self) -> bool {
         !self.declarations_importance.all_true()
     }
 
     /// Returns whether this block contains a declaration of a given longhand.
+    #[inline]
     pub fn contains(&self, id: LonghandId) -> bool {
         self.longhands.contains(id)
     }
@@ -292,8 +302,16 @@ impl PropertyDeclarationBlock {
 
     /// Get a declaration for a given property.
     ///
-    /// NOTE: This is linear time.
+    /// NOTE: This is linear time in the case of custom properties or in the
+    /// case the longhand is actually in the declaration block.
+    #[inline]
     pub fn get(&self, property: PropertyDeclarationId) -> Option<(&PropertyDeclaration, Importance)> {
+        if let PropertyDeclarationId::Longhand(id) = property {
+            if !self.contains(id) {
+                return None;
+            }
+        }
+
         self.declarations.iter().enumerate().find(|&(_, decl)| decl.id() == property).map(|(i, decl)| {
             let importance = if self.declarations_importance.get(i as u32) {
                 Importance::Important
@@ -408,7 +426,7 @@ impl PropertyDeclarationBlock {
                 let all_shorthand_len = match drain.all_shorthand {
                     AllShorthand::NotSet => 0,
                     AllShorthand::CSSWideKeyword(_) |
-                    AllShorthand::WithVariables(_) => ShorthandId::All.longhands().len()
+                    AllShorthand::WithVariables(_) => shorthands::ALL_SHORTHAND_MAX_LEN,
                 };
                 let push_calls_count =
                     drain.declarations.len() + all_shorthand_len;
@@ -743,20 +761,46 @@ impl PropertyDeclarationBlock {
     ///
     /// https://drafts.csswg.org/cssom/#serialize-a-css-declaration-block
     pub fn to_css(&self, dest: &mut CssStringWriter) -> fmt::Result {
+        use std::iter::Cloned;
+        use std::slice;
+
         let mut is_first_serialization = true; // trailing serializations should have a prepended space
 
         // Step 1 -> dest = result list
 
         // Step 2
-        let mut already_serialized = PropertyDeclarationIdSet::new();
+        //
+        // NOTE(emilio): We reuse this set for both longhands and shorthands
+        // with subtly different meaning. For longhands, only longhands that
+        // have actually been serialized (either by themselves, or as part of a
+        // shorthand) appear here. For shorthands, all the shorthands that we've
+        // attempted to serialize appear here.
+        let mut already_serialized = NonCustomPropertyIdSet::new();
 
         // Step 3
         for (declaration, importance) in self.declaration_importance_iter() {
             // Step 3.1
             let property = declaration.id();
+            let longhand_id = match property {
+                PropertyDeclarationId::Longhand(id) => id,
+                PropertyDeclarationId::Custom(..) => {
+                    // Given the invariants that there are no duplicate
+                    // properties in a declaration block, and that custom
+                    // properties can't be part of a shorthand, we can just care
+                    // about them here.
+                    append_serialization::<Cloned<slice::Iter<_>>, _>(
+                        dest,
+                        &property,
+                        AppendableValue::Declaration(declaration),
+                        importance,
+                        &mut is_first_serialization,
+                    )?;
+                    continue;
+                }
+            };
 
             // Step 3.2
-            if already_serialized.contains(property) {
+            if already_serialized.contains(longhand_id.into()) {
                 continue;
             }
 
@@ -765,8 +809,12 @@ impl PropertyDeclarationBlock {
             // iterating below.
 
             // Step 3.3.2
-            for &shorthand in declaration.shorthands() {
-                let properties = shorthand.longhands();
+            for &shorthand in longhand_id.shorthands() {
+                // We already attempted to serialize this shorthand before.
+                if already_serialized.contains(shorthand.into()) {
+                    continue;
+                }
+                already_serialized.insert(shorthand.into());
 
                 // Substep 2 & 3
                 let mut current_longhands = SmallVec::<[_; 10]>::new();
@@ -776,8 +824,19 @@ impl PropertyDeclarationBlock {
                 let is_system_font =
                     shorthand == ShorthandId::Font &&
                     self.declarations.iter().any(|l| {
-                        !already_serialized.contains(l.id()) &&
-                        l.get_system().is_some()
+                        match l.id() {
+                            PropertyDeclarationId::Longhand(id) => {
+                                if already_serialized.contains(id.into()) {
+                                    return false;
+                                }
+
+                                l.get_system().is_some()
+                            }
+                            PropertyDeclarationId::Custom(..) => {
+                                debug_assert!(l.get_system().is_none());
+                                false
+                            }
+                        }
                     });
 
                 if is_system_font {
@@ -793,21 +852,24 @@ impl PropertyDeclarationBlock {
                         }
                     }
                 } else {
-                    for (longhand, importance) in self.declaration_importance_iter() {
-                        if longhand.id().is_longhand_of(shorthand) {
-                            current_longhands.push(longhand);
-                            if importance.important() {
-                                important_count += 1;
+                    let mut contains_all_longhands = true;
+                    for &longhand in shorthand.longhands() {
+                        match self.get(PropertyDeclarationId::Longhand(longhand)) {
+                            Some((declaration, importance)) => {
+                                current_longhands.push(declaration);
+                                if importance.important() {
+                                    important_count += 1;
+                                }
+                            }
+                            None => {
+                                contains_all_longhands = false;
+                                break;
                             }
                         }
                     }
+
                     // Substep 1:
-                    //
-                    // Assuming that the PropertyDeclarationBlock contains no
-                    // duplicate entries, if the current_longhands length is
-                    // equal to the properties length, it means that the
-                    // properties that map to shorthand are present in longhands
-                    if current_longhands.len() != properties.len() {
+                    if !contains_all_longhands {
                         continue;
                     }
                 }
@@ -866,7 +928,7 @@ impl PropertyDeclarationBlock {
                 };
 
                 // Substeps 7 and 8
-                append_serialization::<Cloned<slice::Iter< _>>, _>(
+                append_serialization::<Cloned<slice::Iter<_>>, _>(
                     dest,
                     &shorthand,
                     value,
@@ -875,8 +937,13 @@ impl PropertyDeclarationBlock {
                 )?;
 
                 for current_longhand in &current_longhands {
+                    let longhand_id = match current_longhand.id() {
+                        PropertyDeclarationId::Longhand(id) => id,
+                        PropertyDeclarationId::Custom(..) => unreachable!(),
+                    };
+
                     // Substep 9
-                    already_serialized.insert(current_longhand.id());
+                    already_serialized.insert(longhand_id.into());
                 }
 
                 // FIXME(https://github.com/w3c/csswg-drafts/issues/1774)
@@ -888,12 +955,9 @@ impl PropertyDeclarationBlock {
             }
 
             // Step 3.3.4
-            if already_serialized.contains(property) {
+            if already_serialized.contains(longhand_id.into()) {
                 continue;
             }
-
-            use std::iter::Cloned;
-            use std::slice;
 
             // Steps 3.3.5, 3.3.6 & 3.3.7
             // Need to specify an iterator type here even though it’s unused to work around
@@ -905,10 +969,11 @@ impl PropertyDeclarationBlock {
                 &property,
                 AppendableValue::Declaration(declaration),
                 importance,
-                &mut is_first_serialization)?;
+                &mut is_first_serialization,
+            )?;
 
             // Step 3.3.8
-            already_serialized.insert(property);
+            already_serialized.insert(longhand_id.into());
         }
 
         // Step 4

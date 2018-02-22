@@ -47,10 +47,12 @@ struct LoadInfoArgs
   uint32_t                    contentPolicyType;
   uint32_t                    tainting;
   bool                        upgradeInsecureRequests;
+  bool                        browserUpgradeInsecureRequests;
   bool                        verifySignedContent;
   bool                        enforceSRI;
   bool                        allowDocumentToBeAgnosticToCSP;
   bool                        forceAllowDataURI;
+  bool                        allowInsecureRedirectToDataURI;
   bool                        forceInheritPrincipalDropped;
   uint64_t                    innerWindowID;
   uint64_t                    outerWindowID;

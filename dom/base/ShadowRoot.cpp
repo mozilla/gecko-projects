@@ -57,7 +57,6 @@ ShadowRoot::ShadowRoot(Element* aElement, bool aClosed,
   : DocumentFragment(aNodeInfo)
   , DocumentOrShadowRoot(*this)
   , mProtoBinding(aProtoBinding)
-  , mInsertionPointChanged(false)
   , mIsComposedDocParticipant(false)
 {
   SetHost(aElement);
@@ -433,32 +432,6 @@ ShadowRoot::MaybeReassignElement(Element* aElement,
   return false;
 }
 
-void
-ShadowRoot::DistributionChanged()
-{
-  // FIXME(emilio): We could be more granular in a bunch of cases.
-  auto* host = GetHost();
-  if (!host || !host->IsInComposedDoc()) {
-    return;
-  }
-
-  auto* shell = OwnerDoc()->GetShell();
-  if (!shell) {
-    return;
-  }
-
-  shell->DestroyFramesForAndRestyle(host);
-}
-
-void
-ShadowRoot::DistributeAllNodes()
-{
-
-  //XXX Handle <slot>.
-
-  DistributionChanged();
-}
-
 Element*
 ShadowRoot::GetActiveElement()
 {
@@ -475,16 +448,6 @@ void
 ShadowRoot::SetInnerHTML(const nsAString& aInnerHTML, ErrorResult& aError)
 {
   SetInnerHTMLInternal(aInnerHTML, aError);
-}
-
-Element*
-ShadowRoot::Host()
-{
-  nsIContent* host = GetHost();
-  MOZ_ASSERT(host && host->IsElement(),
-             "ShadowRoot host should always be an element, "
-             "how else did we create this ShadowRoot?");
-  return host->AsElement();
 }
 
 void
@@ -513,7 +476,7 @@ ShadowRoot::AttributeChanged(nsIDocument* aDocument,
     return;
   }
 
-  //XXX optimize this!
+  // FIXME(emilio): We could be more granular in a bunch of cases.
   shell->DestroyFramesForAndRestyle(aElement);
 }
 

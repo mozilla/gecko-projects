@@ -1730,7 +1730,7 @@ private:
 };
 
 nsresult
-PresShell::Initialize(nscoord aWidth, nscoord aHeight)
+PresShell::Initialize()
 {
   if (mIsDestroying) {
     return NS_OK;
@@ -1763,11 +1763,6 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
     }
   }
 #endif
-
-  // XXX Do a full invalidate at the beginning so that invalidates along
-  // the way don't have region accumulation issues?
-
-  mPresContext->SetVisibleArea(nsRect(0, 0, aWidth, aHeight));
 
   // Get the root frame from the frame manager
   // XXXbz it would be nice to move this somewhere else... like frame manager
@@ -5222,8 +5217,8 @@ PresShell::AddPrintPreviewBackgroundItem(nsDisplayListBuilder& aBuilder,
                                          nsIFrame*             aFrame,
                                          const nsRect&         aBounds)
 {
-  aList.AppendToBottom(new (&aBuilder)
-    nsDisplaySolidColor(&aBuilder, aFrame, aBounds, NS_RGB(115, 115, 115)));
+  aList.AppendToBottom(
+    MakeDisplayItem<nsDisplaySolidColor>(&aBuilder, aFrame, aBounds, NS_RGB(115, 115, 115)));
 }
 
 static bool
@@ -5313,7 +5308,7 @@ PresShell::AddCanvasBackgroundColorItem(nsDisplayListBuilder& aBuilder,
 
   if (!addedScrollingBackgroundColor || forceUnscrolledItem) {
     aList.AppendToBottom(
-      new (&aBuilder) nsDisplaySolidColor(&aBuilder, aFrame, aBounds, bgcolor));
+      MakeDisplayItem<nsDisplaySolidColor>(&aBuilder, aFrame, aBounds, bgcolor));
   }
 }
 
@@ -8048,12 +8043,10 @@ PresShell::DispatchTouchEventToDOM(WidgetEvent* aEvent,
       }
     }
 
-    nsIPresShell *presShell = doc->GetShell();
-    if (!presShell) {
+    nsPresContext *context = doc->GetPresContext();
+    if (!context) {
       continue;
     }
-
-    nsPresContext *context = presShell->GetPresContext();
 
     tmpStatus = nsEventStatus_eIgnore;
     EventDispatcher::Dispatch(targetPtr, context,
@@ -9774,8 +9767,7 @@ PresShell::VerifyIncrementalReflow()
 
   // Make the new presentation context the same size as our
   // presentation context.
-  nsRect r = mPresContext->GetVisibleArea();
-  cx->SetVisibleArea(r);
+  cx->SetVisibleArea(mPresContext->GetVisibleArea());
 
   // Create a new presentation shell to view the document. Use the
   // exact same style information that this document has.
@@ -9806,7 +9798,7 @@ PresShell::VerifyIncrementalReflow()
   vm->SetPresShell(sh);
   {
     nsAutoCauseReflowNotifier crNotifier(this);
-    sh->Initialize(r.width, r.height);
+    sh->Initialize();
   }
   mDocument->BindingManager()->ProcessAttachedQueue();
   sh->FlushPendingNotifications(FlushType::Layout);
@@ -10503,9 +10495,9 @@ void PresShell::QueryIsActive()
       MOZ_ASSERT(!container,
                  "external resource doc shouldn't have its own container");
 
-      nsIPresShell* displayPresShell = displayDoc->GetShell();
-      if (displayPresShell) {
-        container = displayPresShell->GetPresContext()->GetContainerWeak();
+      nsPresContext* displayPresContext = displayDoc->GetPresContext();
+      if (displayPresContext) {
+        container = displayPresContext->GetContainerWeak();
       }
     }
   }

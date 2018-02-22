@@ -619,6 +619,199 @@ MacroAssemblerMIPS::ma_cmp_set(Register dst, Address lhs, Register rhs, Conditio
     ma_cmp_set(dst, ScratchRegister, rhs, c);
 }
 
+void
+MacroAssemblerMIPSCompat::cmp64Set(Condition cond, Register64 lhs, Imm64 val, Register dest) {
+
+    if (val.value == 0) {
+        switch(cond){
+          case Assembler::Equal:
+          case Assembler::BelowOrEqual:
+            as_or(dest, lhs.high, lhs.low);
+            as_sltiu(dest, dest, 1);
+            break;
+          case Assembler::NotEqual:
+          case Assembler::Above:
+            as_or(dest, lhs.high, lhs.low);
+            as_sltu(dest, zero, dest);
+            break;
+          case Assembler::LessThan:
+          case Assembler::GreaterThanOrEqual:
+            as_slt(dest, lhs.high, zero);
+            if (cond == Assembler::GreaterThanOrEqual)
+                as_xori(dest, dest, 1);
+            break;
+          case Assembler::GreaterThan:
+          case Assembler::LessThanOrEqual:
+            as_or(SecondScratchReg, lhs.high, lhs.low);
+            as_sra(ScratchRegister, lhs.high, 31);
+            as_sltu(dest, ScratchRegister, SecondScratchReg);
+            if (cond == Assembler::LessThanOrEqual)
+                as_xori(dest, dest, 1);
+            break;
+          case Assembler::Below:
+          case Assembler::AboveOrEqual:
+            as_ori(dest, zero, cond == Assembler::AboveOrEqual ? 1 : 0);
+            break;
+          default:
+            MOZ_CRASH("Condition code not supported");
+            break;
+        }
+        return;
+    }
+
+    Condition c = ma_cmp64(cond, lhs, val, dest);
+
+    switch(cond) {
+      // For Equal/NotEqual cond ma_cmp64 dest holds non boolean result.
+      case Assembler::Equal:
+        as_sltiu(dest, dest, 1);
+        break;
+      case Assembler::NotEqual:
+        as_sltu(dest, zero, dest);
+        break;
+      default:
+        if(c == Assembler::Zero)
+           as_xori(dest, dest, 1);
+       break;
+    }
+}
+
+void
+MacroAssemblerMIPSCompat::cmp64Set(Condition cond, Register64 lhs, Register64 rhs, Register dest) {
+
+    Condition c = ma_cmp64(cond, lhs, rhs, dest);
+
+    switch(cond) {
+      // For Equal/NotEqual cond ma_cmp64 dest holds non boolean result.
+      case Assembler::Equal:
+        as_sltiu(dest, dest, 1);
+        break;
+      case Assembler::NotEqual:
+        as_sltu(dest, zero, dest);
+        break;
+      default:
+        if(c == Assembler::Zero)
+           as_xori(dest, dest, 1);
+       break;
+    }
+}
+
+Assembler::Condition
+MacroAssemblerMIPSCompat::ma_cmp64(Condition cond, Register64 lhs, Register64 rhs, Register dest) {
+
+    switch(cond) {
+      case Assembler::Equal:
+      case Assembler::NotEqual:
+        as_xor(SecondScratchReg, lhs.high, rhs.high);
+        as_xor(ScratchRegister, lhs.low, rhs.low);
+        as_or(dest, SecondScratchReg, ScratchRegister);
+        return (cond == Assembler::Equal) ? Assembler::Zero : Assembler::NonZero;
+        break;
+      case Assembler::LessThan:
+      case Assembler::GreaterThanOrEqual:
+        as_slt(SecondScratchReg, rhs.high, lhs.high);
+        as_sltu(ScratchRegister, lhs.low, rhs.low);
+        as_slt(SecondScratchReg, SecondScratchReg, ScratchRegister);
+        as_slt(ScratchRegister, lhs.high, rhs.high);
+        as_or(dest, ScratchRegister, SecondScratchReg);
+        return (cond == Assembler::GreaterThanOrEqual) ? Assembler::Zero : Assembler::NonZero;
+        break;
+      case Assembler::GreaterThan:
+      case Assembler::LessThanOrEqual:
+        as_slt(SecondScratchReg, lhs.high, rhs.high);
+        as_sltu(ScratchRegister, rhs.low, lhs.low);
+        as_slt(SecondScratchReg, SecondScratchReg, ScratchRegister);
+        as_slt(ScratchRegister, rhs.high, lhs.high);
+        as_or(dest, ScratchRegister, SecondScratchReg);
+        return (cond == Assembler::LessThanOrEqual) ? Assembler::Zero : Assembler::NonZero;
+        break;
+      case Assembler::Below:
+      case Assembler::AboveOrEqual:
+        as_sltu(SecondScratchReg, rhs.high, lhs.high);
+        as_sltu(ScratchRegister, lhs.low, rhs.low);
+        as_slt(SecondScratchReg, SecondScratchReg, ScratchRegister);
+        as_sltu(ScratchRegister, lhs.high, rhs.high);
+        as_or(dest, ScratchRegister, SecondScratchReg);
+        return (cond == Assembler::AboveOrEqual) ? Assembler::Zero : Assembler::NonZero;
+        break;
+      case Assembler::Above:
+      case Assembler::BelowOrEqual:
+        as_sltu(SecondScratchReg, lhs.high, rhs.high);
+        as_sltu(ScratchRegister, rhs.low, lhs.low);
+        as_slt(SecondScratchReg, SecondScratchReg, ScratchRegister);
+        as_sltu(ScratchRegister, rhs.high, lhs.high);
+        as_or(dest, ScratchRegister, SecondScratchReg);
+        return (cond == Assembler::BelowOrEqual) ? Assembler::Zero : Assembler::NonZero;
+        break;
+      default:
+        MOZ_CRASH("Condition code not supported");
+        break;
+    }
+}
+
+Assembler::Condition
+MacroAssemblerMIPSCompat::ma_cmp64(Condition cond, Register64 lhs, Imm64 val, Register dest) {
+
+    MOZ_ASSERT(val.value != 0);
+
+    switch(cond) {
+      case Assembler::Equal:
+      case Assembler::NotEqual:
+        ma_xor(SecondScratchReg, lhs.high, val.hi());
+        ma_xor(ScratchRegister, lhs.low, val.low());
+        as_or(dest, SecondScratchReg, ScratchRegister);
+        return (cond == Assembler::Equal) ? Assembler::Zero : Assembler::NonZero;
+        break;
+      case Assembler::LessThan:
+      case Assembler::GreaterThanOrEqual:
+        ma_li(SecondScratchReg, val.hi());
+        as_slt(ScratchRegister, lhs.high, SecondScratchReg);
+        as_slt(SecondScratchReg, SecondScratchReg, lhs.high);
+        as_subu(SecondScratchReg, SecondScratchReg, ScratchRegister);
+        ma_li(ScratchRegister, val.low());
+        as_sltu(ScratchRegister, lhs.low, ScratchRegister);
+        as_slt(dest, SecondScratchReg, ScratchRegister);
+        return (cond == Assembler::GreaterThanOrEqual) ? Assembler::Zero : Assembler::NonZero;
+        break;
+      case Assembler::GreaterThan:
+      case Assembler::LessThanOrEqual:
+        ma_li(SecondScratchReg, val.hi());
+        as_slt(ScratchRegister, SecondScratchReg, lhs.high);
+        as_slt(SecondScratchReg, lhs.high, SecondScratchReg);
+        as_subu(SecondScratchReg, SecondScratchReg, ScratchRegister);
+        ma_li(ScratchRegister, val.low());
+        as_sltu(ScratchRegister, ScratchRegister, lhs.low);
+        as_slt(dest, SecondScratchReg, ScratchRegister);
+        return (cond == Assembler::LessThanOrEqual) ? Assembler::Zero : Assembler::NonZero;
+        break;
+      case Assembler::Below:
+      case Assembler::AboveOrEqual:
+        ma_li(SecondScratchReg, val.hi());
+        as_sltu(ScratchRegister, lhs.high, SecondScratchReg);
+        as_sltu(SecondScratchReg, SecondScratchReg, lhs.high);
+        as_subu(SecondScratchReg, SecondScratchReg, ScratchRegister);
+        ma_li(ScratchRegister, val.low());
+        as_sltu(ScratchRegister, lhs.low, ScratchRegister);
+        as_slt(dest, SecondScratchReg, ScratchRegister);
+        return (cond == Assembler::AboveOrEqual) ? Assembler::Zero : Assembler::NonZero;
+        break;
+      case Assembler::Above:
+      case Assembler::BelowOrEqual:
+        ma_li(SecondScratchReg, val.hi());
+        as_sltu(ScratchRegister, SecondScratchReg, lhs.high);
+        as_sltu(SecondScratchReg, lhs.high, SecondScratchReg);
+        as_subu(SecondScratchReg, SecondScratchReg, ScratchRegister);
+        ma_li(ScratchRegister, val.low());
+        as_sltu(ScratchRegister, ScratchRegister, lhs.low);
+        as_slt(dest, SecondScratchReg, ScratchRegister);
+        return (cond == Assembler::BelowOrEqual) ? Assembler::Zero : Assembler::NonZero;
+        break;
+      default:
+        MOZ_CRASH("Condition code not supported");
+        break;
+    }
+}
+
 // fp instructions
 void
 MacroAssemblerMIPS::ma_lid(FloatRegister dest, double value)
@@ -2403,6 +2596,164 @@ MacroAssembler::wasmTruncateFloat32ToUInt32(FloatRegister input, Register output
     bind(&done);
 }
 
+void
+MacroAssembler::wasmLoadI64(const wasm::MemoryAccessDesc& access, Register memoryBase, Register ptr,
+                            Register ptrScratch, Register64 output)
+{
+    wasmLoadI64Impl(access, memoryBase, ptr, ptrScratch, output, InvalidReg);
+}
+
+void
+MacroAssembler::wasmUnalignedLoadI64(const wasm::MemoryAccessDesc& access, Register memoryBase,
+                                     Register ptr, Register ptrScratch, Register64 output,
+                                     Register tmp)
+{
+    wasmLoadI64Impl(access, memoryBase, ptr, ptrScratch, output, tmp);
+}
+
+void
+MacroAssembler::wasmStoreI64(const wasm::MemoryAccessDesc& access, Register64 value,
+                             Register memoryBase, Register ptr, Register ptrScratch)
+{
+    wasmStoreI64Impl(access, value, memoryBase, ptr, ptrScratch, InvalidReg);
+}
+
+void
+MacroAssembler::wasmUnalignedStoreI64(const wasm::MemoryAccessDesc& access, Register64 value,
+                                      Register memoryBase, Register ptr, Register ptrScratch,
+                                      Register tmp)
+{
+    wasmStoreI64Impl(access, value, memoryBase, ptr, ptrScratch, tmp);
+}
+
+void
+MacroAssemblerMIPSCompat::wasmLoadI64Impl(const wasm::MemoryAccessDesc& access, Register memoryBase,
+                                          Register ptr, Register ptrScratch, Register64 output,
+                                          Register tmp)
+{
+    uint32_t offset = access.offset();
+    MOZ_ASSERT_IF(offset, ptrScratch != InvalidReg);
+
+    // Maybe add the offset.
+    if (offset) {
+        asMasm().movePtr(ptr, ptrScratch);
+        asMasm().addPtr(Imm32(offset), ptrScratch);
+        ptr = ptrScratch;
+    }
+
+    unsigned byteSize = access.byteSize();
+    bool isSigned;
+
+    switch (access.type()) {
+      case Scalar::Int8:   isSigned = true; break;
+      case Scalar::Uint8:  isSigned = false; break;
+      case Scalar::Int16:  isSigned = true; break;
+      case Scalar::Uint16: isSigned = false; break;
+      case Scalar::Int32:  isSigned = true; break;
+      case Scalar::Uint32: isSigned = false; break;
+      case Scalar::Int64:  isSigned = true; break;
+      default: MOZ_CRASH("unexpected array type");
+    }
+
+    BaseIndex address(memoryBase, ptr, TimesOne);
+    MOZ_ASSERT(INT64LOW_OFFSET == 0);
+    if (IsUnaligned(access)) {
+        MOZ_ASSERT(tmp != InvalidReg);
+        if (byteSize <= 4) {
+            asMasm().ma_load_unaligned(access, output.low, address, tmp,
+                                       static_cast<LoadStoreSize>(8 * byteSize),
+                                       isSigned ? SignExtend : ZeroExtend);
+            if (!isSigned)
+                asMasm().move32(Imm32(0), output.high);
+            else
+                asMasm().ma_sra(output.high, output.low, Imm32(31));
+        } else {
+            MOZ_ASSERT(output.low != ptr);
+            asMasm().ma_load_unaligned(access, output.low, address, tmp, SizeWord, ZeroExtend);
+            asMasm().ma_load_unaligned(access, output.high,
+                                       BaseIndex(HeapReg, ptr, TimesOne, INT64HIGH_OFFSET),
+                                       tmp, SizeWord, SignExtend);
+        }
+        return;
+    }
+
+    asMasm().memoryBarrierBefore(access.sync());
+    if (byteSize <= 4) {
+        asMasm().ma_load(output.low, address, static_cast<LoadStoreSize>(8 * byteSize),
+                         isSigned ? SignExtend : ZeroExtend);
+        asMasm().append(access, asMasm().size() - 4 , asMasm().framePushed());
+        if (!isSigned)
+            asMasm().move32(Imm32(0), output.high);
+        else
+            asMasm().ma_sra(output.high, output.low, Imm32(31));
+    } else {
+        MOZ_ASSERT(output.low != ptr);
+        asMasm().ma_load(output.low, BaseIndex(HeapReg, ptr, TimesOne), SizeWord);
+        asMasm().append(access, asMasm().size() - 4 , asMasm().framePushed());
+        asMasm().ma_load(output.high, BaseIndex(HeapReg, ptr, TimesOne, INT64HIGH_OFFSET), SizeWord);
+        asMasm().append(access, asMasm().size() - 4 , asMasm().framePushed());
+    }
+    asMasm().memoryBarrierAfter(access.sync());
+}
+
+void
+MacroAssemblerMIPSCompat::wasmStoreI64Impl(const wasm::MemoryAccessDesc& access, Register64 value,
+                                           Register memoryBase, Register ptr, Register ptrScratch,
+                                           Register tmp)
+{
+    uint32_t offset = access.offset();
+    MOZ_ASSERT(offset < wasm::OffsetGuardLimit);
+    MOZ_ASSERT_IF(offset, ptrScratch != InvalidReg);
+
+    // Maybe add the offset.
+    if (offset) {
+        asMasm().addPtr(Imm32(offset), ptrScratch);
+        ptr = ptrScratch;
+    }
+
+    unsigned byteSize = access.byteSize();
+    bool isSigned;
+    switch (access.type()) {
+      case Scalar::Int8:   isSigned = true; break;
+      case Scalar::Uint8:  isSigned = false; break;
+      case Scalar::Int16:  isSigned = true; break;
+      case Scalar::Uint16: isSigned = false; break;
+      case Scalar::Int32:  isSigned = true; break;
+      case Scalar::Uint32: isSigned = false; break;
+      case Scalar::Int64:  isSigned = true; break;
+      default: MOZ_CRASH("unexpected array type");
+    }
+
+    MOZ_ASSERT(INT64LOW_OFFSET == 0);
+    BaseIndex address(memoryBase, ptr, TimesOne);
+    if (IsUnaligned(access)) {
+        MOZ_ASSERT(tmp != InvalidReg);
+        if (byteSize <= 4) {
+            asMasm().ma_store_unaligned(access, value.low, address, tmp,
+                                        static_cast<LoadStoreSize>(8 * byteSize),
+                                        isSigned ? SignExtend : ZeroExtend);
+        } else {
+            asMasm().ma_store_unaligned(access, value.high,
+                                        BaseIndex(HeapReg, ptr, TimesOne, INT64HIGH_OFFSET),
+                                        tmp, SizeWord, SignExtend);
+            asMasm().ma_store_unaligned(access, value.low, address, tmp, SizeWord, ZeroExtend);
+        }
+        return;
+    }
+
+    asMasm().memoryBarrierBefore(access.sync());
+    if (byteSize <= 4) {
+        asMasm().ma_store(value.low, address, static_cast<LoadStoreSize>(8 * byteSize));
+        asMasm().append(access, asMasm().size() - 4, asMasm().framePushed());
+    } else {
+        asMasm().ma_store(value.high, BaseIndex(HeapReg, ptr, TimesOne, INT64HIGH_OFFSET),
+                          SizeWord);
+        asMasm().append(access, asMasm().size() - 4, asMasm().framePushed());
+        asMasm().ma_store(value.low, address, SizeWord);
+    }
+    asMasm().memoryBarrierAfter(access.sync());
+}
+
 static void
 EnterAtomic64Region(MacroAssembler& masm, Register addr, Register spinlock, Register scratch)
 {
@@ -2611,6 +2962,7 @@ MacroAssembler::atomicFetchOp64(const Synchronization&, AtomicOp op, Register64 
 {
     AtomicFetchOp64(*this, op, value, mem, temp, output);
 }
+
 // ========================================================================
 // Convert floating point.
 
@@ -2634,4 +2986,3 @@ MacroAssembler::convertUInt64ToDouble(Register64 src, FloatRegister dest, Regist
 }
 
 //}}} check_macroassembler_style
-
