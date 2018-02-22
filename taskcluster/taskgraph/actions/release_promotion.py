@@ -76,13 +76,9 @@ VERSION_BUMP_FLAVORS = (
     'ship_devedition',
 )
 
-PARTIAL_UPDATES_FLAVORS = (
-    'promote_firefox',
-    'promote_firefox_rc',
-    'promote_devedition',
-    'ship_firefox',
-    'ship_firefox_rc',
-    'ship_devedition',
+PARTIAL_UPDATES_PRODUCTS = (
+    'devedition',
+    'firefox',
 )
 
 
@@ -177,8 +173,8 @@ def is_release_promotion_available(parameters):
             #   }
             'partial_updates': {
                 'type': 'object',
-                'description': ('Partial updates. Required in the following flavors: '
-                                '{}'.format(sorted(PARTIAL_UPDATES_FLAVORS))),
+                'description': ('Partial updates. Required in the following products: '
+                                '{}'.format(sorted(PARTIAL_UPDATES_PRODUCTS))),
                 'default': {},
                 'additionalProperties': {
                     'type': 'object',
@@ -224,20 +220,19 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
                 "targets." % ', '.join(VERSION_BUMP_FLAVORS)
             )
 
-    if product in ('firefox', 'devedition'):
-        if release_promotion_flavor in PARTIAL_UPDATES_FLAVORS:
-            partial_updates = json.dumps(input.get('partial_updates', {}))
-            if partial_updates == "{}":
-                raise Exception(
-                    "`partial_updates` property needs to be provided for %s "
-                    "targets." % ', '.join(PARTIAL_UPDATES_FLAVORS)
-                )
-            balrog_prefix = product.title()
-            os.environ['PARTIAL_UPDATES'] = partial_updates
-            release_history = populate_release_history(
-                balrog_prefix, parameters['project'],
-                partial_updates=input['partial_updates']
+    if product in PARTIAL_UPDATES_PRODUCTS:
+        partial_updates = json.dumps(input.get('partial_updates', {}))
+        if partial_updates == "{}":
+            raise Exception(
+                "`partial_updates` property needs to be provided for %s "
+                "products." % ', '.join(PARTIAL_UPDATES_PRODUCTS)
             )
+        balrog_prefix = product.title()
+        os.environ['PARTIAL_UPDATES'] = partial_updates
+        release_history = populate_release_history(
+            balrog_prefix, parameters['project'],
+            partial_updates=input['partial_updates']
+        )
 
     promotion_config = RELEASE_PROMOTION_CONFIG[release_promotion_flavor]
 
