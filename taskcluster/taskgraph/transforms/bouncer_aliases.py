@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 transforms = TransformSequence()
 
+
 @transforms.add
 def make_task_worker(config, jobs):
     for job in jobs:
@@ -65,6 +66,7 @@ def craft_bouncer_alias(product, bouncer_product, release_type):
         channel=_craft_channel_string_of_alias(product, release_type),
         postfix=_craft_alias_postfix(bouncer_product)
     )
+
 
 def _craft_product(product):
     # XXX devedition is provided in the channel function
