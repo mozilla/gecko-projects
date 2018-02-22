@@ -1106,7 +1106,7 @@ def build_balrog_payload(config, task, task_def):
 
 
 @payload_builder('bouncer-aliases')
-def build_bouncer_submission_payload(config, task, task_def):
+def build_bouncer_aliases_payload(config, task, task_def):
     worker = task['worker']
 
     task_def['payload'] = {
