@@ -29,6 +29,14 @@ XPCOMUtils.defineLazyGetter(this, "log", () => {
 this.EXPORTED_SYMBOLS = ["Policies"];
 
 this.Policies = {
+  "BlockAboutAddons": {
+    onBeforeUIStartup(manager, param) {
+      if (param) {
+        manager.disallowFeature("about:addons", true);
+      }
+    }
+  },
+
   "BlockAboutConfig": {
     onBeforeUIStartup(manager, param) {
       if (param) {
@@ -103,6 +111,14 @@ this.Policies = {
     }
   },
 
+  "CreateMasterPassword": {
+    onBeforeUIStartup(manager, param) {
+      if (!param) {
+        manager.disallowFeature("createMasterPassword");
+      }
+    }
+  },
+
   "DisableFirefoxScreenshots": {
     onBeforeAddons(manager, param) {
       if (param) {
@@ -142,6 +158,12 @@ this.Policies = {
   "popups": {
     onBeforeUIStartup(manager, param) {
       addAllowDenyPermissions("popup", param.allow, param.block);
+    }
+  },
+
+  "RememberPasswords": {
+    onBeforeUIStartup(manager, param) {
+      setAndLockPref("signon.rememberSignons", param);
     }
   },
 

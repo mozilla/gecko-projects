@@ -38,29 +38,46 @@ fs.writeFileSync(
   )
 );
 
-module.exports = tests.map(({ name, dirname, input, output }) => ({
-  context: __dirname,
-  entry: input,
-  output: {
-    path: __dirname,
-    filename: output,
-
-    libraryTarget: "var",
-    library: name
-  },
-  devtool: "sourcemap",
-  module: {
-    loaders: [
-      {
-        test: /\.js$/,
-        exclude: /node_modules/,
-        loader: "babel-loader",
-        options: {
-          babelrc: false,
-          presets: ["env"],
-          plugins: ["add-module-exports"]
-        }
-      }
-    ]
+module.exports = [
+  {
+    context: __dirname,
+    entry: "babel-polyfill",
+    output: {
+      filename: "polyfill-bundle.js"
+    }
   }
-}));
+].concat(
+  tests.map(({ name, dirname, input, output }) => {
+    const babelEnv = name !== "webpackModulesEs6";
+    const babelModules = name !== "webpackModules";
+
+    return {
+      context: __dirname,
+      entry: input,
+      output: {
+        path: __dirname,
+        filename: output,
+
+        libraryTarget: "var",
+        library: name
+      },
+      devtool: "sourcemap",
+      module: {
+        loaders: [
+          {
+            test: /\.js$/,
+            exclude: /node_modules/,
+            loader: "babel-loader",
+            options: {
+              babelrc: false,
+              presets: babelEnv
+                ? [["env", { modules: babelModules ? "commonjs" : false }]]
+                : [],
+              plugins: babelEnv && babelModules ? ["add-module-exports"] : []
+            }
+          }
+        ]
+      }
+    };
+  })
+);

@@ -509,6 +509,13 @@ interface nsILoadInfo : nsISupports
   [infallible] readonly attribute boolean upgradeInsecureRequests;
 
   /**
+   * Returns true if the the page is https and the content is upgradable from http
+   * requires 'security.mixed_content.upgrade_display_content' pref to be true.
+   * Currently this only upgrades display content but might be expanded to other loads.
+   * This is very similar in implementation to upgradeInsecureRequests but browser set.
+   */
+  [infallible] readonly attribute boolean browserUpgradeInsecureRequests;
+  /**
    * If true, the content of the channel is queued up and checked
    * if it matches a content signature. Note, setting this flag
    * to true will negatively impact performance since the preloader
@@ -528,6 +535,11 @@ interface nsILoadInfo : nsISupports
    * If true, toplevel data: URI navigation is allowed
    */
   [infallible] attribute boolean forceAllowDataURI;
+
+  /**
+   * If true, insecure redirects to a data: URI are allowed.
+   */
+  [infallible] attribute boolean allowInsecureRedirectToDataURI;
 
   /**
    * If true, this is the load of a frame's original src attribute

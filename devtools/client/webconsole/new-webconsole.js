@@ -132,7 +132,7 @@ NewWebConsoleFrame.prototype = {
   },
 
   logWarningAboutReplacedAPI() {
-    this.owner.target.logErrorInPage(l10n.getStr("ConsoleAPIDisabled"),
+    this.owner.target.logWarningInPage(l10n.getStr("ConsoleAPIDisabled"),
       "ConsoleAPIDisabled");
   },
 
@@ -250,7 +250,7 @@ NewWebConsoleFrame.prototype = {
 
     if (this.isBrowserConsole) {
       shortcuts.on(l10n.getStr("webconsole.close.key"),
-                   this.window.close.bind(this.window));
+                   this.window.top.close.bind(this.window.top));
 
       ZoomKeys.register(this.window);
     } else if (Services.prefs.getBoolPref(PREF_SIDEBAR_ENABLED)) {

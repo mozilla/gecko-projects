@@ -2,6 +2,14 @@
   "$schema": "http://json-schema.org/draft-04/schema#",
   "type": "object",
   "properties": {
+    "BlockAboutAddons": {
+      "description": "Block access to the Add-ons Mananger (about:addons).",
+      "first_available": "60.0",
+
+      "type": "boolean",
+      "enum": [true]
+    },
+
     "BlockAboutConfig": {
       "description": "Blocks access to the about:config page.",
       "first_available": "60.0",
@@ -57,6 +65,14 @@
 
       "type": "boolean",
       "enum": [true]
+    },
+
+    "CreateMasterPassword": {
+      "description": "If false, removes access to create a master password.",
+      "first_available": "60.0",
+
+      "type": "boolean",
+      "enum": [false]
     },
 
     "DisableFirefoxScreenshots": {
@@ -133,6 +149,13 @@
           }
         }
       }
+    },
+
+    "RememberPasswords": {
+      "description": "Enforces the setting to allow Firefox to remember saved logins and passwords. Both true and false values are accepted.",
+      "first_available": "60.0",
+
+      "type": "boolean"
     },
 
     "install_addons": {

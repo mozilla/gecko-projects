@@ -58,7 +58,7 @@ use style::properties::ComputedValues;
 use style::selector_parser::RestyleDamage;
 use style::servo::restyle_damage::ServoRestyleDamage;
 use style::str::char_is_whitespace;
-use style::values::{self, Either, Auto};
+use style::values::{self, Either};
 use style::values::computed::{Length, LengthOrPercentage, LengthOrPercentageOrAuto};
 use style::values::computed::counters::ContentItem;
 use style::values::generics::box_::VerticalAlign;
@@ -1408,6 +1408,16 @@ impl Fragment {
         }
     }
 
+    /// If this is a Column fragment, get the col span
+    ///
+    /// Panics for non-column fragments
+    pub fn column_span(&self) -> u32 {
+        match self.specific {
+            SpecificFragmentInfo::TableColumn(col_fragment) => max(col_fragment.span, 1),
+            _ => panic!("non-table-column fragment inside table column?!"),
+        }
+    }
+
     /// Returns true if this element can be split. This is true for text fragments, unless
     /// `white-space: pre` or `white-space: nowrap` is set.
     pub fn can_split(&self) -> bool {
@@ -2512,7 +2522,7 @@ impl Fragment {
         // For absolutely and relatively positioned fragments we only establish a stacking
         // context if there is a z-index set.
         // See https://www.w3.org/TR/CSS2/visuren.html#z-index
-        self.style().get_position().z_index != Either::Second(Auto)
+        !self.style().get_position().z_index.is_auto()
     }
 
     // Get the effective z-index of this fragment. Z-indices only apply to positioned element

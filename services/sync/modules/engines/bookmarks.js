@@ -395,24 +395,10 @@ BookmarksEngine.prototype = {
     let guidMap = {};
     let tree = await PlacesUtils.promiseBookmarksTree("");
 
-    function* walkBookmarksTree(tree, parent = null) {
-      if (tree) {
-        // Skip root node
-        if (parent) {
-          yield [tree, parent];
-        }
-        if (tree.children) {
-          for (let child of tree.children) {
-            yield* walkBookmarksTree(child, tree);
-          }
-        }
-      }
-    }
-
     function* walkBookmarksRoots(tree) {
       for (let child of tree.children) {
         if (isSyncedRootNode(child)) {
-          yield* walkBookmarksTree(child, tree);
+          yield* Utils.walkTree(child, tree);
         }
       }
     }
@@ -565,7 +551,7 @@ BookmarksEngine.prototype = {
       }
       this._log.warn("Error while building GUID map, skipping all other incoming items", ex);
       // eslint-disable-next-line no-throw-literal
-      throw {code: Engine.prototype.eEngineAbortApplyIncoming,
+      throw {code: SyncEngine.prototype.eEngineAbortApplyIncoming,
              cause: ex};
     }
   },
