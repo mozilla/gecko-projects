@@ -332,7 +332,7 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
 
         # 'secondary' balrog/update verify/final verify tasks only run for RCs
         if parameters.get('release_type') != 'rc':
-            if 'secondary' in task.kind:
+            if 'secondary' in task.kind or task.label == 'release-bouncer-sub-firefox-rc':
                 return False
 
         if task.attributes.get('shipping_product') == 'firefox' and \
