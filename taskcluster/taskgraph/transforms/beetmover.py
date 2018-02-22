@@ -11,7 +11,8 @@ from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.schema import validate_schema, Schema
 from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
-                                         get_beetmover_action_scope)
+                                         get_beetmover_action_scope,
+                                         get_phase)
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
 
@@ -327,7 +328,7 @@ beetmover_description_schema = Schema({
     # locale is passed only for l10n beetmoving
     Optional('locale'): basestring,
 
-    Required('shipping-phase'): task_description_schema['shipping-phase'],
+    Optional('shipping-phase'): task_description_schema['shipping-phase'],
     Optional('shipping-product'): task_description_schema['shipping-product'],
 })
 
@@ -382,6 +383,7 @@ def make_task_description(config, jobs):
 
         bucket_scope = get_beetmover_bucket_scope(config)
         action_scope = get_beetmover_action_scope(config)
+        phase = get_phase(config)
 
         task = {
             'label': label,
@@ -392,7 +394,7 @@ def make_task_description(config, jobs):
             'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
             'treeherder': treeherder,
-            'shipping-phase': job['shipping-phase'],
+            'shipping-phase': phase,
         }
 
         yield task
