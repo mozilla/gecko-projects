@@ -571,6 +571,9 @@ task_description_schema = Schema({
             Required('paths'): [basestring],
         }],
     }, {
+        Required('implementation'): 'bouncer-aliases',
+        Required('entries'): object,
+    }, {
         Required('implementation'): 'bouncer-submission',
         Required('locales'): [basestring],
         Required('entries'): object,
@@ -1125,6 +1128,15 @@ def build_balrog_payload(config, task, task_def):
                 'publish_rules': worker['publish-rules'],
                 'release_eta': config.params.get('release_eta') or '',
             })
+
+
+@payload_builder('bouncer-aliases')
+def build_bouncer_submission_payload(config, task, task_def):
+    worker = task['worker']
+
+    task_def['payload'] = {
+        'aliases_entries': worker['entries']
+    }
 
 
 @payload_builder('bouncer-submission')

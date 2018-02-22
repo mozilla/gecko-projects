@@ -16,8 +16,6 @@ from taskgraph.util.scriptworker import get_release_config
 
 logger = logging.getLogger(__name__)
 
-transforms = TransformSequence()
-
 
 FTP_PLATFORMS_PER_BOUNCER_PLATFORM = {
     'android': 'android-api-16',
@@ -188,8 +186,8 @@ def craft_paths_per_bouncer_platform(product, bouncer_product, bouncer_platforms
     return paths_per_bouncer_platform
 
 
-def craft_bouncer_product_name(product, bouncer_product, current_version, current_build_number,
-                               previous_version=None):
+def craft_bouncer_product_name(product, bouncer_product, current_version,
+                               current_build_number=None, previous_version=None):
     if '-ssl' in bouncer_product:
         postfix = '-SSL'
     elif 'stub-' in bouncer_product:
@@ -201,6 +199,10 @@ def craft_bouncer_product_name(product, bouncer_product, current_version, curren
             raise Exception('Partial is being processed, but no previous version defined.')
 
         if '-candidates' in bouncer_product:
+            if not current_build_number:
+                raise Exception('Partial in candidates directory is being processed, \
+but no current build number defined.')
+
             postfix = 'build{build_number}-Partial-{previous_version_with_build_number}'.format(
                 build_number=current_build_number,
                 previous_version_with_build_number=previous_version,
