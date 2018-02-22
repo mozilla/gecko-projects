@@ -1095,7 +1095,7 @@ def build_balrog_payload(config, task, task_def):
         else:  # schedule / ship
             task_def['payload'].update({
                 'publish_rules': worker['publish-rules'],
-                'release_eta': config.params.get('release_eta', ''),
+                'release_eta': config.params.get('release_eta') or '',
             })
 
 
