@@ -18,3 +18,6 @@ kind-dependencies:
 only-for-attributes:
    - nightly
    - signed
+
+job-template:
+   shipping-phase: promote

@@ -107,7 +107,7 @@ def make_task_description(config, jobs):
             'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
             'treeherder': treeherder,
-            'shipping-phase': job.get('shipping-phase', 'promote'),
+            'shipping-phase': job['shipping-phase'],
             'shipping-product': job.get('shipping-product'),
         }
 
