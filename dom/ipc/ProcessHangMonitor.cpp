@@ -119,7 +119,8 @@ class HangMonitorChild
  private:
   void ShutdownOnThread();
 
-  static Atomic<HangMonitorChild*> sInstance;
+  static Atomic<HangMonitorChild*, SequentiallyConsistent,
+                recordreplay::Behavior::DontPreserve> sInstance;
   UniquePtr<BackgroundHangMonitor> mForcePaintMonitor;
 
   const RefPtr<ProcessHangMonitor> mHangMonitor;
@@ -143,7 +144,8 @@ class HangMonitorChild
   bool mIPCOpen;
 };
 
-Atomic<HangMonitorChild*> HangMonitorChild::sInstance;
+Atomic<HangMonitorChild*, SequentiallyConsistent,
+       recordreplay::Behavior::DontPreserve> HangMonitorChild::sInstance;
 
 /* Parent process objects */
 
@@ -294,7 +296,7 @@ bool HangMonitorParent::sShouldForcePaint = true;
 
 HangMonitorChild::HangMonitorChild(ProcessHangMonitor* aMonitor)
  : mHangMonitor(aMonitor),
-   mMonitor("HangMonitorChild lock"),
+   mMonitor("HangMonitorChild lock", recordreplay::Behavior::DontPreserve),
    mSentReport(false),
    mTerminateScript(false),
    mTerminateGlobal(false),
@@ -339,7 +341,7 @@ HangMonitorChild::InterruptCallback()
     mForcePaint = false;
   }
 
-  if (forcePaint) {
+  if (forcePaint && !recordreplay::IsRecordingOrReplaying()) {
     RefPtr<TabChild> tabChild = TabChild::FindTabChild(forcePaintTab);
     if (tabChild) {
       js::AutoAssertNoContentJS nojs(mContext);
