@@ -381,6 +381,11 @@ interface nsIMessageManagerGlobal : nsISyncMessageSender
   void dump(in DOMString aStr);
 
   /**
+   * Add a record/replay assertion at the current point.
+   */
+  void recordReplayAssert(in DOMString aStr);
+
+  /**
    * If leak detection is enabled, print a note to the leak log that this
    * process will intentionally crash.
    */

@@ -824,6 +824,13 @@ nsFrameMessageManager::Dump(const nsAString& aStr)
 }
 
 NS_IMETHODIMP
+nsFrameMessageManager::RecordReplayAssert(const nsAString& aStr)
+{
+  recordreplay::RecordReplayAssert(NS_ConvertUTF16toUTF8(aStr).get());
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsFrameMessageManager::PrivateNoteIntentionalCrash()
 {
   if (XRE_IsContentProcess()) {

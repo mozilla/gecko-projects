@@ -311,6 +311,8 @@ partial interface Window {
 
   void                      dump(DOMString str);
 
+  void                      recordReplayAssert(DOMString str);
+
   /**
    * This method is here for backwards compatibility with 4.x only,
    * its implementation is a no-op

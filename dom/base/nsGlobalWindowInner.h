@@ -309,6 +309,7 @@ public:
   void CaptureEvents();
   void ReleaseEvents();
   void Dump(const nsAString& aStr);
+  void RecordReplayAssert(const nsAString& aStr);
   void SetResizable(bool aResizable) const;
 
   // nsIDOMEventTarget
