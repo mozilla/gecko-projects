@@ -9,6 +9,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/Move.h"
+#include "mozilla/RecordReplay.h"
 
 #if !defined(XP_WIN)
 # include <pthread.h>
@@ -25,7 +26,7 @@ class MutexImpl
 public:
   struct PlatformData;
 
-  MFBT_API MutexImpl();
+  MFBT_API MutexImpl(recordreplay::Behavior aRecorded = recordreplay::Behavior::Preserve);
   MFBT_API ~MutexImpl();
 
   bool operator==(const MutexImpl& rhs) {

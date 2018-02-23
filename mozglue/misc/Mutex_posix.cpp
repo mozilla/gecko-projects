@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/Assertions.h"
+#include "mozilla/Maybe.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -23,9 +24,13 @@
     }                                           \
   }
 
-mozilla::detail::MutexImpl::MutexImpl()
+mozilla::detail::MutexImpl::MutexImpl(recordreplay::Behavior aRecorded)
 {
   pthread_mutexattr_t* attrp = nullptr;
+
+  mozilla::Maybe<mozilla::recordreplay::AutoPassThroughThreadEvents> pt;
+  if (aRecorded == recordreplay::Behavior::DontPreserve)
+    pt.emplace();
 
   // Linux with glibc and FreeBSD support adaptive mutexes that spin
   // for a short number of tries before sleeping.  NSPR's locks did
