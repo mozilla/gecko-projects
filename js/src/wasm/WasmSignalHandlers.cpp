@@ -1607,6 +1607,10 @@ ProcessHasSignalHandlers()
         return sHaveSignalHandlers;
     sTriedInstallSignalHandlers = true;
 
+    // Signal handlers are currently disabled when recording or replaying.
+    if (mozilla::recordreplay::IsRecordingOrReplaying())
+        return false;
+
 #if defined(ANDROID)
 # if !defined(__aarch64__)
     // Before Android 4.4 (SDK version 19), there is a bug
