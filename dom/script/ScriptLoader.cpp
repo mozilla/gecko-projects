@@ -1245,6 +1245,8 @@ ScriptLoader::CreateLoadRequest(ScriptKind aKind,
 bool
 ScriptLoader::ProcessScriptElement(nsIScriptElement* aElement)
 {
+  recordreplay::RecordReplayAssert("ScriptLoader::ProcessScriptElement");
+
   // We need a document to evaluate scripts.
   NS_ENSURE_TRUE(mDocument, false);
 
@@ -1883,6 +1885,8 @@ ScriptLoader::GetScriptSource(ScriptLoadRequest* aRequest, nsAutoString& inlineD
 nsresult
 ScriptLoader::ProcessRequest(ScriptLoadRequest* aRequest)
 {
+  recordreplay::RecordReplayAssert("ScriptLoader::ProcessRequest");
+
   LOG(("ScriptLoadRequest (%p): Process request", aRequest));
 
   NS_ASSERTION(nsContentUtils::IsSafeToRunScript(),
@@ -2169,6 +2173,8 @@ ScriptLoader::ShouldCacheBytecode(ScriptLoadRequest* aRequest)
 nsresult
 ScriptLoader::EvaluateScript(ScriptLoadRequest* aRequest)
 {
+  recordreplay::RecordReplayAssert("ScriptLoader::EvaluateScript");
+
   using namespace mozilla::Telemetry;
   MOZ_ASSERT(aRequest->IsReadyToRun());
 

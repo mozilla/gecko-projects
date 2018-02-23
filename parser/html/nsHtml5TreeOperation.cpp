@@ -972,6 +972,7 @@ nsHtml5TreeOperation::Perform(nsHtml5TreeOpExecutor* aBuilder,
       return mOne.result;
     }
     case eTreeOpRunScript: {
+      recordreplay::RecordReplayAssert("nsHtml5TreeOperation::Perform eTreeOpRunScript");
       nsIContent* node = *(mOne.node);
       nsAHtml5TreeBuilderState* snapshot = mTwo.state;
       if (snapshot) {

@@ -232,6 +232,8 @@ nsJSUtils::ExecutionContext::CompileAndExec(JS::CompileOptions& aCompileOptions,
                                             JS::SourceBufferHolder& aSrcBuf,
                                             JS::MutableHandle<JSScript*> aScript)
 {
+  recordreplay::RecordReplayAssert("nsJSUtils::ExecutionContext::CompileAndExec");
+
   if (mSkip) {
     return mRv;
   }

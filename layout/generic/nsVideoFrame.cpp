@@ -642,10 +642,15 @@ nsVideoFrame::ComputeSize(gfxContext *aRenderingContext,
   // Only video elements have an intrinsic ratio.
   nsSize intrinsicRatio = HasVideoElement() ? size : nsSize(0, 0);
 
-  return ComputeSizeWithIntrinsicDimensions(aRenderingContext, aWM,
+  LogicalSize result = ComputeSizeWithIntrinsicDimensions(aRenderingContext, aWM,
                                             intrinsicSize, intrinsicRatio,
                                             aCBSize, aMargin, aBorder, aPadding,
                                             aFlags);
+
+  recordreplay::RecordReplayAssert("nsVideoFrame::ComputeSize #1 %d %d",
+                                   (int) result.ISize(aWM), (int) result.BSize(aWM));
+
+  return result;
 }
 
 nscoord nsVideoFrame::GetMinISize(gfxContext *aRenderingContext)

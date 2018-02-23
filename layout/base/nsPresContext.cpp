@@ -2923,6 +2923,8 @@ nsPresContext::ReflowStarted(bool aInterruptible)
 bool
 nsPresContext::CheckForInterrupt(nsIFrame* aFrame)
 {
+  recordreplay::RecordReplayAssert("nsPresContext::CheckForInterrupt");
+
   if (mHasPendingInterrupt) {
     mShell->FrameNeedsToContinueReflow(aFrame);
     return true;

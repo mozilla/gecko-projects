@@ -126,6 +126,8 @@ public:
       bool hadSnowWhiteObjects = nsCycleCollector_doDeferredDeletion();
       Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_ASYNC_SNOW_WHITE_FREEING,
                             uint32_t((TimeStamp::Now() - start).ToMilliseconds()));
+      recordreplay::RecordReplayAssert("AsyncFreeSnowWhite::Run %d %d",
+                                       (int) hadSnowWhiteObjects, (int) mContinuation);
       if (hadSnowWhiteObjects && !mContinuation) {
           mContinuation = true;
           if (NS_FAILED(Dispatch())) {

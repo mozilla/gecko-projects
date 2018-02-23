@@ -1225,6 +1225,7 @@ nsBulletFrame::AddInlinePrefISize(gfxContext* aRenderingContext,
   if (MOZ_LIKELY(!::IsIgnoreable(this, isize))) {
     aData->DefaultAddInlinePrefISize(isize);
   }
+  recordreplay::RecordReplayAssert("nsBulletFrame::AddInlinePrefISize %d", (int) aData->mCurrentLine);
 }
 
 NS_IMETHODIMP

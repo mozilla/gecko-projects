@@ -161,6 +161,8 @@ BytecodeCompiler::BytecodeCompiler(JSContext* cx,
     script(cx)
 {
     MOZ_ASSERT(sourceBuffer.get());
+
+    mozilla::recordreplay::RecordReplayAssert("BytecodeCompiler::BytecodeCompiler %s", options.filename());
 }
 
 bool

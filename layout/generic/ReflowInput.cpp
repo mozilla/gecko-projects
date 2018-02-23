@@ -72,6 +72,7 @@ ReflowInput::ReflowInput(nsPresContext*       aPresContext,
   mParentReflowInput = nullptr;
   AvailableISize() = aAvailableSpace.ISize(mWritingMode);
   AvailableBSize() = aAvailableSpace.BSize(mWritingMode);
+
   mFloatManager = nullptr;
   mLineLayout = nullptr;
   mDiscoveredClearance = nullptr;
@@ -311,6 +312,7 @@ ReflowInput::SetComputedWidth(nscoord aComputedWidth)
   NS_PRECONDITION(aComputedWidth >= 0, "Invalid computed width");
   if (ComputedWidth() != aComputedWidth) {
     ComputedWidth() = aComputedWidth;
+    recordreplay::RecordReplayAssert("SetComputedWidth %d", (int) aComputedWidth);
     LayoutFrameType frameType = mFrame->Type();
     if (frameType != LayoutFrameType::Viewport || // Or check GetParent()?
         mWritingMode.IsVertical()) {
@@ -1771,6 +1773,8 @@ ReflowInput::InitAbsoluteConstraints(nsPresContext* aPresContext,
                          computeSizeFlags);
     ComputedISize() = computedSize.ISize(wm);
     ComputedBSize() = computedSize.BSize(wm);
+    recordreplay::RecordReplayAssert("ReflowInput::ReflowInput #1 %d %d",
+                                     (int) mComputedWidth, (int) mComputedHeight);
     NS_ASSERTION(ComputedISize() >= 0, "Bogus inline-size");
     NS_ASSERTION(ComputedBSize() == NS_UNCONSTRAINEDSIZE ||
                  ComputedBSize() >= 0, "Bogus block-size");
@@ -1972,6 +1976,9 @@ ReflowInput::InitAbsoluteConstraints(nsPresContext* aPresContext,
   }
   ComputedBSize() = computedSize.ConvertTo(wm, cbwm).BSize(wm);
   ComputedISize() = computedSize.ConvertTo(wm, cbwm).ISize(wm);
+
+  recordreplay::RecordReplayAssert("ReflowInput::ReflowInput #2 %d %d",
+                                   (int) mComputedWidth, (int) mComputedHeight);
 
   SetComputedLogicalOffsets(offsets.ConvertTo(wm, cbwm));
   SetComputedLogicalMargin(margin.ConvertTo(wm, cbwm));
@@ -2238,6 +2245,9 @@ ReflowInput::InitConstraints(nsPresContext* aPresContext,
       ComputedBSize() = NS_UNCONSTRAINEDSIZE;
     }
 
+    recordreplay::RecordReplayAssert("ReflowInput::ReflowInput #2 %d %d",
+                                     (int) mComputedWidth, (int) mComputedHeight);
+
     ComputedMinWidth() = ComputedMinHeight() = 0;
     ComputedMaxWidth() = ComputedMaxHeight() = NS_UNCONSTRAINEDSIZE;
   } else {
@@ -2404,6 +2414,9 @@ ReflowInput::InitConstraints(nsPresContext* aPresContext,
                                             blockSize);
       }
 
+      recordreplay::RecordReplayAssert("ReflowInput::ReflowInput #3 %d %d",
+                                       (int) mComputedWidth, (int) mComputedHeight);
+
       // Doesn't apply to table elements
       ComputedMinWidth() = ComputedMinHeight() = 0;
       ComputedMaxWidth() = ComputedMaxHeight() = NS_UNCONSTRAINEDSIZE;
@@ -2500,6 +2513,23 @@ ReflowInput::InitConstraints(nsPresContext* aPresContext,
         cbSize.ISize(wm) = AvailableISize();
       }
 
+      recordreplay::RecordReplayAssert("ReflowInput::ReflowInput ComputeSize Call #1 %d %d #2 %d #3 %d %d %d %d #4 %d %d %d %d #5 %d %d %d %d FLAGS %d",
+                                       cbSize.ISize(wm), cbSize.BSize(wm),
+                                       (int) AvailableISize(),
+                                       (int) ComputedLogicalMargin().IStart(wm),
+                                       (int) ComputedLogicalMargin().IEnd(wm),
+                                       (int) ComputedLogicalMargin().BStart(wm),
+                                       (int) ComputedLogicalMargin().BEnd(wm),
+                                       (int) ComputedLogicalBorderPadding().IStart(wm),
+                                       (int) ComputedLogicalBorderPadding().IEnd(wm),
+                                       (int) ComputedLogicalBorderPadding().BStart(wm),
+                                       (int) ComputedLogicalBorderPadding().BEnd(wm),
+                                       (int) ComputedLogicalPadding().IStart(wm),
+                                       (int) ComputedLogicalPadding().IEnd(wm),
+                                       (int) ComputedLogicalPadding().BStart(wm),
+                                       (int) ComputedLogicalPadding().BEnd(wm),
+                                       (int) computeSizeFlags);
+
       LogicalSize size =
         mFrame->ComputeSize(mRenderingContext, wm, cbSize, AvailableISize(),
                            ComputedLogicalMargin().Size(wm),
@@ -2513,6 +2543,9 @@ ReflowInput::InitConstraints(nsPresContext* aPresContext,
       NS_ASSERTION(ComputedISize() >= 0, "Bogus inline-size");
       NS_ASSERTION(ComputedBSize() == NS_UNCONSTRAINEDSIZE ||
                    ComputedBSize() >= 0, "Bogus block-size");
+
+      recordreplay::RecordReplayAssert("ReflowInput::ReflowInput #4 %d %d",
+                                       (int) mComputedWidth, (int) mComputedHeight);
 
       // Exclude inline tables, side captions, flex and grid items from block
       // margin calculations.

@@ -513,6 +513,8 @@ nsTimerImpl::Cancel()
 void
 nsTimerImpl::CancelImpl(bool aClearITimer)
 {
+  recordreplay::RecordReplayAssert("nsTimerImpl::CancelImpl %d", aClearITimer);
+
   Callback cbTrash;
   RefPtr<nsITimer> timerTrash;
 

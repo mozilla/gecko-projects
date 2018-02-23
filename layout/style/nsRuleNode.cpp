@@ -465,6 +465,7 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
   NS_ASSERTION(aPresContext, "Must have prescontext");
 
   if (aValue.IsPixelLengthUnit()) {
+    recordreplay::RecordReplayAssert("CalcLengthWith #1 %d", aValue.GetPixelLength());
     return aValue.GetPixelLength();
   }
   if (aValue.IsCalcUnit()) {
@@ -481,8 +482,10 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
     if (!css::ComputeCalc(result, aValue, ops)) {
       MOZ_ASSERT_UNREACHABLE("unexpected ComputeCalc failure");
     }
+    recordreplay::RecordReplayAssert("CalcLengthWith #2 %d", result);
     return result;
   }
+  recordreplay::RecordReplayAssert("CalcLengthWith #2.1 %d", aValue.GetUnit());
   switch (aValue.GetUnit()) {
     // nsPresContext::SetVisibleArea and
     // nsPresContext::MediaFeatureValuesChanged handle dynamic changes
@@ -503,10 +506,12 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
     // when viewport units are in use.
     case eCSSUnit_ViewportWidth: {
       nscoord viewportWidth = CalcViewportUnitsScale(aPresContext).width;
+      recordreplay::RecordReplayAssert("CalcLengthWith #3 %d", viewportWidth);
       return ScaleViewportCoordTrunc(aValue, viewportWidth);
     }
     case eCSSUnit_ViewportHeight: {
       nscoord viewportHeight = CalcViewportUnitsScale(aPresContext).height;
+      recordreplay::RecordReplayAssert("CalcLengthWith #4 %d", viewportHeight);
       return ScaleViewportCoordTrunc(aValue, viewportHeight);
     }
     case eCSSUnit_ViewportMin: {
@@ -581,11 +586,13 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
   // thus can't be stored in the rule tree:
   const nsStyleFont *styleFont =
     aStyleFont ? aStyleFont : aStyleContext->StyleFont();
+  recordreplay::RecordReplayAssert("CalcLengthWith #5.0 %d %d", aFontSize, styleFont->mFont.size);
   if (aFontSize == -1) {
     // XXX Should this be styleFont->mSize instead to avoid taking minfontsize
     // prefs into account?
     aFontSize = styleFont->mFont.size;
   }
+  recordreplay::RecordReplayAssert("CalcLengthWith #5 %d %d", aFontSize, aValue.GetUnit());
   switch (aValue.GetUnit()) {
     case eCSSUnit_EM: {
       if (aValue.GetFloatValue() == 0.0f) {
@@ -603,6 +610,7 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
         nsRuleNode::GetMetricsFor(aPresContext, aStyleContext, styleFont,
                                   aFontSize, aUseUserFontSet);
       aConditions.SetUncacheable();
+      recordreplay::RecordReplayAssert("CalcLengthWith #6 %.2f", (float) fm->XHeight());
       return ScaleCoordRound(aValue, float(fm->XHeight()));
     }
     case eCSSUnit_Char: {
@@ -615,6 +623,9 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
           GetMetrics(fm->Orientation()).zeroOrAveCharWidth;
 
       aConditions.SetUncacheable();
+      recordreplay::RecordReplayAssert("CalcLengthWith #7 %.2f %.2f",
+                                       (float) aPresContext->AppUnitsPerDevPixel(),
+                                       zeroWidth);
       return ScaleCoordRound(aValue, ceil(aPresContext->AppUnitsPerDevPixel() *
                                           zeroWidth));
     }
@@ -834,7 +845,7 @@ GetFloatFromBoxPosition(int32_t aEnumValue)
 #define SETCOORD_LAE    (SETCOORD_LENGTH | SETCOORD_AUTO | SETCOORD_ENUMERATED)
 
 // changes aCoord iff it returns true
-static bool SetCoord(const nsCSSValue& aValue, nsStyleCoord& aCoord,
+static MOZ_NEVER_INLINE /* FIXME */ bool SetCoord(const nsCSSValue& aValue, nsStyleCoord& aCoord,
                        const nsStyleCoord& aParentCoord,
                        int32_t aMask, GeckoStyleContext* aStyleContext,
                        nsPresContext* aPresContext,
@@ -855,6 +866,7 @@ static bool SetCoord(const nsCSSValue& aValue, nsStyleCoord& aCoord,
                    "parser should have ensured no nonnegative lengths");
       len = 0;
     }
+    recordreplay::RecordReplayAssert("SetCoord LENGTH %d", (int) len);
     aCoord.SetCoordValue(len);
   }
   else if (((aMask & SETCOORD_PERCENT) != 0) &&
@@ -943,6 +955,7 @@ static bool SetCoord(const nsCSSValue& aValue, nsStyleCoord& aCoord,
       default: NS_NOTREACHED("unrecognized angular unit");
         unit = eStyleUnit_Degree;
     }
+    recordreplay::RecordReplayAssert("SetCoord AngleValue %d %.2f", unit, aValue.GetAngleValue());
     aCoord.SetAngleValue(aValue.GetAngleValue(), unit);
   }
   else {
@@ -3364,10 +3377,12 @@ nsRuleNode::SetFontSize(nsPresContext* aPresContext,
         (value <= NS_STYLE_FONT_SIZE_XXLARGE)) {
       *aSize = CalcFontPointSize(value, baseSize,
                        aPresContext, eFontSize_CSS);
+      recordreplay::RecordReplayAssert("nsRuleNode::SetFontSize #0.1 %d", (int) *aSize);
     }
     else if (NS_STYLE_FONT_SIZE_XXXLARGE == value) {
       // <font size="7"> is not specified in CSS, so we don't use eFontSize_CSS.
       *aSize = CalcFontPointSize(value, baseSize, aPresContext);
+      recordreplay::RecordReplayAssert("nsRuleNode::SetFontSize #0.2 %d", (int) *aSize);
     }
     else if (NS_STYLE_FONT_SIZE_LARGER  == value ||
              NS_STYLE_FONT_SIZE_SMALLER == value) {
@@ -3376,6 +3391,7 @@ nsRuleNode::SetFontSize(nsPresContext* aPresContext,
       float factor = (NS_STYLE_FONT_SIZE_LARGER == value) ? 1.2f : (1.0f / 1.2f);
 
       *aSize = NSToCoordFloorClamped(aParentSize * factor);
+      recordreplay::RecordReplayAssert("nsRuleNode::SetFontSize #0.3 %d", (int) *aSize);
 
       sizeIsZoomedAccordingToParent = true;
 
@@ -3398,6 +3414,7 @@ nsRuleNode::SetFontSize(nsPresContext* aPresContext,
                  "negative lengths and percents should be rejected by parser");
       *aSize = 0;
     }
+    recordreplay::RecordReplayAssert("nsRuleNode::SetFontSize #0.4 %d", (int) *aSize);
     // The calc ops will always zoom its result according to the value
     // of aParentFont->mAllowZoom.
     sizeIsZoomedAccordingToParent = true;
@@ -3405,6 +3422,8 @@ nsRuleNode::SetFontSize(nsPresContext* aPresContext,
   else if (eCSSUnit_System_Font == sizeValue->GetUnit()) {
     // this becomes our cascading size
     *aSize = aSystemFont.size;
+    recordreplay::RecordReplayAssert("nsRuleNode::SetFontSize #0.5 %d %d",
+                                     recordreplay::ThingIndex((void*)&aSystemFont), (int) *aSize);
   }
   else if (eCSSUnit_Inherit == sizeValue->GetUnit() ||
            eCSSUnit_Unset == sizeValue->GetUnit()) {
@@ -3413,12 +3432,14 @@ nsRuleNode::SetFontSize(nsPresContext* aPresContext,
     // to inherit and we don't want explicit "inherit" to differ from the
     // default.
     *aSize = aScriptLevelAdjustedParentSize;
+    recordreplay::RecordReplayAssert("nsRuleNode::SetFontSize #0.6 %d", (int) *aSize);
     sizeIsZoomedAccordingToParent = true;
   }
   else if (eCSSUnit_Initial == sizeValue->GetUnit()) {
     // The initial value is 'medium', which has magical sizing based on
     // the generic font family, so do that here too.
     *aSize = baseSize;
+    recordreplay::RecordReplayAssert("nsRuleNode::SetFontSize #1 %d", (int) *aSize);
   } else {
     NS_ASSERTION(eCSSUnit_Null == sizeValue->GetUnit(),
                  "What kind of font-size value is this?");
@@ -3432,6 +3453,7 @@ nsRuleNode::SetFontSize(nsPresContext* aPresContext,
       // store the data in the rule tree.
       aConditions.SetUncacheable();
       *aSize = aScriptLevelAdjustedParentSize;
+      recordreplay::RecordReplayAssert("nsRuleNode::SetFontSize #1.1 %d", (int) *aSize);
       sizeIsZoomedAccordingToParent = true;
     } else {
       return;
@@ -3444,9 +3466,13 @@ nsRuleNode::SetFontSize(nsPresContext* aPresContext,
                          aParentFont->mAllowZoom;
   if (!currentlyZoomed && aFont->mAllowZoom) {
     *aSize = nsStyleFont::ZoomText(aPresContext, *aSize);
+    recordreplay::RecordReplayAssert("nsRuleNode::SetFontSize #1.2 %d", (int) *aSize);
   } else if (currentlyZoomed && !aFont->mAllowZoom) {
     *aSize = nsStyleFont::UnZoomText(aPresContext, *aSize);
+    recordreplay::RecordReplayAssert("nsRuleNode::SetFontSize #2 %d", (int) *aSize);
   }
+
+  recordreplay::RecordReplayAssert("nsRuleNode::SetFontSize #3 %d", (int) *aSize);
 }
 
 static int8_t ClampTo8Bit(int32_t aValue) {
@@ -3497,6 +3523,7 @@ nsRuleNode::SetFont(nsPresContext* aPresContext, GeckoStyleContext* aContext,
   const nsFont* defaultVariableFont =
     aPresContext->GetDefaultFont(kPresContext_DefaultVariableFont_ID,
                                  aFont->mLanguage);
+  recordreplay::RecordReplayAssert("nsRuleNode::SetFont #1 %d", defaultVariableFont->size);
 
   // -moz-system-font: enum (never inherit!)
   static_assert(
@@ -3527,6 +3554,7 @@ nsRuleNode::SetFont(nsPresContext* aPresContext, GeckoStyleContext* aContext,
       (LookAndFeel::FontID)systemFontValue->GetIntValue();
     nsLayoutUtils::ComputeSystemFont(lazySystemFont.ptr(), fontID, aPresContext,
                                      defaultVariableFont);
+    recordreplay::RecordReplayAssert("nsRuleNode::SetFont #2 %d", lazySystemFont.ptr()->size);
   }
   const nsFont& systemFont = lazySystemFont.refOr(*defaultVariableFont);
 

@@ -85,6 +85,12 @@ BlockReflowInput::BlockReflowInput(const ReflowInput& aReflowInput,
   mContainerSize.height = aReflowInput.ComputedHeight() +
                           mBorderPadding.TopBottom(wm);
 
+  recordreplay::RecordReplayAssert("BlockReflowInput %d %d %d %d",
+                                   (int) aReflowInput.ComputedWidth(),
+                                   (int) mBorderPadding.LeftRight(wm),
+                                   (int) aReflowInput.ComputedHeight(),
+                                   (int) mBorderPadding.TopBottom(wm));
+
   if ((aBStartMarginRoot && !logicalSkipSides.BStart()) ||
       0 != mBorderPadding.BStart(wm)) {
     mFlags.mIsBStartMarginRoot = true;

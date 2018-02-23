@@ -4726,6 +4726,8 @@ ExecuteScript(JSContext* cx, HandleObject scope, HandleScript script, Value* rva
 static bool
 ExecuteScript(JSContext* cx, AutoObjectVector& envChain, HandleScript scriptArg, Value* rval)
 {
+    mozilla::recordreplay::RecordReplayAssert("ExecuteScript %s", scriptArg->filename());
+
     RootedObject env(cx);
     RootedScope dummy(cx);
     if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &env, &dummy))
@@ -7806,3 +7808,18 @@ NoteIntentionalCrash()
 }
 
 } // namespace js
+
+extern "C" const char*
+JS_CurrentExecutionPoint()
+{
+    JSContext* cx = TlsContext.get();
+    if (!cx)
+        return "No JSContext";
+    jsbytecode* pc;
+    JSScript* script = cx->currentScript(&pc, JSContext::ALLOW_CROSS_COMPARTMENT);
+    if (!script)
+        return "No current JSScript";
+    static char buf[4096];
+    snprintf(buf, sizeof(buf), "%s:%d", script->filename(), PCToLineNumber(script, pc));
+    return buf;
+}

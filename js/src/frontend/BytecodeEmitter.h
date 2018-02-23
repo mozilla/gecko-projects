@@ -365,6 +365,13 @@ struct MOZ_STACK_CLASS BytecodeEmitter
         }
 
         uint32_t index = atomIndices->count();
+
+        {
+            char buf[4096];
+            JS_PutEscapedFlatString(buf, 4096, atom, '\"');
+            mozilla::recordreplay::RecordReplayAssert("makeAtomIndex %s %d", buf, (int) index);
+        }
+
         if (!atomIndices->add(p, atom, index))
             return false;
 

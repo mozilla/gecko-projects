@@ -245,6 +245,8 @@ nsRubyBaseContainerFrame::AddInlinePrefISize(
     }
   }
   aData->mCurrentLine += sum;
+  recordreplay::RecordReplayAssert("nsRubyBaseContainerFrame::AddInlinePrefISize %d",
+                                   (int) aData->mCurrentLine);
 }
 
 /* virtual */ bool

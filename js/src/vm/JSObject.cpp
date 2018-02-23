@@ -2221,8 +2221,15 @@ bool
 js::LookupProperty(JSContext* cx, HandleObject obj, js::HandleId id,
                    MutableHandleObject objp, MutableHandle<PropertyResult> propp)
 {
-    if (LookupPropertyOp op = obj->getOpsLookupProperty())
+    if (LookupPropertyOp op = obj->getOpsLookupProperty()) {
+        jsbytecode* pc;
+        JSScript* script = cx->currentScript(&pc);
+        if (script) {
+            mozilla::recordreplay::RecordReplayAssert("js::LookupProperty %s:%d",
+                                                      script->filename(), PCToLineNumber(script, pc));
+        }
         return op(cx, obj, id, objp, propp);
+    }
     return LookupPropertyInline<CanGC>(cx, obj.as<NativeObject>(), id, objp, propp);
 }
 

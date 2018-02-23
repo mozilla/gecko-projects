@@ -48,6 +48,7 @@ public:
     , mCallback(aCallback)
     , mTarget(aTarget)
   {
+    recordreplay::RecordReplayAssert("nsInputStreamReadyEvent %s", aName);
   }
 
 private:

@@ -82,6 +82,8 @@ nsRubyFrame::AddInlinePrefISize(gfxContext *aRenderingContext,
     }
   }
   aData->mLineIsEmpty = false;
+  recordreplay::RecordReplayAssert("nsRubyFrame::AddInlinePrefISize %d",
+                                   (int) aData->mCurrentLine);
 }
 
 static nsRubyBaseContainerFrame*

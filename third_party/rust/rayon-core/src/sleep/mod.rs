@@ -76,6 +76,10 @@ impl Sleep {
 
     #[inline]
     pub fn work_found(&self, worker_index: usize, yields: usize) -> usize {
+//        unsafe {
+//            extern crate libc;
+//            libc::write(libc::STDERR_FILENO, "RUST work_found".as_ptr() as *const libc::c_void, 15);
+//        }
         log!(FoundWork {
             worker: worker_index,
             yields: yields,
@@ -91,6 +95,10 @@ impl Sleep {
 
     #[inline]
     pub fn no_work_found(&self, worker_index: usize, yields: usize) -> usize {
+//        unsafe {
+//            extern crate libc;
+//            libc::write(libc::STDERR_FILENO, "RUST no_work_found".as_ptr() as *const libc::c_void, 18);
+//        }
         log!(DidNotFindWork {
             worker: worker_index,
             yields: yields,

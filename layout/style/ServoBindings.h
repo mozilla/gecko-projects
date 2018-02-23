@@ -731,6 +731,9 @@ bool Gecko_IsInServoTraversal();
 // Returns true if we're currently on the main thread.
 bool Gecko_IsMainThread();
 
+// Add a record/replay assertion at the current point of execution.
+void Gecko_RecordReplayAssert(const uint8_t* aText);
+
 } // extern "C"
 
 #endif // mozilla_ServoBindings_h

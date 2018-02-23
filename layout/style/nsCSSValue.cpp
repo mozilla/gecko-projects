@@ -61,6 +61,7 @@ nsCSSValue::nsCSSValue(int32_t aValue, nsCSSUnit aUnit)
     mUnit = eCSSUnit_Null;
     mValue.mInt = 0;
   }
+  recordreplay::RecordReplayAssert("nsCSSValue #1 %d %d", aValue, (int) aUnit);
 }
 
 nsCSSValue::nsCSSValue(float aValue, nsCSSUnit aUnit)
@@ -75,6 +76,7 @@ nsCSSValue::nsCSSValue(float aValue, nsCSSUnit aUnit)
     mUnit = eCSSUnit_Null;
     mValue.mInt = 0;
   }
+  recordreplay::RecordReplayAssert("nsCSSValue #2 %.2f %d", aValue, (int) aUnit);
 }
 
 nsCSSValue::nsCSSValue(const nsString& aValue, nsCSSUnit aUnit)
@@ -88,6 +90,7 @@ nsCSSValue::nsCSSValue(const nsString& aValue, nsCSSUnit aUnit)
     mUnit = eCSSUnit_Null;
     mValue.mInt = 0;
   }
+  recordreplay::RecordReplayAssert("nsCSSValue #3 %d", (int) aUnit);
 }
 
 nsCSSValue::nsCSSValue(nsCSSValue::Array* aValue, nsCSSUnit aUnit)
@@ -96,6 +99,7 @@ nsCSSValue::nsCSSValue(nsCSSValue::Array* aValue, nsCSSUnit aUnit)
   MOZ_ASSERT(UnitHasArrayValue(), "bad unit");
   mValue.mArray = aValue;
   mValue.mArray->AddRef();
+  recordreplay::RecordReplayAssert("nsCSSValue #4 %d", (int) aUnit);
 }
 
 nsCSSValue::nsCSSValue(mozilla::css::URLValue* aValue)
@@ -471,6 +475,7 @@ void nsCSSValue::SetIntValue(int32_t aValue, nsCSSUnit aUnit)
     mUnit = aUnit;
     mValue.mInt = aValue;
   }
+  recordreplay::RecordReplayAssert("nsCSSValue::SetIntValue %d %d", aValue, (int) aUnit);
 }
 
 void nsCSSValue::SetPercentValue(float aValue)
@@ -479,6 +484,7 @@ void nsCSSValue::SetPercentValue(float aValue)
   mUnit = eCSSUnit_Percent;
   mValue.mFloat = aValue;
   MOZ_ASSERT(!mozilla::IsNaN(mValue.mFloat));
+  recordreplay::RecordReplayAssert("nsCSSValue::SetPercentValue %.2f", aValue);
 }
 
 void nsCSSValue::SetFloatValue(float aValue, nsCSSUnit aUnit)
@@ -490,6 +496,7 @@ void nsCSSValue::SetFloatValue(float aValue, nsCSSUnit aUnit)
     mValue.mFloat = aValue;
     MOZ_ASSERT(!mozilla::IsNaN(mValue.mFloat));
   }
+  recordreplay::RecordReplayAssert("nsCSSValue::SetFloatValue %d %.2f", (int) aUnit, aValue);
 }
 
 void nsCSSValue::SetStringValue(const nsString& aValue,

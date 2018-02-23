@@ -535,6 +535,8 @@ MessageChannel::MessageChannel(const char* aName,
     mPeerPid(-1),
     mIsPostponingSends(false)
 {
+    recordreplay::RegisterThing(this);
+
     MOZ_COUNT_CTOR(ipc::MessageChannel);
 
 #ifdef OS_WIN
@@ -560,6 +562,8 @@ MessageChannel::MessageChannel(const char* aName,
 
 MessageChannel::~MessageChannel()
 {
+    recordreplay::UnregisterThing(this);
+
     MOZ_COUNT_DTOR(ipc::MessageChannel);
     IPC_ASSERT(mCxxStackFrames.empty(), "mismatched CxxStackFrame ctor/dtors");
 #ifdef OS_WIN
@@ -748,6 +752,8 @@ bool
 MessageChannel::Open(Transport* aTransport, MessageLoop* aIOLoop, Side aSide)
 {
     NS_PRECONDITION(!mLink, "Open() called > once");
+
+    recordreplay::RecordReplayAssert("MessageChannel::Open %d", recordreplay::ThingIndex(this));
 
     mMonitor = new RefCountedMonitor();
     mWorkerLoop = MessageLoop::current();

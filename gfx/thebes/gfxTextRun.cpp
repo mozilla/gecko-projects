@@ -344,6 +344,7 @@ gfxTextRun::ComputePartialLigatureWidth(Range aPartRange,
     if (aPartRange.start >= aPartRange.end)
         return 0;
     LigatureData data = ComputeLigatureData(aPartRange, aProvider);
+    recordreplay::RecordReplayAssert("gfxTextRun::ComputePartialLigatureWidth %.2f", data.mPartWidth);
     return data.mPartWidth;
 }
 
@@ -1151,8 +1152,10 @@ gfxTextRun::BreakAndMeasureText(uint32_t aStart, uint32_t aMaxLength,
     // 3) none of the text fits before a break opportunity (width > aWidth && lastBreak < 0)
     uint32_t charsFit;
     bool usedHyphenation = false;
+    recordreplay::RecordReplayAssert("gfxTextRun::BreakAndMeasureText #0 %.2f %.2f %.2f", width, trimmableAdvance, aWidth);
     if (width - trimmableAdvance <= aWidth) {
         charsFit = aMaxLength;
+        recordreplay::RecordReplayAssert("gfxTextRun::BreakAndMeasureText #1 %d", (int) charsFit);
     } else if (lastBreak >= 0) {
         if (lastCandidateBreak >= 0 && lastCandidateBreak != lastBreak) {
             lastBreak = lastCandidateBreak;
@@ -1162,11 +1165,13 @@ gfxTextRun::BreakAndMeasureText(uint32_t aStart, uint32_t aMaxLength,
             *aBreakPriority = lastCandidateBreakPriority;
         }
         charsFit = lastBreak - aStart;
+        recordreplay::RecordReplayAssert("gfxTextRun::BreakAndMeasureText #2 %d %d", (int) lastBreak, (int) aStart);
         trimmableChars = lastBreakTrimmableChars;
         trimmableAdvance = lastBreakTrimmableAdvance;
         usedHyphenation = lastBreakUsedHyphenation;
     } else {
         charsFit = aMaxLength;
+        recordreplay::RecordReplayAssert("gfxTextRun::BreakAndMeasureText #3 %d", (int) charsFit);
     }
 
     if (aMetrics) {
@@ -1224,22 +1229,30 @@ gfxTextRun::GetAdvanceWidth(Range aRange, PropertyProvider *aProvider,
         ComputePartialLigatureWidth(Range(ligatureRange.end, aRange.end),
                                     aProvider);
 
+    recordreplay::RecordReplayAssert("gfxTextRun::GetAdvanceWidth #2 %.2f", result);
+
     if (aSpacing) {
         aSpacing->mBefore = aSpacing->mAfter = 0;
     }
 
+    recordreplay::RecordReplayAssert("gfxTextRun::GetAdvanceWidth #2.0.0 %d %d", (int) !!aProvider, (int) mFlags);
+
     // Account for all remaining spacing here. This is more efficient than
     // processing it along with the glyphs.
     if (aProvider && (mFlags & gfx::ShapedTextFlags::TEXT_ENABLE_SPACING)) {
+        recordreplay::RecordReplayAssert("gfxTextRun::GetAdvanceWidth #2.0");
         uint32_t i;
         AutoTArray<PropertyProvider::Spacing,200> spacingBuffer;
         if (spacingBuffer.AppendElements(aRange.Length())) {
+            recordreplay::RecordReplayAssert("gfxTextRun::GetAdvanceWidth #2.1");
             GetAdjustedSpacing(this, ligatureRange, aProvider,
                                spacingBuffer.Elements());
             for (i = 0; i < ligatureRange.Length(); ++i) {
                 PropertyProvider::Spacing *space = &spacingBuffer[i];
+                recordreplay::RecordReplayAssert("gfxTextRun::GetAdvanceWidth #1 %.2f %.2f", (float) space->mBefore, (float) space->mAfter);
                 result += space->mBefore + space->mAfter;
             }
+            recordreplay::RecordReplayAssert("gfxTextRun::GetAdvanceWidth #1.1");
             if (aSpacing) {
                 aSpacing->mBefore = spacingBuffer[0].mBefore;
                 aSpacing->mAfter = spacingBuffer.LastElement().mAfter;
@@ -1247,7 +1260,11 @@ gfxTextRun::GetAdvanceWidth(Range aRange, PropertyProvider *aProvider,
         }
     }
 
-    return result + GetAdvanceForGlyphs(ligatureRange);
+    int32_t advance = GetAdvanceForGlyphs(ligatureRange);
+
+    recordreplay::RecordReplayAssert("gfxTextRun::GetAdvanceWidth %.2f %d", result, advance);
+
+    return result + advance;
 }
 
 bool
