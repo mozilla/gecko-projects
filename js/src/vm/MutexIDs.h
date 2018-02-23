@@ -46,6 +46,7 @@
   _(ProcessExecutableRegion,     500) \
   _(OffThreadPromiseState,       500) \
   _(BufferStreamState,           500) \
+  _(ReplayContentSet,            500) \
   _(WasmCodeProfilingLabels,     500) \
   _(WasmModuleTieringLock,       500) \
   _(WasmCompileTaskState,        500) \

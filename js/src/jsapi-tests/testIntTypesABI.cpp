@@ -26,6 +26,7 @@
 #include "js/MemoryMetrics.h"
 #include "js/ProfilingStack.h"
 #include "js/RefCounted.h"
+#include "js/ReplayHooks.h"
 #include "js/RequiredDefines.h"
 #include "js/RootingAPI.h"
 #include "js/SliceBudget.h"

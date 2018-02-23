@@ -20,6 +20,7 @@
 #include "vm/Debugger.h"
 #include "vm/JSContext.h"
 #include "vm/JSONParser.h"
+#include "vm/ReplayDebugger.h"
 
 #include "gc/Nursery-inl.h"
 #include "gc/PrivateIterators-inl.h"
@@ -386,6 +387,8 @@ js::gc::GCRuntime::traceRuntimeCommon(JSTracer* trc, TraceOrMarkRuntime traceOrM
             if (traceOrMark == TraceRuntime)
                 (*op)(trc, grayRootTracer.data);
         }
+
+        ReplayDebugger::markRoots(trc);
     }
 }
 
