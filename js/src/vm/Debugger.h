@@ -46,6 +46,8 @@ class ScriptedOnStepHandler;
 class ScriptedOnPopHandler;
 class WasmInstanceObject;
 
+class ReplayDebugger;
+
 typedef HashSet<ReadBarrieredGlobalObject,
                 MovableCellHasher<ReadBarrieredGlobalObject>,
                 ZoneAllocPolicy> WeakGlobalObjectSet;
@@ -229,6 +231,19 @@ class MOZ_RAII EvalOptions {
     void setLineno(unsigned lineno) { lineno_ = lineno; }
 };
 
+struct ScriptStructure
+{
+    uint8_t* code; // Also includes notes, at |code + codeLength|.
+    size_t codeLength;
+    size_t totalLength;
+    uint8_t* trynotes;
+    size_t trynotesLength;
+    size_t lineno;
+    size_t mainOffset;
+
+    ScriptStructure() { mozilla::PodZero(this); }
+};
+
 /*
  * Env is the type of what ES5 calls "lexical environments" (runtime activations
  * of lexical scopes). This is currently just JSObject, and is implemented by
@@ -260,6 +275,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     friend class Breakpoint;
     friend class DebuggerMemory;
     friend struct JSRuntime::GlobalObjectWatchersLinkAccess<Debugger>;
+    friend class ReplayDebugger;
     friend class SavedStacks;
     friend class ScriptedOnStepHandler;
     friend class ScriptedOnPopHandler;
@@ -375,6 +391,8 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     }
     static void writeBarrierPost(Debugger** vp, Debugger* prev, Debugger* next) {}
 
+    bool getScriptStructure(JSContext* cx, HandleObject obj, ScriptStructure* script);
+
   private:
     GCPtrNativeObject object; /* The Debugger object. Strong reference. */
     WeakGlobalObjectSet debuggees; /* Debuggee globals. Cross-compartment weak references. */
@@ -455,6 +473,11 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
      */
     MOZ_MUST_USE bool addAllocationsTrackingForAllDebuggees(JSContext* cx);
     void removeAllocationsTrackingForAllDebuggees();
+
+    // If this debugger has an associated ReplayDebugger, then it is debugging
+    // a replaying process and all child objects which it creates are
+    // also associated with that ReplayDebugger.
+    ReplayDebugger* replayDebugger_;
 
     /*
      * If this Debugger is enabled, and has a onNewGlobalObject handler, then
@@ -625,6 +648,10 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     static bool setOnNewScript(JSContext* cx, unsigned argc, Value* vp);
     static bool getOnEnterFrame(JSContext* cx, unsigned argc, Value* vp);
     static bool setOnEnterFrame(JSContext* cx, unsigned argc, Value* vp);
+    static bool getOnPopFrame(JSContext* cx, unsigned argc, Value* vp);
+    static bool setOnPopFrame(JSContext* cx, unsigned argc, Value* vp);
+    static bool getOnReplayFinished(JSContext* cx, unsigned argc, Value* vp);
+    static bool setOnReplayFinished(JSContext* cx, unsigned argc, Value* vp);
     static bool getOnNewGlobalObject(JSContext* cx, unsigned argc, Value* vp);
     static bool setOnNewGlobalObject(JSContext* cx, unsigned argc, Value* vp);
     static bool getOnNewPromise(JSContext* cx, unsigned argc, Value* vp);
@@ -640,6 +667,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     static bool getCollectCoverageInfo(JSContext* cx, unsigned argc, Value* vp);
     static bool setCollectCoverageInfo(JSContext* cx, unsigned argc, Value* vp);
     static bool getMemory(JSContext* cx, unsigned argc, Value* vp);
+    static bool getReplaying(JSContext* cx, unsigned argc, Value* vp);
     static bool addDebuggee(JSContext* cx, unsigned argc, Value* vp);
     static bool addAllGlobalsAsDebuggees(JSContext* cx, unsigned argc, Value* vp);
     static bool removeDebuggee(JSContext* cx, unsigned argc, Value* vp);
@@ -652,11 +680,16 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     static bool findObjects(JSContext* cx, unsigned argc, Value* vp);
     static bool findAllGlobals(JSContext* cx, unsigned argc, Value* vp);
     static bool makeGlobalObjectReference(JSContext* cx, unsigned argc, Value* vp);
+    static bool replayResumeBackward(JSContext* cx, unsigned argc, Value* vp);
+    static bool replayResumeForward(JSContext* cx, unsigned argc, Value* vp);
+    static bool replayPause(JSContext* cx, unsigned argc, Value* vp);
+    static bool replayingContent(JSContext* cx, unsigned argc, Value* vp);
     static bool setupTraceLoggerScriptCalls(JSContext* cx, unsigned argc, Value* vp);
     static bool drainTraceLoggerScriptCalls(JSContext* cx, unsigned argc, Value* vp);
     static bool startTraceLogger(JSContext* cx, unsigned argc, Value* vp);
     static bool endTraceLogger(JSContext* cx, unsigned argc, Value* vp);
     static bool isCompilableUnit(JSContext* cx, unsigned argc, Value* vp);
+    static bool allDebuggersCanRewind(JSContext* cx, unsigned argc, Value* vp);
 #ifdef NIGHTLY_BUILD
     static bool setupTraceLogger(JSContext* cx, unsigned argc, Value* vp);
     static bool drainTraceLogger(JSContext* cx, unsigned argc, Value* vp);
@@ -693,6 +726,9 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
 
     // Public for DebuggerScript_setBreakpoint.
     static MOZ_MUST_USE bool ensureExecutionObservabilityOfScript(JSContext* cx, JSScript* script);
+    MOZ_MUST_USE bool updateObservesAllExecutionOnDebuggees(JSContext* cx, IsObserving observing);
+    bool getBreakpointHandlerAndOffset(JSContext* cx, CallArgs& args, HandleObject obj,
+                                       size_t* poffset, MutableHandleObject handler);
 
     // Whether the Debugger instance needs to observe all non-AOT JS
     // execution of its debugees.
@@ -716,7 +752,6 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
 
     static bool hookObservesAllExecution(Hook which);
 
-    MOZ_MUST_USE bool updateObservesAllExecutionOnDebuggees(JSContext* cx, IsObserving observing);
     MOZ_MUST_USE bool updateObservesCoverageOnDebuggees(JSContext* cx, IsObserving observing);
     void updateObservesAsmJSOnDebuggees(IsObserving observing);
     void updateObservesBinarySourceDebuggees(IsObserving observing);
@@ -822,11 +857,19 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     inline js::GCPtrNativeObject& toJSObjectRef();
     static inline Debugger* fromJSObject(const JSObject* obj);
     static Debugger* fromChildJSObject(JSObject* obj);
+    static bool isReplayingChildJSObject(const JSObject* obj);
+
+    NativeObject* createChildObject(JSContext* cx, const Class* clasp, HandleObject proto,
+                                    bool replaying = false);
 
     Zone* zone() const { return toJSObject()->zone(); }
 
     bool hasMemory() const;
     DebuggerMemory& memory() const;
+
+    ReplayDebugger* replayDebugger() const {
+        return replayDebugger_;
+    }
 
     WeakGlobalObjectSet::Range allDebuggees() const { return debuggees.all(); }
 
@@ -1027,6 +1070,8 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     MOZ_MUST_USE bool unwrapPropertyDescriptor(JSContext* cx, HandleObject obj,
                                                MutableHandle<PropertyDescriptor> desc);
 
+    static JSObject* createMagicValueObject(JSContext* cx, JSWhyMagic why);
+
     /*
      * Store the Debugger.Frame object for frame in *vp.
      *
@@ -1122,6 +1167,9 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     Debugger & operator=(const Debugger&) = delete;
 };
 
+extern const Class DebuggerScript_class;
+extern const Class DebuggerSource_class;
+
 enum class DebuggerEnvironmentType {
     Declarative,
     With,
@@ -1132,10 +1180,11 @@ class DebuggerEnvironment : public NativeObject
 {
   public:
     enum {
-        OWNER_SLOT
+        OWNER_SLOT,
+        REPLAYING_SLOT
     };
 
-    static const unsigned RESERVED_SLOTS = 1;
+    static const unsigned RESERVED_SLOTS = 2;
 
     static const Class class_;
 
@@ -1166,6 +1215,7 @@ class DebuggerEnvironment : public NativeObject
     static const JSFunctionSpec methods_[];
 
     Env* referent() const {
+        MOZ_RELEASE_ASSERT(!Debugger::isReplayingChildJSObject(this));
         Env* env = static_cast<Env*>(getPrivate());
         MOZ_ASSERT(env);
         return env;
@@ -1321,10 +1371,11 @@ class DebuggerFrame : public NativeObject
 
   public:
     enum {
-        OWNER_SLOT
+        OWNER_SLOT,
+        REPLAYING_SLOT
     };
 
-    static const unsigned RESERVED_SLOTS = 1;
+    static const unsigned RESERVED_SLOTS = 2;
 
     static const Class class_;
 
@@ -1346,7 +1397,8 @@ class DebuggerFrame : public NativeObject
                                       MutableHandleDebuggerFrame result);
     static MOZ_MUST_USE bool getThis(JSContext* cx, HandleDebuggerFrame frame,
                                      MutableHandleValue result);
-    static DebuggerFrameType getType(HandleDebuggerFrame frame);
+    static DebuggerFrameType getType(AbstractFramePtr frame);
+    static JSAtom* getTypeAtom(JSContext* cx, AbstractFramePtr frame);
     static DebuggerFrameImplementation getImplementation(HandleDebuggerFrame frame);
     static MOZ_MUST_USE bool setOnStepHandler(JSContext* cx, HandleDebuggerFrame frame,
                                               OnStepHandler* handler);
@@ -1496,10 +1548,11 @@ class DebuggerObject : public NativeObject
 
   private:
     enum {
-        OWNER_SLOT
+        OWNER_SLOT,
+        REPLAYING_SLOT
     };
 
-    static const unsigned RESERVED_SLOTS = 1;
+    static const unsigned RESERVED_SLOTS = 2;
 
     static const ClassOps classOps_;
 
@@ -1508,6 +1561,7 @@ class DebuggerObject : public NativeObject
     static const JSFunctionSpec methods_[];
 
     JSObject* referent() const {
+        MOZ_RELEASE_ASSERT(!Debugger::isReplayingChildJSObject(this));
         JSObject* obj = (JSObject*) getPrivate();
         MOZ_ASSERT(obj);
         return obj;
@@ -1791,18 +1845,6 @@ Debugger::observesGlobal(GlobalObject* global) const
 }
 
 /* static */ void
-Debugger::onNewScript(JSContext* cx, HandleScript script)
-{
-    // We early return in slowPathOnNewScript for self-hosted scripts, so we can
-    // ignore those in our assertion here.
-    MOZ_ASSERT_IF(!script->compartment()->creationOptions().invisibleToDebugger() &&
-                  !script->selfHosted(),
-                  script->compartment()->firedOnNewGlobalObject);
-    if (script->compartment()->isDebuggee())
-        slowPathOnNewScript(cx, script);
-}
-
-/* static */ void
 Debugger::onNewGlobalObject(JSContext* cx, Handle<GlobalObject*> global)
 {
     MOZ_ASSERT(!global->compartment()->firedOnNewGlobalObject);
@@ -1824,6 +1866,99 @@ Debugger::onLogAllocationSite(JSContext* cx, JSObject* obj, HandleSavedFrame fra
 }
 
 MOZ_MUST_USE bool ReportObjectRequired(JSContext* cx);
+
+void UpdateFrameIterPc(FrameIter& iter);
+
+enum SealHelperOp { OpSeal, OpFreeze, OpPreventExtensions };
+
+bool ObjectIsSealedHelper(JSContext* cx, HandleObject obj, SealHelperOp op, bool* rv);
+
+bool CallMethodIfPresent(JSContext* cx, HandleObject obj, const char* name, size_t argc, Value* argv,
+                         MutableHandleValue rval);
+
+bool EvaluateInEnv(JSContext* cx, Handle<Env*> env, AbstractFramePtr frame,
+                   mozilla::Range<const char16_t> chars, const char* filename,
+                   unsigned lineno, MutableHandleValue rval);
+
+bool GetObjectEnv(JSContext* cx, JSObject* obj, MutableHandle<Env*> env);
+
+DebuggerEnvironmentType GetEnvType(Env* env);
+JSAtom* GetEnvTypeAtom(JSContext* cx, Env* env);
+JSObject* GetEnvObject(Env* env);
+JSObject* GetEnvCallee(Env* env);
+bool EnvIsOptimizedOut(Env* env);
+
+bool GetEnvVariable(JSContext* cx, Handle<Env*> env, HandleId id, MutableHandleValue rval);
+bool GetFunctionParameterNames(JSContext* cx, HandleFunction fun, MutableHandle<StringVector> names);
+bool GetFrameActualArg(JSContext* cx, AbstractFramePtr frame, size_t i, MutableHandleValue rv);
+
+// Given a Debugger instance dbg, if it is enabled, prevents all its debuggee
+// compartments from executing scripts. Attempts to run script will throw an
+// instance of Debugger.DebuggeeWouldRun from the topmost locked Debugger's
+// compartment.
+class MOZ_RAII EnterDebuggeeNoExecute
+{
+    friend class js::LeaveDebuggeeNoExecute;
+
+    Debugger& dbg_;
+    EnterDebuggeeNoExecute** stack_;
+    EnterDebuggeeNoExecute* prev_;
+
+    // Non-nullptr when unlocked temporarily by a LeaveDebuggeeNoExecute.
+    LeaveDebuggeeNoExecute* unlocked_;
+
+    // When DebuggeeWouldRun is a warning instead of an error, whether we've
+    // reported a warning already.
+    bool reported_;
+
+  public:
+    explicit EnterDebuggeeNoExecute(JSContext* cx, Debugger& dbg);
+    ~EnterDebuggeeNoExecute();
+
+    Debugger& debugger() const {
+        return dbg_;
+    }
+
+#ifdef DEBUG
+    static bool isLockedInStack(JSContext* cx, Debugger& dbg);
+#endif
+
+    // Given a JSContext entered into a debuggee compartment, find the lock
+    // that locks it. Returns nullptr if not found.
+    static EnterDebuggeeNoExecute* findInStack(JSContext* cx);
+
+    // Given a JSContext entered into a debuggee compartment, report a
+    // warning or an error if there is a lock that locks it.
+    static bool reportIfFoundInStack(JSContext* cx, HandleScript script);
+};
+
+// Given a JSContext entered into a debuggee compartment, if it is in
+// an NX section, unlock the topmost EnterDebuggeeNoExecute instance.
+//
+// Does nothing if debuggee is not in an NX section. For example, this
+// situation arises when invocation functions are called without entering
+// Debugger code, e.g., calling D.O.p.executeInGlobal or D.O.p.apply.
+class MOZ_RAII LeaveDebuggeeNoExecute
+{
+    EnterDebuggeeNoExecute* prevLocked_;
+
+  public:
+    explicit LeaveDebuggeeNoExecute(JSContext* cx)
+      : prevLocked_(EnterDebuggeeNoExecute::findInStack(cx))
+    {
+        if (prevLocked_) {
+            MOZ_ASSERT(!prevLocked_->unlocked_);
+            prevLocked_->unlocked_ = this;
+        }
+    }
+
+    ~LeaveDebuggeeNoExecute() {
+        if (prevLocked_) {
+            MOZ_ASSERT(prevLocked_->unlocked_ == this);
+            prevLocked_->unlocked_ = nullptr;
+        }
+    }
+};
 
 } /* namespace js */
 

@@ -37,6 +37,7 @@
 #include "wasm/AsmJS.h"
 
 #include "frontend/ParseNode-inl.h"
+#include "vm/Debugger-inl.h"
 #include "vm/EnvironmentObject-inl.h"
 #include "vm/JSAtom-inl.h"
 #include "vm/JSScript-inl.h"

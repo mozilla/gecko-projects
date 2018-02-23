@@ -2452,10 +2452,10 @@ js::CallResultEscapes(jsbytecode* pc)
 }
 
 extern bool
-js::IsValidBytecodeOffset(JSContext* cx, JSScript* script, size_t offset)
+js::IsValidBytecodeOffset(JSContext* cx, jsbytecode* code, size_t length, size_t offset)
 {
     // This could be faster (by following jump instructions if the target is <= offset).
-    for (BytecodeRange r(cx, script); !r.empty(); r.popFront()) {
+    for (BytecodeRange r(cx, code, length); !r.empty(); r.popFront()) {
         size_t here = r.frontOffset();
         if (here >= offset)
             return here == offset;
@@ -2997,4 +2997,55 @@ js::GetCodeCoverageSummary(JSContext* cx, size_t* length)
     if (length)
         *length = len;
     return res;
+}
+
+bool
+js::GetSuccessorBytecodes(jsbytecode* pc, PcVector& successors)
+{
+    JSOp op = (JSOp)*pc;
+    if (FlowsIntoNext(op)) {
+        if (!successors.append(GetNextPc(pc)))
+            return false;
+    }
+
+    if (CodeSpec[op].type() == JOF_JUMP) {
+        if (!successors.append(pc + GET_JUMP_OFFSET(pc)))
+            return false;
+    } else if (op == JSOP_TABLESWITCH) {
+        if (!successors.append(pc + GET_JUMP_OFFSET(pc)))
+            return false;
+        jsbytecode* npc = pc + JUMP_OFFSET_LEN;
+
+        int32_t low = GET_JUMP_OFFSET(npc);
+        npc += JUMP_OFFSET_LEN;
+        int ncases = GET_JUMP_OFFSET(npc) - low + 1;
+        npc += JUMP_OFFSET_LEN;
+
+        for (int i = 0; i < ncases; i++) {
+            if (!successors.append(pc + GET_JUMP_OFFSET(npc)))
+                return false;
+            npc += JUMP_OFFSET_LEN;
+        }
+    }
+
+    return true;
+}
+
+bool
+js::GetPredecessorBytecodes(jsbytecode* code, jsbytecode* end, jsbytecode* pc, PcVector& predecessors)
+{
+    MOZ_ASSERT(pc >= code && pc < end);
+    for (jsbytecode* npc = code; npc < end; npc = GetNextPc(npc)) {
+        PcVector successors;
+        if (!GetSuccessorBytecodes(npc, successors))
+            return false;
+        for (size_t i = 0; i < successors.length(); i++) {
+            if (successors[i] == pc) {
+                if (!predecessors.append(npc))
+                    return false;
+                break;
+            }
+        }
+    }
+    return true;
 }
