@@ -2145,6 +2145,13 @@ HelperThread::handleGCHelperWorkload(AutoLockHelperThreadState& locked)
     HelperThreadState().notifyAll(GlobalHelperThreadState::CONSUMER, locked);
 }
 
+/* static */ void
+HelperThread::WakeupAll()
+{
+    AutoLockHelperThreadState lock;
+    HelperThreadState().notifyAll(GlobalHelperThreadState::PRODUCER, lock);
+}
+
 void
 JSContext::setHelperThread(HelperThread* thread)
 {
@@ -2241,6 +2248,19 @@ HelperThread::threadLoop()
 
         const TaskSpec* task = findHighestPriorityTask(lock);
         if (!task) {
+            if (mozilla::recordreplay::IsRecordingOrReplaying()) {
+                // Unlock the helper thread state lock before potentially
+                // blocking while the main thread waits for all threads to
+                // become idle. Otherwise we would need to see if we need to
+                // block at every point where a helper thread acquires the
+                // helper thread state lock.
+                {
+                    AutoUnlockHelperThreadState unlock(lock);
+                    mozilla::recordreplay::MaybeWaitForSnapshot();
+                }
+                mozilla::recordreplay::NotifyUnrecordedWait(WakeupAll);
+            }
+
             HelperThreadState().wait(lock, GlobalHelperThreadState::PRODUCER);
             continue;
         }

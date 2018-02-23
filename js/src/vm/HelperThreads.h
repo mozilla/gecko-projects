@@ -416,6 +416,8 @@ struct HelperThread
     static void ThreadMain(void* arg);
     void threadLoop();
 
+    static void WakeupAll();
+
   private:
     struct TaskSpec
     {
