@@ -187,6 +187,8 @@ static const char kStaticCtorDtorWarning[] =
 static void
 AssertActivityIsLegal()
 {
+  if (recordreplay::IsRecordingOrReplaying())
+    return;
   if (gActivityTLS == BAD_TLS_INDEX || PR_GetThreadPrivate(gActivityTLS)) {
     if (PR_GetEnv("MOZ_FATAL_STATIC_XPCOM_CTORS_DTORS")) {
       MOZ_CRASH_UNSAFE_OOL(kStaticCtorDtorWarning);
@@ -740,6 +742,12 @@ InitTraceLog()
     return;
   }
   gInitialized = true;
+
+  // Don't trace refcounts while recording or replaying, these are not
+  // required to match up between the two executions.
+  if (mozilla::recordreplay::IsRecordingOrReplaying()) {
+    return;
+  }
 
   bool defined = InitLog("XPCOM_MEM_BLOAT_LOG", "bloat/leaks", &gBloatLog);
   if (!defined) {
