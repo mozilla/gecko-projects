@@ -60,7 +60,9 @@ bool gShutdown;
 
 // The timestamp of the last event notification, or PR_INTERVAL_NO_WAIT if
 // we're currently not processing events.
-Atomic<PRIntervalTime> gTimestamp(PR_INTERVAL_NO_WAIT);
+Atomic<PRIntervalTime,
+       SequentiallyConsistent,
+       recordreplay::Behavior::DontPreserve> gTimestamp(PR_INTERVAL_NO_WAIT);
 
 #ifdef REPORT_CHROME_HANGS
 // Main thread ID used in reporting chrome hangs under Windows
