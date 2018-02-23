@@ -81,7 +81,7 @@ public:
 // threads are operating the same atom, so it has to be signed so that
 // we wouldn't use overflow value for comparison.
 // See nsAtom::AddRef() and nsAtom::Release().
-static Atomic<int32_t, ReleaseAcquire> gUnusedAtomCount(0);
+static Atomic<int32_t, ReleaseAcquire, recordreplay::Behavior::DontPreserve> gUnusedAtomCount(0);
 
 // This constructor is for dynamic atoms and HTML5 atoms.
 nsAtom::nsAtom(AtomKind aKind, const nsAString& aString, uint32_t aHash)
