@@ -915,6 +915,17 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
                         aCloneData, aCpows, aPrincipal, aRetVal);
 }
 
+// When recording or replaying, return whether a message should be received in
+// the middleman process instead of the recording/replaying process.
+static bool
+DirectMessageToMiddleman(const nsAString& aMessage)
+{
+  // FIXME surely there is a better way to do this.
+  nsCString cmsg = NS_ConvertUTF16toUTF8(aMessage);
+  const char* cstr = cmsg.get();
+  return strncmp(cstr, "debug:", 6) == 0;
+}
+
 nsresult
 nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
                                       nsIFrameLoader* aTargetFrameLoader,
@@ -926,6 +937,19 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
                                       nsIPrincipal* aPrincipal,
                                       nsTArray<StructuredCloneData>* aRetVal)
 {
+  // If we are recording or replaying, we will end up here in both the
+  // middleman process and the recording/replaying process. Ignore the message
+  // in one of the processes, so that it is only received in one place.
+  if (recordreplay::IsRecordingOrReplaying()) {
+    if (DirectMessageToMiddleman(aMessage)) {
+      return NS_OK;
+    }
+  } else if (recordreplay::IsMiddleman()) {
+    if (!DirectMessageToMiddleman(aMessage)) {
+      return NS_OK;
+    }
+  }
+
   nsAutoTObserverArray<nsMessageListenerInfo, 1>* listeners =
     mListeners.Get(aMessage);
   if (listeners) {
