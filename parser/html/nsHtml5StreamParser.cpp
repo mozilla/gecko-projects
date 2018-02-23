@@ -227,6 +227,9 @@ nsHtml5StreamParser::~nsHtml5StreamParser()
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   mTokenizer->end();
+  if (recordreplay::IsRecordingOrReplaying()) {
+    JS::EndContentParseForRecordReplay(this);
+  }
 #ifdef DEBUG
   {
     mozilla::MutexAutoLock flushTimerLock(mFlushTimerMutex);
@@ -293,6 +296,13 @@ nsHtml5StreamParser::Notify(const char* aCharset, nsDetectionConfident aConf)
 void
 nsHtml5StreamParser::SetViewSourceTitle(nsIURI* aURL)
 {
+  if (recordreplay::IsRecordingOrReplaying()) {
+    nsAutoCString spec;
+    aURL->GetSpec(spec);
+    JS::BeginContentParseForRecordReplay(this, spec.get(), "text/html",
+                                         JS::SmallestEncoding::Latin1 /* FIXME Guessing here */);
+  }
+
   if (aURL) {
     nsCOMPtr<nsIURI> temp;
     bool isViewSource;
@@ -1166,6 +1176,10 @@ nsHtml5StreamParser::DoDataAvailable(const uint8_t* aBuffer, uint32_t aLength)
 
   if (IsTerminated()) {
     return;
+  }
+
+  if (recordreplay::IsRecordingOrReplaying()) {
+    JS::AddContentParseDataForRecordReplay(this, aBuffer, aLength);
   }
 
   uint32_t writeCount;

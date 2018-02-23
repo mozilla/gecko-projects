@@ -4134,6 +4134,24 @@ extern JS_PUBLIC_API(bool)
 InitScriptSourceElement(JSContext* cx, HandleScript script,
                         HandleObject element, HandleString elementAttrName = nullptr);
 
+// Notify the JS engine that some content is being parsed. This may only be
+// called when the process is recording or replaying --- during replay we will
+// need to be able to get the complete source for any files that contain JS,
+// and can't simply fetch that file's entire contents since it may have been
+// changed or may no longer exist.
+extern JS_PUBLIC_API(void)
+BeginContentParseForRecordReplay(const void* token,
+                                 const char* filename, const char* contentType,
+                                 SmallestEncoding encoding);
+
+// Add some parse data to an existing content parse.
+extern JS_PUBLIC_API(void)
+AddContentParseDataForRecordReplay(const void* token, const void* buffer, size_t length);
+
+// Mark a content parse as having completed.
+extern JS_PUBLIC_API(void)
+EndContentParseForRecordReplay(const void* token);
+
 } /* namespace JS */
 
 extern JS_PUBLIC_API(JSString*)
@@ -4141,7 +4159,6 @@ JS_DecompileScript(JSContext* cx, JS::Handle<JSScript*> script);
 
 extern JS_PUBLIC_API(JSString*)
 JS_DecompileFunction(JSContext* cx, JS::Handle<JSFunction*> fun);
-
 
 /*
  * NB: JS_ExecuteScript and the JS::Evaluate APIs come in two flavors: either
