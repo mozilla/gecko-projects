@@ -134,6 +134,25 @@ class BufferList : private AllocPolicy
     return AllocateSegment(aInitialSize, aInitialCapacity);
   }
 
+  bool CopyFrom(const BufferList& aOther)
+  {
+    MOZ_ASSERT(mOwning);
+
+    Clear();
+
+    if (!Init(aOther.mSize, (aOther.mSize + kSegmentAlignment - 1) & ~(kSegmentAlignment - 1)))
+      return false;
+
+    size_t offset = 0;
+    for (const Segment& segment : aOther.mSegments) {
+      memcpy(Start() + offset, segment.mData, segment.mSize);
+      offset += segment.mSize;
+    }
+    MOZ_ASSERT(offset == mSize);
+
+    return true;
+  }
+
   // Returns the sum of the sizes of all the buffers.
   size_t Size() const { return mSize; }
 
