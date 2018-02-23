@@ -496,6 +496,7 @@ mozilla::dom::TraceBlackJS(JSTracer* aTrc, bool aIsShutdownGC)
   }
 
   if (nsFrameMessageManager::GetChildProcessManager()) {
+    recordreplay::AutoPassThroughThreadEvents pt; // FIXME
     nsIContentProcessMessageManager* pg = ProcessGlobal::Get();
     if (pg) {
       mozilla::TraceScriptHolder(pg, aTrc);

@@ -42287,7 +42287,7 @@ exports.default = (0, _reactRedux.connect)(state => {
   const selectedFrame = (0, _selectors.getSelectedFrame)(state);
   const selectedSource = (0, _selectors.getSelectedSource)(state);
 
-  const { scope: frameScopes, pending } = (0, _selectors.getFrameScope)(state, selectedSource && selectedSource.get("id"), selectedFrame.id) || { scope: null, pending: false };
+  const { scope: frameScopes, pending } = (0, _selectors.getFrameScope)(state, selectedSource && selectedSource.get("id"), selectedFrame ? selectedFrame.id : null) || { scope: null, pending: false };
 
   return {
     selectedFrame,

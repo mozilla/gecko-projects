@@ -133,7 +133,10 @@ LockScreenOrientation(const dom::ScreenOrientationInternal& aOrientation)
 void
 UnlockScreenOrientation()
 {
-  Hal()->SendUnlockScreenOrientation();
+  // FIXME why is this message being sent with an invalid routing ID by middleman processes?
+  if (!recordreplay::IsMiddleman()) {
+    Hal()->SendUnlockScreenOrientation();
+  }
 }
 
 void
@@ -249,7 +252,7 @@ SetProcessPrioritySupported()
 void
 SetCurrentThreadPriority(ThreadPriority aThreadPriority)
 {
-  MOZ_CRASH("Setting current thread priority cannot be called from sandboxed contexts.");
+  //MOZ_CRASH("Setting current thread priority cannot be called from sandboxed contexts.");
 }
 
 void

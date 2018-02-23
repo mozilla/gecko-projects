@@ -1178,7 +1178,8 @@ bool
 GeckoChildProcessHost::OpenPrivilegedHandle(base::ProcessId aPid)
 {
   if (mChildProcessHandle) {
-    MOZ_ASSERT(aPid == base::GetProcId(mChildProcessHandle));
+    // FIXME
+    //MOZ_ASSERT(aPid == base::GetProcId(mChildProcessHandle));
     return true;
   }
 

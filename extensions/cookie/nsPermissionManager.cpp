@@ -3390,7 +3390,7 @@ nsPermissionManager::BroadcastPermissionsForPrincipalToAllContentProcesses(nsIPr
 bool
 nsPermissionManager::PermissionAvailable(nsIPrincipal* aPrincipal, const char* aType)
 {
-  if (XRE_IsContentProcess()) {
+  if (XRE_IsContentProcess() && !recordreplay::IsMiddleman()) {
     nsAutoCString permissionKey;
     // NOTE: GetKeyForPermission accepts a null aType.
     GetKeyForPermission(aPrincipal, aType, permissionKey);

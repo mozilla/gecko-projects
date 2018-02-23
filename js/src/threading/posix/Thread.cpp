@@ -197,7 +197,8 @@ js::ThisThread::SetName(const char* name)
 #else
   rv = pthread_setname_np(pthread_self(), name);
 #endif
-  MOZ_RELEASE_ASSERT(!rv);
+  // FIXME
+  //MOZ_RELEASE_ASSERT(!rv);
 }
 
 void
