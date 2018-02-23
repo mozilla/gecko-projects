@@ -683,6 +683,10 @@ gfxPlatform::Init()
       }
     }
 
+    if (recordreplay::IsRecordingOrReplaying()) {
+      GPUProcessManager::Initialize();
+    }
+
     // Drop a note in the crash report if we end up forcing an option that could
     // destabilize things.  New items should be appended at the end (of an existing
     // or in a new section), so that we don't have to know the version to interpret
@@ -752,7 +756,7 @@ gfxPlatform::Init()
       gpu->LaunchGPUProcess();
     }
 
-    if (XRE_IsParentProcess()) {
+    if (XRE_IsParentProcess() || recordreplay::IsRecordingOrReplaying()) {
       if (gfxPlatform::ForceSoftwareVsync()) {
         gPlatform->mVsyncSource = (gPlatform)->gfxPlatform::CreateHardwareVsyncSource();
       } else {
@@ -1014,10 +1018,12 @@ gfxPlatform::InitLayersIPC()
   }
 
   if (XRE_IsContentProcess()) {
-    if (gfxVars::UseOMTP()) {
+    if (gfxVars::UseOMTP() && !recordreplay::IsRecordingOrReplaying()) {
       layers::PaintThread::Start();
     }
-  } else if (XRE_IsParentProcess()) {
+  }
+
+  if (XRE_IsParentProcess() || recordreplay::IsRecordingOrReplaying()) {
     if (gfxVars::UseWebRender()) {
       wr::RenderThread::Start();
       layers::SharedSurfacesParent::Initialize();
@@ -1044,7 +1050,7 @@ gfxPlatform::ShutdownLayersIPC()
           layers::ImageBridgeChild::ShutDown();
         }
 
-        if (gfxVars::UseOMTP()) {
+        if (gfxVars::UseOMTP() && !recordreplay::IsRecordingOrReplaying()) {
           layers::PaintThread::Shutdown();
         }
     } else if (XRE_IsParentProcess()) {
@@ -1335,6 +1341,10 @@ gfxPlatform::ComputeTileSize()
 void
 gfxPlatform::PopulateScreenInfo()
 {
+  if (recordreplay::IsMiddleman()) {
+    return;
+  }
+
   nsCOMPtr<nsIScreenManager> manager = do_GetService("@mozilla.org/gfx/screenmanager;1");
   MOZ_ASSERT(manager, "failed to get nsIScreenManager");
 
@@ -2591,7 +2601,7 @@ gfxPlatform::InitOMTPConfig()
     // The parent process runs through all the real decision-making code
     // later in this function. For other processes we still want to report
     // the state of the feature for crash reports.
-    if (gfxVars::UseOMTP()) {
+    if (gfxVars::UseOMTP() && !recordreplay::IsRecordingOrReplaying()) {
       reporter.SetSuccessful(paintWorkerCount);
     }
     return;
@@ -2716,7 +2726,7 @@ gfxPlatform::IsInLayoutAsapMode()
 /* static */ bool
 gfxPlatform::ForceSoftwareVsync()
 {
-  return gfxPrefs::LayoutFrameRate() > 0;
+  return gfxPrefs::LayoutFrameRate() > 0 || recordreplay::IsRecordingOrReplaying();
 }
 
 /* static */ int
@@ -2799,6 +2809,8 @@ gfxPlatform::GetTilesSupportInfo(mozilla::widget::InfoObject& aObj)
 /*static*/ bool
 gfxPlatform::AsyncPanZoomEnabled()
 {
+  if (recordreplay::IsRecordingOrReplaying())
+    return false;
 #if !defined(MOZ_WIDGET_ANDROID) && !defined(MOZ_WIDGET_UIKIT)
   // For XUL applications (everything but Firefox on Android)
   // we only want to use APZ when E10S is enabled. If

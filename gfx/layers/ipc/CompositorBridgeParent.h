@@ -169,6 +169,10 @@ public:
 
   virtual void NotifyWebRenderError(wr::WebRenderError aError) {}
 
+  virtual void ForceComposeToTarget(gfx::DrawTarget* aTarget, const gfx::IntRect* aRect = nullptr) {
+    MOZ_CRASH();
+  }
+
 protected:
   ~CompositorBridgeParentBase() override;
 
@@ -437,7 +441,7 @@ public:
 
   widget::CompositorWidget* GetWidget() { return mWidget; }
 
-  void ForceComposeToTarget(gfx::DrawTarget* aTarget, const gfx::IntRect* aRect = nullptr);
+  virtual void ForceComposeToTarget(gfx::DrawTarget* aTarget, const gfx::IntRect* aRect = nullptr) override;
 
   PAPZCTreeManagerParent* AllocPAPZCTreeManagerParent(const uint64_t& aLayersId) override;
   bool DeallocPAPZCTreeManagerParent(PAPZCTreeManagerParent* aActor) override;

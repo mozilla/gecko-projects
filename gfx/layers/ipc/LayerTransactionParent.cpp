@@ -42,6 +42,14 @@
 using mozilla::layout::RenderFrameParent;
 
 namespace mozilla {
+
+// FIXME
+namespace recordreplay {
+  namespace child {
+    extern void NotifyPaintComplete();
+  }
+}
+
 namespace layers {
 
 //--------------------------------------------------
@@ -168,6 +176,12 @@ LayerTransactionParent::RecvInitReadLocks(ReadLockArray&& aReadLocks)
 mozilla::ipc::IPCResult
 LayerTransactionParent::RecvUpdate(const TransactionInfo& aInfo)
 {
+  auto guard = MakeScopeExit([&] {
+      if (recordreplay::IsRecordingOrReplaying()) {
+        recordreplay::child::NotifyPaintComplete();
+      }
+    });
+
   AUTO_PROFILER_TRACING("Paint", "LayerTransaction");
   AUTO_PROFILER_LABEL("LayerTransactionParent::RecvUpdate", GRAPHICS);
 
@@ -505,6 +519,10 @@ LayerTransactionParent::RecvUpdate(const TransactionInfo& aInfo)
     }
 
     mLayerManager->RecordUpdateTime((TimeStamp::Now() - updateStart).ToMilliseconds());
+  }
+
+  if (recordreplay::IsRecordingOrReplaying()) {
+    mCompositorBridge->ForceComposeToTarget(nullptr);
   }
 
   return IPC_OK();

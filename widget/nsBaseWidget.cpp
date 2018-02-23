@@ -1496,7 +1496,27 @@ CompositorBridgeChild* nsBaseWidget::GetRemoteRenderer()
 already_AddRefed<gfx::DrawTarget>
 nsBaseWidget::StartRemoteDrawing()
 {
+  if (recordreplay::IsRecordingOrReplaying()) {
+    return recordreplay::child::DrawTargetForRemoteDrawing(mBounds.Size());
+  }
   return nullptr;
+}
+
+// FIXME
+namespace mozilla {
+  namespace recordreplay {
+    namespace child {
+      void EndRemoteDrawing();
+    }
+  }
+}
+
+void
+nsBaseWidget::EndRemoteDrawing()
+{
+  if (recordreplay::IsRecordingOrReplaying()) {
+    recordreplay::child::EndRemoteDrawing();
+  }
 }
 
 uint32_t

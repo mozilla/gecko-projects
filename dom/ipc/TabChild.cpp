@@ -211,8 +211,10 @@ already_AddRefed<nsIPresShell>
 TabChildBase::GetPresShell() const
 {
   nsCOMPtr<nsIPresShell> result;
-  if (nsCOMPtr<nsIDocument> doc = GetDocument()) {
-    result = doc->GetShell();
+  if (!recordreplay::IsMiddleman()) {
+    if (nsCOMPtr<nsIDocument> doc = GetDocument()) {
+      result = doc->GetShell();
+    }
   }
   return result.forget();
 }
@@ -649,6 +651,11 @@ TabChild::Init()
   mAPZEventState = new APZEventState(mPuppetWidget, Move(callback));
 
   mIPCOpen = true;
+
+  if (recordreplay::IsRecordingOrReplaying()) {
+    mPuppetWidget->CreateCompositor();
+  }
+
   return NS_OK;
 }
 
@@ -1119,9 +1126,11 @@ TabChild::ActorDestroy(ActorDestroyReason why)
     }
   }
 
-  CompositorBridgeChild* compositorChild = CompositorBridgeChild::Get();
-  if (compositorChild) {
-    compositorChild->CancelNotifyAfterRemotePaint(this);
+  if (!recordreplay::IsRecordingOrReplaying() && !recordreplay::IsMiddleman()) {
+    CompositorBridgeChild* compositorChild = CompositorBridgeChild::Get();
+    if (compositorChild) {
+      compositorChild->CancelNotifyAfterRemotePaint(this);
+    }
   }
 
   if (GetTabId() != 0) {
@@ -1289,7 +1298,7 @@ TabChild::RecvInitRendering(const TextureFactoryIdentifier& aTextureFactoryIdent
 mozilla::ipc::IPCResult
 TabChild::RecvUpdateDimensions(const DimensionInfo& aDimensionInfo)
 {
-    if (!mRemoteFrame) {
+    if (!mRemoteFrame && !recordreplay::IsRecordingOrReplaying()) {
         return IPC_OK();
     }
 
@@ -2896,7 +2905,9 @@ void
 TabChild::NotifyPainted()
 {
     if (!mNotified) {
-        mRemoteFrame->SendNotifyCompositorTransaction();
+        if (!recordreplay::IsRecordingOrReplaying()) {
+            mRemoteFrame->SendNotifyCompositorTransaction();
+        }
         mNotified = true;
     }
 }

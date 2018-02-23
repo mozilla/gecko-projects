@@ -1163,7 +1163,7 @@ CompositorBridgeChild::FlushAsyncPaints()
   MOZ_ASSERT(NS_IsMainThread());
 
   Maybe<TimeStamp> start;
-  if (XRE_IsContentProcess() && gfx::gfxVars::UseOMTP()) {
+  if (XRE_IsContentProcess() && gfx::gfxVars::UseOMTP() && !recordreplay::IsRecordingOrReplaying()) {
     start = Some(TimeStamp::Now());
   }
 

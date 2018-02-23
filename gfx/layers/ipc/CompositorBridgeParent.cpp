@@ -349,7 +349,7 @@ void
 CompositorBridgeParent::InitSameProcess(widget::CompositorWidget* aWidget,
                                         const uint64_t& aLayerTreeId)
 {
-  MOZ_ASSERT(XRE_IsParentProcess());
+  MOZ_ASSERT(XRE_IsParentProcess() || recordreplay::IsRecordingOrReplaying());
   MOZ_ASSERT(NS_IsMainThread());
 
   mWidget = aWidget;

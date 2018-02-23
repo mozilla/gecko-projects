@@ -483,7 +483,7 @@ ClientLayerManager::GetRemoteRenderer()
 CompositorBridgeChild*
 ClientLayerManager::GetCompositorBridgeChild()
 {
-  if (!XRE_IsParentProcess()) {
+  if (!XRE_IsParentProcess() && !recordreplay::IsRecordingOrReplaying()) {
     return CompositorBridgeChild::Get();
   }
   return GetRemoteRenderer();
@@ -509,7 +509,11 @@ ClientLayerManager::DidComposite(uint64_t aTransactionId,
                                  const TimeStamp& aCompositeStart,
                                  const TimeStamp& aCompositeEnd)
 {
-  MOZ_ASSERT(mWidget);
+  // FIXME
+  if (!mWidget) {
+    MOZ_ASSERT(recordreplay::IsRecordingOrReplaying());
+    return;
+  }
 
   // Notifying the observers may tick the refresh driver which can cause
   // a lot of different things to happen that may affect the lifetime of

@@ -386,6 +386,10 @@ gfxWindowsPlatform::CanUseHardwareVideoDecoding()
 bool
 gfxWindowsPlatform::InitDWriteSupport()
 {
+  if (recordreplay::IsRecordingOrReplaying()) {
+    return false;
+  }
+
   mozilla::ScopedGfxFeatureReporter reporter("DWrite");
   if (!Factory::EnsureDWriteFactory()) {
     return false;
@@ -1426,7 +1430,7 @@ gfxWindowsPlatform::InitializeDevices()
   }
 
   // If acceleration is disabled, we refuse to initialize anything.
-  if (!gfxConfig::IsEnabled(Feature::HW_COMPOSITING)) {
+  if (!gfxConfig::IsEnabled(Feature::HW_COMPOSITING) || recordreplay::IsRecordingOrReplaying()) {
     return;
   }
 

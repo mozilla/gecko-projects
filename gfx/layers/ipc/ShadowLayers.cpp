@@ -44,6 +44,14 @@ namespace ipc {
 class Shmem;
 } // namespace ipc
 
+// FIXME
+namespace recordreplay {
+  namespace child {
+    void NotifyPaintStart();
+    void WaitForPaintToComplete();
+  }
+}
+
 namespace layers {
 
 using namespace mozilla::gfx;
@@ -807,11 +815,19 @@ ShadowLayerForwarder::EndTransaction(const nsIntRegion& aRegionToClear,
   // finish. If it does we don't have to delay messages at all.
   GetCompositorBridgeChild()->PostponeMessagesIfAsyncPainting();
 
+  if (recordreplay::IsRecordingOrReplaying()) {
+    recordreplay::child::NotifyPaintStart();
+  }
+
   MOZ_LAYERS_LOG(("[LayersForwarder] sending transaction..."));
   RenderTraceScope rendertrace3("Forward Transaction", "000093");
   if (!mShadowManager->SendUpdate(info)) {
     MOZ_LAYERS_LOG(("[LayersForwarder] WARNING: sending transaction failed!"));
     return false;
+  }
+
+  if (recordreplay::IsRecordingOrReplaying()) {
+    recordreplay::child::WaitForPaintToComplete();
   }
 
   if (startTime) {
@@ -921,6 +937,9 @@ void ShadowLayerForwarder::AttachAsyncCompositable(const CompositableHandle& aHa
 
 void ShadowLayerForwarder::SetShadowManager(PLayerTransactionChild* aShadowManager)
 {
+  if (recordreplay::IsMiddleman()) {
+    return;
+  }
   mShadowManager = static_cast<LayerTransactionChild*>(aShadowManager);
   mShadowManager->SetForwarder(this);
 }
@@ -1117,6 +1136,7 @@ ShadowLayerForwarder::GetCompositorBridgeChild()
   if (!mShadowManager) {
     return nullptr;
   }
+  MOZ_ASSERT(!recordreplay::IsMiddleman());
   mCompositorBridgeChild = static_cast<CompositorBridgeChild*>(mShadowManager->Manager());
   return mCompositorBridgeChild;
 }

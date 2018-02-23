@@ -680,6 +680,8 @@ public:
   // Request that the docshell be marked as active.
   void ForcePaint(uint64_t aLayerObserverEpoch);
 
+  uint64_t LayerObserverEpoch() const { return mLayerObserverEpoch; }
+
 #if defined(XP_WIN) && defined(ACCESSIBILITY)
   uintptr_t GetNativeWindowHandle() const { return mNativeWindowHandle; }
 #endif
