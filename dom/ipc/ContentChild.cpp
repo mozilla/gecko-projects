@@ -3708,6 +3708,13 @@ ContentChild::RecvAddDynamicScalars(nsTArray<DynamicScalarDefinition>&& aDefs)
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult
+ContentChild::RecvSaveRecording(const nsCString& aFilename)
+{
+  recordreplay::parent::SaveRecording(aFilename);
+  return IPC_OK();
+}
+
 already_AddRefed<nsIEventTarget>
 ContentChild::GetSpecificMessageEventTarget(const Message& aMsg)
 {

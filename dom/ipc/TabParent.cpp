@@ -2967,6 +2967,13 @@ TabParent::PreserveLayers(bool aPreserveLayers)
 }
 
 NS_IMETHODIMP
+TabParent::SaveRecording(const nsACString& aFilename, bool* aRetval)
+{
+  *aRetval = Manager()->AsContentParent()->SaveRecording(aFilename);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 TabParent::SuppressDisplayport(bool aEnabled)
 {
   if (IsDestroyed()) {

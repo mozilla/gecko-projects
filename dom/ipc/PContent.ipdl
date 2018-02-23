@@ -701,6 +701,9 @@ child:
      */
     async PClientOpenWindowOp(ClientOpenWindowArgs aArgs);
 
+    /* Save the execution up to the current point in a recorded process. */
+    async SaveRecording(nsCString filename);
+
 parent:
     async InitBackground(Endpoint<PBackgroundParent> aEndpoint);
 

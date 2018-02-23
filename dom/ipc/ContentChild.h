@@ -715,6 +715,9 @@ public:
   virtual bool
   DeallocPClientOpenWindowOpChild(PClientOpenWindowOpChild* aActor) override;
 
+  mozilla::ipc::IPCResult
+  RecvSaveRecording(const nsCString& filename) override;
+
 #ifdef NIGHTLY_BUILD
   // Fetch the current number of pending input events.
   //

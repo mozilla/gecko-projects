@@ -5572,6 +5572,19 @@ ContentParent::CanCommunicateWith(ContentParentId aOtherProcess)
   return parentId == aOtherProcess;
 }
 
+bool
+ContentParent::SaveRecording(const nsACString& aFilename)
+{
+  if (!mRecordExecution.Length()) {
+    return false;
+  }
+
+  nsCString filename(aFilename);
+  Unused << SendSaveRecording(filename);
+
+  return true;
+}
+
 mozilla::ipc::IPCResult
 ContentParent::RecvMaybeReloadPlugins()
 {

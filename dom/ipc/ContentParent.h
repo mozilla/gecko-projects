@@ -1210,6 +1210,8 @@ public:
 
   bool CanCommunicateWith(ContentParentId aOtherProcess);
 
+  bool SaveRecording(const nsACString& aFilename);
+
 private:
 
   // If you add strong pointers to cycle collected objects here, be sure to
