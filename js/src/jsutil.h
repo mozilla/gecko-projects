@@ -310,7 +310,10 @@ PodSet(T* aDst, const T& aSrc, size_t aNElem)
 static inline void*
 Poison(void* ptr, uint8_t value, size_t num)
 {
-    static bool disablePoison = bool(getenv("JSGC_DISABLE_POISONING"));
+    // Don't check the environment when recording or replaying and we might be
+    // under the GC.
+    static bool disablePoison =
+        !mozilla::recordreplay::IsRecordingOrReplaying() && bool(getenv("JSGC_DISABLE_POISONING"));
     if (disablePoison)
         return ptr;
 
