@@ -30,6 +30,7 @@
 
 using mozilla::StaticAutoPtr;
 using mozilla::StaticMutex;
+using mozilla::StaticMutexNotRecorded;
 using mozilla::StaticMutexAutoLock;
 using mozilla::Telemetry::Common::AutoHashtable;
 using mozilla::Telemetry::Common::IsExpiredVersion;
@@ -1477,7 +1478,7 @@ internal_RegisterScalars(const StaticMutexAutoLock& lock,
 // that, due to the nature of Telemetry, we cannot rely on having a
 // mutex initialized in InitializeGlobalState. Unfortunately, we
 // cannot make sure that no other function is called before this point.
-static StaticMutex gTelemetryScalarsMutex;
+static StaticMutexNotRecorded gTelemetryScalarsMutex;
 
 void
 TelemetryScalar::InitializeGlobalState(bool aCanRecordBase, bool aCanRecordExtended)

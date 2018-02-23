@@ -36,7 +36,7 @@ using base::BooleanHistogram;
 using base::CountHistogram;
 using base::FlagHistogram;
 using base::LinearHistogram;
-using mozilla::StaticMutex;
+using mozilla::StaticMutexNotRecorded;
 using mozilla::StaticMutexAutoLock;
 using mozilla::Telemetry::HistogramAccumulation;
 using mozilla::Telemetry::KeyedHistogramAccumulation;
@@ -958,7 +958,7 @@ KeyedHistogram::GetJSSnapshot(JSContext* cx, JS::Handle<JSObject*> obj,
 // a normal Mutex would show up as a leak in BloatView.  StaticMutex
 // also has the "OffTheBooks" property, so it won't show as a leak
 // in BloatView.
-static StaticMutex gTelemetryHistogramMutex;
+static StaticMutexNotRecorded gTelemetryHistogramMutex;
 
 namespace {
 
