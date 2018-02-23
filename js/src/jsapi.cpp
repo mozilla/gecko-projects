@@ -4290,7 +4290,9 @@ CanDoOffThread(JSContext* cx, const ReadOnlyCompileOptions& options, size_t leng
         }
     }
 
-    return cx->runtime()->canUseParallelParsing() && CanUseExtraThreads();
+    return cx->runtime()->canUseParallelParsing() &&
+           CanUseExtraThreads() &&
+           !mozilla::recordreplay::IsRecordingOrReplaying();
 }
 
 JS_PUBLIC_API(bool)
