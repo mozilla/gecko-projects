@@ -114,7 +114,8 @@ public:
     return maybe_pod_realloc<T>(aPtr, aOldSize, aNewSize);
   }
 
-  void free_(void* aPtr)
+  template <typename T>
+  void free_(T* aPtr, size_t aNumElems)
   {
     free(aPtr);
   }

@@ -113,7 +113,7 @@ struct AllocPolicyBasedFreePolicy
 {
   void operator()(const void* ptr) {
     AllocPolicy policy;
-    policy.free_(const_cast<void*>(ptr));
+    policy.free_(const_cast<void*>(ptr), 0);
   }
 };
 
@@ -139,7 +139,7 @@ class MOZ_STACK_CLASS SprintfState final : private mozilla::PrintfTarget, privat
     }
 
     ~SprintfState() {
-        this->free_(mBase);
+        this->free_(mBase, 0);
     }
 
     bool vprint(const char* format, va_list ap_list) MOZ_FORMAT_PRINTF(2, 0) {

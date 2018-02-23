@@ -188,7 +188,7 @@ public:
     Segment* segment;
     while ((segment = mSegments.popFirst())) {
       segment->~Segment();
-      this->free_(segment);
+      this->template free_<Segment>(segment, 1);
     }
   }
 
@@ -214,7 +214,7 @@ public:
     if (!last->Length()) {
       mSegments.popLast();
       last->~Segment();
-      this->free_(last);
+      this->template free_<Segment>(last, 1);
     }
   }
 
@@ -247,7 +247,7 @@ public:
       // Destroying the segment destroys all elements contained therein.
       mSegments.popLast();
       last->~Segment();
-      this->free_(last);
+      this->template free_<Segment>(last, 1);
 
       MOZ_ASSERT(aNumElements >= segmentLen);
       aNumElements -= segmentLen;

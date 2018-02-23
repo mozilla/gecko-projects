@@ -74,7 +74,10 @@ private:
     }
 
     void *realloc_(void *p, size_t bytes) { return ::realloc(p, bytes); }
-    void free_(void *p) { ::free(p); }
+
+    template <typename T>
+    void free_(T *p, size_t numElems) { ::free(p); }
+
     void reportAllocOverflow() const {}
     bool checkSimulatedOOM() const { return true; }
   };
