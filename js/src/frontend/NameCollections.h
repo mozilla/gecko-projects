@@ -140,12 +140,16 @@ struct RecyclableAtomMapValueWrapper
     }
 };
 
+// Note: Name maps preserve iteration order while recording/replaying, as
+// iteration can affect generated script bytecode and the order in which
+// e.g. lookup property hooks are performed on the associated global.
 template <typename MapValue>
 using RecyclableNameMap = InlineMap<JSAtom*,
                                     RecyclableAtomMapValueWrapper<MapValue>,
                                     24,
                                     DefaultHasher<JSAtom*>,
-                                    SystemAllocPolicy>;
+                                    SystemAllocPolicy,
+                                    mozilla::recordreplay::Behavior::Preserve>;
 
 using DeclaredNameMap = RecyclableNameMap<DeclaredNameInfo>;
 using CheckTDZMap = RecyclableNameMap<MaybeCheckTDZ>;
