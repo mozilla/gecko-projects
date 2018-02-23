@@ -34,7 +34,8 @@ class GCParallelTask
 
   protected:
     // A flag to signal a request for early completion of the off-thread task.
-    mozilla::Atomic<bool> cancel_;
+    mozilla::Atomic<bool, mozilla::SequentiallyConsistent,
+                    mozilla::recordreplay::Behavior::DontPreserve> cancel_;
 
     virtual void run() = 0;
 

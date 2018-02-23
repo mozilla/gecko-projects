@@ -66,7 +66,8 @@ class ZoneGroup
         Active
     };
 
-    mozilla::Atomic<HelperThreadUse> helperThreadUse;
+    mozilla::Atomic<HelperThreadUse, mozilla::SequentiallyConsistent,
+                    mozilla::recordreplay::Behavior::DontPreserve> helperThreadUse;
 
   public:
     // Whether a zone in this group was created for use by a helper thread.
@@ -135,7 +136,8 @@ class ZoneGroup
     // Number of Ion compilations which were finished off thread and are
     // waiting to be lazily linked. This is only set while holding the helper
     // thread state lock, but may be read from at other times.
-    mozilla::Atomic<size_t> numFinishedBuilders;
+    mozilla::Atomic<size_t, mozilla::SequentiallyConsistent,
+                    mozilla::recordreplay::Behavior::DontPreserve> numFinishedBuilders;
 
   private:
     /* List of Ion compilation waiting to get linked. */

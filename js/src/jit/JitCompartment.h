@@ -155,7 +155,9 @@ class JitRuntime
 
     // If true, the signal handler to interrupt Ion code should not attempt to
     // patch backedges, as some thread is busy modifying data structures.
-    mozilla::Atomic<bool> preventBackedgePatching_;
+    mozilla::Atomic<bool,
+                    mozilla::SequentiallyConsistent,
+                    mozilla::recordreplay::Behavior::DontPreserve> preventBackedgePatching_;
 
     // Global table of jitcode native address => bytecode address mappings.
     UnprotectedData<JitcodeGlobalTable*> jitcodeGlobalTable_;

@@ -494,7 +494,8 @@ class MemoryCounter
 {
     // Bytes counter to measure memory pressure for GC scheduling. It counts
     // upwards from zero.
-    mozilla::Atomic<size_t, mozilla::ReleaseAcquire> bytes_;
+    mozilla::Atomic<size_t, mozilla::ReleaseAcquire,
+                    mozilla::recordreplay::Behavior::DontPreserve> bytes_;
 
     // GC trigger threshold for memory allocations.
     size_t maxBytes_;
@@ -503,7 +504,8 @@ class MemoryCounter
     ActiveThreadData<size_t> bytesAtStartOfGC_;
 
     // Which kind of GC has been triggered if any.
-    mozilla::Atomic<TriggerKind, mozilla::ReleaseAcquire> triggered_;
+    mozilla::Atomic<TriggerKind, mozilla::ReleaseAcquire,
+                    mozilla::recordreplay::Behavior::DontPreserve> triggered_;
 
   public:
     MemoryCounter();
@@ -550,7 +552,8 @@ class ZoneHeapThreshold
     GCLockData<double> gcHeapGrowthFactor_;
 
     // GC trigger threshold for allocations on the GC heap.
-    mozilla::Atomic<size_t, mozilla::Relaxed> gcTriggerBytes_;
+    mozilla::Atomic<size_t, mozilla::Relaxed,
+                    mozilla::recordreplay::Behavior::DontPreserve> gcTriggerBytes_;
 
   public:
     ZoneHeapThreshold()

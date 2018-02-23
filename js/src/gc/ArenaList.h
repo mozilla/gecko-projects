@@ -237,7 +237,8 @@ class ArenaLists
 
     enum BackgroundFinalizeStateEnum { BFS_DONE, BFS_RUN };
 
-    typedef mozilla::Atomic<BackgroundFinalizeStateEnum, mozilla::SequentiallyConsistent>
+    typedef mozilla::Atomic<BackgroundFinalizeStateEnum, mozilla::SequentiallyConsistent,
+                            mozilla::recordreplay::Behavior::DontPreserve>
         BackgroundFinalizeState;
 
     /* The current background finalization state, accessed atomically. */

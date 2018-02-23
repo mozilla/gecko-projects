@@ -143,7 +143,8 @@ ObjectElements::FreezeElements(JSContext* cx, HandleNativeObject obj)
 }
 
 #ifdef DEBUG
-static mozilla::Atomic<bool, mozilla::Relaxed> gShapeConsistencyChecksEnabled(false);
+static mozilla::Atomic<bool, mozilla::Relaxed, mozilla::recordreplay::Behavior::DontPreserve>
+    gShapeConsistencyChecksEnabled(false);
 
 /* static */ void
 js::NativeObject::enableShapeConsistencyChecks()

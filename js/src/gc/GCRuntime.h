@@ -699,12 +699,16 @@ class GCRuntime
     ActiveThreadData<RootedValueMap> rootsHash;
 
     // An incrementing id used to assign unique ids to cells that require one.
-    mozilla::Atomic<uint64_t, mozilla::ReleaseAcquire> nextCellUniqueId_;
+    mozilla::Atomic<uint64_t,
+                    mozilla::ReleaseAcquire,
+                    mozilla::recordreplay::Behavior::DontPreserve> nextCellUniqueId_;
 
     /*
      * Number of the committed arenas in all GC chunks including empty chunks.
      */
-    mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire> numArenasFreeCommitted;
+    mozilla::Atomic<uint32_t,
+                    mozilla::ReleaseAcquire,
+                    mozilla::recordreplay::Behavior::DontPreserve> numArenasFreeCommitted;
     ActiveThreadData<VerifyPreTracer*> verifyPreData;
 
   private:
@@ -718,7 +722,9 @@ class GCRuntime
      */
     ActiveThreadData<JSGCMode> mode;
 
-    mozilla::Atomic<size_t, mozilla::ReleaseAcquire> numActiveZoneIters;
+    mozilla::Atomic<size_t,
+                    mozilla::ReleaseAcquire,
+                    mozilla::recordreplay::Behavior::DontPreserve> numActiveZoneIters;
 
     /* During shutdown, the GC needs to clean up every possible object. */
     ActiveThreadData<bool> cleanUpEverything;
@@ -752,7 +758,9 @@ class GCRuntime
      */
     UnprotectedData<bool> grayBitsValid;
 
-    mozilla::Atomic<JS::gcreason::Reason, mozilla::Relaxed> majorGCTriggerReason;
+    mozilla::Atomic<JS::gcreason::Reason,
+                    mozilla::Relaxed,
+                    mozilla::recordreplay::Behavior::DontPreserve> majorGCTriggerReason;
 
   private:
     /* Perform full GC if rt->keepAtoms() becomes false. */

@@ -185,7 +185,7 @@ class MIRGenerator
     MIRGraph* graph_;
     AbortReasonOr<Ok> offThreadStatus_;
     ObjectGroupVector abortedPreliminaryGroups_;
-    mozilla::Atomic<bool, mozilla::Relaxed> cancelBuild_;
+    HelperThreadRelaxedAtomicBool cancelBuild_;
 
     uint32_t wasmMaxStackArgBytes_;
     bool needsOverrecursedCheck_;
