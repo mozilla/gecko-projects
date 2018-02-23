@@ -32,6 +32,9 @@ public:
   // crash reporter needs metadata), the shmem should be parsed.
   template <typename T>
   static bool InitSingleton(T* aToplevelProtocol) {
+    if (recordreplay::IsRecordingOrReplaying())
+      return true;
+
     Shmem shmem;
     if (!AllocShmem(aToplevelProtocol, &shmem)) {
       return false;
