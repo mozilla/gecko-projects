@@ -1339,6 +1339,10 @@ PeerConnectionImpl::CreateDataChannel(const nsAString& aLabel,
   PC_AUTO_ENTER_API_CALL(false);
   MOZ_ASSERT(aRetval);
 
+  if (recordreplay::IsRecordingOrReplaying()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
   RefPtr<DataChannel> dataChannel;
   DataChannelConnection::Type theType =
     static_cast<DataChannelConnection::Type>(aType);
