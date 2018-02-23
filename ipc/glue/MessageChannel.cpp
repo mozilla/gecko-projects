@@ -1033,7 +1033,7 @@ public:
 MOZ_NEVER_INLINE static void
 CheckChildProcessBuildID(const IPC::Message& aMsg)
 {
-    MOZ_ASSERT(XRE_IsParentProcess());
+    MOZ_ASSERT(XRE_IsParentProcess() || recordreplay::IsMiddleman());
     nsCString childBuildID;
     PickleIterator msgIter(aMsg);
     MOZ_ALWAYS_TRUE(IPC::ReadParam(&aMsg, &msgIter, &childBuildID));
@@ -2064,7 +2064,10 @@ MessageChannel::DispatchSyncMessage(const Message& aMsg, Message*& aReply)
 
     int nestedLevel = aMsg.nested_level();
 
-    MOZ_RELEASE_ASSERT(nestedLevel == IPC::Message::NOT_NESTED || NS_IsMainThread());
+    MOZ_RELEASE_ASSERT(nestedLevel == IPC::Message::NOT_NESTED ||
+                       NS_IsMainThread() ||
+                       recordreplay::IsMiddleman() ||
+                       (recordreplay::IsReplaying() && recordreplay::AreThreadEventsPassedThrough()));
 #ifdef MOZ_TASK_TRACER
     AutoScopedLabel autolabel("sync message %s", aMsg.name());
 #endif

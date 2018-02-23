@@ -18,6 +18,7 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/ipc/MessageChannel.h"
 #include "mozilla/ipc/Transport.h"
+#include "mozilla/recordreplay/ChildIPC.h"
 #include "mozilla/StaticMutex.h"
 #include "mozilla/SystemGroup.h"
 #include "mozilla/Unused.h"
@@ -603,7 +604,15 @@ IToplevelProtocol::OtherPid() const
 void
 IToplevelProtocol::SetOtherProcessId(base::ProcessId aOtherPid)
 {
-  mOtherPid = aOtherPid;
+  // When recording an execution, all communication we do is forwarded from
+  // the middleman to the parent process, so use its pid instead of the
+  // middleman's pid.
+  if (recordreplay::IsRecordingOrReplaying() &&
+      aOtherPid == recordreplay::child::MiddlemanProcessId()) {
+    mOtherPid = recordreplay::child::ParentProcessId();
+  } else {
+    mOtherPid = aOtherPid;
+  }
 }
 
 bool

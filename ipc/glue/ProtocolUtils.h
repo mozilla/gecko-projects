@@ -23,6 +23,7 @@
 #include "mozilla/ipc/Shmem.h"
 #include "mozilla/ipc/Transport.h"
 #include "mozilla/ipc/MessageLink.h"
+#include "mozilla/recordreplay/ChildIPC.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/MozPromise.h"
@@ -663,7 +664,16 @@ public:
     bool Bind(PFooSide* aActor)
     {
         MOZ_RELEASE_ASSERT(mValid);
-        MOZ_RELEASE_ASSERT(mMyPid == base::GetCurrentProcId());
+        if (mMyPid != base::GetCurrentProcId()) {
+            // The parent process will supply the middleman's pid instead of
+            // the true child pid when recording or replaying. Fix this here.
+            // Note that if we're replaying we'll see the pid of the middleman
+            // used while recording.
+            MOZ_RELEASE_ASSERT(recordreplay::IsRecordingOrReplaying());
+            MOZ_RELEASE_ASSERT(recordreplay::IsReplaying() ||
+                               mMyPid == recordreplay::child::MiddlemanProcessId());
+            mMyPid = base::GetCurrentProcId();
+        }
 
         UniquePtr<Transport> t = mozilla::ipc::OpenDescriptor(mTransport, mMode);
         if (!t) {
