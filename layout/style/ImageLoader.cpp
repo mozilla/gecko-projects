@@ -75,14 +75,26 @@ ImageLoader::AssociateRequestToFrame(imgIRequest* aRequest,
       return new RequestSet();
     });
 
-  // Add these to the sets, but only if they're not already there.
-  uint32_t i = frameSet->IndexOfFirstElementGt(aFrame);
-  if (i == 0 || aFrame != frameSet->ElementAt(i-1)) {
-    frameSet->InsertElementAt(i, aFrame);
-  }
-  i = requestSet->IndexOfFirstElementGt(aRequest);
-  if (i == 0 || aRequest != requestSet->ElementAt(i-1)) {
-    requestSet->InsertElementAt(i, aRequest);
+  // Add these to the sets, but only if they're not already there. The sets are
+  // in sorted order, except when recording or replaying (where a different
+  // pointer addresses between the recording/replay would produce a different
+  // order in the sets when sorted).
+  if (recordreplay::IsRecordingOrReplaying()) {
+    if (!frameSet->Contains(aFrame)) {
+      frameSet->AppendElement(aFrame);
+    }
+    if (!requestSet->Contains(aRequest)) {
+      requestSet->AppendElement(aRequest);
+    }
+  } else {
+    uint32_t i = frameSet->IndexOfFirstElementGt(aFrame);
+    if (i == 0 || aFrame != frameSet->ElementAt(i-1)) {
+      frameSet->InsertElementAt(i, aFrame);
+    }
+    i = requestSet->IndexOfFirstElementGt(aRequest);
+    if (i == 0 || aRequest != requestSet->ElementAt(i-1)) {
+      requestSet->InsertElementAt(i, aRequest);
+    }
   }
 }
 
@@ -138,7 +150,11 @@ ImageLoader::RemoveRequestToFrameMapping(imgIRequest* aRequest,
   if (auto entry = mRequestToFrameMap.Lookup(aRequest)) {
     FrameSet* frameSet = entry.Data();
     MOZ_ASSERT(frameSet, "This should never be null");
-    frameSet->RemoveElementSorted(aFrame);
+    if (recordreplay::IsRecordingOrReplaying()) {
+      frameSet->RemoveElement(aFrame);
+    } else {
+      frameSet->RemoveElementSorted(aFrame);
+    }
     if (frameSet->IsEmpty()) {
       nsPresContext* presContext = GetPresContext();
       if (presContext) {
@@ -156,7 +172,11 @@ ImageLoader::RemoveFrameToRequestMapping(imgIRequest* aRequest,
   if (auto entry = mFrameToRequestMap.Lookup(aFrame)) {
     RequestSet* requestSet = entry.Data();
     MOZ_ASSERT(requestSet, "This should never be null");
-    requestSet->RemoveElementSorted(aRequest);
+    if (recordreplay::IsRecordingOrReplaying()) {
+      requestSet->RemoveElement(aRequest);
+    } else {
+      requestSet->RemoveElementSorted(aRequest);
+    }
     if (requestSet->IsEmpty()) {
       aFrame->SetHasImageRequest(false);
       entry.Remove();
