@@ -599,7 +599,9 @@ ContentParent::PreallocateProcess()
 {
   RefPtr<ContentParent> process =
     new ContentParent(/* aOpener = */ nullptr,
-                      NS_LITERAL_STRING(DEFAULT_REMOTE_TYPE));
+                      NS_LITERAL_STRING(DEFAULT_REMOTE_TYPE),
+                      /* aRecordExecution = */ nsString(),
+                      /* aReplayExecution = */ nsString());
 
   PreallocatedProcessManager::AddBlocker(process);
 
@@ -757,17 +759,28 @@ ContentParent::MinTabSelect(const nsTArray<ContentParent*>& aContentParents,
 }
 
 /*static*/ already_AddRefed<ContentParent>
-ContentParent::GetNewOrUsedBrowserProcess(const nsAString& aRemoteType,
+ContentParent::GetNewOrUsedBrowserProcess(Element* aFrameElement,
+                                          const nsAString& aRemoteType,
                                           ProcessPriority aPriority,
                                           ContentParent* aOpener,
                                           bool aPreferUsed)
 {
+  nsAutoString recordExecution;
+  nsAutoString replayExecution;
+  if (aFrameElement) {
+    aFrameElement->GetAttr(kNameSpaceID_None, nsGkAtoms::RecordExecution, recordExecution);
+    aFrameElement->GetAttr(kNameSpaceID_None, nsGkAtoms::ReplayExecution, replayExecution);
+  }
+
   nsTArray<ContentParent*>& contentParents = GetOrCreatePool(aRemoteType);
   uint32_t maxContentParents = GetMaxProcessCount(aRemoteType);
-  if (aRemoteType.EqualsLiteral(LARGE_ALLOCATION_REMOTE_TYPE)) {
+  if (recordExecution.Length() || replayExecution.Length()) {
+    // Fall through and always create a new process when recording or replaying.
+  } else if (aRemoteType.EqualsLiteral(LARGE_ALLOCATION_REMOTE_TYPE)) {
     // We never want to re-use Large-Allocation processes.
     if (contentParents.Length() >= maxContentParents) {
-      return GetNewOrUsedBrowserProcess(NS_LITERAL_STRING(DEFAULT_REMOTE_TYPE),
+      return GetNewOrUsedBrowserProcess(aFrameElement,
+                                        NS_LITERAL_STRING(DEFAULT_REMOTE_TYPE),
                                         aPriority,
                                         aOpener);
     }
@@ -825,7 +838,7 @@ ContentParent::GetNewOrUsedBrowserProcess(const nsAString& aRemoteType,
   }
 
   // Create a new process from scratch.
-  RefPtr<ContentParent> p = new ContentParent(aOpener, aRemoteType);
+  RefPtr<ContentParent> p = new ContentParent(aOpener, aRemoteType, recordExecution, replayExecution);
 
   // Until the new process is ready let's not allow to start up any preallocated processes.
   PreallocatedProcessManager::AddBlocker(p);
@@ -935,7 +948,7 @@ ContentParent::RecvCreateChildProcess(const IPCTabContext& aContext,
                                      aPriority);
   }
   else {
-    cp = GetNewOrUsedBrowserProcess(NS_LITERAL_STRING(DEFAULT_REMOTE_TYPE),
+    cp = GetNewOrUsedBrowserProcess(nullptr, NS_LITERAL_STRING(DEFAULT_REMOTE_TYPE),
                                     aPriority, this);
   }
 
@@ -1156,7 +1169,7 @@ ContentParent::CreateBrowser(const TabContext& aContext,
                                       initialPriority);
       } else {
         constructorSender =
-          GetNewOrUsedBrowserProcess(remoteType, initialPriority,
+          GetNewOrUsedBrowserProcess(aFrameElement, remoteType, initialPriority,
                                      nullptr, isPreloadBrowser);
       }
       if (!constructorSender) {
@@ -2059,7 +2072,7 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
     extraArgs.push_back("-safeMode");
   }
 
-  if (!mSubprocess->LaunchAndWaitForProcessHandle(extraArgs)) {
+  if (!mSubprocess->LaunchAndWaitForProcessHandle(extraArgs, mRecordExecution, mReplayExecution)) {
     MarkAsDead();
     return false;
   }
@@ -2099,6 +2112,8 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
 
 ContentParent::ContentParent(ContentParent* aOpener,
                              const nsAString& aRemoteType,
+                             const nsAString& aRecordExecution,
+                             const nsAString& aReplayExecution,
                              int32_t aJSPluginID)
   : nsIContentParent()
   , mSubprocess(nullptr)
@@ -2113,6 +2128,8 @@ ContentParent::ContentParent(ContentParent* aOpener,
   , mIsAvailable(true)
   , mIsAlive(true)
   , mIsForBrowser(!mRemoteType.IsEmpty())
+  , mRecordExecution(aRecordExecution)
+  , mReplayExecution(aReplayExecution)
   , mCalledClose(false)
   , mCalledKillHard(false)
   , mCreatedPairedMinidumps(false)

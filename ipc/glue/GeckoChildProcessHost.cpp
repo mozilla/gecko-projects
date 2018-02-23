@@ -37,6 +37,7 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/ipc/BrowserProcessSubThread.h"
 #include "mozilla/ipc/EnvironmentMap.h"
+#include "mozilla/recordreplay/ParentIPC.h"
 #include "mozilla/Omnijar.h"
 #include "mozilla/Telemetry.h"
 #include "ProtocolUtils.h"
@@ -333,11 +334,11 @@ GeckoChildProcessHost::SyncLaunch(std::vector<std::string> aExtraOpts, int aTime
   MessageLoop* ioLoop = XRE_GetIOMessageLoop();
   NS_ASSERTION(MessageLoop::current() != ioLoop, "sync launch from the IO thread NYI");
 
-  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>>(
+  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>, nsString, nsString>(
     "ipc::GeckoChildProcessHost::RunPerformAsyncLaunch",
     this,
     &GeckoChildProcessHost::RunPerformAsyncLaunch,
-    aExtraOpts));
+    aExtraOpts, nsString(), nsString()));
 
   return WaitUntilConnected(aTimeoutMs);
 }
@@ -349,11 +350,11 @@ GeckoChildProcessHost::AsyncLaunch(std::vector<std::string> aExtraOpts)
 
   MessageLoop* ioLoop = XRE_GetIOMessageLoop();
 
-  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>>(
+  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>, nsString, nsString>(
     "ipc::GeckoChildProcessHost::RunPerformAsyncLaunch",
     this,
     &GeckoChildProcessHost::RunPerformAsyncLaunch,
-    aExtraOpts));
+    aExtraOpts, nsString(), nsString()));
 
   // This may look like the sync launch wait, but we only delay as
   // long as it takes to create the channel.
@@ -404,16 +405,18 @@ GeckoChildProcessHost::WaitUntilConnected(int32_t aTimeoutMs)
 }
 
 bool
-GeckoChildProcessHost::LaunchAndWaitForProcessHandle(StringVector aExtraOpts)
+GeckoChildProcessHost::LaunchAndWaitForProcessHandle(StringVector aExtraOpts,
+                                                     const nsAString& aRecordExecution,
+                                                     const nsAString& aReplayExecution)
 {
   PrepareLaunch();
 
   MessageLoop* ioLoop = XRE_GetIOMessageLoop();
-  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>>(
+  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>, nsString, nsString>(
     "ipc::GeckoChildProcessHost::RunPerformAsyncLaunch",
     this,
     &GeckoChildProcessHost::RunPerformAsyncLaunch,
-    aExtraOpts));
+    aExtraOpts, nsString(aRecordExecution), nsString(aReplayExecution)));
 
   MonitorAutoLock lock(mMonitor);
   while (mProcessState < PROCESS_CREATED) {
@@ -493,12 +496,54 @@ GeckoChildProcessHost::GetChildLogName(const char* origLogName,
   buffer.AppendInt(mChildCounter);
 }
 
+static bool
+TestEnv(const char* aEnv)
+{
+  const char* value = getenv(aEnv);
+  return value && value[0];
+}
+
+// FIXME why does PR_SetEnv not work in opt builds here?
+static void
+SetEnv(const char* aEnv, const char* aValue)
+{
+  if (aValue) {
+    int rv = setenv(aEnv, aValue, 1);
+    MOZ_RELEASE_ASSERT(rv == 0);
+  } else {
+    int rv = unsetenv(aEnv);
+    MOZ_RELEASE_ASSERT(rv == 0);
+  }
+}
+
 bool
-GeckoChildProcessHost::PerformAsyncLaunch(std::vector<std::string> aExtraOpts)
+GeckoChildProcessHost::PerformAsyncLaunch(std::vector<std::string> aExtraOpts,
+                                          const nsAString& aRecordExecution,
+                                          const nsAString& aReplayExecution)
 {
 #ifdef MOZ_GECKO_PROFILER
   AutoSetProfilerEnvVarsForChildProcess profilerEnvironment;
 #endif
+
+  // Set environment variables if we want the child process to record or replay
+  // its behavior.
+  MOZ_ASSERT(!aRecordExecution.Length() || !aReplayExecution.Length());
+  if (recordreplay::IsMiddleman()) {
+    MOZ_ASSERT(TestEnv("MIDDLEMAN_RECORD") != TestEnv("MIDDLEMAN_REPLAY"));
+    if (TestEnv("MIDDLEMAN_RECORD")) {
+      SetEnv("RECORD", getenv("MIDDLEMAN_RECORD"));
+    } else {
+      SetEnv("REPLAY", getenv("MIDDLEMAN_REPLAY"));
+    }
+  } else if (aRecordExecution.Length()) {
+    nsAutoCString cmd;
+    cmd.Append(NS_ConvertUTF16toUTF8(aRecordExecution));
+    SetEnv("MIDDLEMAN_RECORD", cmd.get());
+  } else if (aReplayExecution.Length()) {
+    nsAutoCString cmd;
+    cmd.Append(NS_ConvertUTF16toUTF8(aReplayExecution));
+    SetEnv("MIDDLEMAN_REPLAY", cmd.get());
+  }
 
   // - Note: this code is not called re-entrantly, nor are restoreOrig*LogName
   //   or mChildCounter touched by any other thread, so this is safe.
@@ -539,15 +584,25 @@ GeckoChildProcessHost::PerformAsyncLaunch(std::vector<std::string> aExtraOpts)
   }
 #endif
 
-  return PerformAsyncLaunchInternal(aExtraOpts);
+  bool retval = PerformAsyncLaunchInternal(aExtraOpts);
+
+  if (aRecordExecution.Length()) {
+    SetEnv("MIDDLEMAN_RECORD", nullptr);
+  } else if (aReplayExecution.Length()) {
+    SetEnv("MIDDLEMAN_REPLAY", nullptr);
+  }
+
+  return retval;
 }
 
 bool
-GeckoChildProcessHost::RunPerformAsyncLaunch(std::vector<std::string> aExtraOpts)
+GeckoChildProcessHost::RunPerformAsyncLaunch(std::vector<std::string> aExtraOpts,
+                                             nsString aRecordExecution,
+                                             nsString aReplayExecution)
 {
   InitializeChannel();
 
-  bool ok = PerformAsyncLaunch(aExtraOpts);
+  bool ok = PerformAsyncLaunch(aExtraOpts, aRecordExecution, aReplayExecution);
   if (!ok) {
     // WaitUntilConnected might be waiting for us to signal.
     // If something failed let's set the error state and notify.

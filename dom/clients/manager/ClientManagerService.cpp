@@ -596,7 +596,8 @@ public:
     // present.
     if (!targetProcess) {
       targetProcess =
-        ContentParent::GetNewOrUsedBrowserProcess(NS_LITERAL_STRING(DEFAULT_REMOTE_TYPE),
+        ContentParent::GetNewOrUsedBrowserProcess(nullptr,
+                                                  NS_LITERAL_STRING(DEFAULT_REMOTE_TYPE),
                                                   ContentParent::GetInitialProcessPriority(nullptr),
                                                   nullptr);
     }

@@ -64,7 +64,9 @@ public:
   // executable image can be loaded.  On win32, we do know that when
   // we return.  But we don't know if dynamic linking succeeded on
   // either platform.
-  bool LaunchAndWaitForProcessHandle(StringVector aExtraOpts=StringVector());
+  bool LaunchAndWaitForProcessHandle(StringVector aExtraOpts,
+                                     const nsAString& aRecordExecution,
+                                     const nsAString& aReplayExecution);
 
   // Block until the child process has been created and it connects to
   // the IPC channel, meaning it's fully initialized.  (Or until an
@@ -72,7 +74,9 @@ public:
   bool SyncLaunch(StringVector aExtraOpts=StringVector(),
                   int32_t timeoutMs=0);
 
-  virtual bool PerformAsyncLaunch(StringVector aExtraOpts=StringVector());
+  virtual bool PerformAsyncLaunch(StringVector aExtraOpts,
+                                  const nsAString& aRecordExecution,
+                                  const nsAString& aReplayExecution);
 
   virtual void OnChannelConnected(int32_t peer_pid) override;
   virtual void OnMessageReceived(IPC::Message&& aMsg) override;
@@ -171,7 +175,9 @@ private:
   // Does the actual work for AsyncLaunch, on the IO thread.
   bool PerformAsyncLaunchInternal(std::vector<std::string>& aExtraOpts);
 
-  bool RunPerformAsyncLaunch(StringVector aExtraOpts=StringVector());
+  bool RunPerformAsyncLaunch(StringVector aExtraOpts,
+                             nsString aRecordExecution,
+                             nsString aReplayExecution);
 
   enum class BinaryPathType {
     Self,

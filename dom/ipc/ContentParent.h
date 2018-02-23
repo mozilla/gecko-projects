@@ -167,7 +167,8 @@ public:
    * 3. normal iframe
    */
   static already_AddRefed<ContentParent>
-  GetNewOrUsedBrowserProcess(const nsAString& aRemoteType,
+  GetNewOrUsedBrowserProcess(Element* aFrameElement,
+                             const nsAString& aRemoteType,
                              hal::ProcessPriority aPriority =
                              hal::ProcessPriority::PROCESS_PRIORITY_FOREGROUND,
                              ContentParent* aOpener = nullptr,
@@ -735,15 +736,20 @@ private:
   FORWARD_SHMEM_ALLOCATOR_TO(PContentParent)
 
   explicit ContentParent(int32_t aPluginID)
-    : ContentParent(nullptr, EmptyString(), aPluginID)
+    : ContentParent(nullptr, EmptyString(), EmptyString(), EmptyString(), aPluginID)
   {}
   ContentParent(ContentParent* aOpener,
-                const nsAString& aRemoteType)
-    : ContentParent(aOpener, aRemoteType, nsFakePluginTag::NOT_JSPLUGIN)
+                const nsAString& aRemoteType,
+                const nsAString& aRecordExecution,
+                const nsAString& aReplayExecution)
+    : ContentParent(aOpener, aRemoteType, aRecordExecution, aReplayExecution,
+                    nsFakePluginTag::NOT_JSPLUGIN)
   {}
 
   ContentParent(ContentParent* aOpener,
                 const nsAString& aRemoteType,
+                const nsAString& aRecordExecution,
+                const nsAString& aReplayExecution,
                 int32_t aPluginID);
 
   // Launch the subprocess and associated initialization.
@@ -1246,6 +1252,8 @@ private:
   bool mIsAlive;
 
   bool mIsForBrowser;
+  nsAutoString mRecordExecution;
+  nsAutoString mReplayExecution;
 
   // These variables track whether we've called Close() and KillHard() on our
   // channel.
