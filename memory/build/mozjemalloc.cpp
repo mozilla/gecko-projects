@@ -507,7 +507,7 @@ END_GLOBALS
 static const size_t gRecycleLimit = 128_MiB;
 
 // The current amount of recycled bytes, updated atomically.
-static Atomic<size_t, ReleaseAcquire> gRecycledSize;
+static Atomic<size_t, ReleaseAcquire, recordreplay::Behavior::DontPreserve> gRecycledSize;
 
 // Maximum number of dirty pages per arena.
 #define DIRTY_MAX_DEFAULT (1U << 8)
@@ -537,7 +537,8 @@ static void*
 base_alloc(size_t aSize);
 
 // Set to true once the allocator has been initialized.
-static Atomic<bool> malloc_initialized(false);
+static Atomic<bool, SequentiallyConsistent,
+	      recordreplay::Behavior::DontPreserve> malloc_initialized(false);
 
 static StaticMutex gInitLock;
 
