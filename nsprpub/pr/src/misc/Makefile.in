@@ -31,6 +31,7 @@ CSRCS = \
 	prnetdb.c  \
 	praton.c  \
 	prolock.c  \
+	prrecordreplay.c \
 	prrng.c    \
 	prsystem.c \
 	prtime.c   \

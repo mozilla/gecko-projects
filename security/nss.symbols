@@ -12,6 +12,7 @@
 # exported in NSPR (Windows peculiarity).
 PR_*
 PL_*
+gPR*
 #endif
 #include ../db/sqlite3/src/sqlite.symbols
 ATOB_AsciiToData

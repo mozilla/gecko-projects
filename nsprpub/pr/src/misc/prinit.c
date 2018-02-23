@@ -166,6 +166,9 @@ static void _PR_InitStuff(void)
     _PR_MD_EARLY_INIT();
 
     _PR_InitLocks();
+
+    PR_RecordReplayInitialize();
+
     _PR_InitAtomic();
     _PR_InitSegs();
     _PR_InitStacks();
