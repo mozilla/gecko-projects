@@ -488,6 +488,8 @@ XPCWrappedNative::XPCWrappedNative(already_AddRefed<nsISupports>&& aIdentity,
     MOZ_ASSERT(NS_IsMainThread());
 
     mIdentity = aIdentity;
+    RecordReplayRegisterDeferredFinalizeThing(nullptr, nullptr, mIdentity);
+
     mFlatJSObject.setFlags(FLAT_JS_OBJECT_VALID);
 
     MOZ_ASSERT(mMaybeProto, "bad ctor param");
@@ -505,6 +507,8 @@ XPCWrappedNative::XPCWrappedNative(already_AddRefed<nsISupports>&& aIdentity,
     MOZ_ASSERT(NS_IsMainThread());
 
     mIdentity = aIdentity;
+    RecordReplayRegisterDeferredFinalizeThing(nullptr, nullptr, mIdentity);
+
     mFlatJSObject.setFlags(FLAT_JS_OBJECT_VALID);
 
     MOZ_ASSERT(aScope, "bad ctor param");
@@ -531,8 +535,12 @@ XPCWrappedNative::Destroy()
 #endif
 
     if (mIdentity) {
+        // Either release mIdentity immediately or defer the release. When
+        // recording or replaying the release must always be deferred, so that
+        // DeferredFinalize matches the earlier call to
+        // RecordReplayRegisterDeferredFinalizeThing.
         XPCJSRuntime* rt = GetRuntime();
-        if (rt && rt->GetDoingFinalization()) {
+        if ((rt && rt->GetDoingFinalization()) || recordreplay::IsRecordingOrReplaying()) {
             DeferredFinalize(mIdentity.forget().take());
         } else {
             mIdentity = nullptr;
@@ -789,8 +797,10 @@ XPCWrappedNative::FlatJSObjectFinalized()
         }
 
         // We also need to release any native pointers held...
+        // As for XPCWrappedNative::Destroy, when recording or replaying the
+        // release must always be deferred.
         RefPtr<nsISupports> native = to->TakeNative();
-        if (native && GetRuntime()) {
+        if (native && (GetRuntime() || recordreplay::IsRecordingOrReplaying())) {
             DeferredFinalize(native.forget().take());
         }
 
@@ -1099,6 +1109,8 @@ XPCWrappedNative::InitTearOff(XPCWrappedNativeTearOff* aTearOff,
 
     aTearOff->SetInterface(aInterface);
     aTearOff->SetNative(qiResult);
+    RecordReplayRegisterDeferredFinalizeThing(nullptr, nullptr, qiResult);
+
     if (needJSObject && !InitTearOffJSObject(aTearOff))
         return NS_ERROR_OUT_OF_MEMORY;
 

@@ -137,8 +137,26 @@ public:
       return NS_OK;
   }
 
+  // Dispatch() can be called during a GC, which occur at non-deterministic
+  // points when recording or replaying. This callback is used with the
+  // record/replay trigger mechanism to make sure the snow white freer executes
+  // at a consistent point.
+  void RecordReplayRun()
+  {
+      // Make sure state in the freer is consistent with the recording.
+      mActive = recordreplay::RecordReplayValue(mActive);
+      mPurge = recordreplay::RecordReplayValue(mPurge);
+      mContinuation = recordreplay::RecordReplayValue(mContinuation);
+
+      Run();
+  }
+
   nsresult Dispatch()
   {
+      if (recordreplay::IsRecordingOrReplaying()) {
+          recordreplay::ActivateTrigger(this);
+          return NS_OK;
+      }
       nsCOMPtr<nsIRunnable> self(this);
       return NS_IdleDispatchToCurrentThread(self.forget(), 2500);
   }
@@ -158,7 +176,19 @@ public:
     : Runnable("AsyncFreeSnowWhite")
     , mContinuation(false)
     , mActive(false)
-    , mPurge(false) {}
+    , mPurge(false)
+  {
+      if (recordreplay::IsRecordingOrReplaying()) {
+          recordreplay::RegisterTrigger(this, [=]() { RecordReplayRun(); });
+      }
+  }
+
+  ~AsyncFreeSnowWhite()
+  {
+      if (recordreplay::IsRecordingOrReplaying()) {
+          recordreplay::UnregisterTrigger(this);
+      }
+  }
 
 public:
   bool mContinuation;

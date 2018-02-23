@@ -13,7 +13,7 @@
 inline JSObject*
 nsWrapperCache::GetWrapperPreserveColor() const
 {
-  JSObject* obj = mWrapper;
+  JSObject* obj = GetWrapperMaybeDead();
   if (obj && js::gc::EdgeNeedsSweepUnbarriered(&obj)) {
     // The object has been found to be dead and is in the process of being
     // finalized, so don't let the caller see it. As an optimisation, remove it
@@ -21,7 +21,8 @@ nsWrapperCache::GetWrapperPreserveColor() const
     const_cast<nsWrapperCache*>(this)->ClearWrapper();
     return nullptr;
   }
-  MOZ_ASSERT(obj == mWrapper);
+  MOZ_ASSERT(obj == mWrapper ||
+             (!mWrapper && mozilla::recordreplay::IsReplaying()));
   return obj;
 }
 

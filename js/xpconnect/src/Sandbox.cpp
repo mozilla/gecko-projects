@@ -1183,6 +1183,7 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
             new SandboxPrivate(principal, sandbox);
 
         // Pass on ownership of sbp to |sandbox|.
+        RecordReplayRegisterDeferredFinalizeThing(nullptr, nullptr, sbp);
         JS_SetPrivate(sandbox, sbp.forget().take());
 
         {

@@ -114,6 +114,12 @@ void
 nsWrapperCache::CheckCCWrapperTraversal(void* aScriptObjectHolder,
                                         nsScriptObjectTracer* aTracer)
 {
+  // Skip checking if we are recording or replaying, as calling
+  // GetWrapperPreserveColor() can cause the cache's wrapper to be cleared.
+  if (recordreplay::IsRecordingOrReplaying()) {
+    return;
+  }
+
   JSObject* wrapper = GetWrapperPreserveColor();
   if (!wrapper) {
     return;
