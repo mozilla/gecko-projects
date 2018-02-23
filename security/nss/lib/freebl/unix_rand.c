@@ -20,6 +20,7 @@
 #include "prthread.h"
 #include "prprf.h"
 #include "prenv.h"
+#include "prrecordreplay.h"
 
 size_t RNG_FileUpdate(const char *fileName, size_t limit);
 
@@ -721,9 +722,11 @@ RNG_SystemInfoForRNG(void)
      * Pass the C environment and the addresses of the pointers to the
      * hash function. This makes the random number function depend on the
      * execution environment of the user and on the platform the program
-     * is running on.
+     * is running on. This is not done while recording or replaying because
+     * the contents and pointer values in the environ variable can differ
+     * between the recording and replay.
      */
-    if (environ != NULL) {
+    if (environ != NULL && !PR_IsRecordingOrReplaying()) {
         cp = (const char *const *)environ;
         while (*cp) {
             RNG_RandomUpdate(*cp, strlen(*cp));
