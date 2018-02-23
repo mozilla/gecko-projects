@@ -684,6 +684,8 @@ js::Nursery::collect(JS::gcreason::Reason reason)
 {
     MOZ_ASSERT(!TlsContext.get()->suppressGC);
 
+    mozilla::recordreplay::AutoDisallowThreadEvents disallow;
+
     if (!isEnabled() || isEmpty()) {
         // Our barriers are not always exact, and there may be entries in the
         // storebuffer even when the nursery is disabled or empty. It's not safe
