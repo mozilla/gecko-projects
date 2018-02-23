@@ -980,7 +980,9 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   switch (mProcessType) {
     case GeckoProcessType_Content:
 #  if defined(MOZ_CONTENT_SANDBOX)
-      if (mSandboxLevel > 0) {
+      if (mSandboxLevel > 0 &&
+          !recordreplay::IsMiddleman() &&
+          !recordreplay::IsRecordingOrReplaying()) {
         // For now we treat every failure as fatal in SetSecurityLevelForContentProcess
         // and just crash there right away. Should this change in the future then we
         // should also handle the error here.
