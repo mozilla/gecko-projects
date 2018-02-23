@@ -1088,7 +1088,10 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       if (!packet) {
         return { error: "notInterrupted" };
       }
-      packet.why = { type: "interrupted" };
+      // onNext is set while replaying so that the client will treat us as paused
+      // at a breakpoint. When replaying we may need to pause and interact with
+      // the server even if there are no frames on the stack.
+      packet.why = { type: "interrupted", onNext: this.dbg.replaying };
 
       // Send the response to the interrupt request now (rather than
       // returning it), because we're going to start a nested event loop

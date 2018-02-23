@@ -24,6 +24,7 @@ var { assert } = DevToolsUtils;
 var { TabSources } = require("./utils/TabSources");
 var makeDebugger = require("./utils/make-debugger");
 const EventEmitter = require("devtools/shared/event-emitter");
+const Debugger = require("Debugger");
 
 const EXTENSION_CONTENT_JSM = "resource://gre/modules/ExtensionContent.jsm";
 
@@ -230,6 +231,8 @@ function TabActor(connection) {
     noTabReconfigureOnClose: true,
     // Supports the logInPage request.
     logInPage: true,
+    // Supports requests related to rewinding.
+    canRewind: Debugger.allDebuggersCanRewind(),
   };
 
   this._workerActorList = null;
