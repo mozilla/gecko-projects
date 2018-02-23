@@ -2044,9 +2044,13 @@ bool
 GCRuntime::shouldCompact()
 {
     // Compact on shrinking GC if enabled, but skip compacting in incremental
-    // GCs if we are currently animating.
+    // GCs if we are currently animating. Also skip compacting while
+    // recording/replaying an execution, due to both the increased snapshot
+    // size when moving objects as well as the process debugger using raw
+    // non-nursery GC pointers as identifiers.
     return invocationKind == GC_SHRINK && isCompactingGCEnabled() &&
-        (!isIncremental || rt->lastAnimationTime + PRMJ_USEC_PER_SEC < PRMJ_Now());
+        (!isIncremental || rt->lastAnimationTime + PRMJ_USEC_PER_SEC < ReallyPRMJNow()) &&
+        !mozilla::recordreplay::IsRecordingOrReplaying();
 }
 
 bool
