@@ -456,7 +456,7 @@ struct JSStructuredCloneWriter {
           counts(out.context()), entries(out.context()),
           memory(out.context()), callbacks(cb),
           closure(cbClosure), transferable(out.context(), tVal),
-          transferableObjects(out.context(), GCHashSet<JSObject*>(cx)),
+          transferableObjects(out.context(), TransferableObjectsSet(cx)),
           cloneDataPolicy(cloneDataPolicy)
     {}
 
@@ -553,9 +553,13 @@ struct JSStructuredCloneWriter {
     // Any value passed to JS_WriteStructuredClone.
     void* closure;
 
-    // Set of transferable objects
+    // Set of transferable objects. Iteration order of this table must be
+    // preserved during recording/replaying, as the callbacks used during
+    // transfer may interact with the recording.
     RootedValue transferable;
-    Rooted<GCHashSet<JSObject*>> transferableObjects;
+    typedef GCHashSet<JSObject*, DefaultHasher<JSObject*>, TempAllocPolicy,
+                      mozilla::recordreplay::Behavior::Preserve> TransferableObjectsSet;
+    Rooted<TransferableObjectsSet> transferableObjects;
 
     const JS::CloneDataPolicy cloneDataPolicy;
 
