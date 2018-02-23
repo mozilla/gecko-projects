@@ -1,0 +1,60 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#ifndef mozilla_toolkit_recordreplay_ipc_ChildIPC_h
+#define mozilla_toolkit_recordreplay_ipc_ChildIPC_h
+
+#include "base/process.h"
+
+#include "mozilla/gfx/2D.h"
+#include "Units.h"
+
+namespace mozilla {
+namespace recordreplay {
+namespace child {
+
+// Naively replaying a child process execution will not perform any IPC. When
+// the replaying process attempts to make system calls that communicate with
+// the parent, function redirections are invoked that simply replay the values
+// which those calls produced in the original recording.
+//
+// The replayed process needs to be able to communicate with the parent in some
+// ways, however. IPDL messages need to be sent to the compositor in the parent
+// to render graphics, and the parent needs to send messages to the client to
+// control and debug the replay.
+//
+// This file manages the real IPC which occurs in a replaying process. New
+// threads --- which did not existing while recording --- are spawned to manage
+// IPC with the middleman process, and IPDL actors are created up front for use
+// in communicating with the middleman using the PReplay protocol.
+
+///////////////////////////////////////////////////////////////////////////////
+// Public API
+///////////////////////////////////////////////////////////////////////////////
+
+// Initialize replaying IPC state. This is called once during process startup,
+// and is a no-op if the process is not replaying.
+void InitRecordingOrReplayingProcess(base::ProcessId aParentPid,
+                                     int* aArgc, char*** aArgv);
+
+base::ProcessId MiddlemanProcessId();
+base::ProcessId ParentProcessId();
+
+void NotifyPaint();
+
+already_AddRefed<gfx::DrawTarget> DrawTargetForRemoteDrawing(LayoutDeviceIntSize aSize);
+
+// Save a complete recording up to the current point to aFilename.
+void SaveRecording(const char* aFilename);
+
+// Report a fatal error to the middleman process.
+void ReportFatalError(const char* aMessage);
+
+} // namespace child
+} // namespace recordreplay
+} // namespace mozilla
+
+#endif // mozilla_toolkit_recordreplay_ipc_ChildIPC_h
