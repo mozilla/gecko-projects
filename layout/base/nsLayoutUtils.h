@@ -2540,6 +2540,10 @@ public:
   // Whether Stylo should be allowed to be enabled in this process.
   static bool StyloSupportedInCurrentProcess() {
 #ifdef MOZ_STYLO
+    // FIXME
+    if (mozilla::recordreplay::IsRecordingOrReplaying()) {
+      return false;
+    }
     if (XRE_IsContentProcess()) {
       return true;
     }
