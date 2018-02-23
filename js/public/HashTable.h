@@ -16,6 +16,7 @@
 #include "mozilla/Move.h"
 #include "mozilla/Opaque.h"
 #include "mozilla/PodOperations.h"
+#include "mozilla/RecordReplay.h"
 #include "mozilla/ReentrancyGuard.h"
 #include "mozilla/TemplateLib.h"
 #include "mozilla/TypeTraits.h"
@@ -30,7 +31,8 @@ template <class> struct DefaultHasher;
 template <class, class> class HashMapEntry;
 namespace detail {
     template <class T> class HashTableEntry;
-    template <class T, class HashPolicy, class AllocPolicy> class HashTable;
+    template <class T, class HashPolicy, class AllocPolicy,
+              mozilla::recordreplay::Behavior RecordingBehavior> class HashTable;
 } // namespace detail
 
 /*****************************************************************************/
@@ -57,6 +59,8 @@ using Generation = mozilla::Opaque<uint64_t>;
 //  - see Hash Policy section below
 // AllocPolicy:
 //  - see jsalloc.h
+// RecordingBehavior:
+//  - Whether to preserve iteration order while recording/replaying executions.
 //
 // Note:
 // - HashMap is not reentrant: Key/Value/HashPolicy/AllocPolicy members
@@ -65,7 +69,9 @@ using Generation = mozilla::Opaque<uint64_t>;
 template <class Key,
           class Value,
           class HashPolicy = DefaultHasher<Key>,
-          class AllocPolicy = TempAllocPolicy>
+          class AllocPolicy = TempAllocPolicy,
+          mozilla::recordreplay::Behavior RecordingBehavior =
+              mozilla::recordreplay::Behavior::DontPreserve>
 class HashMap
 {
     typedef HashMapEntry<Key, Value> TableEntry;
@@ -78,7 +84,7 @@ class HashMap
         static void setKey(TableEntry& e, Key& k) { HashPolicy::rekey(e.mutableKey(), k); }
     };
 
-    typedef detail::HashTable<TableEntry, MapHashPolicy, AllocPolicy> Impl;
+    typedef detail::HashTable<TableEntry, MapHashPolicy, AllocPolicy, RecordingBehavior> Impl;
     Impl impl;
 
   public:
@@ -319,6 +325,8 @@ class HashMap
 //  - see Hash Policy section below
 // AllocPolicy:
 //  - see jsalloc.h
+// RecordingBehavior:
+//  - Whether to preserve iteration order while recording/replaying executions.
 //
 // Note:
 // - HashSet is not reentrant: T/HashPolicy/AllocPolicy members called by
@@ -326,7 +334,9 @@ class HashMap
 // - Due to the lack of exception handling, the user must call |init()|.
 template <class T,
           class HashPolicy = DefaultHasher<T>,
-          class AllocPolicy = TempAllocPolicy>
+          class AllocPolicy = TempAllocPolicy,
+          mozilla::recordreplay::Behavior RecordingBehavior =
+              mozilla::recordreplay::Behavior::DontPreserve>
 class HashSet
 {
     struct SetOps : HashPolicy
@@ -337,7 +347,7 @@ class HashSet
         static void setKey(T& t, KeyType& k) { HashPolicy::rekey(t, k); }
     };
 
-    typedef detail::HashTable<const T, SetOps, AllocPolicy> Impl;
+    typedef detail::HashTable<const T, SetOps, AllocPolicy, RecordingBehavior> Impl;
     Impl impl;
 
   public:
@@ -734,9 +744,9 @@ class HashMapEntry
     Key key_;
     Value value_;
 
-    template <class, class, class> friend class detail::HashTable;
+    template <class, class, class, mozilla::recordreplay::Behavior> friend class detail::HashTable;
     template <class> friend class detail::HashTableEntry;
-    template <class, class, class, class> friend class HashMap;
+    template <class, class, class, class, mozilla::recordreplay::Behavior> friend class HashMap;
 
   public:
     template<typename KeyInput, typename ValueInput>
@@ -786,13 +796,14 @@ namespace js {
 
 namespace detail {
 
-template <class T, class HashPolicy, class AllocPolicy>
+template <class T, class HashPolicy, class AllocPolicy,
+          mozilla::recordreplay::Behavior RecordingBehavior>
 class HashTable;
 
 template <class T>
 class HashTableEntry
 {
-    template <class, class, class> friend class HashTable;
+    template <class, class, class, mozilla::recordreplay::Behavior> friend class HashTable;
     typedef typename mozilla::RemoveConst<T>::Type NonConstT;
 
     HashNumber keyHash;
@@ -862,7 +873,8 @@ class HashTableEntry
     }
 };
 
-template <class T, class HashPolicy, class AllocPolicy>
+template <class T, class HashPolicy, class AllocPolicy,
+          mozilla::recordreplay::Behavior RecordingBehavior>
 class HashTable : private AllocPolicy
 {
     friend class mozilla::ReentrancyGuard;
@@ -1216,9 +1228,22 @@ class HashTable : private AllocPolicy
         return Entry::isLiveHash(hash);
     }
 
-    static HashNumber prepareHash(const Lookup& l)
+    HashNumber prepareHash(const Lookup& l) const
     {
-        HashNumber keyHash = ScrambleHashCode(HashPolicy::hash(l));
+        HashNumber keyHash;
+        if (RecordingBehavior == mozilla::recordreplay::Behavior::Preserve &&
+            mozilla::recordreplay::IsRecordingOrReplaying())
+        {
+            // Hashcodes may vary between recording and replaying, affecting
+            // the order in which elements are visited during iteration.
+            // Using the same hash code for every element avoids this issue,
+            // though it makes accesses to the table use linear rather than
+            // constant time. Few JS hashtables require their iteration order
+            // to be preserved, and none are performance sensitive.
+            keyHash = 0;
+        } else {
+            keyHash = ScrambleHashCode(HashPolicy::hash(l));
+        }
 
         // Avoid reserved hash codes.
         if (!isLiveHash(keyHash))

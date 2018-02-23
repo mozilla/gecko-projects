@@ -236,10 +236,12 @@ namespace JS {
 // manually.
 template <typename T,
           typename HashPolicy = js::DefaultHasher<T>,
-          typename AllocPolicy = js::TempAllocPolicy>
-class GCHashSet : public js::HashSet<T, HashPolicy, AllocPolicy>
+          typename AllocPolicy = js::TempAllocPolicy,
+          mozilla::recordreplay::Behavior RecordingBehavior =
+              mozilla::recordreplay::Behavior::DontPreserve>
+class GCHashSet : public js::HashSet<T, HashPolicy, AllocPolicy, RecordingBehavior>
 {
-    using Base = js::HashSet<T, HashPolicy, AllocPolicy>;
+    using Base = js::HashSet<T, HashPolicy, AllocPolicy, RecordingBehavior>;
 
   public:
     explicit GCHashSet(AllocPolicy a = AllocPolicy()) : Base(a)  {}
@@ -282,10 +284,11 @@ class GCHashSet : public js::HashSet<T, HashPolicy, AllocPolicy>
 
 namespace js {
 
-template <typename Wrapper, typename... Args>
-class WrappedPtrOperations<JS::GCHashSet<Args...>, Wrapper>
+template <typename Wrapper, typename T, typename HashPolicy, typename AllocPolicy,
+          mozilla::recordreplay::Behavior RecordingBehavior>
+class WrappedPtrOperations<JS::GCHashSet<T, HashPolicy, AllocPolicy, RecordingBehavior>, Wrapper>
 {
-    using Set = JS::GCHashSet<Args...>;
+    using Set = JS::GCHashSet<T, HashPolicy, AllocPolicy, RecordingBehavior>;
 
     const Set& set() const { return static_cast<const Wrapper*>(this)->get(); }
 
@@ -312,11 +315,14 @@ class WrappedPtrOperations<JS::GCHashSet<Args...>, Wrapper>
     }
 };
 
-template <typename Wrapper, typename... Args>
-class MutableWrappedPtrOperations<JS::GCHashSet<Args...>, Wrapper>
-  : public WrappedPtrOperations<JS::GCHashSet<Args...>, Wrapper>
+template <typename Wrapper, typename T, typename HashPolicy, typename AllocPolicy,
+          mozilla::recordreplay::Behavior RecordingBehavior>
+class MutableWrappedPtrOperations<JS::GCHashSet<T, HashPolicy, AllocPolicy,
+                                                RecordingBehavior>, Wrapper>
+  : public WrappedPtrOperations<JS::GCHashSet<T, HashPolicy, AllocPolicy,
+                                              RecordingBehavior>, Wrapper>
 {
-    using Set = JS::GCHashSet<Args...>;
+    using Set = JS::GCHashSet<T, HashPolicy, AllocPolicy, RecordingBehavior>;
     using Lookup = typename Set::Lookup;
 
     Set& set() { return static_cast<Wrapper*>(this)->get(); }
