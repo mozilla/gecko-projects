@@ -513,6 +513,15 @@
                   <menuitem id="menu_pageSource"
                             observes="devtoolsMenuBroadcaster_PageSource"
                             accesskey="&pageSourceCmd.accesskey;"/>
+                  <menuitem id="menu_devtools_recordExecution"
+                            observes="devtoolsMenuBroadcaster_RecordExecution"
+                            hidden="true"/>
+                  <menuitem id="menu_devtools_saveRecording"
+                            observes="devtoolsMenuBroadcaster_SaveRecording"
+                            hidden="true"/>
+                  <menuitem id="menu_devtools_replayExecution"
+                            observes="devtoolsMenuBroadcaster_ReplayExecution"
+                            hidden="true"/>
                 </menupopup>
               </menu>
               <menuitem id="menu_pageInfo"

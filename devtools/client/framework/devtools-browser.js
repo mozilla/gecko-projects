@@ -134,6 +134,12 @@ var gDevToolsBrowser = exports.gDevToolsBrowser = {
 
     // Enable DevTools connection screen, if the preference allows this.
     toggleMenuItem("menu_devtools_connect", devtoolsRemoteEnabled);
+
+    // Enable record/replay menu items?
+    let recordReplayEnabled = Services.prefs.getBoolPref("devtools.recordreplay.enabled");
+    toggleMenuItem("menu_devtools_recordExecution", recordReplayEnabled);
+    toggleMenuItem("menu_devtools_saveRecording", recordReplayEnabled);
+    toggleMenuItem("menu_devtools_replayExecution", recordReplayEnabled);
   },
 
   /**

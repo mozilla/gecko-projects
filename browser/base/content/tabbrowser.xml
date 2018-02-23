@@ -2217,7 +2217,8 @@
           <![CDATA[
             // Supported parameters:
             // userContextId, remote, remoteType, isPreloadBrowser,
-            // uriIsAboutBlank, sameProcessAsFrameLoader
+            // uriIsAboutBlank, sameProcessAsFrameLoader,
+	    // recordExecution, replayExecution
 
             const NS_XUL = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 
@@ -2241,6 +2242,16 @@
             if (aParams.remoteType) {
               b.setAttribute("remoteType", aParams.remoteType);
               b.setAttribute("remote", "true");
+            }
+
+            let recordExecution = aParams && aParams.recordExecution;
+            if (recordExecution) {
+              b.setAttribute("recordExecution", recordExecution);
+            }
+
+            let replayExecution = aParams && aParams.replayExecution;
+            if (replayExecution) {
+              b.setAttribute("replayExecution", replayExecution);
             }
 
             if (aParams.openerWindow) {
@@ -2630,6 +2641,8 @@
             var aNoInitialLabel;
             var aFocusUrlBar;
             var aName;
+            var aRecordExecution;
+            var aReplayExecution;
             if (arguments.length == 2 &&
                 typeof arguments[1] == "object" &&
                 !(arguments[1] instanceof Ci.nsIURI)) {
@@ -2653,6 +2666,8 @@
               aSameProcessAsFrameLoader = params.sameProcessAsFrameLoader;
               aOriginPrincipal          = params.originPrincipal;
               aDisallowInheritPrincipal = params.disallowInheritPrincipal;
+              aRecordExecution      = params.recordExecution;
+              aReplayExecution      = params.replayExecution;
               aOpener                   = params.opener;
               aOpenerBrowser            = params.openerBrowser;
               aCreateLazyBrowser        = params.createLazyBrowser;
@@ -2794,7 +2809,9 @@
               // icon for the tab would be set incorrectly (see bug 1195981).
               if (aURI == BROWSER_NEW_TAB_URL &&
                   !aUserContextId &&
-                  !PrivateBrowsingUtils.isWindowPrivate(window)) {
+                  !PrivateBrowsingUtils.isWindowPrivate(window) &&
+                  !aRecordExecution &&
+                  !aReplayExecution) {
                 b = this._getPreloadedBrowser();
                 if (b) {
                   usingPreloadedContent = true;
@@ -2809,6 +2826,8 @@
                                           sameProcessAsFrameLoader: aSameProcessAsFrameLoader,
                                           openerWindow: aOpener,
                                           nextTabParentId: aNextTabParentId,
+                                          recordExecution: aRecordExecution,
+                                          replayExecution: aReplayExecution,
                                           name: aName });
               }
 
