@@ -19,7 +19,9 @@ static const size_t XPTI_ARENA1_BLOCK_SIZE =  8 * 1024;
 static const uint32_t XPTI_HASHTABLE_LENGTH = 1024;
 
 XPTInterfaceInfoManager::xptiWorkingSet::xptiWorkingSet()
-    : mTableReentrantMonitor("xptiWorkingSet::mTableReentrantMonitor")
+    : mTableReentrantMonitor("xptiWorkingSet::mTableReentrantMonitor",
+                             /* This mutex is used through GC finalizers. */
+                             recordreplay::Behavior::DontPreserve)
     , mIIDTable(XPTI_HASHTABLE_LENGTH)
     , mNameTable(XPTI_HASHTABLE_LENGTH)
 {
