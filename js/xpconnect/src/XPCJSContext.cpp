@@ -563,6 +563,12 @@ xpc::SimulateActivityCallback(bool aActive)
 void
 XPCJSContext::ActivityCallback(void* arg, bool active)
 {
+    // Since the slow script dialog never activates if we are recording or
+    // replaying, don't record/replay JS activity notifications.
+    if (recordreplay::IsRecordingOrReplaying()) {
+        return;
+    }
+
     if (!active) {
         ProcessHangMonitor::ClearHang();
     }
@@ -603,6 +609,12 @@ IsWebExtensionContentScript(BasePrincipal* principal, nsAString& addonId)
 bool
 XPCJSContext::InterruptCallback(JSContext* cx)
 {
+    // The slow script dialog never activates if we are recording or replaying,
+    // since the precise timing of the dialog cannot be replayed.
+    if (recordreplay::IsRecordingOrReplaying()) {
+        return true;
+    }
+
     XPCJSContext* self = XPCJSContext::Get();
 
     // Now is a good time to turn on profiling if it's pending.
