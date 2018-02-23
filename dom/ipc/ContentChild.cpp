@@ -1184,7 +1184,9 @@ ContentChild::InitXPCOM(const XPCOMInitData& aXPCOMInit,
   RecvBidiKeyboardNotify(aXPCOMInit.isLangRTL(), aXPCOMInit.haveBidiKeyboards());
 
   // Create the CPOW manager as soon as possible.
-  SendPJavaScriptConstructor();
+  if (!recordreplay::IsMiddleman()) {
+    SendPJavaScriptConstructor();
+  }
 
   if (aXPCOMInit.domainPolicy().active()) {
     nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
@@ -1989,6 +1991,9 @@ ContentChild::GetCPOWManager()
 {
   if (PJavaScriptChild* c = LoneManagedOrNullAsserts(ManagedPJavaScriptChild())) {
     return CPOWManagerFor(c);
+  }
+  if (recordreplay::IsMiddleman()) {
+    return nullptr;
   }
   return CPOWManagerFor(SendPJavaScriptConstructor());
 }
