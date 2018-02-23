@@ -10,6 +10,7 @@
 #include "prbit.h"
 #include "prlog.h"
 #include "prmem.h"
+#include "prrecordreplay.h"
 #include "prtypes.h"
 #include <stdlib.h>
 #include <string.h>
@@ -78,6 +79,13 @@ PL_NewHashTable(PRUint32 n, PLHashFunction keyHash,
 
     if (!allocOps) allocOps = &defaultHashAllocOps;
 
+    // Generate custom callbacks for the table if we are recording or replaying.
+    if (PR_IsRecordingOrReplaying()) {
+        PR_CALL_RECORD_REPLAY_INTERFACE("RecordReplayInterface_GeneratePLHashTableCallbacks",
+                                        (&keyHash, &keyCompare, &valueCompare,
+                                         &allocOps, &allocPriv));
+    }
+
     ht = (PLHashTable*)((*allocOps->allocTable)(allocPriv, sizeof *ht));
     if (!ht)
 	return 0;
@@ -123,6 +131,12 @@ PL_HashTableDestroy(PLHashTable *ht)
     memset(ht, 0xDB, sizeof *ht);
 #endif
     (*allocOps->freeTable)(allocPriv, ht);
+
+    // Destroy any custom callbacks associated with the table.
+    if (PR_IsRecordingOrReplaying()) {
+        PR_CALL_RECORD_REPLAY_INTERFACE("RecordReplayInterface_DestroyPLHashTableCallbacks",
+                                        (allocPriv));
+    }
 }
 
 /*
