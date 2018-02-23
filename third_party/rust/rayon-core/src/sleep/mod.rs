@@ -7,8 +7,37 @@ use std::sync::{Condvar, Mutex};
 use std::thread;
 use std::usize;
 
+pub struct AtomicUsizePreserved {
+    data: Mutex<AtomicUsize>,
+}
+
+impl AtomicUsizePreserved {
+    pub fn new(v: usize) -> AtomicUsizePreserved {
+        AtomicUsizePreserved {
+            data: Mutex::new(AtomicUsize::new(v)),
+        }
+    }
+
+    pub fn load(&self, order: Ordering) -> usize {
+        self.data.lock().unwrap().load(order)
+    }
+
+    pub fn swap(&self, ptr: usize, order: Ordering) -> usize {
+        self.data.lock().unwrap().swap(ptr, order)
+    }
+
+    pub fn compare_exchange(&self,
+                            current: usize,
+                            new: usize,
+                            success: Ordering,
+                            failure: Ordering)
+                            -> Result<usize, usize> {
+        self.data.lock().unwrap().compare_exchange(current, new, success, failure)
+    }
+}
+
 pub struct Sleep {
-    state: AtomicUsize,
+    state: AtomicUsizePreserved,
     data: Mutex<()>,
     tickle: Condvar,
 }
@@ -22,7 +51,7 @@ const ROUNDS_UNTIL_ASLEEP: usize = 64;
 impl Sleep {
     pub fn new() -> Sleep {
         Sleep {
-            state: AtomicUsize::new(AWAKE),
+            state: AtomicUsizePreserved::new(AWAKE),
             data: Mutex::new(()),
             tickle: Condvar::new(),
         }
