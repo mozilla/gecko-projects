@@ -140,11 +140,11 @@ ObjectActor.prototype = {
 
     // If Cu is not defined, we are running on a worker thread, where xrays
     // don't exist.
-    if (Cu) {
+    if (raw && Cu) {
       raw = Cu.unwaiveXrays(raw);
     }
 
-    if (!DevToolsUtils.isSafeJSObject(raw)) {
+    if (raw && !DevToolsUtils.isSafeJSObject(raw)) {
       raw = null;
     }
 
@@ -1671,15 +1671,17 @@ DebuggerServer.ObjectActorPreviewers.Object = [
     }
 
     let raw = obj.unsafeDereference();
-    let global = Cu.getGlobalForObject(DebuggerServer);
-    let classProto = global[obj.class].prototype;
-    // The Xray machinery for TypedArrays denies indexed access on the grounds
-    // that it's slow, and advises callers to do a structured clone instead.
-    let safeView = Cu.cloneInto(classProto.subarray.call(raw, 0,
-      OBJECT_PREVIEW_MAX_ITEMS), global);
-    let items = grip.preview.items = [];
-    for (let i = 0; i < safeView.length; i++) {
-      items.push(safeView[i]);
+    if (raw) {
+      let global = Cu.getGlobalForObject(DebuggerServer);
+      let classProto = global[obj.class].prototype;
+      // The Xray machinery for TypedArrays denies indexed access on the grounds
+      // that it's slow, and advises callers to do a structured clone instead.
+      let safeView = Cu.cloneInto(classProto.subarray.call(raw, 0,
+        OBJECT_PREVIEW_MAX_ITEMS), global);
+      let items = grip.preview.items = [];
+      for (let i = 0; i < safeView.length; i++) {
+        items.push(safeView[i]);
+      }
     }
 
     return true;

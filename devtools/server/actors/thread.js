@@ -116,7 +116,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
   },
 
   get globalDebugObject() {
-    if (!this._parent.window) {
+    if (!this._parent.window || this.dbg.replaying) {
       return null;
     }
     return this.dbg.makeGlobalObjectReference(this._parent.window);
@@ -403,12 +403,17 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     return this._tabClosed ? null : undefined;
   },
 
-  _makeOnEnterFrame: function ({ pauseAndRespond }) {
+  _makeOnEnterFrame: function ({ pauseAndRespond, rewinding }) {
     return frame => {
       const generatedLocation = this.sources.getFrameLocation(frame);
       let { originalSourceActor } = this.unsafeSynchronize(
         this.sources.getOriginalLocation(generatedLocation));
       let url = originalSourceActor.url;
+
+      // When rewinding into a frame, we end up at the point when it is being popped.
+      if (rewinding) {
+        aFrame.reportedPop = true;
+      }
 
       return this.sources.isBlackBoxed(url)
         ? undefined
@@ -526,7 +531,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
   /**
    * Define the JS hook functions for stepping.
    */
-  _makeSteppingHooks: function (startLocation, steppingType) {
+  _makeSteppingHooks: function (startLocation, steppingType, rewinding) {
     // Bind these methods and state because some of the hooks are called
     // with 'this' set to the current frame. Rather than repeating the
     // binding in each _makeOnX method, just do it once here and pass it
@@ -540,7 +545,8 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       thread: this,
       startFrame: this.youngestFrame,
       startLocation: startLocation,
-      steppingType: steppingType
+      steppingType: steppingType,
+      rewinding: rewinding
     };
 
     return {
@@ -561,6 +567,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
    */
   _handleResumeLimit: function (request) {
     let steppingType = request.resumeLimit.type;
+    let rewinding = request.rewind;
     if (!["break", "step", "next", "finish"].includes(steppingType)) {
       return Promise.reject({ error: "badParameterType",
                               message: "Unknown resumeLimit type" });
@@ -570,25 +577,39 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     return this.sources.getOriginalLocation(generatedLocation)
       .then(originalLocation => {
         const { onEnterFrame, onPop, onStep } = this._makeSteppingHooks(originalLocation,
-                                                                        steppingType);
+                                                                        steppingType,
+                                                                        rewinding);
 
         // Make sure there is still a frame on the stack if we are to continue
         // stepping.
-        let stepFrame = this._getNextStepFrame(this.youngestFrame);
+        let stepFrame = this._getNextStepFrame(this.youngestFrame, rewinding);
         if (stepFrame) {
           switch (steppingType) {
             case "step":
-              this.dbg.onEnterFrame = onEnterFrame;
+              if (rewinding) {
+                  this.dbg.onPopFrame = onEnterFrame;
+              } else {
+                  this.dbg.onEnterFrame = onEnterFrame;
+              }
               // Fall through.
             case "break":
             case "next":
               if (stepFrame.script) {
                 stepFrame.onStep = onStep;
               }
-              stepFrame.onPop = onPop;
+              if (!rewinding) {
+                  stepFrame.onPop = onPop;
+              }
               break;
             case "finish":
-              stepFrame.onPop = onPop;
+              if (rewinding) {
+                  let olderFrame = (stepFrame == this.youngestFrame) ? stepFrame.older : stepFrame;
+                  if (olderFrame && olderFrame.script) {
+                      olderFrame.onStep = onStep;
+                  }
+              } else {
+                  stepFrame.onPop = onPop;
+              }
           }
         }
 
@@ -666,6 +687,14 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       };
     }
 
+    let rewinding = request && request.rewind;
+    if (rewinding && !this.dbg.replaying) {
+      return {
+        error: "cantRewind",
+        message: "Can't rewind a debuggee that is not replaying."
+      };
+    }
+
     let resumeLimitHandled;
     if (request && request.resumeLimit) {
       resumeLimitHandled = this._handleResumeLimit(request);
@@ -680,6 +709,15 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
         this._options.ignoreCaughtExceptions = request.ignoreCaughtExceptions;
         this.maybePauseOnExceptions();
         this._maybeListenToEvents(request);
+      }
+
+      // When replaying execution in a separate process we need to explicitly
+      // notify that process when to resume execution.
+      if (this.dbg.replaying) {
+        if (rewinding)
+          this.dbg.replayResumeBackward();
+        else
+          this.dbg.replayResumeForward();
       }
 
       let packet = this._resumed();
@@ -850,8 +888,9 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
   /**
    * Helper method that returns the next frame when stepping.
    */
-  _getNextStepFrame: function (frame) {
-    let stepFrame = frame.reportedPop ? frame.older : frame;
+  _getNextStepFrame: function (frame, rewinding) {
+    let endOfFrame = rewinding ? (frame.offset == 0) : frame.reportedPop;
+    let stepFrame = endOfFrame ? frame.older : frame;
     if (!stepFrame || !stepFrame.script) {
       stepFrame = null;
     }
@@ -1030,13 +1069,17 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     try {
       // If execution should pause just before the next JavaScript bytecode is
       // executed, just set an onEnterFrame handler.
-      if (request.when == "onNext") {
+      if (request.when == "onNext" && !this.dbg.replaying) {
         let onEnterFrame = (frame) => {
           return this._pauseAndRespond(frame, { type: "interrupted", onNext: true });
         };
         this.dbg.onEnterFrame = onEnterFrame;
 
         return { type: "willInterrupt" };
+      }
+
+      if (this.dbg.replaying) {
+        this.dbg.replayPause();
       }
 
       // If execution should pause immediately, just put ourselves in the paused
@@ -1172,6 +1215,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
 
     // Clear stepping hooks.
     this.dbg.onEnterFrame = undefined;
+    this.dbg.onPopFrame = undefined;
     this.dbg.onExceptionUnwind = undefined;
     if (frame) {
       frame.onStep = undefined;
@@ -1181,7 +1225,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     // Clear DOM event breakpoints.
     // XPCShell tests don't use actual DOM windows for globals and cause
     // removeListenerForAllEvents to throw.
-    if (!isWorker && this.global && !this.global.toString().includes("Sandbox")) {
+    if (!isWorker && this.global && !this.dbg.replaying && !this.global.toString().includes("Sandbox")) {
       Services.els.removeListenerForAllEvents(this.global, this._allEventsListener, true);
       for (let [, bp] of this._hiddenBreakpoints) {
         bp.delete();
