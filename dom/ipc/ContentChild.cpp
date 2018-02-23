@@ -68,6 +68,7 @@
 #include "mozilla/net/CaptivePortalService.h"
 #include "mozilla/plugins/PluginInstanceParent.h"
 #include "mozilla/plugins/PluginModuleParent.h"
+#include "mozilla/recordreplay/ParentIPC.h"
 #include "mozilla/widget/ScreenManager.h"
 #include "mozilla/widget/WidgetMessageUtils.h"
 #include "nsBaseDragService.h"
@@ -1282,6 +1283,24 @@ ContentChild::DeallocPCycleCollectWithLogsChild(PCycleCollectWithLogsChild* /* a
   return true;
 }
 
+const MessageChannel*
+ContentChild::GetIPCChannel() const
+{
+  if (recordreplay::IsMiddleman()) {
+    return recordreplay::parent::ChannelToUIProcess();
+  }
+  return PContentChild::GetIPCChannel();
+}
+
+MessageChannel*
+ContentChild::GetIPCChannel()
+{
+  if (recordreplay::IsMiddleman()) {
+    return recordreplay::parent::ChannelToUIProcess();
+  }
+  return PContentChild::GetIPCChannel();
+}
+
 mozilla::ipc::IPCResult
 ContentChild::RecvInitContentBridgeChild(Endpoint<PContentBridgeChild>&& aEndpoint)
 {
@@ -1720,7 +1739,11 @@ FirstIdle(void)
 {
   MOZ_ASSERT(gFirstIdleTask);
   gFirstIdleTask = nullptr;
-  ContentChild::GetSingleton()->SendFirstIdle();
+
+  // When recording or replaying, the middleman process will send this message instead.
+  if (!recordreplay::IsRecordingOrReplaying()) {
+    ContentChild::GetSingleton()->SendFirstIdle();
+  }
 }
 
 mozilla::jsipc::PJavaScriptChild *

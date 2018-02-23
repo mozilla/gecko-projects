@@ -210,7 +210,7 @@ ScriptPreloader::ScriptPreloader()
   : mMonitor("[ScriptPreloader.mMonitor]")
   , mSaveMonitor("[ScriptPreloader.mSaveMonitor]")
 {
-    if (XRE_IsParentProcess()) {
+    if (XRE_IsParentProcess() || recordreplay::IsMiddleman()) {
         sProcessType = ProcessType::Parent;
     } else {
         sProcessType = GetChildProcessType(dom::ContentChild::GetSingleton()->GetRemoteType());

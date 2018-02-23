@@ -166,6 +166,9 @@ public:
 
   static void UpdateCookieStatus(nsIChannel *aChannel);
 
+  const MessageChannel* GetIPCChannel() const override;
+  MessageChannel* GetIPCChannel() override;
+
   mozilla::ipc::IPCResult
   RecvInitContentBridgeChild(Endpoint<PContentBridgeChild>&& aEndpoint) override;
 

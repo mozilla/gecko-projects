@@ -9,6 +9,7 @@
 #include "ContentProcess.h"
 #include "ContentPrefs.h"
 #include "mozilla/Scheduler.h"
+#include "mozilla/recordreplay/ParentIPC.h"
 
 #if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
 #include <stdlib.h>
@@ -225,11 +226,17 @@ ContentProcess::Init(int aArgc, char* aArgv[])
 
   Preferences::SetEarlyPreferences(&prefsArray);
   Scheduler::SetPrefs(schedulerPrefs);
-  mContent.Init(IOThreadChild::message_loop(),
-                ParentPid(),
-                IOThreadChild::channel(),
-                childID,
-                isForBrowser);
+
+  if (recordreplay::IsMiddleman()) {
+    recordreplay::parent::Initialize(aArgc, aArgv, ParentPid(), childID, &mContent);
+  } else {
+    mContent.Init(IOThreadChild::message_loop(),
+                  ParentPid(),
+                  IOThreadChild::channel(),
+                  childID,
+                  isForBrowser);
+  }
+
   mXREEmbed.Start();
 #if (defined(XP_MACOSX)) && defined(MOZ_CONTENT_SANDBOX)
   mContent.SetProfileDir(profileDir);

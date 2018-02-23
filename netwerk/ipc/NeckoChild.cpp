@@ -59,7 +59,7 @@ void NeckoChild::InitNeckoChild()
 {
   MOZ_ASSERT(IsNeckoChild(), "InitNeckoChild called by non-child!");
 
-  if (!gNeckoChild) {
+  if (!gNeckoChild && !recordreplay::IsMiddleman()) {
     mozilla::dom::ContentChild * cpc =
       mozilla::dom::ContentChild::GetSingleton();
     NS_ASSERTION(cpc, "Content Protocol is NULL!");
