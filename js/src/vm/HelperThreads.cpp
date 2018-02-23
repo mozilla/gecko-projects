@@ -1426,7 +1426,7 @@ static inline
 TimeDuration
 TimeSince(TimeStamp prev)
 {
-    TimeStamp now = TimeStamp::Now();
+    TimeStamp now = ReallyNow();
     // Sadly this happens sometimes.
     MOZ_ASSERT(now >= prev);
     if (now < prev)
@@ -1439,7 +1439,7 @@ js::GCParallelTask::runFromActiveCooperatingThread(JSRuntime* rt)
 {
     MOZ_ASSERT(state == NotStarted);
     MOZ_ASSERT(js::CurrentThreadCanAccessRuntime(rt));
-    TimeStamp timeStart = TimeStamp::Now();
+    TimeStamp timeStart = ReallyNow();
     run();
     duration_ = TimeSince(timeStart);
 }
@@ -1452,7 +1452,7 @@ js::GCParallelTask::runFromHelperThread(AutoLockHelperThreadState& locked)
 
     {
         AutoUnlockHelperThreadState parallelSection(locked);
-        TimeStamp timeStart = TimeStamp::Now();
+        TimeStamp timeStart = ReallyNow();
         TlsContext.get()->heapState = JS::HeapState::MajorCollecting;
         run();
         TlsContext.get()->heapState = JS::HeapState::Idle;

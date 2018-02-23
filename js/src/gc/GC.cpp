@@ -915,6 +915,13 @@ GCRuntime::releaseArena(Arena* arena, const AutoLockGC& lock)
     return arena->chunk()->releaseArena(rt, arena, lock);
 }
 
+static int64_t
+ReallyPRMJNow()
+{
+    mozilla::recordreplay::AutoPassThroughThreadEvents pt;
+    return PRMJ_Now();
+}
+
 GCRuntime::GCRuntime(JSRuntime* rt) :
     rt(rt),
     systemZone(nullptr),
@@ -927,7 +934,7 @@ GCRuntime::GCRuntime(JSRuntime* rt) :
     numArenasFreeCommitted(0),
     verifyPreData(nullptr),
     chunkAllocationSinceLastGC(false),
-    lastGCTime(PRMJ_Now()),
+    lastGCTime(ReallyPRMJNow()),
     mode(TuningDefaults::Mode),
     numActiveZoneIters(0),
     cleanUpEverything(false),
@@ -3146,7 +3153,7 @@ SliceBudget::SliceBudget(TimeBudget time)
         makeUnlimited();
     } else {
         // Note: TimeBudget(0) is equivalent to WorkBudget(CounterReset).
-        deadline = PRMJ_Now() + time.budget * PRMJ_USEC_PER_MSEC;
+        deadline = ReallyPRMJNow() + time.budget * PRMJ_USEC_PER_MSEC;
         counter = CounterReset;
     }
 }
@@ -3176,7 +3183,7 @@ SliceBudget::describe(char* buffer, size_t maxlen) const
 bool
 SliceBudget::checkOverBudget()
 {
-    bool over = PRMJ_Now() >= deadline;
+    bool over = ReallyPRMJNow() >= deadline;
     if (!over)
         counter = CounterReset;
     return over;
@@ -4152,7 +4159,7 @@ GCRuntime::prepareZonesForCollection(JS::gcreason::Reason reason, bool* isFullOu
     *isFullOut = true;
     bool any = false;
 
-    int64_t currentTime = PRMJ_Now();
+    int64_t currentTime = ReallyPRMJNow();
 
     for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
         /* Set up which zones will be collected. */
@@ -6645,7 +6652,7 @@ GCRuntime::finishCollection(JS::gcreason::Reason reason)
     marker.stop();
     clearBufferedGrayRoots();
 
-    uint64_t currentTime = PRMJ_Now();
+    uint64_t currentTime = ReallyPRMJNow();
     schedulingState.updateHighFrequencyMode(lastGCTime, currentTime, tunables);
 
     for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {

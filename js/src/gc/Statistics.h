@@ -23,6 +23,7 @@
 #include "js/UniquePtr.h"
 #include "js/Vector.h"
 #include "vm/JSONPrinter.h"
+#include "vm/Time.h"
 
 using mozilla::Maybe;
 
