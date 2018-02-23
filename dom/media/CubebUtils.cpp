@@ -404,6 +404,13 @@ void InitBrandName()
 void InitAudioIPCConnection()
 {
   MOZ_ASSERT(NS_IsMainThread());
+
+  if (recordreplay::IsMiddleman()) {
+    // We'll get confused if both the recording/replaying process and middleman
+    // initialize audio connections.
+    return;
+  }
+
   auto contentChild = dom::ContentChild::GetSingleton();
   auto promise = contentChild->SendCreateAudioIPCConnection();
   promise->Then(AbstractThread::MainThread(),
