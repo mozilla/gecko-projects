@@ -872,7 +872,8 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
 
 # ifdef MOZ_WIDGET_COCOA
   // Wait for the child process to send us its 'task_t' data.
-  const int kTimeoutMs = 10000;
+  const int kTimeoutMs =
+    (TestEnv("WAIT_AT_START") || TestEnv("MIDDLEMAN_WAIT_AT_START")) ? 1000000 : 10000;
 
   MachReceiveMessage child_message;
   ReceivePort parent_recv_port(mach_connection_name.c_str());

@@ -890,22 +890,27 @@ RecvHitSnapshot(const channel::HitSnapshotMessage& aMsg)
 
   HandleUpdatesForSnapshot(aMsg.mSnapshotId, aMsg.mFinal, aMsg.mRecorded);
 
-  // Finally, resume either forwards or backwards. Interim snapshots always
-  // resume forward (these are generated when we rewound past the point of
-  // the last snapshot we were trying to get to). Otherwise, break the resume
-  // off into a separate runnable, to avoid starving any debugger code already
-  // on the stack and waiting for the process to pause.
+  // Interim snapshots always resume forward (these are generated when we
+  // rewound past the point of the last snapshot we were trying to get to).
   if (aMsg.mInterim) {
     channel::SendMessage(channel::ResumeMessage(/* aForward = */ true, /* aHitOtherBreakpoints = */ false));
-  } else if (!gResumeForwardOrBackward) {
+    return;
+  }
+
+  // Otherwise, resume either forwards or backwards. Break the resume off into
+  // a separate runnable, to avoid starving any debugger code already on the
+  // stack and waiting for the process to pause.
+  if (!gResumeForwardOrBackward) {
     gResumeForwardOrBackward = true;
     gMainThreadMessageLoop->PostTask(NewRunnableFunction("ResumeForwardOrBackward",
                                                          ResumeForwardOrBackward,
                                                          /* aHitOtherBreakpoints = */ false));
   }
 
-  // Uncomment this to rewind when certain snapshots are reached.
-  //if (aMsg.mSnapshotId == 50) { HookResume(false, false); }
+  // Uncomment this to resume when certain snapshots are reached.
+  //if (aMsg.mSnapshotId == 300) { HookResume(false, false); }
+  //if (aMsg.mSnapshotId == 0) { HookResume(true, false); }
+
   //if (aMsg.mFinal) { HookResume(false, false); }
 }
 

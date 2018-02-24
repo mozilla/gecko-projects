@@ -213,6 +213,8 @@ ParentProcessId()
 void
 ReportFatalError(const char* aError)
 {
+  UnrecoverableSnapshotFailure();
+
   Print("***** Fatal Record/Replay Error *****\n%s\n", aError);
 
   // Construct a FatalErrorMessage on the stack, to avoid touching the heap.

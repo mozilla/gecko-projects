@@ -194,16 +194,6 @@ struct DirtyPageSet {
   DirtyPageSet(size_t aSnapshot)
     : mSnapshot(aSnapshot)
   {}
-
-  DirtyPageSet(DirtyPageSet&& aOther) {
-    *this = Move(aOther);
-  }
-
-  DirtyPageSet& operator=(DirtyPageSet&& aOther) {
-    mSnapshot = aOther.mSnapshot;
-    mPages = Move(aOther.mPages);
-    return *this;
-  }
 };
 
 // Worklist used by each snapshot thread.
@@ -368,7 +358,6 @@ CountdownThreadMain(void*)
 {
   while (true) {
     if (gMemoryInfo->mCountdown && --gMemoryInfo->mCountdown == 0) {
-      //UnrecoverableSnapshotFailure();
       child::ReportFatalError("CountdownThread activated");
     }
     ThreadYield();
@@ -1435,15 +1424,13 @@ TakeDiffMemorySnapshot()
     worklist->mSets.emplaceBack(GetActiveRecordedSnapshot());
   }
 
-  SortedDirtyPageSet newDirtyPages;
-
   // Distribute remaining active dirty pages to the snapshot thread worklists.
   for (SortedDirtyPageSet::Iter iter = gMemoryInfo->mActiveDirty.begin(); !iter.done(); ++iter) {
     AddDirtyPageToWorklist(iter.ref().mBase, iter.ref().mOriginal, iter.ref().mExecutable);
     DirectWriteProtectMemory(iter.ref().mBase, PageSize, iter.ref().mExecutable);
   }
 
-  gMemoryInfo->mActiveDirty = Move(newDirtyPages);
+  gMemoryInfo->mActiveDirty.clear();
 
   // Allow snapshot threads to resume execution.
   gMemoryInfo->mSnapshotThreadsShouldIdle.ActivateEnd();

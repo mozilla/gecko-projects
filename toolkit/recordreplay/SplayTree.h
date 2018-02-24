@@ -59,18 +59,6 @@ public:
     }
   }
 
-  SplayTree& operator=(SplayTree&& aOther) {
-    this->~SplayTree();
-    mAlloc = aOther.mAlloc;
-    mRoot = aOther.mRoot;
-    mFreeList = aOther.mFreeList;
-    mChunks = Move(aOther.mChunks);
-    aOther.mRoot = nullptr;
-    aOther.mFreeList = nullptr;
-    aOther.mChunks.clear();
-    return *this;
-  }
-
   bool empty() const {
     return !mRoot;
   }
