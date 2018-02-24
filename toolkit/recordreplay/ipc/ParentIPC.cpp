@@ -157,10 +157,10 @@ public:
   virtual Result OnMessageReceived(const Message& aMessage, Message*& aReply) override {
     //fprintf(stderr, "SYNC_MSG %s\n", IPC::StringFromIPCMessageType(aMessage.type()));
 
-    Message nMessage;
-    nMessage.CopyFrom(aMessage);
+    Message* nMessage = new Message();
+    nMessage->CopyFrom(aMessage);
     mOppositeMessageLoop->PostTask(NewRunnableFunction("ForwardMessageSync", ForwardMessageSync,
-                                                       mOpposite, &nMessage, &aReply));
+                                                       mOpposite, nMessage, &aReply));
 
     MonitorAutoLock lock(*gCommunicationMonitor);
     while (!aReply) {
@@ -183,10 +183,10 @@ public:
   virtual Result OnCallReceived(const Message& aMessage, Message*& aReply) override {
     //fprintf(stderr, "SYNC_CALL %s\n", IPC::StringFromIPCMessageType(aMessage.type()));
 
-    Message nMessage;
-    nMessage.CopyFrom(aMessage);
+    Message* nMessage = new Message();
+    nMessage->CopyFrom(aMessage);
     mOppositeMessageLoop->PostTask(NewRunnableFunction("ForwardCallMessage", ForwardCallMessage,
-                                                       mOpposite, &nMessage, &aReply));
+                                                       mOpposite, nMessage, &aReply));
 
     MonitorAutoLock lock(*gCommunicationMonitor);
     while (!aReply)
