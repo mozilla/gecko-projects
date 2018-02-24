@@ -235,6 +235,7 @@ namespace recordreplay {
   MACRO(CFUUIDCreateString)                     \
   MACRO(CFUUIDGetUUIDBytes)                     \
   MACRO(CGAffineTransformConcat)                \
+  MACRO(CGBitmapContextCreateImage)             \
   MACRO(CGBitmapContextCreateWithData)          \
   MACRO(CGBitmapContextGetBytesPerRow)          \
   MACRO(CGBitmapContextGetHeight)               \
@@ -247,9 +248,11 @@ namespace recordreplay {
   MACRO(CGColorSpaceRelease)                    \
   MACRO(CGContextClipToRects)                   \
   MACRO(CGContextConcatCTM)                     \
+  MACRO(CGContextDrawImage)                     \
   MACRO(CGContextGetClipBoundingBox)            \
   MACRO(CGContextGetCTM)                        \
   MACRO(CGContextGetType)                       \
+  MACRO(CGContextGetUserSpaceToDeviceSpaceTransform) \
   MACRO(CGContextRestoreGState)                 \
   MACRO(CGContextSaveGState)                    \
   MACRO(CGContextSetAllowsFontSubpixelPositioning) \
@@ -2051,6 +2054,7 @@ RRFunction1(CFUUIDCreate)
 RRFunction2(CFUUIDCreateString)
 RRFunctionTypes1(CFUUIDGetUUIDBytes, CFUUIDBytes, CFUUIDRef)
 RRFunctionTypes2(CGAffineTransformConcat, CGAffineTransform, CGAffineTransform, CGAffineTransform)
+RRFunction1(CGBitmapContextCreateImage)
 
 struct ContextDataInfo
 {
@@ -2104,9 +2108,11 @@ RRFunction1(CGColorSpaceCopyICCProfile)
 RRFunction1(CGColorSpaceRelease)
 RRFunction3(CGContextClipToRects)
 RRFunctionTypesVoid2(CGContextConcatCTM, CGContextRef, CGAffineTransform)
+RRFunctionTypesVoid3(CGContextDrawImage, CGContextRef, CGRect, CGImageRef)
 RRFunctionTypes1(CGContextGetClipBoundingBox, CGRect, CGContextRef)
 RRFunctionTypes1(CGContextGetCTM, CGAffineTransform, CGContextRef)
 RRFunction1(CGContextGetType)
+RRFunctionTypes1(CGContextGetUserSpaceToDeviceSpaceTransform, CGAffineTransform, CGContextRef)
 
 static void
 RR_CGContextRestoreGState(CGContextRef aCx)
