@@ -146,6 +146,7 @@ namespace recordreplay {
   MACRO(mach_timebase_info)                     \
   MACRO(mach_vm_allocate)                       \
   MACRO(mach_vm_deallocate)                     \
+  MACRO(mach_vm_protect)                        \
   MACRO(sandbox_free_error)                     \
   MACRO(sandbox_init)                           \
   MACRO(vm_copy)                                \
@@ -1500,6 +1501,17 @@ RR_mach_vm_deallocate(vm_map_t aTarget, mach_vm_address_t aAddress, mach_vm_size
     kern_return_t res = OriginalCall(mach_vm_deallocate, kern_return_t,
                                      aTarget, aAddress, aSize);
     MOZ_RELEASE_ASSERT(res == KERN_SUCCESS);
+  }
+  return KERN_SUCCESS;
+}
+
+static kern_return_t
+RR_mach_vm_protect(vm_map_t aTarget, mach_vm_address_t aAddress, mach_vm_size_t aSize,
+                   boolean_t aSetMaximum, vm_prot_t aNewProtection)
+{
+  if (!HasTakenSnapshot()) {
+    return OriginalCall(mach_vm_protect, kern_return_t,
+                        aTarget, aAddress, aSize, aSetMaximum, aNewProtection);
   }
   return KERN_SUCCESS;
 }
