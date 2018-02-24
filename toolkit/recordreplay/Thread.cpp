@@ -712,6 +712,9 @@ Thread::WaitForCvarUntil(void* aCvar, std::function<void()> aReleaseLock,
     while (thread->mWaitCvar) {
       if (gThreadsShouldIdle && !thread->PassThroughEvents()) {
         Wait();
+        if (IsReplaying()) {
+          break;
+        }
       }
       if (aCallback()) {
         notified = false;
