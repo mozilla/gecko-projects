@@ -594,7 +594,7 @@ MapAnonymousMemory(void* aAddress, size_t aSize, int aFlags)
     return AllocateFixedMemory(aAddress, aSize);
   }
 
-  if (void* res = TryAllocateMemory(aAddress, aSize)) {
+  if (void* res = TryAllocateMemory(aAddress, aSize, AllocatedMemoryKind::Tracked)) {
     return res;
   }
 
@@ -625,16 +625,18 @@ MapAnonymousMemory(void* aAddress, size_t aSize, int aFlags)
 static void*
 RR_mmap(void* aAddress, size_t aSize, int aProt, int aFlags, int aFd, off_t aOffset)
 {
+  MOZ_RELEASE_ASSERT(aAddress == PageBase(aAddress));
+
   // Anonymous mappings are not recorded, and can occur at different times
   // during recording and replay.
   if (aFlags & MAP_ANON) {
-    return MapAnonymousMemory(aAddress, aSize, aFlags);
+    return MapAnonymousMemory(aAddress, RoundupSizeToPageBoundary(aSize), aFlags);
   }
 
   RecordReplayFunction(mmap, void*, aAddress, aSize, aProt, aFlags, aFd, aOffset);
   events.CheckInput(aSize);
   if (IsReplaying()) {
-    rval = MapAnonymousMemory(aAddress, aSize, aFlags);
+    rval = MapAnonymousMemory(nullptr, RoundupSizeToPageBoundary(aSize), aFlags);
   }
   events.RecordOrReplayBytes(rval, aSize);
   return rval;
@@ -643,6 +645,8 @@ RR_mmap(void* aAddress, size_t aSize, int aProt, int aFlags, int aFd, off_t aOff
 static ssize_t
 RR_munmap(void* aAddress, size_t aSize)
 {
+  RoundRegionToPageBoundaries(&aAddress, &aSize);
+
   // Memory unmappings are not recorded, and can occur at different times
   // during recording and replay.
   if (UnregisterDeallocatedMemory(aAddress, aSize, AllocatedMemoryKind::Tracked)) {
@@ -1483,7 +1487,9 @@ static kern_return_t
 RR_mach_vm_allocate(vm_map_t aTarget, mach_vm_address_t* aAddress,
                     mach_vm_size_t aSize, int aFlags)
 {
-  if (void* res = TryAllocateMemory(aAddress, aSize)) {
+  aSize = RoundupSizeToPageBoundary(aSize);
+
+  if (void* res = TryAllocateMemory(nullptr, aSize, AllocatedMemoryKind::Tracked)) {
     *aAddress = (mach_vm_address_t) res;
     return KERN_SUCCESS;
   }
@@ -1500,6 +1506,8 @@ RR_mach_vm_allocate(vm_map_t aTarget, mach_vm_address_t* aAddress,
 static kern_return_t
 RR_mach_vm_deallocate(vm_map_t aTarget, mach_vm_address_t aAddress, mach_vm_size_t aSize)
 {
+  RoundRegionToPageBoundaries(&aAddress, &aSize);
+
   if (UnregisterDeallocatedMemory((void*)aAddress, aSize, AllocatedMemoryKind::Tracked)) {
     kern_return_t res = OriginalCall(mach_vm_deallocate, kern_return_t,
                                      aTarget, aAddress, aSize);
@@ -2577,10 +2585,10 @@ extern "C" {
 MOZ_EXPORT void*
 RecordReplayInterface_AllocateMemory(size_t aSize, AllocatedMemoryKind aKind)
 {
-  if (aKind == AllocatedMemoryKind::Tracked) {
-    if (void* res = TryAllocateMemory(nullptr, aSize)) {
-      return res;
-    }
+  MOZ_RELEASE_ASSERT(aSize);
+  aSize = RoundupSizeToPageBoundary(aSize);
+  if (void* res = TryAllocateMemory(nullptr, aSize, aKind)) {
+    return res;
   }
   void* res = OriginalCall(mmap, void*,
                            nullptr, aSize, PROT_READ | PROT_WRITE | PROT_EXEC,
@@ -2593,6 +2601,7 @@ RecordReplayInterface_AllocateMemory(size_t aSize, AllocatedMemoryKind aKind)
 MOZ_EXPORT void
 RecordReplayInterface_DeallocateMemory(void* aAddress, size_t aSize, AllocatedMemoryKind aKind)
 {
+  aSize = RoundupSizeToPageBoundary(aSize);
   if (aSize && UnregisterDeallocatedMemory(aAddress, aSize, aKind)) {
     ssize_t rv = OriginalCall(munmap, int, aAddress, aSize);
     MOZ_RELEASE_ASSERT(rv >= 0);

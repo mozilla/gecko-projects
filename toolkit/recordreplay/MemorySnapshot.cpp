@@ -688,7 +688,7 @@ RemoveInitialUntrackedRegion(uint8_t* aBase, size_t aSize)
 
   for (AllocatedMemoryRegion& region : gMemoryInfo->mInitialUntrackedRegions) {
     if (region.mBase == aBase) {
-      MOZ_RELEASE_ASSERT(region.mSize == RoundupSizeToPageBoundary(aSize));
+      MOZ_RELEASE_ASSERT(region.mSize == aSize);
       region.mBase = nullptr;
       region.mSize = 0;
       return;
@@ -864,13 +864,14 @@ EnsureMemoryDoesNotOverlapSystemThreadStack(void* aAddress, size_t aSize)
 void
 RegisterAllocatedMemory(void* aBaseAddress, size_t aSize, AllocatedMemoryKind aKind)
 {
+  MOZ_RELEASE_ASSERT(aBaseAddress == PageBase(aBaseAddress));
+  MOZ_RELEASE_ASSERT(aSize == RoundupSizeToPageBoundary(aSize));
+
   if (!IsRecordingOrReplaying()) {
     return;
   }
 
   uint8_t* aAddress = reinterpret_cast<uint8_t*>(aBaseAddress);
-  MOZ_RELEASE_ASSERT((size_t)aAddress % PageSize == 0);
-  aSize = RoundupSizeToPageBoundary(aSize);
 
   EnsureMemoryDoesNotOverlapSystemThreadStack(aAddress, aSize);
   if (aKind == AllocatedMemoryKind::Untracked) {
@@ -919,8 +920,8 @@ static void
 AddFreeRegion(void* aAddress, size_t aSize)
 {
   // This must be called with the free regions lock held.
-  MOZ_RELEASE_ASSERT(aAddress);
-  MOZ_RELEASE_ASSERT(aSize);
+  MOZ_RELEASE_ASSERT(aAddress && aAddress == PageBase(aAddress));
+  MOZ_RELEASE_ASSERT(aSize && aSize == RoundupSizeToPageBoundary(aSize));
 
   gFreeRegions.insert(aSize, AllocatedMemoryRegion((uint8_t*)aAddress, aSize, true));
 }
@@ -928,7 +929,10 @@ AddFreeRegion(void* aAddress, size_t aSize)
 bool
 UnregisterDeallocatedMemory(void* aAddress, size_t aSize, AllocatedMemoryKind aKind)
 {
-  if (!aAddress || !IsRecordingOrReplaying()) {
+  MOZ_RELEASE_ASSERT(aAddress == PageBase(aAddress));
+  MOZ_RELEASE_ASSERT(aSize == RoundupSizeToPageBoundary(aSize));
+
+  if (!aAddress || !aSize || !IsRecordingOrReplaying()) {
     return true;
   }
 
@@ -966,9 +970,12 @@ UnregisterDeallocatedMemory(void* aAddress, size_t aSize, AllocatedMemoryKind aK
 }
 
 void*
-TryAllocateMemory(void* aAddress, size_t aSize)
+TryAllocateMemory(void* aAddress, size_t aSize, AllocatedMemoryKind aKind)
 {
-  if (!IsRecordingOrReplaying() || !HasTakenSnapshot()) {
+  MOZ_RELEASE_ASSERT(aAddress == PageBase(aAddress));
+  MOZ_RELEASE_ASSERT(aSize == RoundupSizeToPageBoundary(aSize));
+
+  if (!IsRecordingOrReplaying() || !HasTakenSnapshot() || aKind != AllocatedMemoryKind::Tracked) {
     return nullptr;
   }
 
@@ -1020,6 +1027,8 @@ void*
 AllocateFixedMemory(void* aAddress, size_t aSize)
 {
   MOZ_RELEASE_ASSERT(HasTakenSnapshot());
+  MOZ_RELEASE_ASSERT(aAddress == PageBase(aAddress));
+  MOZ_RELEASE_ASSERT(aSize == RoundupSizeToPageBoundary(aSize));
 
   // The memory should already be tracked.
   AutoSpinLock lock(gMemoryInfo->mTrackedRegionsLock);

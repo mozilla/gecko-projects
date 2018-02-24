@@ -44,7 +44,7 @@ bool UnregisterDeallocatedMemory(void* aAddress, size_t aSize, AllocatedMemoryKi
 // Attempt to allocate a block of memory from the set of free blocks, returning
 // null if a suitable block was not found. aAddress is an optional address at
 // which to allocate the block. The resulting memory will be zeroed.
-void* TryAllocateMemory(void* aAddress, size_t aSize);
+void* TryAllocateMemory(void* aAddress, size_t aSize, AllocatedMemoryKind aKind);
 
 // Try to allocate at a specific address, even if it is already mapped.
 void* AllocateFixedMemory(void* aAddress, size_t aSize);

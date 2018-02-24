@@ -153,6 +153,15 @@ RoundupSizeToPageBoundary(size_t aSize)
   return aSize;
 }
 
+template <typename Ptr, typename Size>
+static inline void
+RoundRegionToPageBoundaries(Ptr* aAddress, Size* aSize)
+{
+  (*aSize) += (uint8_t*) *aAddress - PageBase((void*) *aAddress);
+  *aAddress = (Ptr) PageBase((void*) *aAddress);
+  *aSize = RoundupSizeToPageBoundary(*aSize);
+}
+
 static inline bool
 TestEnv(const char* env)
 {
