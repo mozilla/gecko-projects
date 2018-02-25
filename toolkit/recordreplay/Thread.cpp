@@ -727,8 +727,6 @@ Thread::WaitForCvarUntil(void* aCvar, std::function<void()> aReleaseLock,
     aReleaseLock();
   }
 
-  thread->CheckForEndOfReplay();
-
   thread->Events().RecordOrReplayScalar(&notified);
   return notified;
 }

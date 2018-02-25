@@ -151,7 +151,6 @@ Lock::EnterHelper(bool aBlockUntilAcquired)
   MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
 
   Thread* thread = Thread::Current();
-  thread->CheckForEndOfReplay();
 
   LockAcquires* acquires = gLockAcquires.Get(mId);
 

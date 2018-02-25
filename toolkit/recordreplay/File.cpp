@@ -47,7 +47,15 @@ StreamTemplate<Kind>::ReadBytes(void* aData, size_t aSize)
     }
 
     MOZ_RELEASE_ASSERT(mBufferPos == mBufferLength);
-    MOZ_RELEASE_ASSERT(mChunkIndex < mChunks.length());
+
+    // If we try to read off the end of a stream then we must have hit the end
+    // of the replay for this thread. Wait indefinitely in case we rewind.
+    if (mChunkIndex == mChunks.length()) {
+      MOZ_RELEASE_ASSERT(mName == StreamName::Event || mName == StreamName::Assert);
+      MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
+      Thread::WaitForever();
+      Unreachable();
+    }
 
     const StreamChunkLocation& chunk = mChunks[mChunkIndex++];
 

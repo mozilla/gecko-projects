@@ -304,16 +304,6 @@ public:
   // Wait indefinitely, without allowing this thread to be rewound.
   static void WaitForeverNoIdle();
 
-  // If we've exhausted all the events that occurred while recording this
-  // thread then wait indefinitely in case we rewind.
-  void CheckForEndOfReplay() {
-    MOZ_RELEASE_ASSERT(!PassThroughEvents());
-    if (IsReplaying() && Events().AtEnd()) {
-      WaitForever();
-      Unreachable();
-    }
-  }
-
   // Set the lock which this thread is waiting for.
   void SetWaitLock(Lock* aLock) {
     MOZ_RELEASE_ASSERT(!!aLock == !mWaitLock);

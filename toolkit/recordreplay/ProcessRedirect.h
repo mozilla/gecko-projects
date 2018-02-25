@@ -215,8 +215,6 @@ public:
     // Stop the event passing through that was initiated in the constructor.
     mThread->SetPassThrough(false);
 
-    mThread->CheckForEndOfReplay();
-
     // Add an event for the thread.
     RecordReplayAssert("%s", mCallName);
     ThreadEvent ev = (ThreadEvent)((uint32_t)ThreadEvent::CallStart + mCallId);
