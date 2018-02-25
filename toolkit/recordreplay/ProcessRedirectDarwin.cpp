@@ -2116,7 +2116,14 @@ RRFunction1(CGColorSpaceCopyICCProfile)
 RRFunction1(CGColorSpaceRelease)
 RRFunction3(CGContextClipToRects)
 RRFunctionTypesVoid2(CGContextConcatCTM, CGContextRef, CGAffineTransform)
-RRFunctionTypesVoid3(CGContextDrawImage, CGContextRef, CGRect, CGImageRef)
+
+static void
+RR_CGContextDrawImage(CGContextRef aCx, CGRect aRect, CGImageRef aImage)
+{
+  RecordReplayFunctionVoid(CGContextDrawImage, aCx, aRect, aImage);
+  FlushContext(aCx);
+}
+
 RRFunctionTypes1(CGContextGetClipBoundingBox, CGRect, CGContextRef)
 RRFunctionTypes1(CGContextGetCTM, CGAffineTransform, CGContextRef)
 RRFunction1(CGContextGetType)
