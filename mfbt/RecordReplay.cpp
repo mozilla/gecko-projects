@@ -108,7 +108,7 @@ LoadSymbol(const char* aName)
 #else
 #error "Unknown platform"
 #endif
-  MOZ_ASSERT(rv);
+  MOZ_RELEASE_ASSERT(rv);
   return rv;
 }
 

@@ -622,6 +622,14 @@ RecordReplayInterface_InternalThingIndex(void* aThing)
   return index;
 }
 
+MOZ_EXPORT const char*
+RecordReplayInterface_InternalVirtualThingName(void* aThing)
+{
+  void* vtable = *(void**)aThing;
+  const char* name = SymbolNameRaw(vtable);
+  return name ? name : "(unknown)";
+}
+
 } // extern "C"
 
 } // namespace recordreplay

@@ -213,8 +213,6 @@ ParentProcessId()
 void
 ReportFatalError(const char* aError)
 {
-  UnrecoverableSnapshotFailure();
-
   Print("***** Fatal Record/Replay Error *****\n%s\n", aError);
 
   // Construct a FatalErrorMessage on the stack, to avoid touching the heap.
@@ -226,6 +224,8 @@ ReportFatalError(const char* aError)
   buf[sizeof(buf) - 1] = 0;
 
   channel::SendMessage(*msg);
+
+  UnrecoverableSnapshotFailure();
 
   // Block until we get a terminate message and die.
   Thread::WaitForeverNoIdle();
