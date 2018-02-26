@@ -556,9 +556,6 @@ BrowserGlue.prototype = {
           }
         });
         break;
-      case "test-initialize-sanitizer":
-        Sanitizer.onStartup();
-        break;
       case "sync-ui-state:update":
         this._updateFxaBadges();
         break;
@@ -2849,6 +2846,9 @@ const ContentPermissionIntegration = {
         if (Services.prefs.getBoolPref("browser.storageManager.enabled")) {
           return new PermissionUI.PersistentStoragePermissionPrompt(request);
         }
+      }
+      case "midi": {
+        return new PermissionUI.MIDIPermissionPrompt(request);
       }
     }
     return undefined;

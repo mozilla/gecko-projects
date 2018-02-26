@@ -3,11 +3,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-this.MAIN_MESSAGE_TYPE = "ActivityStream:Main";
-this.CONTENT_MESSAGE_TYPE = "ActivityStream:Content";
-this.PRELOAD_MESSAGE_TYPE = "ActivityStream:PreloadedBrowser";
-this.UI_CODE = 1;
-this.BACKGROUND_PROCESS = 2;
+var MAIN_MESSAGE_TYPE = "ActivityStream:Main";
+var CONTENT_MESSAGE_TYPE = "ActivityStream:Content";
+var PRELOAD_MESSAGE_TYPE = "ActivityStream:PreloadedBrowser";
+var UI_CODE = 1;
+var BACKGROUND_PROCESS = 2;
 
 /**
  * globalImportContext - Are we in UI code (i.e. react, a dom) or some kind of background process?
@@ -25,9 +25,11 @@ this.globalImportContext = globalImportContext;
 // }
 const actionTypes = {};
 for (const type of [
+  "ARCHIVE_FROM_POCKET",
   "BLOCK_URL",
   "BOOKMARK_URL",
   "DELETE_BOOKMARK_BY_ID",
+  "DELETE_FROM_POCKET",
   "DELETE_HISTORY_URL",
   "DELETE_HISTORY_URL_CONFIRM",
   "DIALOG_CANCEL",
@@ -53,6 +55,7 @@ for (const type of [
   "PLACES_HISTORY_CLEARED",
   "PLACES_LINKS_DELETED",
   "PLACES_LINK_BLOCKED",
+  "PLACES_SAVED_TO_POCKET",
   "PREFS_INITIAL_VALUES",
   "PREF_CHANGED",
   "RICH_ICON_MISSING",
@@ -274,7 +277,7 @@ function WebExtEvent(type, data, importContext = globalImportContext) {
 
 this.actionTypes = actionTypes;
 
-this.actionCreators = {
+var actionCreators = {
   BroadcastToContent,
   UserEvent,
   UndesiredEvent,
@@ -290,7 +293,7 @@ this.actionCreators = {
 };
 
 // These are helpers to test for certain kinds of actions
-this.actionUtils = {
+var actionUtils = {
   isSendToMain(action) {
     if (!action.meta) {
       return false;
@@ -335,7 +338,7 @@ this.actionUtils = {
   _RouteMessage
 };
 
-this.EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "actionTypes",
   "actionCreators",
   "actionUtils",

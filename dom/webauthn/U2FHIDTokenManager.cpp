@@ -105,37 +105,36 @@ U2FHIDTokenManager::Drop()
 // *      attestation signature
 //
 RefPtr<U2FRegisterPromise>
-U2FHIDTokenManager::Register(const nsTArray<WebAuthnScopedCredential>& aCredentials,
-                             const WebAuthnAuthenticatorSelection &aAuthenticatorSelection,
-                             const nsTArray<uint8_t>& aApplication,
-                             const nsTArray<uint8_t>& aChallenge,
-                             uint32_t aTimeoutMS)
+U2FHIDTokenManager::Register(const WebAuthnMakeCredentialInfo& aInfo)
 {
   mozilla::ipc::AssertIsOnBackgroundThread();
 
   uint64_t registerFlags = 0;
 
+  const WebAuthnAuthenticatorSelection& sel = aInfo.AuthenticatorSelection();
+
   // Set flags for credential creation.
-  if (aAuthenticatorSelection.requireResidentKey()) {
+  if (sel.requireResidentKey()) {
     registerFlags |= U2F_FLAG_REQUIRE_RESIDENT_KEY;
   }
-  if (aAuthenticatorSelection.requireUserVerification()) {
+  if (sel.requireUserVerification()) {
     registerFlags |= U2F_FLAG_REQUIRE_USER_VERIFICATION;
   }
-  if (aAuthenticatorSelection.requirePlatformAttachment()) {
+  if (sel.requirePlatformAttachment()) {
     registerFlags |= U2F_FLAG_REQUIRE_PLATFORM_ATTACHMENT;
   }
 
   ClearPromises();
+  mCurrentAppId = aInfo.RpIdHash();
   mTransactionId = rust_u2f_mgr_register(mU2FManager,
                                          registerFlags,
-                                         (uint64_t)aTimeoutMS,
+                                         (uint64_t)aInfo.TimeoutMS(),
                                          u2f_register_callback,
-                                         aChallenge.Elements(),
-                                         aChallenge.Length(),
-                                         aApplication.Elements(),
-                                         aApplication.Length(),
-                                         U2FKeyHandles(aCredentials).Get());
+                                         aInfo.ClientDataHash().Elements(),
+                                         aInfo.ClientDataHash().Length(),
+                                         aInfo.RpIdHash().Elements(),
+                                         aInfo.RpIdHash().Length(),
+                                         U2FKeyHandles(aInfo.ExcludeList()).Get());
 
   if (mTransactionId == 0) {
     return U2FRegisterPromise::CreateAndReject(NS_ERROR_DOM_UNKNOWN_ERR, __func__);
@@ -161,31 +160,37 @@ U2FHIDTokenManager::Register(const nsTArray<WebAuthnScopedCredential>& aCredenti
 //  *     Signature
 //
 RefPtr<U2FSignPromise>
-U2FHIDTokenManager::Sign(const nsTArray<WebAuthnScopedCredential>& aCredentials,
-                         const nsTArray<uint8_t>& aApplication,
-                         const nsTArray<uint8_t>& aChallenge,
-                         bool aRequireUserVerification,
-                         uint32_t aTimeoutMS)
+U2FHIDTokenManager::Sign(const WebAuthnGetAssertionInfo& aInfo)
 {
   mozilla::ipc::AssertIsOnBackgroundThread();
 
   uint64_t signFlags = 0;
 
   // Set flags for credential requests.
-  if (aRequireUserVerification) {
+  if (aInfo.RequireUserVerification()) {
     signFlags |= U2F_FLAG_REQUIRE_USER_VERIFICATION;
+  }
+
+  mCurrentAppId = aInfo.RpIdHash();
+  nsTArray<nsTArray<uint8_t>> appIds;
+  appIds.AppendElement(mCurrentAppId);
+
+  // Process extensions.
+  for (const WebAuthnExtension& ext: aInfo.Extensions()) {
+    if (ext.type() == WebAuthnExtension::TWebAuthnExtensionAppId) {
+      appIds.AppendElement(ext.get_WebAuthnExtensionAppId().AppId());
+    }
   }
 
   ClearPromises();
   mTransactionId = rust_u2f_mgr_sign(mU2FManager,
                                      signFlags,
-                                     (uint64_t)aTimeoutMS,
+                                     (uint64_t)aInfo.TimeoutMS(),
                                      u2f_sign_callback,
-                                     aChallenge.Elements(),
-                                     aChallenge.Length(),
-                                     aApplication.Elements(),
-                                     aApplication.Length(),
-                                     U2FKeyHandles(aCredentials).Get());
+                                     aInfo.ClientDataHash().Elements(),
+                                     aInfo.ClientDataHash().Length(),
+                                     U2FAppIds(appIds).Get(),
+                                     U2FKeyHandles(aInfo.AllowList()).Get());
   if (mTransactionId == 0) {
     return U2FSignPromise::CreateAndReject(NS_ERROR_DOM_UNKNOWN_ERR, __func__);
   }
@@ -234,6 +239,12 @@ U2FHIDTokenManager::HandleSignResult(UniquePtr<U2FResult>&& aResult)
 
   MOZ_ASSERT(!mSignPromise.IsEmpty());
 
+  nsTArray<uint8_t> appId;
+  if (!aResult->CopyAppId(appId)) {
+    mSignPromise.Reject(NS_ERROR_DOM_UNKNOWN_ERR, __func__);
+    return;
+  }
+
   nsTArray<uint8_t> keyHandle;
   if (!aResult->CopyKeyHandle(keyHandle)) {
     mSignPromise.Reject(NS_ERROR_DOM_UNKNOWN_ERR, __func__);
@@ -246,7 +257,14 @@ U2FHIDTokenManager::HandleSignResult(UniquePtr<U2FResult>&& aResult)
     return;
   }
 
-  WebAuthnGetAssertionResult result(keyHandle, signature);
+  nsTArray<WebAuthnExtensionResult> extensions;
+
+  if (appId != mCurrentAppId) {
+    // Indicate to the RP that we used the FIDO appId.
+    extensions.AppendElement(WebAuthnExtensionResultAppId(true));
+  }
+
+  WebAuthnGetAssertionResult result(appId, keyHandle, signature, extensions);
   mSignPromise.Resolve(Move(result), __func__);
 }
 

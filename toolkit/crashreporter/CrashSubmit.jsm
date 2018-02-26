@@ -6,12 +6,12 @@ ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/KeyValueParser.jsm");
-Cu.importGlobalProperties(["File", "XMLHttpRequest"]);
+Cu.importGlobalProperties(["File", "FormData", "XMLHttpRequest"]);
 
 ChromeUtils.defineModuleGetter(this, "OS",
                                "resource://gre/modules/osfile.jsm");
 
-this.EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "CrashSubmit"
 ];
 
@@ -216,8 +216,8 @@ Submitter.prototype = {
     let xhr = new XMLHttpRequest();
     xhr.open("POST", serverURL, true);
 
-    let formData = Cc["@mozilla.org/files/formdata;1"]
-                   .createInstance(Ci.nsIDOMFormData);
+    let formData = new FormData();
+
     // add the data
     for (let [name, value] of Object.entries(this.extraKeyVals)) {
       if (name != "ServerURL" && name != "StackTraces") {
@@ -387,7 +387,7 @@ Submitter.prototype = {
 
 // ===================================
 // External API goes here
-this.CrashSubmit = {
+var CrashSubmit = {
   /**
    * Submit the crash report named id.dmp from the "pending" directory.
    *

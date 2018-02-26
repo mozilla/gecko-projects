@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-this.EXPORTED_SYMBOLS = [ "SitePermissions" ];
+var EXPORTED_SYMBOLS = [ "SitePermissions" ];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -136,7 +136,7 @@ const TemporaryBlockedPermissions = {
  * Some methods have the side effect of dispatching a "PermissionStateChange"
  * event on changes to temporary permissions, as mentioned in the respective docs.
  */
-this.SitePermissions = {
+var SitePermissions = {
   // Permission states.
   UNKNOWN: Services.perms.UNKNOWN_ACTION,
   ALLOW: Services.perms.ALLOW_ACTION,
@@ -656,12 +656,28 @@ var gPermissionObject = {
 
   "canvas": {
   },
+
+  "midi": {
+    exactHostMatch: true
+  },
+
+  "midi-sysex": {
+    exactHostMatch: true
+  }
 };
 
 // Delete this entry while being pre-off
 // or the persistent-storage permission would appear in Page info's Permission section
 if (!Services.prefs.getBoolPref("browser.storageManager.enabled")) {
   delete gPermissionObject["persistent-storage"];
+}
+
+if (!Services.prefs.getBoolPref("dom.webmidi.enabled")) {
+  // ESLint gets angry about array versus dot notation here, but some permission
+  // names use hyphens. Disabling rule for line to keep things consistent.
+  // eslint-disable-next-line dot-notation
+  delete gPermissionObject["midi"];
+  delete gPermissionObject["midi-sysex"];
 }
 
 XPCOMUtils.defineLazyPreferenceGetter(SitePermissions, "temporaryPermissionExpireTime",

@@ -4,7 +4,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["NewTabUtils"];
+var EXPORTED_SYMBOLS = ["NewTabUtils"];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -1313,6 +1313,10 @@ var ActivityStreamLinks = {
    */
   blockURL(aLink) {
     BlockedLinks.block(aLink);
+    // If we're blocking a pocket item, invalidate the cache too
+    if (aLink.pocket_id) {
+      this._savedPocketStories = null;
+    }
   },
 
   onLinkBlocked(aLink) {
@@ -2097,7 +2101,7 @@ var ExpirationFilter = {
 /**
  * Singleton that provides the public API of this JSM.
  */
-this.NewTabUtils = {
+var NewTabUtils = {
   _initialized: false,
 
   /**

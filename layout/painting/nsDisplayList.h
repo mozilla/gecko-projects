@@ -2040,7 +2040,7 @@ MakeDisplayItem(nsDisplayListBuilder* aBuilder, Args&&... aArgs)
   for (uint32_t i = 0; i < array.Length(); i++) {
     mozilla::DisplayItemData* did = array.ElementAt(i);
     if (did->GetDisplayItemKey() == item->GetPerFrameKey()) {
-      if (did->HasMergedFrames()) {
+      if (!did->HasMergedFrames()) {
         item->SetDisplayItemData(did);
       }
       break;

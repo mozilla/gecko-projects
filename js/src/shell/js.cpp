@@ -49,13 +49,12 @@
 # include <sys/wait.h>
 # include <unistd.h>
 #endif
+
 #include "jsapi.h"
 #include "jsarray.h"
 #include "jsfriendapi.h"
-#include "jsprf.h"
 #include "jstypes.h"
 #include "jsutil.h"
-#include "jswrapper.h"
 #ifndef JS_POSIX_NSPR
 # include "prerror.h"
 # include "prlink.h"
@@ -78,9 +77,11 @@
 #include "js/Debug.h"
 #include "js/GCVector.h"
 #include "js/Initialization.h"
+#include "js/Printf.h"
 #include "js/StructuredClone.h"
 #include "js/SweepingAPI.h"
 #include "js/TrackedOptimizationInfo.h"
+#include "js/Wrapper.h"
 #include "perf/jsperf.h"
 #include "shell/jsoptparse.h"
 #include "shell/jsshell.h"
@@ -91,8 +92,6 @@
 #include "threading/Thread.h"
 #include "util/Windows.h"
 #include "vm/ArgumentsObject.h"
-#include "vm/AsyncFunction.h"
-#include "vm/AsyncIteration.h"
 #include "vm/Compression.h"
 #include "vm/Debugger.h"
 #include "vm/HelperThreads.h"
@@ -2452,61 +2451,6 @@ AssertEq(JSContext* cx, unsigned argc, Value* vp)
 }
 
 static JSScript*
-ValueToScript(JSContext* cx, HandleValue v, JSFunction** funp = nullptr)
-{
-    if (v.isString()) {
-        // To convert a string to a script, compile it. Parse it as an ES6 Program.
-        RootedLinearString linearStr(cx, StringToLinearString(cx, v.toString()));
-        if (!linearStr)
-            return nullptr;
-        size_t len = GetLinearStringLength(linearStr);
-        AutoStableStringChars linearChars(cx);
-        if (!linearChars.initTwoByte(cx, linearStr))
-            return nullptr;
-        const char16_t* chars = linearChars.twoByteRange().begin().get();
-
-        RootedScript script(cx);
-        CompileOptions options(cx);
-        if (!JS::Compile(cx, options, chars, len, &script))
-            return nullptr;
-        return script;
-    }
-
-    RootedFunction fun(cx, JS_ValueToFunction(cx, v));
-    if (!fun)
-        return nullptr;
-
-    // Unwrap bound functions.
-    while (fun->isBoundFunction()) {
-        JSObject* target = fun->getBoundFunctionTarget();
-        if (target && target->is<JSFunction>())
-            fun = &target->as<JSFunction>();
-        else
-            break;
-    }
-
-    // Get unwrapped async function.
-    if (IsWrappedAsyncFunction(fun))
-        fun = GetUnwrappedAsyncFunction(fun);
-    if (IsWrappedAsyncGenerator(fun))
-        fun = GetUnwrappedAsyncGenerator(fun);
-
-    if (!fun->isInterpreted()) {
-        JS_ReportErrorNumberASCII(cx, my_GetErrorMessage, nullptr, JSSMSG_SCRIPTS_ONLY);
-        return nullptr;
-    }
-
-    JSScript* script = JSFunction::getOrCreateScript(cx, fun);
-    if (!script)
-        return nullptr;
-
-    if (funp)
-        *funp = fun;
-
-    return script;
-}
-
-static JSScript*
 GetTopScript(JSContext* cx)
 {
     NonBuiltinScriptFrameIter iter(cx);
@@ -2524,7 +2468,7 @@ GetScriptAndPCArgs(JSContext* cx, CallArgs& args, MutableHandleScript scriptp,
         unsigned intarg = 0;
         if (v.isObject() &&
             JS_GetClass(&v.toObject()) == Jsvalify(&JSFunction::class_)) {
-            script = ValueToScript(cx, v);
+            script = TestingFunctionArgumentToScript(cx, v);
             if (!script)
                 return false;
             intarg++;
@@ -2557,7 +2501,7 @@ LineToPC(JSContext* cx, unsigned argc, Value* vp)
     RootedScript script(cx, GetTopScript(cx));
     int32_t lineArg = 0;
     if (args[0].isObject() && args[0].toObject().is<JSFunction>()) {
-        script = ValueToScript(cx, args[0]);
+        script = TestingFunctionArgumentToScript(cx, args[0]);
         if (!script)
             return false;
         lineArg++;
@@ -2763,7 +2707,7 @@ Notes(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     for (unsigned i = 0; i < args.length(); i++) {
-        RootedScript script (cx, ValueToScript(cx, args[i]));
+        RootedScript script (cx, TestingFunctionArgumentToScript(cx, args[i]));
         if (!script)
             return false;
 
@@ -3001,7 +2945,7 @@ DisassembleToSprinter(JSContext* cx, unsigned argc, Value* vp, Sprinter* sprinte
             if (value.isObject() && value.toObject().is<ModuleObject>())
                 script = value.toObject().as<ModuleObject>().script();
             else
-                script = ValueToScript(cx, value, fun.address());
+                script = TestingFunctionArgumentToScript(cx, value, fun.address());
             if (!script)
                 return false;
             if (!DisassembleScript(cx, script, fun, p.lines, p.recursive, p.sourceNotes, sprinter))
@@ -3121,7 +3065,7 @@ DisassWithSrc(JSContext* cx, unsigned argc, Value* vp)
 
     RootedScript script(cx);
     for (unsigned i = 0; i < args.length(); i++) {
-        script = ValueToScript(cx, args[i]);
+        script = TestingFunctionArgumentToScript(cx, args[i]);
         if (!script)
            return false;
 
@@ -3316,7 +3260,7 @@ GetSLX(JSContext* cx, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
     RootedScript script(cx);
 
-    script = ValueToScript(cx, args.get(0));
+    script = TestingFunctionArgumentToScript(cx, args.get(0));
     if (!script)
         return false;
     args.rval().setInt32(GetScriptLineExtent(script));

@@ -1201,7 +1201,7 @@ CanvasRenderingContext2D::ParseColor(const nsAString& aString,
       // Otherwise, get the value of the color property, flushing style
       // if necessary.
       RefPtr<nsStyleContext> canvasStyle =
-        nsComputedDOMStyle::GetStyleContext(mCanvasElement, nullptr, presShell);
+        nsComputedDOMStyle::GetStyleContext(mCanvasElement, nullptr);
       if (canvasStyle) {
         *aColor = canvasStyle->StyleColor()->mColor;
       }
@@ -1226,11 +1226,10 @@ CanvasRenderingContext2D::ParseColor(const nsAString& aString,
     // otherwise resolve it
     nsCOMPtr<nsIPresShell> presShell = GetPresShell();
     RefPtr<nsStyleContext> parentContext;
-    if (mCanvasElement && mCanvasElement->IsInUncomposedDoc()) {
+    if (mCanvasElement && mCanvasElement->IsInComposedDoc()) {
       // Inherit from the canvas element.
-      parentContext = nsComputedDOMStyle::GetStyleContext(mCanvasElement,
-                                                          nullptr,
-                                                          presShell);
+      parentContext =
+        nsComputedDOMStyle::GetStyleContext(mCanvasElement, nullptr);
     }
 
     Unused << nsRuleNode::ComputeColor(
@@ -1862,7 +1861,7 @@ CanvasRenderingContext2D::RegisterAllocation()
 static already_AddRefed<LayerManager>
 LayerManagerFromCanvasElement(nsINode* aCanvasElement)
 {
-  if (!aCanvasElement || !aCanvasElement->OwnerDoc()) {
+  if (!aCanvasElement) {
     return nullptr;
   }
 
@@ -1927,7 +1926,7 @@ CanvasRenderingContext2D::TrySharedTarget(RefPtr<gfx::DrawTarget>& aOutDT,
   aOutDT = nullptr;
   aOutProvider = nullptr;
 
-  if (!mCanvasElement || !mCanvasElement->OwnerDoc()) {
+  if (!mCanvasElement) {
     return false;
   }
 
@@ -2003,20 +2002,18 @@ CanvasRenderingContext2D::ClearTarget()
 
   SetInitialState();
 
+  if (!mCanvasElement || !mCanvasElement->IsInComposedDoc()) {
+    return;
+  }
+
   // For vertical writing-mode, unless text-orientation is sideways,
   // we'll modify the initial value of textBaseline to 'middle'.
-  RefPtr<nsStyleContext> canvasStyle;
-  if (mCanvasElement && mCanvasElement->IsInUncomposedDoc()) {
-    nsCOMPtr<nsIPresShell> presShell = GetPresShell();
-    if (presShell) {
-      canvasStyle =
-        nsComputedDOMStyle::GetStyleContext(mCanvasElement, nullptr, presShell);
-      if (canvasStyle) {
-        WritingMode wm(canvasStyle);
-        if (wm.IsVertical() && !wm.IsSideways()) {
-          CurrentState().textBaseline = TextBaseline::MIDDLE;
-        }
-      }
+  RefPtr<nsStyleContext> canvasStyle =
+    nsComputedDOMStyle::GetStyleContext(mCanvasElement, nullptr);
+  if (canvasStyle) {
+    WritingMode wm(canvasStyle);
+    if (wm.IsVertical() && !wm.IsSideways()) {
+      CurrentState().textBaseline = TextBaseline::MIDDLE;
     }
   }
 }
@@ -2738,18 +2735,19 @@ CreateFontDeclaration(const nsAString& aFont,
 }
 
 static already_AddRefed<GeckoStyleContext>
-GetFontParentStyleContext(Element* aElement, nsIPresShell* aPresShell,
+GetFontParentStyleContext(Element* aElement,
+                          nsIPresShell* aPresShell,
                           ErrorResult& aError)
 {
-  if (aElement && aElement->IsInUncomposedDoc()) {
+  if (aElement && aElement->IsInComposedDoc()) {
     // Inherit from the canvas element.
     RefPtr<nsStyleContext> result =
-      nsComputedDOMStyle::GetStyleContext(aElement, nullptr, aPresShell);
+      nsComputedDOMStyle::GetStyleContext(aElement, nullptr);
     if (!result) {
       aError.Throw(NS_ERROR_FAILURE);
       return nullptr;
     }
-    return already_AddRefed<GeckoStyleContext>(result.forget().take()->AsGecko());
+    return GeckoStyleContext::TakeRef(result.forget());
   }
 
   // otherwise inherit from default (10px sans-serif)
@@ -2918,17 +2916,11 @@ GetFontStyleForServo(Element* aElement, const nsAString& aFont,
 
   ServoStyleSet* styleSet = aPresShell->StyleSet()->AsServo();
 
-  RefPtr<ServoStyleContext> parentStyle;
+  RefPtr<nsStyleContext> parentStyle;
   // have to get a parent style context for inherit-like relative
   // values (2em, bolder, etc.)
-  if (aElement && aElement->IsInUncomposedDoc()) {
-    // Inherit from the canvas element.
-    aPresShell->FlushPendingNotifications(FlushType::Style);
-    // We need to use ResolveStyleLazily, which involves traversal,
-    // instead of ResolvestyleFor() because we need up-to-date style even if
-    // the canvas element is display:none.
-    parentStyle =
-      styleSet->ResolveStyleLazily(aElement, CSSPseudoElementType::NotPseudo);
+  if (aElement && aElement->IsInComposedDoc()) {
+    parentStyle = nsComputedDOMStyle::GetStyleContext(aElement, nullptr);
   } else {
     RefPtr<RawServoDeclarationBlock> declarations =
       CreateFontDeclarationForServo(NS_LITERAL_STRING("10px sans-serif"),
@@ -2945,14 +2937,13 @@ GetFontStyleForServo(Element* aElement, const nsAString& aFont,
              "GetFontParentStyleContext should have returned an error if the presshell is being destroyed.");
 
   RefPtr<ServoStyleContext> sc =
-    styleSet->ResolveForDeclarations(parentStyle, declarations);
+    styleSet->ResolveForDeclarations(parentStyle->AsServo(), declarations);
 
   // The font getter is required to be reserialized based on what we
   // parsed (including having line-height removed).  (Older drafts of
   // the spec required font sizes be converted to pixels, but that no
   // longer seems to be required.)
   Servo_SerializeFontValueForCanvas(declarations, &aOutUsedFont);
-
   return sc.forget();
 }
 
@@ -4585,10 +4576,10 @@ CanvasRenderingContext2D::DrawOrMeasureText(const nsAString& aRawText,
   bool isRTL = false;
 
   RefPtr<nsStyleContext> canvasStyle;
-  if (mCanvasElement && mCanvasElement->IsInUncomposedDoc()) {
+  if (mCanvasElement && mCanvasElement->IsInComposedDoc()) {
     // try to find the closest context
     canvasStyle =
-      nsComputedDOMStyle::GetStyleContext(mCanvasElement, nullptr, presShell);
+      nsComputedDOMStyle::GetStyleContext(mCanvasElement, nullptr);
     if (!canvasStyle) {
       return NS_ERROR_FAILURE;
     }
@@ -4976,8 +4967,9 @@ CanvasRenderingContext2D::IsPointInPath(JSContext* aCx, double aX, double aY, co
   // Check for site-specific permission and return false if no permission.
   if (mCanvasElement) {
     nsCOMPtr<nsIDocument> ownerDoc = mCanvasElement->OwnerDoc();
-    if (!ownerDoc || !CanvasUtils::IsImageExtractionAllowed(ownerDoc, aCx))
+    if (!CanvasUtils::IsImageExtractionAllowed(ownerDoc, aCx)) {
       return false;
+    }
   }
 
   EnsureUserSpacePath(aWinding);
@@ -5018,8 +5010,9 @@ CanvasRenderingContext2D::IsPointInStroke(JSContext* aCx, double aX, double aY)
   // Check for site-specific permission and return false if no permission.
   if (mCanvasElement) {
     nsCOMPtr<nsIDocument> ownerDoc = mCanvasElement->OwnerDoc();
-    if (!ownerDoc || !CanvasUtils::IsImageExtractionAllowed(ownerDoc, aCx))
+    if (!CanvasUtils::IsImageExtractionAllowed(ownerDoc, aCx)) {
       return false;
+    }
   }
 
   EnsureUserSpacePath();
@@ -5887,8 +5880,7 @@ CanvasRenderingContext2D::GetImageDataArray(JSContext* aCx,
   bool usePlaceholder = false;
   if (mCanvasElement) {
     nsCOMPtr<nsIDocument> ownerDoc = mCanvasElement->OwnerDoc();
-    usePlaceholder = !ownerDoc ||
-      !CanvasUtils::IsImageExtractionAllowed(ownerDoc, aCx);
+    usePlaceholder = !CanvasUtils::IsImageExtractionAllowed(ownerDoc, aCx);
   }
 
   do {

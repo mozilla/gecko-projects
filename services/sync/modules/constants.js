@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // Process each item in the "constants hash" to add to "global" and give a name
-this.EXPORTED_SYMBOLS = [];
+var EXPORTED_SYMBOLS = [];
 for (let [key, val] of Object.entries({
 
 // Don't manually modify this line, as it is automatically replaced on merge day
@@ -18,12 +18,6 @@ SYNC_API_VERSION:                      "1.5",
 // the per-engine cleartext formats.
 STORAGE_VERSION:                       5,
 PREFS_BRANCH:                          "services.sync.",
-
-// Host "key" to access Weave Identity in the password manager
-PWDMGR_HOST:                           "chrome://weave",
-PWDMGR_PASSWORD_REALM:                 "Mozilla Services Password",
-PWDMGR_PASSPHRASE_REALM:               "Mozilla Services Encryption Passphrase",
-PWDMGR_KEYBUNDLE_REALM:                "Mozilla Services Key Bundles",
 
 // Put in [] because those aren't allowed in a collection name.
 DEFAULT_KEYBUNDLE_NAME:                "[default]",

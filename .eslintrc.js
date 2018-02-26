@@ -53,10 +53,8 @@ module.exports = {
     // XXX Bug 1434446. These directories have jsm files still being fixed, so
     // turn off global no-unused-vars checking for them.
     "files": [
-      "accessible/**/*.jsm",
       "browser/components/**/*.jsm",
       "browser/extensions/**/*.jsm",
-      "services/sync/**/*.jsm",
       "toolkit/**/*.jsm",
     ],
     "rules": {

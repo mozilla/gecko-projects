@@ -125,7 +125,6 @@
 #include "nsIScriptContext.h"
 #include "nsBindingManager.h"
 #include "nsHTMLDocument.h"
-#include "nsIDOMHTMLFormElement.h"
 #include "nsIRequest.h"
 #include "nsHostObjectProtocolHandler.h"
 
@@ -160,6 +159,7 @@
 #include "nsEscape.h"
 #include "nsObjectLoadingContent.h"
 #include "nsHtml5TreeOpExecutor.h"
+#include "mozilla/dom/HTMLFormElement.h"
 #include "mozilla/dom/HTMLLinkElement.h"
 #include "mozilla/dom/HTMLMediaElement.h"
 #include "mozilla/dom/HTMLIFrameElement.h"
@@ -1924,6 +1924,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsDocument)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSecurityInfo)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDisplayDocument)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFontFaceSet)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mReadyForIdle)
 
   // Traverse all nsDocument nsCOMPtrs.
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mParser)
@@ -2065,6 +2066,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDocument)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mChildrenCollection)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mOrientationPendingPromise)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mFontFaceSet)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mReadyForIdle);
 
   tmp->mParentDocument = nullptr;
 
@@ -2735,6 +2737,7 @@ nsDocument::StartDocumentLoad(const char* aCommand, nsIChannel* aChannel,
   }
 
   mMayStartLayout = false;
+  MOZ_ASSERT(!mReadyForIdle, "We should never hit DOMContentLoaded before this point");
 
   if (aReset) {
     Reset(aChannel, aLoadGroup);
@@ -5266,6 +5269,10 @@ nsDocument::DispatchContentLoadedEvents()
                                        NS_LITERAL_STRING("DOMContentLoaded"),
                                        true, false);
 
+  if (MayStartLayout()) {
+    MaybeResolveReadyForIdle();
+  }
+
   RefPtr<TimelineConsumers> timelines = TimelineConsumers::Get();
   nsIDocShell* docShell = this->GetDocShell();
 
@@ -6590,6 +6597,19 @@ void
 nsDocument::FlushSkinBindings()
 {
   BindingManager()->FlushSkinBindings();
+}
+
+void
+nsIDocument::SetMayStartLayout(bool aMayStartLayout)
+{
+  mMayStartLayout = aMayStartLayout;
+  if (MayStartLayout()) {
+    ReadyState state = GetReadyStateEnum();
+    if (state >= READYSTATE_INTERACTIVE) {
+      // DOMContentLoaded has fired already.
+      MaybeResolveReadyForIdle();
+    }
+  }
 }
 
 nsresult
@@ -8006,12 +8026,11 @@ nsDocument::Sanitize()
   for (uint32_t i = 0; i < length; ++i) {
     NS_ASSERTION(nodes->Item(i), "null item in nodelist");
 
-    nsCOMPtr<nsIDOMHTMLFormElement> form = do_QueryInterface(nodes->Item(i));
+    HTMLFormElement* form = HTMLFormElement::FromContent(nodes->Item(i));
     if (!form)
       continue;
 
-    nodes->Item(i)->AsElement()->GetAttr(kNameSpaceID_None,
-                                         nsGkAtoms::autocomplete, value);
+    form->GetAttr(kNameSpaceID_None, nsGkAtoms::autocomplete, value);
     if (value.LowerCaseEqualsLiteral("off"))
       form->Reset();
   }
@@ -10315,6 +10334,35 @@ nsIDocument::GetMozDocumentURIIfNotForErrorPages()
   }
 
   return uri.forget();
+}
+
+Promise*
+nsIDocument::GetDocumentReadyForIdle(ErrorResult& aRv)
+{
+  if (!mReadyForIdle) {
+    nsIGlobalObject* global = GetScopeObject();
+    if (!global) {
+      aRv.Throw(NS_ERROR_NOT_AVAILABLE);
+      return nullptr;
+    }
+
+    mReadyForIdle = Promise::Create(global, aRv);
+    if (aRv.Failed()) {
+      return nullptr;
+    }
+  }
+
+  return mReadyForIdle;
+}
+
+void
+nsIDocument::MaybeResolveReadyForIdle()
+{
+  IgnoredErrorResult rv;
+  Promise* readyPromise = GetDocumentReadyForIdle(rv);
+  if (readyPromise) {
+    readyPromise->MaybeResolve(this);
+  }
 }
 
 nsIHTMLCollection*

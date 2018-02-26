@@ -6,10 +6,13 @@
   <!ENTITY viewAllItems               "View All Items">
   <!ENTITY paymentSummaryTitle        "Your Payment">
   <!ENTITY shippingAddressLabel       "Shipping Address">
+  <!ENTITY deliveryAddressLabel       "Delivery Address">
+  <!ENTITY pickupAddressLabel         "Pickup Address">
   <!ENTITY shippingOptionsLabel       "Shipping Options">
   <!ENTITY paymentMethodsLabel        "Payment Method">
-  <!ENTITY cancelPaymentButtonLabel   "Cancel">
-  <!ENTITY approvePaymentButtonLabel  "Pay">
+  <!ENTITY cancelPaymentButton.label   "Cancel">
+  <!ENTITY approvePaymentButton.label  "Pay">
+  <!ENTITY processingPaymentButton.label "Processing">
   <!ENTITY orderDetailsLabel          "Order Details">
   <!ENTITY orderTotalLabel            "Total">
 ]>
@@ -64,23 +67,34 @@
         <h1>&paymentSummaryTitle;</h1>
 
         <section>
-          <div class="shippingRequested"><label>&shippingAddressLabel;</label></div>
-          <address-picker class="shippingRequested" selected-state-key="selectedShippingAddress"></address-picker>
-          <div class="shippingRequested"><label>&shippingOptionsLabel;</label></div>
-          <shipping-option-picker class="shippingRequested"></shipping-option-picker>
+          <div class="shipping-related"
+               id="shipping-type-label"
+               data-shipping-address-label="&shippingAddressLabel;"
+               data-delivery-address-label="&deliveryAddressLabel;"
+               data-pickup-address-label="&pickupAddressLabel;"><label></label></div>
+          <address-picker class="shipping-related" selected-state-key="selectedShippingAddress"></address-picker>
+          <div class="shipping-related"><label>&shippingOptionsLabel;</label></div>
+          <shipping-option-picker class="shipping-related"></shipping-option-picker>
           <div><label>&paymentMethodsLabel;</label></div>
           <payment-method-picker selected-state-key="selectedPaymentCard"></payment-method-picker>
+          <div id="error-text"></div>
         </section>
 
         <footer id="controls-container">
-          <button id="cancel">&cancelPaymentButtonLabel;</button>
-          <button id="pay">&approvePaymentButtonLabel;</button>
+          <button id="cancel">&cancelPaymentButton.label;</button>
+          <button id="pay"
+                  data-initial-label="&approvePaymentButton.label;"
+                  data-processing-label="&processingPaymentButton.label;"></button>
         </footer>
       </section>
       <section id="order-details-overlay" hidden="hidden">
         <h1>&orderDetailsLabel;</h1>
         <order-details></order-details>
       </section>
+    </div>
+
+    <div id="disabled-overlay" hidden="hidden">
+      <!-- overlay to prevent changes while waiting for a response from the merchant -->
     </div>
   </template>
 
@@ -97,7 +111,7 @@
 <body>
   <iframe id="debugging-console"
           hidden="hidden"
-          height="300"
+          height="400"
           src="debugging.html"></iframe>
   <payment-dialog></payment-dialog>
 </body>

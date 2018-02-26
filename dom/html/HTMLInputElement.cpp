@@ -34,7 +34,6 @@
 #include "nsRepeatService.h"
 #include "nsContentCID.h"
 #include "nsIComponentManager.h"
-#include "nsIDOMHTMLFormElement.h"
 #include "mozilla/dom/ProgressEvent.h"
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
@@ -6907,46 +6906,6 @@ HTMLInputElement::IsMutable() const
   return !IsDisabled() &&
          !(DoesReadOnlyApply() &&
            HasAttr(kNameSpaceID_None, nsGkAtoms::readonly));
-}
-
-bool
-HTMLInputElement::DoesReadOnlyApply() const
-{
-  switch (mType)
-  {
-    case NS_FORM_INPUT_HIDDEN:
-    case NS_FORM_INPUT_BUTTON:
-    case NS_FORM_INPUT_IMAGE:
-    case NS_FORM_INPUT_RESET:
-    case NS_FORM_INPUT_SUBMIT:
-    case NS_FORM_INPUT_RADIO:
-    case NS_FORM_INPUT_FILE:
-    case NS_FORM_INPUT_CHECKBOX:
-    case NS_FORM_INPUT_RANGE:
-    case NS_FORM_INPUT_COLOR:
-      return false;
-#ifdef DEBUG
-    case NS_FORM_INPUT_TEXT:
-    case NS_FORM_INPUT_PASSWORD:
-    case NS_FORM_INPUT_SEARCH:
-    case NS_FORM_INPUT_TEL:
-    case NS_FORM_INPUT_EMAIL:
-    case NS_FORM_INPUT_URL:
-    case NS_FORM_INPUT_NUMBER:
-    case NS_FORM_INPUT_DATE:
-    case NS_FORM_INPUT_TIME:
-    case NS_FORM_INPUT_MONTH:
-    case NS_FORM_INPUT_WEEK:
-    case NS_FORM_INPUT_DATETIME_LOCAL:
-      return true;
-    default:
-      MOZ_ASSERT_UNREACHABLE("Unexpected input type in DoesReadOnlyApply()");
-      return true;
-#else // DEBUG
-    default:
-      return true;
-#endif // DEBUG
-  }
 }
 
 bool

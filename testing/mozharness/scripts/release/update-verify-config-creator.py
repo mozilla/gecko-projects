@@ -1,4 +1,5 @@
 from distutils.version import LooseVersion
+import json
 import math
 import os
 import pprint
@@ -167,7 +168,6 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
             config={
                 "virtualenv_modules": [
                     "mozrelease",
-                    "requests",
                 ],
                 "virtualenv_path": "venv",
             },
@@ -208,17 +208,18 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
         from mozrelease.paths import getCandidatesDir
         from mozrelease.platforms import ftp2infoFile
         from mozrelease.versions import MozillaVersion
-        import requests
 
         self.update_paths = {}
 
-        releases = requests.get(
+        ret = self._retry_download(
             "{}/1.0/{}.json".format(
                 self.config["product_details_server"],
                 self.config["stage_product"],
             ),
-        ).json()["releases"]
-        for release_name, release_info in releases.items():
+            "WARNING",
+        )
+        releases = json.load(ret)["releases"]
+        for release_name, release_info in reversed(sorted(releases.items())):
             product, version = release_name.split("-", 1)
             version = version.rstrip("esr")
             tag = "{}_{}_RELEASE".format(product.upper(), version.replace(".", "_"))
@@ -236,7 +237,19 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
             if not branch:
                 raise Exception("Cannot determine branch, cannot continue!")
 
-            # We have to trim out previous releases that aren't in the same
+            # Exclude any releases that don't match one of our include version
+            # regexes. This is generally to avoid including versions from other
+            # channels. Eg: including betas when testing releases
+            for v in self.config["include_versions"]:
+                if re.match(v, version):
+                    break
+            else:
+                self.log("Skipping release whose version doesn't match any "
+                         "include_version pattern: %s" % release_name,
+                         level=INFO)
+                continue
+
+            # We also have to trim out previous releases that aren't in the same
             # product line, too old, etc.
             if self.config["stage_product"] != product:
                 self.log("Skipping release that doesn't match product name: %s" % release_name,
@@ -255,19 +268,6 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
                          level=INFO)
                 continue
 
-            # In addition to the above, we also exclude any releases that
-            # don't match one of our include version regexes.
-            # This is generally to avoid including versions from other channels
-            # Eg: including betas when testing releases
-            for v in self.config["include_versions"]:
-                if re.match(v, version):
-                    break
-            else:
-                self.log("Skipping release whose version doesn't match any "
-                         "include_version pattern: %s" % release_name,
-                         level=INFO)
-                continue
-
             if version in self.update_paths:
                 raise Exception("Found duplicate release for version: %s", version)
 
@@ -283,10 +283,8 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
                 ftp2infoFile(self.config["platform"])
             )
             self.log("Retrieving buildid from info file: %s" % info_file_url, level=DEBUG)
-            ret = requests.get(info_file_url)
-            if not ret.ok:
-                raise Exception("Couldn't find buildid for %s - cannot continue." % release_name)
-            buildID = ret.text.split("=")[1].strip()
+            ret = self._retry_download(info_file_url, "WARNING")
+            buildID = ret.read().split("=")[1].strip()
 
             shipped_locales_url = urljoin(
                 self.config["hg_server"],
@@ -296,11 +294,8 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
                     self.config["app_name"],
                 ),
             )
-            ret = requests.get(shipped_locales_url)
-            if not ret.ok:
-                raise Exception("Couldn't find shipped-locales for %s "
-                                "- cannot continue" % release_name)
-            shipped_locales = ret.text.strip()
+            ret = self._retry_download(shipped_locales_url, "WARNING")
+            shipped_locales = ret.read().strip()
 
             app_version_url = urljoin(
                 self.config["hg_server"],
@@ -310,12 +305,7 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
                     self.config["app_name"],
                 ),
             )
-            app_version = requests.get(app_version_url).text.strip()
-            ret = requests.get(app_version_url)
-            if not ret.ok:
-                raise Exception("Couldn't find app version for %s "
-                                "- cannot continue" % release_name)
-            app_version = ret.text.strip()
+            app_version = self._retry_download(app_version_url, "WARNING").read().strip()
 
             self.log("Adding {} to update paths".format(version), level=INFO)
             self.update_paths[version] = {
@@ -341,7 +331,6 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
         from mozrelease.update_verify import UpdateVerifyConfig
         from mozrelease.paths import getCandidatesDir, getReleasesDir, getReleaseInstallerPath
         from mozrelease.versions import getPrettyVersion
-        import requests
 
         candidates_dir = getCandidatesDir(
             self.config["stage_product"], self.config["to_version"],
@@ -374,10 +363,7 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
                 self.config["app_name"],
             ),
         )
-        ret = requests.get(to_shipped_locales_url)
-        if not ret.ok:
-            raise Exception("Couldn't find shipped-locales for current release")
-        to_shipped_locales = ret.text.strip()
+        to_shipped_locales = self._retry_download(to_shipped_locales_url, "WARNING").read().strip()
         to_locales = set(getPlatformLocales(to_shipped_locales, self.config["platform"]))
 
         completes_only_index = 0

@@ -1306,7 +1306,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         DEFINED_ON(x86);
     template <typename T>
     void branchValueIsNurseryCellImpl(Condition cond, const T& value, Register temp, Label* label)
-        DEFINED_ON(arm64, mips64, x64);
+        DEFINED_ON(arm64, x64);
 
     template <typename T>
     inline void branchTestUndefinedImpl(Condition cond, const T& t, Label* label)
@@ -1933,7 +1933,8 @@ class MacroAssembler : public MacroAssemblerSpecific
     // Emits a test of a value against all types in a TypeSet. A scratch
     // register is required.
     template <typename Source>
-    void guardTypeSet(const Source& address, const TypeSet* types, BarrierKind kind, Register scratch, Label* miss);
+    void guardTypeSet(const Source& address, const TypeSet* types, BarrierKind kind,
+                      Register unboxScratch, Register objScratch, Label* miss);
 
     void guardObjectType(Register obj, const TypeSet* types, Register scratch, Label* miss);
 

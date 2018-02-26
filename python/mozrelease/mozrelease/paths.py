@@ -43,46 +43,21 @@ def getReleaseInstallerPath(productName, brandName, version, platform,
                             locale='en-US'):
     if productName not in ('fennec',):
         if platform.startswith('linux'):
-            filename = '%s.tar.bz2' % productName
             return '/'.join([p.strip('/') for p in [
                 platform, locale, '%s-%s.tar.bz2' % (productName, version)]])
         elif 'mac' in platform:
-            filename = '%s.dmg' % productName
             return '/'.join([p.strip('/') for p in [
                 platform, locale, '%s %s.dmg' % (brandName, version)]])
         elif platform.startswith('win'):
-            filename = '%s.zip' % productName
-            instname = '%s.exe' % productName
-            prefix = []
-            prefix.extend([platform, locale])
-            return '/'.join(
-                [p.strip('/') for p in
-                 prefix + ['%s Setup %s.exe' % (brandName, version)]]
-            )
+            return '/'.join([p.strip('/') for p in [
+                platform, locale, '%s Setup %s.exe' % (brandName, version)]])
         else:
             raise "Unsupported platform"
     else:
         if platform.startswith('android'):
             filename = '%s-%s.%s.android-arm.apk' % (
                 productName, version, locale)
-            prefix = []
-            prefix.extend([platform, locale])
-            return '/'.join(
-                [p.strip('/') for p in
-                 prefix + [filename]]
-            )
-        elif platform == 'linux':
-            filename = '%s.tar.bz2' % productName
             return '/'.join([p.strip('/') for p in [
-                platform, locale, '%s-%s.%s.linux-i686.tar.bz2' % (productName, version, locale)]])
-        elif 'mac' in platform:
-            filename = '%s.dmg' % productName
-            return '/'.join([p.strip('/') for p in [
-                platform, locale, '%s-%s.%s.mac.dmg' % (brandName, version, locale)]])
-        elif platform == 'win32':
-            filename = '%s.zip' % productName
-            return '/'.join([p.strip('/') for p in [
-                platform, locale,
-                '%s-%s.%s.win32.zip' % (productName, version, locale)]])
+                platform, locale, filename]])
         else:
             raise "Unsupported platform"

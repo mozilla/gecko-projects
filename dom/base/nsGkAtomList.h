@@ -930,6 +930,7 @@ GK_ATOM(onpopstate, "onpopstate")
 GK_ATOM(only, "only")               // this one is not an event
 GK_ATOM(onmessage, "onmessage")
 GK_ATOM(onmessageerror, "onmessageerror")
+GK_ATOM(onmidimessage, "onmidimessage")
 GK_ATOM(onmousedown, "onmousedown")
 GK_ATOM(onmouseenter, "onmouseenter")
 GK_ATOM(onmouseleave, "onmouseleave")
@@ -2182,7 +2183,8 @@ GK_ATOM(genConInitializerProperty, "QuoteNodeProperty")
 GK_ATOM(labelMouseDownPtProperty, "LabelMouseDownPtProperty")
 GK_ATOM(lockedStyleStates, "lockedStyleStates")
 GK_ATOM(apzCallbackTransform, "apzCallbackTransform")
-GK_ATOM(restylableAnonymousNode, "restylableAnonymousNode")
+GK_ATOM(restylableAnonymousNode, "restylableAnonymousNode") // bool
+GK_ATOM(docLevelNativeAnonymousContent, "docLevelNativeAnonymousContent") // bool
 GK_ATOM(paintRequestTime, "PaintRequestTime")
 GK_ATOM(pseudoProperty, "PseudoProperty")  // CSSPseudoElementType
 GK_ATOM(manualNACProperty, "ManualNACProperty") // ManualNAC*

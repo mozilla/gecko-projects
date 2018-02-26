@@ -225,6 +225,9 @@ pref("dom.keyboardevent.dispatch_during_composition", false);
 // cause inputting printable character.
 pref("dom.keyboardevent.keypress.dispatch_non_printable_keys_only_system_group_in_content", false);
 
+// Whether the WebMIDI API is enabled
+pref("dom.webmidi.enabled", false);
+
 // Whether to run add-on code in different compartments from browser code. This
 // causes a separate compartment for each (addon, global) combination, which may
 // significantly increase the number of compartments in the system.
@@ -853,7 +856,6 @@ pref("gfx.bundled_fonts.force-enabled", false);
 pref("gfx.missing_fonts.notify", false);
 
 // prefs controlling the font (name/cmap) loader that runs shortly after startup
-pref("gfx.font_loader.families_per_slice", 3); // read in info 3 families at a time
 #ifdef XP_WIN
 pref("gfx.font_loader.delay", 120000);         // 2 minutes after startup
 pref("gfx.font_loader.interval", 1000);        // every 1 second until complete
@@ -3756,11 +3758,7 @@ pref("font.name-list.sans-serif.ja", "Meiryo, Yu Gothic, MS PGothic, MS Gothic, 
 pref("font.name-list.monospace.ja", "MS Gothic, MS Mincho, Meiryo, Yu Gothic, Yu Mincho, MS PGothic, MS PMincho");
 
 pref("font.name-list.serif.ko", "Batang, Gulim");
-#ifdef EARLY_BETA_OR_EARLIER
 pref("font.name-list.sans-serif.ko", "Malgun Gothic, Gulim");
-#else
-pref("font.name-list.sans-serif.ko", "Gulim, Malgun Gothic");
-#endif
 pref("font.name-list.monospace.ko", "GulimChe");
 pref("font.name-list.cursive.ko", "Gungsuh");
 
@@ -4738,6 +4736,14 @@ pref("image.mem.discardable", true);
 // demand from compressed data. Has no effect if image.mem.discardable is false.
 pref("image.mem.animated.discardable", true);
 
+// Whether the heap should be used for frames from animated images. On Android,
+// volatile memory keeps file handles open for each buffer.
+#if defined(ANDROID)
+pref("image.mem.animated.use_heap", true);
+#else
+pref("image.mem.animated.use_heap", false);
+#endif
+
 // Decodes images into shared memory to allow direct use in separate
 // rendering processes.
 pref("image.mem.shared", 2);
@@ -4768,6 +4774,14 @@ pref("image.mem.surfacecache.size_factor", 4);
 // of the data, and so forth. The default should be a good balance for desktop
 // and laptop systems, where we never discard visible images.
 pref("image.mem.surfacecache.discard_factor", 1);
+
+// What is the minimum buffer size in KB before using volatile memory over the
+// heap. On Android, volatile memory keeps file handles open for each buffer.
+#if defined(ANDROID)
+pref("image.mem.volatile.min_threshold_kb", 100);
+#else
+pref("image.mem.volatile.min_threshold_kb", -1);
+#endif
 
 // How many threads we'll use for multithreaded decoding. If < 0, will be
 // automatically determined based on the system's number of cores.

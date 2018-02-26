@@ -4,7 +4,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["MigrationUtils", "MigratorPrototype"];
+var EXPORTED_SYMBOLS = ["MigrationUtils", "MigratorPrototype"];
 
 const TOPIC_WILL_IMPORT_BOOKMARKS = "initial-migration-will-import-default-bookmarks";
 const TOPIC_DID_IMPORT_BOOKMARKS = "initial-migration-did-import-default-bookmarks";
@@ -84,7 +84,7 @@ function getMigrationBundle() {
  * 5. Implement getResources(aProfile) (see below).
  * 6. For startup-only migrators, override |startupOnlyMigrator|.
  */
-this.MigratorPrototype = {
+var MigratorPrototype = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIBrowserProfileMigrator]),
 
   /**
@@ -438,7 +438,7 @@ this.MigratorPrototype = {
   },
 };
 
-this.MigrationUtils = Object.freeze({
+var MigrationUtils = Object.freeze({
   resourceTypes: {
     SETTINGS:   Ci.nsIBrowserProfileMigrator.SETTINGS,
     COOKIES:    Ci.nsIBrowserProfileMigrator.COOKIES,
@@ -1040,19 +1040,6 @@ this.MigrationUtils = Object.freeze({
       this._updateHistoryUndo(places);
     }
     return PlacesUtils.asyncHistory.updatePlaces(places, options, true);
-  },
-
-  insertLoginWrapper(login) {
-    this._importQuantities.logins++;
-    let insertedLogin = LoginHelper.maybeImportLogin(login);
-    // Note that this means that if we import a login that has a newer password
-    // than we know about, we will update the login, and an undo of the import
-    // will not revert this. This seems preferable over removing the login
-    // outright or storing the old password in the undo file.
-    if (insertedLogin && gKeepUndoData) {
-      let {guid, timePasswordChanged} = insertedLogin;
-      gUndoData.get("logins").push({guid, timePasswordChanged});
-    }
   },
 
   async insertLoginsWrapper(logins) {

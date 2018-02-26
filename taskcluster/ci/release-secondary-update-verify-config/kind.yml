@@ -6,6 +6,7 @@ loader: taskgraph.loader.transform:loader
 
 transforms:
    - taskgraph.transforms.update_verify_config:transforms
+   - taskgraph.transforms.release_notifications:transforms
    - taskgraph.transforms.job:transforms
    - taskgraph.transforms.task:transforms
 
@@ -43,8 +44,8 @@ job-defaults:
             default: "https://aus5.mozilla.org"
       include-version:
          by-project:
-            birch: "'^\\d+\\.\\d+(\\.\\d+)?$'"
-            mozilla-release: "'^\\d+\\.\\d+(\\.\\d+)?$'"
+            birch: nonbeta
+            mozilla-release: nonbeta
             default: null
       last-watershed:
          by-project:
@@ -53,49 +54,14 @@ job-defaults:
             default: null
       mar-channel-id-override:
          by-project:
-            birch: "'^\\d+\\.\\d+(\\.\\d+)?$,firefox-mozilla-beta,firefox-mozilla-release'"
-            mozilla-release: "'^\\d+\\.\\d+(\\.\\d+)?$,firefox-mozilla-beta,firefox-mozilla-release'"
+            birch: beta
+            mozilla-release: beta
             default: null
       channel:
          by-project:
             birch: "beta-localtest"
             mozilla-release: "beta-localtest"
             default: "default"
-   notifications:
-      completed:
-         subject: "COMPLETED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
-         message: "COMPLETED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
-         plugins:
-            by-project:
-               mozilla-release: ["log_collect"]
-               default: []
-
-      failed:
-         subject: "FAILED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
-         message: "FAILED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
-         plugins:
-            by-project:
-               mozilla-release: ["log_collect", "ses"]
-               default: ["ses"]
-         emails:
-            by-project:
-               birch: ["release+tcstaging@mozilla.com"]
-               mozilla-release: ["release-automation-notifications@mozilla.com"]
-               try: ["{task_def[metadata][owner]}"]
-               default: []
-
-      exception:
-         subject: "EXCEPTION: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
-         message: "EXCEPTION: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
-         plugins:
-            by-project:
-               mozilla-release: ["log_collect", "ses"]
-               default: ["ses"]
-         emails:
-            by-project:
-               birch: ["release+tcstaging@mozilla.com"]
-               mozilla-release: ["release-automation-notifications@mozilla.com"]
-               default: []
 
 jobs:
    firefox-secondary-linux:
