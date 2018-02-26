@@ -4,13 +4,13 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["Preferences"];
+var EXPORTED_SYMBOLS = ["Preferences"];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://testing-common/TestUtils.jsm");
 ChromeUtils.import("resource://testing-common/ContentTask.jsm");
 
-this.Preferences = {
+var Preferences = {
 
   init(libDir) {
     let panes = [
@@ -125,7 +125,7 @@ async function connectionDialog(aBrowser) {
 
 async function clearRecentHistoryDialog(aBrowser) {
   await ContentTask.spawn(aBrowser, null, async function() {
-    content.document.getElementById("historyRememberClear").click();
+    content.document.getElementById("clearHistoryButton").click();
   });
 }
 

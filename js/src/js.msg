@@ -116,7 +116,8 @@ MSG_DEF(JSMSG_JSON_CYCLIC_VALUE,       0, JSEXN_TYPEERR, "cyclic object value")
 MSG_DEF(JSMSG_BAD_INSTANCEOF_RHS,      1, JSEXN_TYPEERR, "invalid 'instanceof' operand {0}")
 MSG_DEF(JSMSG_BAD_LEFTSIDE_OF_ASS,     0, JSEXN_REFERENCEERR, "invalid assignment left-hand side")
 MSG_DEF(JSMSG_BAD_PROTOTYPE,           1, JSEXN_TYPEERR, "'prototype' property of {0} is not an object")
-MSG_DEF(JSMSG_IN_NOT_OBJECT,           2, JSEXN_TYPEERR, "cannot use 'in' operator to search for '{0}' in '{1}'")
+MSG_DEF(JSMSG_IN_NOT_OBJECT,           1, JSEXN_TYPEERR, "right-hand side of 'in' should be an object, got {0}")
+MSG_DEF(JSMSG_IN_STRING,               2, JSEXN_TYPEERR, "cannot use 'in' operator to search for '{0}' in '{1}'")
 MSG_DEF(JSMSG_TOO_MANY_CON_SPREADARGS, 0, JSEXN_RANGEERR, "too many constructor arguments")
 MSG_DEF(JSMSG_TOO_MANY_FUN_SPREADARGS, 0, JSEXN_RANGEERR, "too many function arguments")
 MSG_DEF(JSMSG_UNINITIALIZED_LEXICAL,   1, JSEXN_REFERENCEERR, "can't access lexical declaration `{0}' before initialization")
@@ -480,6 +481,9 @@ MSG_DEF(JSMSG_DEBUG_PROMISE_NOT_RESOLVED, 0, JSEXN_TYPEERR, "Promise hasn't been
 MSG_DEF(JSMSG_DEBUG_PROMISE_NOT_FULFILLED, 0, JSEXN_TYPEERR, "Promise hasn't been fulfilled")
 MSG_DEF(JSMSG_DEBUG_PROMISE_NOT_REJECTED, 0, JSEXN_TYPEERR, "Promise hasn't been rejected")
 MSG_DEF(JSMSG_DEBUG_NO_BINARY_SOURCE,  0, JSEXN_ERR, "WebAssembly binary source is not available")
+
+// Testing functions
+MSG_DEF(JSMSG_TESTING_SCRIPTS_ONLY, 0, JSEXN_TYPEERR, "only works on scripts")
 
 // Tracelogger
 MSG_DEF(JSMSG_TRACELOGGER_ENABLE_FAIL, 1, JSEXN_ERR, "enabling tracelogger failed: {0}")

@@ -66,13 +66,11 @@ job-defaults:
             default: null
       last-watershed:
          by-project:
-            birch: "57.0"
-            jamun: "56.0b10"
-            maple: "56.0b10"
-            mozilla-beta: "56.0b10"
-            mozilla-release: "57.0"
-            # TODO: double check me
-            mozilla-esr52: "52.0esr"
+            birch: nonbeta
+            jamun: beta
+            maple: beta
+            mozilla-beta: beta
+            mozilla-release: nonbeta
             default: null
 
 jobs:

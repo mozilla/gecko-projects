@@ -3,7 +3,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["InputWidgetHelper"];
+var EXPORTED_SYMBOLS = ["InputWidgetHelper"];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -40,7 +40,7 @@ var InputWidgetHelper = {
 
   show: function(aElement) {
     let type = aElement.getAttribute("type");
-    let p = new Prompt({
+    new Prompt({
       window: aElement.ownerGlobal,
       title: this.strings().GetStringFromName("inputWidgetHelper." + aElement.getAttribute("type")),
       buttons: [

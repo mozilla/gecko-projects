@@ -449,6 +449,7 @@ public:
     mDisableFlattening(false),
     mBackfaceHidden(false),
     mShouldPaintOnContentSide(false),
+    mDTCRequiresTargetConfirmation(false),
     mImage(nullptr),
     mCommonClipCount(-1),
     mNewChildLayersIndex(-1)
@@ -641,6 +642,13 @@ public:
    * example if it contains native theme widgets.
    */
   bool mShouldPaintOnContentSide;
+  /**
+   * Set to true if events targeting the dispatch-to-content region
+   * require target confirmation.
+   * See CompositorHitTestFlags::eRequiresTargetConfirmation and
+   * EventRegions::mDTCRequiresTargetConfirmation.
+   */
+  bool mDTCRequiresTargetConfirmation;
   /**
    * Stores the pointer to the nsDisplayImage if we want to
    * convert this to an ImageLayer.
@@ -2089,7 +2097,7 @@ FrameLayerBuilder::GetOldLayerForFrame(nsIFrame* aFrame, uint32_t aDisplayItemKe
     return nullptr;
 
   DisplayItemData* data = aOldData;
-  if (!data || data->mLayer->Manager() != mRetainingManager || data->Disconnected()) {
+  if (!data || data->Disconnected() || data->mLayer->Manager() != mRetainingManager) {
     data = GetDisplayItemData(aFrame, aDisplayItemKey);
   }
   MOZ_ASSERT(data == GetDisplayItemData(aFrame, aDisplayItemKey));
@@ -3160,7 +3168,9 @@ void ContainerState::FinishPaintedLayerData(PaintedLayerData& aData, FindOpaqueB
     MOZ_ASSERT(item.mItem->GetType() != DisplayItemType::TYPE_COMPOSITOR_HITTEST_INFO);
 
     DisplayItemData* oldData =
-      mLayerBuilder->GetOldLayerForFrame(item.mItem->Frame(), item.mItem->GetPerFrameKey());
+      mLayerBuilder->GetOldLayerForFrame(item.mItem->Frame(),
+                                         item.mItem->GetPerFrameKey(),
+                                         item.mItem->HasMergedFrames() ? nullptr : item.mItem->GetDisplayItemData());
     InvalidateForLayerChange(item.mItem, data->mLayer, oldData);
     mLayerBuilder->AddPaintedDisplayItem(data, item.mItem, item.mClip,
                                          *this, item.mLayerState,
@@ -3338,6 +3348,9 @@ void ContainerState::FinishPaintedLayerData(PaintedLayerData& aData, FindOpaqueB
       }
       containingPaintedLayerData->mDispatchToContentHitRegion.Or(
         containingPaintedLayerData->mDispatchToContentHitRegion, rect);
+      if (data->mDTCRequiresTargetConfirmation) {
+        containingPaintedLayerData->mDTCRequiresTargetConfirmation = true;
+      }
     }
     if (!data->mMaybeHitRegion.GetBounds().IsEmpty()) {
       nsRect rect = nsLayoutUtils::TransformFrameRectToAncestor(
@@ -3401,7 +3414,8 @@ void ContainerState::FinishPaintedLayerData(PaintedLayerData& aData, FindOpaqueB
         ScaleRegionToOutsidePixels(data->mDispatchToContentHitRegion),
         ScaleRegionToOutsidePixels(data->mNoActionRegion),
         ScaleRegionToOutsidePixels(data->mHorizontalPanRegion),
-        ScaleRegionToOutsidePixels(data->mVerticalPanRegion));
+        ScaleRegionToOutsidePixels(data->mVerticalPanRegion),
+        data->mDTCRequiresTargetConfirmation);
 
     Matrix mat = layer->GetTransform().As2D();
     mat.Invert();
@@ -3657,6 +3671,10 @@ PaintedLayerData::AccumulateHitTestInfo(ContainerState* aState,
 
   if (aItem->HitTestInfo() & CompositorHitTestInfo::eDispatchToContent) {
     mDispatchToContentHitRegion.OrWith(area);
+
+    if (aItem->HitTestInfo() & CompositorHitTestInfo::eRequiresTargetConfirmation) {
+      mDTCRequiresTargetConfirmation = true;
+    }
   }
 
   auto touchFlags = hitTestInfo & CompositorHitTestInfo::eTouchActionMask;
@@ -4906,7 +4924,9 @@ FrameLayerBuilder::StoreDataForFrame(nsDisplayItem* aItem, Layer* aLayer,
   RefPtr<DisplayItemData> data =
     new (aItem->Frame()->PresContext()) DisplayItemData(lmd, aItem->GetPerFrameKey(), aLayer);
 
-  aItem->SetDisplayItemData(data);
+  if (!data->HasMergedFrames()) {
+    aItem->SetDisplayItemData(data);
+  }
 
   data->BeginUpdate(aLayer, aState, aItem);
 

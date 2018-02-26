@@ -7,7 +7,6 @@
 
 #include "ShimInterfaceInfo.h"
 
-#include "nsIDOMCanvasRenderingContext2D.h"
 #include "nsIDOMCharacterData.h"
 #include "nsIDOMClientRect.h"
 #include "nsIDOMClientRectList.h"
@@ -30,7 +29,6 @@
 #include "nsIDOMEventTarget.h"
 #include "nsIDOMFileList.h"
 #include "nsIDOMFocusEvent.h"
-#include "nsIDOMFormData.h"
 #include "nsIDOMGeoPositionError.h"
 #include "nsIDOMHTMLFormElement.h"
 #include "nsIDOMHTMLInputElement.h"
@@ -59,7 +57,6 @@
 #include "nsITreeBoxObject.h"
 #include "nsIWebBrowserPersistable.h"
 
-#include "mozilla/dom/CanvasRenderingContext2DBinding.h"
 #include "mozilla/dom/CharacterDataBinding.h"
 #include "mozilla/dom/DOMRectBinding.h"
 #include "mozilla/dom/DOMRectListBinding.h"
@@ -85,7 +82,6 @@
 #include "mozilla/dom/EventTargetBinding.h"
 #include "mozilla/dom/FileListBinding.h"
 #include "mozilla/dom/FocusEventBinding.h"
-#include "mozilla/dom/FormDataBinding.h"
 #include "mozilla/dom/FrameLoaderBinding.h"
 #include "mozilla/dom/HTMLAnchorElementBinding.h"
 #include "mozilla/dom/HTMLAreaElementBinding.h"
@@ -184,7 +180,6 @@ struct ComponentsInterfaceShimEntry {
 
 const ComponentsInterfaceShimEntry kComponentsInterfaceShimMap[] =
 {
-  DEFINE_SHIM(CanvasRenderingContext2D),
   DEFINE_SHIM(CharacterData),
   DEFINE_SHIM_WITH_CUSTOM_INTERFACE(nsIDOMClientRect, DOMRectReadOnly),
   DEFINE_SHIM_WITH_CUSTOM_INTERFACE(nsIDOMClientRectList, DOMRectList),
@@ -204,7 +199,6 @@ const ComponentsInterfaceShimEntry kComponentsInterfaceShimMap[] =
   DEFINE_SHIM(EventTarget),
   DEFINE_SHIM(FileList),
   DEFINE_SHIM(FocusEvent),
-  DEFINE_SHIM(FormData),
   DEFINE_SHIM_WITH_CUSTOM_INTERFACE(nsIFrameLoader, FrameLoader),
   DEFINE_SHIM_WITH_CUSTOM_INTERFACE(nsIDOMGeoPositionError, PositionError),
   DEFINE_SHIM(HTMLFormElement),

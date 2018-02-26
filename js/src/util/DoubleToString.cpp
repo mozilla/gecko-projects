@@ -10,7 +10,8 @@
 
 #include "util/DoubleToString.h"
 
-#include "jsprf.h"
+#include "mozilla/EndianUtils.h"
+
 #include "jstypes.h"
 #include "jsutil.h"
 

@@ -2,14 +2,14 @@
 * License, v. 2.0. If a copy of the MPL was not distributed with this
 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-this.EXPORTED_SYMBOLS = ["Status"];
+var EXPORTED_SYMBOLS = ["Status"];
 
 ChromeUtils.import("resource://services-sync/constants.js");
 ChromeUtils.import("resource://gre/modules/Log.jsm");
 ChromeUtils.import("resource://services-sync/browserid_identity.js");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-this.Status = {
+var Status = {
   _log: Log.repository.getLogger("Sync.Status"),
   __authManager: null,
   ready: false,
@@ -19,7 +19,6 @@ this.Status = {
       return this.__authManager;
     }
     this.__authManager = new BrowserIDManager();
-    this.__authManager.initialize();
     return this.__authManager;
   },
 
@@ -92,13 +91,12 @@ this.Status = {
   },
 
   checkSetup: function checkSetup() {
-    let result = this._authManager.currentAuthState;
-    if (result == STATUS_OK) {
-      Status.service = result;
-      return result;
+    if (!this._authManager.username) {
+      Status.login = LOGIN_FAILED_NO_USERNAME;
+      Status.service = CLIENT_NOT_CONFIGURED;
+    } else if (Status.login == STATUS_OK) {
+      Status.service = STATUS_OK;
     }
-
-    Status.login = result;
     return Status.service;
   },
 

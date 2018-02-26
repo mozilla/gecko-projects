@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-this.EXPORTED_SYMBOLS = ["PlacesUtils"];
+var EXPORTED_SYMBOLS = ["PlacesUtils"];
 
 Cu.importGlobalProperties(["URL"]);
 
@@ -34,12 +34,10 @@ const NEWLINE = AppConstants.platform == "macosx" ? "\n" : "\r\n";
 const TIMERS_RESOLUTION_SKEW_MS = 16;
 
 function QI_node(aNode, aIID) {
-  var result = null;
   try {
-    result = aNode.QueryInterface(aIID);
-  } catch (e) {
-  }
-  return result;
+    return aNode.QueryInterface(aIID);
+  } catch (ex) {}
+  return null;
 }
 function asContainer(aNode) {
   return QI_node(aNode, Ci.nsINavHistoryContainerResultNode);
@@ -78,13 +76,13 @@ async function notifyKeywordChange(url, keyword, source) {
   // Notify bookmarks about the removal.
   let bookmarks = [];
   await PlacesUtils.bookmarks.fetch({ url }, b => bookmarks.push(b));
-  // We don't want to yield in the gIgnoreKeywordNotifications section.
   for (let bookmark of bookmarks) {
-    bookmark.id = await PlacesUtils.promiseItemId(bookmark.guid);
-    bookmark.parentId = await PlacesUtils.promiseItemId(bookmark.parentGuid);
+    let ids = await PlacesUtils.promiseManyItemIds([bookmark.guid,
+                                                    bookmark.parentGuid]);
+    bookmark.id = ids.get(bookmark.guid);
+    bookmark.parentId = ids.get(bookmark.parentGuid);
   }
   let observers = PlacesUtils.bookmarks.getObservers();
-  gIgnoreKeywordNotifications = true;
   for (let bookmark of bookmarks) {
     notify(observers, "onItemChanged", [ bookmark.id, "keyword", false,
                                          keyword,
@@ -95,7 +93,6 @@ async function notifyKeywordChange(url, keyword, source) {
                                          "", source
                                        ]);
   }
-  gIgnoreKeywordNotifications = false;
 }
 
 /**
@@ -117,17 +114,23 @@ function serializeNode(aNode, aIsLivemark) {
   data.instanceId = PlacesUtils.instanceId;
 
   let guid = aNode.bookmarkGuid;
+  let grandParentId;
+
   // Some nodes, e.g. the unfiled/menu/toolbar ones can have a virtual guid, so
   // we ignore any that are a folder shortcut. These will be handled below.
   if (guid && !PlacesUtils.bookmarks.isVirtualRootItem(guid)) {
     // TODO: Really guid should be set on everything, however currently this upsets
     // the drag 'n' drop / cut/copy/paste operations.
     data.itemGuid = guid;
-    if (aNode.parent)
+    if (aNode.parent) {
       data.parent = aNode.parent.itemId;
+      data.parentGuid = aNode.parent.bookmarkGuid;
+    }
+
     let grandParent = aNode.parent && aNode.parent.parent;
-    if (grandParent)
-      data.grandParentId = grandParent.itemId;
+    if (grandParent) {
+      grandParentId = grandParent.itemId;
+    }
 
     data.dateAdded = aNode.dateAdded;
     data.lastModified = aNode.lastModified;
@@ -152,7 +155,7 @@ function serializeNode(aNode, aIsLivemark) {
       data.tags = aNode.tags;
   } else if (PlacesUtils.nodeIsContainer(aNode)) {
     // Tag containers accept only uri nodes.
-    if (data.grandParentId == PlacesUtils.tagsFolderId)
+    if (grandParentId == PlacesUtils.tagsFolderId)
       throw new Error("Unexpected node type");
 
     let concreteId = PlacesUtils.getConcreteItemId(aNode);
@@ -176,7 +179,7 @@ function serializeNode(aNode, aIsLivemark) {
   } else if (PlacesUtils.nodeIsSeparator(aNode)) {
     // Tag containers don't accept separators.
     if (data.parent == PlacesUtils.tagsFolderId ||
-        data.grandParentId == PlacesUtils.tagsFolderId)
+        grandParentId == PlacesUtils.tagsFolderId)
       throw new Error("Unexpected node type");
 
     data.type = PlacesUtils.TYPE_X_MOZ_PLACE_SEPARATOR;
@@ -189,6 +192,22 @@ function serializeNode(aNode, aIsLivemark) {
 const DB_URL_LENGTH_MAX = 65536;
 const DB_TITLE_LENGTH_MAX = 4096;
 const DB_DESCRIPTION_LENGTH_MAX = 256;
+
+/**
+ * Executes a boolean validate function, throwing if it returns false.
+ *
+ * @param boolValidateFn
+ *        A boolean validate function.
+ * @return the input value.
+ * @throws if input doesn't pass the validate function.
+ */
+function simpleValidateFunc(boolValidateFn) {
+  return (v, input) => {
+    if (!boolValidateFn(v, input))
+      throw new Error("Invalid value");
+    return v;
+  };
+}
 
 /**
  * List of bookmark object validators, one per each known property.
@@ -287,7 +306,7 @@ const SYNC_CHANGE_RECORD_VALIDATORS = Object.freeze({
   synced: simpleValidateFunc(v => v === true || v === false),
 });
 
-this.PlacesUtils = {
+var PlacesUtils = {
   // Place entries that are containers, e.g. bookmark folders or queries.
   TYPE_X_MOZ_PLACE_CONTAINER: "text/x-moz-place-container",
   // Place entries that are bookmark separators.
@@ -675,9 +694,6 @@ this.PlacesUtils = {
     }
   },
 
-  onPageAnnotationSet() {},
-  onPageAnnotationRemoved() {},
-
   /**
    * Determines whether or not a ResultNode is a host container.
    * @param   aNode
@@ -953,7 +969,7 @@ this.PlacesUtils = {
             try {
               titleString = Services.io.newURI(uriString).QueryInterface(Ci.nsIURL)
                                 .fileName;
-            } catch (e) {}
+            } catch (ex) {}
           }
           // note:  Services.io.newURI() will throw if uriString is not a valid URI
           if (Services.io.newURI(uriString)) {
@@ -1416,7 +1432,6 @@ this.PlacesUtils = {
    */
   setCharsetForURI: function PU_setCharsetForURI(aURI, aCharset) {
     return new Promise(resolve => {
-
       // Delaying to catch issues with asynchronous behavior while waiting
       // to implement asynchronous annotations in bug 699844.
       Services.tm.dispatchToMainThread(function() {
@@ -1430,7 +1445,6 @@ this.PlacesUtils = {
         }
         resolve();
       });
-
     });
   },
 
@@ -1443,18 +1457,14 @@ this.PlacesUtils = {
    */
   getCharsetForURI: function PU_getCharsetForURI(aURI) {
     return new Promise(resolve => {
-
       Services.tm.dispatchToMainThread(function() {
         let charset = null;
-
         try {
           charset = PlacesUtils.annotations.getPageAnnotation(aURI,
                                                               PlacesUtils.CHARSET_ANNO);
         } catch (ex) { }
-
         resolve(charset);
       });
-
     });
   },
 
@@ -1469,12 +1479,9 @@ this.PlacesUtils = {
   promiseFaviconData(aPageUrl) {
     return new Promise((resolve, reject) => {
       PlacesUtils.favicons.getFaviconDataForPage(NetUtil.newURI(aPageUrl),
-        function(aURI, aDataLen, aData, aMimeType) {
-          if (aURI) {
-            resolve({ uri: aURI,
-                               dataLen: aDataLen,
-                               data: aData,
-                               mimeType: aMimeType });
+        function(uri, dataLen, data, mimeType) {
+          if (uri) {
+            resolve({ uri, dataLen, data, mimeType });
           } else {
             reject();
           }
@@ -1674,8 +1681,8 @@ this.PlacesUtils = {
       if (aRow.getResultByName("has_annos")) {
         try {
           item.annos = PlacesUtils.getAnnotationsForItem(itemId);
-        } catch (e) {
-          Cu.reportError("Unexpected error while reading annotations " + e);
+        } catch (ex) {
+          Cu.reportError("Unexpected error while reading annotations " + ex);
         }
       }
 
@@ -1752,7 +1759,6 @@ this.PlacesUtils = {
        LEFT JOIN moz_bookmarks b3 ON b3.id = d.parent
        LEFT JOIN moz_places h ON h.id = d.fk
        ORDER BY d.level, d.parent, d.position`;
-
 
     if (!aItemGuid)
       aItemGuid = this.bookmarks.rootGuid;
@@ -1883,11 +1889,6 @@ XPCOMUtils.defineLazyServiceGetter(PlacesUtils, "livemarks",
                                    "@mozilla.org/browser/livemark-service;2",
                                    "mozIAsyncLivemarks");
 
-XPCOMUtils.defineLazyGetter(PlacesUtils, "keywords", () => {
-  gKeywordsCachePromise.catch(Cu.reportError);
-  return Keywords;
-});
-
 XPCOMUtils.defineLazyGetter(this, "bundle", function() {
   const PLACES_STRING_BUNDLE_URI = "chrome://places/locale/places.properties";
   return Services.strings.createBundle(PLACES_STRING_BUNDLE_URI);
@@ -1978,7 +1979,7 @@ XPCOMUtils.defineLazyGetter(this, "gAsyncDBWrapperPromised",
  *  - 1 keyword can only point to 1 URL
  *  - 1 URL can have multiple keywords, iff they differ by POST data (included the empty one).
  */
-var Keywords = {
+PlacesUtils.keywords = {
   /**
    * Fetches a keyword entry based on keyword or URL.
    *
@@ -2008,8 +2009,13 @@ var Keywords = {
     if (onResult && typeof onResult != "function")
       throw new Error("onResult callback must be a valid function");
 
-    if (hasUrl)
-      keywordOrEntry.url = new URL(keywordOrEntry.url);
+    if (hasUrl) {
+      try {
+        keywordOrEntry.url = BOOKMARK_VALIDATORS.url(keywordOrEntry.url);
+      } catch (ex) {
+        throw new Error(keywordOrEntry.url + " is not a valid URL");
+      }
+    }
     if (hasKeyword)
       keywordOrEntry.keyword = keywordOrEntry.keyword.trim().toLowerCase();
 
@@ -2023,7 +2029,7 @@ var Keywords = {
       }
     };
 
-    return gKeywordsCachePromise.then(cache => {
+    return promiseKeywordsCache().then(cache => {
       let entries = [];
       if (hasKeyword) {
         let entry = cache.get(keywordOrEntry.keyword);
@@ -2054,7 +2060,7 @@ var Keywords = {
    *        An object describing the keyword to insert, in the form:
    *        {
    *          keyword: non-empty string,
-   *          URL: URL or href to associate to the keyword,
+   *          url: URL or href to associate to the keyword,
    *          postData: optional POST data to associate to the keyword
    *          source: The change source, forwarded to all bookmark observers.
    *            Defaults to nsINavBookmarksService::SOURCE_DEFAULT.
@@ -2083,10 +2089,14 @@ var Keywords = {
     keyword = keyword.trim().toLowerCase();
     let postData = keywordEntry.postData || "";
     // This also checks href for validity
-    url = new URL(url);
+    try {
+      url = BOOKMARK_VALIDATORS.url(url);
+    } catch (ex) {
+      throw new Error(url + " is not a valid URL");
+    }
 
-    return PlacesUtils.withConnectionWrapper("Keywords.insert", async db => {
-        let cache = await gKeywordsCachePromise;
+    return PlacesUtils.withConnectionWrapper("PlacesUtils.keywords.insert", async db => {
+        let cache = await promiseKeywordsCache();
 
         // Trying to set the same keyword is a no-op.
         let oldEntry = cache.get(keyword);
@@ -2178,8 +2188,8 @@ var Keywords = {
     let { keyword,
           source = Ci.nsINavBookmarksService.SOURCE_DEFAULT } = keywordOrEntry;
     keyword = keywordOrEntry.keyword.trim().toLowerCase();
-    return PlacesUtils.withConnectionWrapper("Keywords.remove", async function(db) {
-      let cache = await gKeywordsCachePromise;
+    return PlacesUtils.withConnectionWrapper("PlacesUtils.keywords.remove", async db => {
+      let cache = await promiseKeywordsCache();
       if (!cache.has(keyword))
         return;
       let { url } = cache.get(keyword);
@@ -2194,145 +2204,238 @@ var Keywords = {
       // Notify bookmarks about the removal.
       await notifyKeywordChange(url.href, "", source);
     });
-  }
+  },
+
+  /**
+   * Moves all (keyword, POST data) pairs from one URL to another, and fires
+   * observer notifications for all affected bookmarks. If the destination URL
+   * already has keywords, they will be removed and replaced with the source
+   * URL's keywords.
+   *
+   * @param oldURL
+   *        The source URL.
+   * @param newURL
+   *        The destination URL.
+   * @param source
+   *        The change source, forwarded to all bookmark observers.
+   * @return {Promise}
+   * @resolves when all keywords have been moved to the destination URL.
+   */
+  reassign(oldURL, newURL, source = PlacesUtils.bookmarks.SOURCES.DEFAULT) {
+    try {
+      oldURL = BOOKMARK_VALIDATORS.url(oldURL);
+    } catch (ex) {
+      throw new Error(oldURL + " is not a valid source URL");
+    }
+    try {
+      newURL = BOOKMARK_VALIDATORS.url(newURL);
+    } catch (ex) {
+      throw new Error(oldURL + " is not a valid destination URL");
+    }
+    return PlacesUtils.withConnectionWrapper("PlacesUtils.keywords.reassign",
+                                             async function(db) {
+      let keywordsToReassign = [];
+      let keywordsToRemove = [];
+      let cache = await promiseKeywordsCache();
+      for (let [keyword, entry] of cache) {
+        if (entry.url.href == oldURL.href) {
+          keywordsToReassign.push(keyword);
+        }
+        if (entry.url.href == newURL.href) {
+          keywordsToRemove.push(keyword);
+        }
+      }
+      if (!keywordsToReassign.length) {
+        return;
+      }
+
+      await db.executeTransaction(async function() {
+        // Remove existing keywords from the new URL.
+        await db.executeCached(
+          `DELETE FROM moz_keywords WHERE keyword = :keyword`,
+          keywordsToRemove.map(keyword => ({ keyword })));
+
+        // Move keywords from the old URL to the new URL.
+        await db.executeCached(`
+          UPDATE moz_keywords SET
+            place_id = (SELECT id FROM moz_places
+                        WHERE url_hash = hash(:newURL) AND
+                              url = :newURL)
+          WHERE place_id = (SELECT id FROM moz_places
+                            WHERE url_hash = hash(:oldURL) AND
+                                  url = :oldURL)`,
+          { newURL: newURL.href, oldURL: oldURL.href });
+      });
+      for (let keyword of keywordsToReassign) {
+        let entry = cache.get(keyword);
+        entry.url = newURL;
+      }
+      for (let keyword of keywordsToRemove) {
+        cache.delete(keyword);
+      }
+
+      if (keywordsToReassign.length) {
+        // If we moved any keywords, notify that we removed all keywords from
+        // the old and new URLs, then notify for each moved keyword.
+        await notifyKeywordChange(oldURL, "", source);
+        await notifyKeywordChange(newURL, "", source);
+        for (let keyword of keywordsToReassign) {
+          await notifyKeywordChange(newURL, keyword, source);
+        }
+      } else if (keywordsToRemove.length) {
+        // If the old URL didn't have any keywords, but the new URL did, just
+        // notify that we removed all keywords from the new URL.
+        await notifyKeywordChange(oldURL, "", source);
+      }
+    });
+  },
+
+  /**
+   * Removes all orphaned keywords from the given URLs. Orphaned keywords are
+   * associated with URLs that are no longer bookmarked. If a given URL is still
+   * bookmarked, its keywords will not be removed.
+   *
+   * @param urls
+   *        A list of URLs to check for orphaned keywords.
+   * @return {Promise}
+   * @resolves when all keywords have been removed from URLs that are no longer
+   *           bookmarked.
+   */
+  removeFromURLsIfNotBookmarked(urls) {
+    let hrefs = new Set();
+    for (let url of urls) {
+      try {
+        url = BOOKMARK_VALIDATORS.url(url);
+      } catch (ex) {
+        throw new Error(url + " is not a valid URL");
+      }
+      hrefs.add(url.href);
+    }
+    return PlacesUtils.withConnectionWrapper(
+      "PlacesUtils.keywords.removeFromURLsIfNotBookmarked",
+      async function(db) {
+        let keywordsByHref = new Map();
+        let cache = await promiseKeywordsCache();
+        for (let [keyword, entry] of cache) {
+          let href = entry.url.href;
+          if (!hrefs.has(href)) {
+            continue;
+          }
+          if (!keywordsByHref.has(href)) {
+            keywordsByHref.set(href, [keyword]);
+            continue;
+          }
+          let existingKeywords = keywordsByHref.get(href);
+          existingKeywords.push(keyword);
+        }
+        if (!keywordsByHref.size) {
+          return;
+        }
+
+        let placeInfosToRemove = [];
+        let rows = await db.execute(`
+          SELECT h.id, h.url
+          FROM moz_places h
+          JOIN moz_keywords k ON k.place_id = h.id
+          GROUP BY h.id
+          HAVING h.foreign_count = COUNT(*)`);
+        for (let row of rows) {
+          placeInfosToRemove.push({
+            placeId: row.getResultByName("id"),
+            href: row.getResultByName("url"),
+          });
+        }
+        if (!placeInfosToRemove.length) {
+          return;
+        }
+
+        await db.execute(`DELETE FROM moz_keywords WHERE place_id IN (${
+          Array.from(placeInfosToRemove.map(info => info.placeId)).join()})`);
+        for (let { href } of placeInfosToRemove) {
+          let keywords = keywordsByHref.get(href);
+          for (let keyword of keywords) {
+            cache.delete(keyword);
+          }
+        }
+    });
+  },
+
+  /**
+   * Removes all keywords from all URLs.
+   *
+   * @return {Promise}
+   * @resolves when all keywords have been removed.
+   */
+  eraseEverything() {
+    return PlacesUtils.withConnectionWrapper(
+      "PlacesUtils.keywords.eraseEverything",
+      async function(db) {
+        let cache = await promiseKeywordsCache();
+        if (!cache.size) {
+          return;
+        }
+        await db.executeCached(`DELETE FROM moz_keywords`);
+        cache.clear();
+      }
+    );
+  },
+
+  /**
+   * Invalidates the keywords cache, leaving all existing keywords in place.
+   * The cache will be repopulated on the next `PlacesUtils.keywords.*` call.
+   *
+   * @return {Promise}
+   * @resolves when the cache has been cleared.
+   */
+  invalidateCachedKeywords() {
+    gKeywordsCachePromise = gKeywordsCachePromise.then(_ => null);
+    return gKeywordsCachePromise;
+  },
 };
 
-// Set by the keywords API to distinguish notifications fired by the old API.
-// Once the old API will be gone, we can remove this and stop observing.
-var gIgnoreKeywordNotifications = false;
+var gKeywordsCachePromise = Promise.resolve();
 
-XPCOMUtils.defineLazyGetter(this, "gKeywordsCachePromise", () =>
-  PlacesUtils.withConnectionWrapper("PlacesUtils: gKeywordsCachePromise",
-    async function(db) {
-      let cache = new Map();
-
-      // Start observing changes to bookmarks. For now we are going to keep that
-      // relation for backwards compatibility reasons, but mostly because we are
-      // lacking a UI to manage keywords directly.
-      let observer = {
-        QueryInterface: XPCOMUtils.generateQI(Ci.nsINavBookmarkObserver),
-        onBeginUpdateBatch() {},
-        onEndUpdateBatch() {},
-        onItemAdded() {},
-        onItemVisited() {},
-        onItemMoved() {},
-
-        onItemRemoved(id, parentId, index, itemType, uri, guid, parentGuid,
-                      source) {
-          if (itemType != PlacesUtils.bookmarks.TYPE_BOOKMARK)
-            return;
-
-          let keywords = keywordsForHref(uri.spec);
-          // This uri has no keywords associated, so there's nothing to do.
-          if (keywords.length == 0)
-            return;
-
-          (async function() {
-            // If the uri is not bookmarked anymore, we can remove this keyword.
-            let bookmark = await PlacesUtils.bookmarks.fetch({ url: uri });
-            if (!bookmark) {
-              for (let keyword of keywords) {
-                await PlacesUtils.keywords.remove({ keyword, source });
-              }
-            }
-          })().catch(Cu.reportError);
-        },
-
-        onItemChanged(id, prop, isAnno, val, lastMod, itemType, parentId, guid,
-                      parentGuid, oldVal, source) {
-          if (gIgnoreKeywordNotifications) {
-            return;
-          }
-
-          if (prop == "keyword") {
-            this._onKeywordChanged(guid, val, oldVal);
-          } else if (prop == "uri") {
-            this._onUrlChanged(guid, val, oldVal, source).catch(Cu.reportError);
-          }
-        },
-
-        _onKeywordChanged(guid, keyword, href) {
-          if (keyword.length == 0) {
-            // We are removing a keyword.
-            let keywords = keywordsForHref(href);
-            for (let kw of keywords) {
-              cache.delete(kw);
-            }
-          } else {
-            // We are adding a new keyword.
-            cache.set(keyword, { keyword, url: new URL(href) });
-          }
-        },
-
-        async _onUrlChanged(guid, url, oldUrl, source) {
-          // Check if the old url is associated with keywords.
-          let entries = [];
-          await PlacesUtils.keywords.fetch({ url: oldUrl }, e => entries.push(e));
-          if (entries.length == 0) {
-            return;
-          }
-
-          // Move the keywords to the new url.
-          for (let entry of entries) {
-            await PlacesUtils.keywords.remove({
-              keyword: entry.keyword,
-              source,
-            });
-            await PlacesUtils.keywords.insert({
-              keyword: entry.keyword,
-              url,
-              postData: entry.postData,
-              source,
-            });
-          }
-        },
-      };
-
-      PlacesUtils.bookmarks.addObserver(observer);
-      PlacesUtils.registerShutdownFunction(() => {
-        PlacesUtils.bookmarks.removeObserver(observer);
-      });
-
-      let rows = await db.execute(
-        `SELECT keyword, url, post_data
-         FROM moz_keywords k
-         JOIN moz_places h ON h.id = k.place_id
-        `);
-      let brokenKeywords = [];
-      for (let row of rows) {
-        let keyword = row.getResultByName("keyword");
-        try {
-          let entry = { keyword,
-                        url: new URL(row.getResultByName("url")),
-                        postData: row.getResultByName("post_data") || null };
-          cache.set(keyword, entry);
-        } catch (ex) {
-          // The url is invalid, don't load the keyword and remove it, or it
-          // would break the whole keywords API.
-          brokenKeywords.push(keyword);
-        }
-      }
-
-      if (brokenKeywords.length) {
-        await db.execute(
-          `DELETE FROM moz_keywords
-           WHERE keyword IN (${brokenKeywords.map(JSON.stringify).join(",")})
-          `);
-      }
-
-      // Helper to get a keyword from an href.
-      function keywordsForHref(href) {
-        let keywords = [];
-        for (let [ key, val ] of cache) {
-          if (val.url.href == href)
-            keywords.push(key);
-        }
-        return keywords;
-      }
-
+function promiseKeywordsCache() {
+  let promise = gKeywordsCachePromise.then(function(cache) {
+    if (cache) {
       return cache;
     }
-));
+    return PlacesUtils.withConnectionWrapper(
+      "PlacesUtils: promiseKeywordsCache",
+      async db => {
+        let cache = new Map();
+        let rows = await db.execute(
+          `SELECT keyword, url, post_data
+           FROM moz_keywords k
+           JOIN moz_places h ON h.id = k.place_id
+          `);
+        let brokenKeywords = [];
+        for (let row of rows) {
+          let keyword = row.getResultByName("keyword");
+          try {
+            let entry = { keyword,
+                          url: new URL(row.getResultByName("url")),
+                          postData: row.getResultByName("post_data") || null };
+            cache.set(keyword, entry);
+          } catch (ex) {
+            // The url is invalid, don't load the keyword and remove it, or it
+            // would break the whole keywords API.
+            brokenKeywords.push(keyword);
+          }
+        }
+        if (brokenKeywords.length) {
+          await db.execute(
+            `DELETE FROM moz_keywords
+             WHERE keyword IN (${brokenKeywords.map(JSON.stringify).join(",")})
+            `);
+        }
+        return cache;
+      }
+    );
+  });
+  gKeywordsCachePromise = promise.catch(_ => {});
+  return promise;
+}
 
 // Sometime soon, likely as part of the transition to mozIAsyncBookmarks,
 // itemIds will be deprecated in favour of GUIDs, which play much better
@@ -2475,19 +2578,3 @@ var GuidHelper = {
     }
   }
 };
-
-/**
- * Executes a boolean validate function, throwing if it returns false.
- *
- * @param boolValidateFn
- *        A boolean validate function.
- * @return the input value.
- * @throws if input doesn't pass the validate function.
- */
-function simpleValidateFunc(boolValidateFn) {
-  return (v, input) => {
-    if (!boolValidateFn(v, input))
-      throw new Error("Invalid value");
-    return v;
-  };
-}

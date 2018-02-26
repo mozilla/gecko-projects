@@ -6,7 +6,7 @@
  * This file contains code for synchronizing engines.
  */
 
-this.EXPORTED_SYMBOLS = ["EngineSynchronizer"];
+var EXPORTED_SYMBOLS = ["EngineSynchronizer"];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Log.jsm");
@@ -21,12 +21,12 @@ ChromeUtils.defineModuleGetter(this, "Doctor",
  *
  * This was originally split out of service.js. The API needs lots of love.
  */
-this.EngineSynchronizer = function EngineSynchronizer(service) {
+function EngineSynchronizer(service) {
   this._log = Log.repository.getLogger("Sync.Synchronizer");
   this._log.manageLevelFromPref("services.sync.log.logger.synchronizer");
 
   this.service = service;
-};
+}
 
 EngineSynchronizer.prototype = {
   async sync(engineNamesToSync, why) {
@@ -49,7 +49,7 @@ EngineSynchronizer.prototype = {
     }
 
     // If we don't have a node, get one. If that fails, retry in 10 minutes.
-    if (!this.service.clusterURL && !(await this.service._clusterManager.setCluster())) {
+    if (!this.service.clusterURL && !(await this.service.identity.setCluster())) {
       this.service.status.sync = NO_SYNC_NODE_FOUND;
       this._log.info("No cluster URL found. Cannot sync.");
       return;

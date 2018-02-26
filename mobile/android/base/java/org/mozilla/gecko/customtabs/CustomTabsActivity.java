@@ -42,9 +42,6 @@ import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.FormAssistPopup;
 import org.mozilla.gecko.GeckoAccessibility;
 import org.mozilla.gecko.GeckoSharedPrefs;
-import org.mozilla.gecko.GeckoSession;
-import org.mozilla.gecko.GeckoSessionSettings;
-import org.mozilla.gecko.GeckoView;
 import org.mozilla.gecko.preferences.GeckoPreferences;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.SnackbarBuilder;
@@ -67,6 +64,9 @@ import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.webapps.WebApps;
 import org.mozilla.gecko.widget.ActionModePresenter;
 import org.mozilla.gecko.widget.GeckoPopupMenu;
+import org.mozilla.geckoview.GeckoSession;
+import org.mozilla.geckoview.GeckoSessionSettings;
+import org.mozilla.geckoview.GeckoView;
 
 import java.util.List;
 
@@ -649,6 +649,13 @@ public class CustomTabsActivity extends AppCompatActivity
         return true;
     }
 
+    @Override
+    public void onNewSession(final GeckoSession session, final String uri,
+                             final GeckoSession.Response<GeckoSession> response) {
+        // We should never get here because we abort loads that need a new session in onLoadUri()
+        throw new IllegalStateException("Unexpected new session");
+    }
+
     /* GeckoSession.ProgressListener */
     @Override
     public void onPageStart(GeckoSession session, String url) {
@@ -684,6 +691,11 @@ public class CustomTabsActivity extends AppCompatActivity
         Intent intent = new Intent(getIntent());
         intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
         startActivity(intent);
+    }
+
+    @Override
+    public void onCloseRequest(GeckoSession session) {
+        // Ignore
     }
 
     @Override

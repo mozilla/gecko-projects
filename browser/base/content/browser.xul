@@ -7,10 +7,12 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 <?xml-stylesheet href="chrome://browser/content/browser.css" type="text/css"?>
+<?xml-stylesheet href="chrome://browser/content/downloads/downloads.css"?>
 <?xml-stylesheet href="chrome://browser/content/places/places.css" type="text/css"?>
 <?xml-stylesheet href="chrome://browser/content/usercontext/usercontext.css" type="text/css"?>
 <?xml-stylesheet href="chrome://browser/skin/controlcenter/panel.css" type="text/css"?>
 <?xml-stylesheet href="chrome://browser/skin/customizableui/panelUI.css" type="text/css"?>
+<?xml-stylesheet href="chrome://browser/skin/downloads/downloads.css"?>
 <?xml-stylesheet href="chrome://browser/skin/" type="text/css"?>
 
 <?xul-overlay href="chrome://global/content/editMenuOverlay.xul"?>
@@ -496,6 +498,7 @@
 
 #include ../../components/customizableui/content/panelUI.inc.xul
 #include ../../components/controlcenter/content/panel.inc.xul
+#include ../../components/downloads/content/downloadsPanel.inc.xul
 
     <hbox id="downloads-animation-container" mousethrough="always">
       <vbox id="downloads-notification-anchor" hidden="true">
@@ -620,7 +623,6 @@
 #ifdef CAN_DRAW_IN_TITLEBAR
 #ifndef XP_MACOSX
       <hbox class="titlebar-placeholder" type="caption-buttons" ordinal="1000"
-            persist="width"
             skipintoolbarset="true"/>
 #endif
 #endif
@@ -694,7 +696,6 @@
             ordinal="1000"/>
 #ifdef CAN_DRAW_IN_TITLEBAR
       <hbox class="titlebar-placeholder" type="caption-buttons"
-            persist="width"
 #ifndef XP_MACOSX
             ordinal="1000"
 #endif
@@ -702,7 +703,6 @@
 
 #ifdef XP_MACOSX
       <hbox class="titlebar-placeholder" type="fullscreen-button"
-            persist="width"
             skipintoolbarset="true"/>
 #endif
 #endif
@@ -815,6 +815,8 @@
                          tooltiptext="&urlbar.popupBlocked.tooltip;"/>
                   <image data-permission-id="canvas" class="blocked-permission-icon canvas-icon" role="button"
                          tooltiptext="&urlbar.canvasBlocked.tooltip;"/>
+                  <image data-permission-id="midi" class="blocked-permission-icon midi-icon" role="button"
+                         tooltiptext="&urlbar.midiBlocked.tooltip;"/>
                 </box>
                 <box id="notification-popup-box"
                      hidden="true"
@@ -856,6 +858,8 @@
                          tooltiptext="&urlbar.emeNotificationAnchor.tooltip;"/>
                   <image id="persistent-storage-notification-icon" class="notification-anchor-icon persistent-storage-icon" role="button"
                          tooltiptext="&urlbar.persistentStorageNotificationAnchor.tooltip;"/>
+                  <image id="midi-notification-icon" class="notification-anchor-icon midi-icon" role="button"
+                         tooltiptext="&urlbar.midiNotificationAnchor.tooltip;"/>
                 </box>
                 <image id="connection-icon"/>
                 <image id="extension-icon"/>
@@ -925,7 +929,20 @@
                        overflows="false"
                        cui-areatype="toolbar"
                        hidden="true"
-                       tooltip="dynamic-shortcut-tooltip"/>
+                       tooltip="dynamic-shortcut-tooltip"
+                       indicator="true">
+            <!-- The panel's anchor area is smaller than the outer button, but must
+                 always be visible and must not move or resize when the indicator
+                 state changes, otherwise the panel could change its position or lose
+                 its arrow unexpectedly. -->
+            <stack id="downloads-indicator-anchor"
+                   consumeanchor="downloads-button">
+              <box id="downloads-indicator-icon"/>
+              <stack id="downloads-indicator-progress-outer">
+                <box id="downloads-indicator-progress-inner"/>
+              </stack>
+            </stack>
+          </toolbarbutton>
 
         <toolbarbutton id="library-button" class="toolbarbutton-1 chromeclass-toolbar-additional subviewbutton-nav"
                        removable="true"

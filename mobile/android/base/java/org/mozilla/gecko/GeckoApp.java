@@ -42,6 +42,9 @@ import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.util.ViewUtil;
 import org.mozilla.gecko.widget.ActionModePresenter;
 import org.mozilla.gecko.widget.AnchoredPopup;
+import org.mozilla.geckoview.GeckoSession;
+import org.mozilla.geckoview.GeckoSessionSettings;
+import org.mozilla.geckoview.GeckoView;
 
 import android.animation.Animator;
 import android.animation.ObjectAnimator;
@@ -855,6 +858,10 @@ public abstract class GeckoApp extends GeckoActivity
 
     @Override // GeckoSession.ContentListener
     public void onFocusRequest(final GeckoSession session) {
+    }
+
+    @Override // GeckoSession.ContentListener
+    public void onCloseRequest(final GeckoSession session) {
     }
 
     @Override // GeckoSession.ContentListener

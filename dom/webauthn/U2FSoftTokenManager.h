@@ -24,18 +24,10 @@ public:
   explicit U2FSoftTokenManager(uint32_t aCounter);
 
   RefPtr<U2FRegisterPromise>
-  Register(const nsTArray<WebAuthnScopedCredential>& aCredentials,
-           const WebAuthnAuthenticatorSelection &aAuthenticatorSelection,
-           const nsTArray<uint8_t>& aApplication,
-           const nsTArray<uint8_t>& aChallenge,
-           uint32_t aTimeoutMS) override;
+  Register(const WebAuthnMakeCredentialInfo& aInfo) override;
 
   RefPtr<U2FSignPromise>
-  Sign(const nsTArray<WebAuthnScopedCredential>& aCredentials,
-       const nsTArray<uint8_t>& aApplication,
-       const nsTArray<uint8_t>& aChallenge,
-       bool aRequireUserVerification,
-       uint32_t aTimeoutMS) override;
+  Sign(const WebAuthnGetAssertionInfo& aInfo) override;
 
   void Cancel() override;
 
@@ -46,6 +38,12 @@ private:
   nsresult IsRegistered(const nsTArray<uint8_t>& aKeyHandle,
                         const nsTArray<uint8_t>& aAppParam,
                         bool& aResult);
+
+  bool
+  FindRegisteredKeyHandle(const nsTArray<nsTArray<uint8_t>>& aAppIds,
+                          const nsTArray<WebAuthnScopedCredential>& aCredentials,
+                          /*out*/ nsTArray<uint8_t>& aKeyHandle,
+                          /*out*/ nsTArray<uint8_t>& aAppId);
 
   bool mInitialized;
   mozilla::UniquePK11SymKey mWrappingKey;

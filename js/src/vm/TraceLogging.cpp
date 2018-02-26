@@ -7,13 +7,13 @@
 #include "vm/TraceLogging.h"
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/EndianUtils.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ScopeExit.h"
 
 #include <string.h>
 
 #include "jsapi.h"
-#include "jsprf.h"
 
 #include "jit/BaselineJIT.h"
 #include "jit/CompileWrappers.h"

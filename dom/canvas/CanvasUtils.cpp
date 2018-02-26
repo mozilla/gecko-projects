@@ -9,7 +9,6 @@
 #include "nsIServiceManager.h"
 
 #include "nsIConsoleService.h"
-#include "nsIDOMCanvasRenderingContext2D.h"
 #include "nsICanvasRenderingContextInternal.h"
 #include "nsIHTMLCollection.h"
 #include "mozilla/dom/HTMLCanvasElement.h"
@@ -74,8 +73,7 @@ bool IsImageExtractionAllowed(nsIDocument *aDocument, JSContext *aCx)
 
     // Allow local files to extract canvas data.
     bool isFileURL;
-    (void) docURI->SchemeIs("file", &isFileURL);
-    if (isFileURL) {
+    if (NS_SUCCEEDED(docURI->SchemeIs("file", &isFileURL)) && isFileURL) {
         return true;
     }
 

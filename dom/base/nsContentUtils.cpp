@@ -134,8 +134,6 @@
 #include "nsIDOMDocument.h"
 #include "nsIDOMDocumentType.h"
 #include "nsIDOMElement.h"
-#include "nsIDOMHTMLFormElement.h"
-#include "nsIDOMHTMLInputElement.h"
 #include "nsIDOMNode.h"
 #include "nsIDOMNodeList.h"
 #include "nsIDOMWindowUtils.h"
@@ -1060,7 +1058,7 @@ nsContentUtils::Atob(const nsAString& aAsciiBase64String,
 }
 
 bool
-nsContentUtils::IsAutocompleteEnabled(nsIDOMHTMLInputElement* aInput)
+nsContentUtils::IsAutocompleteEnabled(mozilla::dom::HTMLInputElement* aInput)
 {
   NS_PRECONDITION(aInput, "aInput should not be null!");
 
@@ -1068,8 +1066,7 @@ nsContentUtils::IsAutocompleteEnabled(nsIDOMHTMLInputElement* aInput)
   aInput->GetAutocomplete(autocomplete);
 
   if (autocomplete.IsEmpty()) {
-    nsCOMPtr<nsIDOMHTMLFormElement> form;
-    aInput->GetForm(getter_AddRefs(form));
+    auto* form = aInput->GetForm();
     if (!form) {
       return true;
     }
@@ -10492,6 +10489,9 @@ nsContentUtils::AppendDocumentLevelNativeAnonymousContentTo(
     nsTArray<nsIContent*>& aElements)
 {
   MOZ_ASSERT(aDocument);
+#ifdef DEBUG
+  size_t oldLength = aElements.Length();
+#endif
 
   if (nsIPresShell* presShell = aDocument->GetShell()) {
     if (nsIFrame* scrollFrame = presShell->GetRootScrollFrame()) {
@@ -10507,6 +10507,14 @@ nsContentUtils::AppendDocumentLevelNativeAnonymousContentTo(
       }
     }
   }
+
+#ifdef DEBUG
+  for (size_t i = oldLength; i < aElements.Length(); i++) {
+    MOZ_ASSERT(
+        aElements[i]->GetProperty(nsGkAtoms::docLevelNativeAnonymousContent),
+        "Someone here has lied, or missed to flag the node");
+  }
+#endif
 }
 
 static void

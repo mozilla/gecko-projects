@@ -447,13 +447,6 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
         unboxSymbol(value, scratch);
         return scratch;
     }
-    Register extractCell(const Address& address, Register scratch) {
-        return extractObject(address, scratch);
-    }
-    Register extractCell(const ValueOperand& value, Register scratch) {
-        unboxNonDouble(value, scratch);
-        return scratch;
-    }
     Register extractInt32(const ValueOperand& value, Register scratch) {
         unboxInt32(value, scratch);
         return scratch;
@@ -733,8 +726,6 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
 
     void convertUInt64ToDouble(Register src, FloatRegister dest);
 
-    void wasmTruncateToI64(FloatRegister input, Register output, MIRType fromType,
-                           bool isUnsigned, Label* oolEntry, Label* oolRejoin);
 
     void breakpoint();
 

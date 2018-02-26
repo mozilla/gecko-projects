@@ -14,14 +14,22 @@
 #include "mozilla/UniquePtr.h"
 
 #include "jsapi.h" // For JSAutoByteString.  See bug 1033916.
-#include "jsbytecode.h"
 #include "jspubtd.h"
 
 #include "js/CallArgs.h"
 #include "js/CallNonGenericMethod.h"
 #include "js/Class.h"
 #include "js/HeapAPI.h"
+#include "js/TypeDecls.h"
 #include "js/Utility.h"
+
+#ifndef JS_STACK_GROWTH_DIRECTION
+# ifdef __hppa
+#  define JS_STACK_GROWTH_DIRECTION (1)
+# else
+#  define JS_STACK_GROWTH_DIRECTION (-1)
+# endif
+#endif
 
 #if JS_STACK_GROWTH_DIRECTION > 0
 # define JS_CHECK_STACK_SIZE(limit, sp) (MOZ_LIKELY((uintptr_t)(sp) < (limit)))

@@ -111,6 +111,24 @@ CodeGeneratorMIPSShared::branchToBlock(Assembler::FloatFormat fmt, FloatRegister
     }
 }
 
+FrameSizeClass
+FrameSizeClass::FromDepth(uint32_t frameDepth)
+{
+    return FrameSizeClass::None();
+}
+
+FrameSizeClass
+FrameSizeClass::ClassLimit()
+{
+    return FrameSizeClass(0);
+}
+
+uint32_t
+FrameSizeClass::frameSize() const
+{
+    MOZ_CRASH("MIPS does not use frame size classes");
+}
+
 void
 OutOfLineBailout::accept(CodeGeneratorMIPSShared* codegen)
 {
@@ -1481,17 +1499,19 @@ CodeGeneratorMIPSShared::visitWasmTruncateToInt32(LWasmTruncateToInt32* lir)
 
     MOZ_ASSERT(fromType == MIRType::Double || fromType == MIRType::Float32);
 
-    auto* ool = new (alloc()) OutOfLineWasmTruncateCheck(mir, input);
+    auto* ool = new (alloc()) OutOfLineWasmTruncateCheck(mir, input, output);
     addOutOfLineCode(ool, mir);
 
     Label* oolEntry = ool->entry();
     if (mir->isUnsigned()) {
         if (fromType == MIRType::Double)
-            masm.wasmTruncateDoubleToUInt32(input, output, oolEntry);
+            masm.wasmTruncateDoubleToUInt32(input, output, mir->isSaturating(), oolEntry);
         else if (fromType == MIRType::Float32)
-            masm.wasmTruncateFloat32ToUInt32(input, output, oolEntry);
+            masm.wasmTruncateFloat32ToUInt32(input, output, mir->isSaturating(), oolEntry);
         else
             MOZ_CRASH("unexpected type");
+
+        masm.bind(ool->rejoin());
         return;
     }
 
@@ -1505,12 +1525,29 @@ CodeGeneratorMIPSShared::visitWasmTruncateToInt32(LWasmTruncateToInt32* lir)
     masm.bind(ool->rejoin());
 }
 
+
+void
+CodeGeneratorMIPSShared::visitOutOfLineBailout(OutOfLineBailout* ool)
+{
+    // Push snapshotOffset and make sure stack is aligned.
+    masm.subPtr(Imm32(sizeof(Value)), StackPointer);
+    masm.storePtr(ImmWord(ool->snapshot()->snapshotOffset()), Address(StackPointer, 0));
+
+    masm.jump(&deoptLabel_);
+}
+
 void
 CodeGeneratorMIPSShared::visitOutOfLineWasmTruncateCheck(OutOfLineWasmTruncateCheck* ool)
 {
-    masm.outOfLineWasmTruncateToIntCheck(ool->input(), ool->fromType(), ool->toType(),
-                                         ool->isUnsigned(), ool->rejoin(),
-                                         ool->bytecodeOffset());
+    if(ool->toType() == MIRType::Int32)
+    {
+        masm.outOfLineWasmTruncateToInt32Check(ool->input(), ool->output(), ool->fromType(),
+                                               ool->flags(), ool->rejoin(), ool->bytecodeOffset());
+    } else {
+        MOZ_ASSERT(ool->toType() == MIRType::Int64);
+        masm.outOfLineWasmTruncateToInt64Check(ool->input(), ool->output64(), ool->fromType(),
+                                               ool->flags(), ool->rejoin(), ool->bytecodeOffset());
+    }
 }
 
 void
@@ -1555,7 +1592,7 @@ CodeGeneratorMIPSShared::visitCopySignD(LCopySignD* ins)
 void
 CodeGeneratorMIPSShared::visitValue(LValue* value)
 {
-    const ValueOperand out = ToOutValue(value);
+    const ValueOperand out = GetValueOutput(value);
 
     masm.moveValue(value->value(), out);
 }

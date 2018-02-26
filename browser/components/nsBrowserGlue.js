@@ -556,9 +556,6 @@ BrowserGlue.prototype = {
           }
         });
         break;
-      case "test-initialize-sanitizer":
-        Sanitizer.onStartup();
-        break;
       case "sync-ui-state:update":
         this._updateFxaBadges();
         break;
@@ -716,15 +713,9 @@ BrowserGlue.prototype = {
 
 
     // Initialize the default l10n resource sources for L10nRegistry.
-    const multilocalePath = "resource://gre/res/multilocale.json";
-    L10nRegistry.bootstrap = fetch(multilocalePath).then(d => d.json()).then(({ locales }) => {
-      const toolkitSource = new FileSource("toolkit", locales, "resource://gre/localization/{locale}/");
-      L10nRegistry.registerSource(toolkitSource);
-      const appSource = new FileSource("app", locales, "resource://app/localization/{locale}/");
-      L10nRegistry.registerSource(appSource);
-    }).catch(e => {
-      Services.console.logStringMessage(`Could not load multilocale.json. Error: ${e}`);
-    });
+    let locales = Services.locale.getPackagedLocales();
+    const appSource = new FileSource("app", locales, "resource://app/localization/{locale}/");
+    L10nRegistry.registerSource(appSource);
 
     Services.obs.notifyObservers(null, "browser-ui-startup-complete");
   },
@@ -2855,6 +2846,9 @@ const ContentPermissionIntegration = {
         if (Services.prefs.getBoolPref("browser.storageManager.enabled")) {
           return new PermissionUI.PersistentStoragePermissionPrompt(request);
         }
+      }
+      case "midi": {
+        return new PermissionUI.MIDIPermissionPrompt(request);
       }
     }
     return undefined;

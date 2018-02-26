@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-this.EXPORTED_SYMBOLS = [ "SitePermissions" ];
+var EXPORTED_SYMBOLS = [ "SitePermissions" ];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -136,7 +136,7 @@ const TemporaryBlockedPermissions = {
  * Some methods have the side effect of dispatching a "PermissionStateChange"
  * event on changes to temporary permissions, as mentioned in the respective docs.
  */
-this.SitePermissions = {
+var SitePermissions = {
   // Permission states.
   UNKNOWN: Services.perms.UNKNOWN_ACTION,
   ALLOW: Services.perms.ALLOW_ACTION,
@@ -149,6 +149,7 @@ this.SitePermissions = {
   SCOPE_TEMPORARY: "{SitePermissions.SCOPE_TEMPORARY}",
   SCOPE_SESSION: "{SitePermissions.SCOPE_SESSION}",
   SCOPE_PERSISTENT: "{SitePermissions.SCOPE_PERSISTENT}",
+  SCOPE_POLICY: "{SitePermissions.SCOPE_POLICY}",
 
   _defaultPrefBranch: Services.prefs.getBranch("permissions.default."),
 
@@ -188,7 +189,10 @@ this.SitePermissions = {
         let scope = this.SCOPE_PERSISTENT;
         if (permission.expireType == Services.perms.EXPIRE_SESSION) {
           scope = this.SCOPE_SESSION;
+        } else if (permission.expireType == Services.perms.EXPIRE_POLICY) {
+          scope = this.SCOPE_POLICY;
         }
+
         result.push({
           id: permission.type,
           scope,
@@ -358,6 +362,8 @@ this.SitePermissions = {
         result.state = permission.capability;
         if (permission.expireType == Services.perms.EXPIRE_SESSION) {
           result.scope = this.SCOPE_SESSION;
+        } else if (permission.expireType == Services.perms.EXPIRE_POLICY) {
+          result.scope = this.SCOPE_POLICY;
         }
       }
     }
@@ -430,6 +436,8 @@ this.SitePermissions = {
       let perms_scope = Services.perms.EXPIRE_NEVER;
       if (scope == this.SCOPE_SESSION) {
         perms_scope = Services.perms.EXPIRE_SESSION;
+      } else if (scope == this.SCOPE_POLICY) {
+        perms_scope = Services.perms.EXPIRE_POLICY;
       }
 
       Services.perms.add(uri, permissionID, state, perms_scope);
@@ -541,13 +549,13 @@ this.SitePermissions = {
       case this.PROMPT:
         return gStringBundle.GetStringFromName("state.current.prompt");
       case this.ALLOW:
-        if (scope && scope != this.SCOPE_PERSISTENT)
+        if (scope && scope != this.SCOPE_PERSISTENT && scope != this.SCOPE_POLICY)
           return gStringBundle.GetStringFromName("state.current.allowedTemporarily");
         return gStringBundle.GetStringFromName("state.current.allowed");
       case this.ALLOW_COOKIES_FOR_SESSION:
         return gStringBundle.GetStringFromName("state.current.allowedForSession");
       case this.BLOCK:
-        if (scope && scope != this.SCOPE_PERSISTENT)
+        if (scope && scope != this.SCOPE_PERSISTENT && scope != this.SCOPE_POLICY)
           return gStringBundle.GetStringFromName("state.current.blockedTemporarily");
         return gStringBundle.GetStringFromName("state.current.blocked");
       default:
@@ -648,12 +656,28 @@ var gPermissionObject = {
 
   "canvas": {
   },
+
+  "midi": {
+    exactHostMatch: true
+  },
+
+  "midi-sysex": {
+    exactHostMatch: true
+  }
 };
 
 // Delete this entry while being pre-off
 // or the persistent-storage permission would appear in Page info's Permission section
 if (!Services.prefs.getBoolPref("browser.storageManager.enabled")) {
   delete gPermissionObject["persistent-storage"];
+}
+
+if (!Services.prefs.getBoolPref("dom.webmidi.enabled")) {
+  // ESLint gets angry about array versus dot notation here, but some permission
+  // names use hyphens. Disabling rule for line to keep things consistent.
+  // eslint-disable-next-line dot-notation
+  delete gPermissionObject["midi"];
+  delete gPermissionObject["midi-sysex"];
 }
 
 XPCOMUtils.defineLazyPreferenceGetter(SitePermissions, "temporaryPermissionExpireTime",

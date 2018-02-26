@@ -20,7 +20,6 @@
 #include "jsarray.h"
 #include "jslibmath.h"
 #include "jsnum.h"
-#include "jsprf.h"
 #include "jsstr.h"
 
 #include "builtin/Eval.h"
@@ -1699,18 +1698,20 @@ js::ReportInNotObjectError(JSContext* cx, HandleValue lref, int lindex,
         return UniqueChars(JS_EncodeString(cx, str));
     };
 
-    UniqueChars lbytes = lref.isString()
-                       ? uniqueCharsFromString(cx, lref)
-                       : DecompileValueGenerator(cx, lindex, lref, nullptr);
-    if (!lbytes)
+    if (lref.isString() && rref.isString()) {
+        UniqueChars lbytes = uniqueCharsFromString(cx, lref);
+        if (!lbytes)
+            return;
+        UniqueChars rbytes = uniqueCharsFromString(cx, rref);
+        if (!rbytes)
+            return;
+        JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr, JSMSG_IN_STRING,
+                                   lbytes.get(), rbytes.get());
         return;
-    UniqueChars rbytes = rref.isString()
-                       ? uniqueCharsFromString(cx, rref)
-                       : DecompileValueGenerator(cx, rindex, rref, nullptr);
-    if (!rbytes)
-        return;
+    }
+
     JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr, JSMSG_IN_NOT_OBJECT,
-                               lbytes.get(), rbytes.get());
+                               InformalValueTypeName(rref));
 }
 
 static MOZ_NEVER_INLINE bool

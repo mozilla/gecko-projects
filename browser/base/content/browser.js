@@ -7426,13 +7426,16 @@ var gIdentityHandler = {
 
   updateSharingIndicator() {
     let tab = gBrowser.selectedTab;
-    let sharing = tab.getAttribute("sharing");
-    if (sharing)
-      this._identityBox.setAttribute("sharing", sharing);
-    else
-      this._identityBox.removeAttribute("sharing");
-
     this._sharingState = tab._sharingState;
+
+    this._identityBox.removeAttribute("paused");
+    this._identityBox.removeAttribute("sharing");
+    if (this._sharingState && this._sharingState.sharing) {
+      this._identityBox.setAttribute("sharing", this._sharingState.sharing);
+      if (this._sharingState.paused) {
+        this._identityBox.setAttribute("paused", "true");
+      }
+    }
 
     if (this._identityPopup.state == "open") {
       this.updateSitePermissions();
@@ -7930,7 +7933,7 @@ var gIdentityHandler = {
 
     if (this._sharingState) {
       // If WebRTC device or screen permissions are in use, we need to find
-      // the associated permission item to set the inUse field to true.
+      // the associated permission item to set the sharingState field.
       for (let id of ["camera", "microphone", "screen"]) {
         if (this._sharingState[id]) {
           let found = false;
@@ -7938,7 +7941,7 @@ var gIdentityHandler = {
             if (permission.id != id)
               continue;
             found = true;
-            permission.inUse = true;
+            permission.sharingState = this._sharingState[id];
             break;
           }
           if (!found) {
@@ -7949,7 +7952,7 @@ var gIdentityHandler = {
               id,
               state: SitePermissions.ALLOW,
               scope: SitePermissions.SCOPE_REQUEST,
-              inUse: true,
+              sharingState: this._sharingState[id],
             });
           }
         }
@@ -8000,8 +8003,28 @@ var gIdentityHandler = {
     let classes = "identity-popup-permission-icon " + aPermission.id + "-icon";
     if (aPermission.state == SitePermissions.BLOCK)
       classes += " blocked-permission-icon";
-    if (aPermission.inUse)
+
+    if (aPermission.sharingState == Ci.nsIMediaManagerService.STATE_CAPTURE_ENABLED ||
+       (aPermission.id == "screen" && aPermission.sharingState &&
+        !aPermission.sharingState.includes("Paused"))) {
       classes += " in-use";
+
+      // Synchronize control center and identity block blinking animations.
+      window.promiseDocumentFlushed(() => {}).then(() => {
+        let sharingIconBlink = document.getElementById("sharing-icon").getAnimations()[0];
+        if (sharingIconBlink) {
+          let startTime = sharingIconBlink.startTime;
+          window.requestAnimationFrame(() => {
+            // TODO(Bug 1440607): This could cause a style flush, but putting
+            // the getAnimations() call outside of rAF causes a leak.
+            let imgBlink = img.getAnimations()[0];
+            if (imgBlink) {
+              imgBlink.startTime = startTime;
+            }
+          });
+        }
+      });
+    }
     img.setAttribute("class", classes);
 
     let nameLabel = document.createElement("label");
@@ -8009,7 +8032,9 @@ var gIdentityHandler = {
     nameLabel.setAttribute("class", "identity-popup-permission-label");
     nameLabel.textContent = SitePermissions.getPermissionLabel(aPermission.id);
 
-    if (aPermission.id == "popup") {
+    let isPolicyPermission = aPermission.scope == SitePermissions.SCOPE_POLICY;
+
+    if (aPermission.id == "popup" && !isPolicyPermission) {
       let menulist = document.createElement("menulist");
       let menupopup = document.createElement("menupopup");
       let block = document.createElement("vbox");
@@ -8058,11 +8083,22 @@ var gIdentityHandler = {
     let {state, scope} = aPermission;
     // If the user did not permanently allow this device but it is currently
     // used, set the variables to display a "temporarily allowed" info.
-    if (state != SitePermissions.ALLOW && aPermission.inUse) {
+    if (state != SitePermissions.ALLOW && aPermission.sharingState) {
       state = SitePermissions.ALLOW;
       scope = SitePermissions.SCOPE_REQUEST;
     }
     stateLabel.textContent = SitePermissions.getCurrentStateLabel(state, scope);
+
+    container.appendChild(img);
+    container.appendChild(nameLabel);
+    container.appendChild(stateLabel);
+
+    /* We return the permission item here without a remove button if the permission is a
+       SCOPE_POLICY permission. Policy permissions cannot be removed/changed for the duration
+       of the browser session. */
+    if (isPolicyPermission) {
+      return container;
+    }
 
     let button = document.createElement("button");
     button.setAttribute("class", "identity-popup-permission-remove-button");
@@ -8071,7 +8107,7 @@ var gIdentityHandler = {
     button.addEventListener("command", () => {
       let browser = gBrowser.selectedBrowser;
       this._permissionList.removeChild(container);
-      if (aPermission.inUse &&
+      if (aPermission.sharingState &&
           ["camera", "microphone", "screen"].includes(aPermission.id)) {
         let windowId = this._sharingState.windowId;
         if (aPermission.id == "screen") {
@@ -8128,9 +8164,6 @@ var gIdentityHandler = {
       histogram.add(aPermission.id, permissionType);
     });
 
-    container.appendChild(img);
-    container.appendChild(nameLabel);
-    container.appendChild(stateLabel);
     container.appendChild(button);
 
     return container;

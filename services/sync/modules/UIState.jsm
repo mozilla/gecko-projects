@@ -14,7 +14,7 @@
  * @property {boolean} [syncing] Whether or not we are currently syncing.
  */
 
-this.EXPORTED_SYMBOLS = ["UIState"];
+var EXPORTED_SYMBOLS = ["UIState"];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -28,6 +28,7 @@ const TOPICS = [
   "weave:service:sync:start",
   "weave:service:sync:finish",
   "weave:service:sync:error",
+  "weave:service:start-over:finish",
   "fxaccounts:onverified",
   "fxaccounts:onlogin", // Defined in FxAccountsCommon, pulling it is expensive.
   "fxaccounts:onlogout",
@@ -241,7 +242,7 @@ for (let topic of TOPICS) {
   Services.obs.addObserver(UIStateInternal, topic);
 }
 
-this.UIState = {
+var UIState = {
   _internal: UIStateInternal,
 
   ON_UPDATE,

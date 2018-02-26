@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-this.EXPORTED_SYMBOLS = ["Utils", "Svc", "SerializableSet"];
+var EXPORTED_SYMBOLS = ["Utils", "Svc", "SerializableSet"];
 
 ChromeUtils.import("resource://services-common/observers.js");
 ChromeUtils.import("resource://services-common/utils.js");
@@ -53,7 +53,7 @@ class HMACMismatch extends Error {
 /*
  * Utility functions
  */
-this.Utils = {
+var Utils = {
   // Aliases from CryptoUtils.
   generateRandomBytes: CryptoUtils.generateRandomBytes,
   computeHTTPMACSHA1: CryptoUtils.computeHTTPMACSHA1,
@@ -609,25 +609,6 @@ this.Utils = {
    * reset when we drop sync credentials, etc.
    */
   getSyncCredentialsHosts() {
-    let result = new Set(this.getSyncCredentialsHostsLegacy());
-    for (let host of this.getSyncCredentialsHostsFxA()) {
-      result.add(host);
-    }
-    return result;
-  },
-
-  /*
-   * Get the "legacy" identity hosts.
-   */
-  getSyncCredentialsHostsLegacy() {
-    // the legacy sync host
-    return new Set([PWDMGR_HOST]);
-  },
-
-  /*
-   * Get the FxA identity hosts.
-   */
-  getSyncCredentialsHostsFxA() {
     let result = new Set();
     // the FxA host
     result.add(FxAccountsCommon.FXA_PWDMGR_HOST);
@@ -778,7 +759,7 @@ XPCOMUtils.defineLazyGetter(Utils, "utf8Encoder", () =>
 /*
  * Commonly-used services
  */
-this.Svc = {};
+var Svc = {};
 Svc.Prefs = new Preferences(PREFS_BRANCH);
 Svc.Obs = Observers;
 

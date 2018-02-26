@@ -4,7 +4,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["DownloadNotifications"];
+var EXPORTED_SYMBOLS = ["DownloadNotifications"];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -18,8 +18,6 @@ ChromeUtils.defineModuleGetter(this, "UITelemetry", "resource://gre/modules/UITe
 
 XPCOMUtils.defineLazyServiceGetter(this, "ParentalControls",
   "@mozilla.org/parental-controls-service;1", "nsIParentalControlsService");
-
-var Log = ChromeUtils.import("resource://gre/modules/AndroidLog.jsm", {}).AndroidLog.i.bind(null, "DownloadNotifications");
 
 XPCOMUtils.defineLazyGetter(this, "strings",
                             () => Services.strings.createBundle("chrome://browser/locale/browser.properties"));
