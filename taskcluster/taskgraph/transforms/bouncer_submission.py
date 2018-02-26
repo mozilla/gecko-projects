@@ -104,7 +104,12 @@ def make_task_worker(config, jobs):
         del job['bouncer-products']
 
         if job['worker']['entries']:
-            yield job
+            # XXX Because rc jobs are defined within the same kind, we need to delete the
+            # firefox-rc job at this stage, if we're not building an RC. Otherwise, even if
+            # target_tasks.py filters out the rc job, it gets resurected by any kind that depends
+            # on the release-bouncer-sub one (release-notify-promote as of time of this writing).
+            if config.params['release_type'] == 'rc' or job['name'] != 'firefox-rc':
+                yield job
         else:
             logger.warn('No bouncer entries defined in bouncer submission task for "{}". \
 Job deleted.'.format(job['name']))
