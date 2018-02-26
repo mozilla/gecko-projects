@@ -92,8 +92,6 @@ def make_task_worker(config, jobs):
             job, 'scopes', item_name=job['name'], project=config.params['project']
         )
 
-        job['scopes'].append('project:releng:bouncer:action:submission')
-
         # No need to filter out ja-JP-mac, we need to upload both
         all_locales = list(sorted(parse_locales_file(job['locales-file']).keys()))
         job['worker']['locales'] = all_locales
@@ -138,6 +136,8 @@ partial-related entry for "{}"'.format(job['name']))
         ]
         previous_versions = [None]
 
+    project = config.params['project']
+
     return {
         craft_bouncer_product_name(
             product, bouncer_product, current_version, current_build_number, previous_version
@@ -145,7 +145,7 @@ partial-related entry for "{}"'.format(job['name']))
             'options': {
                 'add_locales': craft_add_locales(product),
                 'check_uptake': craft_check_uptake(bouncer_product),
-                'ssl_only': craft_ssl_only(bouncer_product),
+                'ssl_only': craft_ssl_only(bouncer_product, project),
             },
             'paths_per_bouncer_platform': craft_paths_per_bouncer_platform(
                 product, bouncer_product, bouncer_platforms, current_version,
@@ -231,7 +231,11 @@ def craft_check_uptake(bouncer_product):
     return bouncer_product != 'complete-mar-candidates'
 
 
-def craft_ssl_only(bouncer_product):
+def craft_ssl_only(bouncer_product, project):
+    # XXX ESR is the only channel where we force serve the installer over SSL
+    if '-esr' in project and bouncer_product == 'installer':
+        return True
+
     return bouncer_product not in (
         'complete-mar',
         'installer',
