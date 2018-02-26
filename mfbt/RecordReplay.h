@@ -432,11 +432,7 @@ enum class AllocatedMemoryKind
   Untracked,
 
   // Memory that is saved and restored when taking or restoring snapshots.
-  Tracked,
-
-  // As for Tracked, but the API is called while holding a special lock on free
-  // memory regions in the process. This is for internal use only.
-  TrackedFreeRegionLockHeld
+  Tracked
 };
 
 // Allocate or deallocate a block of memory of a particular kind. Allocated

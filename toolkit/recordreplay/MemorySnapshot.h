@@ -31,23 +31,13 @@ namespace recordreplay {
 // system. We instead keep a set of free blocks that are unused at the current
 // point of execution and are available to satisfy new allocations.
 
-// Note a range of memory that was just allocated from the system, and the
-// kind of memory allocation that was performed. This is called by platform
-// specific redirections.
-void RegisterAllocatedMemory(void* aAddress, size_t aSize, AllocatedMemoryKind aKind);
-
-// Note a range of memory that we are attempting to release back to the system.
-// This is called by platform specific redirections, and returns true if the
-// memory may be released back to the system.
-bool UnregisterDeallocatedMemory(void* aAddress, size_t aSize, AllocatedMemoryKind aKind);
-
-// Attempt to allocate a block of memory from the set of free blocks, returning
-// null if a suitable block was not found. aAddress is an optional address at
-// which to allocate the block. The resulting memory will be zeroed.
-void* TryAllocateMemory(void* aAddress, size_t aSize, AllocatedMemoryKind aKind);
-
-// Try to allocate at a specific address, even if it is already mapped.
+// Try to allocate at a specific address, even if it is already considered
+// allocated.
 void* AllocateFixedMemory(void* aAddress, size_t aSize);
+
+// Allocate memory, trying to use a specific address if provided but only if
+// it is free.
+void* AllocateMemoryTryAddress(void* aAddress, size_t aSize, AllocatedMemoryKind aKind);
 
 // Return whether system threads should be suspended and unable to run.
 bool SystemThreadsShouldBeSuspended();

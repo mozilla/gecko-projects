@@ -42,22 +42,15 @@ class SplayTree
   AllocPolicy mAlloc;
   Node* mRoot;
   Node* mFreeList;
-  InfallibleVector<Node*, 4, AllocPolicy> mChunks;
 
   SplayTree(const SplayTree&) = delete;
   SplayTree& operator=(const SplayTree&) = delete;
 
 public:
 
-  explicit SplayTree()
-    : mRoot(nullptr), mFreeList(nullptr)
+  explicit SplayTree(const AllocPolicy& aAlloc = AllocPolicy())
+    : mAlloc(aAlloc), mRoot(nullptr), mFreeList(nullptr)
   {}
-
-  ~SplayTree() {
-    for (Node* nodeArray : mChunks) {
-      mAlloc.template free_<Node>(nodeArray, NodesPerChunk());
-    }
-  }
 
   bool empty() const {
     return !mRoot;
@@ -268,7 +261,6 @@ private:
         nodeArray[i].mLeft = &nodeArray[i + 1];
       }
       mFreeList = nodeArray;
-      mChunks.emplaceBack(nodeArray);
     }
     Node* node = mFreeList;
     mFreeList = node->mLeft;

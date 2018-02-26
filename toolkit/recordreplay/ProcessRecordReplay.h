@@ -153,15 +153,6 @@ RoundupSizeToPageBoundary(size_t aSize)
   return aSize;
 }
 
-template <typename Ptr, typename Size>
-static inline void
-RoundRegionToPageBoundaries(Ptr* aAddress, Size* aSize)
-{
-  (*aSize) += (uint8_t*) *aAddress - PageBase((void*) *aAddress);
-  *aAddress = (Ptr) PageBase((void*) *aAddress);
-  *aSize = RoundupSizeToPageBoundary(*aSize);
-}
-
 static inline bool
 TestEnv(const char* env)
 {
@@ -211,6 +202,10 @@ void DumpTimers();
 
 // Generic typedef for a system file handle.
 typedef size_t FileHandle;
+
+// Allocate/deallocate a block of memory.
+void* DirectAllocateMemory(void* aAddress, size_t aSize);
+void DirectDeallocateMemory(void* aAddress, size_t aSize);
 
 // Give a block of memory R or RX access.
 void DirectWriteProtectMemory(void* aAddress, size_t aSize, bool aExecutable,

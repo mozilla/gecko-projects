@@ -100,19 +100,6 @@ namespace recordreplay {
 // Memory Snapshot Structures
 ///////////////////////////////////////////////////////////////////////////////
 
-// The number of megabytes to preallocate for use as page copies. The snapshot
-// mechanism tries to write pages to disk to avoid filling this up, but
-// allocation of additional pages might still occur.
-#define PagePreallocatedMB 300
-
-// The target range for the number of megabytes of free pages to have.
-#define PageFreeListMinMB 30
-#define PageFreeListMaxMB 50
-
-#define PagePreallocatedCount (PagePreallocatedMB * 1024 * 1024 / PageSize)
-#define PageFreeListMinCount  (PageFreeListMinMB * 1024 * 1024 / PageSize)
-#define PageFreeListMaxCount  (PageFreeListMaxMB * 1024 * 1024 / PageSize)
-
 // A region of allocated memory which should be tracked by MemoryInfo.
 struct AllocatedMemoryRegion {
   uint8_t* mBase;
@@ -241,6 +228,75 @@ public:
 
 static const size_t NumSnapshotThreads = 8;
 
+// A set of free regions in the process. There are two of these, for the
+// free regions in tracked and untracked memory.
+class FreeRegionSet {
+  // Kind of memory being managed. This also describes the memory used by the
+  // set itself.
+  AllocatedMemoryKind mKind;
+
+  // Lock protecting contents of the structure.
+  SpinLock mLock;
+
+  // To avoid reentrancy issues when growing the set, a chunk of pages for
+  // the splay tree is preallocated for use the next time the tree needs to
+  // expand its size.
+  static const size_t ChunkPages = 4;
+  void* mNextChunk;
+
+  // Ensure there is a chunk available for the splay tree.
+  void MaybeRefillNextChunk();
+
+  // Get the next chunk from the free region set for this memory kind.
+  void* TakeNextChunk();
+
+  struct MyAllocPolicy {
+    FreeRegionSet& mSet;
+
+    template <typename T>
+    void free_(T* aPtr, size_t aSize) { MOZ_CRASH(); }
+
+    template <typename T>
+    T* pod_malloc(size_t aNumElems) {
+      MOZ_RELEASE_ASSERT(sizeof(T) * aNumElems <= ChunkPages * PageSize);
+      return (T*) mSet.TakeNextChunk();
+    }
+
+    explicit MyAllocPolicy(FreeRegionSet& aSet)
+      : mSet(aSet)
+    {}
+  };
+
+  // All memory in gMemoryInfo->mTrackedRegions that is not in use at the current
+  // point in execution.
+  typedef SplayTree<AllocatedMemoryRegion,
+                    AllocatedMemoryRegion::SizeReverseSort,
+                    MyAllocPolicy, ChunkPages> Tree;
+  Tree mRegions;
+
+  void InsertLockHeld(void* aAddress, size_t aSize);
+  void* ExtractLockHeld(size_t aSize);
+
+public:
+  explicit FreeRegionSet(AllocatedMemoryKind aKind)
+    : mKind(aKind), mRegions(MyAllocPolicy(*this))
+  {}
+
+  // Get the single region set for a given memory kind.
+  static FreeRegionSet& Get(AllocatedMemoryKind aKind);
+
+  // Add a free region to the set.
+  void Insert(void* aAddress, size_t aSize);
+
+  // Remove a free region of the specified size. If aAddress is specified then
+  // this address will be prioritized, but a different pointer may be returned.
+  // The resulting memory will be zeroed.
+  void* Extract(void* aAddress, size_t aSize);
+
+  // Return whether a memory range intersects this set at all.
+  bool Intersects(void* aAddress, size_t aSize);
+};
+
 // Information about the current memory state. The contents of this structure
 // are in untracked memory.
 struct MemoryInfo {
@@ -276,6 +332,9 @@ struct MemoryInfo {
   // main thread when memory changes are not allowed.
   SortedDirtyPageSet mActiveDirty;
 
+  // All untracked memory which is available for new allocations.
+  FreeRegionSet mFreeUntrackedRegions;
+
   // Worklists for each snapshot thread.
   SnapshotThreadWorklist mSnapshotWorklists[NumSnapshotThreads];
 
@@ -286,17 +345,16 @@ struct MemoryInfo {
   // Whether snapshot threads should idle.
   SnapshotThreadCondition mSnapshotThreadsShouldIdle;
 
-  // Buffer of pages available for use as copies of other pages.
-  uint8_t* mPreallocatedPages;
+  // Lock protecting state coordinating management of in-memory snapshot pages.
+  SpinLock mSnapshotPagesLock;
 
-  // Vector of indexes into the preallocated pages which are unused.
-  uint32_t mPageFreeList[PagePreallocatedCount];
-  size_t mPageFreeListCount;
-  SpinLock mPageFreeListLock;
+  // The number of untracked page copies that are in use by in-memory snapshots.
+  // Protected by mSnapshotPagesLock.
+  size_t mNumSnapshotPages;
 
-  // Whether snapshot threads have been woken up due to us running low on
-  // unused preallocated pages.
-  bool mPageFreeListPressure;
+  // Whether snapshot threads have been woken up due to excessive pages in use
+  // by in-memory snapshots. Protected by mSnapshotPagesLock.
+  bool mSnapshotPagePressure;
 
   // Counter used by the countdown thread.
   Atomic<size_t, SequentiallyConsistent, Behavior::DontPreserve> mCountdown;
@@ -311,6 +369,7 @@ struct MemoryInfo {
 
   MemoryInfo()
     : mMemoryChangesAllowed(true)
+    , mFreeUntrackedRegions(AllocatedMemoryKind::Untracked)
     , mStartTime(CurrentTime())
   {
     // The singleton MemoryInfo is allocated with zeroed memory, so other
@@ -481,33 +540,35 @@ SnapshotThreadCondition::WaitUntilNoLongerActive()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Page Copy Allocation
+// Snapshot Page Allocation
 ///////////////////////////////////////////////////////////////////////////////
+
+// Approximate limit for the memory to use for in-memory snapshot pages.
+static const size_t SnapshotPageMaxMB = 300;
+static const size_t SnapshotPageMaxCount = SnapshotPageMaxMB * 1024 * 1024 / PageSize;
+
+// Lower limit at which to stop writing snapshots to disk.
+static const size_t SnapshotPageMinMB = 280;
+static const size_t SnapshotPageMinCount = SnapshotPageMinMB * 1024 * 1024 / PageSize;
 
 // Get a page in untracked memory that can be used as a copy of a tracked page.
 static uint8_t*
 AllocatePageCopy()
 {
   {
-    AutoSpinLock ex(gMemoryInfo->mPageFreeListLock);
-    if (gMemoryInfo->mPageFreeListCount) {
-      uint32_t index = gMemoryInfo->mPageFreeList[--gMemoryInfo->mPageFreeListCount];
-      uint8_t* page = gMemoryInfo->mPreallocatedPages + index * PageSize;
-
-      // If we are running low on free pages, wake up snapshot threads so that
-      // they can start writing old diff pages out to disk.
-      if (index <= PageFreeListMinCount && !gMemoryInfo->mPageFreeListPressure) {
+    AutoSpinLock ex(gMemoryInfo->mSnapshotPagesLock);
+    if (++gMemoryInfo->mNumSnapshotPages >= SnapshotPageMaxCount) {
+      if (!gMemoryInfo->mSnapshotPagePressure) {
+        // Wake up snapshot threads so that they can start writing old diff
+        // pages out to disk.
         for (size_t i = 0; i < NumSnapshotThreads; i++) {
           Thread::Notify(gMemoryInfo->mSnapshotWorklists[i].mThreadId);
         }
-        gMemoryInfo->mPageFreeListPressure = true;
+        gMemoryInfo->mSnapshotPagePressure = true;
       }
-
-      return page;
     }
   }
 
-  // The freelist was empty, get a new page from the system.
   return (uint8_t*) AllocateMemory(PageSize, AllocatedMemoryKind::Untracked);
 }
 
@@ -515,19 +576,15 @@ AllocatePageCopy()
 static void
 FreePageCopy(uint8_t* aPage)
 {
-  // If the page is within the block of memory used by the preallocated pages,
-  // add the page to the freelist. Otherwise free it directly from the system.
-  uint32_t index = (aPage - gMemoryInfo->mPreallocatedPages) / PageSize;
-  if (index < PagePreallocatedCount) {
-    AutoSpinLock ex(gMemoryInfo->mPageFreeListLock);
-    MOZ_RELEASE_ASSERT(gMemoryInfo->mPageFreeListCount < PagePreallocatedCount);
-    gMemoryInfo->mPageFreeList[gMemoryInfo->mPageFreeListCount++] = index;
-    if (gMemoryInfo->mPageFreeListCount >= PageFreeListMaxCount) {
-      gMemoryInfo->mPageFreeListPressure = false;
+  {
+    AutoSpinLock ex(gMemoryInfo->mSnapshotPagesLock);
+    MOZ_RELEASE_ASSERT(gMemoryInfo->mNumSnapshotPages);
+    if (--gMemoryInfo->mNumSnapshotPages <= SnapshotPageMinCount) {
+      gMemoryInfo->mSnapshotPagePressure = false;
     }
-  } else {
-    DeallocateMemory(aPage, PageSize, AllocatedMemoryKind::Untracked);
   }
+
+  DeallocateMemory(aPage, PageSize, AllocatedMemoryKind::Untracked);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -549,6 +606,21 @@ MemoryMove(void* aDst, void* aSrc, size_t aSize)
   size_t* nsrc = (size_t*)aSrc;
   for (size_t i = 0; i < aSize / sizeof(size_t); i++) {
     ndst[i] = nsrc[i];
+  }
+}
+
+// Similarly, zero out a range of memory without doing anything weird with
+// dynamic code loading.
+static void
+MemoryZero(void* aDst, size_t aSize)
+{
+  MOZ_ASSERT((size_t)aDst % sizeof(size_t) == 0);
+  MOZ_ASSERT(aSize % sizeof(size_t) == 0);
+
+  // Use volatile here to avoid annoying clang optimizations.
+  volatile size_t* ndst = (size_t*)aDst;
+  for (size_t i = 0; i < aSize / sizeof(size_t); i++) {
+    ndst[i] = 0;
   }
 }
 
@@ -835,51 +907,12 @@ ProcessAllInitialMemoryRegions()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Replay Memory Allocation
+// Free Region Management
 ///////////////////////////////////////////////////////////////////////////////
 
-static void
-EnsureMemoryDoesNotOverlapSystemThreadStack(void* aAddress, size_t aSize)
-{
-  if (!gMemoryInfo) {
-    return;
-  }
-  AutoSpinLock lock(gMemoryInfo->mSystemThreadStacksLock);
-  for (auto stack : gMemoryInfo->mSystemThreadStacks) {
-    MOZ_RELEASE_ASSERT(!MemoryIntersects(stack.mBase, stack.mSize, (uint8_t*)aAddress, aSize));
-  }
-}
-
-void
-RegisterAllocatedMemory(void* aBaseAddress, size_t aSize, AllocatedMemoryKind aKind)
-{
-  MOZ_RELEASE_ASSERT(aBaseAddress == PageBase(aBaseAddress));
-  MOZ_RELEASE_ASSERT(aSize == RoundupSizeToPageBoundary(aSize));
-
-  if (!IsRecordingOrReplaying()) {
-    return;
-  }
-
-  uint8_t* aAddress = reinterpret_cast<uint8_t*>(aBaseAddress);
-
-  EnsureMemoryDoesNotOverlapSystemThreadStack(aAddress, aSize);
-  if (aKind == AllocatedMemoryKind::Untracked) {
-    if (!HasTakenSnapshot()) {
-      AddInitialUntrackedMemoryRegion(aAddress, aSize);
-    }
-  } else if (HasTakenSnapshot()) {
-    EnsureMemoryChangesAllowed();
-    DirectWriteProtectMemory(aAddress, aSize, true);
-    AddTrackedRegion(aAddress, aSize, true);
-  }
-}
-
 // All memory in gMemoryInfo->mTrackedRegions that is not in use at the current
-// point in execution. Protected by gFreeRegionsLock.
-typedef SplayTree<AllocatedMemoryRegion, AllocatedMemoryRegion::SizeReverseSort,
-                  AllocPolicy<AllocatedMemoryKind::TrackedFreeRegionLockHeld>, 4> FreeRegionsTree;
-static FreeRegionsTree gFreeRegions;
-static SpinLock gFreeRegionsLock;
+// point in execution.
+static FreeRegionSet gFreeRegions(AllocatedMemoryKind::Tracked);
 
 // The size of gMemoryInfo->mTrackedRegionsByAllocationOrder we expect to see
 // at the point of the last snapshot.
@@ -900,116 +933,160 @@ FixupFreeRegionsAfterRewind()
   size_t newTrackedRegions = gMemoryInfo->mTrackedRegionsByAllocationOrder.length();
   for (size_t i = gNumTrackedRegions; i < newTrackedRegions; i++) {
     const AllocatedMemoryRegion& region = gMemoryInfo->mTrackedRegionsByAllocationOrder[i];
-    gFreeRegions.insert(region.mSize, region);
+    gFreeRegions.Insert(region.mBase, region.mSize);
   }
   gNumTrackedRegions = newTrackedRegions;
 }
 
-static void
-AddFreeRegion(void* aAddress, size_t aSize)
+/* static */ FreeRegionSet&
+FreeRegionSet::Get(AllocatedMemoryKind aKind)
 {
-  // This must be called with the free regions lock held.
-  MOZ_RELEASE_ASSERT(aAddress && aAddress == PageBase(aAddress));
-  MOZ_RELEASE_ASSERT(aSize && aSize == RoundupSizeToPageBoundary(aSize));
-
-  gFreeRegions.insert(aSize, AllocatedMemoryRegion((uint8_t*)aAddress, aSize, true));
-}
-
-bool
-UnregisterDeallocatedMemory(void* aAddress, size_t aSize, AllocatedMemoryKind aKind)
-{
-  MOZ_RELEASE_ASSERT(aAddress == PageBase(aAddress));
-  MOZ_RELEASE_ASSERT(aSize == RoundupSizeToPageBoundary(aSize));
-
-  if (!aAddress || !aSize || !IsRecordingOrReplaying()) {
-    return true;
-  }
-
-  if (aKind == AllocatedMemoryKind::Untracked) {
-    if (!HasTakenSnapshot()) {
-      RemoveInitialUntrackedRegion(reinterpret_cast<uint8_t*>(aAddress), aSize);
-    }
-    return true;
-  }
-
-  if (!HasTakenSnapshot()) {
-    return true;
-  }
-
-  if (aKind == AllocatedMemoryKind::TrackedFreeRegionLockHeld) {
-    // This region was freed while the gFreeRegions vector was reallocated when
-    // we added another free region. Avoid reentrancy issues by ignoring this
-    // region, making it unavailable for use by future allocations.
-    return false;
-  }
-
-  // For simplicity, all free regions must be executable, so ignore deallocated
-  // memory in regions that are not executable.
-  bool executable;
-  if (!IsTrackedAddress(aAddress, &executable) || !executable) {
-    return false;
-  }
-
-  // Mark this region as free, but do not unmap it. It will become usable for
-  // later allocations, but will not need to be remapped if we end up
-  // rewinding to a point where this memory was in use.
-  AutoSpinLock ex(gFreeRegionsLock);
-  AddFreeRegion(aAddress, aSize);
-  return false;
+  return (aKind == AllocatedMemoryKind::Untracked)
+         ? gMemoryInfo->mFreeUntrackedRegions
+         : gFreeRegions;
 }
 
 void*
-TryAllocateMemory(void* aAddress, size_t aSize, AllocatedMemoryKind aKind)
+FreeRegionSet::TakeNextChunk()
 {
-  MOZ_RELEASE_ASSERT(aAddress == PageBase(aAddress));
-  MOZ_RELEASE_ASSERT(aSize == RoundupSizeToPageBoundary(aSize));
+  MOZ_RELEASE_ASSERT(mNextChunk);
+  void* res = mNextChunk;
+  mNextChunk = nullptr;
+  return res;
+}
 
-  if (!IsRecordingOrReplaying() || !HasTakenSnapshot() || aKind != AllocatedMemoryKind::Tracked) {
-    return nullptr;
+void
+FreeRegionSet::InsertLockHeld(void* aAddress, size_t aSize)
+{
+  mRegions.insert(aSize, AllocatedMemoryRegion((uint8_t*) aAddress, aSize, true));
+}
+
+static void
+RegisterAllocatedMemory(void* aBaseAddress, size_t aSize, AllocatedMemoryKind aKind);
+
+void
+FreeRegionSet::MaybeRefillNextChunk()
+{
+  if (mNextChunk) {
+    return;
   }
 
-  void* res = nullptr;
-  AutoSpinLock ex(gFreeRegionsLock);
+  // Look for a free region we can take the next chunk from.
+  size_t size = ChunkPages * PageSize;
+  mNextChunk = ExtractLockHeld(size);
+
+  if (!mNextChunk) {
+    // Allocate memory from the system.
+    mNextChunk = DirectAllocateMemory(nullptr, size);
+    RegisterAllocatedMemory(mNextChunk, size, mKind);
+  }
+}
+
+void
+FreeRegionSet::Insert(void* aAddress, size_t aSize)
+{
+  MOZ_RELEASE_ASSERT(aAddress && aAddress == PageBase(aAddress));
+  MOZ_RELEASE_ASSERT(aSize && aSize == RoundupSizeToPageBoundary(aSize));
+
+  AutoSpinLock lock(mLock);
+
+  MaybeRefillNextChunk();
+  InsertLockHeld(aAddress, aSize);
+}
+
+void*
+FreeRegionSet::ExtractLockHeld(size_t aSize)
+{
+  Maybe<AllocatedMemoryRegion> best =
+    mRegions.lookupClosestLessOrEqual(aSize, /* aRemove = */ true);
+  if (best.isSome()) {
+    MOZ_RELEASE_ASSERT(best.ref().mSize >= aSize);
+    uint8_t* res = best.ref().mBase;
+    if (best.ref().mSize > aSize) {
+      InsertLockHeld(res + aSize, best.ref().mSize - aSize);
+    }
+    MemoryZero(res, aSize);
+    return res;
+  }
+  return nullptr;
+}
+
+void*
+FreeRegionSet::Extract(void* aAddress, size_t aSize)
+{
+  MOZ_RELEASE_ASSERT(aAddress == PageBase(aAddress));
+  MOZ_RELEASE_ASSERT(aSize && aSize == RoundupSizeToPageBoundary(aSize));
+
+  AutoSpinLock lock(mLock);
+
   if (aAddress) {
+    MaybeRefillNextChunk();
+
     // We were given a point at which to try to place the allocation. Look for
     // a free region which contains [aAddress, aAddress + aSize] entirely.
-    for (FreeRegionsTree::Iter iter = gFreeRegions.begin(); !iter.done(); ++iter) {
+    for (typename Tree::Iter iter = mRegions.begin(); !iter.done(); ++iter) {
       uint8_t* regionBase = iter.ref().mBase;
       uint8_t* regionExtent = regionBase + iter.ref().mSize;
       uint8_t* addrBase = (uint8_t*)aAddress;
       uint8_t* addrExtent = addrBase + aSize;
       if (regionBase <= addrBase && regionExtent >= addrExtent) {
-        res = aAddress;
         iter.removeEntry();
         if (regionBase < addrBase) {
-          AddFreeRegion(regionBase, addrBase - regionBase);
+          InsertLockHeld(regionBase, addrBase - regionBase);
         }
         if (regionExtent > addrExtent) {
-          AddFreeRegion(addrExtent, regionExtent - addrExtent);
+          InsertLockHeld(addrExtent, regionExtent - addrExtent);
         }
-        break;
+        MemoryZero(aAddress, aSize);
+        return aAddress;
       }
     }
-  } else {
-    // No address hint, look for the smallest free region which is larger than
-    // the desired allocation size.
-    Maybe<AllocatedMemoryRegion> best =
-      gFreeRegions.lookupClosestLessOrEqual(aSize, /* aRemove = */ true);
-    if (best.isSome()) {
-      MOZ_RELEASE_ASSERT(best.ref().mSize >= aSize);
-      res = best.ref().mBase;
-      if (best.ref().mSize > aSize) {
-        AddFreeRegion(best.ref().mBase + aSize, best.ref().mSize - aSize);
-      }
+    // Fall through and look for a free region at another address.
+  }
+
+  // No address hint, look for the smallest free region which is larger than
+  // the desired allocation size.
+  return ExtractLockHeld(aSize);
+}
+
+bool
+FreeRegionSet::Intersects(void* aAddress, size_t aSize)
+{
+  AutoSpinLock lock(mLock);
+  for (typename Tree::Iter iter = mRegions.begin(); !iter.done(); ++iter) {
+    if (MemoryIntersects(iter.ref().mBase, iter.ref().mSize, aAddress, aSize)) {
+      return true;
     }
   }
+  return false;
+}
 
-  // Make sure the memory is zeroed.
-  if (res) {
-    memset(res, 0, aSize);
+///////////////////////////////////////////////////////////////////////////////
+// Memory Management
+///////////////////////////////////////////////////////////////////////////////
+
+static void EnsureMemoryDoesNotOverlapSystemThreadStack(void* aAddress, size_t aSize);
+
+// Note a range of memory that was just allocated from the system, and the
+// kind of memory allocation that was performed.
+static void
+RegisterAllocatedMemory(void* aBaseAddress, size_t aSize, AllocatedMemoryKind aKind)
+{
+  MOZ_RELEASE_ASSERT(aBaseAddress == PageBase(aBaseAddress));
+  MOZ_RELEASE_ASSERT(aSize == RoundupSizeToPageBoundary(aSize));
+
+  uint8_t* aAddress = reinterpret_cast<uint8_t*>(aBaseAddress);
+
+  EnsureMemoryDoesNotOverlapSystemThreadStack(aAddress, aSize);
+  if (aKind == AllocatedMemoryKind::Untracked) {
+    if (!HasTakenSnapshot()) {
+      AddInitialUntrackedMemoryRegion(aAddress, aSize);
+    }
+  } else if (HasTakenSnapshot()) {
+    EnsureMemoryChangesAllowed();
+    DirectWriteProtectMemory(aAddress, aSize, true);
+    AddTrackedRegion(aAddress, aSize, true);
   }
-
-  return res;
 }
 
 void*
@@ -1019,23 +1096,105 @@ AllocateFixedMemory(void* aAddress, size_t aSize)
   MOZ_RELEASE_ASSERT(aAddress == PageBase(aAddress));
   MOZ_RELEASE_ASSERT(aSize == RoundupSizeToPageBoundary(aSize));
 
-  // The memory should already be tracked.
-  AutoSpinLock lock(gMemoryInfo->mTrackedRegionsLock);
-  Maybe<AllocatedMemoryRegion> region =
-    gMemoryInfo->mTrackedRegions.lookupClosestLessOrEqual(aAddress);
-  if (!region.isSome() ||
-      !MemoryContains(region.ref().mBase, region.ref().mSize, aAddress, aSize)) {
-    child::ReportFatalError("Fixed memory is not tracked!");
-  }
-
-  // The memory should not be free.
-  for (FreeRegionsTree::Iter iter = gFreeRegions.begin(); !iter.done(); ++iter) {
-    if (MemoryIntersects(iter.ref().mBase, iter.ref().mSize, aAddress, aSize)) {
-      child::ReportFatalError("Fixed memory is currently free!");
+  {
+    // The memory should already be tracked.
+    AutoSpinLock lock(gMemoryInfo->mTrackedRegionsLock);
+    Maybe<AllocatedMemoryRegion> region =
+      gMemoryInfo->mTrackedRegions.lookupClosestLessOrEqual(aAddress);
+    if (!region.isSome() ||
+        !MemoryContains(region.ref().mBase, region.ref().mSize, aAddress, aSize)) {
+      child::ReportFatalError("Fixed memory is not tracked!");
     }
   }
 
+  // The memory should not be free.
+  if (gFreeRegions.Intersects(aAddress, aSize)) {
+    child::ReportFatalError("Fixed memory is currently free!");
+  }
+
   return aAddress;
+}
+
+void*
+AllocateMemoryTryAddress(void* aAddress, size_t aSize, AllocatedMemoryKind aKind)
+{
+  MOZ_RELEASE_ASSERT(aAddress == PageBase(aAddress));
+  aSize = RoundupSizeToPageBoundary(aSize);
+
+  if (HasTakenSnapshot()) {
+    if (void* res = FreeRegionSet::Get(aKind).Extract(aAddress, aSize)) {
+      return res;
+    }
+  }
+
+  void* res = DirectAllocateMemory(aAddress, aSize);
+  RegisterAllocatedMemory(res, aSize, aKind);
+  return res;
+}
+
+extern "C" {
+
+MOZ_EXPORT void*
+RecordReplayInterface_AllocateMemory(size_t aSize, AllocatedMemoryKind aKind)
+{
+  if (!IsRecordingOrReplaying()) {
+    return DirectAllocateMemory(nullptr, aSize);
+  }
+  return AllocateMemoryTryAddress(nullptr, aSize, aKind);
+}
+
+MOZ_EXPORT void
+RecordReplayInterface_DeallocateMemory(void* aAddress, size_t aSize, AllocatedMemoryKind aKind)
+{
+  // Round the supplied region to the containing page boundaries.
+  aSize += (uint8_t*) aAddress - PageBase(aAddress);
+  aAddress = PageBase(aAddress);
+  aSize = RoundupSizeToPageBoundary(aSize);
+
+  if (!aAddress || !aSize) {
+    return;
+  }
+
+  // Memory is returned to the system before taking the first snapshot.
+  if (!HasTakenSnapshot()) {
+    if (IsRecordingOrReplaying() && aKind == AllocatedMemoryKind::Untracked) {
+      RemoveInitialUntrackedRegion((uint8_t*) aAddress, aSize);
+    }
+    DirectDeallocateMemory(aAddress, aSize);
+    return;
+  }
+
+  if (aKind == AllocatedMemoryKind::Tracked) {
+    // For simplicity, all free regions must be executable, so ignore deallocated
+    // memory in regions that are not executable.
+    bool executable;
+    if (!IsTrackedAddress(aAddress, &executable) || !executable) {
+      return;
+    }
+  }
+
+  // Mark this region as free, but do not unmap it. It will become usable for
+  // later allocations, but will not need to be remapped if we end up
+  // rewinding to a point where this memory was in use.
+  FreeRegionSet::Get(aKind).Insert(aAddress, aSize);
+}
+
+} // extern "C"
+
+///////////////////////////////////////////////////////////////////////////////
+// System Threads
+///////////////////////////////////////////////////////////////////////////////
+
+static void
+EnsureMemoryDoesNotOverlapSystemThreadStack(void* aAddress, size_t aSize)
+{
+  if (!gMemoryInfo) {
+    return;
+  }
+  AutoSpinLock lock(gMemoryInfo->mSystemThreadStacksLock);
+  for (auto stack : gMemoryInfo->mSystemThreadStacks) {
+    MOZ_RELEASE_ASSERT(!MemoryIntersects(stack.mBase, stack.mSize, (uint8_t*)aAddress, aSize));
+  }
 }
 
 bool
@@ -1263,9 +1422,9 @@ SnapshotThreadMain(void* aArgument)
     // writing snapshots to disk, to make it faster to restore later and to
     // avoid unnecessary pressure on the system.
     //
-    // Read here without locking, this is just a heuristic to keep the freelist
-    // size in approximately the right range.
-    if (gMemoryInfo->mPageFreeListCount >= PageFreeListMaxCount) {
+    // Read here without locking, this is just a heuristic to keep the number
+    // of snapshot pages in approximately the right range.
+    if (!gMemoryInfo->mSnapshotPagePressure) {
       Thread::WaitNoIdle();
       continue;
     }
@@ -1356,13 +1515,6 @@ InitializeMemorySnapshots()
 
   // Mark gMemoryInfo as untracked. See AddInitialUntrackedMemoryRegion.
   AddInitialUntrackedMemoryRegion(reinterpret_cast<uint8_t*>(memory), sizeof(MemoryInfo));
-
-  gMemoryInfo->mPreallocatedPages = (uint8_t*)
-    AllocateMemory(PagePreallocatedCount * PageSize, AllocatedMemoryKind::Untracked);
-  for (size_t i = 0; i < PagePreallocatedCount; i++) {
-    gMemoryInfo->mPageFreeList[i] = i;
-  }
-  gMemoryInfo->mPageFreeListCount = PagePreallocatedCount;
 
   // Call some library functions so that no dynamic name lookups are performed
   // at a later time when heap writes are not allowed.
