@@ -53,11 +53,6 @@ job-defaults:
       # is behind a watershed
       include-version:
          by-project:
-            # The beta regexes (jamun, maple, mozilla-beta) do not match
-            # point releases. In the rare event that we do ship a point
-            # release to beta, we need to either:
-            # 1) update these regexes to match that specific version
-            # 2) pass a second include version that matches that specifivc version
             birch: nonbeta
             jamun: beta
             maple: beta
@@ -66,11 +61,14 @@ job-defaults:
             default: null
       last-watershed:
          by-project:
-            birch: nonbeta
-            jamun: beta
-            maple: beta
-            mozilla-beta: beta
-            mozilla-release: nonbeta
+            # TODO: add esr here when setting up mozilla-esr60
+            # let's put mozilla-esr52 in this comment as well, in case
+            # somebody is grepping the tree for things they need to do.
+            birch: "57.0"
+            jamun: "56.0b10"
+            maple: "56.0b10"
+            mozilla-beta: "56.0b10"
+            mozilla-release: "57.0"
             default: null
 
 jobs:
