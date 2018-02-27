@@ -33,7 +33,6 @@ job-defaults:
                     - "browser/config/version.txt"
                     - "browser/config/version_display.txt"
                     - "config/milestone.txt"
-        force-dry-run: true
         push:
             by-project:
                 mozilla-beta: true
