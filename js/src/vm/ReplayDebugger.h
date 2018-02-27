@@ -32,7 +32,7 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
     ~ReplayDebugger();
     bool init();
 
-    static void onNewScript(JSContext* cx, JSScript* script);
+    static void onNewScript(JSContext* cx, HandleScript script);
 
     // Debugger methods.
     bool findScripts(JSContext* cx, MutableHandle<GCVector<JSObject*>> scriptObjects);

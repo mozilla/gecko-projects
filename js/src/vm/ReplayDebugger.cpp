@@ -2243,7 +2243,7 @@ static void
 MaybeSetupBreakpointsForScript(JSContext* cx, size_t id);
 
 /* static */ void
-ReplayDebugger::onNewScript(JSContext* cx, JSScript* script)
+ReplayDebugger::onNewScript(JSContext* cx, HandleScript script)
 {
     MOZ_RELEASE_ASSERT(IsRecordingOrReplaying());
 
@@ -2255,14 +2255,18 @@ ReplayDebugger::onNewScript(JSContext* cx, JSScript* script)
     if (!ConsiderScript(script))
         return;
 
+    AutoEnterOOMUnsafeRegion oomUnsafe;
+
     if (script->hasObjects()) {
         for (size_t i = 0; i < script->objects()->length; i++) {
             JSObject* obj = script->objects()->vector[i];
             if (obj->is<JSFunction>()) {
-                JSFunction* fun = &obj->as<JSFunction>();
+                RootedFunction fun(cx, &obj->as<JSFunction>());
                 if (fun->isInterpreted()) {
-                    MOZ_RELEASE_ASSERT(fun->hasScript()); // See BytecodeCompiler::canLazilyParse.
-                    onNewScript(cx, fun->nonLazyScript());
+                    RootedScript script(cx, JSFunction::getOrCreateScript(cx, fun));
+                    if (!script)
+                        oomUnsafe.crash("ReplayDebugger::onNewScript");
+                    onNewScript(cx, script);
                 }
             }
         }
@@ -2272,9 +2276,9 @@ ReplayDebugger::onNewScript(JSContext* cx, JSScript* script)
         MOZ_RELEASE_ASSERT(script != gDebuggerScripts[i]);
 
     if (gDebuggerScripts.empty() && !gDebuggerScripts.append(nullptr))
-        MOZ_CRASH();
+        oomUnsafe.crash("ReplayDebugger::onNewScript");
     if (!gDebuggerScripts.append(script))
-        MOZ_CRASH();
+        oomUnsafe.crash("ReplayDebugger::onNewScript");
 
     ScriptSourceObject* sso = &script->scriptSourceUnwrap();
     bool found = false;
@@ -2285,9 +2289,9 @@ ReplayDebugger::onNewScript(JSContext* cx, JSScript* script)
         }
     }
     if (gDebuggerScriptSources.empty() && !gDebuggerScriptSources.append(nullptr))
-        MOZ_CRASH();
+        oomUnsafe.crash("ReplayDebugger::onNewScript");
     if (!found && !gDebuggerScriptSources.append(sso))
-        MOZ_CRASH();
+        oomUnsafe.crash("ReplayDebugger::onNewScript");
 
     MaybeSetupBreakpointsForScript(cx, gDebuggerScripts.length() - 1);
 }
