@@ -1212,7 +1212,7 @@ def build_treescript_payload(config, task, task_def):
     if worker['push']:
         task_def['scopes'].append('project:releng:treescript:action:push')
 
-    if worker['force-dry-run']:
+    if worker.get('force-dry-run'):
         task_def['payload']['dry_run'] = True
 
 
