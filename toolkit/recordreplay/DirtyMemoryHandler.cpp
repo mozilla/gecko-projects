@@ -7,6 +7,7 @@
 #include "DirtyMemoryHandler.h"
 
 #include "ipc/ChildIPC.h"
+#include "mozilla/Sprintf.h"
 #include "MemorySnapshot.h"
 #include "Thread.h"
 
@@ -76,8 +77,8 @@ DirtyMemoryExceptionHandlerThread(void*)
         continue;
       } else {
         char buf[4096];
-        snprintf(buf, sizeof(buf), "HandleDirtyMemoryFault failed %p %s", faultingAddress,
-                 gMozCrashReason ? gMozCrashReason : "");
+        SprintfLiteral(buf, "HandleDirtyMemoryFault failed %p %s", faultingAddress,
+                       gMozCrashReason ? gMozCrashReason : "");
         child::ReportFatalError(buf);
       }
     } else {

@@ -327,10 +327,8 @@ AssertLineCount(nsBlockFrame* aFrame, const char* aPrefix)
     count++;
   }
 
-  char buf[256];
-  snprintf(buf, sizeof(buf), "nsBlockFrame %s THING %d LINES %d",
-           aPrefix, (int) recordreplay::ThingIndex(aFrame), (int) count);
-  recordreplay::RecordReplayAssert(buf);
+  recordreplay::RecordReplayAssert("nsBlockFrame %s THING %d LINES %d",
+                                   aPrefix, (int) recordreplay::ThingIndex(aFrame), (int) count);
 }
 
 void
@@ -4280,11 +4278,8 @@ nsBlockFrame::ReflowInlineFrame(BlockReflowInput& aState,
   bool pushedFrame;
   aLineLayout.ReflowFrame(aFrame, frameReflowStatus, nullptr, pushedFrame);
 
-  {
-    char buf[256];
-    snprintf(buf, sizeof(buf), "ReflowInlineFrame STATUS #1 %d", (int) frameReflowStatus.IsFullyComplete());
-    recordreplay::RecordReplayAssert(buf);
-  }
+  recordreplay::RecordReplayAssert("ReflowInlineFrame STATUS #1 %d",
+                                   (int) frameReflowStatus.IsFullyComplete());
 
   AssertLineCount(this, "ReflowInlineFrame #3");
 
@@ -4400,9 +4395,10 @@ nsBlockFrame::ReflowInlineFrame(BlockReflowInput& aState,
       aLine->SetLineWrapped(true);
     }
 
-    char buf[256];
-    snprintf(buf, sizeof(buf), "ReflowInlineFrame #12.4 %d %d %d", (int) frameReflowStatus.FirstLetterComplete(), (int) aFrame->IsPlaceholderFrame(), (int) *aLineReflowStatus);
-    recordreplay::RecordReplayAssert(buf);
+    recordreplay::RecordReplayAssert("ReflowInlineFrame #12.4 %d %d %d",
+                                     (int) frameReflowStatus.FirstLetterComplete(),
+                                     (int) aFrame->IsPlaceholderFrame(),
+                                     (int) *aLineReflowStatus);
 
     // If we just ended a first-letter frame or reflowed a placeholder then
     // don't split the line and don't stop the line reflow...

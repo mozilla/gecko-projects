@@ -106,7 +106,7 @@ RemoveCallbackData(void* aData)
 }
 
 void
-PassThroughThreadEventsAllowCallbacks(std::function<void()> aFn)
+PassThroughThreadEventsAllowCallbacks(const std::function<void()>& aFn)
 {
   MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
 

@@ -174,6 +174,9 @@ public:
       }
   }
 
+  // Workaround static analysis.
+  struct RawSelfPtr { AsyncFreeSnowWhite* mPtr; };
+
   AsyncFreeSnowWhite()
     : Runnable("AsyncFreeSnowWhite")
     , mContinuation(false)
@@ -181,7 +184,9 @@ public:
     , mPurge(false)
   {
       if (recordreplay::IsRecordingOrReplaying()) {
-          recordreplay::RegisterTrigger(this, [=]() { RecordReplayRun(); });
+          RawSelfPtr ptr;
+          ptr.mPtr = this;
+          recordreplay::RegisterTrigger(this, [=]() { ptr.mPtr->RecordReplayRun(); });
       }
   }
 

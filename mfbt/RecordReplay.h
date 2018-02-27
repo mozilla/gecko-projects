@@ -250,7 +250,7 @@ static inline void MovePLDHashTableContents(const PLDHashTableOps* aFirstOps,
 //     return res;
 //   }
 // };
-static inline void RegisterWeakPointer(const void* aPtr, std::function<void(bool)> aCallback);
+static inline void RegisterWeakPointer(const void* aPtr, const std::function<void(bool)>& aCallback);
 static inline void UnregisterWeakPointer(const void* aPtr);
 static inline void WeakPointerAccess(const void* aPtr, bool aSuccess);
 MFBT_API void SetWeakPointerJSRoot(const void* aPtr, /*JSObject*/void* aJSObj);
@@ -293,7 +293,7 @@ MFBT_API void SetWeakPointerJSRoot(const void* aPtr, /*JSObject*/void* aJSObj);
 //   // recording, this object will never be accessed again.
 //   void DestroyContents();
 // };
-MFBT_API void RegisterTrigger(void* aObj, std::function<void()> aCallback);
+MFBT_API void RegisterTrigger(void* aObj, const std::function<void()>& aCallback);
 MFBT_API void UnregisterTrigger(void* aObj);
 MFBT_API void ActivateTrigger(void* aObj);
 MFBT_API void ExecuteTriggers();
@@ -322,7 +322,7 @@ static inline bool HasDivergedFromRecording();
 //
 // The callback should poke the thread so that it is no longer blocked on the
 // resource. The thread must call MaybeWaitForSnapshot before blocking again.
-MFBT_API void NotifyUnrecordedWait(std::function<void()> aCallback);
+MFBT_API void NotifyUnrecordedWait(const std::function<void()>& aCallback);
 MFBT_API void MaybeWaitForSnapshot();
 
 // API for debugging inconsistent behavior between recording and replay.
@@ -540,7 +540,7 @@ MOZ_MakeRecordReplayWrapperVoid(MovePLDHashTableContents,
                                 (aFirstOps, aSecondOps))
 MOZ_MakeRecordReplayWrapperVoid(InvalidateRecording, (const char* aWhy), (aWhy))
 MOZ_MakeRecordReplayWrapperVoid(RegisterWeakPointer,
-                                (const void* aPtr, std::function<void(bool)> aCallback),
+                                (const void* aPtr, const std::function<void(bool)>& aCallback),
                                 (aPtr, aCallback))
 MOZ_MakeRecordReplayWrapperVoid(UnregisterWeakPointer, (const void* aPtr), (aPtr))
 MOZ_MakeRecordReplayWrapperVoid(WeakPointerAccess,

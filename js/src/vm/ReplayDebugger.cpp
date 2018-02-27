@@ -173,7 +173,7 @@ template <typename T>
 struct HandleFactory : public JS::CustomAutoRooter
 {
     static const size_t ChunkCapacity = 8;
-    HandleFactory(JSContext* cx)
+    explicit HandleFactory(JSContext* cx)
       : CustomAutoRooter(cx), cx(cx), count(0), chunks(cx)
     {}
 
@@ -184,7 +184,7 @@ struct HandleFactory : public JS::CustomAutoRooter
         }
     }
 
-    Handle<T> newHandle(T v) {
+    Handle<T> newHandle(const T& v) {
         if (count == ChunkCapacity * (chunks.length() + 1)) {
             T* buf = (T*) js_malloc(ChunkCapacity * sizeof(T));
             if (!buf || !chunks.append(buf)) {
@@ -213,7 +213,7 @@ struct ReplayDebugger::Activity
 {
     JSContext* cx;
 
-    Activity(JSContext* cx)
+    explicit Activity(JSContext* cx)
       : cx(cx), valueHandles(cx), objectHandles(cx), stringHandles(cx)
     {
         MOZ_RELEASE_ASSERT(!cx->isExceptionPending());
@@ -386,7 +386,7 @@ struct ReplayDebugger::Activity
         return handlify(static_cast<JSObject*>(obj->as<NativeObject>().getPrivate()));
     }
 
-    HandleValue handlify(Value v) { return valueHandles.newHandle(v); }
+    HandleValue handlify(const Value& v) { return valueHandles.newHandle(v); }
     HandleObject handlify(JSObject* v) { return objectHandles.newHandle(v); }
     HandleString handlify(JSString* v) { return stringHandles.newHandle(v); }
 
@@ -396,22 +396,22 @@ struct ReplayDebugger::Activity
             JS_ReportErrorASCII(cx, "%s", text ? text : "Conversion error");
     }
 
-    HandleValue valueToValue(Value v) { return handlify(v); }
-    HandleObject valueToObject(Value v) {
+    HandleValue valueToValue(const Value& v) { return handlify(v); }
+    HandleObject valueToObject(const Value& v) {
         if (v.isObject())
             return handlify(&v.toObject());
         if (!v.isUndefined() && !v.isNull())
             fail();
         return nullptr;
     }
-    HandleString valueToString(Value v) {
+    HandleString valueToString(const Value& v) {
         if (v.isString())
             return handlify(v.toString());
         if (!v.isUndefined() && !v.isNull())
             fail();
         return nullptr;
     }
-    size_t valueToScalar(Value v) {
+    size_t valueToScalar(const Value& v) {
         if (v.isNumber())
             return (size_t) v.toNumber();
         fail();
@@ -1568,10 +1568,10 @@ struct BreakpointPosition
       : kind(Invalid), script(0), offset(0), frameIndex(0)
     {}
 
-    BreakpointPosition(Kind kind,
-                       size_t script = EMPTY_SCRIPT,
-                       size_t offset = EMPTY_OFFSET,
-                       size_t frameIndex = EMPTY_FRAME_INDEX)
+    explicit BreakpointPosition(Kind kind,
+                                size_t script = EMPTY_SCRIPT,
+                                size_t offset = EMPTY_OFFSET,
+                                size_t frameIndex = EMPTY_FRAME_INDEX)
       : kind(kind), script(script), offset(offset), frameIndex(frameIndex)
     {}
 
@@ -3409,7 +3409,7 @@ static bool gPendingResume;
 static bool gPendingResumeForward;
 
 static void
-HandlerHit(JSContext* cx, std::function<bool(const BreakpointPosition&)> match,
+HandlerHit(JSContext* cx, const std::function<bool(const BreakpointPosition&)>& match,
            bool popFrameOk = true, const Value& popFrameResult = UndefinedValue())
 {
     // Don't call breakpoint handlers for code that executes while we are

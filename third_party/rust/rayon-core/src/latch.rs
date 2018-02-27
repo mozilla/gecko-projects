@@ -40,50 +40,17 @@ pub trait LatchProbe {
     fn probe(&self) -> bool;
 }
 
-pub struct AtomicBoolPreserved {
-    data: Mutex<AtomicBool>,
-}
-
-impl AtomicBoolPreserved {
-    pub fn new(v: bool) -> AtomicBoolPreserved {
-        AtomicBoolPreserved {
-            data: Mutex::new(AtomicBool::new(v)),
-        }
-    }
-
-    pub fn load(&self, order: Ordering) -> bool {
-        self.data.lock().unwrap().load(order)
-    }
-
-    pub fn store(&self, v: bool, order: Ordering) {
-        self.data.lock().unwrap().store(v, order)
-    }
-
-    pub fn swap(&self, ptr: bool, order: Ordering) -> bool {
-        self.data.lock().unwrap().swap(ptr, order)
-    }
-
-    pub fn compare_exchange(&self,
-                            current: bool,
-                            new: bool,
-                            success: Ordering,
-                            failure: Ordering)
-                            -> Result<bool, bool> {
-        self.data.lock().unwrap().compare_exchange(current, new, success, failure)
-    }
-}
-
 /// Spin latches are the simplest, most efficient kind, but they do
 /// not support a `wait()` operation. They just have a boolean flag
 /// that becomes true when `set()` is called.
 pub struct SpinLatch {
-    b: AtomicBoolPreserved,
+    b: AtomicBool,
 }
 
 impl SpinLatch {
     #[inline]
     pub fn new() -> SpinLatch {
-        SpinLatch { b: AtomicBoolPreserved::new(false) }
+        SpinLatch { b: AtomicBool::new(false) }
     }
 }
 
@@ -144,44 +111,6 @@ impl Latch for LockLatch {
     }
 }
 
-#[derive(Debug)]
-pub struct AtomicUsizePreserved {
-    data: Mutex<AtomicUsize>,
-}
-
-impl AtomicUsizePreserved {
-    pub fn new(v: usize) -> AtomicUsizePreserved {
-        AtomicUsizePreserved {
-            data: Mutex::new(AtomicUsize::new(v)),
-        }
-    }
-
-    pub fn load(&self, order: Ordering) -> usize {
-        self.data.lock().unwrap().load(order)
-    }
-
-    pub fn fetch_add(&self, v: usize, order: Ordering) -> usize {
-        self.data.lock().unwrap().fetch_add(v, order)
-    }
-
-    pub fn fetch_sub(&self, v: usize, order: Ordering) -> usize {
-        self.data.lock().unwrap().fetch_sub(v, order)
-    }
-
-    pub fn swap(&self, ptr: usize, order: Ordering) -> usize {
-        self.data.lock().unwrap().swap(ptr, order)
-    }
-
-    pub fn compare_exchange(&self,
-                            current: usize,
-                            new: usize,
-                            success: Ordering,
-                            failure: Ordering)
-                            -> Result<usize, usize> {
-        self.data.lock().unwrap().compare_exchange(current, new, success, failure)
-    }
-}
-
 /// Counting latches are used to implement scopes. They track a
 /// counter. Unlike other latches, calling `set()` does not
 /// necessarily make the latch be considered `set()`; instead, it just
@@ -189,13 +118,13 @@ impl AtomicUsizePreserved {
 /// `probe()` returns true) once the counter reaches zero.
 #[derive(Debug)]
 pub struct CountLatch {
-    counter: AtomicUsizePreserved,
+    counter: AtomicUsize,
 }
 
 impl CountLatch {
     #[inline]
     pub fn new() -> CountLatch {
-        CountLatch { counter: AtomicUsizePreserved::new(1) }
+        CountLatch { counter: AtomicUsize::new(1) }
     }
 
     #[inline]

@@ -52,7 +52,7 @@ private:
 // RAII class to lock a spin lock.
 struct MOZ_RAII AutoSpinLock
 {
-  AutoSpinLock(SpinLock& aLock MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+  explicit AutoSpinLock(SpinLock& aLock MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
     : mLock(aLock)
   {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
@@ -72,7 +72,7 @@ private:
 // RAII class to lock a read/write spin lock for reading.
 struct AutoReadSpinLock
 {
-  AutoReadSpinLock(ReadWriteSpinLock& aLock MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+  explicit AutoReadSpinLock(ReadWriteSpinLock& aLock MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
     : mLock(aLock)
   {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
@@ -92,7 +92,7 @@ private:
 // RAII class to lock a read/write spin lock for writing.
 struct AutoWriteSpinLock
 {
-  AutoWriteSpinLock(ReadWriteSpinLock& aLock MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+  explicit AutoWriteSpinLock(ReadWriteSpinLock& aLock MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
     : mLock(aLock)
   {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;

@@ -523,7 +523,7 @@ Thread::ResumeIdleThreads()
 }
 
 void
-Thread::NotifyUnrecordedWait(std::function<void()> aCallback)
+Thread::NotifyUnrecordedWait(const std::function<void()>& aCallback)
 {
   MonitorAutoLock lock(*gMonitor);
   if (mUnrecordedWaitCallback) {
@@ -557,7 +557,7 @@ Thread::MaybeWaitForSnapshot()
 extern "C" {
 
 MOZ_EXPORT void
-RecordReplayInterface_NotifyUnrecordedWait(std::function<void()> aCallback)
+RecordReplayInterface_NotifyUnrecordedWait(const std::function<void()>& aCallback)
 {
   Thread::Current()->NotifyUnrecordedWait(aCallback);
 }
@@ -674,7 +674,7 @@ Thread::NotifyThreadsWaitingForLock(Lock* aLock)
 }
 
 /* static */ void
-Thread::WaitForCvar(void* aCvar, std::function<void()> aReleaseLock)
+Thread::WaitForCvar(void* aCvar, const std::function<void()>& aReleaseLock)
 {
   if (IsRecording()) {
     Thread* thread = Current();
@@ -695,8 +695,8 @@ Thread::WaitForCvar(void* aCvar, std::function<void()> aReleaseLock)
 }
 
 /* static */ bool
-Thread::WaitForCvarUntil(void* aCvar, std::function<void()> aReleaseLock,
-                         std::function<bool()> aCallback)
+Thread::WaitForCvarUntil(void* aCvar, const std::function<void()>& aReleaseLock,
+                         const std::function<bool()>& aCallback)
 {
   RecordReplayAssert("WaitForCvarUntil");
 
@@ -894,7 +894,7 @@ SpawnCallEventHelperThreads()
 }
 
 /* static */ void
-Thread::ExecuteCallEventOffThread(std::function<void()> aCallback, bool* aCompleted)
+Thread::ExecuteCallEventOffThread(const std::function<void()>& aCallback, bool* aCompleted)
 {
   MOZ_RELEASE_ASSERT(IsRecording());
   MOZ_RELEASE_ASSERT(!gThreadsAreIdle);

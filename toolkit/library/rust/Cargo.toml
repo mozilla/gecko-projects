@@ -49,5 +49,5 @@ codegen-units = 1
 
 [patch.crates-io]
 libudev-sys = { path = "../../../dom/webauthn/libudev-sys" }
-rayon-core = { path = "../../../third_party/rust/rayon-core" }
+rayon-core = { path = "../../../toolkit/recordreplay/rayon-core" }
 serde_derive = { git = "https://github.com/gankro/serde", branch = "deserialize_from_enums4" }

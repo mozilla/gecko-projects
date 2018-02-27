@@ -196,7 +196,7 @@ struct InitializeMessage : public Message
 {
   bool mTakeSnapshots;
 
-  InitializeMessage(bool aTakeSnapshots)
+  explicit InitializeMessage(bool aTakeSnapshots)
     : Message(MessageType::Initialize, sizeof(*this))
     , mTakeSnapshots(aTakeSnapshots)
   {}
@@ -211,7 +211,7 @@ struct TakeSnapshotMessage : public Message
 
 struct SaveRecordingMessage : public Message
 {
-  SaveRecordingMessage(uint32_t aSize)
+  explicit SaveRecordingMessage(uint32_t aSize)
     : Message(MessageType::SaveRecording, aSize)
   {}
 
@@ -248,7 +248,7 @@ struct DebuggerRequestMessage : public Message
 
 struct DebuggerResponseMessage : public Message
 {
-  DebuggerResponseMessage(uint32_t aSize)
+  explicit DebuggerResponseMessage(uint32_t aSize)
     : Message(MessageType::DebuggerResponse, aSize)
   {}
 
@@ -290,7 +290,7 @@ struct TerminateMessage : public Message
 
 struct FatalErrorMessage : public Message
 {
-  FatalErrorMessage(uint32_t aSize)
+  explicit FatalErrorMessage(uint32_t aSize)
     : Message(MessageType::FatalError, aSize)
   {}
 
@@ -339,7 +339,7 @@ struct HitBreakpointMessage : public Message
 {
   uint32_t mBreakpointId;
 
-  HitBreakpointMessage(uint32_t aBreakpointId)
+  explicit HitBreakpointMessage(uint32_t aBreakpointId)
     : Message(MessageType::HitBreakpoint, sizeof(*this))
     , mBreakpointId(aBreakpointId)
   {}

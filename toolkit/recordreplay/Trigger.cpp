@@ -24,7 +24,7 @@ struct TriggerInfo
 
   TriggerInfo() { PodZero(this); }
 
-  TriggerInfo(std::function<void()> aCallback)
+  explicit TriggerInfo(const std::function<void()>& aCallback)
     : mCallback(aCallback), mRegisterCount(1)
   {}
 };
@@ -50,7 +50,7 @@ InitializeTriggers()
 extern "C" {
 
 MOZ_EXPORT void
-RecordReplayInterface_RegisterTrigger(void* aObj, std::function<void()> aCallback)
+RecordReplayInterface_RegisterTrigger(void* aObj, const std::function<void()>& aCallback)
 {
   MOZ_ASSERT(IsRecordingOrReplaying());
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());

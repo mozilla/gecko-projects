@@ -45,7 +45,7 @@ private:
 // RAII class to lock a monitor.
 struct MOZ_RAII MonitorAutoLock
 {
-  MonitorAutoLock(Monitor& aMonitor MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+  explicit MonitorAutoLock(Monitor& aMonitor MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
     : mMonitor(aMonitor)
   {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
@@ -65,7 +65,7 @@ private:
 // RAII class to unlock a monitor.
 struct MOZ_RAII MonitorAutoUnlock
 {
-  MonitorAutoUnlock(Monitor& aMonitor MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+  explicit MonitorAutoUnlock(Monitor& aMonitor MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
     : mMonitor(aMonitor)
   {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;

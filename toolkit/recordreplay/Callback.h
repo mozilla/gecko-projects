@@ -78,7 +78,7 @@ void SaveOrRestoreCallbackData(void** aData);
 // If recording, call aFn with events passed through, allowing Gecko callbacks
 // to execute within aFn. If replaying, execute only the Gecko callbacks which
 // executed while recording.
-void PassThroughThreadEventsAllowCallbacks(std::function<void()> aFn);
+void PassThroughThreadEventsAllowCallbacks(const std::function<void()>& aFn);
 
 // Within a callback wrapper, bracket the execution of the code for the Gecko
 // callback and record the callback as having executed. This stops passing

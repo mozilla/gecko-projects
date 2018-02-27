@@ -230,8 +230,7 @@ CheckForInvalidRecording()
 {
   if (gRecordingInvalidReason) {
     char buf[4096];
-    snprintf(buf, sizeof(buf), "Recording is unusable: %s", gRecordingInvalidReason);
-    buf[sizeof(buf) - 1] = 0;
+    SprintfLiteral(buf, "Recording is unusable: %s", gRecordingInvalidReason);
     child::ReportFatalError(buf);
     Unreachable();
   }
@@ -308,9 +307,8 @@ void Print(const char* aFormat, ...)
   va_list ap;
   va_start(ap, aFormat);
   char buf[2048];
-  vsnprintf(buf, sizeof(buf), aFormat, ap);
+  VsprintfLiteral(buf, aFormat, ap);
   va_end(ap);
-  buf[sizeof(buf) - 1] = 0;
   DirectPrint(buf);
 }
 
@@ -323,9 +321,8 @@ PrintSpew(const char* aFormat, ...)
   va_list ap;
   va_start(ap, aFormat);
   char buf[2048];
-  vsnprintf(buf, sizeof(buf), aFormat, ap);
+  VsprintfLiteral(buf, aFormat, ap);
   va_end(ap);
-  buf[sizeof(buf) - 1] = 0;
   DirectPrint(buf);
 }
 
@@ -404,8 +401,7 @@ RecordReplayInterface_InternalRecordReplayAssert(const char* aFormat, va_list aA
   // Record an assertion string consisting of the name of the assertion and
   // stack information about the current point of execution.
   char text[1024];
-  vsnprintf(text, sizeof(text), aFormat, aArgs);
-  text[sizeof(text) - 1] = 0;
+  VsprintfLiteral(text, aFormat, aArgs);
   if (IsRecording() && (thread->ShouldCaptureEventStacks() || AlwaysCaptureEventStack(text))) {
     AutoPassThroughThreadEvents pt;
     SetCurrentStackString(text, text + strlen(text), sizeof(text) - strlen(text));
@@ -452,11 +448,9 @@ RecordReplayInterface_InternalRecordReplayAssert(const char* aFormat, va_list aA
       }
 
       char buf[4096];
-      snprintf(buf, sizeof(buf),
-               "Assertion Mismatch: Thread %d Recorded: %s [%d]\nReplayed: %s [%d]\n",
-               (int) thread->Id(), buffer, (int) streamPos, text,
-               (int) thread->Events().StreamPosition());
-      buf[sizeof(buf) - 1] = 0;
+      SprintfLiteral(buf, "Assertion Mismatch: Thread %d Recorded: %s [%d]\nReplayed: %s [%d]\n",
+                     (int) thread->Id(), buffer, (int) streamPos, text,
+                     (int) thread->Events().StreamPosition());
       child::ReportFatalError(buf);
       Unreachable();
     }
@@ -528,10 +522,9 @@ RecordReplayInterface_InternalRecordReplayAssertBytes(const void* aData, size_t 
       }
 
       char buf[4096];
-      snprintf(buf, sizeof(buf),
-               "Byte Comparison Check Failed: Position %d %d Length %d %d\n",
-               (int) streamPos, (int) thread->Events().StreamPosition(), (int) oldSize, (int) aSize);
-      buf[sizeof(buf) - 1] = 0;
+      SprintfLiteral(buf, "Byte Comparison Check Failed: Position %d %d Length %d %d\n",
+                     (int) streamPos, (int) thread->Events().StreamPosition(),
+                     (int) oldSize, (int) aSize);
       child::ReportFatalError(buf);
       Unreachable();
     }

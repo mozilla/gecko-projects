@@ -7,6 +7,7 @@
 #include "File.h"
 
 #include "mozilla/Compression.h"
+#include "mozilla/Sprintf.h"
 #include "ProcessRewind.h"
 
 #include <algorithm>
@@ -167,9 +168,8 @@ StreamTemplate<Kind>::CheckInput(size_t aValue)
   RecordOrReplayScalar(&oldValue);
   if (oldValue != aValue) {
     char buf[4096];
-    snprintf(buf, sizeof(buf),
-             "Input Mismatch: Recorded: %d Replayed %d\n", (int) oldValue, (int) aValue);
-    buf[sizeof(buf) - 1] = 0;
+    SprintfLiteral(buf,
+                   "Input Mismatch: Recorded: %d Replayed %d\n", (int) oldValue, (int) aValue);
     child::ReportFatalError(buf);
     Unreachable();
   }
@@ -359,7 +359,7 @@ FileTemplate<Kind>::Open(const char* aName, size_t aIndex, Mode aMode)
     SetFilename(aName);
   } else {
     char filename[1024];
-    size_t nchars = snprintf(filename, sizeof(filename), "%s_%d", aName, (int) aIndex);
+    size_t nchars = SprintfLiteral(filename, "%s_%d", aName, (int) aIndex);
     MOZ_RELEASE_ASSERT(nchars < sizeof(filename));
     SetFilename(filename);
   }
@@ -508,7 +508,7 @@ FileTemplate<Kind>::FixupAfterRecordingRewind(FileHandle aFd)
 
 template <AllocatedMemoryKind Kind>
 void
-FileTemplate<Kind>::ForEachStream(std::function<void(StreamTemplate<Kind>*)> aCallback) const
+FileTemplate<Kind>::ForEachStream(const std::function<void(StreamTemplate<Kind>*)>& aCallback) const
 {
   for (auto& vector : mStreams) {
     for (auto stream : vector) {

@@ -255,7 +255,7 @@ public:
 private:
   void SetFilename(const char* aFilename);
 
-  void ForEachStream(std::function<void(StreamTemplate<Kind>*)> aCallback) const;
+  void ForEachStream(const std::function<void(StreamTemplate<Kind>*)>& aCallback) const;
 
   bool ReadIndex();
 

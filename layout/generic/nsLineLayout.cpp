@@ -807,9 +807,7 @@ IsPercentageAware(const nsIFrame* aFrame)
 static void
 AssertReflowStatus(const char* aPrefix, const nsReflowStatus& aReflowStatus)
 {
-  char buf[256];
-  snprintf(buf, sizeof(buf), "%s %d", aPrefix, (int) aReflowStatus.IsFullyComplete());
-  recordreplay::RecordReplayAssert(buf);
+  recordreplay::RecordReplayAssert("%s %d", aPrefix, (int) aReflowStatus.IsFullyComplete());
 }
 
 void

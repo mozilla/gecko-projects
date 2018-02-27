@@ -23,7 +23,7 @@ struct WeakPointerInfo {
   std::function<void(bool)> mCallback;
   JS::PersistentRootedObject* mRoot;
 
-  WeakPointerInfo(std::function<void(bool)> aCallback)
+  explicit WeakPointerInfo(const std::function<void(bool)>& aCallback)
     : mCallback(aCallback), mRoot(nullptr)
   {}
 
@@ -49,7 +49,7 @@ extern "C" {
 
 MOZ_EXPORT void
 RecordReplayInterface_InternalRegisterWeakPointer(const void* aPtr,
-                                                  std::function<void(bool)> aCallback)
+                                                  const std::function<void(bool)>& aCallback)
 {
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());

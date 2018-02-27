@@ -19,6 +19,8 @@
 
 #include <bsm/audit.h>
 #include <bsm/audit_session.h>
+#include <mach/clock.h>
+#include <mach/mach.h>
 #include <mach/mach_time.h>
 #include <mach/mach_vm.h>
 #include <mach/vm_map.h>
@@ -29,6 +31,7 @@
 #include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <time.h>
 
 #include <Carbon/Carbon.h>
 #include <SystemConfiguration/SystemConfiguration.h>
@@ -1157,6 +1160,21 @@ RR_pthread_cond_wait(pthread_cond_t* aCond, pthread_mutex_t* aMutex)
   return 0;
 }
 
+static void
+GetCurrentTime(timespec* aCurrent)
+{
+  AutoPassThroughThreadEvents pt;
+
+  // See https://gist.github.com/jbenet/1087739.
+  clock_serv_t cclock;
+  mach_timespec_t mts;
+  host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
+  clock_get_time(cclock, &mts);
+  mach_port_deallocate(mach_task_self(), cclock);
+  aCurrent->tv_sec = mts.tv_sec;
+  aCurrent->tv_nsec = mts.tv_nsec;
+}
+
 static ssize_t
 RR_pthread_cond_timedwait(pthread_cond_t* aCond, pthread_mutex_t* aMutex,
                           timespec* aTimeout)
@@ -1167,9 +1185,8 @@ RR_pthread_cond_timedwait(pthread_cond_t* aCond, pthread_mutex_t* aMutex,
   }
   MOZ_ALWAYS_TRUE(OriginalCall(pthread_mutex_unlock, ssize_t, aMutex) == 0);
   bool notified = Thread::WaitForCvarUntil(aCond, [=]() { lock->Leave(); }, [=]() -> bool {
-      AutoPassThroughThreadEvents pt;
       timespec current;
-      MOZ_ALWAYS_TRUE(clock_gettime(CLOCK_REALTIME, &current) == 0);
+      GetCurrentTime(&current);
       return current.tv_sec > aTimeout->tv_sec
           || (current.tv_sec == aTimeout->tv_sec && current.tv_nsec >= aTimeout->tv_nsec);
     });
@@ -1183,10 +1200,7 @@ RR_pthread_cond_timedwait_relative_np(pthread_cond_t* aCond, pthread_mutex_t* aM
                                       timespec* aTimeout)
 {
   timespec current;
-  {
-    AutoEnsurePassThroughThreadEvents pt;
-    MOZ_ALWAYS_TRUE(clock_gettime(CLOCK_REALTIME, &current) == 0);
-  }
+  GetCurrentTime(&current);
   current.tv_sec += aTimeout->tv_sec;
   current.tv_nsec += aTimeout->tv_nsec;
   return RR_pthread_cond_timedwait(aCond, aMutex, &current);

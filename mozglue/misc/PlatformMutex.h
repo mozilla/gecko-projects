@@ -26,7 +26,7 @@ class MutexImpl
 public:
   struct PlatformData;
 
-  MFBT_API MutexImpl(recordreplay::Behavior aRecorded = recordreplay::Behavior::Preserve);
+  explicit MFBT_API MutexImpl(recordreplay::Behavior aRecorded = recordreplay::Behavior::Preserve);
   MFBT_API ~MutexImpl();
 
   bool operator==(const MutexImpl& rhs) {

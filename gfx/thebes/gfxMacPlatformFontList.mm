@@ -1642,9 +1642,8 @@ gfxMacPlatformFontList::LookupSystemFont(LookAndFeel::FontID aSystemFontID,
                                          gfxFontStyle &aFontStyle,
                                          float aDevPixPerCSSPixel)
 {
-    char buf[256];
-    snprintf(buf, sizeof(buf), "gfxMacPlatformFontList::LookupSystemFont %d", (int) aSystemFontID);
-    recordreplay::RecordReplayAssert(buf);
+    recordreplay::RecordReplayAssert("gfxMacPlatformFontList::LookupSystemFont %d",
+                                     (int) aSystemFontID);
 
     // code moved here from widget/cocoa/nsLookAndFeel.mm
     NSFont *font = nullptr;

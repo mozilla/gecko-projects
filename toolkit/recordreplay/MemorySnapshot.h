@@ -110,7 +110,7 @@ void StartCountdown(size_t aCount);
 // Per StartCountdown, set a countdown and remove it on destruction.
 struct MOZ_RAII AutoCountdown
 {
-  AutoCountdown(size_t aCount);
+  explicit AutoCountdown(size_t aCount);
   ~AutoCountdown();
 };
 

@@ -136,21 +136,8 @@ pub fn join_context<A, B, RA, RB>(oper_a: A, oper_b: B) -> (RA, RB)
         // may also have been stolen. There may also be some tasks
         // pushed on top of it in the stack, and we will have to pop
         // those off to get to it.
-
-//    unsafe {
-//            extern crate libc;
-//            libc::write(libc::STDERR_FILENO, "RUST join #1".as_ptr() as *const libc::c_void, 12);
-//        }
         while !job_b.latch.probe() {
-//    unsafe {
-//            extern crate libc;
-//            libc::write(libc::STDERR_FILENO, "RUST join #2".as_ptr() as *const libc::c_void, 12);
-//        }
             if let Some(job) = worker_thread.take_local_job() {
-//    unsafe {
-//            extern crate libc;
-//            libc::write(libc::STDERR_FILENO, "RUST join #3".as_ptr() as *const libc::c_void, 12);
-//        }
                 if job == job_b_ref {
                     // Found it! Let's run it.
                     //
@@ -163,10 +150,6 @@ pub fn join_context<A, B, RA, RB>(oper_a: A, oper_b: B) -> (RA, RB)
                     worker_thread.execute(job);
                 }
             } else {
-//    unsafe {
-//            extern crate libc;
-//            libc::write(libc::STDERR_FILENO, "RUST join #4".as_ptr() as *const libc::c_void, 12);
-//        }
                 // Local deque is empty. Time to steal from other
                 // threads.
                 log!(LostJob { worker: worker_thread.index() });

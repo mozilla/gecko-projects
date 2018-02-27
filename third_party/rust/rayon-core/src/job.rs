@@ -151,10 +151,6 @@ impl<BODY> Job for HeapJob<BODY>
     where BODY: FnOnce() + Send
 {
     unsafe fn execute(this: *const Self) {
-//        unsafe {
-//            extern crate libc;
-//            libc::write(libc::STDERR_FILENO, "RUST execute".as_ptr() as *const libc::c_void, 12);
-//        }
         let this: Box<Self> = mem::transmute(this);
         let job = (*this.job.get()).take().unwrap();
         job();

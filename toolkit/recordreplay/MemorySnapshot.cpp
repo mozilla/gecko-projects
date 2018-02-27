@@ -191,7 +191,7 @@ struct DirtyPageSet {
   // which owns this set.
   InfallibleVector<DirtyPage, 256, UntrackedAllocPolicy> mPages;
 
-  DirtyPageSet(size_t aSnapshot)
+  explicit DirtyPageSet(size_t aSnapshot)
     : mSnapshot(aSnapshot)
   {}
 };

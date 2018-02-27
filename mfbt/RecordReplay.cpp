@@ -49,7 +49,7 @@ namespace recordreplay {
         (void* aData, size_t aSize), (aData, aSize))            \
   Macro(DisallowUnhandledDivergeFromRecording, (), ())          \
   Macro(NotifyUnrecordedWait,                                   \
-        (std::function<void()> aCallback), (aCallback))         \
+        (const std::function<void()>& aCallback), (aCallback))  \
   Macro(MaybeWaitForSnapshot, (), ())                           \
   Macro(InternalInvalidateRecording, (const char* aWhy), (aWhy)) \
   Macro(InternalDestroyPLDHashTableCallbacks,                   \
@@ -67,7 +67,7 @@ namespace recordreplay {
   Macro(DeallocateMemory,                                       \
         (void* aAddress, size_t aSize, AllocatedMemoryKind aKind), (aAddress, aSize, aKind)) \
   Macro(InternalRegisterWeakPointer,                            \
-        (const void* aPtr, std::function<void(bool)> aCallback), (aPtr, aCallback)) \
+        (const void* aPtr, const std::function<void(bool)>& aCallback), (aPtr, aCallback)) \
   Macro(InternalUnregisterWeakPointer,                          \
         (const void* aPtr), (aPtr))                             \
   Macro(InternalWeakPointerAccess,                              \
@@ -75,7 +75,7 @@ namespace recordreplay {
   Macro(SetWeakPointerJSRoot,                                   \
         (const void* aPtr, void* aJSObj), (aPtr, aJSObj))       \
   Macro(RegisterTrigger,                                        \
-        (void* aObj, std::function<void()> aCallback),          \
+        (void* aObj, const std::function<void()>& aCallback),   \
         (aObj, aCallback))                                      \
   Macro(UnregisterTrigger,                                      \
         (void* aObj), (aObj))                                   \

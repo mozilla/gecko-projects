@@ -451,7 +451,7 @@ MaybePauseMainThread()
 }
 
 void
-PauseMainThreadAndInvokeCallback(std::function<void()> aCallback, bool aSynchronous)
+PauseMainThreadAndInvokeCallback(const std::function<void()>& aCallback, bool aSynchronous)
 {
   MonitorAutoLock lock(*gMainThreadCallbackMonitor);
   gMainThreadShouldPause = true;

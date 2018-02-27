@@ -9314,10 +9314,9 @@ private:
 static void
 AssertReflowStatus(const char* aPrefix, nsTextFrame* aFrame, const nsReflowStatus& aReflowStatus)
 {
-  char buf[256];
-  snprintf(buf, sizeof(buf), "%s %d %d", aPrefix,
-           (int) recordreplay::ThingIndex(aFrame), (int) aReflowStatus.IsFullyComplete());
-  recordreplay::RecordReplayAssert(buf);
+  recordreplay::RecordReplayAssert("%s %d %d", aPrefix,
+                                   (int) recordreplay::ThingIndex(aFrame),
+                                   (int) aReflowStatus.IsFullyComplete());
 }
 
 void

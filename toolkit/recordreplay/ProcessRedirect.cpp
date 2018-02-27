@@ -7,6 +7,7 @@
 #include "ProcessRedirect.h"
 
 #include "InfallibleVector.h"
+#include "mozilla/Sprintf.h"
 
 #include <string.h>
 
@@ -186,7 +187,7 @@ RedirectFailure(const char* aFormat, ...)
   va_list ap;
   va_start(ap, aFormat);
   char buf[4096];
-  vsnprintf(buf, sizeof(buf), aFormat, ap);
+  VsprintfLiteral(buf, aFormat, ap);
   va_end(ap);
   buf[sizeof(buf) - 1] = 0;
   gRedirectFailures.emplaceBack(strdup(buf));

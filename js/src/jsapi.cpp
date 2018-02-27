@@ -7820,6 +7820,6 @@ JS_CurrentExecutionPoint()
     if (!script)
         return "No current JSScript";
     static char buf[4096];
-    snprintf(buf, sizeof(buf), "%s:%d", script->filename(), PCToLineNumber(script, pc));
+    SprintfLiteral(buf, "%s:%d", script->filename(), PCToLineNumber(script, pc));
     return buf;
 }

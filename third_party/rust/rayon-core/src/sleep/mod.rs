@@ -7,37 +7,8 @@ use std::sync::{Condvar, Mutex};
 use std::thread;
 use std::usize;
 
-pub struct AtomicUsizePreserved {
-    data: Mutex<AtomicUsize>,
-}
-
-impl AtomicUsizePreserved {
-    pub fn new(v: usize) -> AtomicUsizePreserved {
-        AtomicUsizePreserved {
-            data: Mutex::new(AtomicUsize::new(v)),
-        }
-    }
-
-    pub fn load(&self, order: Ordering) -> usize {
-        self.data.lock().unwrap().load(order)
-    }
-
-    pub fn swap(&self, ptr: usize, order: Ordering) -> usize {
-        self.data.lock().unwrap().swap(ptr, order)
-    }
-
-    pub fn compare_exchange(&self,
-                            current: usize,
-                            new: usize,
-                            success: Ordering,
-                            failure: Ordering)
-                            -> Result<usize, usize> {
-        self.data.lock().unwrap().compare_exchange(current, new, success, failure)
-    }
-}
-
 pub struct Sleep {
-    state: AtomicUsizePreserved,
+    state: AtomicUsize,
     data: Mutex<()>,
     tickle: Condvar,
 }
@@ -51,7 +22,7 @@ const ROUNDS_UNTIL_ASLEEP: usize = 64;
 impl Sleep {
     pub fn new() -> Sleep {
         Sleep {
-            state: AtomicUsizePreserved::new(AWAKE),
+            state: AtomicUsize::new(AWAKE),
             data: Mutex::new(()),
             tickle: Condvar::new(),
         }
@@ -76,10 +47,6 @@ impl Sleep {
 
     #[inline]
     pub fn work_found(&self, worker_index: usize, yields: usize) -> usize {
-//        unsafe {
-//            extern crate libc;
-//            libc::write(libc::STDERR_FILENO, "RUST work_found".as_ptr() as *const libc::c_void, 15);
-//        }
         log!(FoundWork {
             worker: worker_index,
             yields: yields,
@@ -95,10 +62,6 @@ impl Sleep {
 
     #[inline]
     pub fn no_work_found(&self, worker_index: usize, yields: usize) -> usize {
-//        unsafe {
-//            extern crate libc;
-//            libc::write(libc::STDERR_FILENO, "RUST no_work_found".as_ptr() as *const libc::c_void, 18);
-//        }
         log!(DidNotFindWork {
             worker: worker_index,
             yields: yields,

@@ -190,7 +190,7 @@ enum class TimerKind {
 
 struct AutoTimer
 {
-  AutoTimer(TimerKind aKind);
+  explicit AutoTimer(TimerKind aKind);
   ~AutoTimer();
 
 private:

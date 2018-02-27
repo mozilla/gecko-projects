@@ -156,7 +156,7 @@ public:
   // Look for a key in the table with a matching original hash and for which
   // aMatch() is true for, returning its new hash number if found.
   bool HasMatchingKey(HashNumber aOriginalHash,
-                      std::function<bool(const void*)> aMatch,
+                      const std::function<bool(const void*)>& aMatch,
                       HashNumber* aNewHash)
   {
     HashToKeyMap::const_iterator iter = mHashToKey.find(aOriginalHash);
@@ -369,7 +369,7 @@ struct PLDHashTableInfo : public StableHashTableInfo
   // Wrapper callbacks for the table.
   PLDHashTableOps mNewOps;
 
-  PLDHashTableInfo(const PLDHashTableOps* aOps)
+  explicit PLDHashTableInfo(const PLDHashTableOps* aOps)
     : mOps(aOps)
   {
     PodZero(&mNewOps);

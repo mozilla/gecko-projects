@@ -101,7 +101,7 @@ public:
   MiddlemanProtocol* mOpposite;
   MessageLoop* mOppositeMessageLoop;
 
-  MiddlemanProtocol(ipc::Side aSide)
+  explicit MiddlemanProtocol(ipc::Side aSide)
     : ipc::IToplevelProtocol(PContentMsgStart, aSide)
     , mChannel("MiddlemanProtocol", this)
     , mSide(aSide)

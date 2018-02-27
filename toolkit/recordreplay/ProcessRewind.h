@@ -114,7 +114,7 @@ bool LastSnapshotIsInterim();
 // only be called from the replay message loop thread (see ChildIPC.h).
 // If aSynchronous is specified, this will block until the callback completes
 // execution, otherwise it will return immediately.
-void PauseMainThreadAndInvokeCallback(std::function<void()>, bool aSynchronous);
+void PauseMainThreadAndInvokeCallback(const std::function<void()>& aCallback, bool aSynchronous);
 
 // Return whether the main thread should be paused. This does not necessarily
 // mean it is paused, but it will pause at the earliest opportunity.

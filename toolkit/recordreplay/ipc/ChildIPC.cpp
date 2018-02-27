@@ -184,7 +184,7 @@ InitRecordingOrReplayingProcess(base::ProcessId aParentPid,
     }
   }
 
-  MOZ_RELEASE_ASSERT(*aArgc == 1);
+  MOZ_RELEASE_ASSERT(*aArgc >= 1);
   MOZ_RELEASE_ASSERT(!strcmp((*aArgv)[0], gParentArgv[0]));
   MOZ_RELEASE_ASSERT(gParentArgv.back() == nullptr);
 

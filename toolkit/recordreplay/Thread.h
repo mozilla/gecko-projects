@@ -314,12 +314,12 @@ public:
   static void NotifyThreadsWaitingForLock(Lock* aLock);
 
   // Release the lock and block this thread until the given cvar is notified.
-  static void WaitForCvar(void* aCvar, std::function<void()> aReleaseLock);
+  static void WaitForCvar(void* aCvar, const std::function<void()>& aReleaseLock);
 
   // Release the lock and block this thread until the given cvar is notified or
   // aCallback returns true, returning whether the cvar was notified.
-  static bool WaitForCvarUntil(void* aCvar, std::function<void()> aReleaseLock,
-                               std::function<bool()> aCallback);
+  static bool WaitForCvarUntil(void* aCvar, const std::function<void()>& aReleaseLock,
+                               const std::function<bool()>& aCallback);
 
   // Wake up one or all threads waiting on a cvar.
   static void SignalCvar(void* aCvar, bool aBroadcast);
@@ -329,7 +329,7 @@ public:
 
   // Synchronously execute a callback on another thread, allowing snapshots to
   // be taken/restored while doing so.
-  static void ExecuteCallEventOffThread(std::function<void()> aCallback, bool* aCompleted);
+  static void ExecuteCallEventOffThread(const std::function<void()>& aCallback, bool* aCompleted);
 
   // Note a buffer used by an off thread call event. This is called twice for
   // each buffer, before and after the call itself. The first time an untracked
@@ -346,7 +346,7 @@ public:
   static void EndOffThreadCallEvent();
 
   // See RecordReplay.h.
-  void NotifyUnrecordedWait(std::function<void()> aCallback);
+  void NotifyUnrecordedWait(const std::function<void()>& aCallback);
   static void MaybeWaitForSnapshot();
 
   // Wait for all other threads to enter the idle state necessary for recording
