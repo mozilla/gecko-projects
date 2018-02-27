@@ -2316,7 +2316,7 @@ ScriptSource::performXDR(XDRState<mode>* xdr)
             return false;
 
         // Note the content of sources decoded when recording or replaying.
-        if (mode == XDR_DECODE && mozilla::recordreplay::IsRecordingOrReplaying()) {
+        if (mode == XDR_DECODE && hasSourceData() && mozilla::recordreplay::IsRecordingOrReplaying()) {
             UncompressedSourceCache::AutoHoldEntry holder;
             ScriptSource::PinnedChars chars(xdr->cx(), this, holder, 0, length());
             if (!chars.get())

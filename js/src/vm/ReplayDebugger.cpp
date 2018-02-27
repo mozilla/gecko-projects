@@ -541,10 +541,8 @@ HandleObject
 ReplayDebugger::getScript(Activity& a, size_t id)
 {
     DebugObjectMap::Ptr p = debugScripts.lookup(id);
-    if (!p) {
-        JS_ReportErrorASCII(a.cx, "Unknown script");
+    if (!p)
         return nullptr;
-    }
     return a.handlify(p->value());
 }
 
@@ -2967,7 +2965,10 @@ static size_t
 CountScriptFrames(JSContext* cx)
 {
     size_t numFrames = 0;
-    for (ScriptFrameIter iter(cx); !iter.done(); ++iter, ++numFrames) {}
+    for (ScriptFrameIter iter(cx); !iter.done(); ++iter) {
+        if (ConsiderScript(iter.script()))
+            ++numFrames;
+    }
     return numFrames;
 }
 
@@ -2980,13 +2981,15 @@ ScriptFrameIterForIndex(JSContext* cx, size_t index, ScriptFrameIter& iter)
         return false;
     }
     size_t indexFromTop = numFrames - 1 - index;
-    size_t i = 0;
-    for (;; ++iter, ++i) {
+    size_t frame = 0;
+    for (;; ++iter) {
         MOZ_RELEASE_ASSERT(!iter.done());
         if (iter.isIon() && !iter.ensureHasRematerializedFrame(cx))
             return false;
-        if (i == indexFromTop)
-            break;
+        if (ConsiderScript(iter.script())) {
+            if (frame++ == indexFromTop)
+                break;
+        }
     }
     UpdateFrameIterPc(iter);
     return true;
