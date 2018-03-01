@@ -7,8 +7,6 @@ Transform the push-apk kind into an actual task description.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-import functools
-
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.task import task_description_schema
 from taskgraph.util.schema import resolve_keyed_by, Schema, validate_schema
