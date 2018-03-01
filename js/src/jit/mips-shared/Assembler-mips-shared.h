@@ -1139,13 +1139,11 @@ class AssemblerMIPSShared : public AssemblerShared
 
     // FP instructions
 
-    // Use these two functions only when you are sure address is aligned.
-    // Otherwise, use ma_ld and ma_sd.
-    BufferOffset as_ld(FloatRegister fd, Register base, int32_t off);
-    BufferOffset as_sd(FloatRegister fd, Register base, int32_t off);
+    BufferOffset as_ldc1(FloatRegister ft, Register base, int32_t off);
+    BufferOffset as_sdc1(FloatRegister ft, Register base, int32_t off);
 
-    BufferOffset as_ls(FloatRegister fd, Register base, int32_t off);
-    BufferOffset as_ss(FloatRegister fd, Register base, int32_t off);
+    BufferOffset as_lwc1(FloatRegister ft, Register base, int32_t off);
+    BufferOffset as_swc1(FloatRegister ft, Register base, int32_t off);
 
     // Loongson-specific FP load and store instructions
     BufferOffset as_gsldl(FloatRegister fd, Register base, int32_t off);
@@ -1258,11 +1256,8 @@ class AssemblerMIPSShared : public AssemblerShared
     void bind(Label* label, BufferOffset boff = BufferOffset());
     void bindLater(Label* label, wasm::OldTrapDesc target);
     virtual void bind(InstImm* inst, uintptr_t branch, uintptr_t target) = 0;
-    void bind(CodeOffset* label) {
-        label->bind(currentOffset());
-    }
-    void use(CodeOffset* label) {
-        label->bind(currentOffset());
+    void bind(CodeLabel* label) {
+        label->target()->bind(currentOffset());
     }
     uint32_t currentOffset() {
         return nextOffset().getOffset();
@@ -1304,9 +1299,11 @@ class AssemblerMIPSShared : public AssemblerShared
     }
 
     void addLongJump(BufferOffset src, BufferOffset dst) {
-        CodeOffset patchAt(src.getOffset());
-        CodeOffset target(dst.getOffset());
-        addCodeLabel(CodeLabel(patchAt, target));
+        CodeLabel cl;
+        cl.patchAt()->bind(src.getOffset());
+        cl.target()->bind(dst.getOffset());
+        cl.setLinkMode(CodeLabel::JumpImmediate);
+        addCodeLabel(mozilla::Move(cl));
     }
 
   public:

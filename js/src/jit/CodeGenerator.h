@@ -161,7 +161,6 @@ class CodeGenerator final : public CodeGeneratorSpecific
     void visitLoadUnboxedExpando(LLoadUnboxedExpando* lir);
     void visitTypeBarrierV(LTypeBarrierV* lir);
     void visitTypeBarrierO(LTypeBarrierO* lir);
-    void visitMonitorTypes(LMonitorTypes* lir);
     void emitPostWriteBarrier(const LAllocation* obj);
     void emitPostWriteBarrier(Register objreg);
     void emitPostWriteBarrierS(Address address, Register prev, Register next);
@@ -617,10 +616,12 @@ class CodeGenerator final : public CodeGeneratorSpecific
     //
     // Instead of saving the pointers, we just save the index of the Read
     // Barriered objects in a bit mask.
-    uint32_t simdRefreshTemplatesDuringLink_;
+    uint32_t simdTemplatesToReadBarrier_;
 
-    void registerSimdTemplate(SimdType simdType);
-    void captureSimdTemplate(JSContext* cx);
+    // Bit mask of JitCompartment stubs that are to be read-barriered.
+    uint32_t compartmentStubsToReadBarrier_;
+
+    void addSimdTemplateToReadBarrier(SimdType simdType);
 };
 
 } // namespace jit

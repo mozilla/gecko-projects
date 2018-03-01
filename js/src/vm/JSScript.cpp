@@ -1399,27 +1399,11 @@ JSScript::hasScriptName()
 }
 
 void
-ScriptSourceObject::trace(JSTracer* trc, JSObject* obj)
-{
-    ScriptSourceObject* sso = static_cast<ScriptSourceObject*>(obj);
-
-    // Don't trip over the poison 'not yet initialized' values.
-    if (!sso->getReservedSlot(INTRODUCTION_SCRIPT_SLOT).isMagic(JS_GENERIC_MAGIC)) {
-        JSScript* script = sso->introductionScript();
-        if (script) {
-            TraceManuallyBarrieredEdge(trc, &script, "ScriptSourceObject introductionScript");
-            sso->setReservedSlot(INTRODUCTION_SCRIPT_SLOT, PrivateValue(script));
-        }
-    }
-}
-
-void
 ScriptSourceObject::finalize(FreeOp* fop, JSObject* obj)
 {
     MOZ_ASSERT(fop->onActiveCooperatingThread());
     ScriptSourceObject* sso = &obj->as<ScriptSourceObject>();
     sso->source()->decref();
-    sso->setReservedSlot(SOURCE_SLOT, PrivateValue(nullptr));
 }
 
 static const ClassOps ScriptSourceObjectClassOps = {
@@ -1433,7 +1417,7 @@ static const ClassOps ScriptSourceObjectClassOps = {
     nullptr, /* call */
     nullptr, /* hasInstance */
     nullptr, /* construct */
-    ScriptSourceObject::trace
+    nullptr  /* trace */
 };
 
 const Class ScriptSourceObject::class_ = {
@@ -1483,13 +1467,13 @@ ScriptSourceObject::initFromOptions(JSContext* cx, HandleScriptSource source,
     // we would be creating a cross-compartment script reference, which is
     // forbidden. In that case, simply don't bother to retain the introduction
     // script.
+    Value introductionScript = UndefinedValue();
     if (options.introductionScript() &&
         options.introductionScript()->compartment() == cx->compartment())
     {
-        source->setReservedSlot(INTRODUCTION_SCRIPT_SLOT, PrivateValue(options.introductionScript()));
-    } else {
-        source->setReservedSlot(INTRODUCTION_SCRIPT_SLOT, UndefinedValue());
+        introductionScript.setPrivateGCThing(options.introductionScript());
     }
+    source->setReservedSlot(INTRODUCTION_SCRIPT_SLOT, introductionScript);
 
     return true;
 }

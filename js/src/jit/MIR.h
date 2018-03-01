@@ -4212,6 +4212,7 @@ class MCall
     bool ignoresReturnValue_:1;
 
     bool needsArgCheck_:1;
+    bool needsClassCheck_:1;
 
     MCall(WrappedFunction* target, uint32_t numActualArgs, bool construct, bool ignoresReturnValue)
       : MVariadicInstruction(classOpcode),
@@ -4219,7 +4220,8 @@ class MCall
         numActualArgs_(numActualArgs),
         construct_(construct),
         ignoresReturnValue_(ignoresReturnValue),
-        needsArgCheck_(true)
+        needsArgCheck_(true),
+        needsClassCheck_(true)
     {
         setResultType(MIRType::Value);
     }
@@ -4237,10 +4239,17 @@ class MCall
     bool needsArgCheck() const {
         return needsArgCheck_;
     }
-
     void disableArgCheck() {
         needsArgCheck_ = false;
     }
+
+    bool needsClassCheck() const {
+        return needsClassCheck_;
+    }
+    void disableClassCheck() {
+        needsClassCheck_ = false;
+    }
+
     MDefinition* getFunction() const {
         return getOperand(FunctionOperandIndex);
     }
@@ -13223,6 +13232,8 @@ class MTypeBarrier
     }
     MDefinition* foldsTo(TempAllocator& alloc) override;
 
+    bool canRedefineInput();
+
     bool alwaysBails() const {
         // If mirtype of input doesn't agree with mirtype of barrier,
         // we will definitely bail.
@@ -13241,43 +13252,6 @@ class MTypeBarrier
     }
 
     ALLOW_CLONE(MTypeBarrier)
-};
-
-// Like MTypeBarrier, guard that the value is in the given type set. This is
-// used before property writes to ensure the value being written is represented
-// in the property types for the object.
-class MMonitorTypes
-  : public MUnaryInstruction,
-    public BoxInputsPolicy::Data
-{
-    const TemporaryTypeSet* typeSet_;
-    BarrierKind barrierKind_;
-
-    MMonitorTypes(MDefinition* def, const TemporaryTypeSet* types, BarrierKind kind)
-      : MUnaryInstruction(classOpcode, def),
-        typeSet_(types),
-        barrierKind_(kind)
-    {
-        MOZ_ASSERT(kind == BarrierKind::TypeTagOnly || kind == BarrierKind::TypeSet);
-
-        setGuard();
-        MOZ_ASSERT(!types->unknown());
-    }
-
-  public:
-    INSTRUCTION_HEADER(MonitorTypes)
-    TRIVIAL_NEW_WRAPPERS
-
-    const TemporaryTypeSet* typeSet() const {
-        return typeSet_;
-    }
-    BarrierKind barrierKind() const {
-        return barrierKind_;
-    }
-
-    AliasSet getAliasSet() const override {
-        return AliasSet::None();
-    }
 };
 
 // Given a value being written to another object, update the generational store
@@ -14271,6 +14245,9 @@ class MWasmBoundsCheck
     {
         // Bounds check is effectful: it throws for OOB.
         setGuard();
+
+        if (JitOptions.spectreIndexMasking)
+            setResultType(MIRType::Int32);
     }
 
   public:
@@ -15191,8 +15168,6 @@ PropertyReadOnPrototypeNeedsTypeBarrier(IonBuilder* builder,
                                         TemporaryTypeSet* observed);
 bool PropertyReadIsIdempotent(CompilerConstraintList* constraints,
                               MDefinition* obj, PropertyName* name);
-void AddObjectsForPropertyRead(TempAllocator& tempAlloc, MDefinition* obj, PropertyName* name,
-                               TemporaryTypeSet* observed);
 bool CanWriteProperty(TempAllocator& alloc, CompilerConstraintList* constraints,
                       HeapTypeSetKey property, MDefinition* value,
                       MIRType implicitType = MIRType::None);

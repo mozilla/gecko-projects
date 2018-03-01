@@ -970,6 +970,13 @@ MacroAssembler::branchTestMagic(Condition cond, const BaseIndex& address, Label*
 }
 
 void
+MacroAssembler::branchToComputedAddress(const BaseIndex& addr)
+{
+    loadPtr(addr, ScratchRegister);
+    branch(ScratchRegister);
+}
+
+void
 MacroAssembler::cmp32Move32(Condition cond, Register lhs, Register rhs, Register src,
                             Register dest)
 {
@@ -1024,6 +1031,12 @@ MacroAssembler::boundsCheck32ForLoad(Register index, const Address& length, Regi
     branch32(Assembler::BelowOrEqual, length, index, failure);
 }
 
+void
+MacroAssembler::spectreMovePtr(Condition cond, Register src, Register dest)
+{
+    MOZ_CRASH();
+}
+
 // ========================================================================
 // Memory access primitives.
 void
@@ -1035,6 +1048,28 @@ void
 MacroAssembler::storeFloat32x3(FloatRegister src, const BaseIndex& dest)
 {
     MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::storeUncanonicalizedDouble(FloatRegister src, const Address& addr)
+{
+    ma_sd(src, addr);
+}
+void
+MacroAssembler::storeUncanonicalizedDouble(FloatRegister src, const BaseIndex& addr)
+{
+    ma_sd(src, addr);
+}
+
+void
+MacroAssembler::storeUncanonicalizedFloat32(FloatRegister src, const Address& addr)
+{
+    ma_ss(src, addr);
+}
+void
+MacroAssembler::storeUncanonicalizedFloat32(FloatRegister src, const BaseIndex& addr)
+{
+    ma_ss(src, addr);
 }
 
 void

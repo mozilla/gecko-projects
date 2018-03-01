@@ -170,7 +170,7 @@
 <groupbox id="siteDataGroup" hidden="true" data-category="panePrivacy" data-hidden-from-search="true">
   <caption><label>&siteData1.label;</label></caption>
 
-  <hbox align="baseline">
+  <hbox data-subcategory="sitedata" align="baseline">
     <vbox flex="1">
       <radiogroup id="acceptCookies"
                   preference="network.cookie.cookieBehavior"
@@ -552,7 +552,8 @@
                 class="tail-with-learn-more"
                 preference="browser.chrome.errorReporter.enabled"
                 label="&collectBrowserErrors.label;"
-                accesskey="&collectBrowserErrors.accesskey;"/>
+                accesskey="&collectBrowserErrors.accesskey;"
+                flex="1"/>
       <label id="collectBrowserErrorsLearnMore"
              class="learnMore text-link">&collectBrowserErrorsLearnMore.label;</label>
     </hbox>
@@ -564,7 +565,8 @@
                 class="tail-with-learn-more"
                 preference="browser.crashReports.unsubmittedCheck.autoSubmit2"
                 label="&sendBackloggedCrashReports.label;"
-                accesskey="&sendBackloggedCrashReports.accesskey;"/>
+                accesskey="&sendBackloggedCrashReports.accesskey;"
+                flex="1"/>
       <label id="crashReporterLearnMore"
              class="learnMore text-link">&crashReporterLearnMore.label;</label>
     </hbox>

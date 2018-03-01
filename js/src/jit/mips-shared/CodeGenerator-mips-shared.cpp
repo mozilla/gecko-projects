@@ -1592,7 +1592,7 @@ CodeGeneratorMIPSShared::visitCopySignD(LCopySignD* ins)
 void
 CodeGeneratorMIPSShared::visitValue(LValue* value)
 {
-    const ValueOperand out = GetValueOutput(value);
+    const ValueOperand out = ToOutValue(value);
 
     masm.moveValue(value->value(), out);
 }
@@ -1846,6 +1846,81 @@ void
 CodeGeneratorMIPSShared::visitStoreTypedArrayElementStatic(LStoreTypedArrayElementStatic* ins)
 {
     MOZ_CRASH("NYI");
+}
+
+class js::jit::OutOfLineTableSwitch : public OutOfLineCodeBase<CodeGeneratorMIPSShared>
+{
+    MTableSwitch* mir_;
+    CodeLabel jumpLabel_;
+
+    void accept(CodeGeneratorMIPSShared* codegen) {
+        codegen->visitOutOfLineTableSwitch(this);
+    }
+
+  public:
+    OutOfLineTableSwitch(MTableSwitch* mir)
+      : mir_(mir)
+    {}
+
+    MTableSwitch* mir() const {
+        return mir_;
+    }
+
+    CodeLabel* jumpLabel() {
+        return &jumpLabel_;
+    }
+};
+
+void
+CodeGeneratorMIPSShared::visitOutOfLineTableSwitch(OutOfLineTableSwitch* ool)
+{
+    MTableSwitch* mir = ool->mir();
+
+    masm.haltingAlign(sizeof(void*));
+    masm.bind(ool->jumpLabel());
+    masm.addCodeLabel(*ool->jumpLabel());
+
+    for (size_t i = 0; i < mir->numCases(); i++) {
+        LBlock* caseblock = skipTrivialBlocks(mir->getCase(i))->lir();
+        Label* caseheader = caseblock->label();
+        uint32_t caseoffset = caseheader->offset();
+
+        // The entries of the jump table need to be absolute addresses and thus
+        // must be patched after codegen is finished.
+        CodeLabel cl;
+        masm.writeCodePointer(&cl);
+        cl.target()->bind(caseoffset);
+        masm.addCodeLabel(cl);
+    }
+}
+
+void
+CodeGeneratorMIPSShared::emitTableSwitchDispatch(MTableSwitch* mir, Register index,
+                                           Register base)
+{
+    Label* defaultcase = skipTrivialBlocks(mir->getDefault())->lir()->label();
+
+    // Lower value with low value
+    if (mir->low() != 0)
+        masm.subPtr(Imm32(mir->low()), index);
+
+    // Jump to default case if input is out of range
+    int32_t cases = mir->numCases();
+    masm.branchPtr(Assembler::AboveOrEqual, index, ImmWord(cases), defaultcase);
+
+    // To fill in the CodeLabels for the case entries, we need to first
+    // generate the case entries (we don't yet know their offsets in the
+    // instruction stream).
+    OutOfLineTableSwitch* ool = new(alloc()) OutOfLineTableSwitch(mir);
+    addOutOfLineCode(ool, mir);
+
+    // Compute the position where a pointer to the right case stands.
+    masm.ma_li(base, ool->jumpLabel());
+
+    BaseIndex pointer(base, index, ScalePointer);
+
+    // Jump to the right case
+    masm.branchToComputedAddress(pointer);
 }
 
 template <typename T>

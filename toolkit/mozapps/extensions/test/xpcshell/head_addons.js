@@ -4,9 +4,9 @@
 
 /* eslint no-unused-vars: ["error", {vars: "local", args: "none"}] */
 
-var AM_Cc = Components.classes;
-var AM_Ci = Components.interfaces;
-var AM_Cu = Components.utils;
+var AM_Cc = Cc;
+var AM_Ci = Ci;
+var AM_Cu = Cu;
 
 AM_Cu.importGlobalProperties(["TextEncoder"]);
 
@@ -18,7 +18,7 @@ const PREF_EM_STRICT_COMPATIBILITY    = "extensions.strictCompatibility";
 const PREF_EM_MIN_COMPAT_APP_VERSION      = "extensions.minCompatibleAppVersion";
 const PREF_EM_MIN_COMPAT_PLATFORM_VERSION = "extensions.minCompatiblePlatformVersion";
 const PREF_GETADDONS_BYIDS               = "extensions.getAddons.get.url";
-const PREF_GETADDONS_BYIDS_PERFORMANCE   = "extensions.getAddons.getWithPerformance.url";
+const PREF_COMPAT_OVERRIDES              = "extensions.getAddons.compatOverides.url";
 const PREF_XPI_SIGNATURES_REQUIRED    = "xpinstall.signatures.required";
 const PREF_SYSTEM_ADDON_SET           = "extensions.systemAddonSet";
 const PREF_SYSTEM_ADDON_UPDATE_URL    = "extensions.systemAddon.update.url";
@@ -1180,10 +1180,10 @@ function interpolateAndServeFile(request, response) {
   try {
     let file = gUrlToFileMap[request.path];
     var data = "";
-    var fstream = Components.classes["@mozilla.org/network/file-input-stream;1"].
-    createInstance(Components.interfaces.nsIFileInputStream);
-    var cstream = Components.classes["@mozilla.org/intl/converter-input-stream;1"].
-    createInstance(Components.interfaces.nsIConverterInputStream);
+    var fstream = Cc["@mozilla.org/network/file-input-stream;1"].
+    createInstance(Ci.nsIFileInputStream);
+    var cstream = Cc["@mozilla.org/intl/converter-input-stream;1"].
+    createInstance(Ci.nsIConverterInputStream);
     fstream.init(file, -1, 0, 0);
     cstream.init(fstream, "UTF-8", 0, 0);
 
@@ -1260,10 +1260,10 @@ function changeXPIDBVersion(aNewVersion, aMutator = undefined) {
  */
 function loadFile(aFile) {
   let data = "";
-  let fstream = Components.classes["@mozilla.org/network/file-input-stream;1"].
-          createInstance(Components.interfaces.nsIFileInputStream);
-  let cstream = Components.classes["@mozilla.org/intl/converter-input-stream;1"].
-          createInstance(Components.interfaces.nsIConverterInputStream);
+  let fstream = Cc["@mozilla.org/network/file-input-stream;1"].
+          createInstance(Ci.nsIFileInputStream);
+  let cstream = Cc["@mozilla.org/intl/converter-input-stream;1"].
+          createInstance(Ci.nsIConverterInputStream);
   fstream.init(aFile, -1, 0, 0);
   cstream.init(fstream, "UTF-8", 0, 0);
   let str = {};

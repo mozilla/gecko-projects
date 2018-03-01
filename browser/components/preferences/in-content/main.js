@@ -467,6 +467,11 @@ var gMainPane = {
       OS.File.stat(ignoreSeparateProfile).then(() => separateProfileModeCheckbox.checked = false,
         () => separateProfileModeCheckbox.checked = true);
 
+      if (!Services.prefs.getBoolPref("identity.fxaccounts.enabled")) {
+        document.getElementById("sync-dev-edition-root").hidden = true;
+        return;
+      }
+
       fxAccounts.getSignedInUser().then(data => {
         document.getElementById("getStarted").selectedIndex = data ? 1 : 0;
       })
@@ -493,7 +498,11 @@ var gMainPane = {
     let arch = bundle.GetStringFromName(archResource);
     version += ` (${arch})`;
 
-    document.getElementById("version").textContent = version;
+    document.l10n.setAttributes(
+      document.getElementById("updateAppInfo"),
+      "update-application-info",
+      { version }
+    );
 
     // Show a release notes link if we have a URL.
     let relNotesLink = document.getElementById("releasenotes");
@@ -761,23 +770,32 @@ var gMainPane = {
     this._updateUseCurrentButton();
 
     function setInputDisabledStates(isControlled) {
+      let tabCount = this._getTabsForHomePage().length;
+
       // Disable or enable the inputs based on if this is controlled by an extension.
       document.querySelectorAll("#browserHomePage, .homepage-button")
         .forEach((element) => {
-          let isLocked = Preferences.get(element.getAttribute("preference")).locked;
-          element.disabled = isLocked || isControlled;
+          let pref = element.getAttribute("preference");
+
+          let isDisabled = Preferences.get(pref).locked || isControlled;
+          if (pref == "pref.browser.disable_button.current_page") {
+            // Special case for current_page to disable it if tabCount is 0
+            isDisabled = isDisabled || tabCount < 1;
+          }
+
+          element.disabled = isDisabled;
         });
     }
 
     if (homePref.locked) {
       // An extension can't control these settings if they're locked.
       hideControllingExtension(HOMEPAGE_OVERRIDE_KEY);
-      setInputDisabledStates(false);
+      setInputDisabledStates.call(this, false);
     } else {
       // Asynchronously update the extension controlled UI.
       handleControllingExtension(
         PREF_SETTING_TYPE, HOMEPAGE_OVERRIDE_KEY, "extensionControlled.homepage_override2")
-        .then(setInputDisabledStates);
+        .then(setInputDisabledStates.bind(this));
     }
 
     // If the pref is set to about:home or about:newtab, set the value to ""
@@ -879,14 +897,12 @@ var gMainPane = {
     let useCurrent = document.getElementById("useCurrent");
     let tabs = this._getTabsForHomePage();
 
-    if (tabs.length > 1)
-      useCurrent.label = useCurrent.getAttribute("label2");
-    else
-      useCurrent.label = useCurrent.getAttribute("label1");
+    const tabCount = tabs.length;
+
+    document.l10n.setAttributes(useCurrent, "use-current-pages", { tabCount });
 
     // If the homepage is controlled by an extension then you can't use this.
     if (await getControllingExtensionInfo(PREF_SETTING_TYPE, HOMEPAGE_OVERRIDE_KEY)) {
-      useCurrent.disabled = true;
       return;
     }
 
@@ -895,7 +911,7 @@ var gMainPane = {
     if (Preferences.get(prefName).locked)
       return;
 
-    useCurrent.disabled = !tabs.length;
+    useCurrent.disabled = tabCount < 1;
   },
 
   _getTabsForHomePage() {
@@ -908,6 +924,8 @@ var gMainPane = {
 
       tabs = win.gBrowser.visibleTabs.slice(win.gBrowser._numPinnedTabs);
       tabs = tabs.filter(this.isNotAboutPreferences);
+      // XXX: Bug 1441637 - Fix tabbrowser to report tab.closing before it blurs it
+      tabs = tabs.filter(tab => !tab.closing);
     }
 
     return tabs;
@@ -1125,7 +1143,7 @@ var gMainPane = {
     description.appendChild(fragment);
   },
 
-  checkBrowserContainers(event) {
+  async checkBrowserContainers(event) {
     let checkbox = document.getElementById("browserContainersCheckbox");
     if (checkbox.checked) {
       Services.prefs.setBoolPref("privacy.userContext.enabled", true);
@@ -1138,14 +1156,16 @@ var gMainPane = {
       return;
     }
 
-    let bundlePreferences = document.getElementById("bundlePreferences");
-
-    let title = bundlePreferences.getString("disableContainersAlertTitle");
-    let message = PluralForm.get(count, bundlePreferences.getString("disableContainersMsg"))
-      .replace("#S", count);
-    let okButton = PluralForm.get(count, bundlePreferences.getString("disableContainersOkButton"))
-      .replace("#S", count);
-    let cancelButton = bundlePreferences.getString("disableContainersButton2");
+    let [
+      title, message, okButton, cancelButton
+    ] = await document.l10n.formatValues([
+      "containers-disable-alert-title",
+      "containers-disable-alert-desc",
+      "containers-disable-alert-ok-button",
+      "containers-disable-alert-cancel-button"
+    ], {
+      tabCount: count
+    });
 
     let buttonFlags = (Ci.nsIPrompt.BUTTON_TITLE_IS_STRING * Ci.nsIPrompt.BUTTON_POS_0) +
       (Ci.nsIPrompt.BUTTON_TITLE_IS_STRING * Ci.nsIPrompt.BUTTON_POS_1);
@@ -1270,7 +1290,7 @@ var gMainPane = {
         }
       }
     })()
-      .catch(Components.utils.reportError);
+      .catch(Cu.reportError);
   },
 
   /**
@@ -1344,29 +1364,15 @@ var gMainPane = {
     if (Services.appinfo.browserTabsRemoteAutostart) {
       let processCountPref = Preferences.get("dom.ipc.processCount");
       let defaultProcessCount = processCountPref.defaultValue;
-      let bundlePreferences = document.getElementById("bundlePreferences");
 
       let contentProcessCount =
         document.querySelector(`#contentProcessCount > menupopup >
                                 menuitem[value="${defaultProcessCount}"]`);
 
-      // New localization API experiment (October 2017).
-      // See bug 1402061 for details.
-      //
-      // The `intl.l10n.fluent.disabled` pref can be used
-      // to opt-out of the experiment in case of any
-      // unforseen problems. The legacy API will then
-      // be used.
-      if (Services.prefs.getBoolPref("intl.l10n.fluent.disabled", false)) {
-        let label = bundlePreferences.getFormattedString("defaultContentProcessCount",
-          [defaultProcessCount]);
-        contentProcessCount.label = label;
-      } else {
-        document.l10n.setAttributes(
-          contentProcessCount,
-          "default-content-process-count",
-          { num: defaultProcessCount });
-      }
+      document.l10n.setAttributes(
+        contentProcessCount,
+        "performance-default-content-process-count",
+        { num: defaultProcessCount });
 
       document.getElementById("limitContentProcess").disabled = false;
       document.getElementById("contentProcessCount").disabled = false;
@@ -1416,30 +1422,35 @@ var gMainPane = {
     if (AppConstants.MOZ_UPDATER) {
       var enabledPref = Preferences.get("app.update.enabled");
       var autoPref = Preferences.get("app.update.auto");
+      let disabledByPolicy = Services.policies &&
+                             !Services.policies.isAllowed("appUpdate");
       var radiogroup = document.getElementById("updateRadioGroup");
 
-      if (!enabledPref.value) // Don't care for autoPref.value in this case.
+      if (!enabledPref.value || disabledByPolicy) // Don't care for autoPref.value in this case.
         radiogroup.value = "manual"; // 3. Never check for updates.
       else if (autoPref.value) // enabledPref.value && autoPref.value
         radiogroup.value = "auto"; // 1. Automatically install updates
       else // enabledPref.value && !autoPref.value
         radiogroup.value = "checkOnly"; // 2. Check, but let me choose
 
-      var canCheck = Components.classes["@mozilla.org/updates/update-service;1"].
-        getService(Components.interfaces.nsIApplicationUpdateService).
+      var canCheck = Cc["@mozilla.org/updates/update-service;1"].
+        getService(Ci.nsIApplicationUpdateService).
         canCheckForUpdates;
       // canCheck is false if the enabledPref is false and locked,
       // or the binary platform or OS version is not known.
       // A locked pref is sufficient to disable the radiogroup.
-      radiogroup.disabled = !canCheck || enabledPref.locked || autoPref.locked;
+      radiogroup.disabled = !canCheck ||
+                            enabledPref.locked ||
+                            autoPref.locked ||
+                            disabledByPolicy;
 
       if (AppConstants.MOZ_MAINTENANCE_SERVICE) {
         // Check to see if the maintenance service is installed.
         // If it is don't show the preference at all.
         var installed;
         try {
-          var wrk = Components.classes["@mozilla.org/windows-registry-key;1"]
-            .createInstance(Components.interfaces.nsIWindowsRegKey);
+          var wrk = Cc["@mozilla.org/windows-registry-key;1"]
+            .createInstance(Ci.nsIWindowsRegKey);
           wrk.open(wrk.ROOT_KEY_LOCAL_MACHINE,
             "SOFTWARE\\Mozilla\\MaintenanceService",
             wrk.ACCESS_READ | wrk.WOW64_64);
@@ -1458,7 +1469,9 @@ var gMainPane = {
    * Sets the pref values based on the selected item of the radiogroup.
    */
   updateWritePrefs() {
-    if (AppConstants.MOZ_UPDATER) {
+    let disabledByPolicy = Services.policies &&
+                           !Services.policies.isAllowed("appUpdate");
+    if (AppConstants.MOZ_UPDATER && !disabledByPolicy) {
       var enabledPref = Preferences.get("app.update.enabled");
       var autoPref = Preferences.get("app.update.auto");
       var radiogroup = document.getElementById("updateRadioGroup");
@@ -2528,7 +2541,7 @@ var gMainPane = {
     downloadFolder.disabled = !preference.value || preference.locked;
     chooseFolder.disabled = !preference.value || preference.locked;
 
-    this.readCloudStorage().catch(Components.utils.reportError);
+    this.readCloudStorage().catch(Cu.reportError);
     // don't override the preference's value in UI
     return undefined;
   },
@@ -2573,7 +2586,7 @@ var gMainPane = {
    * button based on option selected.
    */
   handleSaveToCommand(event) {
-    return this.handleSaveToCommandTask(event).catch(Components.utils.reportError);
+    return this.handleSaveToCommandTask(event).catch(Cu.reportError);
   },
   async handleSaveToCommandTask(event) {
     if (event.target.id !== "saveToCloud" && event.target.id !== "saveTo") {
@@ -2618,7 +2631,7 @@ var gMainPane = {
    * response to the choice, if one is made.
    */
   chooseFolder() {
-    return this.chooseFolderTask().catch(Components.utils.reportError);
+    return this.chooseFolderTask().catch(Cu.reportError);
   },
   async chooseFolderTask() {
     let bundlePreferences = document.getElementById("bundlePreferences");
@@ -2626,11 +2639,11 @@ var gMainPane = {
     let folderListPref = Preferences.get("browser.download.folderList");
     let currentDirPref = await this._indexToFolder(folderListPref.value);
     let defDownloads = await this._indexToFolder(1);
-    let fp = Components.classes["@mozilla.org/filepicker;1"].
-      createInstance(Components.interfaces.nsIFilePicker);
+    let fp = Cc["@mozilla.org/filepicker;1"].
+      createInstance(Ci.nsIFilePicker);
 
-    fp.init(window, title, Components.interfaces.nsIFilePicker.modeGetFolder);
-    fp.appendFilters(Components.interfaces.nsIFilePicker.filterAll);
+    fp.init(window, title, Ci.nsIFilePicker.modeGetFolder);
+    fp.appendFilters(Ci.nsIFilePicker.filterAll);
     // First try to open what's currently configured
     if (currentDirPref && currentDirPref.exists()) {
       fp.displayDirectory = currentDirPref;
@@ -2643,7 +2656,7 @@ var gMainPane = {
     }
 
     let result = await new Promise(resolve => fp.open(resolve));
-    if (result != Components.interfaces.nsIFilePicker.returnOK) {
+    if (result != Ci.nsIFilePicker.returnOK) {
       return;
     }
 
@@ -2661,7 +2674,7 @@ var gMainPane = {
    * preferences.
    */
   displayDownloadDirPref() {
-    this.displayDownloadDirPrefTask().catch(Components.utils.reportError);
+    this.displayDownloadDirPrefTask().catch(Cu.reportError);
 
     // don't override the preference's value in UI
     return undefined;
@@ -2675,7 +2688,7 @@ var gMainPane = {
 
     // Used in defining the correct path to the folder icon.
     var fph = Services.io.getProtocolHandler("file")
-      .QueryInterface(Components.interfaces.nsIFileProtocolHandler);
+      .QueryInterface(Ci.nsIFileProtocolHandler);
     var iconUrlSpec;
 
     let folderIndex = folderListPref.value;
@@ -2725,7 +2738,7 @@ var gMainPane = {
   async _getDownloadsFolder(aFolder) {
     switch (aFolder) {
       case "Desktop":
-        return Services.dirsvc.get("Desk", Components.interfaces.nsIFile);
+        return Services.dirsvc.get("Desk", Ci.nsIFile);
       case "Downloads":
         let downloadsDir = await Downloads.getSystemDownloadsDirectory();
         return new FileUtils.File(downloadsDir);

@@ -76,14 +76,10 @@ function getRepositoryAddon(aAddon, aCallback) {
     aCallback(aAddon);
     return;
   }
-  function completeAddon(aRepositoryAddon) {
-    aAddon._repositoryAddon = aRepositoryAddon;
-    aAddon.compatibilityOverrides = aRepositoryAddon ?
-                                      aRepositoryAddon.compatibilityOverrides :
-                                      null;
+  AddonRepository.getCachedAddonByID(aAddon.id, repoAddon => {
+    aAddon._repositoryAddon = repoAddon;
     aCallback(aAddon);
-  }
-  AddonRepository.getCachedAddonByID(aAddon.id, completeAddon);
+  });
 }
 
 /**
@@ -389,13 +385,13 @@ this.XPIDatabase = {
     try {
       let readTimer = AddonManagerPrivate.simpleTimer("XPIDB_syncRead_MS");
       logger.debug("Opening XPI database " + this.jsonFile.path);
-      fstream = Components.classes["@mozilla.org/network/file-input-stream;1"].
-              createInstance(Components.interfaces.nsIFileInputStream);
+      fstream = Cc["@mozilla.org/network/file-input-stream;1"].
+              createInstance(Ci.nsIFileInputStream);
       fstream.init(this.jsonFile, -1, 0, 0);
       let cstream = null;
       try {
-        cstream = Components.classes["@mozilla.org/intl/converter-input-stream;1"].
-                createInstance(Components.interfaces.nsIConverterInputStream);
+        cstream = Cc["@mozilla.org/intl/converter-input-stream;1"].
+                createInstance(Ci.nsIConverterInputStream);
         cstream.init(fstream, "UTF-8", 0, 0);
 
         let str = {};
@@ -1342,21 +1338,30 @@ this.XPIDatabaseReconcile = {
                       aOldPlatformVersion, aReloadMetadata) {
     logger.debug("Updating compatibility for add-on " + aOldAddon.id + " in " + aInstallLocation.name);
 
+    let checkSigning = aOldAddon.signedState === undefined && ADDON_SIGNING &&
+                       SIGNED_TYPES.has(aOldAddon.type);
+
+    let manifest = null;
+    if (checkSigning || aReloadMetadata) {
+      try {
+        let file = new nsIFile(aAddonState.path);
+        manifest = syncLoadManifestFromFile(file, aInstallLocation);
+      } catch (err) {
+        // If we can no longer read the manifest, it is no longer compatible.
+        aOldAddon.appDisabled = true;
+        return aOldAddon;
+      }
+    }
+
     // If updating from a version of the app that didn't support signedState
-    // then fetch that property now
-    if (aOldAddon.signedState === undefined && ADDON_SIGNING &&
-        SIGNED_TYPES.has(aOldAddon.type)) {
-      let file = new nsIFile(aAddonState.path);
-      let manifest = syncLoadManifestFromFile(file, aInstallLocation);
+    // then update that property now
+    if (checkSigning) {
       aOldAddon.signedState = manifest.signedState;
     }
 
     // May be updating from a version of the app that didn't support all the
     // properties of the currently-installed add-ons.
     if (aReloadMetadata) {
-      let file = new nsIFile(aAddonState.path);
-      let manifest = syncLoadManifestFromFile(file, aInstallLocation);
-
       // Avoid re-reading these properties from manifest,
       // use existing addon instead.
       // TODO - consider re-scanning for targetApplications.

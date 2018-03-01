@@ -561,7 +561,6 @@ class TreeMetadataEmitter(LoggingMixin):
                         'rpath': False,
                         'lto': False,
                         'debug-assertions': True,
-                        'codegen-units': 4,
                         'panic': 'abort',
                     }
                 else:
@@ -1054,9 +1053,6 @@ class TreeMetadataEmitter(LoggingMixin):
         # desired abstraction of the build definition away from makefiles.
         passthru = VariablePassthru(context)
         varlist = [
-            'ANDROID_APK_NAME',
-            'ANDROID_APK_PACKAGE',
-            'ANDROID_GENERATED_RESFILES',
             'EXTRA_DSO_LDOPTS',
             'RCFILE',
             'RESFILE',
@@ -1239,10 +1235,17 @@ class TreeMetadataEmitter(LoggingMixin):
                                  '%s: %s')
                                 % (var, f,), context)
                     if var.startswith('LOCALIZED_'):
-                        if isinstance(f, SourcePath) and not f.startswith('en-US/'):
-                            raise SandboxValidationError(
-                                    '%s paths must start with `en-US/`: %s'
-                                    % (var, f,), context)
+                        if isinstance(f, SourcePath):
+                            if f.startswith('en-US/'):
+                                pass
+                            elif '/locales/en-US/' in f:
+                                pass
+                            else:
+                                raise SandboxValidationError(
+                                        '%s paths must start with `en-US/` or '
+                                        'contain `/locales/en-US/`: %s'
+                                        % (var, f,), context)
+
                     if not isinstance(f, ObjDirPath):
                         path = f.full_path
                         if '*' not in path and not os.path.exists(path):
@@ -1339,24 +1342,6 @@ class TreeMetadataEmitter(LoggingMixin):
             computed_as_flags.resolve_flags('OS',
                                             context.config.substs.get('YASM_ASFLAGS', []))
 
-
-        for (symbol, cls) in [
-                ('ANDROID_RES_DIRS', AndroidResDirs),
-                ('ANDROID_EXTRA_RES_DIRS', AndroidExtraResDirs),
-                ('ANDROID_ASSETS_DIRS', AndroidAssetsDirs)]:
-            paths = context.get(symbol)
-            if not paths:
-                continue
-            for p in paths:
-                if isinstance(p, SourcePath) and not os.path.isdir(p.full_path):
-                    raise SandboxValidationError('Directory listed in '
-                        '%s is not a directory: \'%s\'' %
-                            (symbol, p.full_path), context)
-            yield cls(context, paths)
-
-        android_extra_packages = context.get('ANDROID_EXTRA_PACKAGES')
-        if android_extra_packages:
-            yield AndroidExtraPackages(context, android_extra_packages)
 
         if passthru.variables:
             yield passthru

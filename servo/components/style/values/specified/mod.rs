@@ -39,8 +39,9 @@ pub use self::font::{FontSize, FontSizeAdjust, FontSynthesis, FontWeight, FontVa
 pub use self::font::{FontFamily, FontLanguageOverride, FontVariationSettings, FontVariantEastAsian};
 pub use self::font::{FontVariantLigatures, FontVariantNumeric, FontFeatureSettings};
 pub use self::font::{MozScriptLevel, MozScriptMinSize, MozScriptSizeMultiplier, XTextZoom, XLang};
-pub use self::box_::{AnimationIterationCount, AnimationName, Display, OverscrollBehavior, Contain};
-pub use self::box_::{OverflowClipBox, ScrollSnapType, TouchAction, VerticalAlign, WillChange};
+pub use self::box_::{AnimationIterationCount, AnimationName, Contain, Display};
+pub use self::box_::{OverflowClipBox, OverscrollBehavior, Perspective};
+pub use self::box_::{ScrollSnapType, TouchAction, VerticalAlign, WillChange};
 pub use self::color::{Color, ColorPropertyValue, RGBAColor};
 pub use self::counters::{Content, ContentItem, CounterIncrement, CounterReset};
 pub use self::effects::{BoxShadow, Filter, SimpleShadow};
@@ -51,7 +52,7 @@ pub use self::image::{ColorStop, EndingShape as GradientEndingShape, Gradient};
 pub use self::image::{GradientItem, GradientKind, Image, ImageLayer, MozImageRect};
 pub use self::inherited_box::ImageOrientation;
 pub use self::length::{AbsoluteLength, CalcLengthOrPercentage, CharacterWidth};
-pub use self::length::{FontRelativeLength, Length, LengthOrNone, LengthOrNumber};
+pub use self::length::{FontRelativeLength, Length, LengthOrNumber};
 pub use self::length::{LengthOrPercentage, LengthOrPercentageOrAuto};
 pub use self::length::{LengthOrPercentageOrNone, MaxLength, MozLength};
 pub use self::length::{NoCalcLength, ViewportPercentageLength};
@@ -62,17 +63,17 @@ pub use self::list::ListStyleType;
 pub use self::outline::OutlineStyle;
 pub use self::rect::LengthOrNumberRect;
 pub use self::percentage::Percentage;
-pub use self::position::{GridAutoFlow, GridTemplateAreas, Position};
-pub use self::position::{PositionComponent, ZIndex};
-pub use self::pointing::Cursor;
+pub use self::pointing::{CaretColor, Cursor};
 #[cfg(feature = "gecko")]
 pub use self::pointing::CursorImage;
+pub use self::position::{GridAutoFlow, GridTemplateAreas, Position};
+pub use self::position::{PositionComponent, ZIndex};
 pub use self::svg::{SVGLength, SVGOpacity, SVGPaint, SVGPaintKind};
 pub use self::svg::{SVGPaintOrder, SVGStrokeDashArray, SVGWidth};
 pub use self::svg::MozContextProperties;
 pub use self::table::XSpan;
-pub use self::text::{InitialLetter, LetterSpacing, LineHeight, TextDecorationLine};
-pub use self::text::{TextAlign, TextAlignKeyword, TextOverflow, WordSpacing};
+pub use self::text::{InitialLetter, LetterSpacing, LineHeight, MozTabSize, TextAlign};
+pub use self::text::{TextAlignKeyword, TextDecorationLine, TextOverflow, WordSpacing};
 pub use self::time::Time;
 pub use self::transform::{Rotate, Scale, TimingFunction, Transform};
 pub use self::transform::{TransformOrigin, TransformStyle, Translate};
@@ -550,12 +551,6 @@ pub type GridLine = GenericGridLine<Integer>;
 /// `<grid-template-rows> | <grid-template-columns>`
 pub type GridTemplateComponent = GenericGridTemplateComponent<LengthOrPercentage, Integer>;
 
-/// <length> | <percentage> | <number>
-pub type LengthOrPercentageOrNumber = Either<Number, LengthOrPercentage>;
-
-/// NonNegativeLengthOrPercentage | NonNegativeNumber
-pub type NonNegativeLengthOrPercentageOrNumber = Either<NonNegativeNumber, NonNegativeLengthOrPercentage>;
-
 #[derive(Clone, Debug, MallocSizeOf, PartialEq)]
 /// rect(<top>, <left>, <bottom>, <right>) used by clip and image-region
 pub struct ClipRect {
@@ -697,9 +692,6 @@ impl ClipRectOrAuto {
         }
     }
 }
-
-/// <color> | auto
-pub type ColorOrAuto = Either<Color, Auto>;
 
 /// Whether quirks are allowed in this context.
 #[derive(Clone, Copy, PartialEq)]

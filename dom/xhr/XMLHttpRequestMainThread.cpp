@@ -40,6 +40,7 @@
 #include "nsReadableUtils.h"
 
 #include "nsIURI.h"
+#include "nsIURIMutator.h"
 #include "nsILoadGroup.h"
 #include "nsNetUtil.h"
 #include "nsStringStream.h"
@@ -199,7 +200,6 @@ XMLHttpRequestMainThread::XMLHttpRequestMainThread()
     mResponseType(XMLHttpRequestResponseType::_empty),
     mRequestObserver(nullptr),
     mState(XMLHttpRequestBinding::UNSENT),
-    mStyleBackend(StyleBackendType::None),
     mFlagSynchronous(false), mFlagAborted(false), mFlagParseBody(false),
     mFlagSyncLooping(false), mFlagBackgroundRequest(false),
     mFlagHadUploadListenersOnSend(false), mFlagACwithCredentials(false),
@@ -1483,15 +1483,12 @@ XMLHttpRequestMainThread::Open(const nsACString& aMethod,
   nsAutoCString host;
   parsedURL->GetHost(host);
   if (!host.IsEmpty()) {
-    nsAutoCString userpass;
-    if (!aUsername.IsVoid()) {
-      CopyUTF16toUTF8(aUsername, userpass);
+    if (!aUsername.IsVoid() || !aPassword.IsVoid()) {
+      Unused << NS_MutateURI(parsedURL)
+                  .SetUsername(NS_ConvertUTF16toUTF8(aUsername))
+                  .SetPassword(NS_ConvertUTF16toUTF8(aPassword))
+                  .Finalize(parsedURL);
     }
-    userpass.AppendLiteral(":");
-    if (!aPassword.IsVoid()) {
-      AppendUTF16toUTF8(aPassword, userpass);
-    }
-    parsedURL->SetUserPass(userpass);
   }
 
   // Step 9
@@ -2026,8 +2023,7 @@ XMLHttpRequestMainThread::OnStartRequest(nsIRequest *request, nsISupports *ctxt)
                            emptyStr, emptyStr, nullptr, docURI,
                            baseURI, requestingPrincipal, true, global,
                            mIsHtml ? DocumentFlavorHTML :
-                                     DocumentFlavorLegacyGuess,
-                           mStyleBackend);
+                                     DocumentFlavorLegacyGuess);
     NS_ENSURE_SUCCESS(rv, rv);
     mResponseXML = do_QueryInterface(responseDoc);
     mResponseXML->SetChromeXHRDocURI(chromeXHRDocURI);

@@ -551,9 +551,6 @@ if (SharedAll.Config.DEBUG && Scheduler.launched) {
   Scheduler.post("SET_DEBUG", [true]);
 }
 
-// Observer topics used for monitoring shutdown
-const WEB_WORKERS_SHUTDOWN_TOPIC = "web-workers-shutdown";
-
 // Preference used to configure test shutdown observer.
 const PREF_OSFILE_TEST_SHUTDOWN_OBSERVER =
   "toolkit.osfile.test.shutdown.observer";
@@ -1426,7 +1423,7 @@ Object.defineProperty(OS.File, "queue", {
 // able to replace that field with a custom implementation before it is first
 // called.
 // eslint-disable-next-line mozilla/use-services
-const isContent = Components.classes["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).processType == Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT;
+const isContent = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).processType == Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT;
 
 /**
  * Shutdown barriers, to let clients register to be informed during shutdown.

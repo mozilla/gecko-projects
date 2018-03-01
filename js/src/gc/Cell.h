@@ -94,6 +94,7 @@ struct Cell
     }
 
 #ifdef DEBUG
+    static inline bool thingIsNotGray(Cell* cell);
     inline bool isAligned() const;
     void dump(GenericPrinter& out) const;
     void dump() const;
@@ -122,6 +123,7 @@ class TenuredCell : public Cell
     MOZ_ALWAYS_INLINE bool markIfUnmarked(MarkColor color = MarkColor::Black) const;
     MOZ_ALWAYS_INLINE void markBlack() const;
     MOZ_ALWAYS_INLINE void copyMarkBitsFrom(const TenuredCell* src);
+    MOZ_ALWAYS_INLINE void unmark();
 
     // Access to the arena.
     inline Arena* arena() const;
@@ -309,6 +311,12 @@ TenuredCell::copyMarkBitsFrom(const TenuredCell* src)
     bitmap.copyMarkBit(this, src, ColorBit::GrayOrBlackBit);
 }
 
+void
+TenuredCell::unmark()
+{
+    chunk()->bitmap.unmark(this);
+}
+
 inline Arena*
 TenuredCell::arena() const
 {
@@ -431,6 +439,13 @@ TenuredCell::writeBarrierPost(void* cellp, TenuredCell* prior, TenuredCell* next
 }
 
 #ifdef DEBUG
+
+/* static */ bool
+Cell::thingIsNotGray(Cell* cell)
+{
+    return JS::CellIsNotGray(cell);
+}
+
 bool
 Cell::isAligned() const
 {

@@ -429,11 +429,7 @@ JitZoneGroup::JitZoneGroup(ZoneGroup* group)
 {}
 
 JitCompartment::JitCompartment()
-  : stubCodes_(nullptr),
-    stringConcatStub_(nullptr),
-    regExpMatcherStub_(nullptr),
-    regExpSearcherStub_(nullptr),
-    regExpTesterStub_(nullptr)
+  : stubCodes_(nullptr)
 {
 }
 
@@ -459,16 +455,38 @@ JitCompartment::initialize(JSContext* cx)
     return true;
 }
 
-bool
-JitCompartment::ensureIonStubsExist(JSContext* cx)
+template <typename T>
+static T
+PopNextBitmaskValue(uint32_t* bitmask)
 {
-    if (!stringConcatStub_) {
-        stringConcatStub_ = generateStringConcatStub(cx);
-        if (!stringConcatStub_)
-            return false;
-    }
+    MOZ_ASSERT(*bitmask);
+    uint32_t index = mozilla::CountTrailingZeroes32(*bitmask);
+    *bitmask ^= 1 << index;
 
-    return true;
+    MOZ_ASSERT(index < uint32_t(T::Count));
+    return T(index);
+}
+
+void
+JitCompartment::performStubReadBarriers(uint32_t stubsToBarrier) const
+{
+    while (stubsToBarrier) {
+        auto stub = PopNextBitmaskValue<StubIndex>(&stubsToBarrier);
+        const ReadBarrieredJitCode& jitCode = stubs_[stub];
+        MOZ_ASSERT(jitCode);
+        jitCode.get();
+    }
+}
+
+void
+JitCompartment::performSIMDTemplateReadBarriers(uint32_t simdTemplatesToBarrier) const
+{
+    while (simdTemplatesToBarrier) {
+        auto type = PopNextBitmaskValue<SimdType>(&simdTemplatesToBarrier);
+        const ReadBarrieredObject& tpl = simdTemplateObjects_[type];
+        MOZ_ASSERT(tpl);
+        tpl.get();
+    }
 }
 
 bool
@@ -667,17 +685,10 @@ JitCompartment::sweep(FreeOp* fop, JSCompartment* compartment)
            it = BailoutReturnStubInfo();
     }
 
-    if (stringConcatStub_ && IsAboutToBeFinalizedUnbarriered(&stringConcatStub_))
-        stringConcatStub_ = nullptr;
-
-    if (regExpMatcherStub_ && IsAboutToBeFinalizedUnbarriered(&regExpMatcherStub_))
-        regExpMatcherStub_ = nullptr;
-
-    if (regExpSearcherStub_ && IsAboutToBeFinalizedUnbarriered(&regExpSearcherStub_))
-        regExpSearcherStub_ = nullptr;
-
-    if (regExpTesterStub_ && IsAboutToBeFinalizedUnbarriered(&regExpTesterStub_))
-        regExpTesterStub_ = nullptr;
+    for (ReadBarrieredJitCode& stub : stubs_) {
+        if (stub && IsAboutToBeFinalized(&stub))
+            stub.set(nullptr);
+    }
 
     for (ReadBarrieredObject& obj : simdTemplateObjects_) {
         if (obj && IsAboutToBeFinalized(&obj))
@@ -3156,7 +3167,10 @@ AutoFlushICache::setRange(uintptr_t start, size_t len)
 void
 AutoFlushICache::flush(uintptr_t start, size_t len)
 {
-#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
+#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_NONE)
+    // Nothing
+#elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64) || \
+      defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
     JSContext* cx = TlsContext.get();
     AutoFlushICache* afc = cx ? cx->autoFlushICache() : nullptr;
     if (!afc) {
@@ -3175,6 +3189,8 @@ AutoFlushICache::flush(uintptr_t start, size_t len)
 
     JitSpewCont(JitSpew_CacheFlush, afc->inhibit_ ? "x" : "*");
     ExecutableAllocator::cacheFlush((void*)start, len);
+#else
+    MOZ_CRASH("Unresolved porting API - AutoFlushICache::flush");
 #endif
 }
 
@@ -3183,12 +3199,17 @@ AutoFlushICache::flush(uintptr_t start, size_t len)
 void
 AutoFlushICache::setInhibit()
 {
-#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
+#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_NONE)
+    // Nothing
+#elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64) || \
+      defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
     AutoFlushICache* afc = TlsContext.get()->autoFlushICache();
     MOZ_ASSERT(afc);
     MOZ_ASSERT(afc->start_);
     JitSpewCont(JitSpew_CacheFlush, "I");
     afc->inhibit_ = true;
+#else
+    MOZ_CRASH("Unresolved porting API - AutoFlushICache::setInhibit");
 #endif
 }
 

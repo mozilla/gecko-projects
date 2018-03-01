@@ -87,20 +87,21 @@ reftest:
     description: "Reftest run"
     suite: reftest/reftest
     treeherder-symbol: R(R)
+    worker-type:
+        by-test-platform:
+            windows10-64.*: buildbot-bridge/buildbot-bridge
+            default: null
     instance-size:
         by-test-platform:
             android.*: xlarge
             default: default
-    virtualization:
-        by-test-platform:
-            windows10.*: hardware
-            default: virtual-with-gpu
+    virtualization: virtual-with-gpu
     chunks:
         by-test-platform:
             android-4.3-arm7-api-16/debug: 56
             android.*: 28
             macosx64.*/opt: 1
-            macosx64.*/debug: 2
+            macosx64.*/debug: 3
             windows10-64.*/opt: 1
             windows10-64.*/debug: 2
             default: 8

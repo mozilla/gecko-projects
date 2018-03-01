@@ -37,7 +37,6 @@ PromiseTestUtils.whitelistRejectionsGlobally(/this\.toolbox is null/);
 PromiseTestUtils.whitelistRejectionsGlobally(/this\.webConsoleClient is null/);
 PromiseTestUtils.whitelistRejectionsGlobally(/this\.worker is null/);
 
-const {console} = scopedCuImport("resource://gre/modules/Console.jsm");
 const {ScratchpadManager} = scopedCuImport("resource://devtools/client/scratchpad/scratchpad-manager.jsm");
 const {loader, require} = scopedCuImport("resource://devtools/shared/Loader.jsm");
 
@@ -732,8 +731,8 @@ async function injectEventUtilsInContentTask(browser) {
     EventUtils.window = {};
     EventUtils.parent = EventUtils.window;
     /* eslint-disable camelcase */
-    EventUtils._EU_Ci = Components.interfaces;
-    EventUtils._EU_Cc = Components.classes;
+    EventUtils._EU_Ci = Ci;
+    EventUtils._EU_Cc = Cc;
     /* eslint-enable camelcase */
     // EventUtils' `sendChar` function relies on the navigator to synthetize events.
     EventUtils.navigator = content.navigator;

@@ -832,8 +832,12 @@ class FunctionCompiler
         }
 
         MWasmLoadTls* boundsCheckLimit = maybeLoadBoundsCheckLimit();
-        if (boundsCheckLimit)
-            curBlock_->add(MWasmBoundsCheck::New(alloc(), *base, boundsCheckLimit, bytecodeOffset()));
+        if (boundsCheckLimit) {
+            auto* ins = MWasmBoundsCheck::New(alloc(), *base, boundsCheckLimit, bytecodeOffset());
+            curBlock_->add(ins);
+            if (JitOptions.spectreIndexMasking)
+                *base = ins;
+        }
     }
 
     bool isSmallerAccessForI64(ValType result, const MemoryAccessDesc* access) {
@@ -4441,4 +4445,14 @@ wasm::IonCompileFunctions(const ModuleEnvironment& env, LifoAlloc& lifo,
         return false;
 
     return code->swap(masm);
+}
+
+bool
+js::wasm::IonCanCompile()
+{
+#if !defined(JS_CODEGEN_NONE) && !defined(JS_CODEGEN_ARM64)
+    return true;
+#else
+    return false;
+#endif
 }

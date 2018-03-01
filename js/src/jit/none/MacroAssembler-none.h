@@ -153,7 +153,7 @@ class Assembler : public AssemblerShared
     static void ToggleToCmp(CodeLocationLabel) { MOZ_CRASH(); }
     static void ToggleCall(CodeLocationLabel, bool) { MOZ_CRASH(); }
 
-    static void Bind(uint8_t*, CodeOffset, CodeOffset) { MOZ_CRASH(); }
+    static void Bind(uint8_t*, const CodeLabel&) { MOZ_CRASH(); }
 
     static uintptr_t GetPointer(uint8_t*) { MOZ_CRASH(); }
 
@@ -174,6 +174,21 @@ class Operand
     Operand (const FloatRegister) { MOZ_CRASH();}
     Operand (Register, Imm32 ) { MOZ_CRASH(); }
     Operand (Register, int32_t ) { MOZ_CRASH(); }
+};
+
+class ScratchTagScope
+{
+  public:
+    ScratchTagScope(MacroAssembler&, const ValueOperand) {}
+    operator Register() { MOZ_CRASH(); }
+    void release() { MOZ_CRASH(); }
+    void reacquire() { MOZ_CRASH(); }
+};
+
+class ScratchTagScopeRelease
+{
+  public:
+    explicit ScratchTagScopeRelease(ScratchTagScope*) {}
 };
 
 class MacroAssemblerNone : public Assembler
@@ -216,7 +231,7 @@ class MacroAssemblerNone : public Assembler
     void bindLater(Label*, wasm::OldTrapDesc) { MOZ_CRASH(); }
     template <typename T> void j(Condition, T) { MOZ_CRASH(); }
     template <typename T> void jump(T) { MOZ_CRASH(); }
-    void writeCodePointer(CodeOffset* label) { MOZ_CRASH(); }
+    void writeCodePointer(CodeLabel* label) { MOZ_CRASH(); }
     void haltingAlign(size_t) { MOZ_CRASH(); }
     void nopAlign(size_t) { MOZ_CRASH(); }
     void checkStackAlignment() { MOZ_CRASH(); }
@@ -313,7 +328,7 @@ class MacroAssemblerNone : public Assembler
 
     template <typename T> void computeEffectiveAddress(T, Register) { MOZ_CRASH(); }
 
-    Register splitTagForTest(ValueOperand) { MOZ_CRASH(); }
+    void splitTagForTest(ValueOperand, ScratchTagScope&) { MOZ_CRASH(); }
 
     void boxDouble(FloatRegister, ValueOperand, FloatRegister) { MOZ_CRASH(); }
     void boxNonDouble(JSValueType, Register, ValueOperand) { MOZ_CRASH(); }

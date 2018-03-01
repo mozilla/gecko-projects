@@ -1413,6 +1413,12 @@ pref("privacy.firstparty.isolate",                        false);
 pref("privacy.firstparty.isolate.restrict_opener_access", true);
 // Anti-fingerprinting, disabled by default
 pref("privacy.resistFingerprinting", false);
+// We automatically decline canvas permission requests if they are not initiated
+// from user input. Just in case that breaks something, we allow the user to revert
+// this behaior with this obscure pref. We do not intend to support this long term.
+// If you do set it, to work around some broken website, please file a bug with
+// information so we can understand why it is needed.
+pref("privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts", true);
 // A subset of Resist Fingerprinting protections focused specifically on timers for testing
 // This affects the Animation API, the performance APIs, Date.getTime, Event.timestamp,
 //   File.lastModified, audioContext.currentTime, canvas.captureStream.currentTime
@@ -1561,6 +1567,7 @@ pref("javascript.options.dump_stack_on_debuggee_would_run", false);
 
 // Spectre security vulnerability mitigations.
 pref("javascript.options.spectre.index_masking", true);
+pref("javascript.options.spectre.object_mitigations.barriers", true);
 pref("javascript.options.spectre.string_mitigations", true);
 pref("javascript.options.spectre.value_masking", true);
 
@@ -2631,11 +2638,7 @@ pref("security.mixed_content.block_active_content", false);
 pref("security.mixed_content.block_display_content", false);
 
 // Upgrade mixed display content before it's blocked
-#ifdef NIGHTLY_BUILD
-pref("security.mixed_content.upgrade_display_content", true);
-#else
 pref("security.mixed_content.upgrade_display_content", false);
-#endif
 
 // Block sub requests that happen within an object
 #ifdef EARLY_BETA_OR_EARLIER
@@ -4690,6 +4693,15 @@ pref("toolkit.zoomManager.zoomValues", ".3,.5,.67,.8,.9,1,1.1,1.2,1.33,1.5,1.7,2
 // Image-related prefs
 //
 
+// The maximum size (in kB) that the aggregate frames of an animation can use
+// before it starts to discard already displayed frames and redecode them as
+// necessary.
+pref("image.animated.decode-on-demand.threshold-kb", 20480);
+
+// The minimum number of frames we want to have buffered ahead of an
+// animation's currently displayed frame.
+pref("image.animated.decode-on-demand.batch-size", 6);
+
 // Maximum number of surfaces for an image before entering "factor of 2" mode.
 // This in addition to the number of "native" sizes of an image. A native size
 // is a size for which we can decode a frame without up or downscaling. Most
@@ -5180,6 +5192,7 @@ pref("dom.streams.enabled", false);
 // Push
 
 pref("dom.push.enabled", false);
+pref("dom.push.alwaysConnect", false);
 
 pref("dom.push.loglevel", "error");
 
@@ -5313,7 +5326,7 @@ pref("dom.placeholder.show_on_focus", true);
 
 // WebVR is enabled by default in beta and release for Windows and for all
 // platforms in nightly and aurora.
-#if defined(XP_WIN) || !defined(RELEASE_OR_BETA)
+#if defined(XP_WIN) || defined(XP_MACOSX) || !defined(RELEASE_OR_BETA)
 pref("dom.vr.enabled", true);
 #else
 pref("dom.vr.enabled", false);
@@ -6004,3 +6017,8 @@ pref("layers.omtp.paint-workers", 1);
 #endif
 pref("layers.omtp.release-capture-on-main-thread", false);
 pref("layers.omtp.dump-capture", false);
+
+// Limits the depth of recursive conversion of data when opening
+// a content to view.  This is mostly intended to prevent infinite
+// loops with faulty converters involved.
+pref("general.document_open_conversion_depth_limit", 20);
