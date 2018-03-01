@@ -2361,6 +2361,29 @@ MTypeBarrier::foldsTo(TempAllocator& alloc)
     return input();
 }
 
+bool
+MTypeBarrier::canRedefineInput()
+{
+    // LTypeBarrier does not need its own def usually, because we can use the
+    // input's allocation (LIRGenerator::redefineInput). However, if Spectre
+    // mitigations are enabled, guardObjectType may zero the object register on
+    // speculatively executed paths, so LTypeBarrier needs to have its own def
+    // then to guarantee all uses will see this potentially-zeroed value.
+
+    if (!JitOptions.spectreObjectMitigationsBarriers)
+        return true;
+
+    if (barrierKind() == BarrierKind::TypeTagOnly)
+        return true;
+
+    TemporaryTypeSet* types = resultTypeSet();
+    bool hasSpecificObjects = !types->unknownObject() && types->getObjectCount() > 0;
+    if (!hasSpecificObjects)
+        return true;
+
+    return false;
+}
+
 #ifdef DEBUG
 void
 MPhi::assertLoopPhi() const
@@ -6435,49 +6458,6 @@ jit::PropertyReadIsIdempotent(CompilerConstraintList* constraints,
     return true;
 }
 
-void
-jit::AddObjectsForPropertyRead(TempAllocator& tempAlloc, MDefinition* obj, PropertyName* name,
-                               TemporaryTypeSet* observed)
-{
-    // Add objects to observed which *could* be observed by reading name from obj,
-    // to hopefully avoid unnecessary type barriers and code invalidations.
-
-    LifoAlloc* alloc = tempAlloc.lifoAlloc();
-
-    TemporaryTypeSet* types = obj->resultTypeSet();
-    if (!types || types->unknownObject()) {
-        observed->addType(TypeSet::AnyObjectType(), alloc);
-        return;
-    }
-
-    for (size_t i = 0; i < types->getObjectCount(); i++) {
-        TypeSet::ObjectKey* key = types->getObject(i);
-        if (!key)
-            continue;
-
-        if (key->unknownProperties()) {
-            observed->addType(TypeSet::AnyObjectType(), alloc);
-            return;
-        }
-
-        jsid id = name ? NameToId(name) : JSID_VOID;
-        HeapTypeSetKey property = key->property(id);
-        HeapTypeSet* types = property.maybeTypes();
-        if (!types)
-            continue;
-
-        if (types->unknownObject()) {
-            observed->addType(TypeSet::AnyObjectType(), alloc);
-            return;
-        }
-
-        for (size_t i = 0; i < types->getObjectCount(); i++) {
-            if (TypeSet::ObjectKey* key = types->getObject(i))
-                observed->addType(TypeSet::ObjectType(key), alloc);
-        }
-    }
-}
-
 AbortReasonOr<bool>
 PrototypeHasIndexedProperty(IonBuilder* builder, JSObject* obj)
 {
@@ -6636,8 +6616,17 @@ TryAddTypeBarrierForWrite(TempAllocator& alloc, CompilerConstraintList* constrai
     if ((*pvalue)->resultTypeSet() && (*pvalue)->resultTypeSet()->objectsAreSubset(types))
         kind = BarrierKind::TypeTagOnly;
 
-    MInstruction* ins = MMonitorTypes::New(alloc, *pvalue, types, kind);
+    MInstruction* ins = MTypeBarrier::New(alloc, *pvalue, types, kind);
     current->add(ins);
+    ins->setNotMovable();
+    if (ins->type() == MIRType::Undefined) {
+        ins = MConstant::New(alloc, UndefinedValue());
+        current->add(ins);
+    } else if (ins->type() == MIRType::Null) {
+        ins = MConstant::New(alloc, NullValue());
+        current->add(ins);
+    }
+    *pvalue = ins;
     return true;
 }
 

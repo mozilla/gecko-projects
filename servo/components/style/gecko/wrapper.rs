@@ -773,7 +773,7 @@ impl<'le> GeckoElement<'le> {
 
     fn needs_transitions_update_per_property(
         &self,
-        longhand_id: &LonghandId,
+        longhand_id: LonghandId,
         combined_duration: f32,
         before_change_style: &ComputedValues,
         after_change_style: &ComputedValues,
@@ -787,7 +787,7 @@ impl<'le> GeckoElement<'le> {
         // If the end value has not changed, we should leave the currently
         // running transition as-is since we don't want to interrupt its timing
         // function.
-        if let Some(ref existing) = existing_transitions.get(longhand_id) {
+        if let Some(ref existing) = existing_transitions.get(&longhand_id) {
             let after_value =
                 AnimationValue::from_computed_values(
                     longhand_id,
@@ -798,11 +798,11 @@ impl<'le> GeckoElement<'le> {
         }
 
         let from = AnimationValue::from_computed_values(
-            &longhand_id,
+            longhand_id,
             before_change_style,
         );
         let to = AnimationValue::from_computed_values(
-            &longhand_id,
+            longhand_id,
             after_change_style,
         );
 
@@ -959,7 +959,8 @@ impl<'le> TElement for GeckoElement<'le> {
         // ::before/::after, XBL bindings, or nsIAnonymousContentCreators.
         if self.is_in_anonymous_subtree() ||
            self.has_xbl_binding_with_content() ||
-           self.is_in_shadow_tree() ||
+           self.is_html_slot_element() ||
+           self.shadow_root().is_some() ||
            self.may_have_anonymous_children() {
             unsafe {
                 let mut iter: structs::StyleChildrenIterator = ::std::mem::zeroed();
@@ -990,7 +991,7 @@ impl<'le> TElement for GeckoElement<'le> {
             return self.as_node().owner_doc().as_node();
         }
 
-        if self.xbl_binding().is_some() {
+        if self.xbl_binding().is_some() || self.shadow_root().is_some() {
             return self.as_node();
         }
 
@@ -1408,19 +1409,36 @@ impl<'le> TElement for GeckoElement<'le> {
         // If we are a NAC pseudo-element, we want to get rules from our
         // rule_hash_target, that is, our originating element.
         let mut current = Some(self.rule_hash_target());
-
         while let Some(element) = current {
+            // TODO(emilio): Deal with Shadow DOM separately than with XBL
+            // (right now we still rely on get_xbl_binding_parent()).
+            //
+            // That will allow to clean up a bunch in
+            // push_applicable_declarations.
+            if let Some(shadow) = element.shadow_root() {
+                debug_assert!(!shadow.mServoStyles.mPtr.is_null());
+                let author_styles = unsafe {
+                    &*(shadow.mServoStyles.mPtr
+                        as *const structs::RawServoAuthorStyles
+                        as *const bindings::RawServoAuthorStyles)
+                };
+
+                let author_styles: &'a _ = AuthorStyles::<GeckoStyleSheet>::from_ffi(author_styles);
+                f(&author_styles.data, author_styles.quirks_mode);
+                if element != *self {
+                    break;
+                }
+            }
+
             if let Some(binding) = element.xbl_binding() {
                 binding.each_xbl_cascade_data(&mut f);
 
                 // If we're not looking at our original element, allow the
                 // binding to cut off style inheritance.
-                if element != *self {
-                    if !binding.inherits_style() {
-                        // Go no further; we're not inheriting style from
-                        // anything above here.
-                        break;
-                    }
+                if element != *self && !binding.inherits_style() {
+                    // Go no further; we're not inheriting style from
+                    // anything above here.
+                    break;
                 }
             }
 
@@ -1513,8 +1531,8 @@ impl<'le> TElement for GeckoElement<'le> {
 
             let transition_property: TransitionProperty = property.into();
 
-            let mut property_check_helper = |property: &LonghandId| -> bool {
-                transitions_to_keep.insert(*property);
+            let mut property_check_helper = |property: LonghandId| -> bool {
+                transitions_to_keep.insert(property);
                 self.needs_transitions_update_per_property(
                     property,
                     combined_duration,
@@ -1525,18 +1543,13 @@ impl<'le> TElement for GeckoElement<'le> {
             };
 
             match transition_property {
-                TransitionProperty::All => {
-                    if TransitionProperty::any(property_check_helper) {
-                        return true;
-                    }
-                },
                 TransitionProperty::Unsupported(..) => {},
                 TransitionProperty::Shorthand(ref shorthand) => {
-                    if shorthand.longhands().iter().any(property_check_helper) {
+                    if shorthand.longhands().any(property_check_helper) {
                         return true;
                     }
                 },
-                TransitionProperty::Longhand(ref longhand_id) => {
+                TransitionProperty::Longhand(longhand_id) => {
                     if property_check_helper(longhand_id) {
                         return true;
                     }

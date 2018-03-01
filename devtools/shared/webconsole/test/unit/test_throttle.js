@@ -22,7 +22,7 @@ TestStreamListener.prototype = {
   },
 
   onDataAvailable: function (request, context, inputStream, offset, count) {
-    const sin = Components.classes["@mozilla.org/scriptableinputstream;1"]
+    const sin = Cc["@mozilla.org/scriptableinputstream;1"]
           .createInstance(nsIScriptableInputStream);
     sin.init(inputStream);
     this.data = sin.read(count);
@@ -71,7 +71,7 @@ TestChannel.prototype = {
   },
 };
 
-add_task(function* () {
+add_task(async function () {
   let throttler = new NetworkThrottleManager({
     latencyMean: 1,
     latencyMax: 1,
@@ -129,13 +129,13 @@ add_task(function* () {
      "test listener should not have received data");
   equal(activitySeen, false, "activity not distributed yet");
 
-  let newState = yield testListener.onStateChanged();
+  let newState = await testListener.onStateChanged();
   equal(newState, "data", "test listener received data");
   equal(testListener.data, TEST_INPUT, "test listener received all the data");
   equal(activitySeen, true, "activity has been distributed");
 
   let onChange = testListener.onStateChanged();
   listener.onStopRequest(null, null, null);
-  newState = yield onChange;
+  newState = await onChange;
   equal(newState, "stop", "onStateChanged reported");
 });

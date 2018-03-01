@@ -21,7 +21,6 @@ use properties::longhands;
 use properties::longhands::font_weight::computed_value::T as FontWeight;
 use properties::longhands::font_stretch::computed_value::T as FontStretch;
 use properties::longhands::visibility::computed_value::T as Visibility;
-#[cfg(feature = "gecko")]
 use properties::PropertyId;
 use properties::{LonghandId, ShorthandId};
 use servo_arc::Arc;
@@ -82,11 +81,6 @@ pub fn nscsspropertyid_is_animatable(property: nsCSSPropertyID) -> bool {
 // beforehand.
 #[derive(Clone, Debug, Eq, Hash, MallocSizeOf, PartialEq)]
 pub enum TransitionProperty {
-    /// All, any transitionable property changing should generate a transition.
-    ///
-    /// FIXME(emilio): Can we remove this and just use
-    /// Shorthand(ShorthandId::All)?
-    All,
     /// A shorthand.
     Shorthand(ShorthandId),
     /// A longhand transitionable property.
@@ -102,7 +96,6 @@ impl ToCss for TransitionProperty {
         W: Write,
     {
         match *self {
-            TransitionProperty::All => dest.write_str("all"),
             TransitionProperty::Shorthand(ref id) => dest.write_str(id.name()),
             TransitionProperty::Longhand(ref id) => dest.write_str(id.name()),
             TransitionProperty::Unsupported(ref id) => id.to_css(dest),
@@ -113,27 +106,10 @@ impl ToCss for TransitionProperty {
 trivial_to_computed_value!(TransitionProperty);
 
 impl TransitionProperty {
-    /// Iterates over each longhand property.
-    pub fn each<F: FnMut(&LonghandId) -> ()>(mut cb: F) {
-        % for prop in data.longhands:
-            % if prop.transitionable:
-                cb(&LonghandId::${prop.camel_case});
-            % endif
-        % endfor
-    }
-
-    /// Iterates over every longhand property that is not
-    /// TransitionProperty::All, stopping and returning true when the provided
-    /// callback returns true for the first time.
-    pub fn any<F: FnMut(&LonghandId) -> bool>(mut cb: F) -> bool {
-        % for prop in data.longhands:
-            % if prop.transitionable:
-                if cb(&LonghandId::${prop.camel_case}) {
-                    return true;
-                }
-            % endif
-        % endfor
-        false
+    /// Returns `all`.
+    #[inline]
+    pub fn all() -> Self {
+        TransitionProperty::Shorthand(ShorthandId::All)
     }
 
     /// Parse a transition-property value.
@@ -144,14 +120,12 @@ impl TransitionProperty {
         //
         // FIXME: This should handle aliases too.
         pub enum StaticId {
-            All,
             Longhand(LonghandId),
             Shorthand(ShorthandId),
         }
         ascii_case_insensitive_phf_map! {
             static_id -> StaticId = {
-                "all" => StaticId::All,
-                % for prop in data.shorthands_except_all():
+                % for prop in data.shorthands:
                 "${prop.name}" => StaticId::Shorthand(ShorthandId::${prop.camel_case}),
                 % endfor
                 % for prop in data.longhands:
@@ -164,7 +138,6 @@ impl TransitionProperty {
         let ident = input.expect_ident()?;
 
         Ok(match static_id(&ident) {
-            Some(&StaticId::All) => TransitionProperty::All,
             Some(&StaticId::Longhand(id)) => TransitionProperty::Longhand(id),
             Some(&StaticId::Shorthand(id)) => TransitionProperty::Shorthand(id),
             None => {
@@ -179,7 +152,9 @@ impl TransitionProperty {
     #[cfg(feature = "gecko")]
     pub fn to_nscsspropertyid(&self) -> Result<nsCSSPropertyID, ()> {
         Ok(match *self {
-            TransitionProperty::All => nsCSSPropertyID::eCSSPropertyExtra_all_properties,
+            TransitionProperty::Shorthand(ShorthandId::All) => {
+                nsCSSPropertyID::eCSSPropertyExtra_all_properties
+            }
             TransitionProperty::Shorthand(ref id) => id.to_nscsspropertyid(),
             TransitionProperty::Longhand(ref id) => id.to_nscsspropertyid(),
             TransitionProperty::Unsupported(..) => return Err(()),
@@ -203,7 +178,9 @@ impl From<nsCSSPropertyID> for TransitionProperty {
                 TransitionProperty::Shorthand(ShorthandId::${prop.camel_case})
             }
             % endfor
-            nsCSSPropertyID::eCSSPropertyExtra_all_properties => TransitionProperty::All,
+            nsCSSPropertyID::eCSSPropertyExtra_all_properties => {
+                TransitionProperty::Shorthand(ShorthandId::All)
+            }
             _ => {
                 panic!("non-convertible nsCSSPropertyID")
             }
@@ -313,11 +290,11 @@ impl AnimatedProperty {
     /// Get an animatable value from a transition-property, an old style, and a
     /// new style.
     pub fn from_longhand(
-        property: &LonghandId,
+        property: LonghandId,
         old_style: &ComputedValues,
         new_style: &ComputedValues,
     ) -> Option<AnimatedProperty> {
-        Some(match *property {
+        Some(match property {
             % for prop in data.longhands:
             % if prop.animatable:
                 LonghandId::${prop.camel_case} => {
@@ -659,10 +636,10 @@ impl AnimationValue {
 
     /// Get an AnimationValue for an AnimatableLonghand from a given computed values.
     pub fn from_computed_values(
-        property: &LonghandId,
+        property: LonghandId,
         computed_values: &ComputedValues
     ) -> Option<Self> {
-        Some(match *property {
+        Some(match property {
             % for prop in data.longhands:
             % if prop.animatable:
             LonghandId::${prop.camel_case} => {
@@ -3101,15 +3078,17 @@ impl ComputeSquaredDistance for AnimatedFilterList {
 ///   border-top-color, border-color, border-top, border
 ///
 /// [property-order] https://drafts.csswg.org/web-animations/#calculating-computed-keyframes
-#[cfg(feature = "gecko")]
 pub fn compare_property_priority(a: &PropertyId, b: &PropertyId) -> cmp::Ordering {
     match (a.as_shorthand(), b.as_shorthand()) {
         // Within shorthands, sort by the number of subproperties, then by IDL name.
         (Ok(a), Ok(b)) => {
-            let subprop_count_a = a.longhands().len();
-            let subprop_count_b = b.longhands().len();
-            subprop_count_a.cmp(&subprop_count_b).then_with(
-                || get_idl_name_sort_order(&a).cmp(&get_idl_name_sort_order(&b)))
+            let subprop_count_a = a.longhands().count();
+            let subprop_count_b = b.longhands().count();
+            subprop_count_a
+                .cmp(&subprop_count_b)
+                .then_with(|| {
+                    get_idl_name_sort_order(a).cmp(&get_idl_name_sort_order(b))
+                })
         },
 
         // Longhands go before shorthands.
@@ -3122,8 +3101,7 @@ pub fn compare_property_priority(a: &PropertyId, b: &PropertyId) -> cmp::Orderin
     }
 }
 
-#[cfg(feature = "gecko")]
-fn get_idl_name_sort_order(shorthand: &ShorthandId) -> u32 {
+fn get_idl_name_sort_order(shorthand: ShorthandId) -> u32 {
 <%
 # Sort by IDL name.
 sorted_shorthands = sorted(data.shorthands, key=lambda p: to_idl_name(p.ident))
@@ -3131,7 +3109,7 @@ sorted_shorthands = sorted(data.shorthands, key=lambda p: to_idl_name(p.ident))
 # Annotate with sorted position
 sorted_shorthands = [(p, position) for position, p in enumerate(sorted_shorthands)]
 %>
-    match *shorthand {
+    match shorthand {
         % for property, position in sorted_shorthands:
             ShorthandId::${property.camel_case} => ${position},
         % endfor

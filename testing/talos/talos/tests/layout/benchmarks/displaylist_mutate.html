@@ -37,9 +37,6 @@ function runFrame() {
     if (window.tpRecordTime) {
       window.tpRecordTime(end - start, start);
     }
-    if (parent.reportResults) {
-      parent.reportResults(end - start, start);
-    }
     return;
   }
 

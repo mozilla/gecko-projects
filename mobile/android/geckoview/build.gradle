@@ -125,8 +125,7 @@ android {
             java {
                 srcDir "${topsrcdir}/mobile/android/geckoview/src/thirdparty/java"
 
-                if (!mozconfig.substs.MOZ_ANDROID_HLS_SUPPORT ||
-                    !mozconfig.substs.get('MOZ_BUILD_MOBILE_ANDROID_WITH_GRADLE')) {
+                if (!mozconfig.substs.MOZ_ANDROID_HLS_SUPPORT) {
                     exclude 'com/google/android/exoplayer2/**'
                     exclude 'org/mozilla/gecko/media/GeckoHlsAudioRenderer.java'
                     exclude 'org/mozilla/gecko/media/GeckoHlsPlayer.java'
@@ -185,7 +184,8 @@ android.libraryVariants.all { variant ->
         classpath = files(variant.javaCompile.classpath.files)
 
         source = files(variant.javaCompile.source)
-        exclude '**/R.java', '**/BuildConfig.java', 'com/google/**', 'org/webrtc/**'
+        exclude '**/R.java', '**/BuildConfig.java'
+        include 'org/mozilla/geckoview/**'
         options.addPathOption('sourcepath', ':').setValue(
             variant.sourceSets.collect({ it.javaDirectories }).flatten() +
             variant.generateBuildConfig.sourceOutputDir)
@@ -196,6 +196,7 @@ android.libraryVariants.all { variant ->
             file("${System.properties['java.home']}/lib/rt.jar")] + android.bootClasspath
         options.memberLevel = JavadocMemberLevel.PROTECTED
         options.source = 7
+        options.links("https://d.android.com/reference/")
 
         options.docTitle = "GeckoView ${mozconfig.substs.MOZ_APP_VERSION} API"
         options.header = "GeckoView ${mozconfig.substs.MOZ_APP_VERSION} API"

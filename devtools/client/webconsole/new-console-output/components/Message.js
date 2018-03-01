@@ -46,7 +46,6 @@ class Message extends Component {
       messageId: PropTypes.string,
       scrollToMessage: PropTypes.bool,
       exceptionDocURL: PropTypes.string,
-      parameters: PropTypes.object,
       request: PropTypes.object,
       dispatch: PropTypes.func,
       timeStamp: PropTypes.number,
@@ -213,7 +212,8 @@ class Message extends Component {
     let onFrameClick;
     if (serviceContainer && frame) {
       if (source === MESSAGE_SOURCE.CSS) {
-        onFrameClick = serviceContainer.onViewSourceInStyleEditor;
+        onFrameClick = serviceContainer.onViewSourceInStyleEditor
+          || serviceContainer.onViewSource;
       } else if (/^Scratchpad\/\d+$/.test(frame.source)) {
         onFrameClick = serviceContainer.onViewSourceInScratchpad
           || serviceContainer.onViewSource;
@@ -261,7 +261,7 @@ class Message extends Component {
       dom.span({ className: "message-body-wrapper" },
         dom.span({
           className: "message-flex-body",
-          onClick: collapsible && this.toggleMessage,
+          onClick: collapsible ? this.toggleMessage : undefined,
         },
           // Add whitespaces for formatting when copying to the clipboard.
           timestampEl ? " " : null,

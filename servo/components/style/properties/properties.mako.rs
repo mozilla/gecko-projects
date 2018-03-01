@@ -438,45 +438,17 @@ impl NonCustomPropertyId {
         MAP[self.0]
     }
 
-    fn allowed_in(self, context: &ParserContext) -> bool {
-        debug_assert!(
-            matches!(
-                context.rule_type(),
-                CssRuleType::Keyframe | CssRuleType::Page | CssRuleType::Style
-            ),
-            "Declarations are only expected inside a keyframe, page, or style rule."
-        );
+    #[inline]
+    fn enabled_for_all_content(self) -> bool {
+        ${static_non_custom_property_id_set(
+            "EXPERIMENTAL",
+            lambda p: p.experimental(product)
+        )}
 
-        <% id_set = static_non_custom_property_id_set %>
-
-        ${id_set("DISALLOWED_IN_KEYFRAME_BLOCK", lambda p: not p.allowed_in_keyframe_block)}
-        ${id_set("DISALLOWED_IN_PAGE_RULE", lambda p: not p.allowed_in_page_rule)}
-        match context.rule_type() {
-            CssRuleType::Keyframe if DISALLOWED_IN_KEYFRAME_BLOCK.contains(self) => {
-                return false;
-            }
-            CssRuleType::Page if DISALLOWED_IN_PAGE_RULE.contains(self) => {
-                return false;
-            }
-            _ => {}
-        }
-
-        // The semantics of these are kinda hard to reason about, what follows
-        // is a description of the different combinations that can happen with
-        // these three sets.
-        //
-        // Experimental properties are generally controlled by prefs, but an
-        // experimental property explicitly enabled in certain context (UA or
-        // chrome sheets) is always usable in the context regardless of the
-        // pref value.
-        //
-        // Non-experimental properties are either normal properties which are
-        // usable everywhere, or internal-only properties which are only usable
-        // in certain context they are explicitly enabled in.
-        ${id_set("ENABLED_IN_UA_SHEETS", lambda p: p.explicitly_enabled_in_ua_sheets())}
-        ${id_set("ENABLED_IN_CHROME", lambda p: p.explicitly_enabled_in_chrome())}
-        ${id_set("EXPERIMENTAL", lambda p: p.experimental(product))}
-        ${id_set("ALWAYS_ENABLED", lambda p: (not p.experimental(product)) and p.enabled_in_content())}
+        ${static_non_custom_property_id_set(
+            "ALWAYS_ENABLED",
+            lambda p: (not p.experimental(product)) and p.enabled_in_content()
+        )}
 
         let passes_pref_check = || {
             % if product == "servo":
@@ -507,6 +479,61 @@ impl NonCustomPropertyId {
         if EXPERIMENTAL.contains(self) && passes_pref_check() {
             return true
         }
+
+        false
+    }
+
+    fn allowed_in(self, context: &ParserContext) -> bool {
+        debug_assert!(
+            matches!(
+                context.rule_type(),
+                CssRuleType::Keyframe | CssRuleType::Page | CssRuleType::Style
+            ),
+            "Declarations are only expected inside a keyframe, page, or style rule."
+        );
+
+        ${static_non_custom_property_id_set(
+            "DISALLOWED_IN_KEYFRAME_BLOCK",
+            lambda p: not p.allowed_in_keyframe_block
+        )}
+        ${static_non_custom_property_id_set(
+            "DISALLOWED_IN_PAGE_RULE",
+            lambda p: not p.allowed_in_page_rule
+        )}
+        match context.rule_type() {
+            CssRuleType::Keyframe if DISALLOWED_IN_KEYFRAME_BLOCK.contains(self) => {
+                return false;
+            }
+            CssRuleType::Page if DISALLOWED_IN_PAGE_RULE.contains(self) => {
+                return false;
+            }
+            _ => {}
+        }
+
+        // The semantics of these are kinda hard to reason about, what follows
+        // is a description of the different combinations that can happen with
+        // these three sets.
+        //
+        // Experimental properties are generally controlled by prefs, but an
+        // experimental property explicitly enabled in certain context (UA or
+        // chrome sheets) is always usable in the context regardless of the
+        // pref value.
+        //
+        // Non-experimental properties are either normal properties which are
+        // usable everywhere, or internal-only properties which are only usable
+        // in certain context they are explicitly enabled in.
+        if self.enabled_for_all_content() {
+            return true;
+        }
+
+        ${static_non_custom_property_id_set(
+            "ENABLED_IN_UA_SHEETS",
+            lambda p: p.explicitly_enabled_in_ua_sheets()
+        )}
+        ${static_non_custom_property_id_set(
+            "ENABLED_IN_CHROME",
+            lambda p: p.explicitly_enabled_in_chrome()
+        )}
 
         if context.stylesheet_origin == Origin::UserAgent &&
             ENABLED_IN_UA_SHEETS.contains(self)
@@ -794,7 +821,7 @@ impl LonghandId {
         INHERITED.contains(*self)
     }
 
-    fn shorthands(&self) -> &'static [ShorthandId] {
+    fn shorthands(&self) -> NonCustomPropertyIterator<ShorthandId> {
         // first generate longhand to shorthands lookup map
         //
         // NOTE(emilio): This currently doesn't exclude the "all" shorthand. It
@@ -835,15 +862,21 @@ impl LonghandId {
             ];
         % endfor
 
-        match *self {
-            % for property in data.longhands:
-                LonghandId::${property.camel_case} => ${property.ident.upper()},
-            % endfor
+        NonCustomPropertyIterator {
+            filter: NonCustomPropertyId::from(*self).enabled_for_all_content(),
+            iter: match *self {
+                % for property in data.longhands:
+                    LonghandId::${property.camel_case} => ${property.ident.upper()},
+                % endfor
+            }.iter(),
         }
     }
 
-    fn parse_value<'i, 't>(&self, context: &ParserContext, input: &mut Parser<'i, 't>)
-                           -> Result<PropertyDeclaration, ParseError<'i>> {
+    fn parse_value<'i, 't>(
+        &self,
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<PropertyDeclaration, ParseError<'i>> {
         match *self {
             % for property in data.longhands:
                 LonghandId::${property.camel_case} => {
@@ -1073,6 +1106,29 @@ impl LonghandId {
     }
 }
 
+/// An iterator over all the property ids that are enabled for a given
+/// shorthand, if that shorthand is enabled for all content too.
+pub struct NonCustomPropertyIterator<Item: 'static> {
+    filter: bool,
+    iter: ::std::slice::Iter<'static, Item>,
+}
+
+impl<Item> Iterator for NonCustomPropertyIterator<Item>
+where
+    Item: 'static + Copy + Into<NonCustomPropertyId>,
+{
+    type Item = Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let id = *self.iter.next()?;
+            if !self.filter || id.into().enabled_for_all_content() {
+                return Some(id)
+            }
+        }
+    }
+}
+
 /// An identifier for a given shorthand property.
 #[derive(Clone, Copy, Debug, Eq, Hash, MallocSizeOf, PartialEq, ToCss)]
 pub enum ShorthandId {
@@ -1100,7 +1156,7 @@ impl ShorthandId {
     }
 
     /// Get the longhand ids that form this shorthand.
-    pub fn longhands(&self) -> &'static [LonghandId] {
+    pub fn longhands(&self) -> NonCustomPropertyIterator<LonghandId> {
         % for property in data.shorthands:
             static ${property.ident.upper()}: &'static [LonghandId] = &[
                 % for sub in property.sub_properties:
@@ -1108,10 +1164,13 @@ impl ShorthandId {
                 % endfor
             ];
         % endfor
-        match *self {
-            % for property in data.shorthands:
-                ShorthandId::${property.camel_case} => ${property.ident.upper()},
-            % endfor
+        NonCustomPropertyIterator {
+            filter: NonCustomPropertyId::from(*self).enabled_for_all_content(),
+            iter: match *self {
+                % for property in data.shorthands:
+                    ShorthandId::${property.camel_case} => ${property.ident.upper()},
+                % endfor
+            }.iter()
         }
     }
 
@@ -1414,7 +1473,7 @@ impl<'a> PropertyDeclarationId<'a> {
     /// shorthand.
     pub fn is_longhand_of(&self, shorthand: ShorthandId) -> bool {
         match *self {
-            PropertyDeclarationId::Longhand(ref id) => id.shorthands().contains(&shorthand),
+            PropertyDeclarationId::Longhand(ref id) => id.shorthands().any(|s| s == shorthand),
             _ => false,
         }
     }
@@ -1599,16 +1658,35 @@ impl PropertyId {
         }
     }
 
-    fn allowed_in(&self, context: &ParserContext) -> bool {
-        let id: NonCustomPropertyId = match *self {
-            // Custom properties are allowed everywhere
-            PropertyId::Custom(_) => return true,
+    fn non_custom_id(&self) -> Option<NonCustomPropertyId> {
+        Some(match *self {
+            PropertyId::Custom(_) => return None,
             PropertyId::Shorthand(shorthand_id) => shorthand_id.into(),
             PropertyId::Longhand(longhand_id) => longhand_id.into(),
             PropertyId::ShorthandAlias(_, alias_id) => alias_id.into(),
             PropertyId::LonghandAlias(_, alias_id) => alias_id.into(),
+        })
+    }
+
+    /// Whether the property is enabled for all content regardless of the
+    /// stylesheet it was declared on (that is, in practice only checks prefs).
+    #[inline]
+    pub fn enabled_for_all_content(&self) -> bool {
+        let id = match self.non_custom_id() {
+            // Custom properties are allowed everywhere
+            None => return true,
+            Some(id) => id,
         };
 
+        id.enabled_for_all_content()
+    }
+
+    fn allowed_in(&self, context: &ParserContext) -> bool {
+        let id = match self.non_custom_id() {
+            // Custom properties are allowed everywhere
+            None => return true,
+            Some(id) => id,
+        };
         id.allowed_in(context)
     }
 }
@@ -1805,14 +1883,6 @@ impl PropertyDeclaration {
       }
     }
 
-    /// The shorthands that this longhand is part of.
-    pub fn shorthands(&self) -> &'static [ShorthandId] {
-        match self.id() {
-            PropertyDeclarationId::Longhand(id) => id.shorthands(),
-            PropertyDeclarationId::Custom(..) => &[],
-        }
-    }
-
     /// Returns true if this property declaration is for one of the animatable
     /// properties.
     pub fn is_animatable(&self) -> bool {
@@ -1914,7 +1984,7 @@ impl PropertyDeclaration {
                     if id == ShorthandId::All {
                         declarations.all_shorthand = AllShorthand::CSSWideKeyword(keyword)
                     } else {
-                        for &longhand in id.longhands() {
+                        for longhand in id.longhands() {
                             declarations.push(PropertyDeclaration::CSSWideKeyword(
                                 WideKeywordDeclaration {
                                     id: longhand,
@@ -1945,7 +2015,7 @@ impl PropertyDeclaration {
                             if id == ShorthandId::All {
                                 declarations.all_shorthand = AllShorthand::WithVariables(unparsed)
                             } else {
-                                for &id in id.longhands() {
+                                for id in id.longhands() {
                                     declarations.push(
                                         PropertyDeclaration::WithVariables(VariableDeclaration {
                                             id,
@@ -3799,8 +3869,7 @@ impl fmt::Debug for AliasId {
     }
 }
 
-// FIXME(emilio): This macro doesn't account for experimental properties, so
-// even with the pref disabled you can set them from CSSOM in Servo.
+// NOTE(emilio): Callers are responsible to deal with prefs.
 #[macro_export]
 macro_rules! css_properties_accessors {
     ($macro_name: ident) => {

@@ -193,7 +193,7 @@ ${helpers.single_keyword("-servo-overflow-clip-box", "padding-box content-box",
         enabled_in="ua",
         needs_context=False,
         flags="APPLIES_TO_PLACEHOLDER",
-        gecko_pref="layout.css.overscroll-behavior.enabled",
+        gecko_pref="layout.css.overflow-clip-box.enabled",
         animation_value_type="discrete",
         spec="Internal, may be standardized in the future: \
               https://developer.mozilla.org/en-US/docs/Web/CSS/overflow-clip-box",
@@ -246,8 +246,8 @@ ${helpers.predefined_type("transition-timing-function",
 ${helpers.predefined_type(
     "transition-property",
     "TransitionProperty",
-    "computed::TransitionProperty::All",
-    initial_specified_value="specified::TransitionProperty::All",
+    "computed::TransitionProperty::all()",
+    initial_specified_value="specified::TransitionProperty::all()",
     vector=True,
     allow_empty="NotInitial",
     need_index=True,
@@ -507,17 +507,17 @@ ${helpers.single_keyword("resize",
                          flags="APPLIES_TO_PLACEHOLDER",
                          animation_value_type="discrete")}
 
-
-${helpers.predefined_type("perspective",
-                          "LengthOrNone",
-                          "Either::Second(None_)",
-                          "parse_non_negative_length",
-                          gecko_ffi_name="mChildPerspective",
-                          spec="https://drafts.csswg.org/css-transforms/#perspective",
-                          extra_prefixes="moz webkit",
-                          flags="CREATES_STACKING_CONTEXT FIXPOS_CB",
-                          animation_value_type="ComputedValue",
-                          servo_restyle_damage = "reflow_out_of_flow")}
+${helpers.predefined_type(
+    "perspective",
+    "Perspective",
+    "computed::Perspective::none()",
+    gecko_ffi_name="mChildPerspective",
+    spec="https://drafts.csswg.org/css-transforms/#perspective",
+    extra_prefixes="moz webkit",
+    flags="CREATES_STACKING_CONTEXT FIXPOS_CB",
+    animation_value_type="AnimatedPerspective",
+    servo_restyle_damage = "reflow_out_of_flow",
+)}
 
 ${helpers.predefined_type("perspective-origin",
                           "position::Position",

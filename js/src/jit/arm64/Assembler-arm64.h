@@ -192,15 +192,9 @@ class Assembler : public vixl::Assembler
     typedef vixl::Condition Condition;
 
     void finish();
-    bool appendRawCode(const uint8_t* code, size_t numBytes) {
-        MOZ_CRASH("NYI");
-    }
-    bool reserve(size_t size) {
-        MOZ_CRASH("NYI");
-    }
-    bool swapBuffer(wasm::Bytes& bytes) {
-        MOZ_CRASH("NYI");
-    }
+    bool appendRawCode(const uint8_t* code, size_t numBytes);
+    bool reserve(size_t size);
+    bool swapBuffer(wasm::Bytes& bytes);
     void trace(JSTracer* trc);
 
     // Emit the jump table, returning the BufferOffset to the first entry in the table.
@@ -220,9 +214,7 @@ class Assembler : public vixl::Assembler
     void bind(Label* label) { bind(label, nextOffset()); }
     void bind(Label* label, BufferOffset boff);
     void bind(RepatchLabel* label);
-    void bindLater(Label* label, wasm::OldTrapDesc target) {
-        MOZ_CRASH("NYI");
-    }
+    void bindLater(Label* label, wasm::OldTrapDesc target);
 
     bool oom() const {
         return AssemblerShared::oom() ||
@@ -253,14 +245,15 @@ class Assembler : public vixl::Assembler
     }
 
     void processCodeLabels(uint8_t* rawCode) {
-        for (size_t i = 0; i < codeLabels_.length(); i++) {
-            CodeLabel label = codeLabels_[i];
-            Bind(rawCode, *label.patchAt(), *label.target());
+        for (const CodeLabel& label : codeLabels_) {
+            Bind(rawCode, label);
         }
     }
 
-    static void Bind(uint8_t* rawCode, CodeOffset label, CodeOffset address) {
-        *reinterpret_cast<const void**>(rawCode + label.offset()) = rawCode + address.offset();
+    static void Bind(uint8_t* rawCode, const CodeLabel& label) {
+        size_t patchAtOffset = label.patchAt().offset();
+        size_t targetOffset = label.target().offset();
+        *reinterpret_cast<const void**>(rawCode + patchAtOffset) = rawCode + targetOffset;
     }
 
     void retarget(Label* cur, Label* next);
@@ -378,10 +371,10 @@ class Assembler : public vixl::Assembler
     static const size_t OffsetOfJumpTableEntryPointer = 8;
 
   public:
-    void writeCodePointer(CodeOffset* label) {
+    void writeCodePointer(CodeLabel* label) {
         uintptr_t x = uintptr_t(-1);
         BufferOffset off = EmitData(&x, sizeof(uintptr_t));
-        label->bind(off.getOffset());
+        label->patchAt()->bind(off.getOffset());
     }
 
 
@@ -473,8 +466,8 @@ static constexpr Register ABINonArgReturnVolatileReg = lr;
 
 // TLS pointer argument register for WebAssembly functions. This must not alias
 // any other register used for passing function arguments or return values.
-// Preserved by WebAssembly functions.
-static constexpr Register WasmTlsReg { Registers::x17 };
+// Preserved by WebAssembly functions.  Must be nonvolatile.
+static constexpr Register WasmTlsReg { Registers::x23 };
 
 // Registers used for wasm table calls. These registers must be disjoint
 // from the ABI argument registers, WasmTlsReg and each other.

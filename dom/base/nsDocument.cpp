@@ -273,6 +273,7 @@
 #include "mozilla/MediaManager.h"
 
 #include "nsIURIClassifier.h"
+#include "nsIURIMutator.h"
 #include "mozilla/DocumentStyleRootIterator.h"
 #include "mozilla/ServoRestyleManager.h"
 #include "mozilla/ClearOnShutdown.h"
@@ -1475,6 +1476,7 @@ nsIDocument::nsIDocument()
     mBufferingCSPViolations(false),
     mAllowPaymentRequest(false),
     mEncodingMenuDisabled(false),
+    mIsShadowDOMEnabled(false),
     mIsSVGGlyphsDocument(false),
     mAllowUnsafeHTML(false),
     mIsScopedStyleEnabled(eScopedStyle_Unknown),
@@ -1518,10 +1520,6 @@ nsIDocument::nsIDocument()
   for (auto& cnt : mIncCounters) {
     cnt = 0;
   }
-
-  // Set this when document is created and value stays the same for the lifetime
-  // of the document.
-  mIsShadowDOMEnabled = nsContentUtils::IsShadowDOMEnabled();
 }
 
 nsDocument::nsDocument(const char* aContentType)
@@ -2165,6 +2163,14 @@ nsDocument::Init()
              "Bad NodeType in aNodeInfo");
 
   NS_ASSERTION(OwnerDoc() == this, "Our nodeinfo is busted!");
+
+  UpdateStyleBackendType();
+
+  // Set this when document is initialized and value stays the same for the
+  // lifetime of the document.
+  mIsShadowDOMEnabled =
+    mStyleBackendType == StyleBackendType::Servo &&
+    nsContentUtils::IsShadowDOMEnabled();
 
   // If after creation the owner js global is not set for a document
   // we use the default compartment for this document, instead of creating
@@ -9121,8 +9127,8 @@ nsDocument::MaybePreLoadImage(nsIURI* uri, const nsAString &aCrossOriginAttr,
 void
 nsDocument::MaybePreconnect(nsIURI* aOrigURI, mozilla::CORSMode aCORSMode)
 {
-  nsCOMPtr<nsIURI> uri;
-  if (NS_FAILED(aOrigURI->Clone(getter_AddRefs(uri)))) {
+  NS_MutateURI mutator(aOrigURI);
+  if (NS_FAILED(mutator.GetStatus())) {
       return;
   }
 
@@ -9134,9 +9140,15 @@ nsDocument::MaybePreconnect(nsIURI* aOrigURI, mozilla::CORSMode aCORSMode)
   // normalize the path before putting it in the hash to accomplish that.
 
   if (aCORSMode == CORS_ANONYMOUS) {
-    uri->SetPathQueryRef(NS_LITERAL_CSTRING("/anonymous"));
+    mutator.SetPathQueryRef(NS_LITERAL_CSTRING("/anonymous"));
   } else {
-    uri->SetPathQueryRef(NS_LITERAL_CSTRING("/"));
+    mutator.SetPathQueryRef(NS_LITERAL_CSTRING("/"));
+  }
+
+  nsCOMPtr<nsIURI> uri;
+  nsresult rv = mutator.Finalize(uri);
+  if (NS_FAILED(rv)) {
+    return;
   }
 
   auto entry = mPreloadedPreconnects.LookupForAdd(uri);
@@ -9320,8 +9332,7 @@ nsDocument::GetTemplateContentsOwner()
                                     NodePrincipal(),
                                     true, // aLoadedAsData
                                     scriptObject, // aEventObject
-                                    DocumentFlavorHTML,
-                                    mStyleBackendType);
+                                    DocumentFlavorHTML);
     NS_ENSURE_SUCCESS(rv, nullptr);
 
     mTemplateContentsOwner = do_QueryInterface(domDocument);
@@ -12052,12 +12063,6 @@ nsIDocument::Constructor(const GlobalObject& aGlobal,
     return nullptr;
   }
 
-  auto styleBackend = StyleBackendType::None;
-  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(global);
-  if (window && window->GetExtantDoc()) {
-    styleBackend = window->GetExtantDoc()->GetStyleBackendType();
-  }
-
   nsCOMPtr<nsIScriptObjectPrincipal> prin = do_QueryInterface(aGlobal.GetAsSupports());
   if (!prin) {
     rv.Throw(NS_ERROR_UNEXPECTED);
@@ -12082,8 +12087,7 @@ nsIDocument::Constructor(const GlobalObject& aGlobal,
                       prin->GetPrincipal(),
                       true,
                       global,
-                      DocumentFlavorPlain,
-                      styleBackend);
+                      DocumentFlavorPlain);
   if (NS_FAILED(res)) {
     rv.Throw(res);
     return nullptr;

@@ -50,6 +50,7 @@ module.exports = {
     "WebrtcGlobalInformation": false,
     // Non-standard, specific to Firefox.
     "XULElement": false,
+    "console": true,
     "dump": true,
     "openDialog": false,
     "sizeToContent": false,
@@ -78,7 +79,7 @@ module.exports = {
       "no-unused-vars": ["error", {
         "args": "none",
         "vars": "all",
-        "varsIgnorePattern": "^Cc|Ci|Cu|Cr|EXPORTED_SYMBOLS"
+        "varsIgnorePattern": "^EXPORTED_SYMBOLS$"
       }]
     }
   }],
@@ -355,7 +356,7 @@ module.exports = {
     "no-unused-vars": ["error", {
       "args": "none",
       "vars": "local",
-      "varsIgnorePattern": "^Cc|Ci|Cu|Cr|EXPORTED_SYMBOLS"
+      "varsIgnorePattern": "^EXPORTED_SYMBOLS$"
     }],
 
     // No using variables before defined

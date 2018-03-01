@@ -35,6 +35,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   Log: "resource://gre/modules/Log.jsm",
   LoginManagerParent: "resource://gre/modules/LoginManagerParent.jsm",
   NewTabUtils: "resource://gre/modules/NewTabUtils.jsm",
+  OpenInTabsUtils: "resource:///modules/OpenInTabsUtils.jsm",
   PageActions: "resource:///modules/PageActions.jsm",
   PageThumbs: "resource://gre/modules/PageThumbs.jsm",
   PanelMultiView: "resource:///modules/PanelMultiView.jsm",
@@ -221,6 +222,7 @@ XPCOMUtils.defineLazyGetter(this, "Win7Features", function() {
 
 const nsIWebNavigation = Ci.nsIWebNavigation;
 
+var gBrowser = null; // Will be instantiated by the <tabbbrowser> constructor.
 var gLastValidURLStr = "";
 var gInPrintPreviewMode = false;
 var gContextMenu = null; // nsContextMenu instance
@@ -234,9 +236,8 @@ if (AppConstants.platform != "macosx") {
   var gEditUIVisible = true;
 }
 
-/* globals gBrowser, gNavToolbox, gURLBar:true */
+/* globals gNavToolbox, gURLBar:true */
 [
-  ["gBrowser",            "content"],
   ["gNavToolbox",         "navigator-toolbox"],
   ["gURLBar",             "urlbar"],
 ].forEach(function(elementGlobal) {
@@ -537,11 +538,11 @@ const gStoragePressureObserver = {
     } else {
       // The firefox-used space >= 5GB, then guide users to about:preferences
       // to clear some data stored on firefox by websites.
-      let descriptionStringID = "spaceAlert.over5GB.message";
+      let descriptionStringID = "spaceAlert.over5GB.message1";
       let prefButtonLabelStringID = "spaceAlert.over5GB.prefButton.label";
       let prefButtonAccesskeyStringID = "spaceAlert.over5GB.prefButton.accesskey";
       if (AppConstants.platform == "win") {
-        descriptionStringID = "spaceAlert.over5GB.messageWin";
+        descriptionStringID = "spaceAlert.over5GB.messageWin1";
         prefButtonLabelStringID = "spaceAlert.over5GB.prefButtonWin.label";
         prefButtonAccesskeyStringID = "spaceAlert.over5GB.prefButtonWin.accesskey";
       }
@@ -553,7 +554,7 @@ const gStoragePressureObserver = {
           // The advanced subpanes are only supported in the old organization, which will
           // be removed by bug 1349689.
           let win = gBrowser.ownerGlobal;
-          win.openPreferences("panePrivacy", { origin: "storagePressure" });
+          win.openPreferences("privacy-sitedata", { origin: "storagePressure" });
         }
       });
     }
@@ -576,14 +577,14 @@ const gStoragePressureObserver = {
  *          subframes.
  */
 function findChildShell(aDocument, aDocShell, aSoughtURI) {
-  aDocShell.QueryInterface(Components.interfaces.nsIWebNavigation);
-  aDocShell.QueryInterface(Components.interfaces.nsIInterfaceRequestor);
-  var doc = aDocShell.getInterface(Components.interfaces.nsIDOMDocument);
+  aDocShell.QueryInterface(Ci.nsIWebNavigation);
+  aDocShell.QueryInterface(Ci.nsIInterfaceRequestor);
+  var doc = aDocShell.getInterface(Ci.nsIDOMDocument);
   if ((aDocument && doc == aDocument) ||
       (aSoughtURI && aSoughtURI.spec == aDocShell.currentURI.spec))
     return aDocShell;
 
-  var node = aDocShell.QueryInterface(Components.interfaces.nsIDocShellTreeItem);
+  var node = aDocShell.QueryInterface(Ci.nsIDocShellTreeItem);
   for (var i = 0; i < node.childCount; ++i) {
     var docShell = node.getChildAt(i);
     docShell = findChildShell(aDocument, docShell, aSoughtURI);
@@ -1196,8 +1197,7 @@ var gBrowserInit = {
     window.QueryInterface(Ci.nsIDOMChromeWindow).browserDOMWindow =
       new nsBrowserAccess();
 
-    let initBrowser =
-      document.getAnonymousElementByAttribute(gBrowser, "anonid", "initialBrowser");
+    let initBrowser = gBrowser.initialBrowser;
 
     // remoteType and sameProcessAsFrameLoader are passed through to
     // updateBrowserRemoteness as part of an options object, which itself defaults
@@ -1301,7 +1301,7 @@ var gBrowserInit = {
 
     if (!gMultiProcessBrowser) {
       // There is a Content:Click message manually sent from content.
-      Services.els.addSystemEventListener(gBrowser, "click", contentAreaClick, true);
+      Services.els.addSystemEventListener(gBrowser.container, "click", contentAreaClick, true);
     }
 
     // hook up UI through progress listener
@@ -2528,8 +2528,8 @@ function readFromClipboard() {
 
   try {
     // Create transferable that will transfer the text.
-    var trans = Components.classes["@mozilla.org/widget/transferable;1"]
-                          .createInstance(Components.interfaces.nsITransferable);
+    var trans = Cc["@mozilla.org/widget/transferable;1"]
+                  .createInstance(Ci.nsITransferable);
     trans.init(getLoadContext());
 
     trans.addDataFlavor("text/unicode");
@@ -2545,7 +2545,7 @@ function readFromClipboard() {
     trans.getTransferData("text/unicode", data, dataLen);
 
     if (data) {
-      data = data.value.QueryInterface(Components.interfaces.nsISupportsString);
+      data = data.value.QueryInterface(Ci.nsISupportsString);
       url = data.data.substring(0, dataLen.value / 2);
     }
   } catch (ex) {
@@ -3041,7 +3041,7 @@ var BrowserOnClick = {
               params.location = location;
           }
         } catch (e) {
-          Components.utils.reportError("Couldn't get ssl_override pref: " + e);
+          Cu.reportError("Couldn't get ssl_override pref: " + e);
         }
 
         window.openDialog("chrome://pippki/content/exceptionDialog.xul",
@@ -3234,7 +3234,7 @@ function getDefaultHomePage() {
     if (url.includes("|"))
       url = url.split("|")[0];
   } catch (e) {
-    Components.utils.reportError("Couldn't get homepage pref: " + e);
+    Cu.reportError("Couldn't get homepage pref: " + e);
   }
   return url;
 }
@@ -3516,6 +3516,12 @@ var browserDragAndDrop = {
     return Services.droppedLinkHandler.getTriggeringPrincipal(aEvent);
   },
 
+  validateURIsForDrop(aEvent, aURIsCount, aURIs) {
+    return Services.droppedLinkHandler.validateURIsForDrop(aEvent,
+                                                           aURIsCount,
+                                                           aURIs);
+  },
+
   dropLinks(aEvent, aDisallowInherit) {
     return Services.droppedLinkHandler.dropLinks(aEvent, aDisallowInherit);
   }
@@ -3526,7 +3532,22 @@ var homeButtonObserver = {
       // disallow setting home pages that inherit the principal
       let links = browserDragAndDrop.dropLinks(aEvent, true);
       if (links.length) {
-        setTimeout(openHomeDialog, 0, links.map(link => link.url).join("|"));
+        let urls = [];
+        for (let link of links) {
+          if (link.url.includes("|")) {
+            urls.push(...link.url.split("|"));
+          } else {
+            urls.push(link.url);
+          }
+        }
+
+        try {
+          browserDragAndDrop.validateURIsForDrop(aEvent, urls.length, urls);
+        } catch (e) {
+          return;
+        }
+
+        setTimeout(openHomeDialog, 0, urls.join("|"));
       }
     },
 
@@ -3569,12 +3590,28 @@ var newTabButtonObserver = {
   },
   onDragExit(aEvent) {},
   async onDrop(aEvent) {
+    let shiftKey = aEvent.shiftKey;
     let links = browserDragAndDrop.dropLinks(aEvent);
+    let triggeringPrincipal = browserDragAndDrop.getTriggeringPrincipal(aEvent);
+
+    if (links.length >= Services.prefs.getIntPref("browser.tabs.maxOpenBeforeWarn")) {
+      // Sync dialog cannot be used inside drop event handler.
+      let answer = await OpenInTabsUtils.promiseConfirmOpenInTabs(links.length,
+                                                                  window);
+      if (!answer) {
+        return;
+      }
+    }
+
     for (let link of links) {
       if (link.url) {
         let data = await getShortcutOrURIAndPostData(link.url);
         // Allow third-party services to fixup this URL.
-        openNewTabWith(data.url, null, data.postData, aEvent, true);
+        openNewTabWith(data.url, shiftKey, {
+          postData: data.postData,
+          allowThirdPartyFixup: true,
+          triggeringPrincipal,
+        });
       }
     }
   }
@@ -3587,11 +3624,26 @@ var newWindowButtonObserver = {
   onDragExit(aEvent) {},
   async onDrop(aEvent) {
     let links = browserDragAndDrop.dropLinks(aEvent);
+    let triggeringPrincipal = browserDragAndDrop.getTriggeringPrincipal(aEvent);
+
+    if (links.length >= Services.prefs.getIntPref("browser.tabs.maxOpenBeforeWarn")) {
+      // Sync dialog cannot be used inside drop event handler.
+      let answer = await OpenInTabsUtils.promiseConfirmOpenInTabs(links.length,
+                                                                  window);
+      if (!answer) {
+        return;
+      }
+    }
+
     for (let link of links) {
       if (link.url) {
         let data = await getShortcutOrURIAndPostData(link.url);
         // Allow third-party services to fixup this URL.
-        openNewWindowWith(data.url, null, data.postData, true);
+        openNewWindowWith(data.url, {
+          postData: data.postData,
+          allowThirdPartyFixup: true,
+          triggeringPrincipal,
+        });
       }
     }
   }
@@ -4081,8 +4133,8 @@ function OpenBrowserWindow(options) {
   var telemetryObj = {};
   TelemetryStopwatch.start("FX_NEW_WINDOW_MS", telemetryObj);
 
-  var handler = Components.classes["@mozilla.org/browser/clh;1"]
-                          .getService(Components.interfaces.nsIBrowserHandler);
+  var handler = Cc["@mozilla.org/browser/clh;1"]
+                  .getService(Ci.nsIBrowserHandler);
   var defaultArgs = handler.defaultArgs;
   var wintype = document.documentElement.getAttribute("windowtype");
 
@@ -4342,15 +4394,11 @@ var XULBrowserWindow = {
   },
 
   forceInitialBrowserRemote(aRemoteType) {
-    let initBrowser =
-      document.getAnonymousElementByAttribute(gBrowser, "anonid", "initialBrowser");
-    gBrowser.updateBrowserRemoteness(initBrowser, true, { remoteType: aRemoteType });
+    gBrowser.updateBrowserRemoteness(gBrowser.initialBrowser, true, { remoteType: aRemoteType });
   },
 
   forceInitialBrowserNonRemote(aOpener) {
-    let initBrowser =
-      document.getAnonymousElementByAttribute(gBrowser, "anonid", "initialBrowser");
-    gBrowser.updateBrowserRemoteness(initBrowser, false, { opener: aOpener });
+    gBrowser.updateBrowserRemoteness(gBrowser.initialBrowser, false, { opener: aOpener });
   },
 
   setDefaultStatus(status) {
@@ -4513,7 +4561,7 @@ var XULBrowserWindow = {
 
           if (location.spec != "about:blank") {
             switch (aStatus) {
-              case Components.results.NS_ERROR_NET_TIMEOUT:
+              case Cr.NS_ERROR_NET_TIMEOUT:
                 msg = gNavigatorBundle.getString("nv_timeout");
                 break;
             }
@@ -4673,17 +4721,19 @@ var XULBrowserWindow = {
       this.asyncUpdateUI();
 
     if (AppConstants.MOZ_CRASHREPORTER && aLocationURI) {
-      let uri = aLocationURI.clone();
+      let uri = aLocationURI;
       try {
         // If the current URI contains a username/password, remove it.
-        uri.userPass = "";
+        uri = aLocationURI.mutate()
+                          .setUserPass("")
+                          .finalize();
       } catch (ex) { /* Ignore failures on about: URIs. */ }
 
       try {
         gCrashReporter.annotateCrashReport("URL", uri.spec);
       } catch (ex) {
         // Don't make noise when the crash reporter is built but not enabled.
-        if (ex.result != Components.results.NS_ERROR_NOT_INITIALIZED) {
+        if (ex.result != Cr.NS_ERROR_NOT_INITIALIZED) {
           throw ex;
         }
       }
@@ -4750,7 +4800,7 @@ var XULBrowserWindow = {
 
     CombinedStopReload.onTabSwitch();
 
-    var nsIWebProgressListener = Components.interfaces.nsIWebProgressListener;
+    var nsIWebProgressListener = Ci.nsIWebProgressListener;
     var loadingDone = aStateFlags & nsIWebProgressListener.STATE_STOP;
     // use a pseudo-object instead of a (potentially nonexistent) channel for getting
     // a correct error message - and make sure that the UI is always either in
@@ -5696,7 +5746,7 @@ var gHomeButton = {
     var url;
     try {
       url = Services.prefs.getComplexValue(this.prefDomain,
-                                  Components.interfaces.nsIPrefLocalizedString).data;
+                                  Ci.nsIPrefLocalizedString).data;
     } catch (e) {
     }
 
@@ -5730,6 +5780,7 @@ const nodeToTooltipMap = {
   "appMenu-zoomEnlarge-button": "zoomEnlarge-button.tooltip",
   "appMenu-zoomReset-button": "zoomReset-button.tooltip",
   "appMenu-zoomReduce-button": "zoomReduce-button.tooltip",
+  "reader-mode-button": "reader-mode-button.tooltip",
 };
 const nodeToShortcutMap = {
   "bookmarks-menu-button": "manBookmarkKb",
@@ -5750,6 +5801,7 @@ const nodeToShortcutMap = {
   "appMenu-zoomEnlarge-button": "key_fullZoomEnlarge",
   "appMenu-zoomReset-button": "key_fullZoomReset",
   "appMenu-zoomReduce-button": "key_fullZoomReduce",
+  "reader-mode-button": "key_toggleReaderMode",
 };
 
 if (AppConstants.platform == "macosx") {
@@ -6076,7 +6128,7 @@ function stripUnsafeProtocolOnPaste(pasteData) {
     try {
       scheme = Services.io.extractScheme(pasteData);
     } catch (ex) { }
-    if (scheme.toLowerCase() != "javascript") {
+    if (scheme != "javascript") {
       break;
     }
 
@@ -6111,6 +6163,15 @@ function handleDroppedLink(event, urlOrLinks, nameOrTriggeringPrincipal, trigger
   }
 
   (async function() {
+    if (links.length >= Services.prefs.getIntPref("browser.tabs.maxOpenBeforeWarn")) {
+      // Sync dialog cannot be used inside drop event handler.
+      let answer = await OpenInTabsUtils.promiseConfirmOpenInTabs(links.length,
+                                                                  window);
+      if (!answer) {
+        return;
+      }
+    }
+
     let urls = [];
     let postDatas = [];
     for (let link of links) {

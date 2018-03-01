@@ -4275,19 +4275,6 @@ nsCSSFrameConstructor::ConstructFrameFromItemInternal(FrameConstructionItem& aIt
     }
   }
 
-#ifdef MOZ_XUL
-  // More icky XUL stuff
-  if (aItem.mNameSpaceID == kNameSpaceID_XUL &&
-      (aItem.mTag == nsGkAtoms::treechildren || // trees always need titletips
-       content->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::tooltiptext) ||
-       content->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::tooltip))) {
-    nsIRootBox* rootBox = nsIRootBox::GetRootBox(mPresShell);
-    if (rootBox) {
-      rootBox->AddTooltipSupport(content);
-    }
-  }
-#endif
-
   NS_ASSERTION(newFrame->IsFrameOfType(nsIFrame::eLineParticipant) ==
                ((bits & FCDATA_IS_LINE_PARTICIPANT) != 0),
                "Incorrectly set FCDATA_IS_LINE_PARTICIPANT bits");
@@ -4522,6 +4509,7 @@ nsCSSFrameConstructor::FindXULTagData(Element* aElement,
   static const FrameConstructionDataByTag sXULTagData[] = {
 #ifdef MOZ_XUL
     SCROLLABLE_XUL_CREATE(button, NS_NewButtonBoxFrame),
+    SCROLLABLE_XUL_CREATE(thumb, NS_NewButtonBoxFrame),
     SCROLLABLE_XUL_CREATE(checkbox, NS_NewButtonBoxFrame),
     SCROLLABLE_XUL_CREATE(radio, NS_NewButtonBoxFrame),
     SCROLLABLE_XUL_CREATE(autorepeatbutton, NS_NewAutoRepeatBoxFrame),
@@ -8864,7 +8852,7 @@ nsCSSFrameConstructor::EnsureFrameForTextNodeIsCreatedAfterFlush(
 
 void
 nsCSSFrameConstructor::CharacterDataChanged(nsIContent* aContent,
-                                            CharacterDataChangeInfo* aInfo)
+                                            const CharacterDataChangeInfo& aInfo)
 {
   AUTO_LAYOUT_PHASE_ENTRY_POINT(mPresShell->GetPresContext(), FrameC);
 

@@ -33,8 +33,8 @@ def add_command(config, tasks):
             "-c",
             {
                 "task-reference": "hg clone $BUILD_TOOLS_REPO tools && cd tools/release && " +
-                            "./final-verification.sh " +
-                            " ".join(final_verify_configs)
+                                  "./final-verification.sh " +
+                                  " ".join(final_verify_configs)
             }
         ]
         for thing in ("BUILD_TOOLS_REPO",):

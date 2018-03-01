@@ -46,6 +46,25 @@ static const int32_t LOW_32_OFFSET = 4;
 static const int32_t HIGH_32_OFFSET = 0;
 #endif
 
+// See documentation for ScratchTagScope and ScratchTagScopeRelease in
+// MacroAssembler-x64.h.
+
+class ScratchTagScope
+{
+    const ValueOperand& v_;
+  public:
+    ScratchTagScope(MacroAssembler&, const ValueOperand& v) : v_(v) {}
+    operator Register() { return v_.typeReg(); }
+    void release() {}
+    void reacquire() {}
+};
+
+class ScratchTagScopeRelease
+{
+  public:
+    explicit ScratchTagScopeRelease(ScratchTagScope*) {}
+};
+
 class MacroAssemblerMIPS : public MacroAssemblerMIPSShared
 {
   public:
@@ -53,13 +72,15 @@ class MacroAssemblerMIPS : public MacroAssemblerMIPSShared
     using MacroAssemblerMIPSShared::ma_li;
     using MacroAssemblerMIPSShared::ma_ss;
     using MacroAssemblerMIPSShared::ma_sd;
+    using MacroAssemblerMIPSShared::ma_ls;
+    using MacroAssemblerMIPSShared::ma_ld;
     using MacroAssemblerMIPSShared::ma_load;
     using MacroAssemblerMIPSShared::ma_store;
     using MacroAssemblerMIPSShared::ma_cmp_set;
     using MacroAssemblerMIPSShared::ma_subTestOverflow;
     using MacroAssemblerMIPSShared::ma_liPatchable;
 
-    void ma_li(Register dest, CodeOffset* label);
+    void ma_li(Register dest, CodeLabel* label);
 
     void ma_li(Register dest, ImmWord imm);
     void ma_liPatchable(Register dest, ImmPtr imm);
@@ -122,13 +143,16 @@ class MacroAssemblerMIPS : public MacroAssemblerMIPSShared
     void ma_mv(FloatRegister src, ValueOperand dest);
     void ma_mv(ValueOperand src, FloatRegister dest);
 
-    void ma_ls(FloatRegister fd, Address address);
-    void ma_ld(FloatRegister fd, Address address);
-    void ma_sd(FloatRegister fd, Address address);
-    void ma_ss(FloatRegister fd, Address address);
+    void ma_ls(FloatRegister ft, Address address);
+    void ma_ld(FloatRegister ft, Address address);
+    void ma_sd(FloatRegister ft, Address address);
+    void ma_ss(FloatRegister ft, Address address);
 
-    void ma_pop(FloatRegister fs);
-    void ma_push(FloatRegister fs);
+    void ma_ldc1WordAligned(FloatRegister ft, Register base, int32_t off);
+    void ma_sdc1WordAligned(FloatRegister ft, Register base, int32_t off);
+
+    void ma_pop(FloatRegister f);
+    void ma_push(FloatRegister f);
 
     void ma_cmp_set(Register dst, Register lhs, ImmPtr imm, Condition c) {
         ma_cmp_set(dst, lhs, Imm32(uint32_t(imm.value)), c);
@@ -200,7 +224,7 @@ class MacroAssemblerMIPSCompat : public MacroAssemblerMIPS
     void mov(ImmPtr imm, Register dest) {
         mov(ImmWord(uintptr_t(imm.value)), dest);
     }
-    void mov(CodeOffset* label, Register dest) {
+    void mov(CodeLabel* label, Register dest) {
         ma_li(dest, label);
     }
     void mov(Register src, Address dest) {
@@ -288,11 +312,10 @@ class MacroAssemblerMIPSCompat : public MacroAssemblerMIPS
         return movWithPatch(ImmWord(uintptr_t(imm.value)), dest);
     }
 
-    void writeCodePointer(CodeOffset* label) {
-        label->bind(currentOffset());
-        ma_liPatchable(ScratchRegister, ImmWord(0));
-        as_jr(ScratchRegister);
-        as_nop();
+    void writeCodePointer(CodeLabel* label) {
+        BufferOffset off = writeInst(-1);
+        label->patchAt()->bind(off.getOffset());
+        label->setLinkMode(CodeLabel::RawPointer);
     }
 
     void jump(Label* label) {
@@ -328,9 +351,8 @@ class MacroAssemblerMIPSCompat : public MacroAssemblerMIPS
         ma_negu(reg, reg);
     }
 
-    // Returns the register containing the type tag.
-    Register splitTagForTest(const ValueOperand& value) {
-        return value.typeReg();
+    void splitTagForTest(const ValueOperand& value, ScratchTagScope& tag) {
+        MOZ_ASSERT(value.typeReg() == tag);
     }
 
     // unboxing code
@@ -636,17 +658,9 @@ class MacroAssemblerMIPSCompat : public MacroAssemblerMIPS
     void storeUnalignedSimd128Float(FloatRegister src, Address addr) { MOZ_CRASH("NYI"); }
     void storeUnalignedSimd128Float(FloatRegister src, BaseIndex addr) { MOZ_CRASH("NYI"); }
 
-    void loadDouble(const Address& addr, FloatRegister dest);
-    void loadDouble(const BaseIndex& src, FloatRegister dest);
     void loadUnalignedDouble(const wasm::MemoryAccessDesc& access, const BaseIndex& src,
                              Register temp, FloatRegister dest);
 
-    // Load a float value into a register, then expand it to a double.
-    void loadFloatAsDouble(const Address& addr, FloatRegister dest);
-    void loadFloatAsDouble(const BaseIndex& src, FloatRegister dest);
-
-    void loadFloat32(const Address& addr, FloatRegister dest);
-    void loadFloat32(const BaseIndex& src, FloatRegister dest);
     void loadUnalignedFloat32(const wasm::MemoryAccessDesc& access, const BaseIndex& src,
                               Register temp, FloatRegister dest);
 

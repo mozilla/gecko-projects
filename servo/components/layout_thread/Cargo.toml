@@ -15,7 +15,7 @@ unstable = ["parking_lot/nightly"]
 [dependencies]
 app_units = "0.6"
 atomic_refcell = "0.1"
-euclid = "0.16"
+euclid = "0.17"
 fnv = "1.0"
 gfx = {path = "../gfx"}
 gfx_traits = {path = "../gfx_traits"}
@@ -33,7 +33,7 @@ net_traits = {path = "../net_traits"}
 parking_lot = "0.4"
 profile_traits = {path = "../profile_traits"}
 range = {path = "../range"}
-rayon = "0.8"
+rayon = "1"
 script = {path = "../script"}
 script_layout_interface = {path = "../script_layout_interface"}
 script_traits = {path = "../script_traits"}

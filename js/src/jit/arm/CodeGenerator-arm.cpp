@@ -1202,7 +1202,7 @@ CodeGeneratorARM::emitTableSwitchDispatch(MTableSwitch* mir, Register index, Reg
     OutOfLineTableSwitch* ool = new(alloc()) OutOfLineTableSwitch(alloc(), mir);
     for (int32_t i = 0; i < cases; i++) {
         CodeLabel cl;
-        masm.writeCodePointer(cl.patchAt());
+        masm.writeCodePointer(&cl);
         masm.propagateOOM(ool->addCodeLabel(cl));
     }
     addOutOfLineCode(ool, mir);
@@ -1386,14 +1386,6 @@ CodeGeneratorARM::ToValue(LInstruction* ins, size_t pos)
 }
 
 ValueOperand
-CodeGeneratorARM::ToOutValue(LInstruction* ins)
-{
-    Register typeReg = ToRegister(ins->getDef(TYPE_INDEX));
-    Register payloadReg = ToRegister(ins->getDef(PAYLOAD_INDEX));
-    return ValueOperand(typeReg, payloadReg);
-}
-
-ValueOperand
 CodeGeneratorARM::ToTempValue(LInstruction* ins, size_t pos)
 {
     Register typeReg = ToRegister(ins->getTemp(pos + TYPE_INDEX));
@@ -1472,10 +1464,10 @@ CodeGeneratorARM::visitFloat32(LFloat32* ins)
     masm.loadConstantFloat32(ins->getFloat(), ToFloatRegister(out));
 }
 
-Register
-CodeGeneratorARM::splitTagForTest(const ValueOperand& value)
+void
+CodeGeneratorARM::splitTagForTest(const ValueOperand& value, ScratchTagScope& tag)
 {
-    return value.typeReg();
+    MOZ_ASSERT(value.typeReg() == tag);
 }
 
 void

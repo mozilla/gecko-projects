@@ -423,11 +423,12 @@ def get_release_config(config):
     partial_updates = os.environ.get("PARTIAL_UPDATES", "")
     if partial_updates != "" and config.kind in ('release-bouncer-sub',
                                                  'release-bouncer-check',
-                                                 'release-updates-builder',
                                                  'release-update-verify-config',
                                                  'release-balrog-submit-toplevel',
                                                  'release-secondary-balrog-submit-toplevel',
                                                  'release-secondary-update-verify-config',
+                                                 'release-balrog-submit-toplevel',
+                                                 'release-secondary-balrog-submit-toplevel',
                                                  ):
         partial_updates = json.loads(partial_updates)
         release_config['partial_versions'] = ', '.join([

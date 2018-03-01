@@ -161,8 +161,8 @@ def make_task_worker(config, jobs):
             else:
                 build_task = dependency
 
-        signing_task_ref = "<" + str(signing_task) + ">"
-        build_task_ref = "<" + str(build_task) + ">"
+        signing_task_ref = "<{}>".format(str(signing_task))
+        build_task_ref = "<{}>".format(str(build_task))
 
         worker = {
             'implementation': 'beetmover',

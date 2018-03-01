@@ -2182,6 +2182,12 @@ MacroAssembler::test32MovePtr(Condition cond, const Address& addr, Imm32 mask, R
 }
 
 void
+MacroAssembler::spectreMovePtr(Condition cond, Register src, Register dest)
+{
+    ma_mov(src, dest, LeaveCC, cond);
+}
+
+void
 MacroAssembler::boundsCheck32ForLoad(Register index, Register length, Register scratch,
                                      Label* failure)
 {
@@ -2295,6 +2301,8 @@ MacroAssembler::wasmBoundsCheck(Condition cond, Register index, Register boundsC
 {
     as_cmp(index, O2Reg(boundsCheckLimit));
     as_b(label, cond);
+    if (JitOptions.spectreIndexMasking)
+        ma_mov(boundsCheckLimit, index, LeaveCC, cond);
 }
 
 template <class L>
@@ -2306,6 +2314,8 @@ MacroAssembler::wasmBoundsCheck(Condition cond, Register index, Address boundsCh
     ma_ldr(DTRAddr(boundsCheckLimit.base, DtrOffImm(boundsCheckLimit.offset)), scratch);
     as_cmp(index, O2Reg(scratch));
     as_b(label, cond);
+    if (JitOptions.spectreIndexMasking)
+        ma_mov(scratch, index, LeaveCC, cond);
 }
 
 //}}} check_macroassembler_style
