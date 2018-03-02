@@ -590,28 +590,36 @@ RR_mprotect(void* aAddress, size_t aSize, int aFlags)
 }
 
 static void*
+AnonymousMmap(void* aAddress, size_t aSize, bool aFixed)
+{
+  if (aFixed) {
+    // For fixed allocations, make sure this memory region is mapped and zero.
+    memset(aAddress, 0, aSize);
+    return aAddress;
+  }
+  return AllocateMemoryTryAddress(aAddress, RoundupSizeToPageBoundary(aSize), TrackedMemoryKind);
+}
+
+static void*
 RR_mmap(void* aAddress, size_t aSize, int aProt, int aFlags, int aFd, off_t aOffset)
 {
   MOZ_RELEASE_ASSERT(aAddress == PageBase(aAddress));
 
-  // Allocations that require a specific address need special handling.
+  // Make sure that fixed allocations do not interfere with snapshot state.
   if (aFlags & MAP_FIXED) {
-    if (HasTakenSnapshot()) {
-      return AllocateFixedMemory(aAddress, RoundupSizeToPageBoundary(aSize));
-    }
-    return OriginalCall(mmap, void*, aAddress, aSize, aProt, aFlags, aFd, aOffset);
+    CheckFixedMemory(aAddress, RoundupSizeToPageBoundary(aSize));
   }
 
   // Anonymous mappings are not recorded, and can occur at different times
   // during recording and replay.
   if (aFlags & MAP_ANON) {
-    return AllocateMemoryTryAddress(aAddress, RoundupSizeToPageBoundary(aSize), TrackedMemoryKind);
+    return AnonymousMmap(aAddress, RoundupSizeToPageBoundary(aSize), aFlags & MAP_FIXED);
   }
 
   RecordReplayFunction(mmap, void*, aAddress, aSize, aProt, aFlags, aFd, aOffset);
   events.CheckInput(aSize);
   if (IsReplaying()) {
-    rval = AllocateMemoryTryAddress(aAddress, RoundupSizeToPageBoundary(aSize), TrackedMemoryKind);
+    rval = AnonymousMmap(aAddress, RoundupSizeToPageBoundary(aSize), aFlags & MAP_FIXED);
   }
   events.RecordOrReplayBytes(rval, aSize);
   return rval;

@@ -1095,12 +1095,15 @@ RegisterAllocatedMemory(void* aBaseAddress, size_t aSize, AllocatedMemoryKind aK
   }
 }
 
-void*
-AllocateFixedMemory(void* aAddress, size_t aSize)
+void
+CheckFixedMemory(void* aAddress, size_t aSize)
 {
-  MOZ_RELEASE_ASSERT(HasTakenSnapshot());
   MOZ_RELEASE_ASSERT(aAddress == PageBase(aAddress));
   MOZ_RELEASE_ASSERT(aSize == RoundupSizeToPageBoundary(aSize));
+
+  if (!HasTakenSnapshot()) {
+    return;
+  }
 
   {
     // The memory should already be tracked.
@@ -1117,8 +1120,6 @@ AllocateFixedMemory(void* aAddress, size_t aSize)
   if (gFreeRegions.Intersects(aAddress, aSize)) {
     child::ReportFatalError("Fixed memory is currently free!");
   }
-
-  return aAddress;
 }
 
 void*

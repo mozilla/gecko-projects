@@ -31,9 +31,8 @@ namespace recordreplay {
 // system. We instead keep a set of free blocks that are unused at the current
 // point of execution and are available to satisfy new allocations.
 
-// Try to allocate at a specific address, even if it is already considered
-// allocated.
-void* AllocateFixedMemory(void* aAddress, size_t aSize);
+// Make sure that a block of memory in a fixed allocation is already allocated.
+void CheckFixedMemory(void* aAddress, size_t aSize);
 
 // Allocate memory, trying to use a specific address if provided but only if
 // it is free.
