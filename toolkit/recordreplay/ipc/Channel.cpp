@@ -19,7 +19,7 @@ static void
 GetSocketAddress(struct sockaddr_un* addr, base::ProcessId aMiddlemanPid)
 {
   addr->sun_family = AF_UNIX;
-  int n = snprintf(addr->sun_path, sizeof(addr->sun_path), "WebReplay_%d", aMiddlemanPid);
+  int n = snprintf(addr->sun_path, sizeof(addr->sun_path), "/tmp/WebReplay_%d", aMiddlemanPid);
   if (n < 0 || n >= (int) sizeof(addr->sun_path)) {
     MOZ_CRASH();
   }
