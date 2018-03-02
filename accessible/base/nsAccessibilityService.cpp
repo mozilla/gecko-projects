@@ -1487,9 +1487,6 @@ nsAccessibilityService::CreateAccessibleByType(nsIContent* aContent,
   } else if (role.EqualsLiteral("xul:link")) {
     accessible = new XULLinkAccessible(aContent, aDoc);
 
-  } else if(role.EqualsLiteral("xul:pane")) {
-    accessible = new EnumRoleAccessible<roles::PANE>(aContent, aDoc);
-
   } else if (role.EqualsLiteral("xul:panel")) {
     if (aContent->IsElement() &&
         aContent->AsElement()->AttrValueIs(kNameSpaceID_None,
