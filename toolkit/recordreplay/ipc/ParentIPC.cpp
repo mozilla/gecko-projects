@@ -17,6 +17,7 @@
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/layers/LayerTransactionChild.h"
+#include "mozilla/layers/PTextureChild.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
 #include "mozilla/ipc/IOThreadChild.h"
 #include "Monitor.h"
@@ -519,8 +520,6 @@ TerminateChildProcess()
   channel::SendMessage(channel::TerminateMessage());
 }
 
-static layers::PTextureChild* gOldTexture;
-
 static void
 UpdateTitle(dom::TabChild* aTabChild)
 {
@@ -556,6 +555,12 @@ UpdateTitle(dom::TabChild* aTabChild)
   }
 }
 
+static uint64_t gLayerTreeId;
+static layers::PLayerTransactionChild* gLayerTransactionChild;
+
+// Action to clean up the current paint, to be performed after the next paint.
+static std::function<void()> gDestroyAction;
+
 static void
 RecvPaint(const channel::PaintMessage& aMsg)
 {
@@ -583,10 +588,13 @@ RecvPaint(const channel::PaintMessage& aMsg)
   nsTArray<layers::LayersBackend> backends;
   backends.AppendElement(layers::LayersBackend::LAYERS_BASIC);
 
-  layers::PLayerTransactionChild* layerTransactionChild =
-    compositorChild->SendPLayerTransactionConstructor(backends, activeBrowser->LayersId());
-  if (!layerTransactionChild) {
-    MOZ_CRASH();
+  if (activeBrowser->LayersId() != gLayerTreeId) {
+    gLayerTransactionChild =
+      compositorChild->SendPLayerTransactionConstructor(backends, activeBrowser->LayersId());
+    if (!gLayerTransactionChild) {
+      MOZ_CRASH();
+    }
+    gLayerTreeId = activeBrowser->LayersId();
   }
 
   ipc::Shmem shmem;
@@ -621,20 +629,18 @@ RecvPaint(const channel::PaintMessage& aMsg)
     MOZ_CRASH();
   }
 
-  static uint64_t gContentCompositableId = 0;
-  layers::CompositableHandle ContentCompositable(++gContentCompositableId);
+  static uint64_t gCompositableId = 0;
+  layers::CompositableHandle ContentCompositable(++gCompositableId);
 
-  if (!layerTransactionChild->SendNewCompositable(ContentCompositable,
-                                                  layers::TextureInfo(
-                                                    layers::CompositableType::CONTENT_TILED))) {
+  if (!gLayerTransactionChild->SendNewCompositable(ContentCompositable,
+                                                   layers::TextureInfo(
+                                                     layers::CompositableType::CONTENT_TILED))) {
     MOZ_CRASH();
   }
 
-  static const uint64_t RootLayerId = 2;
-  layers::LayerHandle RootLayer(RootLayerId);
-
-  static const uint64_t ContentLayerId = 3;
-  layers::LayerHandle ContentLayer(ContentLayerId);
+  static uint64_t gLayerId = 0;
+  layers::LayerHandle RootLayer(++gLayerId);
+  layers::LayerHandle ContentLayer(++gLayerId);
 
   nsTArray<layers::Edit> cset;
   cset.AppendElement(layers::OpCreateContainerLayer(RootLayer));
@@ -703,9 +709,6 @@ RecvPaint(const channel::PaintMessage& aMsg)
                                                      layers::OpUseTiledLayerBuffer(tileSurface)));
 
   nsTArray<layers::OpDestroy> destroy;
-  if (gOldTexture) {
-    destroy.AppendElement(layers::OpDestroy(gOldTexture));
-  }
 
   TimeStamp now = TimeStamp::Now();
 
@@ -734,7 +737,7 @@ RecvPaint(const channel::PaintMessage& aMsg)
                               /* isRepeatTransaction = */ false,
                               now,
                               TimeStamp());
-  if (!layerTransactionChild->SendUpdate(txn)) {
+  if (!gLayerTransactionChild->SendUpdate(txn)) {
     MOZ_CRASH();
   }
 
@@ -742,11 +745,22 @@ RecvPaint(const channel::PaintMessage& aMsg)
     MOZ_CRASH();
   }
 
+  if (gDestroyAction) {
+    gDestroyAction();
+  }
+
+  gDestroyAction = [=]() {
+    if (!texture->SendDestroy() ||
+        !gLayerTransactionChild->SendReleaseLayer(RootLayer) ||
+        !gLayerTransactionChild->SendReleaseLayer(ContentLayer) ||
+        !gLayerTransactionChild->SendReleaseCompositable(ContentCompositable)) {
+      MOZ_CRASH();
+    }
+  };
+
   FwdTransactionId++;
   TransactionId++;
   PaintSequenceNumber++;
-
-  gOldTexture = texture;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
