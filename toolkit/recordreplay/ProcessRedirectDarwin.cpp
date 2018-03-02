@@ -605,15 +605,13 @@ RR_mmap(void* aAddress, size_t aSize, int aProt, int aFlags, int aFd, off_t aOff
   // Anonymous mappings are not recorded, and can occur at different times
   // during recording and replay.
   if (aFlags & MAP_ANON) {
-    return AllocateMemoryTryAddress(aAddress, RoundupSizeToPageBoundary(aSize),
-                                    AllocatedMemoryKind::Tracked);
+    return AllocateMemoryTryAddress(aAddress, RoundupSizeToPageBoundary(aSize), TrackedMemoryKind);
   }
 
   RecordReplayFunction(mmap, void*, aAddress, aSize, aProt, aFlags, aFd, aOffset);
   events.CheckInput(aSize);
   if (IsReplaying()) {
-    rval = AllocateMemoryTryAddress(aAddress, RoundupSizeToPageBoundary(aSize),
-                                    AllocatedMemoryKind::Tracked);
+    rval = AllocateMemoryTryAddress(aAddress, RoundupSizeToPageBoundary(aSize), TrackedMemoryKind);
   }
   events.RecordOrReplayBytes(rval, aSize);
   return rval;
@@ -622,7 +620,7 @@ RR_mmap(void* aAddress, size_t aSize, int aProt, int aFlags, int aFd, off_t aOff
 static ssize_t
 RR_munmap(void* aAddress, size_t aSize)
 {
-  DeallocateMemory(aAddress, aSize, AllocatedMemoryKind::Tracked);
+  DeallocateMemory(aAddress, aSize, TrackedMemoryKind);
   return 0;
 }
 
@@ -1468,14 +1466,14 @@ static kern_return_t
 RR_mach_vm_allocate(vm_map_t aTarget, mach_vm_address_t* aAddress,
                     mach_vm_size_t aSize, int aFlags)
 {
-  *aAddress = (mach_vm_address_t) AllocateMemory(aSize, AllocatedMemoryKind::Tracked);
+  *aAddress = (mach_vm_address_t) AllocateMemory(aSize, TrackedMemoryKind);
   return KERN_SUCCESS;
 }
 
 static kern_return_t
 RR_mach_vm_deallocate(vm_map_t aTarget, mach_vm_address_t aAddress, mach_vm_size_t aSize)
 {
-  DeallocateMemory((void*) aAddress, aSize, AllocatedMemoryKind::Tracked);
+  DeallocateMemory((void*) aAddress, aSize, TrackedMemoryKind);
   return KERN_SUCCESS;
 }
 

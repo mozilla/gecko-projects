@@ -425,15 +425,14 @@ MFBT_API void DisallowUnhandledDivergeFromRecording();
 // Allocation policies
 ///////////////////////////////////////////////////////////////////////////////
 
-// Enum describing what kind of memory to allocate/deallocate by APIs below.
-enum class AllocatedMemoryKind
-{
-  // Memory that is not saved or restored when taking or restoring snapshots.
-  Untracked,
-
-  // Memory that is saved and restored when taking or restoring snapshots.
-  Tracked
-};
+// Type describing what kind of memory to allocate/deallocate by APIs below.
+// TrackedMemoryKind is reserved for memory that is saved and restored when
+// taking or restoring snapshots. All other values refer to memory that is
+// untracked, and ignored by the snapshot mechanism. Different values may be
+// used to distinguish different classes of memory for diagnosing leaks and
+// reporting memory usage.
+typedef size_t AllocatedMemoryKind;
+static const AllocatedMemoryKind TrackedMemoryKind = 0;
 
 // Allocate or deallocate a block of memory of a particular kind. Allocated
 // memory is initially zeroed.
@@ -487,8 +486,6 @@ public:
     return true;
   }
 };
-
-typedef AllocPolicy<AllocatedMemoryKind::Untracked> UntrackedAllocPolicy;
 
 ///////////////////////////////////////////////////////////////////////////////
 // API inline function implementation

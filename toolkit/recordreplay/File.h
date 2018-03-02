@@ -190,8 +190,8 @@ private:
   void MaybeFixupAfterRecordingRewind();
 };
 
-typedef StreamTemplate<AllocatedMemoryKind::Tracked> Stream;
-typedef StreamTemplate<AllocatedMemoryKind::Untracked> UntrackedStream;
+typedef StreamTemplate<TrackedMemoryKind> Stream;
+typedef StreamTemplate<UntrackedMemoryKind::File> UntrackedStream;
 
 template <AllocatedMemoryKind Kind>
 class FileTemplate
@@ -278,8 +278,8 @@ private:
   void DeallocateMemory(char* aBuf, size_t aSize);
 };
 
-typedef FileTemplate<AllocatedMemoryKind::Tracked> File;
-typedef FileTemplate<AllocatedMemoryKind::Untracked> UntrackedFile;
+typedef FileTemplate<TrackedMemoryKind> File;
+typedef FileTemplate<UntrackedMemoryKind::File> UntrackedFile;
 
 void InitializeFiles(const char* aTempFile);
 

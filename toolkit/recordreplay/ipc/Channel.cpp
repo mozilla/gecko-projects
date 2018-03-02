@@ -141,7 +141,7 @@ SendMessage(const Message& aMsg)
 }
 
 // Buffer for message data received from the other side of the channel.
-static StaticInfallibleVector<char, 0, UntrackedAllocPolicy> gMessageBuffer;
+static StaticInfallibleVector<char, 0, AllocPolicy<UntrackedMemoryKind::Generic>> gMessageBuffer;
 
 // The number of bytes of data already in the message buffer.
 static size_t gMessageBytes;

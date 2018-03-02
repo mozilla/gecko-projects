@@ -49,7 +49,7 @@ struct RewindInfo {
   size_t mActiveRecordedSnapshot;
 
   // Snapshots which have actually been recorded.
-  InfallibleVector<size_t, 1024, UntrackedAllocPolicy> mRecordedSnapshots;
+  InfallibleVector<size_t, 1024, AllocPolicy<UntrackedMemoryKind::Generic>> mRecordedSnapshots;
 
   // Any snapshot which we are trying to rewind back to but did not record when
   // we encountered it earlier, zero if not set.
@@ -69,7 +69,7 @@ void
 InitializeRewindState()
 {
   MOZ_RELEASE_ASSERT(gRewindInfo == nullptr);
-  void* memory = AllocateMemory(sizeof(RewindInfo), AllocatedMemoryKind::Untracked);
+  void* memory = AllocateMemory(sizeof(RewindInfo), UntrackedMemoryKind::Generic);
   gRewindInfo = new(memory) RewindInfo();
 
   gMainThreadCallbackMonitor = new Monitor();

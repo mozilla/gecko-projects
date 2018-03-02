@@ -78,7 +78,7 @@ template <AllocatedMemoryKind Kind>
 class FileTemplate;
 
 // Files and filenames used during recording and replay.
-extern FileTemplate<AllocatedMemoryKind::Tracked>* gRecordingFile;
+extern FileTemplate<TrackedMemoryKind>* gRecordingFile;
 extern const char* gSnapshotMemoryPrefix;
 extern const char* gSnapshotStackPrefix;
 
@@ -190,6 +190,27 @@ private:
 };
 
 void DumpTimers();
+
+// Different kinds of untracked memory used in the system.
+namespace UntrackedMemoryKind {
+  // Note: 0 is TrackedMemoryKind, 1 is used by the replay debugger.
+  static const AllocatedMemoryKind Generic = 2;
+
+  // Memory used by untracked files.
+  static const AllocatedMemoryKind File = 3;
+
+  // Memory used for thread snapshots.
+  static const AllocatedMemoryKind ThreadSnapshot = 4;
+
+  // Memory used by various parts of the snapshot system.
+  static const AllocatedMemoryKind TrackedRegions = 5;
+  static const AllocatedMemoryKind FreeRegions = 6;
+  static const AllocatedMemoryKind DirtyPageSet = 7;
+  static const AllocatedMemoryKind SortedDirtyPageSet = 8;
+  static const AllocatedMemoryKind PageCopy = 9;
+
+  static const size_t Count = 10;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // Redirection Bypassing

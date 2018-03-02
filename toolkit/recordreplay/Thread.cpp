@@ -949,7 +949,7 @@ struct OffThreadCallEventBuffer
 };
 
 struct OffThreadCallEventInfo {
-  InfallibleVector<OffThreadCallEventBuffer, 4, UntrackedAllocPolicy> mBuffers;
+  InfallibleVector<OffThreadCallEventBuffer, 4, AllocPolicy<UntrackedMemoryKind::Generic>> mBuffers;
   SpinLock mLock;
 };
 static OffThreadCallEventInfo* gOffThreadCallEventInfo;
@@ -960,7 +960,7 @@ Thread::InitializeOffThreadCallEvents()
   // Off thread call event data is allocated in untracked memory to avoid
   // deadlocks when the dirty memory handler accesses it.
   gOffThreadCallEventInfo = (OffThreadCallEventInfo*)
-    AllocateMemory(sizeof(OffThreadCallEventInfo), AllocatedMemoryKind::Untracked);
+    AllocateMemory(sizeof(OffThreadCallEventInfo), UntrackedMemoryKind::Generic);
 }
 
 /* static */ void
@@ -978,7 +978,7 @@ Thread::NoteOffThreadCallEventBuffer(void* aBuf, size_t aSize, bool aFirst)
 
   void* untracked = nullptr;
   if (aFirst) {
-    untracked = AllocateMemory(aSize, AllocatedMemoryKind::Untracked);
+    untracked = AllocateMemory(aSize, UntrackedMemoryKind::Generic);
     memcpy(untracked, aBuf, aSize);
   }
 
@@ -999,7 +999,7 @@ Thread::NoteOffThreadCallEventBuffer(void* aBuf, size_t aSize, bool aFirst)
         lock.reset();
 
         memcpy(copy.mOriginal, copy.mUntracked, aSize);
-        DeallocateMemory(copy.mUntracked, aSize, AllocatedMemoryKind::Untracked);
+        DeallocateMemory(copy.mUntracked, aSize, UntrackedMemoryKind::Generic);
         return;
       }
     }

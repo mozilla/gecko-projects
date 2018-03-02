@@ -54,7 +54,7 @@ void
 InitializeThreadSnapshots(size_t aNumThreads)
 {
   gThreadState = (ThreadState*) AllocateMemory(aNumThreads * sizeof(ThreadState),
-                                               AllocatedMemoryKind::Untracked);
+                                               UntrackedMemoryKind::ThreadSnapshot);
 
   jmp_buf buf;
   if (setjmp(buf) == 0) {
@@ -67,7 +67,7 @@ static void
 ClearThreadState(ThreadState* aInfo)
 {
   MOZ_RELEASE_ASSERT(aInfo->mShouldRestore);
-  DeallocateMemory(aInfo->mStackContents, aInfo->mStackBytes, AllocatedMemoryKind::Untracked);
+  DeallocateMemory(aInfo->mStackContents, aInfo->mStackBytes, UntrackedMemoryKind::ThreadSnapshot);
   aInfo->mShouldRestore = false;
   aInfo->mStackContents = nullptr;
   aInfo->mStackBytes = 0;
@@ -249,7 +249,7 @@ RestoreStackForLoadingByThread(UntrackedStream& aStream, size_t aId)
   info.mStackBytes = aStream.ReadScalar();
 
   uint8_t* stackContents =
-    (uint8_t*) AllocateMemory(info.mStackBytes, AllocatedMemoryKind::Untracked);
+    (uint8_t*) AllocateMemory(info.mStackBytes, UntrackedMemoryKind::ThreadSnapshot);
   aStream.ReadBytes(stackContents, info.mStackBytes);
   info.mStackContents = stackContents;
   info.mShouldRestore = true;

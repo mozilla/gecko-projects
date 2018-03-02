@@ -103,14 +103,12 @@ public:
     , mCallbackStorage(nullptr)
   {
     // Use AllocateMemory, as the result will have RWX permissions.
-    mCallbackStorage = (uint8_t*)
-      AllocateMemory(CallbackStorageCapacity, AllocatedMemoryKind::Tracked);
+    mCallbackStorage = (uint8_t*) AllocateMemory(CallbackStorageCapacity, TrackedMemoryKind);
   }
 
   ~StableHashTableInfo() {
     MOZ_ASSERT(mHashToKey.empty());
-    DeallocateMemory(mCallbackStorage, CallbackStorageCapacity,
-                     AllocatedMemoryKind::Tracked);
+    DeallocateMemory(mCallbackStorage, CallbackStorageCapacity, TrackedMemoryKind);
   }
 
   bool AppearsValid() {

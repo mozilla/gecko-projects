@@ -2458,6 +2458,10 @@ FetchContent(JSContext* cx, HandleString filename,
 // Replaying process snapshot management
 ///////////////////////////////////////////////////////////////////////////////
 
+// Magic constant for the kind to use for untracked debugger memory.
+// See UntrackedMemoryKind in ProcessRecordReplay.h
+static const size_t DebuggerAllocatedMemoryKind = 1;
+
 // The precise execution position of the replaying process is managed by the
 // replaying process itself. The middleman will send the replaying process
 // ResumeForward and ResumeBackward messages, but it is up to the replaying
@@ -2474,7 +2478,7 @@ struct BreakpointState
 
     // Some point in the execution space between |snapshot| and the
     // following snapshot. The meaning of this depends on the run phase below.
-    Vector<BreakpointPosition, 4, UntrackedAllocPolicy> executionPoint;
+    Vector<BreakpointPosition, 4, AllocPolicy<DebuggerAllocatedMemoryKind>> executionPoint;
 
     // The current run phase for finding breakpoint hits.
     enum RunPhase {
@@ -2520,7 +2524,7 @@ struct BreakpointState
     };
 
     // All installed breakpoints.
-    Vector<BreakpointInfo, 4, UntrackedAllocPolicy> breakpoints;
+    Vector<BreakpointInfo, 4, AllocPolicy<DebuggerAllocatedMemoryKind>> breakpoints;
 
     // Invalid breakpoint, used during the BackwardCountHits phase when no
     // breakpoints have been encountered yet.
@@ -3771,7 +3775,7 @@ ReplayDebugger::Initialize()
     } else if (IsRecordingOrReplaying()) {
         gContentSet = new ContentSet();
         void* breakpointMem =
-            AllocateMemory(sizeof(BreakpointState), AllocatedMemoryKind::Untracked);
+            AllocateMemory(sizeof(BreakpointState), DebuggerAllocatedMemoryKind);
         gBreakpointState = new (breakpointMem) BreakpointState();
         gInstalledScriptPcHandlers = js_new<InstalledScriptPcHandlerVector>();
 

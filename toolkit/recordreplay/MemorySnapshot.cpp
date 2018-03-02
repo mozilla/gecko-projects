@@ -41,7 +41,7 @@ namespace recordreplay {
 //   the contents of pages modified before the next snapshot. This is handled
 //   here.
 //
-// Heap memory is not tracked when allocated with AllocatedMemoryKind::Untracked.
+// Heap memory is only tracked when allocated with TrackedMemoryKind.
 //
 // Snapshots of heap/static memory is modeled on the copy-on-write semantics
 // used by fork. Instead of actually forking, we use write-protected memory and
@@ -165,7 +165,8 @@ struct DirtyPage {
 };
 
 // A set of dirty pages that can be searched quickly.
-typedef SplayTree<DirtyPage, DirtyPage::AddressSort, UntrackedAllocPolicy, 4> SortedDirtyPageSet;
+typedef SplayTree<DirtyPage, DirtyPage::AddressSort,
+                  AllocPolicy<UntrackedMemoryKind::SortedDirtyPageSet>, 4> SortedDirtyPageSet;
 
 // A set of dirty pages associated with some snapshot.
 struct DirtyPageSet {
@@ -176,7 +177,7 @@ struct DirtyPageSet {
   // thread when all other threads are idle, by the dirty memory handler when
   // it is active and this is the active page set, and by the snapshot thread
   // which owns this set.
-  InfallibleVector<DirtyPage, 256, UntrackedAllocPolicy> mPages;
+  InfallibleVector<DirtyPage, 256, AllocPolicy<UntrackedMemoryKind::DirtyPageSet>> mPages;
 
   explicit DirtyPageSet(size_t aSnapshot)
     : mSnapshot(aSnapshot)
@@ -194,7 +195,7 @@ struct SnapshotThreadWorklist {
   // Sets of pages in the thread's worklist. Each set is for a different
   // snapshot diff, with the oldest snapshots first. As the thread writes diffs
   // out to disk, the earliest entries in this vector are erased.
-  InfallibleVector<DirtyPageSet, 256, UntrackedAllocPolicy> mSets;
+  InfallibleVector<DirtyPageSet, 256, AllocPolicy<UntrackedMemoryKind::Generic>> mSets;
 };
 
 // Structure used to coordinate activity between the main thread and all
@@ -316,15 +317,17 @@ struct MemoryInfo {
 
   // All tracked memory in the process. This may be updated by any thread while
   // holding mTrackedRegionsLock.
-  SplayTree<AllocatedMemoryRegion, AllocatedMemoryRegion::AddressSort, UntrackedAllocPolicy, 4>
+  SplayTree<AllocatedMemoryRegion, AllocatedMemoryRegion::AddressSort,
+            AllocPolicy<UntrackedMemoryKind::TrackedRegions>, 4>
     mTrackedRegions;
-  InfallibleVector<AllocatedMemoryRegion, 512, UntrackedAllocPolicy>
+  InfallibleVector<AllocatedMemoryRegion, 512, AllocPolicy<UntrackedMemoryKind::TrackedRegions>>
     mTrackedRegionsByAllocationOrder;
   SpinLock mTrackedRegionsLock;
 
   // Memory regions that *might* indicate the stacks of system threads. These
   // might also be the stacks for dead threads, or for recorded threads.
-  InfallibleVector<AllocatedMemoryRegion, 512, UntrackedAllocPolicy> mSystemThreadStacks;
+  InfallibleVector<AllocatedMemoryRegion, 512, AllocPolicy<UntrackedMemoryKind::Generic>>
+    mSystemThreadStacks;
   SpinLock mSystemThreadStacksLock;
 
   // Pages from |trackedRegions| modified since the active snapshot. Accessed
@@ -364,12 +367,15 @@ struct MemoryInfo {
   uint32_t mTimeHits[(size_t) TimerKind::Count];
   double mTimeTotals[(size_t) TimerKind::Count];
 
+  // Information for memory allocation.
+  ssize_t mMemoryBalance[UntrackedMemoryKind::Count];
+
   // Recent dirty memory faults.
   void* mDirtyMemoryFaults[50];
 
   MemoryInfo()
     : mMemoryChangesAllowed(true)
-    , mFreeUntrackedRegions(AllocatedMemoryKind::Untracked)
+    , mFreeUntrackedRegions(UntrackedMemoryKind::FreeRegions)
     , mStartTime(CurrentTime())
   {
     // The singleton MemoryInfo is allocated with zeroed memory, so other
@@ -569,7 +575,7 @@ AllocatePageCopy()
     }
   }
 
-  return (uint8_t*) AllocateMemory(PageSize, AllocatedMemoryKind::Untracked);
+  return (uint8_t*) AllocateMemory(PageSize, UntrackedMemoryKind::PageCopy);
 }
 
 // Free a page allocated by AllocatePageCopy.
@@ -584,7 +590,7 @@ FreePageCopy(uint8_t* aPage)
     }
   }
 
-  DeallocateMemory(aPage, PageSize, AllocatedMemoryKind::Untracked);
+  DeallocateMemory(aPage, PageSize, UntrackedMemoryKind::PageCopy);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -912,7 +918,7 @@ ProcessAllInitialMemoryRegions()
 
 // All memory in gMemoryInfo->mTrackedRegions that is not in use at the current
 // point in execution.
-static FreeRegionSet gFreeRegions(AllocatedMemoryKind::Tracked);
+static FreeRegionSet gFreeRegions(TrackedMemoryKind);
 
 // The size of gMemoryInfo->mTrackedRegionsByAllocationOrder we expect to see
 // at the point of the last snapshot.
@@ -941,9 +947,7 @@ FixupFreeRegionsAfterRewind()
 /* static */ FreeRegionSet&
 FreeRegionSet::Get(AllocatedMemoryKind aKind)
 {
-  return (aKind == AllocatedMemoryKind::Untracked)
-         ? gMemoryInfo->mFreeUntrackedRegions
-         : gFreeRegions;
+  return (aKind == TrackedMemoryKind) ? gFreeRegions : gMemoryInfo->mFreeUntrackedRegions;
 }
 
 void*
@@ -973,6 +977,8 @@ FreeRegionSet::MaybeRefillNextChunk()
 
   // Look for a free region we can take the next chunk from.
   size_t size = ChunkPages * PageSize;
+  gMemoryInfo->mMemoryBalance[mKind] += size;
+
   mNextChunk = ExtractLockHeld(size);
 
   if (!mNextChunk) {
@@ -1078,7 +1084,7 @@ RegisterAllocatedMemory(void* aBaseAddress, size_t aSize, AllocatedMemoryKind aK
   uint8_t* aAddress = reinterpret_cast<uint8_t*>(aBaseAddress);
 
   EnsureMemoryDoesNotOverlapSystemThreadStack(aAddress, aSize);
-  if (aKind == AllocatedMemoryKind::Untracked) {
+  if (aKind != TrackedMemoryKind) {
     if (!HasTakenSnapshot()) {
       AddInitialUntrackedMemoryRegion(aAddress, aSize);
     }
@@ -1121,6 +1127,10 @@ AllocateMemoryTryAddress(void* aAddress, size_t aSize, AllocatedMemoryKind aKind
   MOZ_RELEASE_ASSERT(aAddress == PageBase(aAddress));
   aSize = RoundupSizeToPageBoundary(aSize);
 
+  if (gMemoryInfo) {
+    gMemoryInfo->mMemoryBalance[aKind] += aSize;
+  }
+
   if (HasTakenSnapshot()) {
     if (void* res = FreeRegionSet::Get(aKind).Extract(aAddress, aSize)) {
       return res;
@@ -1155,16 +1165,20 @@ RecordReplayInterface_DeallocateMemory(void* aAddress, size_t aSize, AllocatedMe
     return;
   }
 
+  if (gMemoryInfo) {
+    gMemoryInfo->mMemoryBalance[aKind] -= aSize;
+  }
+
   // Memory is returned to the system before taking the first snapshot.
   if (!HasTakenSnapshot()) {
-    if (IsRecordingOrReplaying() && aKind == AllocatedMemoryKind::Untracked) {
+    if (IsRecordingOrReplaying() && aKind != TrackedMemoryKind) {
       RemoveInitialUntrackedRegion((uint8_t*) aAddress, aSize);
     }
     DirectDeallocateMemory(aAddress, aSize);
     return;
   }
 
-  if (aKind == AllocatedMemoryKind::Tracked) {
+  if (aKind == TrackedMemoryKind) {
     // For simplicity, all free regions must be executable, so ignore deallocated
     // memory in regions that are not executable.
     bool executable;
@@ -1510,7 +1524,7 @@ void
 InitializeMemorySnapshots()
 {
   MOZ_RELEASE_ASSERT(gMemoryInfo == nullptr);
-  void* memory = AllocateMemory(sizeof(MemoryInfo), AllocatedMemoryKind::Untracked);
+  void* memory = AllocateMemory(sizeof(MemoryInfo), UntrackedMemoryKind::Generic);
   gMemoryInfo = new(memory) MemoryInfo();
 
   // Mark gMemoryInfo as untracked. See AddInitialUntrackedMemoryRegion.

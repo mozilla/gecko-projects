@@ -254,8 +254,8 @@ StreamTemplate<Kind>::MaybeFixupAfterRecordingRewind()
   ReadBytes(nullptr, pos);
 }
 
-template class StreamTemplate<AllocatedMemoryKind::Tracked>;
-template class StreamTemplate<AllocatedMemoryKind::Untracked>;
+template class StreamTemplate<TrackedMemoryKind>;
+template class StreamTemplate<UntrackedMemoryKind::File>;
 
 ///////////////////////////////////////////////////////////////////////////////
 // FileTemplate
@@ -583,8 +583,8 @@ FileTemplate<Kind>::DeallocateMemory(char* aBuf, size_t aSize)
   recordreplay::DeallocateMemory(aBuf, aSize, Kind);
 }
 
-template class FileTemplate<AllocatedMemoryKind::Tracked>;
-template class FileTemplate<AllocatedMemoryKind::Untracked>;
+template class FileTemplate<TrackedMemoryKind>;
+template class FileTemplate<UntrackedMemoryKind::File>;
 
 void
 InitializeFiles(const char* aTempFile)
