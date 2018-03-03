@@ -616,7 +616,9 @@ RR_mmap(void* aAddress, size_t aSize, int aProt, int aFlags, int aFd, off_t aOff
     return AnonymousMmap(aAddress, RoundupSizeToPageBoundary(aSize), aFlags & MAP_FIXED);
   }
 
-  RecordReplayFunction(mmap, void*, aAddress, aSize, aProt, aFlags, aFd, aOffset);
+  int newProt = HasTakenSnapshot() ? (PROT_READ | PROT_WRITE | PROT_EXEC) : aProt;
+
+  RecordReplayFunction(mmap, void*, aAddress, aSize, newProt, aFlags, aFd, aOffset);
   events.CheckInput(aSize);
   if (IsReplaying()) {
     rval = AnonymousMmap(aAddress, RoundupSizeToPageBoundary(aSize), aFlags & MAP_FIXED);
