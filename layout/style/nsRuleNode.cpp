@@ -3422,8 +3422,7 @@ nsRuleNode::SetFontSize(nsPresContext* aPresContext,
   else if (eCSSUnit_System_Font == sizeValue->GetUnit()) {
     // this becomes our cascading size
     *aSize = aSystemFont.size;
-    recordreplay::RecordReplayAssert("nsRuleNode::SetFontSize #0.5 %d %d",
-                                     recordreplay::ThingIndex((void*)&aSystemFont), (int) *aSize);
+    recordreplay::RecordReplayAssert("nsRuleNode::SetFontSize #0.5 %d", (int) *aSize);
   }
   else if (eCSSUnit_Inherit == sizeValue->GetUnit() ||
            eCSSUnit_Unset == sizeValue->GetUnit()) {

@@ -10258,8 +10258,8 @@ nsLayoutUtils::ApplyMinFontSize(nsStyleFont* aFont,
                                 const nsPresContext* aPresContext,
                                 nscoord aMinFontSize)
 {
-  recordreplay::RecordReplayAssert("nsLayoutUtils::ApplyMinFontSize %d %d %d %.2f %d",
-                                   recordreplay::ThingIndex(aFont), aFont->mSize, aMinFontSize,
+  recordreplay::RecordReplayAssert("nsLayoutUtils::ApplyMinFontSize %d %d %.2f %d",
+                                   aFont->mSize, aMinFontSize,
                                    (float) aFont->mMinFontSizeRatio, aPresContext->IsChrome());
 
   nscoord fontSize = aFont->mSize;
