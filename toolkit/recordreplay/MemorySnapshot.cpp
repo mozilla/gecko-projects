@@ -331,9 +331,10 @@ struct MemoryInfo {
   SpinLock mSystemThreadStacksLock;
 
   // Pages from |trackedRegions| modified since the active snapshot. Accessed
-  // by the dirty memory handler when memory changes are allowed, and by the
-  // main thread when memory changes are not allowed.
+  // by any thread (usually the dirty memory handler) when memory changes are
+  // allowed, and by the main thread when memory changes are not allowed.
   SortedDirtyPageSet mActiveDirty;
+  SpinLock mActiveDirtyLock;
 
   // All untracked memory which is available for new allocations.
   FreeRegionSet mFreeUntrackedRegions;
@@ -678,6 +679,8 @@ HandleDirtyMemoryFault(uint8_t* aAddress)
   // Round down to the base of the page.
   aAddress = PageBase(aAddress);
 
+  AutoSpinLock lock(gMemoryInfo->mActiveDirtyLock);
+
   // Check to see if this is already an active dirty page. Once a page has been
   // marked as dirty it will be accessible until the next snapshot is taken,
   // but it's possible for multiple threads to access the same protected memory
@@ -965,9 +968,6 @@ FreeRegionSet::InsertLockHeld(void* aAddress, size_t aSize)
   mRegions.insert(aSize, AllocatedMemoryRegion((uint8_t*) aAddress, aSize, true));
 }
 
-static void
-RegisterAllocatedMemory(void* aBaseAddress, size_t aSize, AllocatedMemoryKind aKind);
-
 void
 FreeRegionSet::MaybeRefillNextChunk()
 {
@@ -1073,9 +1073,7 @@ FreeRegionSet::Intersects(void* aAddress, size_t aSize)
 
 static void EnsureMemoryDoesNotOverlapSystemThreadStack(void* aAddress, size_t aSize);
 
-// Note a range of memory that was just allocated from the system, and the
-// kind of memory allocation that was performed.
-static void
+void
 RegisterAllocatedMemory(void* aBaseAddress, size_t aSize, AllocatedMemoryKind aKind)
 {
   MOZ_RELEASE_ASSERT(aBaseAddress == PageBase(aBaseAddress));
@@ -1119,6 +1117,25 @@ CheckFixedMemory(void* aAddress, size_t aSize)
   // The memory should not be free.
   if (gFreeRegions.Intersects(aAddress, aSize)) {
     child::ReportFatalError("Fixed memory is currently free!");
+  }
+}
+
+void
+RestoreWritableFixedMemory(void* aAddress, size_t aSize)
+{
+  MOZ_RELEASE_ASSERT(aAddress == PageBase(aAddress));
+  MOZ_RELEASE_ASSERT(aSize == RoundupSizeToPageBoundary(aSize));
+
+  if (!HasTakenSnapshot()) {
+    return;
+  }
+
+  AutoSpinLock lock(gMemoryInfo->mActiveDirtyLock);
+  for (size_t offset = 0; offset < aSize; offset += PageSize) {
+    uint8_t* page = (uint8_t*)aAddress + offset;
+    if (gMemoryInfo->mActiveDirty.maybeLookup(page)) {
+      DirectUnprotectMemory(page, PageSize, true);
+    }
   }
 }
 
