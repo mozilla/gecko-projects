@@ -322,15 +322,11 @@ struct ReplayDebugger::Activity
     }
 
     void defineProperty(HandleObject obj, const char* property, const char* v) {
-        RootedString str(cx, JS_AtomizeString(cx, v));
-        if (str)
-            defineProperty(obj, property, str);
+        defineProperty(obj, property, handlify(v));
     }
 
     void defineProperty(HandleObject obj, const char* property, const char16_t* v) {
-        RootedString str(cx, AtomizeChars(cx, v, js_strlen(v)));
-        if (str)
-            defineProperty(obj, property, str);
+        defineProperty(obj, property, handlify(v));
     }
 
     HandleObject sendRequest(HandleObject request, bool needResponse = true);
@@ -389,6 +385,18 @@ struct ReplayDebugger::Activity
     HandleValue handlify(const Value& v) { return valueHandles.newHandle(v); }
     HandleObject handlify(JSObject* v) { return objectHandles.newHandle(v); }
     HandleString handlify(JSString* v) { return stringHandles.newHandle(v); }
+
+    HandleString handlify(const char* v) {
+        RootedString str(cx, JS_AtomizeString(cx, v));
+        return handlify(str ? str : cx->names().empty);
+    }
+
+    HandleString handlify(const char16_t* v) {
+        RootedString str(cx, AtomizeChars(cx, v, js_strlen(v)));
+        return handlify(str ? str : cx->names().empty);
+    }
+
+    HandleValue valueify(const char* v) { return handlify(StringValue(handlify(v))); }
 
   private:
     void fail(const char* text = nullptr) {
@@ -2117,11 +2125,14 @@ ConvertPrimitiveValueToJSON(ReplayDebugger::Activity& a, HandleValue value)
             a.defineProperty(res, "special", "-Infinity");
         else
             a.defineProperty(res, "primitive", a.handlify(value));
-    } else if (value.isString() || value.isInt32() || value.isBoolean() || value.isNull()) {
-        a.defineProperty(res, "primitive", a.handlify(value));
-    } else {
-        JS_ReportErrorASCII(a.cx, "Cannot send value to replaying process");
+    } else if (value.isMagic()) {
+        a.defineProperty(res, "magic", value.whyMagic());
+    } else if (value.isSymbol()) {
+        JS_ReportErrorASCII(a.cx, "Sending symbols between processes is NYI");
         return nullptr;
+    } else {
+        MOZ_RELEASE_ASSERT(value.isString() || value.isInt32() || value.isBoolean() || value.isNull());
+        a.defineProperty(res, "primitive", a.handlify(value));
     }
     return res;
 }
@@ -2159,6 +2170,10 @@ ConvertPrimitiveValueFromJSON(ReplayDebugger::Activity& a, HandleObject jsonValu
         JS_ReportErrorASCII(a.cx, "Cannot decode value from replaying process");
         return a.handlify(UndefinedValue());
     }
+    if (!a.getValueProperty(jsonValue, "magic").isUndefined()) {
+        JSWhyMagic why = (JSWhyMagic) a.getScalarProperty(jsonValue, "magic");
+        return a.handlify(MagicValue(why));
+    }
     return a.getValueProperty(jsonValue, "primitive");
 }
 
@@ -2169,7 +2184,12 @@ ReplayDebugger::convertValueFromJSON(Activity& a, HandleObject jsonValue)
         HandleObject obj = getObject(a, id);
         return a.handlify(ObjectOrNullValue(obj));
     }
-    return ConvertPrimitiveValueFromJSON(a, jsonValue);
+    HandleValue v = ConvertPrimitiveValueFromJSON(a, jsonValue);
+    if (v.isMagic()) {
+        JSObject* obj = Debugger::createMagicValueObject(a.cx, v.whyMagic());
+        return a.handlify(ObjectOrNullValue(obj));
+    }
+    return v;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2791,6 +2811,17 @@ Respond_getObject(ReplayDebugger::Activity& a, HandleObject request)
 static HandleObject
 Respond_getObjectProperties(ReplayDebugger::Activity& a, HandleObject request)
 {
+    if (!TakeSnapshotAndDivergeFromRecording()) {
+        HandleObject response = a.newArray();
+        HandleObject entry = a.newObject();
+        a.pushArray(response, entry);
+        a.defineProperty(entry, "name", "Unknown properties");
+        a.defineProperty(entry, "attrs", JSPROP_ENUMERATE);
+        HandleValue v = a.valueify("Recording divergence in getObjectProperties");
+        a.defineProperty(entry, "value", ConvertValueToJSON(a, v));
+        return response;
+    }
+
     size_t id = a.getScalarProperty(request, "id");
     RootedObject obj(a.cx, IdObject(id));
 
@@ -2876,6 +2907,14 @@ Respond_getObjectParameterNames(ReplayDebugger::Activity& a, HandleObject reques
 static HandleObject
 Respond_objectCall(ReplayDebugger::Activity& a, HandleObject request)
 {
+    if (!TakeSnapshotAndDivergeFromRecording()) {
+        HandleObject response = a.newObject();
+        a.defineProperty(response, "throwing", true);
+        HandleValue rval = a.valueify("Recording divergence in objectCall");
+        a.defineProperty(response, "result", ConvertValueToJSON(a, rval));
+        return response;
+    }
+
     size_t id = a.getScalarProperty(request, "functionId");
     RootedObject function(a.cx, IdObject(id));
     AutoCompartment ac(a.cx, function);
@@ -2933,6 +2972,16 @@ Respond_getEnvironment(ReplayDebugger::Activity& a, HandleObject request)
 static HandleObject
 Respond_getEnvironmentNames(ReplayDebugger::Activity& a, HandleObject request)
 {
+    if (!TakeSnapshotAndDivergeFromRecording()) {
+        HandleObject response = a.newArray();
+        HandleObject entry = a.newObject();
+        a.pushArray(response, entry);
+        a.defineProperty(entry, "name", "Unknown names");
+        HandleValue v = a.valueify("Recording divergence in getEnvironmentNames");
+        a.defineProperty(entry, "value", ConvertValueToJSON(a, v));
+        return response;
+    }
+
     size_t id = a.getScalarProperty(request, "id");
     RootedObject env(a.cx, IdObject(id));
 
@@ -3070,6 +3119,14 @@ Respond_getFrame(ReplayDebugger::Activity& a, HandleObject request)
 static HandleObject
 Respond_frameEvaluate(ReplayDebugger::Activity& a, HandleObject request)
 {
+    if (!TakeSnapshotAndDivergeFromRecording()) {
+        HandleObject response = a.newObject();
+        a.defineProperty(response, "throwing", true);
+        HandleValue rval = a.valueify("Recording divergence in frameEvaluate");
+        a.defineProperty(response, "result", ConvertValueToJSON(a, rval));
+        return response;
+    }
+
     size_t frameIndex = a.getScalarProperty(request, "frameIndex");
     HandleString text = a.getNonNullStringProperty(request, "text");
 
@@ -3162,9 +3219,7 @@ Respond_clearBreakpoint(ReplayDebugger::Activity& a, HandleObject request)
     Macro(getObjectParameterNames)              \
     Macro(getEnvironment)                       \
     Macro(getFrame)                             \
-    Macro(popFrameResult)
-
-#define FOR_EACH_FALLIBLE_RESPONSE(Macro)       \
+    Macro(popFrameResult)                       \
     Macro(getObjectProperties)                  \
     Macro(objectCall)                           \
     Macro(getEnvironmentNames)                  \
@@ -3208,16 +3263,6 @@ DebugRequestHook(JS::replay::CharBuffer* requestBuffer)
         response = Respond_ ##Name (a, request);
 FOR_EACH_RESPONSE(HANDLE_RESPONSE)
 #undef HANDLE_RESPONSE
-
-#define HANDLE_FALLIBLE_RESPONSE(Name)                          \
-    if (RequestMatch(a, kind, #Name)) {                         \
-        if (TakeSnapshotAndDivergeFromRecording())              \
-            response = Respond_ ##Name (a, request);            \
-        else                                                    \
-            JS_ReportErrorASCII(cx, "Failure responding to " #Name); \
-    }
-FOR_EACH_FALLIBLE_RESPONSE(HANDLE_FALLIBLE_RESPONSE)
-#undef HANDLE_FALLIBLE_RESPONSE
 
 #define HANDLE_NON_RESPONSE(Name)               \
     if (RequestMatch(a, kind, #Name)) {         \
