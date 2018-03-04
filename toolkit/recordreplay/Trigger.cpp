@@ -55,15 +55,17 @@ RecordReplayInterface_RegisterTrigger(void* aObj, const std::function<void()>& a
   MOZ_ASSERT(IsRecordingOrReplaying());
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
-  MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
   MOZ_RELEASE_ASSERT(aObj);
 
   if (HasDivergedFromRecording()) {
     return;
   }
-  Thread* thread = Thread::Current();
+
+  MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
 
   RecordReplayAssert("RegisterTrigger");
+
+  Thread* thread = Thread::Current();
   thread->Events().RecordOrReplayThreadEvent(ThreadEvent::RegisterTrigger);
 
   StaticMutexAutoLock lock(gTriggersMutex);
