@@ -2929,6 +2929,9 @@ Respond_objectCall(ReplayDebugger::Activity& a, HandleObject request)
             return nullptr;
         for (size_t i = 0; i < length; i++)
             args[i].set(ConvertValueFromJSON(a, a.getObjectElement(array, i)));
+    } else {
+        if (!args.init(a.cx, 0))
+            return nullptr;
     }
 
     if (!a.cx->compartment()->wrap(a.cx, &thisv))
