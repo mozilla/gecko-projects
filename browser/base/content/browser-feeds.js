@@ -381,9 +381,11 @@ var FeedHandler = {
     // http://foo.com/index.rdf -> feed://foo.com/index.rdf
     // other urls: prepend feed: scheme, e.g.
     // https://foo.com/index.rdf -> feed:https://foo.com/index.rdf
-    let feedURI = NetUtil.newURI(aSpec);
+    let feedURI = Services.io.newURI(aSpec);
     if (feedURI.schemeIs("http")) {
-      feedURI.scheme = "feed";
+      feedURI = feedURI.mutate()
+                       .setScheme("feed")
+                       .finalize();
       aSpec = feedURI.spec;
     } else {
       aSpec = "feed:" + aSpec;
@@ -593,6 +595,9 @@ var FeedHandler = {
           LOG(`Invalid reader ${settings.reader}`);
           return;
         }
+
+        Services.telemetry.scalarAdd("browser.feeds.feed_subscribed", 1);
+
         const actionPref = getPrefActionForType(settings.feedType);
         this._setPref(actionPref, settings.action);
         const readerPref = getPrefReaderForType(settings.feedType);

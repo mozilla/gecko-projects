@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-this.EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "Troubleshoot",
 ];
 
@@ -128,7 +128,7 @@ function getPrefList(filter) {
   }, {});
 }
 
-this.Troubleshoot = {
+var Troubleshoot = {
 
   /**
    * Captures a snapshot of data that may help troubleshooters troubleshoot
@@ -249,6 +249,10 @@ var dataProviders = {
                      QueryInterface(Ci.nsIInterfaceRequestor).
                      getInterface(Ci.nsIDOMWindowUtils);
       data.styloChromeResult = winUtils.isStyledByServo;
+    }
+
+    if (Services.policies) {
+      data.policiesStatus = Services.policies.status;
     }
 
     const keyGoogle = Services.urlFormatter.formatURL("%GOOGLE_API_KEY%").trim();

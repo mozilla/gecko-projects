@@ -6,7 +6,7 @@
 
 ChromeUtils.import("resource://gre/modules/Messaging.jsm");
 
-this.EXPORTED_SYMBOLS = ["Notifications"];
+var EXPORTED_SYMBOLS = ["Notifications"];
 
 var _notificationsMap = {};
 var _handlersMap = {};
@@ -240,7 +240,7 @@ var Notifications = {
     if (!aIID.equals(Ci.nsISupports) &&
         !aIID.equals(Ci.nsIObserver) &&
         !aIID.equals(Ci.nsISupportsWeakReference))
-      throw Components.results.NS_ERROR_NO_INTERFACE;
+      throw Cr.NS_ERROR_NO_INTERFACE;
     return this;
   }
 };

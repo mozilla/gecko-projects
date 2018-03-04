@@ -8,6 +8,7 @@
 
 #include "mozilla/Atomics.h"
 #include "mozilla/EventForwards.h"
+#include "mozilla/Mutex.h"
 #include "nsIDocument.h"
 #include "nsIObserver.h"
 
@@ -46,6 +47,9 @@
 
 #define SPOOFED_APPNAME    "Netscape"
 #define LEGACY_BUILD_ID    "20100101"
+
+// Forward declare LRUCache, defined in nsRFPService.cpp
+class LRUCache;
 
 namespace mozilla {
 
@@ -159,16 +163,37 @@ public:
   static bool IsResistFingerprintingEnabled();
   static bool IsTimerPrecisionReductionEnabled(TimerPrecisionType aType);
 
+  enum TimeScale {
+    Seconds      = 1,
+    MilliSeconds = 1000,
+    MicroSeconds = 1000000
+  };
+
   // The following Reduce methods can be called off main thread.
-  static double ReduceTimePrecisionAsMSecs(
+  static double ReduceTimePrecisionAsUSecs(
     double aTime,
     TimerPrecisionType aType = TimerPrecisionType::All);
-  static double ReduceTimePrecisionAsUSecs(
+  static double ReduceTimePrecisionAsMSecs(
     double aTime,
     TimerPrecisionType aType = TimerPrecisionType::All);
   static double ReduceTimePrecisionAsSecs(
     double aTime,
     TimerPrecisionType aType = TimerPrecisionType::All);
+
+  // Used by the JS Engine, as it doesn't know about the TimerPrecisionType enum
+  static double ReduceTimePrecisionAsUSecsWrapper(
+    double aTime);
+
+  // Public only for testing purposes
+  static double ReduceTimePrecisionImpl(
+    double aTime,
+    TimeScale aTimeScale,
+    double aResolutionUSec,
+    TimerPrecisionType aType);
+  static nsresult RandomMidpoint(long long aClampedTimeUSec,
+                                 long long aResolutionUSec,
+                                 long long* aMidpointOut,
+                                 uint8_t * aSecretSeed = nullptr);
 
   // This method calculates the video resolution (i.e. height x width) based
   // on the video quality (480p, 720p, etc).

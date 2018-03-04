@@ -979,47 +979,23 @@ MacroAssembler::branchTestMagic(Condition cond, const Address& valaddr, JSWhyMag
 }
 
 void
-MacroAssembler::branchToComputedAddress(const BaseIndex& addr)
+MacroAssembler::branchTruncateDoubleMaybeModUint32(FloatRegister src, Register dest, Label* fail)
 {
-    int32_t shift = Imm32::ShiftOf(addr.scale).value;
-    if (shift) {
-        // 4 instructions : lui ori jr nop
-        as_sll(ScratchRegister, addr.index, 4);
-        as_addu(ScratchRegister, addr.base, ScratchRegister);
-    } else {
-        as_addu(ScratchRegister, addr.base, addr.index);
-    }
-
-    if (addr.offset)
-        asMasm().addPtr(Imm32(addr.offset), ScratchRegister);
-    as_jr(ScratchRegister);
-    as_nop();
-}
-
-// ========================================================================
-// Memory access primitives.
-void
-MacroAssembler::storeUncanonicalizedDouble(FloatRegister src, const Address& addr)
-{
-    ma_sd(src, addr);
-}
-void
-MacroAssembler::storeUncanonicalizedDouble(FloatRegister src, const BaseIndex& addr)
-{
-    MOZ_ASSERT(addr.offset == 0);
-    ma_sd(src, addr);
+    as_truncwd(ScratchFloat32Reg, src);
+    as_cfc1(ScratchRegister, Assembler::FCSR);
+    moveFromFloat32(ScratchFloat32Reg, dest);
+    ma_ext(ScratchRegister, ScratchRegister, Assembler::CauseV, 1);
+    ma_b(ScratchRegister, Imm32(0), fail, Assembler::NotEqual);
 }
 
 void
-MacroAssembler::storeUncanonicalizedFloat32(FloatRegister src, const Address& addr)
+MacroAssembler::branchTruncateFloat32MaybeModUint32(FloatRegister src, Register dest, Label* fail)
 {
-    ma_ss(src, addr);
-}
-void
-MacroAssembler::storeUncanonicalizedFloat32(FloatRegister src, const BaseIndex& addr)
-{
-    MOZ_ASSERT(addr.offset == 0);
-    ma_ss(src, addr);
+    as_truncws(ScratchFloat32Reg, src);
+    as_cfc1(ScratchRegister, Assembler::FCSR);
+    moveFromFloat32(ScratchFloat32Reg, dest);
+    ma_ext(ScratchRegister, ScratchRegister, Assembler::CauseV, 1);
+    ma_b(ScratchRegister, Imm32(0), fail, Assembler::NotEqual);
 }
 
 // ========================================================================

@@ -1648,7 +1648,7 @@ nsStandardURL::SetSpecWithEncoding(const nsACString &input,
     return rv;
 }
 
-NS_IMETHODIMP
+nsresult
 nsStandardURL::SetScheme(const nsACString &input)
 {
     ENSURE_MUTABLE();
@@ -1692,7 +1692,7 @@ nsStandardURL::SetScheme(const nsACString &input)
     return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 nsStandardURL::SetUserPass(const nsACString &input)
 {
     ENSURE_MUTABLE();
@@ -1802,7 +1802,7 @@ nsStandardURL::SetUserPass(const nsACString &input)
     return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 nsStandardURL::SetUsername(const nsACString &input)
 {
     ENSURE_MUTABLE();
@@ -1852,7 +1852,7 @@ nsStandardURL::SetUsername(const nsACString &input)
     return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 nsStandardURL::SetPassword(const nsACString &input)
 {
     ENSURE_MUTABLE();
@@ -1868,6 +1868,10 @@ nsStandardURL::SetPassword(const nsACString &input)
         return NS_ERROR_UNEXPECTED;
     }
     if (mUsername.mLen <= 0) {
+        if (password.IsEmpty()) {
+            MOZ_DIAGNOSTIC_ASSERT(Password().IsEmpty());
+            return NS_OK;
+        }
         NS_WARNING("cannot set password without existing username");
         return NS_ERROR_FAILURE;
     }
@@ -1927,7 +1931,7 @@ nsStandardURL::FindHostLimit(nsACString::const_iterator& aStart,
 
 // If aValue only has a host part and no port number, the port
 // will not be reset!!!
-NS_IMETHODIMP
+nsresult
 nsStandardURL::SetHostPort(const nsACString &aValue)
 {
     ENSURE_MUTABLE();
@@ -1974,41 +1978,29 @@ nsStandardURL::SetHostPort(const nsACString &aValue)
     nsresult rv = SetHost(Substring(start, iter));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    // Also set the port if needed.
-    if (iter != end) {
-        iter++;
-        if (iter != end) {
-            nsCString portStr(Substring(iter, end));
-            nsresult rv;
-            int32_t port = portStr.ToInteger(&rv);
-            if (NS_SUCCEEDED(rv)) {
-                rv = SetPort(port);
-                NS_ENSURE_SUCCESS(rv, rv);
-            } else {
-                // Failure parsing port number
-                return NS_ERROR_MALFORMED_URI;
-            }
-        } else {
-            // port number is missing
-            return NS_ERROR_MALFORMED_URI;
-        }
+    if (iter == end) {
+        // does not end in colon
+        return NS_OK;
     }
+
+    iter++; // advance over the colon
+    if (iter == end) {
+        // port number is missing
+        return NS_OK;
+    }
+
+    nsCString portStr(Substring(iter, end));
+    int32_t port = portStr.ToInteger(&rv);
+    if (NS_FAILED(rv)) {
+        // Failure parsing the port number
+        return NS_OK;
+    }
+
+    Unused << SetPort(port);
     return NS_OK;
 }
 
-// This function is different than SetHostPort in that the port number will be
-// reset as well if aValue parameter does not contain a port port number.
-NS_IMETHODIMP
-nsStandardURL::SetHostAndPort(const nsACString &aValue)
-{
-  // Reset the port and than call SetHostPort. SetHostPort does not reset
-  // the port number.
-  nsresult rv = SetPort(-1);
-  NS_ENSURE_SUCCESS(rv, rv);
-  return SetHostPort(aValue);
-}
-
-NS_IMETHODIMP
+nsresult
 nsStandardURL::SetHost(const nsACString &input)
 {
     ENSURE_MUTABLE();
@@ -2117,7 +2109,7 @@ nsStandardURL::SetHost(const nsACString &input)
     return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 nsStandardURL::SetPort(int32_t port)
 {
     ENSURE_MUTABLE();
@@ -2191,7 +2183,7 @@ nsStandardURL::ReplacePortInSpec(int32_t aNewPort)
     ShiftFromPath(shift);
 }
 
-NS_IMETHODIMP
+nsresult
 nsStandardURL::SetPathQueryRef(const nsACString &input)
 {
     ENSURE_MUTABLE();
@@ -2838,7 +2830,7 @@ nsStandardURL::GetFileExtension(nsACString &result)
     return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 nsStandardURL::SetFilePath(const nsACString &input)
 {
     ENSURE_MUTABLE();
@@ -2924,13 +2916,13 @@ IsUTFEncoding(const Encoding* aEncoding)
            aEncoding == UTF_16LE_ENCODING;
 }
 
-NS_IMETHODIMP
+nsresult
 nsStandardURL::SetQuery(const nsACString &input)
 {
     return SetQueryWithEncoding(input, nullptr);
 }
 
-NS_IMETHODIMP
+nsresult
 nsStandardURL::SetQueryWithEncoding(const nsACString &input,
                                     const Encoding* encoding)
 {
@@ -3007,7 +2999,7 @@ nsStandardURL::SetQueryWithEncoding(const nsACString &input,
     return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 nsStandardURL::SetRef(const nsACString &input)
 {
     ENSURE_MUTABLE();
@@ -3252,7 +3244,7 @@ nsStandardURL::GetFile(nsIFile **result)
     return mFile->Clone(result);
 }
 
-NS_IMETHODIMP
+nsresult
 nsStandardURL::SetFile(nsIFile *file)
 {
     ENSURE_MUTABLE();

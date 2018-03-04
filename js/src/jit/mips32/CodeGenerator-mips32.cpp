@@ -6,7 +6,6 @@
 
 #include "jit/mips32/CodeGenerator-mips32.h"
 
-#include "mozilla/ArrayUtils.h"
 #include "mozilla/MathAlgorithms.h"
 
 #include "jit/CodeGenerator.h"
@@ -24,132 +23,11 @@
 using namespace js;
 using namespace js::jit;
 
-class js::jit::OutOfLineTableSwitch : public OutOfLineCodeBase<CodeGeneratorMIPS>
-{
-    MTableSwitch* mir_;
-    CodeLabel jumpLabel_;
-
-    void accept(CodeGeneratorMIPS* codegen) {
-        codegen->visitOutOfLineTableSwitch(this);
-    }
-
-  public:
-    OutOfLineTableSwitch(MTableSwitch* mir)
-      : mir_(mir)
-    {}
-
-    MTableSwitch* mir() const {
-        return mir_;
-    }
-
-    CodeLabel* jumpLabel() {
-        return &jumpLabel_;
-    }
-};
-
-void
-CodeGeneratorMIPS::visitOutOfLineBailout(OutOfLineBailout* ool)
-{
-    // Push snapshotOffset and make sure stack is aligned.
-    masm.subPtr(Imm32(2 * sizeof(void*)), StackPointer);
-    masm.storePtr(ImmWord(ool->snapshot()->snapshotOffset()), Address(StackPointer, 0));
-
-    masm.jump(&deoptLabel_);
-}
-
-void
-CodeGeneratorMIPS::visitOutOfLineTableSwitch(OutOfLineTableSwitch* ool)
-{
-    MTableSwitch* mir = ool->mir();
-
-    masm.haltingAlign(sizeof(void*));
-    masm.bind(ool->jumpLabel()->target());
-    masm.addCodeLabel(*ool->jumpLabel());
-
-    for (size_t i = 0; i < mir->numCases(); i++) {
-        LBlock* caseblock = skipTrivialBlocks(mir->getCase(i))->lir();
-        Label* caseheader = caseblock->label();
-        uint32_t caseoffset = caseheader->offset();
-
-        // The entries of the jump table need to be absolute addresses and thus
-        // must be patched after codegen is finished.
-        CodeLabel cl;
-        masm.ma_li(ScratchRegister, cl.patchAt());
-        masm.branch(ScratchRegister);
-        cl.target()->bind(caseoffset);
-        masm.addCodeLabel(cl);
-    }
-}
-
-void
-CodeGeneratorMIPS::emitTableSwitchDispatch(MTableSwitch* mir, Register index,
-                                           Register address)
-{
-    Label* defaultcase = skipTrivialBlocks(mir->getDefault())->lir()->label();
-
-    // Lower value with low value
-    if (mir->low() != 0)
-        masm.subPtr(Imm32(mir->low()), index);
-
-    // Jump to default case if input is out of range
-    int32_t cases = mir->numCases();
-    masm.branchPtr(Assembler::AboveOrEqual, index, ImmWord(cases), defaultcase);
-
-    // To fill in the CodeLabels for the case entries, we need to first
-    // generate the case entries (we don't yet know their offsets in the
-    // instruction stream).
-    OutOfLineTableSwitch* ool = new(alloc()) OutOfLineTableSwitch(mir);
-    addOutOfLineCode(ool, mir);
-
-    // Compute the position where a pointer to the right case stands.
-    masm.ma_li(address, ool->jumpLabel()->patchAt());
-    masm.lshiftPtr(Imm32(4), index);
-    masm.addPtr(index, address);
-
-    masm.branch(address);
-}
-
-static const uint32_t FrameSizes[] = { 128, 256, 512, 1024 };
-
-FrameSizeClass
-FrameSizeClass::FromDepth(uint32_t frameDepth)
-{
-    for (uint32_t i = 0; i < mozilla::ArrayLength(FrameSizes); i++) {
-        if (frameDepth < FrameSizes[i])
-            return FrameSizeClass(i);
-    }
-
-    return FrameSizeClass::None();
-}
-
-FrameSizeClass
-FrameSizeClass::ClassLimit()
-{
-    return FrameSizeClass(mozilla::ArrayLength(FrameSizes));
-}
-
-uint32_t
-FrameSizeClass::frameSize() const
-{
-    MOZ_ASSERT(class_ != NO_FRAME_SIZE_CLASS_ID);
-    MOZ_ASSERT(class_ < mozilla::ArrayLength(FrameSizes));
-
-    return FrameSizes[class_];
-}
-
 ValueOperand
 CodeGeneratorMIPS::ToValue(LInstruction* ins, size_t pos)
 {
     Register typeReg = ToRegister(ins->getOperand(pos + TYPE_INDEX));
     Register payloadReg = ToRegister(ins->getOperand(pos + PAYLOAD_INDEX));
-    return ValueOperand(typeReg, payloadReg);
-}
-
-ValueOperand
-CodeGeneratorMIPS::ToOutValue(LInstruction* ins)
-{
-    Register typeReg = ToRegister(ins->getDef(TYPE_INDEX));
-    Register payloadReg = ToRegister(ins->getDef(PAYLOAD_INDEX));
     return ValueOperand(typeReg, payloadReg);
 }
 
@@ -197,10 +75,10 @@ CodeGeneratorMIPS::visitUnbox(LUnbox* unbox)
     }
 }
 
-Register
-CodeGeneratorMIPS::splitTagForTest(const ValueOperand& value)
+void
+CodeGeneratorMIPS::splitTagForTest(const ValueOperand& value, ScratchTagScope& tag)
 {
-    return value.typeReg();
+    MOZ_ASSERT(value.typeReg() == tag);
 }
 
 void
@@ -619,40 +497,45 @@ void
 CodeGeneratorMIPS::visitWasmTruncateToInt64(LWasmTruncateToInt64* lir)
 {
     FloatRegister input = ToFloatRegister(lir->input());
-    FloatRegister scratch = input;
+    FloatRegister arg = input;
     Register64 output = ToOutRegister64(lir);
     MWasmTruncateToInt64* mir = lir->mir();
     MIRType fromType = mir->input()->type();
 
-    auto* ool = new(alloc()) OutOfLineWasmTruncateCheck(mir, input);
+    auto* ool = new(alloc()) OutOfLineWasmTruncateCheck(mir, input, Register64::Invalid());
     addOutOfLineCode(ool, mir);
 
-    if (fromType == MIRType::Double) {
-        masm.branchDouble(Assembler::DoubleUnordered, input, input, ool->entry());
-    } else if (fromType == MIRType::Float32) {
-        masm.branchFloat(Assembler::DoubleUnordered, input, input, ool->entry());
-        scratch = ScratchDoubleReg;
-        masm.convertFloat32ToDouble(input, scratch);
-    } else {
-        MOZ_CRASH("unexpected type in visitOutOfLineWasmTruncateCheck");
+    if (fromType == MIRType::Float32) {
+        arg = ScratchDoubleReg;
+        masm.convertFloat32ToDouble(input, arg);
     }
 
-    masm.Push(input);
+    if (!lir->mir()->isSaturating()) {
+        masm.Push(input);
 
-    masm.setupWasmABICall();
-    masm.passABIArg(scratch, MoveOp::DOUBLE);
-    if (lir->mir()->isUnsigned())
-        masm.callWithABI(mir->bytecodeOffset(), wasm::SymbolicAddress::TruncateDoubleToUint64);
-    else
-        masm.callWithABI(mir->bytecodeOffset(), wasm::SymbolicAddress::TruncateDoubleToInt64);
+        masm.setupWasmABICall();
+        masm.passABIArg(arg, MoveOp::DOUBLE);
 
-    masm.Pop(input);
+        if (lir->mir()->isUnsigned())
+            masm.callWithABI(mir->bytecodeOffset(), wasm::SymbolicAddress::TruncateDoubleToUint64);
+        else
+            masm.callWithABI(mir->bytecodeOffset(), wasm::SymbolicAddress::TruncateDoubleToInt64);
 
-    masm.ma_b(output.high, Imm32(0x80000000), ool->rejoin(), Assembler::NotEqual);
-    masm.ma_b(output.low, Imm32(0x00000000), ool->rejoin(), Assembler::NotEqual);
-    masm.ma_b(ool->entry());
+        masm.Pop(input);
 
-    masm.bind(ool->rejoin());
+        masm.ma_xor(ScratchRegister, output.high, Imm32(0x80000000));
+        masm.ma_or(ScratchRegister, output.low);
+        masm.ma_b(ScratchRegister, Imm32(0), ool->entry(), Assembler::Equal);
+
+        masm.bind(ool->rejoin());
+    } else {
+        masm.setupWasmABICall();
+        masm.passABIArg(arg, MoveOp::DOUBLE);
+        if (lir->mir()->isUnsigned())
+            masm.callWithABI(mir->bytecodeOffset(), wasm::SymbolicAddress::SaturatingTruncateDoubleToUint64);
+        else
+            masm.callWithABI(mir->bytecodeOffset(), wasm::SymbolicAddress::SaturatingTruncateDoubleToInt64);
+    }
 
     MOZ_ASSERT(ReturnReg64 == output);
 }
@@ -661,7 +544,7 @@ void
 CodeGeneratorMIPS::visitInt64ToFloatingPoint(LInt64ToFloatingPoint* lir)
 {
     Register64 input = ToRegister64(lir->getInt64Operand(0));
-    FloatRegister output = ToFloatRegister(lir->output());
+    mozilla::DebugOnly<FloatRegister> output = ToFloatRegister(lir->output());
 
     MInt64ToFloatingPoint* mir = lir->mir();
     MIRType toType = mir->type();
@@ -686,8 +569,8 @@ CodeGeneratorMIPS::visitInt64ToFloatingPoint(LInt64ToFloatingPoint* lir)
         else
             masm.callWithABI(mir->bytecodeOffset(), wasm::SymbolicAddress::Int64ToFloat32, MoveOp::FLOAT32);
 
-    MOZ_ASSERT_IF(toType == MIRType::Double, output == ReturnDoubleReg);
-    MOZ_ASSERT_IF(toType == MIRType::Float32, output == ReturnFloat32Reg);
+    MOZ_ASSERT_IF(toType == MIRType::Double, *(&output) == ReturnDoubleReg);
+    MOZ_ASSERT_IF(toType == MIRType::Float32, *(&output) == ReturnFloat32Reg);
 }
 
 void

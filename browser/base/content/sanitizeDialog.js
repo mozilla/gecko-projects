@@ -99,17 +99,16 @@ var gSanitizePromptDialog = {
     try {
       let range = Sanitizer.getClearRange(this.selectedTimespan);
       let options = {
-        prefDomain: "privacy.cpd.",
         ignoreTimespan: !range,
         range,
       };
       Sanitizer.sanitize(null, options)
-        .catch(Components.utils.reportError)
+        .catch(Cu.reportError)
         .then(() => window.close())
-        .catch(Components.utils.reportError);
+        .catch(Cu.reportError);
       return false;
     } catch (er) {
-      Components.utils.reportError("Exception during sanitize: " + er);
+      Cu.reportError("Exception during sanitize: " + er);
       return true; // We *do* want to close immediately on error.
     }
   },

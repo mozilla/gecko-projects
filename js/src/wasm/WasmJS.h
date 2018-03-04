@@ -205,7 +205,7 @@ class WasmMemoryObject : public NativeObject
     static bool bufferGetter(JSContext* cx, unsigned argc, Value* vp);
     static bool growImpl(JSContext* cx, const CallArgs& args);
     static bool grow(JSContext* cx, unsigned argc, Value* vp);
-    static uint32_t growShared(HandleWasmMemoryObject memory, uint32_t delta, JSContext* cx);
+    static uint32_t growShared(HandleWasmMemoryObject memory, uint32_t delta);
 
     using InstanceSet = JS::WeakCache<GCHashSet<ReadBarrieredWasmInstanceObject,
                                                 MovableCellHasher<ReadBarrieredWasmInstanceObject>,
@@ -285,7 +285,7 @@ class WasmTableObject : public NativeObject
     wasm::Table& table() const;
 };
 
-#ifdef ENABLE_WASM_GLOBAL
+#if defined(ENABLE_WASM_GLOBAL) && defined(EARLY_BETA_OR_EARLIER)
 
 // The class of WebAssembly.Global.  A WasmGlobalObject holds either the value
 // of an immutable wasm global or the cell of a mutable wasm global.
@@ -319,7 +319,7 @@ class WasmGlobalObject : public NativeObject
     Value value() const;
 };
 
-#endif // ENABLE_WASM_GLOBAL
+#endif // ENABLE_WASM_GLOBAL && EARLY_BETA_OR_EARLIER
 
 } // namespace js
 

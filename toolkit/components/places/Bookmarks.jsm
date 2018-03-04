@@ -57,7 +57,7 @@
  * @see nsINavBookmarkObserver
  */
 
-this.EXPORTED_SYMBOLS = [ "Bookmarks" ];
+var EXPORTED_SYMBOLS = [ "Bookmarks" ];
 
 Cu.importGlobalProperties(["URL"]);
 
@@ -169,7 +169,8 @@ var Bookmarks = Object.freeze({
   isVirtualRootItem(guid) {
     return guid == PlacesUtils.bookmarks.virtualMenuGuid ||
            guid == PlacesUtils.bookmarks.virtualToolbarGuid ||
-           guid == PlacesUtils.bookmarks.virtualUnfiledGuid;
+           guid == PlacesUtils.bookmarks.virtualUnfiledGuid ||
+           guid == PlacesUtils.bookmarks.virtualMobileGuid;
   },
 
   /**
@@ -765,6 +766,8 @@ var Bookmarks = Object.freeze({
           }
         }
         if (updateInfo.hasOwnProperty("url")) {
+          await PlacesUtils.keywords.reassign(item.url, updatedItem.url,
+                                              updatedItem.source);
           notify(observers, "onItemChanged", [ updatedItem._id, "uri",
                                                false, updatedItem.url.href,
                                                PlacesUtils.toPRTime(updatedItem.lastModified),
@@ -919,6 +922,7 @@ var Bookmarks = Object.freeze({
 
         // We don't wait for the frecency calculation.
         if (urls && urls.length) {
+          await PlacesUtils.keywords.eraseEverything();
           updateFrecency(db, urls, true).catch(Cu.reportError);
         }
       }
@@ -1950,24 +1954,20 @@ function removeBookmarks(items, options) {
         await setAncestorsLastModified(db, guid, new Date(), syncChangeDelta);
       }
 
-      // Write a tombstone for the removed item.
+      // Write tombstones for the removed items.
       await insertTombstones(db, items, syncChangeDelta);
     });
 
-    // Update the frecencies outside of the transaction, so that the updates
-    // can progress in the background.
-    for (let item of items) {
+    // Update the frecencies outside of the transaction, excluding tags, so that
+    // the updates can progress in the background.
+    urls = urls.concat(items.filter(item => {
       let isUntagging = item._grandParentId == PlacesUtils.tagsFolderId;
-
-      // If not a tag recalculate frecency...
-      if (item.type == Bookmarks.TYPE_BOOKMARK && !isUntagging) {
-        // ...though we don't wait for the calculation.
-        updateFrecency(db, [item.url]).catch(Cu.reportError);
-      }
-    }
+      return !isUntagging && "url" in item;
+    }).map(item => item.url));
 
     if (urls.length) {
-      updateFrecency(db, urls, true).catch(Cu.reportError);
+      await PlacesUtils.keywords.removeFromURLsIfNotBookmarked(urls);
+      updateFrecency(db, urls, urls.length > 1).catch(Cu.reportError);
     }
   });
 }
@@ -2477,21 +2477,6 @@ async function maybeInsertManyPlaces(db, urls) {
 // with the server.
 function needsTombstone(item) {
   return item._syncStatus == Bookmarks.SYNC_STATUS.NORMAL;
-}
-
-// Inserts a tombstone for a removed synced item. Tombstones are stored as rows
-// in the `moz_bookmarks_deleted` table, and only written for "NORMAL" items.
-// After each sync, `PlacesSyncUtils.bookmarks.pushChanges` drops successfully
-// uploaded tombstones.
-function insertTombstone(db, item, syncChangeDelta) {
-  if (!syncChangeDelta || !needsTombstone(item)) {
-    return Promise.resolve();
-  }
-  return db.executeCached(`
-    INSERT INTO moz_bookmarks_deleted (guid, dateRemoved)
-    VALUES (:guid, :dateRemoved)`,
-    { guid: item.guid,
-      dateRemoved: PlacesUtils.toPRTime(Date.now()) });
 }
 
 // Inserts tombstones for removed synced items.

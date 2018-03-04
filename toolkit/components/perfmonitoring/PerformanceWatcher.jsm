@@ -40,7 +40,7 @@
  * of this API.
  */
 
-this.EXPORTED_SYMBOLS = ["PerformanceWatcher"];
+var EXPORTED_SYMBOLS = ["PerformanceWatcher"];
 
 let { PerformanceStats, performanceStatsService } = ChromeUtils.import("resource://gre/modules/PerformanceStats.jsm", {});
 let { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm", {});
@@ -136,7 +136,6 @@ ChildManager._get = function(map, key) {
   }
   return result;
 };
-let gListeners = new WeakMap();
 
 /**
  * An object in charge of managing all the observables for a single
@@ -286,7 +285,7 @@ BufferedObserver.prototype.observe = function(source, details) {
   }
 };
 
-this.PerformanceWatcher = {
+var PerformanceWatcher = {
   /**
    * Add a listener informed whenever we receive a slow performance alert
    * in the application.

@@ -10,7 +10,7 @@
 #include "gfxPrefs.h"
 #include "LayersLogging.h"                              // for Stringify
 #include "mozilla/gfx/Point.h"                          // for Point4D
-#include "mozilla/layers/APZThreadUtils.h"              // for AssertOnCompositorThread
+#include "mozilla/layers/APZThreadUtils.h"              // for AssertOnSamplerThread
 #include "mozilla/layers/APZUtils.h"                    // for CompleteAsyncTransform
 #include "mozilla/layers/AsyncCompositionManager.h"     // for ViewTransform::operator Matrix4x4()
 #include "mozilla/layers/AsyncDragMetrics.h"            // for AsyncDragMetrics
@@ -59,7 +59,7 @@ HitTestingTreeNode::~HitTestingTreeNode()
 void
 HitTestingTreeNode::Destroy()
 {
-  APZThreadUtils::AssertOnCompositorThread();
+  APZThreadUtils::AssertOnSamplerThread();
 
   mPrevSibling = nullptr;
   mLastChild = nullptr;
@@ -312,6 +312,9 @@ HitTestingTreeNode::HitTest(const LayerPoint& aPoint) const
       mEventRegions.mDispatchToContentHitRegion.Contains(point.x, point.y))
   {
     result |= CompositorHitTestInfo::eDispatchToContent;
+    if (mEventRegions.mDTCRequiresTargetConfirmation) {
+      result |= CompositorHitTestInfo::eRequiresTargetConfirmation;
+    }
   } else if (gfxPrefs::TouchActionEnabled()) {
     if (mEventRegions.mNoActionRegion.Contains(point.x, point.y)) {
       // set all the touch-action flags as disabled

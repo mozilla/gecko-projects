@@ -42,8 +42,8 @@ PlacesViewBase.prototype = {
   _nativeView: false,
 
   QueryInterface: XPCOMUtils.generateQI(
-    [Components.interfaces.nsINavHistoryResultObserver,
-     Components.interfaces.nsISupportsWeakReference]),
+    [Ci.nsINavHistoryResultObserver,
+     Ci.nsISupportsWeakReference]),
 
   _place: "",
   get place() {
@@ -217,10 +217,10 @@ PlacesViewBase.prototype = {
       }
     }
 
-    if (PlacesControllerDragHelper.disallowInsertion(container, this))
+    if (this.controller.disallowInsertion(container))
       return null;
 
-    return new InsertionPoint({
+    return new PlacesInsertionPoint({
       parentId: PlacesUtils.getConcreteItemId(container),
       parentGuid: PlacesUtils.getConcreteItemGuid(container),
       index, orientation, tagName
@@ -689,6 +689,10 @@ PlacesViewBase.prototype = {
 
         PlacesUtils.livemarks.getLivemark({ id: aPlacesNode.itemId })
           .then(aLivemark => {
+            if (!this.controller) {
+              // We might have been destroyed in the interim...
+              return;
+            }
             let shouldInvalidate =
               !this.controller.hasCachedLivemarkInfo(aPlacesNode);
             this.controller.cacheLivemarkInfo(aPlacesNode, aLivemark);
@@ -733,7 +737,7 @@ PlacesViewBase.prototype = {
           else
             this._getDOMNodeForPlacesNode(child).removeAttribute("visited");
         }
-      }, Components.utils.reportError);
+      }, Cu.reportError);
   },
 
   /**
@@ -932,6 +936,9 @@ PlacesViewBase.prototype = {
     }
 
     if (popup._placesNode && PlacesUIUtils.getViewForNode(popup) == this) {
+      if (this.controller.hasCachedLivemarkInfo(popup._placesNode)) {
+        Services.telemetry.scalarAdd("browser.feeds.livebookmark_opened", 1);
+      }
       if (!popup._placesNode.containerOpen)
         popup._placesNode.containerOpen = true;
       if (!popup._built)
@@ -1417,7 +1424,7 @@ PlacesToolbar.prototype = {
           .then(aLivemark => {
             this.controller.cacheLivemarkInfo(aPlacesNode, aLivemark);
             this.invalidateContainer(aPlacesNode);
-          }, Components.utils.reportError);
+          }, Cu.reportError);
       }
     } else {
       // Node is in a submenu.
@@ -1512,7 +1519,7 @@ PlacesToolbar.prototype = {
                        : (aEvent.clientX < eltRect.left + threshold)) {
           // Drop before this folder.
           dropPoint.ip =
-            new InsertionPoint({
+            new PlacesInsertionPoint({
               parentId: PlacesUtils.getConcreteItemId(this._resultNode),
               parentGuid: PlacesUtils.getConcreteItemGuid(this._resultNode),
               index: eltIndex,
@@ -1525,7 +1532,7 @@ PlacesToolbar.prototype = {
           let tagName = PlacesUtils.nodeIsTagQuery(elt._placesNode) ?
                         elt._placesNode.title : null;
           dropPoint.ip =
-            new InsertionPoint({
+            new PlacesInsertionPoint({
               parentId: PlacesUtils.getConcreteItemId(elt._placesNode),
               parentGuid: PlacesUtils.getConcreteItemGuid(elt._placesNode),
               tagName
@@ -1539,7 +1546,7 @@ PlacesToolbar.prototype = {
             -1 : eltIndex + 1;
 
           dropPoint.ip =
-            new InsertionPoint({
+            new PlacesInsertionPoint({
               parentId: PlacesUtils.getConcreteItemId(this._resultNode),
               parentGuid: PlacesUtils.getConcreteItemGuid(this._resultNode),
               index: beforeIndex,
@@ -1555,7 +1562,7 @@ PlacesToolbar.prototype = {
                        : (aEvent.clientX < eltRect.left + threshold)) {
           // Drop before this bookmark.
           dropPoint.ip =
-            new InsertionPoint({
+            new PlacesInsertionPoint({
               parentId: PlacesUtils.getConcreteItemId(this._resultNode),
               parentGuid: PlacesUtils.getConcreteItemGuid(this._resultNode),
               index: eltIndex,
@@ -1568,7 +1575,7 @@ PlacesToolbar.prototype = {
             eltIndex == this._rootElt.childNodes.length - 1 ?
             -1 : eltIndex + 1;
           dropPoint.ip =
-            new InsertionPoint({
+            new PlacesInsertionPoint({
               parentId: PlacesUtils.getConcreteItemId(this._resultNode),
               parentGuid: PlacesUtils.getConcreteItemGuid(this._resultNode),
               index: beforeIndex,
@@ -1581,7 +1588,7 @@ PlacesToolbar.prototype = {
       // We are most likely dragging on the empty area of the
       // toolbar, we should drop after the last node.
       dropPoint.ip =
-        new InsertionPoint({
+        new PlacesInsertionPoint({
           parentId: PlacesUtils.getConcreteItemId(this._resultNode),
           parentGuid: PlacesUtils.getConcreteItemGuid(this._resultNode),
           orientation: Ci.nsITreeView.DROP_BEFORE
@@ -1601,10 +1608,8 @@ PlacesToolbar.prototype = {
   notify: function PT_notify(aTimer) {
     if (aTimer == this._updateNodesVisibilityTimer) {
       this._updateNodesVisibilityTimer = null;
-      // TODO: This should use promiseLayoutFlushed("layout"), so that
-      // _updateNodesVisibilityTimerCallback can use getBoundsWithoutFlush. But
-      // for yet unknown reasons doing that causes intermittent failures,
-      // apparently due the flush not happening in a meaningful time.
+      // Bug 1440070: This should use promiseDocumentFlushed, so that
+      // _updateNodesVisibilityTimerCallback can use getBoundsWithoutFlush.
       window.requestAnimationFrame(this._updateNodesVisibilityTimerCallback.bind(this));
     } else if (aTimer == this._ibTimer) {
       // * Timer to turn off indicator bar.
@@ -1778,7 +1783,7 @@ PlacesToolbar.prototype = {
     let dropPoint = this._getDropPoint(aEvent);
     if (dropPoint && dropPoint.ip) {
       PlacesControllerDragHelper.onDrop(dropPoint.ip, aEvent.dataTransfer)
-                                .catch(Components.utils.reportError);
+                                .catch(Cu.reportError);
       aEvent.preventDefault();
     }
 
@@ -2066,7 +2071,7 @@ PlacesPanelMenuView.prototype = {
         .then(aLivemark => {
           this.controller.cacheLivemarkInfo(aPlacesNode, aLivemark);
           this.invalidateContainer(aPlacesNode);
-        }, Components.utils.reportError);
+        }, Cu.reportError);
     }
   },
 
@@ -2115,14 +2120,6 @@ this.PlacesPanelview = class extends PlacesViewBase {
     if (this._events)
       return this._events;
     return this._events = ["click", "command", "dragend", "dragstart", "ViewHiding", "ViewShown"];
-  }
-
-  get panel() {
-    return this.panelMultiView.parentNode;
-  }
-
-  get panelMultiView() {
-    return this._viewElt.panelMultiView;
   }
 
   handleEvent(event) {
@@ -2196,6 +2193,7 @@ this.PlacesPanelview = class extends PlacesViewBase {
   uninit(event) {
     this._removeEventListeners(this.panelMultiView, this.events);
     this._removeEventListeners(window, ["unload"]);
+    delete this.panelMultiView;
     super.uninit(event);
   }
 
@@ -2255,10 +2253,6 @@ this.PlacesPanelview = class extends PlacesViewBase {
     }
   }
 
-  _isPopupOpen() {
-    return this.panel.state == "open" && this.panelMultiView.current == this._viewElt;
-  }
-
   _onPopupHidden(event) {
     let panelview = event.originalTarget;
     let placesNode = panelview._placesNode;
@@ -2280,6 +2274,7 @@ this.PlacesPanelview = class extends PlacesViewBase {
     // we ever get here.
     if (event.originalTarget == this._rootElt) {
       // Start listening for events from all panels inside the panelmultiview.
+      this.panelMultiView = this._viewElt.panelMultiView;
       this._addEventListeners(this.panelMultiView, this.events);
     }
     super._onPopupShowing(event);

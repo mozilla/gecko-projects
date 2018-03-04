@@ -4,7 +4,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["SessionSaver"];
+var EXPORTED_SYMBOLS = ["SessionSaver"];
 
 ChromeUtils.import("resource://gre/modules/Timer.jsm", this);
 ChromeUtils.import("resource://gre/modules/Services.jsm", this);
@@ -13,7 +13,6 @@ ChromeUtils.import("resource://gre/modules/TelemetryStopwatch.jsm", this);
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.jsm",
-  console: "resource://gre/modules/Console.jsm",
   PrivacyFilter: "resource:///modules/sessionstore/PrivacyFilter.jsm",
   RunState: "resource:///modules/sessionstore/RunState.jsm",
   SessionStore: "resource:///modules/sessionstore/SessionStore.jsm",
@@ -58,13 +57,12 @@ function stopWatch(method) {
 }
 
 var stopWatchStart = stopWatch("start");
-var stopWatchCancel = stopWatch("cancel");
 var stopWatchFinish = stopWatch("finish");
 
 /**
  * The external API implemented by the SessionSaver module.
  */
-this.SessionSaver = Object.freeze({
+var SessionSaver = Object.freeze({
   /**
    * Immediately saves the current session to disk.
    */
@@ -391,4 +389,3 @@ XPCOMUtils.defineLazyPreferenceGetter(SessionSaverInternal, "_idleDelay", PREF_I
 
 var idleService = Cc["@mozilla.org/widget/idleservice;1"].getService(Ci.nsIIdleService);
 idleService.addIdleObserver(SessionSaverInternal, SessionSaverInternal._idleDelay);
-

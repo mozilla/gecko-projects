@@ -112,8 +112,6 @@ DEFAULTS = dict(
         'browser.newtabpage.activity-stream.tippyTop.service.endpoint': '',
         'browser.newtabpage.activity-stream.feeds.section.topstories': False,
         'browser.newtabpage.activity-stream.feeds.snippets': False,
-        'browser.newtabpage.directory.source':
-            '${webserver}/directoryLinks.json',
         'browser.newtabpage.introShown': True,
         'browser.safebrowsing.downloads.remote.url':
             'http://127.0.0.1/safebrowsing-dummy/downloads',
@@ -168,7 +166,7 @@ DEFAULTS = dict(
         'media.gmp-manager.updateEnabled': False,
         'extensions.systemAddon.update.url':
             'http://127.0.0.1/dummy-system-addons.xml',
-        'extensions.shield-recipe-client.api_url':
+        'app.normandy.api_url':
             'https://127.0.0.1/selfsupport-dummy/',
         'browser.ping-centre.staging.endpoint':
             'https://127.0.0.1/pingcentre/dummy/',
@@ -312,6 +310,12 @@ def get_counters(config):
 
 def get_active_tests(config):
     activeTests = config.pop('activeTests').strip().split(':')
+
+    # on osx, ARES6 crashes about 50% of the time, bug 1437425
+    if mozinfo.os not in ['linux', 'win'] and \
+       'ARES6' in activeTests and \
+       not config['develop']:
+        activeTests.remove('ARES6')
 
     # ensure tests are available
     availableTests = test.test_dict()

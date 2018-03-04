@@ -28,14 +28,13 @@
 
 #include "jsapi.h"
 #include "jsnum.h"
-#include "jsprf.h"
 #include "jsstr.h"
 #include "jstypes.h"
 #include "jsutil.h"
-#include "jswrapper.h"
 
 #include "js/Conversions.h"
 #include "js/Date.h"
+#include "js/Wrapper.h"
 #include "vm/DateTime.h"
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
@@ -64,6 +63,11 @@ using JS::ToInteger;
 
 // When this value is non-zero, we'll round the time by this resolution.
 static Atomic<uint32_t, Relaxed> sResolutionUsec;
+// This is not implemented yet, but we will use this to know to jitter the time in the JS shell
+static Atomic<bool, Relaxed> sJitter;
+// The callback we will use for the Gecko implementation of Timer Clamping/Jittering
+static Atomic<JS::ReduceMicrosecondTimePrecisionCallback, Relaxed> sReduceMicrosecondTimePrecisionCallback;
+
 
 /*
  * The JS 'Date' object is patterned after the Java 'Date' object.
@@ -406,9 +410,16 @@ JS::DayWithinYear(double time, double year)
 }
 
 JS_PUBLIC_API(void)
-JS::SetTimeResolutionUsec(uint32_t resolution)
+JS::SetReduceMicrosecondTimePrecisionCallback(JS::ReduceMicrosecondTimePrecisionCallback callback)
+{
+    sReduceMicrosecondTimePrecisionCallback = callback;
+}
+
+JS_PUBLIC_API(void)
+JS::SetTimeResolutionUsec(uint32_t resolution, bool jitter)
 {
     sResolutionUsec = resolution;
+    sJitter = jitter;
 }
 
 /*
@@ -1297,9 +1308,40 @@ static ClippedTime
 NowAsMillis()
 {
     double now = PRMJ_Now();
-    if (sResolutionUsec) {
-        now = floor(now / sResolutionUsec) * sResolutionUsec;
+    if (sReduceMicrosecondTimePrecisionCallback)
+        now = sReduceMicrosecondTimePrecisionCallback(now);
+    else if (sResolutionUsec) {
+        double clamped = floor(now / sResolutionUsec) * sResolutionUsec;
+
+        if (sJitter) {
+            // Calculate a random midpoint for jittering. In the browser, we are adversarial:
+            // Web Content may try to calculate the midpoint themselves and use that to bypass
+            // it's security. In the JS Shell, we are not adversarial, we want to jitter the
+            // time to recreate the operating environment, but we do not concern ourselves
+            // with trying to prevent an attacker from calculating the midpoint themselves.
+            // So we use a very simple, very fast CRC with a hardcoded seed.
+
+            uint64_t midpoint = *((uint64_t*)&clamped);
+            midpoint ^= 0x0F00DD1E2BAD2DED; // XOR in a 'secret'
+            // MurmurHash3 internal component from
+            //   https://searchfox.org/mozilla-central/rev/61d400da1c692453c2dc2c1cf37b616ce13dea5b/dom/canvas/MurmurHash3.cpp#85
+            midpoint ^= midpoint >> 33;
+            midpoint *= uint64_t{0xFF51AFD7ED558CCD};
+            midpoint ^= midpoint >> 33;
+            midpoint *= uint64_t{0xC4CEB9FE1A85EC53};
+            midpoint ^= midpoint >> 33;
+            midpoint %= sResolutionUsec;
+
+            if (now > clamped + midpoint) { // We're jittering up to the next step
+                now = clamped + sResolutionUsec;
+            } else { // We're staying at the clamped value
+                now = clamped;
+            }
+        } else { //No jitter, only clamping
+            now = clamped;
+        }
     }
+
     return TimeClip(now / PRMJ_USEC_PER_MSEC);
 }
 
@@ -2906,7 +2948,6 @@ date_toDateString(JSContext* cx, unsigned argc, Value* vp)
     return CallNonGenericMethod<IsDate, date_toDateString_impl>(cx, args);
 }
 
-#if JS_HAS_TOSOURCE
 MOZ_ALWAYS_INLINE bool
 date_toSource_impl(JSContext* cx, const CallArgs& args)
 {
@@ -2931,7 +2972,6 @@ date_toSource(JSContext* cx, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
     return CallNonGenericMethod<IsDate, date_toSource_impl>(cx, args);
 }
-#endif
 
 // ES6 20.3.4.41.
 MOZ_ALWAYS_INLINE bool
@@ -3045,9 +3085,7 @@ static const JSFunctionSpec date_methods[] = {
     JS_FN("toTimeString",        date_toTimeString,       0,0),
     JS_FN("toISOString",         date_toISOString,        0,0),
     JS_FN(js_toJSON_str,         date_toJSON,             1,0),
-#if JS_HAS_TOSOURCE
     JS_FN(js_toSource_str,       date_toSource,           0,0),
-#endif
     JS_FN(js_toString_str,       date_toString,           0,0),
     JS_FN(js_valueOf_str,        date_valueOf,            0,0),
     JS_SYM_FN(toPrimitive,       date_toPrimitive,        1,JSPROP_READONLY),

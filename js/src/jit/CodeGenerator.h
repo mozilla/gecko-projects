@@ -155,13 +155,15 @@ class CodeGenerator final : public CodeGeneratorSpecific
     void visitConvertElementsToDoubles(LConvertElementsToDoubles* lir);
     void visitMaybeToDoubleElement(LMaybeToDoubleElement* lir);
     void visitMaybeCopyElementsForWrite(LMaybeCopyElementsForWrite* lir);
+    void visitGuardShape(LGuardShape* guard);
+    void visitGuardObjectGroup(LGuardObjectGroup* guard);
+    void visitGuardClass(LGuardClass* guard);
     void visitGuardObjectIdentity(LGuardObjectIdentity* guard);
     void visitGuardReceiverPolymorphic(LGuardReceiverPolymorphic* lir);
     void visitGuardUnboxedExpando(LGuardUnboxedExpando* lir);
     void visitLoadUnboxedExpando(LLoadUnboxedExpando* lir);
     void visitTypeBarrierV(LTypeBarrierV* lir);
     void visitTypeBarrierO(LTypeBarrierO* lir);
-    void visitMonitorTypes(LMonitorTypes* lir);
     void emitPostWriteBarrier(const LAllocation* obj);
     void emitPostWriteBarrier(Register objreg);
     void emitPostWriteBarrierS(Address address, Register prev, Register next);
@@ -340,7 +342,7 @@ class CodeGenerator final : public CodeGeneratorSpecific
                            Register elementsTemp, Register lengthTemp, TypedOrValueRegister out);
     void visitArrayPopShiftV(LArrayPopShiftV* lir);
     void visitArrayPopShiftT(LArrayPopShiftT* lir);
-    void emitArrayPush(LInstruction* lir, const MArrayPush* mir, Register obj,
+    void emitArrayPush(LInstruction* lir, Register obj,
                        const ConstantOrRegister& value, Register elementsTemp, Register length);
     void visitArrayPushV(LArrayPushV* lir);
     void visitArrayPushT(LArrayPushT* lir);
@@ -487,13 +489,13 @@ class CodeGenerator final : public CodeGeneratorSpecific
     void addGetPropertyCache(LInstruction* ins, LiveRegisterSet liveRegs,
                              TypedOrValueRegister value, const ConstantOrRegister& id,
                              TypedOrValueRegister output, Register maybeTemp,
-                             GetPropertyResultFlags flags, jsbytecode* profilerLeavePc);
+                             GetPropertyResultFlags flags);
     void addSetPropertyCache(LInstruction* ins, LiveRegisterSet liveRegs, Register objReg,
                              Register temp, FloatRegister tempDouble,
                              FloatRegister tempF32, const ConstantOrRegister& id,
                              const ConstantOrRegister& value,
                              bool strict, bool needsPostBarrier, bool needsTypeBarrier,
-                             bool guardHoles, jsbytecode* profilerLeavePc);
+                             bool guardHoles);
 
     MOZ_MUST_USE bool generateBranchV(const ValueOperand& value, Label* ifTrue, Label* ifFalse,
                                       FloatRegister fr);
@@ -617,10 +619,12 @@ class CodeGenerator final : public CodeGeneratorSpecific
     //
     // Instead of saving the pointers, we just save the index of the Read
     // Barriered objects in a bit mask.
-    uint32_t simdRefreshTemplatesDuringLink_;
+    uint32_t simdTemplatesToReadBarrier_;
 
-    void registerSimdTemplate(SimdType simdType);
-    void captureSimdTemplate(JSContext* cx);
+    // Bit mask of JitCompartment stubs that are to be read-barriered.
+    uint32_t compartmentStubsToReadBarrier_;
+
+    void addSimdTemplateToReadBarrier(SimdType simdType);
 };
 
 } // namespace jit

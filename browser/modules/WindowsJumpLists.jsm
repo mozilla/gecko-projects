@@ -28,7 +28,7 @@ const LIST_TYPE = {
  * Exports
  */
 
-this.EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "WinTaskbarJumpList",
 ];
 
@@ -101,22 +101,22 @@ var tasksCfg = [
     close:            true, // No point, but we don't always update the list on
                             // shutdown. Thus true for consistency.
   },
-
-  // Open new private window
-  {
-    get title() { return _getString("taskbar.tasks.newPrivateWindow.label"); },
-    get description() { return _getString("taskbar.tasks.newPrivateWindow.description"); },
-    args:             "-private-window",
-    iconIndex:        4, // Private browsing mode icon
-    open:             true,
-    close:            true, // No point, but we don't always update the list on
-                            // shutdown. Thus true for consistency.
-  },
 ];
+
+// Open new private window
+let privateWindowTask = {
+  get title() { return _getString("taskbar.tasks.newPrivateWindow.label"); },
+  get description() { return _getString("taskbar.tasks.newPrivateWindow.description"); },
+  args:             "-private-window",
+  iconIndex:        4, // Private browsing mode icon
+  open:             true,
+  close:            true, // No point, but we don't always update the list on
+                          // shutdown. Thus true for consistency.
+};
 
 // Implementation
 
-this.WinTaskbarJumpList =
+var WinTaskbarJumpList =
 {
   _builder: null,
   _tasks: null,
@@ -133,6 +133,10 @@ this.WinTaskbarJumpList =
 
     // Store our task list config data
     this._tasks = tasksCfg;
+
+    if (PrivateBrowsingUtils.enabled) {
+      tasksCfg.push(privateWindowTask);
+    }
 
     // retrieve taskbar related prefs.
     this._refreshPrefs();

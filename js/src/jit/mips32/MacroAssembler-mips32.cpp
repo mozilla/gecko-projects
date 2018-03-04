@@ -7,6 +7,7 @@
 #include "jit/mips32/MacroAssembler-mips32.h"
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/EndianUtils.h"
 #include "mozilla/MathAlgorithms.h"
 
 #include "jit/Bailouts.h"
@@ -61,20 +62,26 @@ MacroAssemblerMIPSCompat::convertInt32ToDouble(const BaseIndex& src, FloatRegist
 void
 MacroAssemblerMIPSCompat::convertUInt32ToDouble(Register src, FloatRegister dest)
 {
-    // We use SecondScratchDoubleReg because MacroAssembler::loadFromTypedArray
-    // calls with ScratchDoubleReg as dest.
-    MOZ_ASSERT(dest != SecondScratchDoubleReg);
+    Label positive, done;
+    ma_b(src, src, &positive, NotSigned, ShortJump);
 
-    // Subtract INT32_MIN to get a positive number
-    ma_subu(ScratchRegister, src, Imm32(INT32_MIN));
+    const uint32_t kExponentShift = mozilla::FloatingPoint<double>::kExponentShift - 32;
+    const uint32_t kExponent = (31 + mozilla::FloatingPoint<double>::kExponentBias);
 
-    // Convert value
-    as_mtc1(ScratchRegister, dest);
-    as_cvtdw(dest, dest);
+    ma_ext(SecondScratchReg, src, 31 - kExponentShift, kExponentShift);
+    ma_li(ScratchRegister, Imm32(kExponent << kExponentShift));
+    ma_or(SecondScratchReg, ScratchRegister);
+    ma_sll(ScratchRegister, src, Imm32(kExponentShift + 1));
+    moveToDoubleHi(SecondScratchReg, dest);
+    moveToDoubleLo(ScratchRegister, dest);
 
-    // Add unsigned value of INT32_MIN
-    ma_lid(SecondScratchDoubleReg, 2147483648.0);
-    as_addd(dest, dest, SecondScratchDoubleReg);
+    ma_b(&done, ShortJump);
+
+    bind(&positive);
+    convertInt32ToDouble(src, dest);
+
+    bind(&done);
+
 }
 
 void
@@ -83,10 +90,19 @@ MacroAssemblerMIPSCompat::convertUInt32ToFloat32(Register src, FloatRegister des
     Label positive, done;
     ma_b(src, src, &positive, NotSigned, ShortJump);
 
-    // We cannot do the same as convertUInt32ToDouble because float32 doesn't
-    // have enough precision.
-    convertUInt32ToDouble(src, dest);
-    convertDoubleToFloat32(dest, dest);
+    const uint32_t kExponentShift = mozilla::FloatingPoint<double>::kExponentShift - 32;
+    const uint32_t kExponent = (31 + mozilla::FloatingPoint<double>::kExponentBias);
+
+    ma_ext(SecondScratchReg, src, 31 - kExponentShift, kExponentShift);
+    ma_li(ScratchRegister, Imm32(kExponent << kExponentShift));
+    ma_or(SecondScratchReg, ScratchRegister);
+    ma_sll(ScratchRegister, src, Imm32(kExponentShift + 1));
+    FloatRegister destDouble = dest.asDouble();
+    moveToDoubleHi(SecondScratchReg, destDouble);
+    moveToDoubleLo(ScratchRegister, destDouble);
+
+    convertDoubleToFloat32(destDouble, dest);
+
     ma_b(&done, ShortJump);
 
     bind(&positive);
@@ -110,17 +126,18 @@ MacroAssemblerMIPSCompat::convertDoubleToInt32(FloatRegister src, Register dest,
 {
     if (negativeZeroCheck) {
         moveFromDoubleHi(src, dest);
-        moveFromDoubleLo(src, ScratchRegister);
-        as_movn(dest, zero, ScratchRegister);
-        ma_b(dest, Imm32(INT32_MIN), fail, Assembler::Equal);
+        moveFromDoubleLo(src, SecondScratchReg);
+        ma_xor(dest, Imm32(INT32_MIN));
+        ma_or(dest, SecondScratchReg);
+        ma_b(dest, Imm32(0), fail, Assembler::Equal);
     }
 
-    // Convert double to int, then convert back and check if we have the
-    // same number.
-    as_cvtwd(ScratchDoubleReg, src);
-    as_mfc1(dest, ScratchDoubleReg);
-    as_cvtdw(ScratchDoubleReg, ScratchDoubleReg);
-    ma_bc1d(src, ScratchDoubleReg, fail, Assembler::DoubleNotEqualOrUnordered);
+    // Truncate double to int ; if result is inexact fail
+    as_truncwd(ScratchFloat32Reg, src);
+    as_cfc1(ScratchRegister, Assembler::FCSR);
+    moveFromFloat32(ScratchFloat32Reg, dest);
+    ma_ext(ScratchRegister, ScratchRegister, Assembler::CauseI, 1);
+    ma_b(ScratchRegister, Imm32(0), fail, Assembler::NotEqual);
 }
 
 // Checks whether a float32 is representable as a 32-bit integer. If so, the
@@ -135,18 +152,11 @@ MacroAssemblerMIPSCompat::convertFloat32ToInt32(FloatRegister src, Register dest
         ma_b(dest, Imm32(INT32_MIN), fail, Assembler::Equal);
     }
 
-    // Converting the floating point value to an integer and then converting it
-    // back to a float32 would not work, as float to int32 conversions are
-    // clamping (e.g. float(INT32_MAX + 1) would get converted into INT32_MAX
-    // and then back to float(INT32_MAX + 1)).  If this ever happens, we just
-    // bail out.
-    as_cvtws(ScratchFloat32Reg, src);
-    as_mfc1(dest, ScratchFloat32Reg);
-    as_cvtsw(ScratchFloat32Reg, ScratchFloat32Reg);
-    ma_bc1s(src, ScratchFloat32Reg, fail, Assembler::DoubleNotEqualOrUnordered);
-
-    // Bail out in the clamped cases.
-    ma_b(dest, Imm32(INT32_MAX), fail, Assembler::Equal);
+    as_truncws(ScratchFloat32Reg, src);
+    as_cfc1(ScratchRegister, Assembler::FCSR);
+    moveFromFloat32(ScratchFloat32Reg, dest);
+    ma_ext(ScratchRegister, ScratchRegister, Assembler::CauseI, 1);
+    ma_b(ScratchRegister, Imm32(0), fail, Assembler::NotEqual);
 }
 
 void
@@ -170,11 +180,12 @@ MacroAssemblerMIPSCompat::convertInt32ToFloat32(const Address& src, FloatRegiste
 }
 
 void
-MacroAssemblerMIPS::ma_li(Register dest, CodeOffset* label)
+MacroAssemblerMIPS::ma_li(Register dest, CodeLabel* label)
 {
     BufferOffset bo = m_buffer.nextOffset();
     ma_liPatchable(dest, ImmWord(/* placeholder */ 0));
-    label->bind(bo.getOffset());
+    label->patchAt()->bind(bo.getOffset());
+    label->setLinkMode(CodeLabel::MoveImmediate);
 }
 
 void
@@ -605,19 +616,6 @@ MacroAssemblerMIPS::branchWithCode(InstImm code, Label* label, JumpKind jumpKind
         as_nop();
 }
 
-void
-MacroAssemblerMIPS::ma_cmp_set(Register rd, Register rs, Address addr, Condition c)
-{
-    ma_lw(ScratchRegister, addr);
-    ma_cmp_set(rd, rs, ScratchRegister, c);
-}
-
-void
-MacroAssemblerMIPS::ma_cmp_set(Register dst, Address lhs, Register rhs, Condition c)
-{
-    ma_lw(ScratchRegister, lhs);
-    ma_cmp_set(dst, ScratchRegister, rhs, c);
-}
 
 void
 MacroAssemblerMIPSCompat::cmp64Set(Condition cond, Register64 lhs, Imm64 val, Register dest) {
@@ -860,7 +858,7 @@ void
 MacroAssemblerMIPS::ma_ls(FloatRegister ft, Address address)
 {
     if (Imm16::IsInSignedRange(address.offset)) {
-        as_ls(ft, address.base, address.offset);
+        as_lwc1(ft, address.base, address.offset);
     } else {
         MOZ_ASSERT(address.base != ScratchRegister);
         ma_li(ScratchRegister, Imm32(address.offset));
@@ -868,7 +866,7 @@ MacroAssemblerMIPS::ma_ls(FloatRegister ft, Address address)
             as_gslsx(ft, address.base, ScratchRegister, 0);
         } else {
             as_addu(ScratchRegister, address.base, ScratchRegister);
-            as_ls(ft, ScratchRegister, 0);
+            as_lwc1(ft, ScratchRegister, 0);
         }
     }
 }
@@ -876,37 +874,34 @@ MacroAssemblerMIPS::ma_ls(FloatRegister ft, Address address)
 void
 MacroAssemblerMIPS::ma_ld(FloatRegister ft, Address address)
 {
-    // Use single precision load instructions so we don't have to worry about
-    // alignment.
-
-    int32_t off = address.offset + PAYLOAD_OFFSET;
-    int32_t off2 = address.offset + TAG_OFFSET;
-    if (Imm16::IsInSignedRange(off) && Imm16::IsInSignedRange(off2)) {
-        as_ls(ft, address.base, off);
-        as_ls(getOddPair(ft), address.base, off2);
+    if (Imm16::IsInSignedRange(address.offset)) {
+        as_ldc1(ft, address.base, address.offset);
     } else {
         MOZ_ASSERT(address.base != ScratchRegister);
-        ma_li(ScratchRegister, Imm32(off));
-        as_addu(ScratchRegister, address.base, ScratchRegister);
-        as_ls(ft, ScratchRegister, PAYLOAD_OFFSET);
-        as_ls(getOddPair(ft), ScratchRegister, TAG_OFFSET);
+        ma_li(ScratchRegister, Imm32(address.offset));
+        if (isLoongson()) {
+            as_gsldx(ft, address.base, ScratchRegister, 0);
+        } else {
+            as_addu(ScratchRegister, address.base, ScratchRegister);
+            as_ldc1(ft, ScratchRegister, 0);
+        }
     }
 }
 
 void
 MacroAssemblerMIPS::ma_sd(FloatRegister ft, Address address)
 {
-    int32_t off = address.offset + PAYLOAD_OFFSET;
-    int32_t off2 = address.offset + TAG_OFFSET;
-    if (Imm16::IsInSignedRange(off) && Imm16::IsInSignedRange(off2)) {
-        as_ss(ft, address.base, off);
-        as_ss(getOddPair(ft), address.base, off2);
+    if (Imm16::IsInSignedRange(address.offset)) {
+        as_sdc1(ft, address.base, address.offset);
     } else {
         MOZ_ASSERT(address.base != ScratchRegister);
-        ma_li(ScratchRegister, Imm32(off));
-        as_addu(ScratchRegister, address.base, ScratchRegister);
-        as_ss(ft, ScratchRegister, PAYLOAD_OFFSET);
-        as_ss(getOddPair(ft), ScratchRegister, TAG_OFFSET);
+        ma_li(ScratchRegister, Imm32(address.offset));
+        if (isLoongson()) {
+            as_gssdx(ft, address.base, ScratchRegister, 0);
+        } else {
+            as_addu(ScratchRegister, address.base, ScratchRegister);
+            as_sdc1(ft, ScratchRegister, 0);
+        }
     }
 }
 
@@ -914,7 +909,7 @@ void
 MacroAssemblerMIPS::ma_ss(FloatRegister ft, Address address)
 {
     if (Imm16::IsInSignedRange(address.offset)) {
-        as_ss(ft, address.base, address.offset);
+        as_swc1(ft, address.base, address.offset);
     } else {
         MOZ_ASSERT(address.base != ScratchRegister);
         ma_li(ScratchRegister, Imm32(address.offset));
@@ -922,23 +917,51 @@ MacroAssemblerMIPS::ma_ss(FloatRegister ft, Address address)
             as_gsssx(ft, address.base, ScratchRegister, 0);
         } else {
             as_addu(ScratchRegister, address.base, ScratchRegister);
-            as_ss(ft, ScratchRegister, 0);
+            as_swc1(ft, ScratchRegister, 0);
         }
     }
 }
 
 void
-MacroAssemblerMIPS::ma_pop(FloatRegister fs)
+MacroAssemblerMIPS::ma_ldc1WordAligned(FloatRegister ft, Register base, int32_t off)
 {
-    ma_ld(fs.doubleOverlay(), Address(StackPointer, 0));
-    as_addiu(StackPointer, StackPointer, sizeof(double));
+    MOZ_ASSERT(Imm16::IsInSignedRange(off + PAYLOAD_OFFSET) &&
+               Imm16::IsInSignedRange(off + TAG_OFFSET));
+
+    as_lwc1(ft, base, off + PAYLOAD_OFFSET);
+    as_lwc1(getOddPair(ft), base, off + TAG_OFFSET);
 }
 
 void
-MacroAssemblerMIPS::ma_push(FloatRegister fs)
+MacroAssemblerMIPS::ma_sdc1WordAligned(FloatRegister ft, Register base, int32_t off)
 {
-    as_addiu(StackPointer, StackPointer, -sizeof(double));
-    ma_sd(fs.doubleOverlay(), Address(StackPointer, 0));
+    MOZ_ASSERT(Imm16::IsInSignedRange(off + PAYLOAD_OFFSET) &&
+               Imm16::IsInSignedRange(off + TAG_OFFSET));
+
+    as_swc1(ft, base, off + PAYLOAD_OFFSET);
+    as_swc1(getOddPair(ft), base, off + TAG_OFFSET);
+}
+
+void
+MacroAssemblerMIPS::ma_pop(FloatRegister f)
+{
+    if (f.isDouble())
+        ma_ldc1WordAligned(f, StackPointer, 0);
+    else
+        as_lwc1(f, StackPointer, 0);
+
+    as_addiu(StackPointer, StackPointer, f.size());
+}
+
+void
+MacroAssemblerMIPS::ma_push(FloatRegister f)
+{
+    as_addiu(StackPointer, StackPointer, -f.size());
+
+    if(f.isDouble())
+        ma_sdc1WordAligned(f, StackPointer, 0);
+    else
+        as_swc1(f, StackPointer, 0);
 }
 
 bool
@@ -1101,19 +1124,6 @@ MacroAssemblerMIPSCompat::loadPrivate(const Address& address, Register dest)
 }
 
 void
-MacroAssemblerMIPSCompat::loadDouble(const Address& address, FloatRegister dest)
-{
-    ma_ld(dest, address);
-}
-
-void
-MacroAssemblerMIPSCompat::loadDouble(const BaseIndex& src, FloatRegister dest)
-{
-    computeScaledAddress(src, SecondScratchReg);
-    ma_ld(dest, Address(SecondScratchReg, src.offset));
-}
-
-void
 MacroAssemblerMIPSCompat::loadUnalignedDouble(const wasm::MemoryAccessDesc& access,
                                               const BaseIndex& src, Register temp, FloatRegister dest)
 {
@@ -1143,33 +1153,6 @@ MacroAssemblerMIPSCompat::loadUnalignedDouble(const wasm::MemoryAccessDesc& acce
         append(access, load.getOffset(), framePushed);
         moveToDoubleHi(temp, dest);
     }
-}
-
-void
-MacroAssemblerMIPSCompat::loadFloatAsDouble(const Address& address, FloatRegister dest)
-{
-    ma_ls(dest, address);
-    as_cvtds(dest, dest);
-}
-
-void
-MacroAssemblerMIPSCompat::loadFloatAsDouble(const BaseIndex& src, FloatRegister dest)
-{
-    loadFloat32(src, dest);
-    as_cvtds(dest, dest);
-}
-
-void
-MacroAssemblerMIPSCompat::loadFloat32(const Address& address, FloatRegister dest)
-{
-    ma_ls(dest, address);
-}
-
-void
-MacroAssemblerMIPSCompat::loadFloat32(const BaseIndex& src, FloatRegister dest)
-{
-    computeScaledAddress(src, SecondScratchReg);
-    ma_ls(dest, Address(SecondScratchReg, src.offset));
 }
 
 void
@@ -1376,49 +1359,19 @@ MacroAssemblerMIPSCompat::storeUnalignedDouble(const wasm::MemoryAccessDesc& acc
     append(access, store.getOffset(), framePushed);
 }
 
-// Note: this function clobbers the input register.
 void
 MacroAssembler::clampDoubleToUint8(FloatRegister input, Register output)
 {
-    MOZ_ASSERT(input != ScratchDoubleReg);
-    Label positive, done;
-
-    // <= 0 or NaN --> 0
-    zeroDouble(ScratchDoubleReg);
-    branchDouble(DoubleGreaterThan, input, ScratchDoubleReg, &positive);
-    {
-        move32(Imm32(0), output);
-        jump(&done);
-    }
-
-    bind(&positive);
-
-    // Add 0.5 and truncate.
-    loadConstantDouble(0.5, ScratchDoubleReg);
-    addDouble(ScratchDoubleReg, input);
-
-    Label outOfRange;
-
-    branchTruncateDoubleMaybeModUint32(input, output, &outOfRange);
-    asMasm().branch32(Assembler::Above, output, Imm32(255), &outOfRange);
-    {
-        // Check if we had a tie.
-        convertInt32ToDouble(output, ScratchDoubleReg);
-        branchDouble(DoubleNotEqual, input, ScratchDoubleReg, &done);
-
-        // It was a tie. Mask out the ones bit to get an even value.
-        // See also js_TypedArray_uint8_clamp_double.
-        and32(Imm32(~1), output);
-        jump(&done);
-    }
-
-    // > 255 --> 255
-    bind(&outOfRange);
-    {
-        move32(Imm32(255), output);
-    }
-
-    bind(&done);
+     as_roundwd(ScratchDoubleReg, input);
+     ma_li(ScratchRegister, Imm32(255));
+     as_mfc1(output, ScratchDoubleReg);
+     zeroDouble(ScratchDoubleReg);
+     as_sltiu(SecondScratchReg, output, 255);
+     as_colt(DoubleFloat, ScratchDoubleReg, input);
+     // if res > 255; res = 255;
+     as_movz(output, ScratchRegister, SecondScratchReg);
+     // if !(input > 0); res = 0;
+     as_movf(output, zero);
 }
 
 // higher level tag testing code
@@ -2008,26 +1961,6 @@ MacroAssemblerMIPSCompat::restoreStackPointer()
 }
 
 void
-MacroAssembler::alignFrameForICArguments(AfterICSaveLive& aic)
-{
-    if (framePushed() % ABIStackAlignment != 0) {
-        aic.alignmentPadding = ABIStackAlignment - (framePushed() % ABIStackAlignment);
-        reserveStack(aic.alignmentPadding);
-    } else {
-        aic.alignmentPadding = 0;
-    }
-    MOZ_ASSERT(framePushed() % ABIStackAlignment == 0);
-    checkStackAlignment();
-}
-
-void
-MacroAssembler::restoreFrameAlignmentForICArguments(AfterICSaveLive& aic)
-{
-    if (aic.alignmentPadding != 0)
-        freeStack(aic.alignmentPadding);
-}
-
-void
 MacroAssemblerMIPSCompat::handleFailureWithHandlerTail(void* handler, Label* profilerExitTail)
 {
     // Reserve space for exception information.
@@ -2210,7 +2143,7 @@ MacroAssembler::PushRegsInMask(LiveRegisterSet set)
         diffF -= sizeof(double);
 
         for (FloatRegisterForwardIterator iter(set.fpus().reduceSetForPush()); iter.more(); ++iter) {
-            as_sd(*iter, SecondScratchReg, -diffF);
+            as_sdc1(*iter, SecondScratchReg, -diffF);
             diffF -= sizeof(double);
         }
 
@@ -2236,7 +2169,7 @@ MacroAssembler::PopRegsInMaskIgnore(LiveRegisterSet set, LiveRegisterSet ignore)
         LiveFloatRegisterSet fpignore(ignore.fpus().reduceSetForPush());
         for (FloatRegisterForwardIterator iter(set.fpus().reduceSetForPush()); iter.more(); ++iter) {
             if (!ignore.has(*iter))
-                as_ld(*iter, SecondScratchReg, -diffF);
+                as_ldc1(*iter, SecondScratchReg, -diffF);
             diffF -= sizeof(double);
         }
         freeStack(reservedF);
@@ -2276,7 +2209,7 @@ MacroAssembler::storeRegsInMask(LiveRegisterSet set, Address dest, Register scra
         diffF -= sizeof(double);
 
         for (FloatRegisterForwardIterator iter(set.fpus().reduceSetForPush()); iter.more(); ++iter) {
-            as_sd(*iter, scratch, -diffF);
+            as_sdc1(*iter, scratch, -diffF);
             diffF -= sizeof(double);
         }
         MOZ_ASSERT(diffF == 0);
@@ -2492,6 +2425,19 @@ MacroAssembler::branchValueIsNurseryCell(Condition cond, ValueOperand value,
 }
 
 void
+MacroAssembler::branchValueIsNurseryObject(Condition cond, ValueOperand value,
+                                           Register temp, Label* label)
+{
+    MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
+    Label done;
+
+    branchTestObject(Assembler::NotEqual, value, cond == Assembler::Equal ? &done : label);
+    branchPtrInNurseryChunk(cond, value.payloadReg(), temp, label);
+
+    bind(&done);
+}
+
+void
 MacroAssembler::branchTestValue(Condition cond, const ValueOperand& lhs,
                                 const Value& rhs, Label* label)
 {
@@ -2548,25 +2494,26 @@ void
 MacroAssembler::wasmTruncateDoubleToUInt32(FloatRegister input, Register output, bool isSaturating,
                                            Label* oolEntry)
 {
-    MOZ_ASSERT(!isSaturating, "NYI");
+    Label done;
 
-    loadConstantDouble(double(-1.0), ScratchDoubleReg);
-    branchDouble(Assembler::DoubleLessThanOrEqual, input, ScratchDoubleReg, oolEntry);
+    as_truncwd(ScratchFloat32Reg, input);
+    ma_li(ScratchRegister, Imm32(INT32_MAX));
+    moveFromFloat32(ScratchFloat32Reg, output);
 
-    loadConstantDouble(double(UINT32_MAX) + 1.0, ScratchDoubleReg);
-    branchDouble(Assembler::DoubleGreaterThanOrEqualOrUnordered, input, ScratchDoubleReg, oolEntry);
-    Label done, simple;
-    loadConstantDouble(double(0x80000000UL), ScratchDoubleReg);
-    branchDouble(Assembler::DoubleLessThan, input, ScratchDoubleReg, &simple);
+    // For numbers in  -1.[ : ]INT32_MAX range do nothing more
+    ma_b(output, ScratchRegister, &done, Assembler::Below, ShortJump);
+
+    loadConstantDouble(double(INT32_MAX + 1ULL), ScratchDoubleReg);
+    ma_li(ScratchRegister, Imm32(INT32_MIN));
     as_subd(ScratchDoubleReg, input, ScratchDoubleReg);
-    as_truncwd(ScratchDoubleReg, ScratchDoubleReg);
-    moveFromFloat32(ScratchDoubleReg, output);
-    ma_li(ScratchRegister, Imm32(0x80000000UL));
-    ma_or(output, ScratchRegister);
-    ma_b(&done);
-    bind(&simple);
-    as_truncwd(ScratchDoubleReg, input);
-    moveFromFloat32(ScratchDoubleReg, output);
+    as_truncwd(ScratchFloat32Reg, ScratchDoubleReg);
+    as_cfc1(SecondScratchReg, Assembler::FCSR);
+    moveFromFloat32(ScratchFloat32Reg, output);
+    ma_ext(SecondScratchReg, SecondScratchReg, Assembler::CauseV, 1);
+    ma_addu(output, ScratchRegister);
+
+    ma_b(SecondScratchReg, Imm32(0), oolEntry, Assembler::NotEqual);
+
     bind(&done);
 }
 
@@ -2574,25 +2521,29 @@ void
 MacroAssembler::wasmTruncateFloat32ToUInt32(FloatRegister input, Register output, bool isSaturating,
                                             Label* oolEntry)
 {
-    MOZ_ASSERT(!isSaturating, "NYI");
+    Label done;
 
-    loadConstantFloat32(double(-1.0), ScratchDoubleReg);
-    branchFloat(Assembler::DoubleLessThanOrEqualOrUnordered, input, ScratchDoubleReg, oolEntry);
+    as_truncws(ScratchFloat32Reg, input);
+    ma_li(ScratchRegister, Imm32(INT32_MAX));
+    moveFromFloat32(ScratchFloat32Reg, output);
+    // For numbers in  -1.[ : ]INT32_MAX range do nothing more
+    ma_b(output, ScratchRegister, &done, Assembler::Below, ShortJump);
 
-    loadConstantFloat32(double(UINT32_MAX) + 1.0, ScratchDoubleReg);
-    branchFloat(Assembler::DoubleGreaterThanOrEqualOrUnordered, input, ScratchDoubleReg, oolEntry);
-    Label done, simple;
-    loadConstantFloat32(double(0x80000000UL), ScratchDoubleReg);
-    branchFloat(Assembler::DoubleLessThan, input, ScratchDoubleReg, &simple);
-    as_subs(ScratchDoubleReg, input, ScratchDoubleReg);
-    as_truncws(ScratchDoubleReg, ScratchDoubleReg);
-    moveFromFloat32(ScratchDoubleReg, output);
-    ma_li(ScratchRegister, Imm32(0x80000000UL));
-    ma_or(output, ScratchRegister);
-    ma_b(&done);
-    bind(&simple);
-    as_truncws(ScratchDoubleReg, input);
-    moveFromFloat32(ScratchDoubleReg, output);
+    loadConstantFloat32(float(INT32_MAX + 1ULL), ScratchFloat32Reg);
+    ma_li(ScratchRegister, Imm32(INT32_MIN));
+    as_subs(ScratchFloat32Reg, input, ScratchFloat32Reg);
+    as_truncws(ScratchFloat32Reg, ScratchFloat32Reg);
+    as_cfc1(SecondScratchReg, Assembler::FCSR);
+    moveFromFloat32(ScratchFloat32Reg, output);
+    ma_ext(SecondScratchReg, SecondScratchReg, Assembler::CauseV, 1);
+    ma_addu(output, ScratchRegister);
+
+    // Guard against negative values that result in 0 due the precision loss.
+    as_sltiu(ScratchRegister, output, 1);
+    ma_or(SecondScratchReg, ScratchRegister);
+
+    ma_b(SecondScratchReg, Imm32(0), oolEntry, Assembler::NotEqual);
+
     bind(&done);
 }
 

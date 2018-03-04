@@ -4,14 +4,11 @@
 
 "use strict";
 
-const {classes: Cc, interfaces: Ci, results: Cr, utils: Cu, manager: Cm} =
-  Components;
-
-this.EXPORTED_SYMBOLS = [ "GMP_PLUGIN_IDS",
-                          "GMPPrefs",
-                          "GMPUtils",
-                          "OPEN_H264_ID",
-                          "WIDEVINE_ID" ];
+var EXPORTED_SYMBOLS = [ "GMP_PLUGIN_IDS",
+                         "GMPPrefs",
+                         "GMPUtils",
+                         "OPEN_H264_ID",
+                         "WIDEVINE_ID" ];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
@@ -21,17 +18,7 @@ const OPEN_H264_ID  = "gmp-gmpopenh264";
 const WIDEVINE_ID   = "gmp-widevinecdm";
 const GMP_PLUGIN_IDS = [ OPEN_H264_ID, WIDEVINE_ID ];
 
-var GMPPluginUnsupportedReason = {
-  NOT_WINDOWS: 1,
-  WINDOWS_VERSION: 2,
-};
-
-var GMPPluginHiddenReason = {
-  UNSUPPORTED: 1,
-  EME_DISABLED: 2,
-};
-
-this.GMPUtils = {
+var GMPUtils = {
   /**
    * Checks whether or not a given plugin is hidden. Hidden plugins are neither
    * downloaded nor displayed in the addons manager.
@@ -113,7 +100,7 @@ this.GMPUtils = {
 /**
  * Manages preferences for GMP addons
  */
-this.GMPPrefs = {
+var GMPPrefs = {
   KEY_EME_ENABLED:              "media.eme.enabled",
   KEY_PLUGIN_ENABLED:           "media.{0}.enabled",
   KEY_PLUGIN_LAST_UPDATE:       "media.{0}.lastUpdate",

@@ -11,8 +11,6 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/Sprintf.h"
 
-#include "jsprf.h"
-
 #include "gc/Marking.h"
 #include "gc/Statistics.h"
 #include "jit/BaselineJIT.h"
@@ -44,7 +42,7 @@ RegionAtAddr(const JitcodeGlobalEntry::IonEntry& entry, void* ptr,
 }
 
 void*
-JitcodeGlobalEntry::IonEntry::canonicalNativeAddrFor(JSRuntime* rt, void* ptr) const
+JitcodeGlobalEntry::IonEntry::canonicalNativeAddrFor(void* ptr) const
 {
     uint32_t ptrOffset;
     JitcodeRegionEntry region = RegionAtAddr(*this, ptr, &ptrOffset);
@@ -52,7 +50,7 @@ JitcodeGlobalEntry::IonEntry::canonicalNativeAddrFor(JSRuntime* rt, void* ptr) c
 }
 
 bool
-JitcodeGlobalEntry::IonEntry::callStackAtAddr(JSRuntime* rt, void* ptr,
+JitcodeGlobalEntry::IonEntry::callStackAtAddr(void* ptr,
                                               BytecodeLocationVector& results,
                                               uint32_t* depth) const
 {
@@ -82,7 +80,7 @@ JitcodeGlobalEntry::IonEntry::callStackAtAddr(JSRuntime* rt, void* ptr,
 }
 
 uint32_t
-JitcodeGlobalEntry::IonEntry::callStackAtAddr(JSRuntime* rt, void* ptr,
+JitcodeGlobalEntry::IonEntry::callStackAtAddr(void* ptr,
                                               const char** results,
                                               uint32_t maxResults) const
 {
@@ -109,7 +107,7 @@ JitcodeGlobalEntry::IonEntry::callStackAtAddr(JSRuntime* rt, void* ptr,
 }
 
 void
-JitcodeGlobalEntry::IonEntry::youngestFrameLocationAtAddr(JSRuntime* rt, void* ptr,
+JitcodeGlobalEntry::IonEntry::youngestFrameLocationAtAddr(void* ptr,
                                                           JSScript** script, jsbytecode** pc) const
 {
     uint32_t ptrOffset;
@@ -162,7 +160,7 @@ JitcodeGlobalEntry::IonEntry::destroy()
 }
 
 void*
-JitcodeGlobalEntry::BaselineEntry::canonicalNativeAddrFor(JSRuntime* rt, void* ptr) const
+JitcodeGlobalEntry::BaselineEntry::canonicalNativeAddrFor(void* ptr) const
 {
     // TODO: We can't yet normalize Baseline addresses until we unify
     // BaselineScript's PCMappingEntries with JitcodeGlobalTable.
@@ -170,7 +168,7 @@ JitcodeGlobalEntry::BaselineEntry::canonicalNativeAddrFor(JSRuntime* rt, void* p
 }
 
 bool
-JitcodeGlobalEntry::BaselineEntry::callStackAtAddr(JSRuntime* rt, void* ptr,
+JitcodeGlobalEntry::BaselineEntry::callStackAtAddr(void* ptr,
                                                    BytecodeLocationVector& results,
                                                    uint32_t* depth) const
 {
@@ -188,7 +186,7 @@ JitcodeGlobalEntry::BaselineEntry::callStackAtAddr(JSRuntime* rt, void* ptr,
 }
 
 uint32_t
-JitcodeGlobalEntry::BaselineEntry::callStackAtAddr(JSRuntime* rt, void* ptr,
+JitcodeGlobalEntry::BaselineEntry::callStackAtAddr(void* ptr,
                                                    const char** results,
                                                    uint32_t maxResults) const
 {
@@ -200,7 +198,7 @@ JitcodeGlobalEntry::BaselineEntry::callStackAtAddr(JSRuntime* rt, void* ptr,
 }
 
 void
-JitcodeGlobalEntry::BaselineEntry::youngestFrameLocationAtAddr(JSRuntime* rt, void* ptr,
+JitcodeGlobalEntry::BaselineEntry::youngestFrameLocationAtAddr(void* ptr,
                                                                JSScript** script,
                                                                jsbytecode** pc) const
 {
@@ -232,7 +230,7 @@ RejoinEntry(JSRuntime* rt, const JitcodeGlobalEntry::IonCacheEntry& cache, void*
 }
 
 void*
-JitcodeGlobalEntry::IonCacheEntry::canonicalNativeAddrFor(JSRuntime* rt, void* ptr) const
+JitcodeGlobalEntry::IonCacheEntry::canonicalNativeAddrFor() const
 {
     return nativeStartAddr_;
 }
@@ -486,7 +484,7 @@ JitcodeGlobalTable::lookupInternal(void* ptr)
 }
 
 bool
-JitcodeGlobalTable::addEntry(const JitcodeGlobalEntry& entry, JSRuntime* rt)
+JitcodeGlobalTable::addEntry(const JitcodeGlobalEntry& entry)
 {
     MOZ_ASSERT(entry.isIon() || entry.isBaseline() || entry.isIonCache() || entry.isDummy());
 
@@ -536,8 +534,7 @@ JitcodeGlobalTable::addEntry(const JitcodeGlobalEntry& entry, JSRuntime* rt)
 }
 
 void
-JitcodeGlobalTable::removeEntry(JitcodeGlobalEntry& entry, JitcodeGlobalEntry** prevTower,
-                                JSRuntime* rt)
+JitcodeGlobalTable::removeEntry(JitcodeGlobalEntry& entry, JitcodeGlobalEntry** prevTower)
 {
     MOZ_ASSERT(!TlsContext.get()->isProfilerSamplingEnabled());
 
@@ -573,7 +570,7 @@ JitcodeGlobalTable::releaseEntry(JitcodeGlobalEntry& entry, JitcodeGlobalEntry**
     Maybe<uint64_t> rangeStart = rt->profilerSampleBufferRangeStart();
     MOZ_ASSERT_IF(rangeStart, !entry.isSampled(*rangeStart));
 #endif
-    removeEntry(entry, prevTower, rt);
+    removeEntry(entry, prevTower);
 }
 
 void
@@ -720,7 +717,7 @@ JitcodeGlobalTable::verifySkiplist()
 #endif // DEBUG
 
 void
-JitcodeGlobalTable::setAllEntriesAsExpired(JSRuntime* rt)
+JitcodeGlobalTable::setAllEntriesAsExpired()
 {
     AutoSuppressProfilerSampling suppressSampling(TlsContext.get());
     for (Range r(*this); !r.empty(); r.popFront()) {

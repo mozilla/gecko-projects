@@ -1116,12 +1116,12 @@ public:
 
     Item<Iterator> end() { return Item<Iterator>(this, nullptr); }
 
-    Tree::TreeNode* Next()
+    arena_t* Next()
     {
-      Tree::TreeNode* result = Tree::Iterator::Next();
+      arena_t* result = Tree::Iterator::Next();
       if (!result && mNextTree) {
         new (this) Iterator(mNextTree, nullptr);
-        result = reinterpret_cast<Tree::TreeNode*>(*Tree::Iterator::begin());
+        result = *Tree::Iterator::begin();
       }
       return result;
     }
@@ -1445,9 +1445,9 @@ base_alloc(size_t aSize)
       return nullptr;
     }
 #endif
-    base_next_decommitted = pbase_next_addr;
     base_committed +=
       (uintptr_t)pbase_next_addr - (uintptr_t)base_next_decommitted;
+    base_next_decommitted = pbase_next_addr;
   }
 
   return ret;

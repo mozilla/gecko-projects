@@ -54,6 +54,7 @@ class MacroAssemblerMIPSShared : public Assembler
     const MacroAssembler& asMasm() const;
 
     Condition ma_cmp(Register rd, Register lhs, Register rhs, Condition c);
+    Condition ma_cmp(Register rd, Register lhs, Imm32 imm, Condition c);
 
     void compareFloatingPoint(FloatFormat fmt, FloatRegister lhs, FloatRegister rhs,
                               DoubleCondition c, FloatTestKind* testKind,
@@ -172,10 +173,12 @@ class MacroAssemblerMIPSShared : public Assembler
 
     // fp instructions
     void ma_lis(FloatRegister dest, float value);
-    void ma_liNegZero(FloatRegister dest);
 
-    void ma_sd(FloatRegister fd, BaseIndex address);
-    void ma_ss(FloatRegister fd, BaseIndex address);
+    void ma_sd(FloatRegister src, BaseIndex address);
+    void ma_ss(FloatRegister src, BaseIndex address);
+
+    void ma_ld(FloatRegister dest, const BaseIndex& src);
+    void ma_ls(FloatRegister dest, const BaseIndex& src);
 
     //FP branches
     void ma_bc1s(FloatRegister lhs, FloatRegister rhs, Label* label, DoubleCondition c,
@@ -191,12 +194,6 @@ class MacroAssemblerMIPSShared : public Assembler
     void ma_cmp_set(Register dst, Register lhs, Imm32 imm, Condition c);
     void ma_cmp_set_double(Register dst, FloatRegister lhs, FloatRegister rhs, DoubleCondition c);
     void ma_cmp_set_float32(Register dst, FloatRegister lhs, FloatRegister rhs, DoubleCondition c);
-
-    BufferOffset ma_BoundsCheck(Register bounded) {
-        BufferOffset bo = m_buffer.nextOffset();
-        ma_liPatchable(bounded, Imm32(0));
-        return bo;
-    }
 
     void moveToDoubleLo(Register src, FloatRegister dest) {
         as_mtc1(src, dest);
@@ -217,9 +214,22 @@ class MacroAssemblerMIPSShared : public Assembler
     void minMaxDouble(FloatRegister srcDest, FloatRegister other, bool handleNaN, bool isMax);
     void minMaxFloat32(FloatRegister srcDest, FloatRegister other, bool handleNaN, bool isMax);
 
-    void outOfLineWasmTruncateToIntCheck(FloatRegister input, MIRType fromType,
-                                         MIRType toType, bool isUnsigned, Label* rejoin,
-                                         wasm::BytecodeOffset trapOffset);
+    void loadDouble(const Address& addr, FloatRegister dest);
+    void loadDouble(const BaseIndex& src, FloatRegister dest);
+
+    // Load a float value into a register, then expand it to a double.
+    void loadFloatAsDouble(const Address& addr, FloatRegister dest);
+    void loadFloatAsDouble(const BaseIndex& src, FloatRegister dest);
+
+    void loadFloat32(const Address& addr, FloatRegister dest);
+    void loadFloat32(const BaseIndex& src, FloatRegister dest);
+
+   void outOfLineWasmTruncateToInt32Check(FloatRegister input, Register output, MIRType fromType,
+                                           TruncFlags flags, Label* rejoin,
+                                           wasm::BytecodeOffset trapOffset);
+    void outOfLineWasmTruncateToInt64Check(FloatRegister input, Register64 output, MIRType fromType,
+                                           TruncFlags flags, Label* rejoin,
+                                           wasm::BytecodeOffset trapOffset);
 
   protected:
     void wasmLoadImpl(const wasm::MemoryAccessDesc& access, Register memoryBase, Register ptr,

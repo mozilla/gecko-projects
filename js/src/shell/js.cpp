@@ -49,13 +49,12 @@
 # include <sys/wait.h>
 # include <unistd.h>
 #endif
+
 #include "jsapi.h"
 #include "jsarray.h"
 #include "jsfriendapi.h"
-#include "jsprf.h"
 #include "jstypes.h"
 #include "jsutil.h"
-#include "jswrapper.h"
 #ifndef JS_POSIX_NSPR
 # include "prerror.h"
 # include "prlink.h"
@@ -78,9 +77,11 @@
 #include "js/Debug.h"
 #include "js/GCVector.h"
 #include "js/Initialization.h"
+#include "js/Printf.h"
 #include "js/StructuredClone.h"
 #include "js/SweepingAPI.h"
 #include "js/TrackedOptimizationInfo.h"
+#include "js/Wrapper.h"
 #include "perf/jsperf.h"
 #include "shell/jsoptparse.h"
 #include "shell/jsshell.h"
@@ -91,8 +92,6 @@
 #include "threading/Thread.h"
 #include "util/Windows.h"
 #include "vm/ArgumentsObject.h"
-#include "vm/AsyncFunction.h"
-#include "vm/AsyncIteration.h"
 #include "vm/Compression.h"
 #include "vm/Debugger.h"
 #include "vm/HelperThreads.h"
@@ -2452,61 +2451,6 @@ AssertEq(JSContext* cx, unsigned argc, Value* vp)
 }
 
 static JSScript*
-ValueToScript(JSContext* cx, HandleValue v, JSFunction** funp = nullptr)
-{
-    if (v.isString()) {
-        // To convert a string to a script, compile it. Parse it as an ES6 Program.
-        RootedLinearString linearStr(cx, StringToLinearString(cx, v.toString()));
-        if (!linearStr)
-            return nullptr;
-        size_t len = GetLinearStringLength(linearStr);
-        AutoStableStringChars linearChars(cx);
-        if (!linearChars.initTwoByte(cx, linearStr))
-            return nullptr;
-        const char16_t* chars = linearChars.twoByteRange().begin().get();
-
-        RootedScript script(cx);
-        CompileOptions options(cx);
-        if (!JS::Compile(cx, options, chars, len, &script))
-            return nullptr;
-        return script;
-    }
-
-    RootedFunction fun(cx, JS_ValueToFunction(cx, v));
-    if (!fun)
-        return nullptr;
-
-    // Unwrap bound functions.
-    while (fun->isBoundFunction()) {
-        JSObject* target = fun->getBoundFunctionTarget();
-        if (target && target->is<JSFunction>())
-            fun = &target->as<JSFunction>();
-        else
-            break;
-    }
-
-    // Get unwrapped async function.
-    if (IsWrappedAsyncFunction(fun))
-        fun = GetUnwrappedAsyncFunction(fun);
-    if (IsWrappedAsyncGenerator(fun))
-        fun = GetUnwrappedAsyncGenerator(fun);
-
-    if (!fun->isInterpreted()) {
-        JS_ReportErrorNumberASCII(cx, my_GetErrorMessage, nullptr, JSSMSG_SCRIPTS_ONLY);
-        return nullptr;
-    }
-
-    JSScript* script = JSFunction::getOrCreateScript(cx, fun);
-    if (!script)
-        return nullptr;
-
-    if (funp)
-        *funp = fun;
-
-    return script;
-}
-
-static JSScript*
 GetTopScript(JSContext* cx)
 {
     NonBuiltinScriptFrameIter iter(cx);
@@ -2524,7 +2468,7 @@ GetScriptAndPCArgs(JSContext* cx, CallArgs& args, MutableHandleScript scriptp,
         unsigned intarg = 0;
         if (v.isObject() &&
             JS_GetClass(&v.toObject()) == Jsvalify(&JSFunction::class_)) {
-            script = ValueToScript(cx, v);
+            script = TestingFunctionArgumentToScript(cx, v);
             if (!script)
                 return false;
             intarg++;
@@ -2557,7 +2501,7 @@ LineToPC(JSContext* cx, unsigned argc, Value* vp)
     RootedScript script(cx, GetTopScript(cx));
     int32_t lineArg = 0;
     if (args[0].isObject() && args[0].toObject().is<JSFunction>()) {
-        script = ValueToScript(cx, args[0]);
+        script = TestingFunctionArgumentToScript(cx, args[0]);
         if (!script)
             return false;
         lineArg++;
@@ -2763,7 +2707,7 @@ Notes(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     for (unsigned i = 0; i < args.length(); i++) {
-        RootedScript script (cx, ValueToScript(cx, args[i]));
+        RootedScript script (cx, TestingFunctionArgumentToScript(cx, args[i]));
         if (!script)
             return false;
 
@@ -3001,7 +2945,7 @@ DisassembleToSprinter(JSContext* cx, unsigned argc, Value* vp, Sprinter* sprinte
             if (value.isObject() && value.toObject().is<ModuleObject>())
                 script = value.toObject().as<ModuleObject>().script();
             else
-                script = ValueToScript(cx, value, fun.address());
+                script = TestingFunctionArgumentToScript(cx, value, fun.address());
             if (!script)
                 return false;
             if (!DisassembleScript(cx, script, fun, p.lines, p.recursive, p.sourceNotes, sprinter))
@@ -3121,7 +3065,7 @@ DisassWithSrc(JSContext* cx, unsigned argc, Value* vp)
 
     RootedScript script(cx);
     for (unsigned i = 0; i < args.length(); i++) {
-        script = ValueToScript(cx, args[i]);
+        script = TestingFunctionArgumentToScript(cx, args[i]);
         if (!script)
            return false;
 
@@ -3316,7 +3260,7 @@ GetSLX(JSContext* cx, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
     RootedScript script(cx);
 
-    script = ValueToScript(cx, args.get(0));
+    script = TestingFunctionArgumentToScript(cx, args.get(0));
     if (!script)
         return false;
     args.rval().setInt32(GetScriptLineExtent(script));
@@ -8525,10 +8469,12 @@ SetContextOptions(JSContext* cx, const OptionParser& op)
     if (const char* str = op.getStringOption("spectre-mitigations")) {
         if (strcmp(str, "on") == 0) {
             jit::JitOptions.spectreIndexMasking = true;
+            jit::JitOptions.spectreObjectMitigationsBarriers = true;
             jit::JitOptions.spectreStringMitigations = true;
             jit::JitOptions.spectreValueMasking = true;
         } else if (strcmp(str, "off") == 0) {
             jit::JitOptions.spectreIndexMasking = false;
+            jit::JitOptions.spectreObjectMitigationsBarriers = false;
             jit::JitOptions.spectreStringMitigations = false;
             jit::JitOptions.spectreValueMasking = false;
         } else {
@@ -8944,7 +8890,10 @@ class AutoLibraryLoader {
     }
 
     PRLibrary* load(const char* path) {
-        PRLibrary* dll = PR_LoadLibrary(path);
+        PRLibSpec libSpec;
+        libSpec.type = PR_LibSpec_Pathname;
+        libSpec.value.pathname = path;
+        PRLibrary* dll = PR_LoadLibraryWithFlags(libSpec, PR_LD_NOW | PR_LD_GLOBAL);
         if (!dll) {
 #ifdef JS_POSIX_NSPR
             fprintf(stderr, "LoadLibrary '%s' failed: %s\n", path, dlerror());
@@ -9122,7 +9071,7 @@ main(int argc, char** argv, char** envp)
         || !op.addBoolOption('\0', "non-writable-jitcode", "(NOP for fuzzers) Allocate JIT code as non-writable memory.")
         || !op.addBoolOption('\0', "no-sse3", "Pretend CPU does not support SSE3 instructions and above "
                              "to test JIT codegen (no-op on platforms other than x86 and x64).")
-        || !op.addBoolOption('\0', "no-sse4", "Pretend CPU does not support SSE4 instructions"
+        || !op.addBoolOption('\0', "no-sse4", "Pretend CPU does not support SSE4 instructions "
                              "to test JIT codegen (no-op on platforms other than x86 and x64).")
         || !op.addBoolOption('\0', "enable-avx", "AVX is disabled by default. Enable AVX. "
                              "(no-op on platforms other than x86 and x64).")
@@ -9139,6 +9088,8 @@ main(int argc, char** argv, char** envp)
         || !op.addBoolOption('\0', "no-ggc", "Disable Generational GC")
         || !op.addBoolOption('\0', "no-cgc", "Disable Compacting GC")
         || !op.addBoolOption('\0', "no-incremental-gc", "Disable Incremental GC")
+        || !op.addStringOption('\0', "nursery-strings", "on/off",
+                               "Allocate strings in the nursery")
         || !op.addIntOption('\0', "available-memory", "SIZE",
                             "Select GC settings based on available memory (MB)", 0)
         || !op.addStringOption('\0', "arm-hwcap", "[features]",
@@ -9285,6 +9236,15 @@ main(int argc, char** argv, char** envp)
     JS::dbg::SetDebuggerMallocSizeOf(cx, moz_malloc_size_of);
 
     js::UseInternalJobQueues(cx);
+
+    if (const char* opt = op.getStringOption("nursery-strings")) {
+        if (strcmp(opt, "on") == 0)
+            cx->runtime()->gc.nursery().enableStrings();
+        else if (strcmp(opt, "off") == 0)
+            cx->runtime()->gc.nursery().disableStrings();
+        else
+            MOZ_CRASH("invalid option value for --nursery-strings, must be on/off");
+    }
 
     if (!JS::InitSelfHostedCode(cx))
         return 1;

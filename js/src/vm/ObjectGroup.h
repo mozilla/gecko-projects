@@ -7,13 +7,13 @@
 #ifndef vm_ObjectGroup_h
 #define vm_ObjectGroup_h
 
-#include "jsbytecode.h"
 #include "jsfriendapi.h"
 
 #include "ds/IdValuePair.h"
 #include "gc/Barrier.h"
 #include "js/CharacterEncoding.h"
 #include "js/GCHashTable.h"
+#include "js/TypeDecls.h"
 #include "vm/TaggedProto.h"
 #include "vm/TypeInference.h"
 
@@ -459,6 +459,10 @@ class ObjectGroup : public gc::TenuredCell
 
     static const JS::TraceKind TraceKind = JS::TraceKind::ObjectGroup;
 
+  private:
+    // See JSObject::offsetOfGroup() comment.
+    friend class js::jit::MacroAssembler;
+
     static inline uint32_t offsetOfClasp() {
         return offsetof(ObjectGroup, clasp_);
     }
@@ -479,6 +483,7 @@ class ObjectGroup : public gc::TenuredCell
         return offsetof(ObjectGroup, flags_);
     }
 
+  public:
     const ObjectGroupFlags* addressOfFlags() const {
         return &flags_;
     }
@@ -677,7 +682,7 @@ class ObjectGroupCompartment
 
     void clearTables();
 
-    void sweep(FreeOp* fop);
+    void sweep();
 
     void purge() {
         defaultNewGroupCache.purge();

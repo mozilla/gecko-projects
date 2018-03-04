@@ -36,6 +36,8 @@
 #include "mozilla/dom/GamepadServiceTest.h"
 #include "mozilla/dom/WakeLock.h"
 #include "mozilla/dom/power/PowerManagerService.h"
+#include "mozilla/dom/MIDIAccessManager.h"
+#include "mozilla/dom/MIDIOptionsBinding.h"
 #include "mozilla/dom/Permissions.h"
 #include "mozilla/dom/Presentation.h"
 #include "mozilla/dom/ServiceWorkerContainer.h"
@@ -548,10 +550,7 @@ Navigator::Storage()
   MOZ_ASSERT(mWindow);
 
   if(!mStorageManager) {
-    nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(mWindow);
-    MOZ_ASSERT(global);
-
-    mStorageManager = new StorageManager(global);
+    mStorageManager = new StorageManager(mWindow->AsGlobal());
   }
 
   return mStorageManager;
@@ -1317,8 +1316,7 @@ Navigator::GetBattery(ErrorResult& aRv)
     return nullptr;
   }
 
-  nsCOMPtr<nsIGlobalObject> go = do_QueryInterface(mWindow);
-  RefPtr<Promise> batteryPromise = Promise::Create(go, aRv);
+  RefPtr<Promise> batteryPromise = Promise::Create(mWindow->AsGlobal(), aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
@@ -1375,8 +1373,7 @@ Navigator::GetVRDisplays(ErrorResult& aRv)
   nsGlobalWindowInner* win = nsGlobalWindowInner::Cast(mWindow);
   win->NotifyVREventListenerAdded();
 
-  nsCOMPtr<nsIGlobalObject> go = do_QueryInterface(mWindow);
-  RefPtr<Promise> p = Promise::Create(go, aRv);
+  RefPtr<Promise> p = Promise::Create(mWindow->AsGlobal(), aRv);
   if (aRv.Failed()) {
     return nullptr;
   }
@@ -1478,6 +1475,18 @@ Navigator::RequestVRPresentation(VRDisplay& aDisplay)
 {
   nsGlobalWindowInner* win = nsGlobalWindowInner::Cast(mWindow);
   win->DispatchVRDisplayActivate(aDisplay.DisplayId(), VRDisplayEventReason::Requested);
+}
+
+already_AddRefed<Promise>
+Navigator::RequestMIDIAccess(const MIDIOptions& aOptions,
+                             ErrorResult& aRv)
+{
+  if (!mWindow) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+  MIDIAccessManager* accessMgr = MIDIAccessManager::Get();
+  return accessMgr->RequestMIDIAccess(mWindow, aOptions, aRv);
 }
 
 nsINetworkProperties*
@@ -1850,9 +1859,8 @@ Navigator::RequestMediaKeySystemAccess(const nsAString& aKeySystem,
                                     ArrayLength(params));
   }
 
-  nsCOMPtr<nsIGlobalObject> go = do_QueryInterface(mWindow);
   RefPtr<DetailedPromise> promise =
-    DetailedPromise::Create(go, aRv,
+    DetailedPromise::Create(mWindow->AsGlobal(), aRv,
       NS_LITERAL_CSTRING("navigator.requestMediaKeySystemAccess"),
       Telemetry::VIDEO_EME_REQUEST_SUCCESS_LATENCY_MS,
       Telemetry::VIDEO_EME_REQUEST_FAILURE_LATENCY_MS);

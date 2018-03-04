@@ -6939,7 +6939,7 @@ class LGetPropertyPolymorphicV : public LInstructionHelper<BOX_PIECES, 1, 0>
     const MGetPropertyPolymorphic* mir() const {
         return mir_->toGetPropertyPolymorphic();
     }
-    virtual const char* extraName() const {
+    const char* extraName() const {
         return PropertyNameToExtraName(mir()->name());
     }
 };
@@ -6964,7 +6964,7 @@ class LGetPropertyPolymorphicT : public LInstructionHelper<1, 1, 1>
     const MGetPropertyPolymorphic* mir() const {
         return mir_->toGetPropertyPolymorphic();
     }
-    virtual const char* extraName() const {
+    const char* extraName() const {
         return PropertyNameToExtraName(mir()->name());
     }
 };
@@ -7788,14 +7788,16 @@ class LLoadUnboxedExpando : public LInstructionHelper<1, 1, 0>
 };
 
 // Guard that a value is in a TypeSet.
-class LTypeBarrierV : public LInstructionHelper<0, BOX_PIECES, 1>
+class LTypeBarrierV : public LInstructionHelper<BOX_PIECES, BOX_PIECES, 2>
 {
   public:
     LIR_HEADER(TypeBarrierV)
 
-    LTypeBarrierV(const LBoxAllocation& input, const LDefinition& temp) {
+    LTypeBarrierV(const LBoxAllocation& input, const LDefinition& unboxTemp,
+                  const LDefinition& objTemp) {
         setBoxOperand(Input, input);
-        setTemp(0, temp);
+        setTemp(0, unboxTemp);
+        setTemp(1, objTemp);
     }
 
     static const size_t Input = 0;
@@ -7803,13 +7805,16 @@ class LTypeBarrierV : public LInstructionHelper<0, BOX_PIECES, 1>
     const MTypeBarrier* mir() const {
         return mir_->toTypeBarrier();
     }
-    const LDefinition* temp() {
+    const LDefinition* unboxTemp() {
         return getTemp(0);
+    }
+    const LDefinition* objTemp() {
+        return getTemp(1);
     }
 };
 
 // Guard that a object is in a TypeSet.
-class LTypeBarrierO : public LInstructionHelper<0, 1, 1>
+class LTypeBarrierO : public LInstructionHelper<1, 1, 1>
 {
   public:
     LIR_HEADER(TypeBarrierO)
@@ -7823,27 +7828,6 @@ class LTypeBarrierO : public LInstructionHelper<0, 1, 1>
     }
     const LAllocation* object() {
         return getOperand(0);
-    }
-    const LDefinition* temp() {
-        return getTemp(0);
-    }
-};
-
-// Guard that a value is in a TypeSet.
-class LMonitorTypes : public LInstructionHelper<0, BOX_PIECES, 1>
-{
-  public:
-    LIR_HEADER(MonitorTypes)
-
-    LMonitorTypes(const LBoxAllocation& input, const LDefinition& temp) {
-        setBoxOperand(Input, input);
-        setTemp(0, temp);
-    }
-
-    static const size_t Input = 0;
-
-    const MMonitorTypes* mir() const {
-        return mir_->toMonitorTypes();
     }
     const LDefinition* temp() {
         return getTemp(0);
@@ -8054,6 +8038,32 @@ class LGuardObjectIdentity : public LInstructionHelper<0, 2, 0>
     }
     const MGuardObjectIdentity* mir() const {
         return mir_->toGuardObjectIdentity();
+    }
+};
+
+class LGuardShape : public LInstructionHelper<0, 1, 0>
+{
+  public:
+    LIR_HEADER(GuardShape)
+
+    explicit LGuardShape(const LAllocation& in) {
+        setOperand(0, in);
+    }
+    const MGuardShape* mir() const {
+        return mir_->toGuardShape();
+    }
+};
+
+class LGuardObjectGroup : public LInstructionHelper<0, 1, 0>
+{
+  public:
+    LIR_HEADER(GuardObjectGroup)
+
+    explicit LGuardObjectGroup(const LAllocation& in) {
+        setOperand(0, in);
+    }
+    const MGuardObjectGroup* mir() const {
+        return mir_->toGuardObjectGroup();
     }
 };
 
@@ -8444,7 +8454,7 @@ class LWasmAddOffset : public LInstructionHelper<1, 1, 0>
     }
 };
 
-class LWasmBoundsCheck : public LInstructionHelper<0, 2, 0>
+class LWasmBoundsCheck : public LInstructionHelper<1, 2, 0>
 {
   public:
     LIR_HEADER(WasmBoundsCheck);

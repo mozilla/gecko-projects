@@ -44,6 +44,11 @@
                 readonly="true"
                 onget="return this._controller"/>
 
+      <property name="disableUserActions"
+                onget="return this.getAttribute('disableUserActions') == 'true';"
+                onset="if (val) this.setAttribute('disableUserActions', 'true');
+                       else this.removeAttribute('disableUserActions'); return val;"/>
+
       <!-- overriding -->
       <property name="view">
         <getter><![CDATA[
@@ -110,6 +115,7 @@
 
           if (!this._controller) {
             this._controller = new PlacesController(this);
+            this._controller.disableUserActions = this.disableUserActions;
             this.controllers.appendController(this._controller);
           }
 
@@ -501,7 +507,7 @@
 
               // Avoid the potentially expensive call to getChildIndex
               // if we know this container doesn't allow insertion
-              if (PlacesControllerDragHelper.disallowInsertion(container, this))
+              if (this.controller.disallowInsertion(container))
                 return null;
 
               var queryOptions = PlacesUtils.asQuery(result.root).queryOptions;
@@ -524,7 +530,7 @@
             }
           }
 
-          if (PlacesControllerDragHelper.disallowInsertion(container, this))
+          if (this.controller.disallowInsertion(container))
             return null;
 
           // TODO (Bug 1160193): properly support dropping on a tag root.
@@ -535,7 +541,7 @@
               return null;
           }
 
-          return new InsertionPoint({
+          return new PlacesInsertionPoint({
             parentId: PlacesUtils.getConcreteItemId(container),
             parentGuid: PlacesUtils.getConcreteItemGuid(container),
             index, orientation, tagName, dropNearNode
@@ -737,6 +743,12 @@
         if (event.target.localName != "treechildren")
           return;
 
+        if (this.disableUserActions) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+
         let nodes = this.selectedNodes;
         for (let i = 0; i < nodes.length; i++) {
           let node = nodes[i];
@@ -750,7 +762,7 @@
 
           // If this node is child of a readonly container (e.g. a livemark)
           // or cannot be moved, we must force a copy.
-          if (!PlacesControllerDragHelper.canMoveNode(node, this)) {
+          if (!this.controller.canMoveNode(node)) {
             event.dataTransfer.effectAllowed = "copyLink";
             break;
           }

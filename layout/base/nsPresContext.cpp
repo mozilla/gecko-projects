@@ -233,6 +233,15 @@ nsPresContext::PrefChangedUpdateTimerCallback(nsITimer *aTimer, void *aClosure)
     presContext->UpdateAfterPreferencesChanged();
 }
 
+void
+nsPresContext::ForceReflowForFontInfoUpdate()
+{
+  // We can trigger reflow by pretending a font.* preference has changed;
+  // this is the same mechanism as gfxPlatform::ForceGlobalReflow() uses
+  // if new fonts are installed during the session, for example.
+  PreferenceChanged("font.internaluseonly.changed");
+}
+
 static bool
 IsVisualCharset(NotNull<const Encoding*> aCharset)
 {
@@ -888,6 +897,8 @@ nsPresContext::Init(nsDeviceContext* aDeviceContext)
   // lazily drop the servo data. We don't do this eagerly during layout teardown
   // because that would incur an extra whole-tree traversal that's unnecessary
   // most of the time.
+  //
+  // FIXME(emilio): I'm pretty sure this doesn't happen after bug 1414999.
   if (mDocument->IsStyledByServo()) {
     Element* root = mDocument->GetRootElement();
     if (root && root->HasServoData()) {

@@ -4,7 +4,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["GeckoViewContentModule"];
+var EXPORTED_SYMBOLS = ["GeckoViewContentModule"];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -15,9 +15,9 @@ XPCOMUtils.defineLazyGetter(this, "dump", () =>
     ChromeUtils.import("resource://gre/modules/AndroidLog.jsm",
                        {}).AndroidLog.d.bind(null, "ViewContentModule"));
 
-function debug(aMsg) {
-  // dump(aMsg);
-}
+// function debug(aMsg) {
+//   dump(aMsg);
+// }
 
 class GeckoViewContentModule {
   constructor(aModuleName, aMessageManager) {

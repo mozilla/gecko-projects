@@ -40,7 +40,6 @@ class nsAtom;
 class nsIContent;
 class nsIDOMDocument;
 class nsIDOMEvent;
-class nsIDOMEventListener;
 class nsIDOMEventTarget;
 class nsIDOMNode;
 class nsIDocumentStateListener;
@@ -65,6 +64,7 @@ class CreateElementTransaction;
 class DeleteNodeTransaction;
 class DeleteTextTransaction;
 class EditAggregateTransaction;
+class EditorEventListener;
 class EditTransactionBase;
 class ErrorResult;
 class HTMLEditor;
@@ -807,8 +807,6 @@ public:
    * Set outOffset to the offset of aChild in the parent.
    * Returns the parent of aChild.
    */
-  static already_AddRefed<nsIDOMNode> GetNodeLocation(nsIDOMNode* aChild,
-                                                      int32_t* outOffset);
   static nsINode* GetNodeLocation(nsINode* aChild, int32_t* aOffset);
 
   /**
@@ -1107,15 +1105,9 @@ public:
   static nsIContent* GetNodeAtRangeOffsetPoint(const RawRangeBoundary& aPoint);
 
   static nsresult GetStartNodeAndOffset(Selection* aSelection,
-                                        nsIDOMNode** outStartNode,
-                                        int32_t* outStartOffset);
-  static nsresult GetStartNodeAndOffset(Selection* aSelection,
                                         nsINode** aStartContainer,
                                         int32_t* aStartOffset);
   static EditorRawDOMPoint GetStartPoint(Selection* aSelection);
-  static nsresult GetEndNodeAndOffset(Selection* aSelection,
-                                      nsIDOMNode** outEndNode,
-                                      int32_t* outEndOffset);
   static nsresult GetEndNodeAndOffset(Selection* aSelection,
                                       nsINode** aEndContainer,
                                       int32_t* aEndOffset);
@@ -1503,7 +1495,7 @@ protected:
   nsCOMPtr<Element> mRootElement;
   // The form field as an event receiver.
   nsCOMPtr<dom::EventTarget> mEventTarget;
-  nsCOMPtr<nsIDOMEventListener> mEventListener;
+  RefPtr<EditorEventListener> mEventListener;
   // Strong reference to placeholder for begin/end batch purposes.
   RefPtr<PlaceholderTransaction> mPlaceholderTransaction;
   // Name of placeholder transaction.

@@ -5,6 +5,9 @@
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
+ChromeUtils.defineModuleGetter(this, "AppConstants",
+  "resource://gre/modules/AppConstants.jsm");
+
 // NB: Eagerly load modules that will be loaded/constructed/initialized in the
 // common case to avoid the overhead of wrapping and detecting lazy loading.
 const {actionCreators: ac, actionTypes: at} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm", {});
@@ -51,14 +54,13 @@ const PREFS_CONFIG = new Map([
       api_key_pref: "extensions.pocket.oAuthConsumerKey",
       // Use the opposite value as what default value the feed would have used
       hidden: !PREFS_CONFIG.get("feeds.section.topstories").getValue(args),
-      provider_header: "pocket_feedback_header",
       provider_description: "pocket_description",
       provider_icon: "pocket",
       provider_name: "Pocket",
       read_more_endpoint: "https://getpocket.com/explore/trending?src=fx_new_tab",
-      stories_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/global-recs?version=2&consumer_key=$apiKey&locale_lang=${args.locale}`,
+      stories_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/global-recs?version=3&consumer_key=$apiKey&locale_lang=${args.locale}`,
       stories_referrer: "https://getpocket.com/recommendations",
-      info_link: "https://www.mozilla.org/privacy/firefox/#pocketstories",
+      privacy_notice_link: "https://www.mozilla.org/privacy/firefox/#suggest-relevant-content",
       disclaimer_link: "https://getpocket.com/firefox/new_tab_learn_more",
       topics_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/trending-topics?version=2&consumer_key=$apiKey&locale_lang=${args.locale}`,
       show_spocs: false,
@@ -114,6 +116,11 @@ const PREFS_CONFIG = new Map([
     value: true,
     value_local_dev: false
   }],
+  ["telemetry.ut.events", {
+    title: "Enable Unified Telemetry event data collection",
+    value: !AppConstants.RELEASE_OR_BETA,
+    value_local_dev: false
+  }],
   ["telemetry.ping.endpoint", {
     title: "Telemetry server endpoint",
     value: "https://tiles.services.mozilla.com/v4/links/activity-stream"
@@ -121,6 +128,10 @@ const PREFS_CONFIG = new Map([
   ["section.highlights.collapsed", {
     title: "Collapse the Highlights section",
     value: false
+  }],
+  ["section.highlights.includePocket", {
+    title: "Boolean flag that decides whether or not to show saved Pocket stories in highlights.",
+    value: true
   }],
   ["section.topstories.collapsed", {
     title: "Collapse the Top Stories section",
@@ -336,4 +347,4 @@ this.ActivityStream = class ActivityStream {
   }
 };
 
-this.EXPORTED_SYMBOLS = ["ActivityStream", "PREFS_CONFIG"];
+const EXPORTED_SYMBOLS = ["ActivityStream", "PREFS_CONFIG"];

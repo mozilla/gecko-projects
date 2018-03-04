@@ -39,6 +39,7 @@
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/ClientHandle.h"
 #include "mozilla/dom/ClientManager.h"
+#include "mozilla/dom/ClientSource.h"
 #include "mozilla/dom/ConsoleUtils.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/DOMPrefs.h"
@@ -902,9 +903,8 @@ ServiceWorkerManager::Register(mozIDOMWindow* aWindow,
     return rv;
   }
 
-  nsCOMPtr<nsIGlobalObject> sgo = do_QueryInterface(window);
   ErrorResult result;
-  RefPtr<Promise> promise = Promise::Create(sgo, result);
+  RefPtr<Promise> promise = Promise::Create(window->AsGlobal(), result);
   if (result.Failed()) {
     return result.StealNSResult();
   }
@@ -1073,9 +1073,8 @@ ServiceWorkerManager::GetRegistrations(mozIDOMWindow* aWindow,
   // now.
   MOZ_ASSERT(!nsContentUtils::IsSystemPrincipal(window->GetExtantDoc()->NodePrincipal()));
 
-  nsCOMPtr<nsIGlobalObject> sgo = do_QueryInterface(window);
   ErrorResult result;
-  RefPtr<Promise> promise = Promise::Create(sgo, result);
+  RefPtr<Promise> promise = Promise::Create(window->AsGlobal(), result);
   if (result.Failed()) {
     return result.StealNSResult();
   }
@@ -1195,9 +1194,8 @@ ServiceWorkerManager::GetRegistration(mozIDOMWindow* aWindow,
   // now.
   MOZ_ASSERT(!nsContentUtils::IsSystemPrincipal(window->GetExtantDoc()->NodePrincipal()));
 
-  nsCOMPtr<nsIGlobalObject> sgo = do_QueryInterface(window);
   ErrorResult result;
-  RefPtr<Promise> promise = Promise::Create(sgo, result);
+  RefPtr<Promise> promise = Promise::Create(window->AsGlobal(), result);
   if (result.Failed()) {
     return result.StealNSResult();
   }
@@ -1397,9 +1395,8 @@ ServiceWorkerManager::GetReadyPromise(mozIDOMWindow* aWindow,
 
   MOZ_ASSERT(!mPendingReadyPromises.Contains(window));
 
-  nsCOMPtr<nsIGlobalObject> sgo = do_QueryInterface(window);
   ErrorResult result;
-  RefPtr<Promise> promise = Promise::Create(sgo, result);
+  RefPtr<Promise> promise = Promise::Create(window->AsGlobal(), result);
   if (result.Failed()) {
     return result.StealNSResult();
   }
@@ -2493,6 +2490,38 @@ ServiceWorkerManager::DispatchFetchEvent(nsIInterceptedChannel* aChannel,
     }
 
     if (clientInfo.isSome()) {
+      // ClientChannelHelper is not called for STS upgrades that get
+      // intercepted by a service worker when interception occurs in
+      // the content process.  Therefore the reserved client is not
+      // properly cleared in that case leading to a situation where
+      // a ClientSource with an http:// principal is controlled by
+      // a ServiceWorker with an https:// principal.
+      //
+      // This does not occur when interception is handled by the
+      // simpler InterceptedHttpChannel approach in the parent.
+      //
+      // As a temporary work around check for this principal mismatch
+      // here and perform the ClientChannelHelper's replacement of
+      // reserved client automatically.
+      if (!XRE_IsParentProcess()) {
+        nsCOMPtr<nsIPrincipal> clientPrincipal = clientInfo.ref().GetPrincipal();
+        if (!clientPrincipal || !clientPrincipal->Equals(principal)) {
+          UniquePtr<ClientSource> reservedClient =
+            loadInfo->TakeReservedClientSource();
+
+          nsCOMPtr<nsISerialEventTarget> target =
+            reservedClient ? reservedClient->EventTarget()
+                           : SystemGroup::EventTargetFor(TaskCategory::Other);
+
+          reservedClient.reset();
+          reservedClient = ClientManager::CreateSource(ClientType::Window,
+                                                       target,
+                                                       principal);
+
+          loadInfo->GiveReservedClientSource(Move(reservedClient));
+        }
+      }
+
       // First, attempt to mark the reserved client controlled directly.  This
       // will update the controlled status in the ClientManagerService in the
       // parent.  It will also eventually propagate back to the ClientSource.

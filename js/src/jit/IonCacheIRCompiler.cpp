@@ -699,9 +699,8 @@ IonCacheIRCompiler::emitGuardCompartment()
     if (!addFailurePath(&failure))
         return false;
 
-    masm.loadPtr(Address(obj, JSObject::offsetOfGroup()), scratch);
-    masm.loadPtr(Address(scratch, ObjectGroup::offsetOfCompartment()), scratch);
-    masm.branchPtr(Assembler::NotEqual, scratch, ImmPtr(compartment), failure->label());
+    masm.branchTestObjCompartment(Assembler::NotEqual, obj, compartment, scratch,
+                                  failure->label());
     return true;
 }
 
@@ -935,9 +934,7 @@ IonCacheIRCompiler::emitMegamorphicLoadSlotResult()
         return false;
 
     // The object must be Native.
-    masm.loadObjClass(obj, scratch3);
-    masm.branchTest32(Assembler::NonZero, Address(scratch3, Class::offsetOfFlags()),
-                      Imm32(Class::NON_NATIVE), failure->label());
+    masm.branchIfNonNativeObj(obj, scratch3, failure->label());
 
     masm.Push(UndefinedValue());
     masm.moveStackPtrTo(scratch3.get());
@@ -1439,6 +1436,28 @@ EmitCheckPropertyTypes(MacroAssembler& masm, const PropertyTypeCheckInfo* typeCh
     masm.Push(obj);
     Register scratch1 = obj;
 
+    // We may also need a scratch register for guardTypeSet. Additionally,
+    // spectreRegToZero is the register that may be zeroed on speculatively
+    // executed paths.
+    Register objScratch = InvalidReg;
+    Register spectreRegToZero = InvalidReg;
+    if (propTypes && !propTypes->unknownObject() && propTypes->getObjectCount() > 0) {
+        AllocatableGeneralRegisterSet regs(GeneralRegisterSet::All());
+        if (!val.constant()) {
+            TypedOrValueRegister valReg = val.reg();
+            if (valReg.hasValue()) {
+                regs.take(valReg.valueReg());
+                spectreRegToZero = valReg.valueReg().payloadOrValueReg();
+            } else if (!valReg.typedReg().isFloat()) {
+                regs.take(valReg.typedReg().gpr());
+                spectreRegToZero = valReg.typedReg().gpr();
+            }
+        }
+        regs.take(scratch1);
+        objScratch = regs.takeAny();
+        masm.Push(objScratch);
+    }
+
     bool checkTypeSet = true;
     Label failedFastPath;
 
@@ -1468,7 +1487,8 @@ EmitCheckPropertyTypes(MacroAssembler& masm, const PropertyTypeCheckInfo* typeCh
         if (propTypes) {
             // guardTypeSet can read from type sets without triggering read barriers.
             TypeSet::readBarrier(propTypes);
-            masm.guardTypeSet(valReg, propTypes, BarrierKind::TypeSet, scratch1, &failedFastPath);
+            masm.guardTypeSet(valReg, propTypes, BarrierKind::TypeSet, scratch1, objScratch,
+                              spectreRegToZero, &failedFastPath);
             masm.jump(&done);
         } else {
             masm.jump(&failedFastPath);
@@ -1511,11 +1531,15 @@ EmitCheckPropertyTypes(MacroAssembler& masm, const PropertyTypeCheckInfo* typeCh
         masm.PopRegsInMaskIgnore(save, ignore);
 
         masm.branchIfTrueBool(scratch1, &done);
+        if (objScratch != InvalidReg)
+            masm.pop(objScratch);
         masm.pop(obj);
         masm.jump(failures);
     }
 
     masm.bind(&done);
+    if (objScratch != InvalidReg)
+        masm.Pop(objScratch);
     masm.Pop(obj);
 }
 
@@ -1625,23 +1649,20 @@ IonCacheIRCompiler::emitAddAndStoreSlotShared(CacheOp op)
         // per the acquired properties analysis. Only change the group if the
         // old group still has a newScript. This only applies to PlainObjects.
         Label noGroupChange;
-        masm.loadPtr(Address(obj, JSObject::offsetOfGroup()), scratch1);
-        masm.branchPtr(Assembler::Equal,
-                       Address(scratch1, ObjectGroup::offsetOfAddendum()),
-                       ImmWord(0),
-                       &noGroupChange);
+        masm.branchIfObjGroupHasNoAddendum(obj, scratch1, &noGroupChange);
 
-        Address groupAddr(obj, JSObject::offsetOfGroup());
-        EmitPreBarrier(masm, groupAddr, MIRType::ObjectGroup);
-        masm.storePtr(ImmGCPtr(newGroup), groupAddr);
+        // Update the object's group.
+        masm.storeObjGroup(newGroup, obj, [](MacroAssembler& masm, const Address& addr) {
+            EmitPreBarrier(masm, addr, MIRType::ObjectGroup);
+        });
 
         masm.bind(&noGroupChange);
     }
 
     // Update the object's shape.
-    Address shapeAddr(obj, ShapedObject::offsetOfShape());
-    EmitPreBarrier(masm, shapeAddr, MIRType::Shape);
-    masm.storePtr(ImmGCPtr(newShape), shapeAddr);
+    masm.storeObjShape(newShape, obj, [](MacroAssembler& masm, const Address& addr) {
+        EmitPreBarrier(masm, addr, MIRType::Shape);
+    });
 
     // Perform the store. No pre-barrier required since this is a new
     // initialization.

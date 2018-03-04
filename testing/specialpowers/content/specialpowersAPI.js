@@ -19,6 +19,7 @@ ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 // We're loaded with "this" not set to the global in some cases, so we
 // have to play some games to get at the global object here.  Normally
@@ -659,7 +660,7 @@ SpecialPowersAPI.prototype = {
   get Cc() { return wrapPrivileged(this.getFullComponents().classes); },
   get Ci() {
  return this.Components ? this.Components.interfaces
-                                    : Components.interfaces;
+                                    : Ci;
 },
   get Cu() { return wrapPrivileged(this.getFullComponents().utils); },
   get Cr() { return wrapPrivileged(this.Components.results); },
@@ -1445,8 +1446,8 @@ SpecialPowersAPI.prototype = {
     return wrapPrivileged(tmp.FormHistory);
   },
   getFormFillController(window) {
-    return Components.classes["@mozilla.org/satchel/form-fill-controller;1"]
-                     .getService(Components.interfaces.nsIFormFillController);
+    return Cc["@mozilla.org/satchel/form-fill-controller;1"]
+             .getService(Ci.nsIFormFillController);
   },
   attachFormFillControllerTo(window) {
     this.getFormFillController()
@@ -1629,7 +1630,7 @@ SpecialPowersAPI.prototype = {
     if (this._xpcomabi != null)
       return this._xpcomabi;
 
-    var xulRuntime = Services.appinfo.QueryInterface(Components.interfaces.nsIXULRuntime);
+    var xulRuntime = Services.appinfo.QueryInterface(Ci.nsIXULRuntime);
 
     this._xpcomabi = xulRuntime.XPCOMABI;
     return this._xpcomabi;
@@ -1697,14 +1698,14 @@ SpecialPowersAPI.prototype = {
   },
 
   addCategoryEntry(category, entry, value, persists, replace) {
-    Components.classes["@mozilla.org/categorymanager;1"].
-      getService(Components.interfaces.nsICategoryManager).
+    Cc["@mozilla.org/categorymanager;1"].
+      getService(Ci.nsICategoryManager).
       addCategoryEntry(category, entry, value, persists, replace);
   },
 
   deleteCategoryEntry(category, entry, persists) {
-    Components.classes["@mozilla.org/categorymanager;1"].
-      getService(Components.interfaces.nsICategoryManager).
+    Cc["@mozilla.org/categorymanager;1"].
+      getService(Ci.nsICategoryManager).
       deleteCategoryEntry(category, entry, persists);
   },
   openDialog(win, args) {
@@ -1774,13 +1775,13 @@ SpecialPowersAPI.prototype = {
     if (whichClipboard === undefined)
       whichClipboard = Services.clipboard.kGlobalClipboard;
 
-    var xferable = Components.classes["@mozilla.org/widget/transferable;1"].
-                   createInstance(Components.interfaces.nsITransferable);
+    var xferable = Cc["@mozilla.org/widget/transferable;1"].
+                   createInstance(Ci.nsITransferable);
     // in e10s b-c tests |content.window| is a CPOW whereas |window| works fine.
     // for some non-e10s mochi tests, |window| is null whereas |content.window|
     // works fine.  So we take whatever is non-null!
     xferable.init(this._getDocShell(typeof(window) == "undefined" ? content.window : window)
-                      .QueryInterface(Components.interfaces.nsILoadContext));
+                      .QueryInterface(Ci.nsILoadContext));
     xferable.addDataFlavor(flavor);
     Services.clipboard.getData(xferable, whichClipboard);
     var data = {};
@@ -1791,7 +1792,7 @@ SpecialPowersAPI.prototype = {
     if (data == null)
       return "";
 
-    return data.QueryInterface(Components.interfaces.nsISupportsString).data;
+    return data.QueryInterface(Ci.nsISupportsString).data;
   },
 
   clipboardCopyString(str) {
@@ -1808,7 +1809,7 @@ SpecialPowersAPI.prototype = {
     newFactory = Cu.waiveXrays(newFactory);
     oldFactory = Cu.waiveXrays(oldFactory);
 
-    var componentRegistrar = Components.manager.QueryInterface(Components.interfaces.nsIComponentRegistrar);
+    var componentRegistrar = Components.manager.QueryInterface(Ci.nsIComponentRegistrar);
 
     var unregisterFactory = newFactory;
     var registerFactory = oldFactory;
@@ -1816,8 +1817,8 @@ SpecialPowersAPI.prototype = {
     if (cid == null) {
       if (contractID != null) {
         cid = componentRegistrar.contractIDToCID(contractID);
-        oldFactory = Components.manager.getClassObject(Components.classes[contractID],
-                                                            Components.interfaces.nsIFactory);
+        oldFactory = Components.manager.getClassObject(Cc[contractID],
+                                                            Ci.nsIFactory);
       } else {
         return {"error": "trying to register a new contract ID: Missing contractID"};
       }
@@ -2235,6 +2236,8 @@ SpecialPowersAPI.prototype = {
                                                           tables,
                                                           wrapCallback);
   },
+
+  EARLY_BETA_OR_EARLIER: AppConstants.EARLY_BETA_OR_EARLIER,
 
 };
 

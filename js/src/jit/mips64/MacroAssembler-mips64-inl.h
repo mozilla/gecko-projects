@@ -55,13 +55,15 @@ MacroAssembler::move32To64ZeroExtend(Register src, Register64 dest)
 void
 MacroAssembler::move8To64SignExtend(Register src, Register64 dest)
 {
-    move8SignExtend(src, dest.reg);
+    move32To64SignExtend(src, dest);
+    move8SignExtend(dest.reg, dest.reg);
 }
 
 void
 MacroAssembler::move16To64SignExtend(Register src, Register64 dest)
 {
-    move16SignExtend(src, dest.reg);
+    move32To64SignExtend(src, dest);
+    move16SignExtend(dest.reg, dest.reg);
 }
 
 void
@@ -727,47 +729,27 @@ MacroAssembler::branchTestMagic(Condition cond, const Address& valaddr, JSWhyMag
 }
 
 void
-MacroAssembler::branchToComputedAddress(const BaseIndex& addr)
+MacroAssembler::branchTruncateDoubleMaybeModUint32(FloatRegister src, Register dest, Label* fail)
 {
-    int32_t shift = Imm32::ShiftOf(addr.scale).value;
-    if (shift) {
-        // 6 instructions : lui ori dror32 ori jr nop
-        ma_mul(ScratchRegister, addr.index, Imm32(6 * 4));
-        as_daddu(ScratchRegister, addr.base, ScratchRegister);
-    } else {
-        as_daddu(ScratchRegister, addr.base, addr.index);
-    }
+    as_truncld(ScratchDoubleReg, src);
+    as_cfc1(ScratchRegister, Assembler::FCSR);
+    moveFromDouble(ScratchDoubleReg, dest);
+    ma_ext(ScratchRegister, ScratchRegister, Assembler::CauseV, 1);
+    ma_b(ScratchRegister, Imm32(0), fail, Assembler::NotEqual);
 
-    if (addr.offset)
-        asMasm().addPtr(Imm32(addr.offset), ScratchRegister);
-    as_jr(ScratchRegister);
-    as_nop();
-}
-
-// ========================================================================
-// Memory access primitives.
-void
-MacroAssembler::storeUncanonicalizedDouble(FloatRegister src, const Address& addr)
-{
-    ma_sd(src, addr);
-}
-void
-MacroAssembler::storeUncanonicalizedDouble(FloatRegister src, const BaseIndex& addr)
-{
-    MOZ_ASSERT(addr.offset == 0);
-    ma_sd(src, addr);
+    as_sll(dest, dest, 0);
 }
 
 void
-MacroAssembler::storeUncanonicalizedFloat32(FloatRegister src, const Address& addr)
+MacroAssembler::branchTruncateFloat32MaybeModUint32(FloatRegister src, Register dest, Label* fail)
 {
-    ma_ss(src, addr);
-}
-void
-MacroAssembler::storeUncanonicalizedFloat32(FloatRegister src, const BaseIndex& addr)
-{
-    MOZ_ASSERT(addr.offset == 0);
-    ma_ss(src, addr);
+    as_truncls(ScratchDoubleReg, src);
+    as_cfc1(ScratchRegister, Assembler::FCSR);
+    moveFromDouble(ScratchDoubleReg, dest);
+    ma_ext(ScratchRegister, ScratchRegister, Assembler::CauseV, 1);
+    ma_b(ScratchRegister, Imm32(0), fail, Assembler::NotEqual);
+
+    as_sll(dest, dest, 0);
 }
 
 // ========================================================================
@@ -785,7 +767,7 @@ void
 MacroAssembler::wasmBoundsCheck(Condition cond, Register index, Address boundsCheckLimit, L label)
 {
     SecondScratchRegisterScope scratch2(*this);
-    load32(boundsCheckLimit,SecondScratchReg);
+    load32(boundsCheckLimit, SecondScratchReg);
     ma_b(index, SecondScratchReg, label, cond);
 }
 
@@ -800,9 +782,8 @@ inline void
 MacroAssembler::cmpPtrSet(Assembler::Condition cond, Address lhs, ImmPtr rhs,
                           Register dest)
 {
-    loadPtr(lhs, ScratchRegister);
-    movePtr(rhs, SecondScratchReg);
-    cmpPtrSet(cond, ScratchRegister, SecondScratchReg, dest);
+    loadPtr(lhs, SecondScratchReg);
+    cmpPtrSet(cond, SecondScratchReg, rhs, dest);
 }
 
 template<>

@@ -1793,7 +1793,9 @@ HttpBaseChannel::SetReferrerWithPolicy(nsIURI *referrer,
 
   // strip away any userpass; we don't want to be giving out passwords ;-)
   // This is required by Referrer Policy stripping algorithm.
-  rv = clone->SetUserPass(EmptyCString());
+  rv = NS_MutateURI(clone)
+         .SetUserPass(EmptyCString())
+         .Finalize(clone);
   if (NS_FAILED(rv)) return rv;
 
   // 0: full URI
@@ -1871,9 +1873,10 @@ HttpBaseChannel::SetReferrerWithPolicy(nsIURI *referrer,
           rv = url->GetFilePath(path);
           if (NS_FAILED(rv)) return rv;
           spec.Append(path);
-          rv = url->SetQuery(EmptyCString());
-          if (NS_FAILED(rv)) return rv;
-          rv = url->SetRef(EmptyCString());
+          rv = NS_MutateURI(url)
+                 .SetQuery(EmptyCString())
+                 .SetRef(EmptyCString())
+                 .Finalize(clone);
           if (NS_FAILED(rv)) return rv;
           break;
         }
@@ -1885,7 +1888,9 @@ HttpBaseChannel::SetReferrerWithPolicy(nsIURI *referrer,
       case 2: // scheme+host+port+/
         spec.AppendLiteral("/");
         // This nukes any query/ref present as well in the case of nsStandardURL
-        rv = clone->SetPathQueryRef(EmptyCString());
+        rv = NS_MutateURI(clone)
+               .SetPathQueryRef(EmptyCString())
+               .Finalize(clone);
         if (NS_FAILED(rv)) return rv;
         break;
     }
@@ -2850,10 +2855,10 @@ HttpBaseChannel::GetFetchCacheMode(uint32_t* aFetchCacheMode)
     *aFetchCacheMode = nsIHttpChannelInternal::FETCH_CACHE_MODE_RELOAD;
   } else if (ContainsAllFlags(mLoadFlags, VALIDATE_ALWAYS)) {
     *aFetchCacheMode = nsIHttpChannelInternal::FETCH_CACHE_MODE_NO_CACHE;
-  } else if (ContainsAllFlags(mLoadFlags, LOAD_FROM_CACHE |
+  } else if (ContainsAllFlags(mLoadFlags, VALIDATE_NEVER |
                                           nsICachingChannel::LOAD_ONLY_FROM_CACHE)) {
     *aFetchCacheMode = nsIHttpChannelInternal::FETCH_CACHE_MODE_ONLY_IF_CACHED;
-  } else if (ContainsAllFlags(mLoadFlags, LOAD_FROM_CACHE)) {
+  } else if (ContainsAllFlags(mLoadFlags, VALIDATE_NEVER)) {
     *aFetchCacheMode = nsIHttpChannelInternal::FETCH_CACHE_MODE_FORCE_CACHE;
   } else {
     *aFetchCacheMode = nsIHttpChannelInternal::FETCH_CACHE_MODE_DEFAULT;
@@ -2888,6 +2893,12 @@ HttpBaseChannel::SetFetchCacheMode(uint32_t aFetchCacheMode)
 
   // Now, set the load flags that implement each cache mode.
   switch (aFetchCacheMode) {
+  case nsIHttpChannelInternal::FETCH_CACHE_MODE_DEFAULT:
+    // The "default" mode means to use the http cache normally and
+    // respect any http cache-control headers.  We effectively want
+    // to clear our cache related load flags.
+    SetCacheFlags(mLoadFlags, 0);
+    break;
   case nsIHttpChannelInternal::FETCH_CACHE_MODE_NO_STORE:
     // no-store means don't consult the cache on the way to the network, and
     // don't store the response in the cache even if it's cacheable.
@@ -2904,7 +2915,7 @@ HttpBaseChannel::SetFetchCacheMode(uint32_t aFetchCacheMode)
     break;
   case nsIHttpChannelInternal::FETCH_CACHE_MODE_FORCE_CACHE:
     // force-cache means don't validate unless if the response would vary.
-    SetCacheFlags(mLoadFlags, LOAD_FROM_CACHE);
+    SetCacheFlags(mLoadFlags, VALIDATE_NEVER);
     break;
   case nsIHttpChannelInternal::FETCH_CACHE_MODE_ONLY_IF_CACHED:
     // only-if-cached means only from cache, no network, no validation, generate
@@ -2913,7 +2924,7 @@ HttpBaseChannel::SetFetchCacheMode(uint32_t aFetchCacheMode)
     // the user has things in their cache without any network traffic side
     // effects) are addressed in the Request constructor which enforces/requires
     // same-origin request mode.
-    SetCacheFlags(mLoadFlags, LOAD_FROM_CACHE |
+    SetCacheFlags(mLoadFlags, VALIDATE_NEVER |
                               nsICachingChannel::LOAD_ONLY_FROM_CACHE);
     break;
   }
@@ -3414,7 +3425,7 @@ HttpBaseChannel::IsReferrerSchemeAllowed(nsIURI *aReferrer)
 
 /* static */
 void
-HttpBaseChannel::PropagateReferenceIfNeeded(nsIURI* aURI, nsIURI* aRedirectURI)
+HttpBaseChannel::PropagateReferenceIfNeeded(nsIURI* aURI, nsCOMPtr<nsIURI>& aRedirectURI)
 {
   bool hasRef = false;
   nsresult rv = aRedirectURI->GetHasRef(&hasRef);
@@ -3424,7 +3435,9 @@ HttpBaseChannel::PropagateReferenceIfNeeded(nsIURI* aURI, nsIURI* aRedirectURI)
     if (!ref.IsEmpty()) {
       // NOTE: SetRef will fail if mRedirectURI is immutable
       // (e.g. an about: URI)... Oh well.
-      aRedirectURI->SetRef(ref);
+      Unused << NS_MutateURI(aRedirectURI)
+                  .SetRef(ref)
+                  .Finalize(aRedirectURI);
     }
   }
 }
@@ -4543,8 +4556,7 @@ HttpBaseChannel::GetServerTiming(nsIArray **aServerTiming)
   NS_ENSURE_ARG_POINTER(aServerTiming);
 
   bool isHTTPS = false;
-  if (gHttpHandler->AllowPlaintextServerTiming() ||
-      (NS_SUCCEEDED(mURI->SchemeIs("https", &isHTTPS)) && isHTTPS)) {
+  if (NS_SUCCEEDED(mURI->SchemeIs("https", &isHTTPS)) && isHTTPS) {
     nsTArray<nsCOMPtr<nsIServerTiming>> data;
     nsresult rv = NS_OK;
     nsCOMPtr<nsIMutableArray> array = do_CreateInstance(NS_ARRAY_CONTRACTID, &rv);

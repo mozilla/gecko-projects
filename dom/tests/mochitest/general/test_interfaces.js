@@ -20,6 +20,22 @@
 // ];
 //
 // See createInterfaceMap() below for a complete list of properties.
+//
+// The values of the properties need to be either literal true/false
+// (e.g. indicating whether something is enabled on a particular
+// channel/OS) or one of the is* constants below (in cases when
+// exposure is affected by channel or OS in a nontrivial way).
+
+const version = SpecialPowers.Cc["@mozilla.org/xre/app-info;1"].getService(SpecialPowers.Ci.nsIXULAppInfo).version;
+const isNightly = version.endsWith("a1");
+const isEarlyBetaOrEarlier = SpecialPowers.EARLY_BETA_OR_EARLIER;
+const isRelease = !version.includes("a");
+const isDesktop = !/Mobile|Tablet/.test(navigator.userAgent);
+const isMac = /Mac OS/.test(navigator.oscpu);
+const isWindows = /Windows/.test(navigator.oscpu);
+const isAndroid = navigator.userAgent.includes("Android");
+const isLinux = /Linux/.test(navigator.oscpu) && !isAndroid;
+const isInsecureContext = !window.isSecureContext;
 
 // IMPORTANT: Do not change this list without review from
 //            a JavaScript Engine peer!
@@ -29,8 +45,8 @@ var ecmaGlobals =
     {name: "ArrayBuffer", insecureContext: true},
     {name: "Atomics", insecureContext: true, disabled: true},
     {name: "Boolean", insecureContext: true},
-    {name: "ByteLengthQueuingStrategy", insecureContext: true, disabled: !SpecialPowers.Cu.getJSTestingFunctions().streamsAreEnabled()},
-    {name: "CountQueuingStrategy", insecureContext: true, disabled: !SpecialPowers.Cu.getJSTestingFunctions().streamsAreEnabled()},
+    {name: "ByteLengthQueuingStrategy", insecureContext: true, disabled: true},
+    {name: "CountQueuingStrategy", insecureContext: true, disabled: true},
     {name: "DataView", insecureContext: true},
     {name: "Date", insecureContext: true},
     {name: "Error", insecureContext: true},
@@ -56,7 +72,7 @@ var ecmaGlobals =
     {name: "Promise", insecureContext: true},
     {name: "Proxy", insecureContext: true},
     {name: "RangeError", insecureContext: true},
-    {name: "ReadableStream", insecureContext: true, disabled: !SpecialPowers.Cu.getJSTestingFunctions().streamsAreEnabled()},
+    {name: "ReadableStream", insecureContext: true, disabled: true},
     {name: "ReferenceError", insecureContext: true},
     {name: "Reflect", insecureContext: true},
     {name: "RegExp", insecureContext: true},
@@ -75,7 +91,7 @@ var ecmaGlobals =
     {name: "URIError", insecureContext: true},
     {name: "WeakMap", insecureContext: true},
     {name: "WeakSet", insecureContext: true},
-    {name: "WebAssembly", insecureContext: true, disabled: !SpecialPowers.Cu.getJSTestingFunctions().wasmIsSupported()}
+    {name: "WebAssembly", insecureContext: true, disabled: !SpecialPowers.Cu.getJSTestingFunctions().wasmIsSupportedByHardware()},
   ];
 // IMPORTANT: Do not change the list above without review from
 //            a JavaScript Engine peer!
@@ -279,13 +295,13 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "DelayNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "DeviceLightEvent", insecureContext: true},
+    {name: "DeviceLightEvent", insecureContext: true, disabled: isEarlyBetaOrEarlier},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "DeviceMotionEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "DeviceOrientationEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "DeviceProximityEvent", insecureContext: true},
+    {name: "DeviceProximityEvent", insecureContext: true, disabled: isEarlyBetaOrEarlier},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "Directory", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -665,6 +681,22 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "MessagePort", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "MIDIAccess", disabled: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "MIDIConnectionEvent", disabled: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "MIDIInputMap", disabled: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "MIDIInput", disabled: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "MIDIMessageEvent", disabled: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "MIDIOutputMap", disabled: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "MIDIOutput", disabled: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "MIDIPort", disabled: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "MimeType", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "MimeTypeArray", insecureContext: true},
@@ -707,7 +739,7 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "OfflineAudioContext", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "OfflineResourceList", insecureContext: SpecialPowers.getBoolPref("browser.cache.offline.insecure.enable")},
+    {name: "OfflineResourceList", insecureContext: !isEarlyBetaOrEarlier},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "Option", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1133,7 +1165,7 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "URLSearchParams", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "UserProximityEvent", insecureContext: true},
+    {name: "UserProximityEvent", insecureContext: true, disabled: isEarlyBetaOrEarlier},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "ValidityState", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1141,21 +1173,21 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "VideoStreamTrack", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRDisplay", insecureContext: true, releaseNonWindows: false},
+    {name: "VRDisplay", insecureContext: true, releaseNonWindowsAndMac: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRDisplayCapabilities", insecureContext: true, releaseNonWindows: false},
+    {name: "VRDisplayCapabilities", insecureContext: true, releaseNonWindowsAndMac: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRDisplayEvent", insecureContext: true, releaseNonWindows: false},
+    {name: "VRDisplayEvent", insecureContext: true, releaseNonWindowsAndMac: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VREyeParameters", insecureContext: true, releaseNonWindows: false},
+    {name: "VREyeParameters", insecureContext: true, releaseNonWindowsAndMac: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRFieldOfView", insecureContext: true, releaseNonWindows: false},
+    {name: "VRFieldOfView", insecureContext: true, releaseNonWindowsAndMac: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRFrameData", insecureContext: true, releaseNonWindows: false},
+    {name: "VRFrameData", insecureContext: true, releaseNonWindowsAndMac: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRPose", insecureContext: true, releaseNonWindows: false},
+    {name: "VRPose", insecureContext: true, releaseNonWindowsAndMac: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRStageParameters", insecureContext: true, releaseNonWindows: false},
+    {name: "VRStageParameters", insecureContext: true, releaseNonWindowsAndMac: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "VTTCue", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1251,16 +1283,6 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change the list above without review from a DOM peer!
 
 function createInterfaceMap(isXBLScope) {
-  var version = SpecialPowers.Cc["@mozilla.org/xre/app-info;1"].getService(SpecialPowers.Ci.nsIXULAppInfo).version;
-  var isNightly = version.endsWith("a1");
-  var isRelease = !version.includes("a");
-  var isDesktop = !/Mobile|Tablet/.test(navigator.userAgent);
-  var isMac = /Mac OS/.test(navigator.oscpu);
-  var isWindows = /Windows/.test(navigator.oscpu);
-  var isAndroid = navigator.userAgent.includes("Android");
-  var isLinux = /Linux/.test(navigator.oscpu) && !isAndroid;
-  var isInsecureContext = !window.isSecureContext;
-
   var interfaceMap = {};
 
   function addInterfaces(interfaces)
@@ -1279,7 +1301,7 @@ function createInterfaceMap(isXBLScope) {
             (entry.linux === !isLinux) ||
             (entry.android === !isAndroid && !entry.nightlyAndroid) ||
             (entry.release === !isRelease) ||
-            (entry.releaseNonWindows === !(isRelease && !isWindows)) ||
+            (entry.releaseNonWindowsAndMac === !(isRelease && !isWindows && !isMac)) ||
 	    // The insecureContext test is very purposefully converting
 	    // entry.insecureContext to boolean, so undefined will convert to
 	    // false.  That way entries without an insecureContext annotation

@@ -57,12 +57,14 @@ use selector_parser::PseudoElement;
 use servo_arc::{Arc, RawOffsetArc};
 use std::mem::{forget, uninitialized, transmute, zeroed};
 use std::{cmp, ops, ptr};
-use values::{self, Auto, CustomIdent, Either, KeyframesName, None_};
+use values::{self, CustomIdent, Either, KeyframesName, None_};
 use values::computed::{NonNegativeLength, ToComputedValue, Percentage};
 use values::computed::font::{FontSize, SingleFontFamily};
 use values::computed::effects::{BoxShadow, Filter, SimpleShadow};
 use values::computed::outline::OutlineStyle;
+use values::generics::column::ColumnCount;
 use values::generics::position::ZIndex;
+use values::generics::text::MozTabSize;
 use values::generics::transform::TransformStyle;
 use computed_values::border_style;
 
@@ -144,6 +146,22 @@ impl ComputedValues {
         return our_type == CSSPseudoElementType_InheritingAnonBox ||
                our_type == CSSPseudoElementType::NonInheritingAnonBox;
     }
+
+    /// Returns true if the display property is changed from 'none' to others.
+    pub fn is_display_property_changed_from_none(
+        &self,
+        old_values: Option<<&ComputedValues>
+    ) -> bool {
+        use properties::longhands::display::computed_value::T as Display;
+
+        old_values.map_or(false, |old| {
+            let old_display_style = old.get_box().clone_display();
+            let new_display_style = self.get_box().clone_display();
+            old_display_style == Display::None &&
+            new_display_style != Display::None
+        })
+    }
+
 }
 
 impl Drop for ComputedValues {
@@ -1430,18 +1448,18 @@ impl Clone for ${style_struct.gecko_struct_name} {
 
     # Types used with predefined_type()-defined properties that we can auto-generate.
     predefined_types = {
+        "Color": impl_color,
+        "GreaterThanOrEqualToOneNumber": impl_simple,
+        "Integer": impl_simple,
         "length::LengthOrAuto": impl_style_coord,
         "length::LengthOrNormal": impl_style_coord,
         "length::NonNegativeLengthOrAuto": impl_style_coord,
         "length::NonNegativeLengthOrNormal": impl_style_coord,
-        "GreaterThanOrEqualToOneNumber": impl_simple,
         "Length": impl_absolute_length,
-        "Position": impl_position,
+        "LengthOrNormal": impl_style_coord,
         "LengthOrPercentage": impl_style_coord,
         "LengthOrPercentageOrAuto": impl_style_coord,
         "LengthOrPercentageOrNone": impl_style_coord,
-        "LengthOrNone": impl_style_coord,
-        "LengthOrNormal": impl_style_coord,
         "MaxLength": impl_style_coord,
         "MozLength": impl_style_coord,
         "MozScriptMinSize": impl_absolute_length,
@@ -1449,9 +1467,9 @@ impl Clone for ${style_struct.gecko_struct_name} {
         "NonNegativeLengthOrPercentage": impl_style_coord,
         "NonNegativeNumber": impl_simple,
         "Number": impl_simple,
-        "Integer": impl_simple,
         "Opacity": impl_simple,
-        "Color": impl_color,
+        "Perspective": impl_style_coord,
+        "Position": impl_position,
         "RGBAColor": impl_rgba_color,
         "SVGLength": impl_svg_length,
         "SVGOpacity": impl_svg_opacity,
@@ -3454,7 +3472,7 @@ fn static_assert() {
         use properties::PropertyId;
         use properties::longhands::will_change::computed_value::T;
 
-        fn will_change_bitfield_from_prop_flags(prop: &LonghandId) -> u8 {
+        fn will_change_bitfield_from_prop_flags(prop: LonghandId) -> u8 {
             use properties::PropertyFlags;
             use gecko_bindings::structs::NS_STYLE_WILL_CHANGE_ABSPOS_CB;
             use gecko_bindings::structs::NS_STYLE_WILL_CHANGE_FIXPOS_CB;
@@ -3508,7 +3526,7 @@ fn static_assert() {
                                 if let PropertyDeclarationId::Longhand(longhand)
                                     = longhand_or_custom {
                                     self.gecko.mWillChangeBitField |=
-                                        will_change_bitfield_from_prop_flags(&longhand);
+                                        will_change_bitfield_from_prop_flags(longhand);
                                 }
                             },
                         }
@@ -4775,13 +4793,11 @@ fn static_assert() {
 
     #[allow(non_snake_case)]
     pub fn set__moz_tab_size(&mut self, v: longhands::_moz_tab_size::computed_value::T) {
-        use values::Either;
-
         match v {
-            Either::Second(non_negative_number) => {
+            MozTabSize::Number(non_negative_number) => {
                 self.gecko.mTabSize.set_value(CoordDataValue::Factor(non_negative_number.0));
             }
-            Either::First(non_negative_length) => {
+            MozTabSize::Length(non_negative_length) => {
                 self.gecko.mTabSize.set(non_negative_length);
             }
         }
@@ -4789,11 +4805,9 @@ fn static_assert() {
 
     #[allow(non_snake_case)]
     pub fn clone__moz_tab_size(&self) -> longhands::_moz_tab_size::computed_value::T {
-        use values::Either;
-
         match self.gecko.mTabSize.as_value() {
-            CoordDataValue::Coord(coord) => Either::First(Au(coord).into()),
-            CoordDataValue::Factor(number) => Either::Second(From::from(number)),
+            CoordDataValue::Coord(coord) => MozTabSize::Length(Au(coord).into()),
+            CoordDataValue::Factor(number) => MozTabSize::Number(From::from(number)),
             _ => unreachable!(),
         }
     }
@@ -5383,10 +5397,10 @@ clip-path
         use gecko_bindings::structs::{NS_STYLE_COLUMN_COUNT_AUTO, nsStyleColumn_kMaxColumnCount};
 
         self.gecko.mColumnCount = match v {
-            Either::First(integer) => unsafe {
-                cmp::min(integer.0 as u32, nsStyleColumn_kMaxColumnCount)
+            ColumnCount::Integer(integer) => {
+                cmp::min(integer.0 as u32, unsafe { nsStyleColumn_kMaxColumnCount })
             },
-            Either::Second(Auto) => NS_STYLE_COLUMN_COUNT_AUTO
+            ColumnCount::Auto => NS_STYLE_COLUMN_COUNT_AUTO
         };
     }
 
@@ -5397,9 +5411,9 @@ clip-path
         if self.gecko.mColumnCount != NS_STYLE_COLUMN_COUNT_AUTO {
             debug_assert!(self.gecko.mColumnCount >= 1 &&
                           self.gecko.mColumnCount <= nsStyleColumn_kMaxColumnCount);
-            Either::First((self.gecko.mColumnCount as i32).into())
+            ColumnCount::Integer((self.gecko.mColumnCount as i32).into())
         } else {
-            Either::Second(Auto)
+            ColumnCount::Auto
         }
     }
 
@@ -5414,6 +5428,7 @@ clip-path
     }
 
     pub fn set_content(&mut self, v: longhands::content::computed_value::T, device: &Device) {
+        use values::CustomIdent;
         use values::computed::counters::{Content, ContentItem};
         use values::generics::CounterStyleOrNone;
         use gecko_bindings::structs::nsStyleContentData;
@@ -5431,16 +5446,20 @@ clip-path
             ptr
         }
 
-        fn set_counter_function(data: &mut nsStyleContentData,
-                                content_type: nsStyleContentType,
-                                name: &str, sep: &str,
-                                style: CounterStyleOrNone, device: &Device) {
+        fn set_counter_function(
+            data: &mut nsStyleContentData,
+            content_type: nsStyleContentType,
+            name: &CustomIdent,
+            sep: &str,
+            style: CounterStyleOrNone,
+            device: &Device,
+        ) {
             debug_assert!(content_type == eStyleContentType_Counter ||
                           content_type == eStyleContentType_Counters);
             let counter_func = unsafe {
                 bindings::Gecko_SetCounterFunction(data, content_type).as_mut().unwrap()
             };
-            counter_func.mIdent.assign_utf8(name);
+            counter_func.mIdent.assign(name.0.as_slice());
             if content_type == eStyleContentType_Counters {
                 counter_func.mSeparator.assign_utf8(sep);
             }
@@ -5508,12 +5527,24 @@ clip-path
                         ContentItem::NoCloseQuote
                             => self.gecko.mContents[i].mType = eStyleContentType_NoCloseQuote,
                         ContentItem::Counter(ref name, ref style) => {
-                            set_counter_function(&mut self.gecko.mContents[i],
-                                                 eStyleContentType_Counter, &name, "", style.clone(), device);
+                            set_counter_function(
+                                &mut self.gecko.mContents[i],
+                                eStyleContentType_Counter,
+                                &name,
+                                "",
+                                style.clone(),
+                                device,
+                            );
                         }
                         ContentItem::Counters(ref name, ref sep, ref style) => {
-                            set_counter_function(&mut self.gecko.mContents[i],
-                                                 eStyleContentType_Counters, &name, &sep, style.clone(), device);
+                            set_counter_function(
+                                &mut self.gecko.mContents[i],
+                                eStyleContentType_Counters,
+                                &name,
+                                &sep,
+                                style.clone(),
+                                device,
+                            );
                         }
                         ContentItem::Url(ref url) => {
                             unsafe {
@@ -5539,10 +5570,11 @@ clip-path
     }
 
     pub fn clone_content(&self) -> longhands::content::computed_value::T {
+        use Atom;
         use gecko::conversions::string_from_chars_pointer;
         use gecko_bindings::structs::nsStyleContentType::*;
         use values::computed::counters::{Content, ContentItem};
-        use values::Either;
+        use values::{CustomIdent, Either};
         use values::generics::CounterStyleOrNone;
         use values::specified::url::SpecifiedUrl;
         use values::specified::Attr;
@@ -5587,7 +5619,7 @@ clip-path
                     eStyleContentType_Counter | eStyleContentType_Counters => {
                         let gecko_function =
                             unsafe { &**gecko_content.mContent.mCounters.as_ref() };
-                        let ident = gecko_function.mIdent.to_string();
+                        let ident = CustomIdent(Atom::from(&*gecko_function.mIdent));
                         let style =
                             CounterStyleOrNone::from_gecko_value(&gecko_function.mCounterStyle);
                         let style = match style {
@@ -5596,10 +5628,10 @@ clip-path
                                 unreachable!("counter function shouldn't have single string type"),
                         };
                         if gecko_content.mType == eStyleContentType_Counter {
-                            ContentItem::Counter(ident.into_boxed_str(), style)
+                            ContentItem::Counter(ident, style)
                         } else {
                             let separator = gecko_function.mSeparator.to_string();
-                            ContentItem::Counters(ident.into_boxed_str(), separator.into_boxed_str(), style)
+                            ContentItem::Counters(ident, separator.into_boxed_str(), style)
                         }
                     },
                     eStyleContentType_Image => {

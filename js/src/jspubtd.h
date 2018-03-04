@@ -16,9 +16,9 @@
 #include "mozilla/LinkedList.h"
 #include "mozilla/PodOperations.h"
 
-#include "jsprototypes.h"
 #include "jstypes.h"
 
+#include "js/ProtoKey.h"
 #include "js/Result.h"
 #include "js/TraceKind.h"
 #include "js/TypeDecls.h"
@@ -29,7 +29,11 @@
 
 namespace JS {
 
-class AutoIdVector;
+template <typename T> class AutoVector;
+using AutoIdVector = AutoVector<jsid>;
+using AutoValueVector = AutoVector<Value>;
+using AutoObjectVector = AutoVector<JSObject*>;
+
 class CallArgs;
 
 class JS_FRIEND_API(CompileOptions);

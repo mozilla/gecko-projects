@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-this.EXPORTED_SYMBOLS = ["RemoteAddonsParent"];
+var EXPORTED_SYMBOLS = ["RemoteAddonsParent"];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/RemoteWebProgress.jsm");
@@ -439,11 +439,15 @@ var EventTargetParent = {
 
       // Some non-browser windows define gBrowser globals which are not elements
       // and can't be passed to target.contains().
-      if (window &&
-          window.gBrowser instanceof Ci.nsIDOMXULElement &&
-          target.contains(window.gBrowser)) {
+      if (window && window.gBrowser &&
+          window.gBrowser.container instanceof Ci.nsIDOMXULElement &&
+          target.contains(window.gBrowser.container)) {
         return window;
       }
+    }
+
+    if (target.ownerGlobal && target === target.ownerGlobal.gBrowser) {
+      return target.ownerGlobal;
     }
 
     return null;
@@ -800,7 +804,7 @@ ComponentsUtilsInterposition.methods.Sandbox =
       }
       return SandboxParent.makeContentSandbox(addon, chromeGlobal, array, ...rest);
     }
-    return Components.utils.Sandbox(principals, ...rest);
+    return Cu.Sandbox(principals, ...rest);
   };
 
 ComponentsUtilsInterposition.methods.evalInSandbox =
@@ -808,7 +812,7 @@ ComponentsUtilsInterposition.methods.evalInSandbox =
     if (sandbox && Cu.isCrossProcessWrapper(sandbox)) {
       return SandboxParent.evalInSandbox(code, sandbox, ...rest);
     }
-    return Components.utils.evalInSandbox(code, sandbox, ...rest);
+    return Cu.evalInSandbox(code, sandbox, ...rest);
   };
 
 // This interposition handles cases where an add-on tries to import a

@@ -21,6 +21,7 @@
 #include "imgIRequest.h"
 #include "imgRequestProxy.h"
 #include "nsIDocument.h"
+#include "nsIURIMutator.h"
 #include "nsCSSProps.h"
 #include "nsNetUtil.h"
 #include "nsPresContext.h"
@@ -2917,7 +2918,7 @@ css::URLValueData::GetUTF16String() const
     nsDependentCSubstring rust = GetRustString();
     nsString converted = NS_ConvertUTF8toUTF16(rust);
     Servo_ReleaseArcStringData(&mStrings.mRustString);
-    mStrings.mString = converted;
+    new (&mStrings) RustOrGeckoString(converted);
     mUsingRustString = false;
   }
   return mStrings.mString;
@@ -3020,8 +3021,13 @@ css::URLValueData::ResolveLocalRef(nsIURI* aURI) const
     nsCString ref;
     mURI->GetRef(ref);
 
-    aURI->Clone(getter_AddRefs(result));
-    result->SetRef(ref);
+    nsresult rv = NS_MutateURI(aURI)
+                    .SetRef(ref)
+                    .Finalize(result);
+    if (NS_FAILED(rv)) {
+      // If setting the ref failed, just return a clone.
+      aURI->Clone(getter_AddRefs(result));
+    }
   }
 
   return result.forget();

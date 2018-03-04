@@ -174,7 +174,12 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(EditorBase)
  NS_IMPL_CYCLE_COLLECTION_UNLINK(mEditorObservers)
  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocStateListeners)
  NS_IMPL_CYCLE_COLLECTION_UNLINK(mEventTarget)
- NS_IMPL_CYCLE_COLLECTION_UNLINK(mEventListener)
+
+ if (tmp->mEventListener) {
+   tmp->mEventListener->Disconnect();
+   tmp->mEventListener = nullptr;
+ }
+
  NS_IMPL_CYCLE_COLLECTION_UNLINK(mPlaceholderTransaction)
  NS_IMPL_CYCLE_COLLECTION_UNLINK(mSavedSel);
  NS_IMPL_CYCLE_COLLECTION_UNLINK(mRangeUpdater);
@@ -330,9 +335,7 @@ EditorBase::PostCreate()
     // If the text control gets reframed during focus, Focus() would not be
     // called, so take a chance here to see if we need to spell check the text
     // control.
-    EditorEventListener* listener =
-      reinterpret_cast<EditorEventListener*>(mEventListener.get());
-    listener->SpellCheckIfNeeded();
+    mEventListener->SpellCheckIfNeeded();
 
     IMEState newState;
     rv = GetPreferredIMEState(&newState);
@@ -386,9 +389,7 @@ EditorBase::InstallEventListeners()
   mEventTarget = do_QueryInterface(rootContent->GetParent());
   NS_ENSURE_TRUE(mEventTarget, NS_ERROR_NOT_AVAILABLE);
 
-  EditorEventListener* listener =
-    reinterpret_cast<EditorEventListener*>(mEventListener.get());
-  nsresult rv = listener->Connect(this);
+  nsresult rv = mEventListener->Connect(this);
   if (mComposition) {
     // Restart to handle composition with new editor contents.
     mComposition->StartHandlingComposition(this);
@@ -402,7 +403,7 @@ EditorBase::RemoveEventListeners()
   if (!IsInitialized() || !mEventListener) {
     return;
   }
-  reinterpret_cast<EditorEventListener*>(mEventListener.get())->Disconnect();
+  mEventListener->Disconnect();
   if (mComposition) {
     // Even if this is called, don't release mComposition because this is
     // may be reused after reframing.
@@ -3533,24 +3534,6 @@ EditorBase::GetChildOffset(nsINode* aChild,
 }
 
 // static
-already_AddRefed<nsIDOMNode>
-EditorBase::GetNodeLocation(nsIDOMNode* aChild,
-                            int32_t* outOffset)
-{
-  MOZ_ASSERT(aChild && outOffset);
-  NS_ENSURE_TRUE(aChild && outOffset, nullptr);
-  *outOffset = -1;
-
-  nsCOMPtr<nsINode> child = do_QueryInterface(aChild);
-  nsCOMPtr<nsIDOMNode> parent = do_QueryInterface(child->GetParentNode());
-
-  if (parent) {
-    *outOffset = GetChildOffset(aChild, parent);
-  }
-
-  return parent.forget();
-}
-
 nsINode*
 EditorBase::GetNodeLocation(nsINode* aChild,
                             int32_t* aOffset)
@@ -4079,28 +4062,6 @@ EditorBase::GetNodeAtRangeOffsetPoint(const RawRangeBoundary& aPoint)
  */
 nsresult
 EditorBase::GetStartNodeAndOffset(Selection* aSelection,
-                                  nsIDOMNode** outStartNode,
-                                  int32_t* outStartOffset)
-{
-  NS_ENSURE_TRUE(outStartNode && outStartOffset && aSelection, NS_ERROR_NULL_POINTER);
-
-  nsCOMPtr<nsINode> startNode;
-  nsresult rv = GetStartNodeAndOffset(aSelection, getter_AddRefs(startNode),
-                                      outStartOffset);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-
-  if (startNode) {
-    NS_ADDREF(*outStartNode = startNode->AsDOMNode());
-  } else {
-    *outStartNode = nullptr;
-  }
-  return NS_OK;
-}
-
-nsresult
-EditorBase::GetStartNodeAndOffset(Selection* aSelection,
                                   nsINode** aStartContainer,
                                   int32_t* aStartOffset)
 {
@@ -4144,26 +4105,6 @@ EditorBase::GetStartPoint(Selection* aSelection)
  * GetEndNodeAndOffset() returns whatever the end parent & offset is of
  * the first range in the selection.
  */
-nsresult
-EditorBase::GetEndNodeAndOffset(Selection* aSelection,
-                                nsIDOMNode** outEndNode,
-                                int32_t* outEndOffset)
-{
-  NS_ENSURE_TRUE(outEndNode && outEndOffset && aSelection, NS_ERROR_NULL_POINTER);
-
-  nsCOMPtr<nsINode> endNode;
-  nsresult rv = GetEndNodeAndOffset(aSelection, getter_AddRefs(endNode),
-                                    outEndOffset);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  if (endNode) {
-    NS_ADDREF(*outEndNode = endNode->AsDOMNode());
-  } else {
-    *outEndNode = nullptr;
-  }
-  return NS_OK;
-}
-
 nsresult
 EditorBase::GetEndNodeAndOffset(Selection* aSelection,
                                 nsINode** aEndContainer,
@@ -4253,8 +4194,7 @@ EditorBase::IsPreformatted(nsIDOMNode* aNode,
   }
   if (content && content->IsElement()) {
     elementStyle =
-      nsComputedDOMStyle::GetStyleContextNoFlush(content->AsElement(),
-                                                 nullptr, ps);
+      nsComputedDOMStyle::GetStyleContextNoFlush(content->AsElement(), nullptr);
   }
 
   if (!elementStyle) {

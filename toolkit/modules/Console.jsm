@@ -20,7 +20,7 @@
  *   implementation isn't always required (or even well defined)
  */
 
-this.EXPORTED_SYMBOLS = [ "console", "ConsoleAPI" ];
+var EXPORTED_SYMBOLS = [ "console", "ConsoleAPI" ];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -140,7 +140,7 @@ function stringify(aThing, aAllowNewLines) {
 
   if (typeof aThing == "object") {
     let type = getCtorName(aThing);
-    if (aThing instanceof Components.interfaces.nsIDOMNode && aThing.tagName) {
+    if (aThing instanceof Ci.nsIDOMNode && aThing.tagName) {
       return debugElement(aThing);
     }
     type = (type == "Object" ? "" : type + " ");
@@ -224,7 +224,7 @@ function log(aThing) {
           frame = frame.caller;
         }
       }
-    } else if (aThing instanceof Components.interfaces.nsIDOMNode && aThing.tagName) {
+    } else if (aThing instanceof Ci.nsIDOMNode && aThing.tagName) {
       reply += "  " + debugElement(aThing) + "\n";
     } else {
       let keys = Object.getOwnPropertyNames(aThing);
@@ -725,5 +725,4 @@ ConsoleAPI.prototype = {
   },
 };
 
-this.console = new ConsoleAPI();
-this.ConsoleAPI = ConsoleAPI;
+var console = new ConsoleAPI();

@@ -44,6 +44,29 @@ static constexpr ValueOperand JSReturnOperand{JSReturnReg};
 static const int defaultShift = 3;
 static_assert(1 << defaultShift == sizeof(JS::Value), "The defaultShift is wrong");
 
+// See documentation for ScratchTagScope and ScratchTagScopeRelease in
+// MacroAssembler-x64.h.
+
+class ScratchTagScope : public SecondScratchRegisterScope
+{
+  public:
+    ScratchTagScope(MacroAssembler& masm, const ValueOperand&)
+      : SecondScratchRegisterScope(masm)
+    {}
+};
+
+class ScratchTagScopeRelease
+{
+    ScratchTagScope* ts_;
+  public:
+    explicit ScratchTagScopeRelease(ScratchTagScope* ts) : ts_(ts) {
+        ts_->release();
+    }
+    ~ScratchTagScopeRelease() {
+        ts_->reacquire();
+    }
+};
+
 class MacroAssemblerMIPS64 : public MacroAssemblerMIPSShared
 {
   public:
@@ -51,12 +74,14 @@ class MacroAssemblerMIPS64 : public MacroAssemblerMIPSShared
     using MacroAssemblerMIPSShared::ma_li;
     using MacroAssemblerMIPSShared::ma_ss;
     using MacroAssemblerMIPSShared::ma_sd;
+    using MacroAssemblerMIPSShared::ma_ls;
+    using MacroAssemblerMIPSShared::ma_ld;
     using MacroAssemblerMIPSShared::ma_load;
     using MacroAssemblerMIPSShared::ma_store;
     using MacroAssemblerMIPSShared::ma_cmp_set;
     using MacroAssemblerMIPSShared::ma_subTestOverflow;
 
-    void ma_li(Register dest, CodeOffset* label);
+    void ma_li(Register dest, CodeLabel* label);
     void ma_li(Register dest, ImmWord imm);
     void ma_liPatchable(Register dest, ImmPtr imm);
     void ma_liPatchable(Register dest, ImmWord imm, LiFlags flags = Li48);
@@ -133,13 +158,13 @@ class MacroAssemblerMIPS64 : public MacroAssemblerMIPSShared
     void ma_mv(FloatRegister src, ValueOperand dest);
     void ma_mv(ValueOperand src, FloatRegister dest);
 
-    void ma_ls(FloatRegister fd, Address address);
-    void ma_ld(FloatRegister fd, Address address);
-    void ma_sd(FloatRegister fd, Address address);
-    void ma_ss(FloatRegister fd, Address address);
+    void ma_ls(FloatRegister ft, Address address);
+    void ma_ld(FloatRegister ft, Address address);
+    void ma_sd(FloatRegister ft, Address address);
+    void ma_ss(FloatRegister ft, Address address);
 
-    void ma_pop(FloatRegister fs);
-    void ma_push(FloatRegister fs);
+    void ma_pop(FloatRegister f);
+    void ma_push(FloatRegister f);
 
     void ma_cmp_set(Register dst, Register lhs, ImmWord imm, Condition c);
     void ma_cmp_set(Register dst, Register lhs, ImmPtr imm, Condition c);
@@ -211,7 +236,7 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
     void mov(ImmPtr imm, Register dest) {
         mov(ImmWord(uintptr_t(imm.value)), dest);
     }
-    void mov(CodeOffset* label, Register dest) {
+    void mov(CodeLabel* label, Register dest) {
         ma_li(dest, label);
     }
     void mov(Register src, Address dest) {
@@ -310,11 +335,12 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
         return offset;
     }
 
-    void writeCodePointer(CodeOffset* label) {
-        label->bind(currentOffset());
-        ma_liPatchable(ScratchRegister, ImmWord(0));
-        as_jr(ScratchRegister);
-        as_nop();
+    void writeCodePointer(CodeLabel* label) {
+        label->patchAt()->bind(currentOffset());
+        label->setLinkMode(CodeLabel::RawPointer);
+        m_buffer.ensureSpace(sizeof(void*));
+        writeInst(-1);
+        writeInst(-1);
     }
 
     void jump(Label* label) {
@@ -354,10 +380,8 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
         splitTag(operand.valueReg(), dest);
     }
 
-    // Returns the register containing the type tag.
-    Register splitTagForTest(const ValueOperand& value) {
-        splitTag(value, SecondScratchReg);
-        return SecondScratchReg;
+    void splitTagForTest(const ValueOperand& value, ScratchTagScope& tag) {
+        splitTag(value, tag);
     }
 
     // unboxing code
@@ -445,13 +469,6 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
     }
     Register extractSymbol(const ValueOperand& value, Register scratch) {
         unboxSymbol(value, scratch);
-        return scratch;
-    }
-    Register extractCell(const Address& address, Register scratch) {
-        return extractObject(address, scratch);
-    }
-    Register extractCell(const ValueOperand& value, Register scratch) {
-        unboxNonDouble(value, scratch);
         return scratch;
     }
     Register extractInt32(const ValueOperand& value, Register scratch) {
@@ -667,17 +684,8 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
     void storeUnalignedSimd128Float(FloatRegister src, Address addr) { MOZ_CRASH("NYI"); }
     void storeUnalignedSimd128Float(FloatRegister src, BaseIndex addr) { MOZ_CRASH("NYI"); }
 
-    void loadDouble(const Address& addr, FloatRegister dest);
-    void loadDouble(const BaseIndex& src, FloatRegister dest);
     void loadUnalignedDouble(const wasm::MemoryAccessDesc& access, const BaseIndex& src,
                              Register temp, FloatRegister dest);
-
-    // Load a float value into a register, then expand it to a double.
-    void loadFloatAsDouble(const Address& addr, FloatRegister dest);
-    void loadFloatAsDouble(const BaseIndex& src, FloatRegister dest);
-
-    void loadFloat32(const Address& addr, FloatRegister dest);
-    void loadFloat32(const BaseIndex& src, FloatRegister dest);
     void loadUnalignedFloat32(const wasm::MemoryAccessDesc& access, const BaseIndex& src,
                               Register temp, FloatRegister dest);
 
@@ -733,8 +741,6 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
 
     void convertUInt64ToDouble(Register src, FloatRegister dest);
 
-    void wasmTruncateToI64(FloatRegister input, Register output, MIRType fromType,
-                           bool isUnsigned, Label* oolEntry, Label* oolRejoin);
 
     void breakpoint();
 

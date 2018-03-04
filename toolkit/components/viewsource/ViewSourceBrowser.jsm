@@ -15,7 +15,7 @@ const BUNDLE_URL = "chrome://global/locale/viewSource.properties";
 
 const FRAME_SCRIPT = "chrome://global/content/viewSource-content.js";
 
-this.EXPORTED_SYMBOLS = ["ViewSourceBrowser"];
+var EXPORTED_SYMBOLS = ["ViewSourceBrowser"];
 
 // Keep a set of browsers we've seen before, so we can load our frame script as
 // needed into any new ones.
@@ -30,10 +30,10 @@ var gKnownBrowsers = new WeakSet();
  * created by viewSourceUtils.js to wrap the <browser>.  The frame script will
  * be loaded by this module at construction time.
  */
-this.ViewSourceBrowser = function ViewSourceBrowser(aBrowser) {
+function ViewSourceBrowser(aBrowser) {
   this._browser = aBrowser;
   this.init();
-};
+}
 
 ViewSourceBrowser.prototype = {
   /**
@@ -73,7 +73,6 @@ ViewSourceBrowser.prototype = {
       this.mm.addMessageListener(msgName, this);
     });
 
-    // If we have a known <browser> already, load the frame script here.
     this.loadFrameScript();
   },
 
@@ -91,6 +90,12 @@ ViewSourceBrowser.prototype = {
    * For a new browser we've not seen before, load the frame script.
    */
   loadFrameScript() {
+    // Check for a browser first. There won't be one for the window case
+    // (still used by other applications like Thunderbird), as the element
+    // does not exist until the XUL document loads.
+    if (!this.browser) {
+      return;
+    }
     if (!gKnownBrowsers.has(this.browser)) {
       gKnownBrowsers.add(this.browser);
       this.mm.loadFrameScript(FRAME_SCRIPT, false);

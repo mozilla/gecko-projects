@@ -11,7 +11,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "BrowserTestUtils",
 ];
 
@@ -67,7 +67,7 @@ var gSynthesizeCompositionChangeCount = 0;
 const kAboutPageRegistrationContentScript =
   "chrome://mochikit/content/tests/BrowserTestUtils/content-about-page-utils.js";
 
-this.BrowserTestUtils = {
+var BrowserTestUtils = {
   /**
    * Loads a page in a new tab, executes a Task and closes the tab.
    *
@@ -144,7 +144,7 @@ this.BrowserTestUtils = {
    */
   openNewForegroundTab(tabbrowser, ...args) {
     let options;
-    if (tabbrowser instanceof Ci.nsIDOMXULElement) {
+    if (tabbrowser.ownerGlobal && tabbrowser === tabbrowser.ownerGlobal.gBrowser) {
       // tabbrowser is a tabbrowser, read the rest of the arguments from args.
       let [
         opening = "about:blank",
@@ -570,10 +570,10 @@ this.BrowserTestUtils = {
    */
   domWindowOpened(win, checkFn) {
     return new Promise(resolve => {
-      function observer(subject, topic, data) {
+      async function observer(subject, topic, data) {
         if (topic == "domwindowopened" && (!win || subject === win)) {
           let observedWindow = subject.QueryInterface(Ci.nsIDOMWindow);
-          if (checkFn && !checkFn(observedWindow)) {
+          if (checkFn && !await checkFn(observedWindow)) {
             return;
           }
           Services.ww.unregisterNotification(observer);
@@ -1128,10 +1128,13 @@ this.BrowserTestUtils = {
   tabRemoved(tab) {
     return new Promise(resolve => {
       let {messageManager: mm, frameLoader} = tab.linkedBrowser;
+      // FIXME! We shouldn't use "SessionStore:update" to know the tab was
+      // removed.  It will be processed before other "SessionStore:update"
+      // listeners hasn't been processed.
       mm.addMessageListener("SessionStore:update", function onMessage(msg) {
         if (msg.targetFrameLoader == frameLoader && msg.data.isFinal) {
           mm.removeMessageListener("SessionStore:update", onMessage);
-          resolve();
+          TestUtils.executeSoon(() => resolve());
         }
       }, true);
     });
@@ -1596,6 +1599,61 @@ this.BrowserTestUtils = {
       await this.unregisterAboutPage(aboutModule);
     }
     Services.ppmm.removeDelayedProcessScript(kAboutPageRegistrationContentScript);
+  },
+
+  /**
+   * Waits for the dialog to open, and clicks the specified button.
+   *
+   * @param {string} buttonAction
+   *        The ID of the button to click ("accept", "cancel", etc).
+   * @param {string} uri
+   *        The URI of the dialog to wait for.  Defaults to the common dialog.
+   * @return {Promise}
+   *         A Promise which resolves when a "domwindowopened" notification
+   *         for a dialog has been fired by the window watcher and the
+   *         specified button is clicked.
+   */
+  async promiseAlertDialogOpen(buttonAction,
+                               uri="chrome://global/content/commonDialog.xul",
+                               func) {
+    let win = await this.domWindowOpened(null, async win => {
+      // The test listens for the "load" event which guarantees that the alert
+      // class has already been added (it is added when "DOMContentLoaded" is
+      // fired).
+      await this.waitForEvent(win, "load");
+
+      return win.document.documentURI === uri;
+    });
+
+    if (func) {
+      await func(win);
+      return win;
+    }
+
+    let doc = win.document.documentElement;
+    doc.getButton(buttonAction).click();
+
+    return win;
+  },
+
+  /**
+   * Waits for the dialog to open, and clicks the specified button, and waits
+   * for the dialog to close.
+   *
+   * @param {string} buttonAction
+   *        The ID of the button to click ("accept", "cancel", etc).
+   * @param {string} uri
+   *        The URI of the dialog to wait for.  Defaults to the common dialog.
+   * @return {Promise}
+   *         A Promise which resolves when a "domwindowopened" notification
+   *         for a dialog has been fired by the window watcher and the
+   *         specified button is clicked, and the dialog has been fully closed.
+   */
+  async promiseAlertDialog(buttonAction,
+                           uri="chrome://global/content/commonDialog.xul",
+                           func) {
+    let win = await this.promiseAlertDialogOpen(buttonAction, uri, func);
+    return this.windowClosed(win);
   },
 
   /**

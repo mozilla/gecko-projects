@@ -68,7 +68,7 @@ use layout::context::LayoutContext;
 use layout::context::RegisteredPainter;
 use layout::context::RegisteredPainters;
 use layout::context::malloc_size_of_persistent_local_context;
-use layout::display_list::ToLayout;
+use layout::display_list::{IndexableText, ToLayout};
 use layout::display_list::WebRenderDisplayListConverter;
 use layout::flow::{Flow, GetBaseFlow, ImmutableFlowUtils, MutableOwnedFlowUtils};
 use layout::flow_ref::FlowRef;
@@ -457,11 +457,12 @@ impl LayoutThread {
             opts::get().initial_window_size.to_f32() * TypedScale::new(1.0),
             TypedScale::new(opts::get().device_pixels_per_px.unwrap_or(1.0)));
 
-        let configuration =
-            rayon::Configuration::new().num_threads(layout_threads)
-                                       .start_handler(|_| thread_state::initialize_layout_worker_thread());
+        let workers =
+            rayon::ThreadPoolBuilder::new().num_threads(layout_threads)
+                                           .start_handler(|_| thread_state::initialize_layout_worker_thread())
+                                           .build();
         let parallel_traversal = if layout_threads > 1 {
-            Some(rayon::ThreadPool::new(configuration).expect("ThreadPool creation failed"))
+            Some(workers.expect("ThreadPool creation failed"))
         } else {
             None
         };
@@ -515,6 +516,7 @@ impl LayoutThread {
                 LayoutThreadData {
                     constellation_chan: constellation_chan,
                     display_list: None,
+                    indexable_text: IndexableText::default(),
                     content_box_response: None,
                     content_boxes_response: Vec::new(),
                     client_rect_response: Rect::zero(),
@@ -708,7 +710,7 @@ impl LayoutThread {
                 let mut txn = webrender_api::Transaction::new();
                 txn.scroll_node_with_id(
                     webrender_api::LayoutPoint::from_untyped(&point),
-                    webrender_api::ScrollNodeIdType::ExternalScrollId(state.scroll_id),
+                    state.scroll_id,
                     webrender_api::ScrollClamping::ToContentBounds
                 );
                 self.webrender_api.send_transaction(self.webrender_document, txn);
@@ -1002,6 +1004,9 @@ impl LayoutThread {
                         }
                     }
 
+                    rw_data.indexable_text = std::mem::replace(
+                        &mut build_state.indexable_text,
+                        IndexableText::default());
                     rw_data.display_list = Some(Arc::new(build_state.to_display_list()));
                 }
             }
@@ -1366,10 +1371,7 @@ impl LayoutThread {
                     Au::from_f32_px(point_in_node.y)
                 );
                 rw_data.text_index_response = TextIndexResponse(
-                    rw_data.display_list
-                    .as_ref()
-                    .expect("Tried to hit test with no display list")
-                    .text_index(opaque_node, point_in_node.to_layout())
+                    rw_data.indexable_text.text_index(opaque_node, point_in_node)
                 );
             },
             ReflowGoal::NodeGeometryQuery(node) => {
@@ -1426,7 +1428,7 @@ impl LayoutThread {
             ReflowGoal::ElementInnerTextQuery(node) => {
                 let node = unsafe { ServoLayoutNode::new(&node) };
                 rw_data.element_inner_text_response =
-                    process_element_inner_text_query(node, &rw_data.display_list);
+                    process_element_inner_text_query(node, &rw_data.indexable_text);
             },
             ReflowGoal::Full | ReflowGoal::TickAnimations => {}
         }

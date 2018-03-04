@@ -210,10 +210,6 @@ user_pref("browser.pagethumbnails.capturing_disabled", true);
 // download test runs first doesn't show the popup inconsistently.
 user_pref("browser.download.panel.shown", true);
 
-// Assume the about:newtab page's intro panels have been shown to not depend on
-// which test runs first and happens to open about:newtab
-user_pref("browser.newtabpage.introShown", true);
-
 // Enable webapps testing mode, which bypasses native installation.
 user_pref("browser.webapps.testing", true);
 
@@ -317,7 +313,7 @@ user_pref("browser.search.countryCode", "US");
 user_pref("browser.search.geoSpecificDefaults", false);
 
 // Make sure Shield doesn't hit the network.
-user_pref("extensions.shield-recipe-client.api_url", "");
+user_pref("app.normandy.api_url", "");
 
 // Make sure PingCentre doesn't hit the network.
 user_pref("browser.ping-centre.staging.endpoint", "");

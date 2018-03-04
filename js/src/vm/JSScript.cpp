@@ -22,10 +22,8 @@
 #include <string.h>
 
 #include "jsapi.h"
-#include "jsprf.h"
 #include "jstypes.h"
 #include "jsutil.h"
-#include "jswrapper.h"
 
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/BytecodeEmitter.h"
@@ -35,7 +33,9 @@
 #include "jit/Ion.h"
 #include "jit/IonCode.h"
 #include "js/MemoryMetrics.h"
+#include "js/Printf.h"
 #include "js/Utility.h"
+#include "js/Wrapper.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/BytecodeUtil.h"
 #include "vm/Compression.h"
@@ -1373,7 +1373,7 @@ JSScript::releaseScriptCounts(ScriptCounts* counts)
 }
 
 void
-JSScript::destroyScriptCounts(FreeOp* fop)
+JSScript::destroyScriptCounts()
 {
     if (hasScriptCounts()) {
         ScriptCounts scriptCounts;
@@ -1400,27 +1400,11 @@ JSScript::hasScriptName()
 }
 
 void
-ScriptSourceObject::trace(JSTracer* trc, JSObject* obj)
-{
-    ScriptSourceObject* sso = static_cast<ScriptSourceObject*>(obj);
-
-    // Don't trip over the poison 'not yet initialized' values.
-    if (!sso->getReservedSlot(INTRODUCTION_SCRIPT_SLOT).isMagic(JS_GENERIC_MAGIC)) {
-        JSScript* script = sso->introductionScript();
-        if (script) {
-            TraceManuallyBarrieredEdge(trc, &script, "ScriptSourceObject introductionScript");
-            sso->setReservedSlot(INTRODUCTION_SCRIPT_SLOT, PrivateValue(script));
-        }
-    }
-}
-
-void
 ScriptSourceObject::finalize(FreeOp* fop, JSObject* obj)
 {
     MOZ_ASSERT(fop->onActiveCooperatingThread());
     ScriptSourceObject* sso = &obj->as<ScriptSourceObject>();
     sso->source()->decref();
-    sso->setReservedSlot(SOURCE_SLOT, PrivateValue(nullptr));
 }
 
 static const ClassOps ScriptSourceObjectClassOps = {
@@ -1434,7 +1418,7 @@ static const ClassOps ScriptSourceObjectClassOps = {
     nullptr, /* call */
     nullptr, /* hasInstance */
     nullptr, /* construct */
-    ScriptSourceObject::trace
+    nullptr  /* trace */
 };
 
 const Class ScriptSourceObject::class_ = {
@@ -1484,13 +1468,13 @@ ScriptSourceObject::initFromOptions(JSContext* cx, HandleScriptSource source,
     // we would be creating a cross-compartment script reference, which is
     // forbidden. In that case, simply don't bother to retain the introduction
     // script.
+    Value introductionScript = UndefinedValue();
     if (options.introductionScript() &&
         options.introductionScript()->compartment() == cx->compartment())
     {
-        source->setReservedSlot(INTRODUCTION_SCRIPT_SLOT, PrivateValue(options.introductionScript()));
-    } else {
-        source->setReservedSlot(INTRODUCTION_SCRIPT_SLOT, UndefinedValue());
+        introductionScript.setPrivateGCThing(options.introductionScript());
     }
+    source->setReservedSlot(INTRODUCTION_SCRIPT_SLOT, introductionScript);
 
     return true;
 }
@@ -2761,6 +2745,8 @@ JSScript::Create(JSContext* cx, const ReadOnlyCompileOptions& options,
     script->toStringStart_ = toStringStart;
     script->toStringEnd_ = toStringEnd;
 
+    script->hideScriptFromDebugger_ = options.hideScriptFromDebugger;
+
 #ifdef MOZ_VTUNE
     script->vtuneMethodId_ = vtune::GenerateUniqueMethodID();
 #endif
@@ -2968,8 +2954,7 @@ InitAtomMap(frontend::AtomIndexMap& indices, GCPtrAtom* atoms)
 }
 
 /* static */ void
-JSScript::initFromFunctionBox(JSContext* cx, HandleScript script,
-                              frontend::FunctionBox* funbox)
+JSScript::initFromFunctionBox(HandleScript script, frontend::FunctionBox* funbox)
 {
     JSFunction* fun = funbox->function();
     if (fun->isInterpretedLazy())
@@ -3011,8 +2996,7 @@ JSScript::initFromFunctionBox(JSContext* cx, HandleScript script,
 }
 
 /* static */ void
-JSScript::initFromModuleContext(JSContext* cx, HandleScript script,
-                                frontend::ModuleSharedContext* modulesc)
+JSScript::initFromModuleContext(HandleScript script)
 {
     script->funHasExtensibleScope_ = false;
     script->needsHomeObject_ = false;
@@ -3092,9 +3076,9 @@ JSScript::fullyInitFromEmitter(JSContext* cx, HandleScript script, BytecodeEmitt
     script->hasNonSyntacticScope_ = bce->outermostScope()->hasOnChain(ScopeKind::NonSyntactic);
 
     if (bce->sc->isFunctionBox())
-        initFromFunctionBox(cx, script, bce->sc->asFunctionBox());
+        initFromFunctionBox(script, bce->sc->asFunctionBox());
     else if (bce->sc->isModuleContext())
-        initFromModuleContext(cx, script, bce->sc->asModuleContext());
+        initFromModuleContext(script);
 
     // Copy yield offsets last, as the generator kind is set in
     // initFromFunctionBox.
@@ -3219,7 +3203,7 @@ JSScript::finalize(FreeOp* fop)
 
     jit::DestroyJitScripts(fop, this);
 
-    destroyScriptCounts(fop);
+    destroyScriptCounts();
     destroyDebugScript(fop);
 
     if (data) {
@@ -3656,6 +3640,7 @@ js::detail::CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
     dst->isAsync_ = src->isAsync_;
     dst->hasRest_ = src->hasRest_;
     dst->isExprBody_ = src->isExprBody_;
+    dst->hideScriptFromDebugger_ = src->hideScriptFromDebugger_;
 
     if (nconsts != 0) {
         GCPtrValue* vector = Rebase<GCPtrValue>(dst, src, src->consts()->vector);

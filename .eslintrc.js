@@ -44,48 +44,9 @@ module.exports = {
     // so turn off mozilla/use-services for them for now.
     "files": [
       "extensions/pref/**",
-      "mobile/android/**",
     ],
     "rules": {
       "mozilla/use-services": "off",
-    }
-  }, {
-    // XXX Bug 1434446. These directories have jsm files still being fixed, so
-    // turn off global no-unused-vars checking for them.
-    "files": [
-      "accessible/**/*.jsm",
-      "browser/components/**/*.jsm",
-      "browser/extensions/**/*.jsm",
-      "services/sync/**/*.jsm",
-      "toolkit/**/*.jsm",
-    ],
-    "rules": {
-      "mozilla/mark-exported-symbols-as-used": "error",
-      "no-unused-vars": ["error", {
-        "args": "none",
-        "vars": "local",
-        "varsIgnorePattern": "^Cc|Ci|Cu|Cr|EXPORTED_SYMBOLS"
-      }]
-    }
-  }, {
-    // XXX Bug 1433175. These directories are still being fixed, so turn off
-    // mozilla/use-cc-etc for now.
-    "files": [
-      "accessible/**",
-      "browser/**",
-      "devtools/**",
-      "dom/**",
-      "extensions/pref/**",
-      "mobile/android/**",
-      "security/manager/**",
-      "services/**",
-      "storage/test/**",
-      "testing/**",
-      "toolkit/**",
-      "xpcom/**",
-    ],
-    "rules": {
-      "mozilla/use-cc-etc": "off",
     }
   }, {
     // XXX Bug 1436303. These directories are still being fixed, so turn off

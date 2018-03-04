@@ -20,6 +20,7 @@
 #include "mozilla/EventStates.h"
 #include "mozilla/Likely.h"
 #include "mozilla/LinkedList.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/ServoBindings.h"
 #include "nsAbsoluteContainingBlock.h"
@@ -85,11 +86,9 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ElementInlines.h"
 #include "nsAutoLayoutPhase.h"
+#include "nsStyleContextInlines.h"
 #include "nsStyleStructInlines.h"
 #include "nsPageContentFrame.h"
-#ifdef MOZ_OLD_STYLE
-#include "mozilla/GeckoStyleContext.h"
-#endif
 #include "mozilla/RestyleManager.h"
 #include "mozilla/RestyleManagerInlines.h"
 #include "mozilla/StylePrefs.h"
@@ -1723,17 +1722,6 @@ nsCSSFrameConstructor::NotifyDestroyingFrame(nsIFrame* aFrame)
   RestyleManager()->NotifyDestroyingFrame(aFrame);
 
   nsFrameManager::NotifyDestroyingFrame(aFrame);
-}
-
-static bool
-HasGeneratedContent(const nsIContent* aChild)
-{
-  if (!aChild->MayHaveAnonymousChildren()) {
-    return false;
-  }
-
-  return nsLayoutUtils::GetBeforeFrame(aChild) ||
-         nsLayoutUtils::GetAfterFrame(aChild);
 }
 
 struct nsGenConInitializer {
@@ -4287,19 +4275,6 @@ nsCSSFrameConstructor::ConstructFrameFromItemInternal(FrameConstructionItem& aIt
     }
   }
 
-#ifdef MOZ_XUL
-  // More icky XUL stuff
-  if (aItem.mNameSpaceID == kNameSpaceID_XUL &&
-      (aItem.mTag == nsGkAtoms::treechildren || // trees always need titletips
-       content->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::tooltiptext) ||
-       content->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::tooltip))) {
-    nsIRootBox* rootBox = nsIRootBox::GetRootBox(mPresShell);
-    if (rootBox) {
-      rootBox->AddTooltipSupport(content);
-    }
-  }
-#endif
-
   NS_ASSERTION(newFrame->IsFrameOfType(nsIFrame::eLineParticipant) ==
                ((bits & FCDATA_IS_LINE_PARTICIPANT) != 0),
                "Incorrectly set FCDATA_IS_LINE_PARTICIPANT bits");
@@ -4534,6 +4509,7 @@ nsCSSFrameConstructor::FindXULTagData(Element* aElement,
   static const FrameConstructionDataByTag sXULTagData[] = {
 #ifdef MOZ_XUL
     SCROLLABLE_XUL_CREATE(button, NS_NewButtonBoxFrame),
+    SCROLLABLE_XUL_CREATE(thumb, NS_NewButtonBoxFrame),
     SCROLLABLE_XUL_CREATE(checkbox, NS_NewButtonBoxFrame),
     SCROLLABLE_XUL_CREATE(radio, NS_NewButtonBoxFrame),
     SCROLLABLE_XUL_CREATE(autorepeatbutton, NS_NewAutoRepeatBoxFrame),
@@ -6861,7 +6837,7 @@ nsCSSFrameConstructor::IsValidSibling(nsIFrame*              aSibling,
 template<nsCSSFrameConstructor::SiblingDirection aDirection>
 nsIFrame*
 nsCSSFrameConstructor::FindSiblingInternal(
-  FlattenedChildIterator aIter,
+  FlattenedChildIterator& aIter,
   nsIContent* aTargetContent,
   StyleDisplay& aTargetContentDisplay)
 {
@@ -6973,8 +6949,9 @@ nsCSSFrameConstructor::FindSibling(const FlattenedChildIterator& aIter,
                                    StyleDisplay& aTargetContentDisplay)
 {
   nsIContent* targetContent = aIter.Get();
-  nsIFrame* sibling =
-    FindSiblingInternal<aDirection>(aIter, targetContent, aTargetContentDisplay);
+  FlattenedChildIterator siblingIter = aIter;
+  nsIFrame* sibling = FindSiblingInternal<aDirection>(
+    siblingIter, targetContent, aTargetContentDisplay);
   if (sibling) {
     return sibling;
   }
@@ -8496,6 +8473,8 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
                                       RemoveFlags aFlags)
 {
   MOZ_ASSERT(aChild);
+  MOZ_ASSERT(!aChild->IsRootOfAnonymousSubtree() || !aOldNextSibling,
+             "Anonymous roots don't have siblings");
   AUTO_LAYOUT_PHASE_ENTRY_POINT(mPresShell->GetPresContext(), FrameC);
   nsPresContext* presContext = mPresShell->GetPresContext();
   MOZ_ASSERT(presContext, "Our presShell should have a valid presContext");
@@ -8566,22 +8545,9 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
   MOZ_ASSERT(!childFrame || !GetDisplayContentsStyleFor(aChild),
              "display:contents nodes shouldn't have a frame");
   if (!childFrame && GetDisplayContentsStyleFor(aChild)) {
-    if (HasGeneratedContent(aChild)) {
-      nsIContent* ancestor = aChild->GetFlattenedTreeParent();
-      MOZ_ASSERT(ancestor, "display: contents on the root?");
-      while (!ancestor->GetPrimaryFrame()) {
-        ancestor = ancestor->GetFlattenedTreeParent();
-        MOZ_ASSERT(ancestor, "we can't have a display: contents subtree root!");
-      }
-
-      // XXXmats Can we recreate frames only for the ::after/::before content?
-      // XXX Perhaps even only those that belong to the aChild sub-tree?
-      LAYOUT_PHASE_TEMP_EXIT();
-      RecreateFramesForContent(ancestor, InsertionKind::Async);
-      LAYOUT_PHASE_TEMP_REENTER();
-      return true;
-    }
-
+    // NOTE(emilio): We may iterate through ::before and ::after here and they
+    // may be gone after the respective ContentRemoved call. Right now
+    // StyleChildrenIterator handles that properly, so it's not an issue.
     StyleChildrenIterator iter(aChild);
     for (nsIContent* c = iter.GetNextChild(); c; c = iter.GetNextChild()) {
       if (c->GetPrimaryFrame() || GetDisplayContentsStyleFor(c)) {
@@ -8744,14 +8710,18 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
     }
 #endif
 
-
     // Notify the parent frame that it should delete the frame
     if (childFrame->GetStateBits() & NS_FRAME_OUT_OF_FLOW) {
       childFrame = childFrame->GetPlaceholderFrame();
       NS_ASSERTION(childFrame, "Missing placeholder frame for out of flow.");
       parentFrame = childFrame->GetParent();
     }
+
     RemoveFrame(nsLayoutUtils::GetChildListNameFor(childFrame), childFrame);
+
+    // NOTE(emilio): aChild could be dead here already if it is a ::before or
+    // ::after pseudo-element (since in that case it was owned by childFrame,
+    // which we just destroyed).
 
     if (isRoot) {
       mRootElementFrame = nullptr;
@@ -8771,8 +8741,7 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
     // to do this if the table parent type of our parent type is not
     // eTypeBlock, though, because in that case the whitespace isn't
     // being suppressed due to us anyway.
-    if (aContainer && !aChild->IsRootOfAnonymousSubtree() &&
-        aFlags == REMOVE_CONTENT &&
+    if (aContainer && aOldNextSibling && aFlags == REMOVE_CONTENT &&
         GetParentType(parentType) == eTypeBlock) {
       // Adjacent whitespace-only text nodes might have been suppressed if
       // this node does not have inline ends. Create frames for them now
@@ -8787,17 +8756,15 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
       //
       // FIXME(emilio): This should probably use the lazy frame construction
       // bits if possible instead of reframing it in place.
-      if (aOldNextSibling) {
-        nsIContent* prevSibling = aOldNextSibling->GetPreviousSibling();
-        if (prevSibling && prevSibling->GetPreviousSibling()) {
-          LAYOUT_PHASE_TEMP_EXIT();
-          ReframeTextIfNeeded(aContainer, prevSibling);
-          LAYOUT_PHASE_TEMP_REENTER();
-        }
+      nsIContent* prevSibling = aOldNextSibling->GetPreviousSibling();
+      if (prevSibling && prevSibling->GetPreviousSibling()) {
+        LAYOUT_PHASE_TEMP_EXIT();
+        ReframeTextIfNeeded(aContainer, prevSibling);
+        LAYOUT_PHASE_TEMP_REENTER();
       }
       // Reframe any text node just after the node being removed, if there is
       // one, and if it's not the last child or the first child.
-      if (aOldNextSibling && aOldNextSibling->GetNextSibling() &&
+      if (aOldNextSibling->GetNextSibling() &&
           aOldNextSibling->GetPreviousSibling()) {
         LAYOUT_PHASE_TEMP_EXIT();
         ReframeTextIfNeeded(aContainer, aOldNextSibling);
@@ -8886,7 +8853,7 @@ nsCSSFrameConstructor::EnsureFrameForTextNodeIsCreatedAfterFlush(
 
 void
 nsCSSFrameConstructor::CharacterDataChanged(nsIContent* aContent,
-                                            CharacterDataChangeInfo* aInfo)
+                                            const CharacterDataChangeInfo& aInfo)
 {
   AUTO_LAYOUT_PHASE_ENTRY_POINT(mPresShell->GetPresContext(), FrameC);
 
@@ -13171,4 +13138,23 @@ nsCSSFrameConstructor::FreeFCItem(FrameConstructionItem* aItem)
     item->mNext = mFirstFreeFCItem;
     mFirstFreeFCItem = item;
   }
+}
+
+void
+nsCSSFrameConstructor::AddSizeOfIncludingThis(nsWindowSizes& aSizes) const
+{
+  if (nsIFrame* rootFrame = GetRootFrame()) {
+    rootFrame->AddSizeOfExcludingThisForTree(aSizes);
+  }
+
+  // This must be done after measuring from the frame tree, since frame
+  // manager will measure sizes of staled computed values and style
+  // structs, which only make sense after we know what are being used.
+  nsFrameManager::AddSizeOfIncludingThis(aSizes);
+
+  // Measurement of the following members may be added later if DMD finds it
+  // is worthwhile:
+  // - mFCItemPool
+  // - mQuoteList
+  // - mCounterManager
 }

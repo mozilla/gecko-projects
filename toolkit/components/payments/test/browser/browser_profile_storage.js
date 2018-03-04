@@ -38,27 +38,20 @@ add_task(async function test_initial_state() {
     gBrowser,
     url: BLANK_PAGE_URL,
   }, async browser => {
-    let dialogReadyPromise = waitForWidgetReady();
-    // start by creating a PaymentRequest, and show it
-    await ContentTask.spawn(browser, {methodData, details}, PTU.ContentTasks.createAndShowRequest);
-
-    // get a reference to the UI dialog and the requestId
-    let win = await getPaymentWidget();
-    let requestId = paymentUISrv.requestIdForWindow(win);
-    ok(requestId, "requestId should be defined");
-    is(win.closed, false, "dialog should not be closed");
-
-    let frame = await getPaymentFrame(win);
-    ok(frame, "Got payment frame");
-    await dialogReadyPromise;
-    info("dialog ready");
+    let {win, frame} =
+      await setupPaymentDialog(browser, {
+        methodData,
+        details,
+        merchantTaskFn: PTU.ContentTasks.createAndShowRequest,
+      }
+    );
 
     await spawnPaymentDialogTask(frame, async function checkInitialStore({
       address1GUID,
       card1GUID,
     }) {
       info("checkInitialStore");
-      let contentWin = Components.utils.waiveXrays(content);
+      let contentWin = Cu.waiveXrays(content);
       let {
         savedAddresses,
         savedBasicCards,
@@ -97,7 +90,7 @@ add_task(async function test_initial_state() {
       card1GUID,
     }) {
       info("checkAdd");
-      let contentWin = Components.utils.waiveXrays(content);
+      let contentWin = Cu.waiveXrays(content);
       let {
         savedAddresses,
         savedBasicCards,
@@ -133,7 +126,7 @@ add_task(async function test_initial_state() {
       card1GUID,
     }) {
       info("checkUpdate");
-      let contentWin = Components.utils.waiveXrays(content);
+      let contentWin = Cu.waiveXrays(content);
       let {
         savedAddresses,
         savedBasicCards,
@@ -167,7 +160,7 @@ add_task(async function test_initial_state() {
       card1GUID,
     }) {
       info("checkRemove");
-      let contentWin = Components.utils.waiveXrays(content);
+      let contentWin = Cu.waiveXrays(content);
       let {
         savedAddresses,
         savedBasicCards,

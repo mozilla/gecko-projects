@@ -285,9 +285,9 @@ impl PropertyAnimation {
         match transition_property {
             TransitionProperty::Unsupported(_) => result,
             TransitionProperty::Shorthand(ref shorthand_id) => {
-                shorthand_id.longhands().iter().filter_map(|longhand| {
+                shorthand_id.longhands().filter_map(|longhand| {
                     PropertyAnimation::from_longhand(
-                        &longhand,
+                        longhand,
                         timing_function,
                         duration,
                         old_style,
@@ -295,7 +295,7 @@ impl PropertyAnimation {
                     )
                 }).collect()
             }
-            TransitionProperty::Longhand(ref longhand_id) => {
+            TransitionProperty::Longhand(longhand_id) => {
                 let animation = PropertyAnimation::from_longhand(
                     longhand_id,
                     timing_function,
@@ -309,27 +309,11 @@ impl PropertyAnimation {
                 }
                 result
             }
-            TransitionProperty::All => {
-                TransitionProperty::each(|longhand_id| {
-                    let animation = PropertyAnimation::from_longhand(
-                        longhand_id,
-                        timing_function,
-                        duration,
-                        old_style,
-                        new_style,
-                    );
-
-                    if let Some(animation) = animation {
-                        result.push(animation);
-                    }
-                });
-                result
-            }
         }
     }
 
     fn from_longhand(
-        longhand: &LonghandId,
+        longhand: LonghandId,
         timing_function: TimingFunction,
         duration: Time,
         old_style: &ComputedValues,
@@ -606,7 +590,6 @@ pub fn update_style_for_animation_frame(mut new_style: &mut Arc<ComputedValues>,
     true
 }
 /// Updates a single animation and associated style based on the current time.
-/// If `damage` is provided, inserts the appropriate restyle damage.
 pub fn update_style_for_animation<E>(
     context: &SharedStyleContext,
     animation: &Animation,
@@ -768,7 +751,7 @@ where
                 debug!("update_style_for_animation: scanning prop {:?} for animation \"{}\"",
                        property, name);
                 let animation = PropertyAnimation::from_longhand(
-                    &property,
+                    property,
                     timing_function,
                     Time::from_seconds(relative_duration as f32),
                     &from_style,
@@ -796,8 +779,11 @@ where
 
 /// Update the style in the node when it finishes.
 #[cfg(feature = "servo")]
-pub fn complete_expired_transitions(node: OpaqueNode, style: &mut Arc<ComputedValues>,
-                                    context: &SharedStyleContext) -> bool {
+pub fn complete_expired_transitions(
+    node: OpaqueNode,
+    style: &mut Arc<ComputedValues>,
+    context: &SharedStyleContext,
+) -> bool {
     let had_animations_to_expire;
     {
         let all_expired_animations = context.expired_animations.read();

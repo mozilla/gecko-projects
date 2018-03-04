@@ -17,6 +17,7 @@
 
 #include "gc/ArenaList-inl.h"
 #include "gc/Heap-inl.h"
+#include "gc/PrivateIterators-inl.h"
 #include "vm/JSObject-inl.h"
 
 using namespace js;
@@ -142,7 +143,7 @@ GCRuntime::tryNewNurseryString(JSContext* cx, size_t thingSize, AllocKind kind)
     MOZ_ASSERT(!cx->isNurseryAllocSuppressed());
     MOZ_ASSERT(!IsAtomsCompartment(cx->compartment()));
 
-    Cell* cell = cx->nursery().allocateString(cx, cx->zone(), thingSize, kind);
+    Cell* cell = cx->nursery().allocateString(cx->zone(), thingSize, kind);
     if (cell)
         return static_cast<JSString*>(cell);
 
@@ -151,7 +152,7 @@ GCRuntime::tryNewNurseryString(JSContext* cx, size_t thingSize, AllocKind kind)
 
         // Exceeding gcMaxBytes while tenuring can disable the Nursery.
         if (cx->nursery().isEnabled()) {
-            cell = cx->nursery().allocateString(cx, cx->zone(), thingSize, kind);
+            cell = cx->nursery().allocateString(cx->zone(), thingSize, kind);
             MOZ_ASSERT(cell);
             return static_cast<JSString*>(cell);
         }
@@ -182,7 +183,11 @@ js::AllocateString(JSContext* cx, InitialHeap heap)
     if (!rt->gc.checkAllocatorState<allowGC>(cx, kind))
         return nullptr;
 
-    if (cx->nursery().isEnabled() && heap != TenuredHeap && cx->nursery().canAllocateStrings()) {
+    if (cx->nursery().isEnabled() &&
+        heap != TenuredHeap &&
+        cx->nursery().canAllocateStrings() &&
+        cx->zone()->allocNurseryStrings)
+    {
         auto str = static_cast<StringAllocT*>(rt->gc.tryNewNurseryString<allowGC>(cx, size, kind));
         if (str)
             return str;
@@ -241,7 +246,7 @@ GCRuntime::tryNewTenuredThing(JSContext* cx, AllocKind kind, size_t thingSize)
         // Get the next available free list and allocate out of it. This may
         // acquire a new arena, which will lock the chunk list. If there are no
         // chunks available it may also allocate new memory directly.
-        t = reinterpret_cast<T*>(refillFreeListFromAnyThread(cx, kind, thingSize));
+        t = reinterpret_cast<T*>(refillFreeListFromAnyThread(cx, kind));
 
         if (MOZ_UNLIKELY(!t && allowGC && !cx->helperThread())) {
             // We have no memory available for a new chunk; perform an
@@ -332,12 +337,15 @@ template <typename T>
 GCRuntime::checkIncrementalZoneState(JSContext* cx, T* t)
 {
 #ifdef DEBUG
-    if (cx->helperThread())
+    if (cx->helperThread() || !t)
         return;
 
-    Zone* zone = cx->zone();
-    MOZ_ASSERT_IF(t && zone->wasGCStarted() && (zone->isGCMarking() || zone->isGCSweeping()),
-                  t->asTenured().arena()->allocatedDuringIncremental);
+    TenuredCell* cell = &t->asTenured();
+    Zone* zone = cell->zone();
+    if (zone->isGCMarking() || zone->isGCSweeping())
+        MOZ_ASSERT(cell->isMarkedBlack());
+    else
+        MOZ_ASSERT(!cell->isMarkedAny());
 #endif
 }
 
@@ -358,18 +366,18 @@ GCRuntime::startBackgroundAllocTaskIfIdle()
 }
 
 /* static */ TenuredCell*
-GCRuntime::refillFreeListFromAnyThread(JSContext* cx, AllocKind thingKind, size_t thingSize)
+GCRuntime::refillFreeListFromAnyThread(JSContext* cx, AllocKind thingKind)
 {
     cx->arenas()->checkEmptyFreeList(thingKind);
 
     if (!cx->helperThread())
-        return refillFreeListFromActiveCooperatingThread(cx, thingKind, thingSize);
+        return refillFreeListFromActiveCooperatingThread(cx, thingKind);
 
     return refillFreeListFromHelperThread(cx, thingKind);
 }
 
 /* static */ TenuredCell*
-GCRuntime::refillFreeListFromActiveCooperatingThread(JSContext* cx, AllocKind thingKind, size_t thingSize)
+GCRuntime::refillFreeListFromActiveCooperatingThread(JSContext* cx, AllocKind thingKind)
 {
     // It should not be possible to allocate on the active thread while we are
     // inside a GC.
@@ -452,11 +460,12 @@ ArenaLists::allocateFromArenaInner(JS::Zone* zone, Arena* arena, AllocKind kind)
 {
     size_t thingSize = Arena::thingSize(kind);
 
-    freeLists(kind) = arena->getFirstFreeSpan();
+    setFreeList(kind, arena->getFirstFreeSpan());
 
     if (MOZ_UNLIKELY(zone->wasGCStarted()))
         zone->runtimeFromAnyThread()->gc.arenaAllocatedDuringGC(zone, arena);
-    TenuredCell* thing = freeLists(kind)->allocate(thingSize);
+    TenuredCell* thing = freeList(kind)->allocate(thingSize);
+
     MOZ_ASSERT(thing); // This allocation is infallible.
     return thing;
 }
@@ -464,12 +473,16 @@ ArenaLists::allocateFromArenaInner(JS::Zone* zone, Arena* arena, AllocKind kind)
 void
 GCRuntime::arenaAllocatedDuringGC(JS::Zone* zone, Arena* arena)
 {
-    if (zone->needsIncrementalBarrier()) {
-        arena->allocatedDuringIncremental = true;
-        marker.delayMarkingArena(arena);
-    } else if (zone->isGCSweeping()) {
-        arena->setNextAllocDuringSweep(arenasAllocatedDuringSweep);
-        arenasAllocatedDuringSweep = arena;
+    // Ensure that anything allocated during the mark or sweep phases of an
+    // incremental GC will be marked black by pre-marking all free cells in the
+    // arena we are about to allocate from.
+
+    if (zone->needsIncrementalBarrier() || zone->isGCSweeping()) {
+        for (ArenaFreeCellIter iter(arena); !iter.done(); iter.next()) {
+            TenuredCell* cell = iter.getCell();
+            MOZ_ASSERT(!cell->isMarkedAny());
+            cell->markBlack();
+        }
     }
 }
 
@@ -681,7 +694,7 @@ Chunk::init(JSRuntime* rt)
      * Decommit the arenas. We do this after poisoning so that if the OS does
      * not have to recycle the pages, we still get the benefit of poisoning.
      */
-    decommitAllArenas(rt);
+    decommitAllArenas();
 
     /* Initialize the chunk info. */
     info.init();
@@ -690,7 +703,7 @@ Chunk::init(JSRuntime* rt)
     /* The rest of info fields are initialized in pickChunk. */
 }
 
-void Chunk::decommitAllArenas(JSRuntime* rt)
+void Chunk::decommitAllArenas()
 {
     decommittedArenas.clear(true);
     MarkPagesUnused(&arenas[0], ArenasPerChunk * ArenaSize);

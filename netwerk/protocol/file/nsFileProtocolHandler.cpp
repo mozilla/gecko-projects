@@ -239,21 +239,44 @@ nsFileProtocolHandler::AllowPort(int32_t port, const char *scheme, bool *result)
 // nsIFileProtocolHandler methods:
 
 NS_IMETHODIMP
-nsFileProtocolHandler::NewFileURI(nsIFile *file, nsIURI **result)
+nsFileProtocolHandler::NewFileURI(nsIFile *aFile, nsIURI **aResult)
 {
-    NS_ENSURE_ARG_POINTER(file);
+    NS_ENSURE_ARG_POINTER(aFile);
+
+    RefPtr<nsIFile> file(aFile);
+    // NOTE: the origin charset is assigned the value of the platform
+    // charset by the SetFile method.
+    return NS_MutateURI(new nsStandardURL::Mutator())
+             .Apply(NS_MutatorMethod(&nsIFileURLMutator::SetFile, file))
+             .Finalize(aResult);
+}
+
+NS_IMETHODIMP
+nsFileProtocolHandler::NewFileURIMutator(nsIFile *aFile, nsIURIMutator **aResult)
+{
+    NS_ENSURE_ARG_POINTER(aFile);
     nsresult rv;
 
-    nsCOMPtr<nsIFileURL> url = new nsStandardURL(true);
-    if (!url)
-        return NS_ERROR_OUT_OF_MEMORY;
+    nsCOMPtr<nsIURI> url = new nsStandardURL(true);
+    nsCOMPtr<nsIURIMutator> mutator;
+    rv = url->Mutate(getter_AddRefs(mutator));
+    if (NS_FAILED(rv)) {
+        return rv;
+    }
+    nsCOMPtr<nsIFileURLMutator> fileMutator = do_QueryInterface(mutator, &rv);
+    if (NS_FAILED(rv)) {
+        return rv;
+    }
 
     // NOTE: the origin charset is assigned the value of the platform
     // charset by the SetFile method.
-    rv = url->SetFile(file);
-    if (NS_FAILED(rv)) return rv;
+    rv = fileMutator->SetFile(aFile);
+    if (NS_FAILED(rv)) {
+        return rv;
+    }
 
-    return CallQueryInterface(url, result);
+    mutator.forget(aResult);
+    return NS_OK;
 }
 
 NS_IMETHODIMP

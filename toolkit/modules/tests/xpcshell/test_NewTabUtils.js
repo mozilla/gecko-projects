@@ -527,19 +527,12 @@ add_task(async function getHighlightsWithPocketSuccess() {
         resolved_title: "A title for foo",
         resolved_url: "http://www.foo.com",
         item_id: "123",
+        open_url: "getpocket.com/itemID",
         status: "0"
       },
       "456": {
         item_id: "456",
         status: "2",
-      },
-      "789": {
-        resolved_url: bookmark.url,
-        excerpt: bookmark.description,
-        resolved_title: bookmark.title,
-        image: {src: bookmark.preview_image_url},
-        status: "0",
-        item_id: "789"
       }
     }
   };
@@ -549,11 +542,15 @@ add_task(async function getHighlightsWithPocketSuccess() {
 
   NewTabUtils.activityStreamProvider.fetchSavedPocketItems = () => fakeResponse;
   let provider = NewTabUtils.activityStreamLinks;
+
+  // Force a cache invalidation
+  NewTabUtils.activityStreamLinks._pocketLastUpdated = Date.now() - (70 * 60 * 1000);
+  NewTabUtils.activityStreamLinks._pocketLastLatest = -1;
   let links = await provider.getHighlights();
 
-  // We should have 1 bookmark followed by 2 pocket stories in highlights
+  // We should have 1 bookmark followed by 1 pocket story in highlights
   // We should not have stored the second pocket item since it was deleted
-  Assert.equal(links.length, 3, "Should have 3 links in highlights");
+  Assert.equal(links.length, 2, "Should have 2 links in highlights");
 
   // First highlight should be a bookmark
   Assert.equal(links[0].url, bookmark.url, "The first link is the bookmark");
@@ -567,13 +564,64 @@ add_task(async function getHighlightsWithPocketSuccess() {
   Assert.equal(currentLink.title, pocketItem.resolved_title, "Correct title was added");
   Assert.equal(currentLink.description, pocketItem.excerpt, "Correct description was added");
   Assert.equal(currentLink.pocket_id, pocketItem.item_id, "item_id was preserved");
-  Assert.equal(currentLink.bookmarkGuid, undefined, "Should not have a bookmarkGuid");
+  Assert.equal(currentLink.open_url, pocketItem.open_url, "open_url was preserved");
 
-  // Third highlight should still be a Pocket item but since it was bookmarked, it has a bookmarkGuid
-  pocketItem = fakeResponse.list["789"];
-  currentLink = links[2];
-  Assert.equal(currentLink.url, pocketItem.resolved_url, "Correct Pocket item");
-  Assert.ok(currentLink.bookmarkGuid, "Attached a bookmarkGuid for this Pocket item");
+  NewTabUtils.activityStreamLinks._savedPocketStories = null;
+});
+
+add_task(async function getHighlightsWithPocketCached() {
+  await setUpActivityStreamTest();
+
+  let fakeResponse = {
+    list: {
+      "123": {
+        image: {src: "foo.com/img.png"},
+        excerpt: "A description for foo",
+        resolved_title: "A title for foo",
+        resolved_url: "http://www.foo.com",
+        item_id: "123",
+        open_url: "getpocket.com/itemID",
+        status: "0"
+      },
+      "456": {
+        item_id: "456",
+        status: "2",
+      }
+    }
+  };
+
+  NewTabUtils.activityStreamProvider.fetchSavedPocketItems = () => fakeResponse;
+  let provider = NewTabUtils.activityStreamLinks;
+
+  let links = await provider.getHighlights();
+  Assert.equal(links.length, 1, "Sanity check that we got 1 link back for highlights");
+  Assert.equal(links[0].url, fakeResponse.list["123"].resolved_url, "Sanity check that it was the pocket story");
+
+  // Update what the response would be
+  fakeResponse.list["789"] = {
+    image: {src: "bar.com/img.png"},
+    excerpt: "A description for bar",
+    resolved_title: "A title for bar",
+    resolved_url: "http://www.bar.com",
+    item_id: "789",
+    open_url: "getpocket.com/itemID",
+    status: "0"
+  };
+
+  // Call getHighlights again - this time we should get the cached links since we just updated
+  links = await provider.getHighlights();
+  Assert.equal(links.length, 1, "We still got 1 link back for highlights");
+  Assert.equal(links[0].url, fakeResponse.list["123"].resolved_url, "It was still the same pocket story");
+
+  // Now force a cache invalidation and call getHighlights again
+  NewTabUtils.activityStreamLinks._pocketLastUpdated = Date.now() - (70 * 60 * 1000);
+  NewTabUtils.activityStreamLinks._pocketLastLatest = -1;
+  links = await provider.getHighlights();
+  Assert.equal(links.length, 2, "This time we got fresh links with the new response");
+  Assert.equal(links[0].url, fakeResponse.list["123"].resolved_url, "First link is unchanged");
+  Assert.equal(links[1].url, fakeResponse.list["789"].resolved_url, "Second link is the new link");
+
+  NewTabUtils.activityStreamLinks._savedPocketStories = null;
 });
 
 add_task(async function getHighlightsWithPocketFailure() {
@@ -583,6 +631,10 @@ add_task(async function getHighlightsWithPocketFailure() {
     throw new Error();
   };
   let provider = NewTabUtils.activityStreamLinks;
+
+  // Force a cache invalidation
+  NewTabUtils.activityStreamLinks._pocketLastUpdated = Date.now() - (70 * 60 * 1000);
+  NewTabUtils.activityStreamLinks._pocketLastLatest = -1;
   let links = await provider.getHighlights();
   Assert.equal(links.length, 0, "Return empty links if we reject the promise");
 });
@@ -593,6 +645,10 @@ add_task(async function getHighlightsWithPocketNoData() {
   NewTabUtils.activityStreamProvider.fetchSavedPocketItems = () => {};
 
   let provider = NewTabUtils.activityStreamLinks;
+
+  // Force a cache invalidation
+  NewTabUtils.activityStreamLinks._pocketLastUpdated = Date.now() - (70 * 60 * 1000);
+  NewTabUtils.activityStreamLinks._pocketLastLatest = -1;
   let links = await provider.getHighlights();
   Assert.equal(links.length, 0, "Return empty links if we got no data back from the response");
 });
@@ -866,6 +922,26 @@ add_task(async function activityStream_blockedURLs() {
   // bookmarks
   sizeQueryResult = await getBookmarksSize();
   Assert.equal(sizeQueryResult, 1, "got the correct bookmark size");
+});
+
+add_task(async function activityStream_getTotalBookmarksCount() {
+  await setUpActivityStreamTest();
+
+  let provider = NewTabUtils.activityStreamProvider;
+  let bookmarks = [
+    {url: "https://mozilla1.com/0", parentGuid: PlacesUtils.bookmarks.unfiledGuid},
+    {url: "https://mozilla1.com/1", parentGuid: PlacesUtils.bookmarks.unfiledGuid}
+  ];
+
+  let bookmarksSize = await provider.getTotalBookmarksCount();
+  Assert.equal(bookmarksSize, 0, ".getTotalBookmarksCount() returns 0 for an empty bookmarks table");
+
+  for (const bookmark of bookmarks) {
+    await PlacesUtils.bookmarks.insert(bookmark);
+  }
+
+  bookmarksSize = await provider.getTotalBookmarksCount();
+  Assert.equal(bookmarksSize, 2, ".getTotalBookmarksCount() returns 2 after 2 bookmarks are inserted");
 });
 
 function TestProvider(getLinksFn) {

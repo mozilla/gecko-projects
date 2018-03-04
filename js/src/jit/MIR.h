@@ -4003,8 +4003,7 @@ class MArrayState
     INSTRUCTION_HEADER(ArrayState)
     NAMED_OPERANDS((0, array), (1, initializedLength))
 
-    static MArrayState* New(TempAllocator& alloc, MDefinition* arr, MDefinition* undefinedVal,
-                            MDefinition* initLength);
+    static MArrayState* New(TempAllocator& alloc, MDefinition* arr, MDefinition* initLength);
     static MArrayState* Copy(TempAllocator& alloc, MArrayState* state);
 
     // Initialize values from CopyOnWrite arrays.
@@ -4212,6 +4211,7 @@ class MCall
     bool ignoresReturnValue_:1;
 
     bool needsArgCheck_:1;
+    bool needsClassCheck_:1;
 
     MCall(WrappedFunction* target, uint32_t numActualArgs, bool construct, bool ignoresReturnValue)
       : MVariadicInstruction(classOpcode),
@@ -4219,7 +4219,8 @@ class MCall
         numActualArgs_(numActualArgs),
         construct_(construct),
         ignoresReturnValue_(ignoresReturnValue),
-        needsArgCheck_(true)
+        needsArgCheck_(true),
+        needsClassCheck_(true)
     {
         setResultType(MIRType::Value);
     }
@@ -4237,10 +4238,17 @@ class MCall
     bool needsArgCheck() const {
         return needsArgCheck_;
     }
-
     void disableArgCheck() {
         needsArgCheck_ = false;
     }
+
+    bool needsClassCheck() const {
+        return needsClassCheck_;
+    }
+    void disableClassCheck() {
+        needsClassCheck_ = false;
+    }
+
     MDefinition* getFunction() const {
         return getOperand(FunctionOperandIndex);
     }
@@ -8790,7 +8798,10 @@ struct LambdaFunctionInfo
     // The functions used in lambdas are the canonical original function in
     // the script, and are immutable except for delazification. Record this
     // information while still on the active thread to avoid races.
-    CompilerFunction fun;
+  private:
+    CompilerFunction fun_;
+
+  public:
     uint16_t flags;
     uint16_t nargs;
     gc::Cell* scriptOrLazyScript;
@@ -8798,20 +8809,37 @@ struct LambdaFunctionInfo
     bool useSingletonForClone;
 
     explicit LambdaFunctionInfo(JSFunction* fun)
-      : fun(fun), flags(fun->flags()), nargs(fun->nargs()),
+      : fun_(fun), flags(fun->flags()), nargs(fun->nargs()),
         scriptOrLazyScript(fun->hasScript()
                            ? (gc::Cell*) fun->nonLazyScript()
                            : (gc::Cell*) fun->lazyScript()),
         singletonType(fun->isSingleton()),
         useSingletonForClone(ObjectGroup::useSingletonForClone(fun))
-    {}
+    {
+        // If this assert fails, make sure CodeGenerator::visitLambda does the
+        // right thing. We can't assert this off-thread in CodeGenerator,
+        // because fun->isAsync() accesses the script/lazyScript and can race
+        // with delazification on the main thread.
+        MOZ_ASSERT_IF(flags & JSFunction::EXTENDED,
+                      fun->isArrow() ||
+                      fun->allowSuperProperty() ||
+                      fun->isSelfHostedBuiltin() ||
+                      fun->isAsync());
+    }
+
+    // Be careful when calling this off-thread. Don't call any JSFunction*
+    // methods that depend on script/lazyScript - this can race with
+    // delazification on the main thread.
+    JSFunction* funUnsafe() const {
+        return fun_;
+    }
 
     bool appendRoots(MRootList& roots) const {
-        if (!roots.append(fun))
+        if (!roots.append(fun_))
             return false;
-        if (fun->hasScript())
-            return roots.append(fun->nonLazyScript());
-        return roots.append(fun->lazyScript());
+        if (fun_->hasScript())
+            return roots.append(fun_->nonLazyScript());
+        return roots.append(fun_->lazyScript());
     }
 
   private:
@@ -8831,8 +8859,9 @@ class MLambda
         info_(&cst->toObject().as<JSFunction>())
     {
         setResultType(MIRType::Object);
-        if (!info().fun->isSingleton() && !ObjectGroup::useSingletonForClone(info().fun))
-            setResultTypeSet(MakeSingletonTypeSet(alloc, constraints, info().fun));
+        JSFunction* fun = info().funUnsafe();
+        if (!fun->isSingleton() && !ObjectGroup::useSingletonForClone(fun))
+            setResultTypeSet(MakeSingletonTypeSet(alloc, constraints, fun));
     }
 
   public:
@@ -8867,9 +8896,10 @@ class MLambdaArrow
         info_(&cst->toObject().as<JSFunction>())
     {
         setResultType(MIRType::Object);
-        MOZ_ASSERT(!ObjectGroup::useSingletonForClone(info().fun));
-        if (!info().fun->isSingleton())
-            setResultTypeSet(MakeSingletonTypeSet(alloc, constraints, info().fun));
+        JSFunction* fun = info().funUnsafe();
+        MOZ_ASSERT(!ObjectGroup::useSingletonForClone(fun));
+        if (!fun->isSingleton())
+            setResultTypeSet(MakeSingletonTypeSet(alloc, constraints, fun));
     }
 
   public:
@@ -13223,6 +13253,8 @@ class MTypeBarrier
     }
     MDefinition* foldsTo(TempAllocator& alloc) override;
 
+    bool canRedefineInput();
+
     bool alwaysBails() const {
         // If mirtype of input doesn't agree with mirtype of barrier,
         // we will definitely bail.
@@ -13241,43 +13273,6 @@ class MTypeBarrier
     }
 
     ALLOW_CLONE(MTypeBarrier)
-};
-
-// Like MTypeBarrier, guard that the value is in the given type set. This is
-// used before property writes to ensure the value being written is represented
-// in the property types for the object.
-class MMonitorTypes
-  : public MUnaryInstruction,
-    public BoxInputsPolicy::Data
-{
-    const TemporaryTypeSet* typeSet_;
-    BarrierKind barrierKind_;
-
-    MMonitorTypes(MDefinition* def, const TemporaryTypeSet* types, BarrierKind kind)
-      : MUnaryInstruction(classOpcode, def),
-        typeSet_(types),
-        barrierKind_(kind)
-    {
-        MOZ_ASSERT(kind == BarrierKind::TypeTagOnly || kind == BarrierKind::TypeSet);
-
-        setGuard();
-        MOZ_ASSERT(!types->unknown());
-    }
-
-  public:
-    INSTRUCTION_HEADER(MonitorTypes)
-    TRIVIAL_NEW_WRAPPERS
-
-    const TemporaryTypeSet* typeSet() const {
-        return typeSet_;
-    }
-    BarrierKind barrierKind() const {
-        return barrierKind_;
-    }
-
-    AliasSet getAliasSet() const override {
-        return AliasSet::None();
-    }
 };
 
 // Given a value being written to another object, update the generational store
@@ -14271,6 +14266,9 @@ class MWasmBoundsCheck
     {
         // Bounds check is effectful: it throws for OOB.
         setGuard();
+
+        if (JitOptions.spectreIndexMasking)
+            setResultType(MIRType::Int32);
     }
 
   public:
@@ -15191,8 +15189,6 @@ PropertyReadOnPrototypeNeedsTypeBarrier(IonBuilder* builder,
                                         TemporaryTypeSet* observed);
 bool PropertyReadIsIdempotent(CompilerConstraintList* constraints,
                               MDefinition* obj, PropertyName* name);
-void AddObjectsForPropertyRead(TempAllocator& tempAlloc, MDefinition* obj, PropertyName* name,
-                               TemporaryTypeSet* observed);
 bool CanWriteProperty(TempAllocator& alloc, CompilerConstraintList* constraints,
                       HeapTypeSetKey property, MDefinition* value,
                       MIRType implicitType = MIRType::None);

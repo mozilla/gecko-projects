@@ -9,7 +9,7 @@ const { Component, createFactory } = require("devtools/client/shared/vendor/reac
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const { div } = dom;
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
-const { connect } = require("devtools/client/shared/vendor/react-redux");
+const { connect } = require("../utils/redux-connect");
 const { findDOMNode } = require("devtools/client/shared/vendor/react-dom");
 const Actions = require("../actions/index");
 const { updateFormDataSections } = require("../utils/request-utils");
@@ -41,7 +41,7 @@ class MonitorPanel extends Component {
       networkDetailsOpen: PropTypes.bool.isRequired,
       openNetworkDetails: PropTypes.func.isRequired,
       request: PropTypes.object,
-      selectedRequestVisible: PropTypes.func.isRequired,
+      selectedRequestVisible: PropTypes.bool.isRequired,
       sourceMapService: PropTypes.object,
       openLink: PropTypes.func,
       updateRequest: PropTypes.func.isRequired,
@@ -113,8 +113,8 @@ class MonitorPanel extends Component {
         Toolbar({ connector }),
         SplitBox({
           className: "devtools-responsive-container",
-          initialWidth: `${initialWidth}px`,
-          initialHeight: `${initialHeight}px`,
+          initialWidth: initialWidth,
+          initialHeight: initialHeight,
           minSize: "50px",
           maxSize: "80%",
           splitterSize: 1,

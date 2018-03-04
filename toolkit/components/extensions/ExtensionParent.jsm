@@ -13,7 +13,7 @@
 
 /* exported ExtensionParent */
 
-this.EXPORTED_SYMBOLS = ["ExtensionParent"];
+var EXPORTED_SYMBOLS = ["ExtensionParent"];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -653,6 +653,14 @@ ParentAPIManager = {
   shutdownExtension(extensionId) {
     for (let [childId, context] of this.proxyContexts) {
       if (context.extension.id == extensionId) {
+        if (["ADDON_DISABLE", "ADDON_UNINSTALL"].includes(context.extension.shutdownReason)) {
+          let modules = apiManager.eventModules.get("disable");
+          Array.from(modules).map(async apiName => {
+            let module = await apiManager.asyncLoadModule(apiName);
+            module.onDisable(extensionId);
+          });
+        }
+
         context.shutdown();
         this.proxyContexts.delete(childId);
       }

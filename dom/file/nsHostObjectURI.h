@@ -25,10 +25,11 @@
  * MediaStreams, with scheme "mediastream", and MediaSources, with scheme
  * "mediasource".
  */
-class nsHostObjectURI : public mozilla::net::nsSimpleURI
-                      , public nsIURIWithPrincipal
-                      , public nsIURIWithBlobImpl
-                      , public nsSupportsWeakReference
+class nsHostObjectURI final
+  : public mozilla::net::nsSimpleURI
+  , public nsIURIWithPrincipal
+  , public nsIURIWithBlobImpl
+  , public nsSupportsWeakReference
 {
 public:
   nsHostObjectURI(nsIPrincipal* aPrincipal,
@@ -47,8 +48,6 @@ public:
   NS_DECL_NSISERIALIZABLE
   NS_DECL_NSICLASSINFO
   NS_DECL_NSIIPCSERIALIZABLEURI
-
-  NS_IMETHOD SetScheme(const nsACString &aProtocol) override;
 
   // Override CloneInternal() and EqualsInternal()
   virtual nsresult CloneInternal(RefHandlingEnum aRefHandlingMode,
@@ -77,8 +76,10 @@ public:
 protected:
   virtual ~nsHostObjectURI() {}
 
+  nsresult SetScheme(const nsACString &aProtocol) override;
+
 public:
-  class Mutator
+  class Mutator final
     : public nsIURIMutator
     , public BaseURIMutator<nsHostObjectURI>
     , public nsIBlobURIMutator
@@ -114,6 +115,8 @@ public:
 
     friend class nsHostObjectURI;
   };
+
+  friend BaseURIMutator<nsHostObjectURI>;
 };
 
 #define NS_HOSTOBJECTURI_CID \

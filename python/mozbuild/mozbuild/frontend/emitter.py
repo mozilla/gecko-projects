@@ -531,53 +531,6 @@ class TreeMetadataEmitter(LoggingMixin):
                 'crate-type %s is not permitted for %s' % (crate_type, libname),
                 context)
 
-        # Check that the [profile.{dev,release}.panic] field is "abort"
-        profile_section = config.get('profile', None)
-        if not profile_section:
-            raise SandboxValidationError(
-                'Cargo.toml for %s has no [profile] section' % libname,
-                context)
-
-        for profile_name in ['dev', 'release']:
-            profile = profile_section.get(profile_name, None)
-            if not profile:
-                raise SandboxValidationError(
-                    'Cargo.toml for %s has no [profile.%s] section' % (libname, profile_name),
-                    context)
-
-            panic = profile.get('panic', None)
-            if panic != 'abort':
-                raise SandboxValidationError(
-                    ('Cargo.toml for %s does not specify `panic = "abort"`'
-                     ' in [profile.%s] section') % (libname, profile_name),
-                    context)
-
-            # gkrust and gkrust-gtest must have the exact same profile settings
-            # for our almost-workspaces configuration to work properly.
-            if libname in ('gkrust', 'gkrust-gtest'):
-                if profile_name == 'dev':
-                    expected_profile = {
-                        'opt-level': 1,
-                        'rpath': False,
-                        'lto': False,
-                        'debug-assertions': True,
-                        'codegen-units': 4,
-                        'panic': 'abort',
-                    }
-                else:
-                    expected_profile = {
-                        'opt-level': 2,
-                        'rpath': False,
-                        'debug-assertions': False,
-                        'panic': 'abort',
-                        'codegen-units': 1,
-                    }
-
-                if profile != expected_profile:
-                    raise SandboxValidationError(
-                        'Cargo profile.%s for %s is incorrect' % (profile_name, libname),
-                        context)
-
         cargo_target_dir = context.get('RUST_LIBRARY_TARGET_DIR', '.')
 
         dependencies = set(config.get('dependencies', {}).iterkeys())
@@ -1054,9 +1007,6 @@ class TreeMetadataEmitter(LoggingMixin):
         # desired abstraction of the build definition away from makefiles.
         passthru = VariablePassthru(context)
         varlist = [
-            'ANDROID_APK_NAME',
-            'ANDROID_APK_PACKAGE',
-            'ANDROID_GENERATED_RESFILES',
             'EXTRA_DSO_LDOPTS',
             'RCFILE',
             'RESFILE',
@@ -1239,10 +1189,17 @@ class TreeMetadataEmitter(LoggingMixin):
                                  '%s: %s')
                                 % (var, f,), context)
                     if var.startswith('LOCALIZED_'):
-                        if isinstance(f, SourcePath) and not f.startswith('en-US/'):
-                            raise SandboxValidationError(
-                                    '%s paths must start with `en-US/`: %s'
-                                    % (var, f,), context)
+                        if isinstance(f, SourcePath):
+                            if f.startswith('en-US/'):
+                                pass
+                            elif '/locales/en-US/' in f:
+                                pass
+                            else:
+                                raise SandboxValidationError(
+                                        '%s paths must start with `en-US/` or '
+                                        'contain `/locales/en-US/`: %s'
+                                        % (var, f,), context)
+
                     if not isinstance(f, ObjDirPath):
                         path = f.full_path
                         if '*' not in path and not os.path.exists(path):
@@ -1339,24 +1296,6 @@ class TreeMetadataEmitter(LoggingMixin):
             computed_as_flags.resolve_flags('OS',
                                             context.config.substs.get('YASM_ASFLAGS', []))
 
-
-        for (symbol, cls) in [
-                ('ANDROID_RES_DIRS', AndroidResDirs),
-                ('ANDROID_EXTRA_RES_DIRS', AndroidExtraResDirs),
-                ('ANDROID_ASSETS_DIRS', AndroidAssetsDirs)]:
-            paths = context.get(symbol)
-            if not paths:
-                continue
-            for p in paths:
-                if isinstance(p, SourcePath) and not os.path.isdir(p.full_path):
-                    raise SandboxValidationError('Directory listed in '
-                        '%s is not a directory: \'%s\'' %
-                            (symbol, p.full_path), context)
-            yield cls(context, paths)
-
-        android_extra_packages = context.get('ANDROID_EXTRA_PACKAGES')
-        if android_extra_packages:
-            yield AndroidExtraPackages(context, android_extra_packages)
 
         if passthru.variables:
             yield passthru

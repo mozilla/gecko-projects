@@ -7,7 +7,7 @@
  * the current selected tab's content outer window ID.
  */
 
-this.EXPORTED_SYMBOLS = ["trackBrowserWindow"];
+var EXPORTED_SYMBOLS = ["trackBrowserWindow"];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
@@ -27,9 +27,9 @@ var _lastFocusedWindow = null;
 var _lastTopLevelWindowID = 0;
 
 // Exported symbol
-this.trackBrowserWindow = function trackBrowserWindow(aWindow) {
+function trackBrowserWindow(aWindow) {
   WindowHelper.addWindow(aWindow);
-};
+}
 
 // Global methods
 function debug(s) {
@@ -48,7 +48,7 @@ function _updateCurrentContentOuterWindowID(aBrowser) {
         " id=" + aBrowser.outerWindowID);
 
   _lastTopLevelWindowID = aBrowser.outerWindowID;
-  let windowIDWrapper = Components.classes["@mozilla.org/supports-PRUint64;1"]
+  let windowIDWrapper = Cc["@mozilla.org/supports-PRUint64;1"]
                           .createInstance(Ci.nsISupportsPRUint64);
   windowIDWrapper.data = _lastTopLevelWindowID;
   Services.obs.notifyObservers(windowIDWrapper,

@@ -4,7 +4,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["SessionStore"];
+var EXPORTED_SYMBOLS = ["SessionStore"];
 
 // Current version of the format used by Session Restore.
 const FORMAT_VERSION = 1;
@@ -181,7 +181,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   TabStateFlusher: "resource:///modules/sessionstore/TabStateFlusher.jsm",
   Utils: "resource://gre/modules/sessionstore/Utils.jsm",
   ViewSourceBrowser: "resource://gre/modules/ViewSourceBrowser.jsm",
-  console: "resource://gre/modules/Console.jsm",
   setTimeout: "resource://gre/modules/Timer.jsm",
 });
 
@@ -205,7 +204,7 @@ function debug(aMsg) {
  */
 var gResistFingerprintingEnabled = false;
 
-this.SessionStore = {
+var SessionStore = {
   get promiseInitialized() {
     return SessionStoreInternal.promiseInitialized;
   },

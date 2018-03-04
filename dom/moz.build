@@ -15,7 +15,6 @@ JAR_MANIFESTS += ['jar.mn']
 
 interfaces = [
     'base',
-    'canvas',
     'core',
     'html',
     'events',
@@ -61,6 +60,7 @@ DIRS += [
     'asmjscache',
     'mathml',
     'media',
+    'midi',
     'notification',
     'offline',
     'power',

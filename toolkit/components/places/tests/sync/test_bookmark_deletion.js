@@ -1,3 +1,6 @@
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
+
 add_task(async function test_complex_orphaning() {
   let buf = await openMirror("complex_orphaning");
 
@@ -630,7 +633,7 @@ add_task(async function test_nonexistent_on_one_side() {
         id: "menu",
         type: "folder",
         parentid: "places",
-        hasDupe: false,
+        hasDupe: true,
         parentName: "",
         dateAdded: menuDateAdded.getTime(),
         title: BookmarksMenuTitle,

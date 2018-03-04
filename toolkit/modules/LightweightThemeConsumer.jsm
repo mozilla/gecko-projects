@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-this.EXPORTED_SYMBOLS = ["LightweightThemeConsumer"];
+var EXPORTED_SYMBOLS = ["LightweightThemeConsumer"];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
@@ -10,13 +10,17 @@ ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 // Get the theme variables from the app resource directory.
 // This allows per-app variables.
+const toolkitVariableMap = [
+  ["--arrowpanel-background", "popup"],
+  ["--arrowpanel-color", "popup_text"],
+  ["--arrowpanel-border-color", "popup_border"],
+];
 ChromeUtils.import("resource:///modules/ThemeVariableMap.jsm");
 
 ChromeUtils.defineModuleGetter(this, "LightweightThemeImageOptimizer",
   "resource://gre/modules/addons/LightweightThemeImageOptimizer.jsm");
 
-this.LightweightThemeConsumer =
- function LightweightThemeConsumer(aDocument) {
+function LightweightThemeConsumer(aDocument) {
   this._doc = aDocument;
   this._win = aDocument.defaultView;
 
@@ -26,7 +30,7 @@ this.LightweightThemeConsumer =
   ChromeUtils.import("resource://gre/modules/LightweightThemeManager.jsm", temp);
   this._update(temp.LightweightThemeManager.currentThemeForDisplay);
   this._win.addEventListener("unload", this, { once: true });
-};
+}
 
 LightweightThemeConsumer.prototype = {
   _lastData: null,
@@ -175,10 +179,12 @@ function _setProperty(elem, active, variableName, value) {
 }
 
 function _setProperties(root, active, vars) {
-  for (let [cssVarName, varsKey, optionalElementID] of ThemeVariableMap) {
-    let elem = optionalElementID ? root.ownerDocument.getElementById(optionalElementID)
-                                 : root;
-    _setProperty(elem, active, cssVarName, vars[varsKey]);
+  for (let map of [toolkitVariableMap, ThemeVariableMap]) {
+    for (let [cssVarName, varsKey, optionalElementID] of map) {
+      let elem = optionalElementID ? root.ownerDocument.getElementById(optionalElementID)
+                                   : root;
+      _setProperty(elem, active, cssVarName, vars[varsKey]);
+    }
   }
 }
 

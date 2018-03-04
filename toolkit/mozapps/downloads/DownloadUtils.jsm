@@ -5,7 +5,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = [ "DownloadUtils" ];
+var EXPORTED_SYMBOLS = [ "DownloadUtils" ];
 
 /**
  * This module provides the DownloadUtils object which contains useful methods
@@ -95,7 +95,7 @@ Object.defineProperty(this, "gBundle", {
 const kCachedLastMaxSize = 10;
 var gCachedLast = [];
 
-this.DownloadUtils = {
+var DownloadUtils = {
   /**
    * Generate a full status string for a download given its current progress,
    * total size, speed, last time remaining
@@ -539,8 +539,8 @@ function convertTimeUnitsUnits(aTime, aIndex) {
  * @param aMsg
  *        Error message to log or an array of strings to concat
  */
-function log(aMsg) {
-  let msg = "DownloadUtils.jsm: " + (aMsg.join ? aMsg.join("") : aMsg);
-  Services.console.logStringMessage(msg);
-  dump(msg + "\n");
-}
+// function log(aMsg) {
+//   let msg = "DownloadUtils.jsm: " + (aMsg.join ? aMsg.join("") : aMsg);
+//   Services.console.logStringMessage(msg);
+//   dump(msg + "\n");
+// }

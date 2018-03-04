@@ -34,8 +34,9 @@
 <!ENTITY % connectionDTD SYSTEM "chrome://browser/locale/preferences/connection.dtd">
 <!ENTITY % siteDataSettingsDTD SYSTEM
   "chrome://browser/locale/preferences/siteDataSettings.dtd" >
+<!ENTITY % clearSiteDataDTD SYSTEM
+  "chrome://browser/locale/preferences/clearSiteData.dtd" >
 <!ENTITY % privacyDTD SYSTEM "chrome://browser/locale/preferences/privacy.dtd">
-<!ENTITY % tabsDTD SYSTEM "chrome://browser/locale/preferences/tabs.dtd">
 <!ENTITY % searchDTD SYSTEM "chrome://browser/locale/preferences/search.dtd">
 <!ENTITY % syncBrandDTD SYSTEM "chrome://browser/locale/syncBrand.dtd">
 <!ENTITY % syncDTD SYSTEM "chrome://browser/locale/preferences/sync.dtd">
@@ -47,8 +48,6 @@
 <!ENTITY % mainDTD SYSTEM "chrome://browser/locale/preferences/main.dtd">
 <!ENTITY % aboutHomeDTD SYSTEM "chrome://browser/locale/aboutHome.dtd">
 <!ENTITY % contentDTD SYSTEM "chrome://browser/locale/preferences/content.dtd">
-<!ENTITY % applicationsDTD SYSTEM
-  "chrome://browser/locale/preferences/applications.dtd">
 <!ENTITY % advancedDTD SYSTEM
   "chrome://browser/locale/preferences/advanced.dtd">
 <!ENTITY % aboutDialogDTD SYSTEM "chrome://browser/locale/aboutDialog.dtd" >
@@ -67,8 +66,8 @@
 %deviceManangerDTD;
 %connectionDTD;
 %siteDataSettingsDTD;
+%clearSiteDataDTD;
 %privacyDTD;
-%tabsDTD;
 %searchDTD;
 %syncBrandDTD;
 %syncDTD;
@@ -78,7 +77,6 @@
 %mainDTD;
 %aboutHomeDTD;
 %contentDTD;
-%applicationsDTD;
 %advancedDTD;
 ]>
 
@@ -93,7 +91,7 @@
       data-l10n-attrs="title">
 
   <link rel="localization" href="branding/brand.ftl"/>
-  <link rel="localization" href="browser/preferences/main.ftl"/>
+  <link rel="localization" href="browser/branding/sync-brand.ftl"/>
   <link rel="localization" href="browser/preferences/preferences.ftl"/>
   <script type="text/javascript" src="chrome://global/content/l10n.js"></script>
 
@@ -172,6 +170,7 @@
 
         <richlistitem id="category-sync"
                       class="category"
+                      hidden="true"
                       value="paneSync"
                       helpTopic="prefs-weave"
                       data-l10n-id="category-sync"
@@ -203,7 +202,7 @@
         <hbox class="search-container" pack="end">
           <textbox
             type="search" id="searchInput"
-            data-l10n-id="search-field"
+            data-l10n-id="search-input"
             data-l10n-attrs="style"
             hidden="true" clickSelectsAll="true"/>
         </hbox>

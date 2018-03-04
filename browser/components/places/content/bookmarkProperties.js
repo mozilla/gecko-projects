@@ -161,7 +161,7 @@ var BookmarkPropertiesPanel = {
         this._defaultInsertionPoint = dialogInfo.defaultInsertionPoint;
       } else {
         this._defaultInsertionPoint =
-          new InsertionPoint({
+          new PlacesInsertionPoint({
             parentId: PlacesUtils.bookmarksMenuFolderId,
             parentGuid: PlacesUtils.bookmarks.menuGuid
           });
@@ -253,7 +253,7 @@ var BookmarkPropertiesPanel = {
     // Allow initialization to complete in a truely async manner so that we're
     // not blocking the main thread.
     this._initDialog().catch(ex => {
-      Components.utils.reportError(`Failed to initialize dialog: ${ex}`);
+      Cu.reportError(`Failed to initialize dialog: ${ex}`);
     });
   },
 

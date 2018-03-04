@@ -180,38 +180,6 @@ nsIContent::GetAssignedSlotByMode() const
   return slot;
 }
 
-nsINode*
-nsIContent::GetFlattenedTreeParentForDocumentElementNAC() const
-{
-  MOZ_ASSERT(IsRootOfNativeAnonymousSubtree());
-  MOZ_ASSERT(GetParent());
-  MOZ_ASSERT(GetParent() == OwnerDoc()->GetRootElement());
-  MOZ_ASSERT(!IsGeneratedContentContainerForAfter());
-  MOZ_ASSERT(!IsGeneratedContentContainerForBefore());
-
-  nsIContent* parent = GetParent();
-  AutoTArray<nsIContent*, 8> rootElementNAC;
-  nsContentUtils::AppendNativeAnonymousChildren(
-    parent, rootElementNAC, nsIContent::eSkipDocumentLevelNativeAnonymousContent);
-  const bool isDocLevelNAC = !rootElementNAC.Contains(this);
-
-#ifdef DEBUG
-  {
-    // The code below would be slightly more direct, but it gets the wrong
-    // answer when the root scrollframe is being bootstrapped and we're
-    // trying to style the scrollbars (since GetRootScrollFrame() still returns
-    // null at that point). Verify that the results match otherwise.
-    AutoTArray<nsIContent*, 8> docLevelNAC;
-    nsContentUtils::AppendDocumentLevelNativeAnonymousContentTo(OwnerDoc(), docLevelNAC);
-    nsIPresShell* shell = OwnerDoc()->GetShell();
-    MOZ_ASSERT_IF(shell && shell->GetRootScrollFrame(),
-                  isDocLevelNAC == docLevelNAC.Contains(this));
-  }
-#endif
-
-  return isDocLevelNAC ? OwnerDocAsNode() : parent;
-}
-
 nsIContent::IMEState
 nsIContent::GetDesiredIMEState()
 {
@@ -1056,8 +1024,7 @@ nsIContent::GetEventTargetParent(EventChainPreVisitor& aVisitor)
   }
 
   if (!aVisitor.mEvent->mFlags.mComposedInNativeAnonymousContent &&
-      IsRootOfNativeAnonymousSubtree() && OwnerDoc() &&
-      OwnerDoc()->GetWindow()) {
+      IsRootOfNativeAnonymousSubtree() && OwnerDoc()->GetWindow()) {
     aVisitor.SetParentTarget(OwnerDoc()->GetWindow()->GetParentTarget(), true);
   } else if (parent) {
     aVisitor.SetParentTarget(parent, false);
@@ -1135,7 +1102,12 @@ nsIContent::GetEventTargetParent(EventChainPreVisitor& aVisitor)
             nsContentUtils::Retarget(relatedTargetAsNode, this);
           nsCOMPtr<nsINode> targetInKnownToBeHandledScope =
             FindChromeAccessOnlySubtreeOwner(aVisitor.mTargetInKnownToBeHandledScope);
-          if (nsContentUtils::ContentIsShadowIncludingDescendantOf(
+          // If aVisitor.mTargetInKnownToBeHandledScope wasn't nsINode,
+          // targetInKnownToBeHandledScope will be null. This may happen when
+          // dispatching event to Window object in a content page and
+          // propagating the event to a chrome Element.
+          if (targetInKnownToBeHandledScope &&
+              nsContentUtils::ContentIsShadowIncludingDescendantOf(
                 this, targetInKnownToBeHandledScope->SubtreeRoot())) {
             // Part of step 11.4.
             // "If target's root is a shadow-including inclusive ancestor of
@@ -1226,37 +1198,20 @@ void
 nsIContent::SetAssignedSlot(HTMLSlotElement* aSlot)
 {
   MOZ_ASSERT(aSlot || GetExistingExtendedContentSlots());
-  nsExtendedContentSlots* slots = ExtendedContentSlots();
-
-  RefPtr<HTMLSlotElement> oldSlot = slots->mAssignedSlot.forget();
-  slots->mAssignedSlot = aSlot;
-
-  if (oldSlot != aSlot && IsElement() && AsElement()->HasServoData()) {
-    ServoRestyleManager::ClearServoDataFromSubtree(AsElement());
-  }
+  ExtendedContentSlots()->mAssignedSlot = aSlot;
 }
 
 void
 nsIContent::SetXBLInsertionPoint(nsIContent* aContent)
 {
-  nsCOMPtr<nsIContent> oldInsertionPoint = nullptr;
   if (aContent) {
     nsExtendedContentSlots* slots = ExtendedContentSlots();
     SetFlags(NODE_MAY_BE_IN_BINDING_MNGR);
-    oldInsertionPoint = slots->mXBLInsertionPoint.forget();
     slots->mXBLInsertionPoint = aContent;
   } else {
     if (nsExtendedContentSlots* slots = GetExistingExtendedContentSlots()) {
-      oldInsertionPoint = slots->mXBLInsertionPoint.forget();
       slots->mXBLInsertionPoint = nullptr;
     }
-  }
-
-  // We just changed the flattened tree, so any Servo style data is now invalid.
-  // We rely on nsXBLService::LoadBindings to re-traverse the subtree afterwards.
-  if (oldInsertionPoint != aContent && IsElement() &&
-      AsElement()->HasServoData()) {
-    ServoRestyleManager::ClearServoDataFromSubtree(AsElement());
   }
 }
 
@@ -1322,14 +1277,18 @@ FragmentOrElement::SetTextContentInternal(const nsAString& aTextContent,
 void
 FragmentOrElement::DestroyContent()
 {
+  nsIDocument* document = OwnerDoc();
+
   // Drop any servo data. We do this before the RemovedFromDocument call below
   // so that it doesn't need to try to keep the style state sane when shuffling
   // around the flattened tree.
-  if (IsElement() && AsElement()->HasServoData()) {
+  //
+  // TODO(emilio): I suspect this can be asserted against instead, with a bit of
+  // effort to avoid calling nsDocument::Destroy with a shell...
+  if (IsElement() && document->IsStyledByServo()) {
     AsElement()->ClearServoData();
   }
 
-  nsIDocument *document = OwnerDoc();
   document->BindingManager()->RemovedFromDocument(this, document,
                                                   nsBindingManager::eRunDtor);
   document->ClearBoxObjectFor(this);

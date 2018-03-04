@@ -4,7 +4,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["NewTabUtils"];
+var EXPORTED_SYMBOLS = ["NewTabUtils"];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -21,6 +21,9 @@ ChromeUtils.defineModuleGetter(this, "BinarySearch",
 
 ChromeUtils.defineModuleGetter(this, "pktApi",
   "chrome://pocket/content/pktApi.jsm");
+
+ChromeUtils.defineModuleGetter(this, "Pocket",
+  "chrome://pocket/content/Pocket.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "gCryptoHash", function() {
   return Cc["@mozilla.org/security/hash;1"].createInstance(Ci.nsICryptoHash);
@@ -60,6 +63,10 @@ const ACTIVITY_STREAM_DEFAULT_LIMIT = 12;
 
 // Some default seconds ago for Activity Stream recent requests
 const ACTIVITY_STREAM_DEFAULT_RECENT = 5 * 24 * 60 * 60;
+
+const POCKET_UPDATE_TIME = 24 * 60 * 60 * 1000; // 1 day
+const POCKET_INACTIVE_TIME = 7 * 24 * 60 * 60 * 1000; // 1 week
+const PREF_POCKET_LATEST_SINCE = "extensions.pocket.settings.latestSince";
 
 /**
  * Calculate the MD5 hash for a string.
@@ -102,7 +109,7 @@ function LinksStorage() {
   } catch (ex) {
     // Something went wrong in the update process, we can't recover from here,
     // so just clear the storage and start from scratch (dataloss!).
-    Components.utils.reportError(
+    Cu.reportError(
       "Unable to migrate the newTab storage to the current version. " +
       "Restarting from scratch.\n" + ex);
     this.clear();
@@ -961,12 +968,14 @@ var ActivityStreamProvider = {
       }
       let iconData;
       try {
-        const linkUri = Services.io.newURI(link.url);
+        let linkUri = Services.io.newURI(link.url);
         iconData = await this._getIconData(linkUri);
 
         // Switch the scheme to try again with the other
         if (!iconData) {
-          linkUri.scheme = linkUri.scheme === "https" ? "http" : "https";
+          linkUri = linkUri.mutate()
+                           .setScheme(linkUri.scheme === "https" ? "http" : "https")
+                           .finalize();
           iconData = await this._getIconData(linkUri);
         }
       } catch (e) {
@@ -983,9 +992,13 @@ var ActivityStreamProvider = {
    * saved Pocket items.
    */
   fetchSavedPocketItems(requestData) {
-    if (!pktApi.isUserLoggedIn()) {
+    const latestSince = (Services.prefs.getStringPref(PREF_POCKET_LATEST_SINCE, 0) * 1000);
+
+    // Do not fetch Pocket items for users that have been inactive for too long, or are not logged in
+    if (!pktApi.isUserLoggedIn() || (Date.now() - latestSince > POCKET_INACTIVE_TIME)) {
       return Promise.resolve(null);
     }
+
     return new Promise((resolve, reject) => {
       pktApi.retrieve(requestData, {
         success(data) {
@@ -1034,16 +1047,10 @@ var ActivityStreamProvider = {
                     preview_image_url: item.image && item.image.src,
                     title: item.resolved_title,
                     url: item.resolved_url,
-                    pocket_id: item.item_id
+                    pocket_id: item.item_id,
+                    open_url: item.open_url
                   }));
 
-    // Add bookmark guid for Pocket items that are also bookmarks
-    for (let item of items) {
-      const bookmarkData = await this.getBookmark({url: item.url});
-      if (bookmarkData) {
-        item.bookmarkGuid = bookmarkData.bookmarkGuid;
-      }
-    }
     return this._processHighlights(items, aOptions, "pocket");
   },
 
@@ -1090,6 +1097,30 @@ var ActivityStreamProvider = {
         dateAddedThreshold: (Date.now() - options.bookmarkSecondsAgo * 1000) * 1000
       })
     }), options, "bookmark");
+  },
+
+  /**
+   * Get total count of all bookmarks.
+   * Note: this includes default bookmarks
+   *
+   * @return {int} The number bookmarks in the places DB.
+   */
+  async getTotalBookmarksCount() {
+    let sqlQuery = `
+      SELECT count(*) FROM moz_bookmarks b
+      JOIN moz_bookmarks t ON t.id = b.parent
+      AND t.parent <> :tags_folder
+     WHERE b.type = :type_bookmark
+    `;
+
+    const result = await this.executePlacesQuery(sqlQuery, {
+      params: {
+        tags_folder: PlacesUtils.tagsFolderId,
+        type_bookmark: PlacesUtils.bookmarks.TYPE_BOOKMARK,
+      }
+    });
+
+    return result[0][0];
   },
 
   /**
@@ -1305,7 +1336,11 @@ var ActivityStreamProvider = {
  * A set of actions which influence what sites shown on the Activity Stream page
  */
 var ActivityStreamLinks = {
-  /**
+  _savedPocketStories: null,
+  _pocketLastUpdated: 0,
+  _pocketLastLatest: 0,
+
+ /**
    * Block a url
    *
    * @param {Object} aLink
@@ -1313,6 +1348,10 @@ var ActivityStreamLinks = {
    */
   blockURL(aLink) {
     BlockedLinks.block(aLink);
+    // If we're blocking a pocket item, invalidate the cache too
+    if (aLink.pocket_id) {
+      this._savedPocketStories = null;
+    }
   },
 
   onLinkBlocked(aLink) {
@@ -1368,7 +1407,7 @@ var ActivityStreamLinks = {
 
   /**
    * Helper function which makes the call to the Pocket API to delete an item from
-   * a user's saved to Pocket feed.
+   * a user's saved to Pocket feed. Also, invalidate the Pocket stories cache
    *
    * @param {Integer} aItemID
    *           The unique pocket ID used to find the item to be deleted
@@ -1376,12 +1415,13 @@ var ActivityStreamLinks = {
    *@returns {Promise} Returns a promise at completion
    */
   deletePocketEntry(aItemID) {
+    this._savedPocketStories = null;
     return new Promise((success, error) => pktApi.deleteItem(aItemID, {success, error}));
   },
 
   /**
    * Helper function which makes the call to the Pocket API to archive an item from
-   * a user's saved to Pocket feed.
+   * a user's saved to Pocket feed. Also, invalidate the Pocket stories cache
    *
    * @param {Integer} aItemID
    *           The unique pocket ID used to find the item to be archived
@@ -1389,7 +1429,41 @@ var ActivityStreamLinks = {
    *@returns {Promise} Returns a promise at completion
    */
   archivePocketEntry(aItemID) {
+    this._savedPocketStories = null;
     return new Promise((success, error) => pktApi.archiveItem(aItemID, {success, error}));
+  },
+
+  /**
+   * Helper function which makes the call to the Pocket API to save an item to
+   * a user's saved to Pocket feed if they are logged in. Also, invalidate the
+   * Pocket stories cache
+   *
+   * @param {String} aUrl
+   *           The URL belonging to the story being saved
+   * @param {String} aTitle
+   *           The title belonging to the story being saved
+   * @param {Browser} aBrowser
+   *           The target browser to show the doorhanger in
+   *
+   *@returns {Promise} Returns a promise at completion
+   */
+  addPocketEntry(aUrl, aTitle, aBrowser) {
+    // If the user is not logged in, show the panel to prompt them to log in
+    if (!pktApi.isUserLoggedIn()) {
+      Pocket.savePage(aBrowser, aUrl, aTitle);
+      return Promise.resolve(null);
+    }
+
+    // If the user is logged in, just save the link to Pocket and Activity Stream
+    // will update the page
+    this._savedPocketStories = null;
+    return new Promise((success, error) => {
+      pktApi.addLink(aUrl, {
+        title: aTitle,
+        success,
+        error
+      });
+    });
   },
 
   /**
@@ -1415,7 +1489,19 @@ var ActivityStreamLinks = {
 
     // Add the Pocket items if we need more and want them
     if (aOptions.numItems - results.length > 0 && !aOptions.excludePocket) {
-      results.push(...await ActivityStreamProvider.getRecentlyPocketed(aOptions));
+      const latestSince = ~~(Services.prefs.getStringPref(PREF_POCKET_LATEST_SINCE, 0));
+      // Invalidate the cache, get new stories, and update timestamps if:
+      //  1. we do not have saved to Pocket stories already cached OR
+      //  2. it has been too long since we last got Pocket stories OR
+      //  3. there has been a paged saved to pocket since we last got new stories
+      if (!this._savedPocketStories ||
+          (Date.now() - this._pocketLastUpdated > POCKET_UPDATE_TIME) ||
+          (this._pocketLastLatest < latestSince)) {
+        this._savedPocketStories = await ActivityStreamProvider.getRecentlyPocketed(aOptions);
+        this._pocketLastUpdated = Date.now();
+        this._pocketLastLatest = latestSince;
+      }
+      results.push(...this._savedPocketStories);
     }
 
     // Add in history if we need more and want them
@@ -2055,7 +2141,7 @@ var ExpirationFilter = {
 /**
  * Singleton that provides the public API of this JSM.
  */
-this.NewTabUtils = {
+var NewTabUtils = {
   _initialized: false,
 
   /**

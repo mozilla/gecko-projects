@@ -5,7 +5,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["PerformanceStats"];
+var EXPORTED_SYMBOLS = ["PerformanceStats"];
 
 /**
  * API for querying and examining performance data.
@@ -95,7 +95,7 @@ Probe.prototype = {
       try {
         this._impl.isActive = false;
       } catch (ex) {
-        if (ex && typeof ex == "object" && ex.result == Components.results.NS_ERROR_NOT_AVAILABLE) {
+        if (ex && typeof ex == "object" && ex.result == Cr.NS_ERROR_NOT_AVAILABLE) {
           // The service has already been shutdown. Ignore further shutdown requests.
           return;
         }
@@ -566,7 +566,7 @@ Services.obs.addObserver(function(subject, topic, value) {
 }, FINALIZATION_TOPIC);
 
 // Public API
-this.PerformanceStats = {
+var PerformanceStats = {
   /**
    * Create a monitor for observing a set of performance probes.
    */

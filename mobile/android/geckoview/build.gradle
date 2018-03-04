@@ -1,6 +1,7 @@
 buildDir "${topobjdir}/gradle/build/mobile/android/geckoview"
 
 apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
 
 apply from: "${topsrcdir}/mobile/android/gradle/product_flavors.gradle"
 
@@ -49,6 +50,8 @@ android {
         versionCode computeVersionCode()
         versionName "${mozconfig.substs.MOZ_APP_VERSION}-${mozconfig.substs.MOZ_UPDATE_CHANNEL}"
         consumerProguardFiles 'proguard-rules.txt'
+
+        testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
 
         // TODO: ensure these fields always agree with mobile/android/geckoview/BuildConfig.java.in,
         // either by diffing the processed files or by generating the output from a single source.
@@ -122,8 +125,7 @@ android {
             java {
                 srcDir "${topsrcdir}/mobile/android/geckoview/src/thirdparty/java"
 
-                if (!mozconfig.substs.MOZ_ANDROID_HLS_SUPPORT ||
-                    !mozconfig.substs.get('MOZ_BUILD_MOBILE_ANDROID_WITH_GRADLE')) {
+                if (!mozconfig.substs.MOZ_ANDROID_HLS_SUPPORT) {
                     exclude 'com/google/android/exoplayer2/**'
                     exclude 'org/mozilla/gecko/media/GeckoHlsAudioRenderer.java'
                     exclude 'org/mozilla/gecko/media/GeckoHlsPlayer.java'
@@ -149,9 +151,16 @@ dependencies {
     implementation "com.android.support:support-v4:${mozconfig.substs.ANDROID_SUPPORT_LIBRARY_VERSION}"
     implementation "com.android.support:palette-v7:${mozconfig.substs.ANDROID_SUPPORT_LIBRARY_VERSION}"
 
+    testImplementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
     testImplementation 'junit:junit:4.12'
     testImplementation 'org.robolectric:robolectric:3.5.1'
     testImplementation 'org.mockito:mockito-core:1.10.19'
+
+    androidTestImplementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+    androidTestImplementation 'com.android.support.test:runner:0.5'
+    androidTestImplementation 'com.android.support.test:rules:0.5'
+    androidTestImplementation 'com.android.support.test.espresso:espresso-core:2.2.2'
+    androidTestImplementation "com.android.support:support-annotations:${mozconfig.substs.ANDROID_SUPPORT_LIBRARY_VERSION}"
 }
 
 apply from: "${topsrcdir}/mobile/android/gradle/with_gecko_binaries.gradle"
@@ -175,7 +184,8 @@ android.libraryVariants.all { variant ->
         classpath = files(variant.javaCompile.classpath.files)
 
         source = files(variant.javaCompile.source)
-        exclude '**/R.java', '**/BuildConfig.java', 'com/google/**', 'org/webrtc/**'
+        exclude '**/R.java', '**/BuildConfig.java'
+        include 'org/mozilla/geckoview/**'
         options.addPathOption('sourcepath', ':').setValue(
             variant.sourceSets.collect({ it.javaDirectories }).flatten() +
             variant.generateBuildConfig.sourceOutputDir)
@@ -186,6 +196,7 @@ android.libraryVariants.all { variant ->
             file("${System.properties['java.home']}/lib/rt.jar")] + android.bootClasspath
         options.memberLevel = JavadocMemberLevel.PROTECTED
         options.source = 7
+        options.links("https://d.android.com/reference/")
 
         options.docTitle = "GeckoView ${mozconfig.substs.MOZ_APP_VERSION} API"
         options.header = "GeckoView ${mozconfig.substs.MOZ_APP_VERSION} API"
@@ -213,7 +224,7 @@ android.libraryVariants.all { variant ->
 }
 
 apply plugin: 'maven'
- 
+
 uploadArchives {
     repositories.mavenDeployer {
         pom.groupId = 'org.mozilla'
@@ -256,6 +267,18 @@ afterEvaluate {
         // Javadoc and sources for developer ergononomics.
         archives javadocJarOfficialWithGeckoBinariesNoMinApiRelease
         archives sourcesJarOfficialWithGeckoBinariesNoMinApiRelease
+    }
+
+    // For now, ensure Kotlin is only used in tests.
+    android.sourceSets.all { sourceSet ->
+        if (sourceSet.name.startsWith('test') || sourceSet.name.startsWith('androidTest')) {
+            return
+        }
+        (sourceSet.java.srcDirs + sourceSet.kotlin.srcDirs).each {
+            if (!fileTree(it, { include '**/*.kt' }).empty) {
+                throw new GradleException("Kotlin used in non-test directory ${it.path}")
+            }
+        }
     }
 }
 

@@ -175,6 +175,7 @@ DecoderFactory::CreateAnimationDecoder(DecoderType aType,
                                        const IntSize& aIntrinsicSize,
                                        DecoderFlags aDecoderFlags,
                                        SurfaceFlags aSurfaceFlags,
+                                       size_t aCurrentFrame,
                                        IDecodingTask** aOutTask)
 {
   if (aType == DecoderType::UNKNOWN) {
@@ -205,7 +206,7 @@ DecoderFactory::CreateAnimationDecoder(DecoderType aType,
   SurfaceKey surfaceKey =
     RasterSurfaceKey(aIntrinsicSize, aSurfaceFlags, PlaybackType::eAnimated);
   auto provider = MakeNotNull<RefPtr<AnimationSurfaceProvider>>(
-    aImage, surfaceKey, WrapNotNull(decoder));
+    aImage, surfaceKey, WrapNotNull(decoder), aCurrentFrame);
 
   // Attempt to insert the surface provider into the surface cache right away so
   // we won't trigger any more decoders with the same parameters.
@@ -222,6 +223,35 @@ DecoderFactory::CreateAnimationDecoder(DecoderType aType,
   RefPtr<IDecodingTask> task = provider.get();
   task.forget(aOutTask);
   return NS_OK;
+}
+
+/* static */ already_AddRefed<Decoder>
+DecoderFactory::CloneAnimationDecoder(Decoder* aDecoder)
+{
+  MOZ_ASSERT(aDecoder);
+
+  // In an ideal world, we would assert aDecoder->HasAnimation() but we cannot.
+  // The decoder may not have detected it is animated yet (e.g. it did not even
+  // get scheduled yet, or it has only decoded the first frame and has yet to
+  // rediscover it is animated).
+  DecoderType type = aDecoder->GetType();
+  MOZ_ASSERT(type == DecoderType::GIF || type == DecoderType::PNG,
+             "Calling CloneAnimationDecoder for non-animating DecoderType");
+
+  RefPtr<Decoder> decoder = GetDecoder(type, nullptr, /* aIsRedecode = */ true);
+  MOZ_ASSERT(decoder, "Should have a decoder now");
+
+  // Initialize the decoder.
+  decoder->SetMetadataDecode(false);
+  decoder->SetIterator(aDecoder->GetSourceBuffer()->Iterator());
+  decoder->SetDecoderFlags(aDecoder->GetDecoderFlags());
+  decoder->SetSurfaceFlags(aDecoder->GetSurfaceFlags());
+
+  if (NS_FAILED(decoder->Init())) {
+    return nullptr;
+  }
+
+  return decoder.forget();
 }
 
 /* static */ already_AddRefed<IDecodingTask>

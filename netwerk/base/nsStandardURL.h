@@ -180,10 +180,25 @@ protected:
     // returns NS_ERROR_NO_INTERFACE if the url does not map to a file
     virtual nsresult EnsureFile();
 
+    virtual nsresult SetSpecInternal(const nsACString &input);
+    virtual nsresult SetScheme(const nsACString &input);
+    virtual nsresult SetUserPass(const nsACString &input);
+    virtual nsresult SetUsername(const nsACString &input);
+    virtual nsresult SetPassword(const nsACString &input);
+    virtual nsresult SetHostPort(const nsACString &aValue);
+    virtual nsresult SetHost(const nsACString &input);
+    virtual nsresult SetPort(int32_t port);
+    virtual nsresult SetPathQueryRef(const nsACString &input);
+    virtual nsresult SetRef(const nsACString &input);
+    virtual nsresult SetFilePath(const nsACString &input);
+    virtual nsresult SetQuery(const nsACString &input);
+    virtual nsresult SetQueryWithEncoding(const nsACString &input, const Encoding* encoding);
+
 private:
     nsresult Init(uint32_t urlType, int32_t defaultPort, const nsACString &spec,
                   const char *charset, nsIURI *baseURI);
     nsresult SetDefaultPort(int32_t aNewDefaultPort);
+    nsresult SetFile(nsIFile *file);
 
     nsresult SetFileNameInternal(const nsACString &input);
     nsresult SetFileBaseNameInternal(const nsACString &input);
@@ -465,7 +480,7 @@ public:
         friend T;
     };
 
-    class Mutator
+    class Mutator final
         : public TemplatedMutator<nsStandardURL>
     {
         NS_DECL_ISUPPORTS
@@ -474,6 +489,8 @@ public:
     private:
         virtual ~Mutator() = default;
     };
+
+    friend BaseURIMutator<nsStandardURL>;
 };
 
 #define NS_THIS_STANDARDURL_IMPL_CID                 \

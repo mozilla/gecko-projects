@@ -23,12 +23,12 @@
 #include "mozilla/Maybe.h"
 
 #include "jsnum.h"
-#include "jsprf.h"
 #include "jsstr.h"
 
 #include "ds/LifoAlloc.h"
 #include "js/CharacterEncoding.h"
 #include "js/HashTable.h"
+#include "js/Printf.h"
 #include "util/DoubleToString.h"
 #include "wasm/WasmAST.h"
 #include "wasm/WasmTypes.h"
@@ -91,7 +91,9 @@ class WasmToken
         Equal,
         Error,
         Export,
+#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
         ExtraConversionOpcode,
+#endif
         Float,
         Func,
         GetGlobal,
@@ -218,6 +220,7 @@ class WasmToken
                    kind_ == Load || kind_ == Store);
         u.op_ = op;
     }
+#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
     explicit WasmToken(Kind kind, NumericOp op, const char16_t* begin, const char16_t* end)
       : kind_(kind),
         begin_(begin),
@@ -227,6 +230,7 @@ class WasmToken
         MOZ_ASSERT(kind_ == ExtraConversionOpcode);
         u.numericOp_ = op;
     }
+#endif
     explicit WasmToken(Kind kind, ThreadOp op, const char16_t* begin, const char16_t* end)
       : kind_(kind),
         begin_(begin),
@@ -288,10 +292,12 @@ class WasmToken
                    kind_ == Load || kind_ == Store);
         return u.op_;
     }
+#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
     NumericOp numericOp() const {
         MOZ_ASSERT(kind_ == ExtraConversionOpcode);
         return u.numericOp_;
     }
+#endif
     ThreadOp threadOp() const {
         MOZ_ASSERT(kind_ == AtomicCmpXchg || kind_ == AtomicLoad || kind_ == AtomicRMW ||
                    kind_ == AtomicStore || kind_ == Wait || kind_ == Wake);
@@ -597,7 +603,7 @@ class WasmTokenStream
     void skipSpaces();
 
   public:
-    WasmTokenStream(const char16_t* text, UniqueChars* error)
+    explicit WasmTokenStream(const char16_t* text)
       : cur_(text),
         end_(text + js_strlen(text)),
         lineStart_(text),
@@ -1714,7 +1720,7 @@ struct WasmParseContext
 
     WasmParseContext(const char16_t* text, uintptr_t stackLimit, LifoAlloc& lifo,
                      UniqueChars* error)
-      : ts(text, error),
+      : ts(text),
         lifo(lifo),
         error(error),
         dtoaState(NewDtoaState()),
@@ -1760,7 +1766,7 @@ ParseExpr(WasmParseContext& c, bool inParens)
 }
 
 static bool
-ParseExprList(WasmParseContext& c, AstExprVector* exprs, bool inParens)
+ParseExprList(WasmParseContext& c, AstExprVector* exprs)
 {
     for (;;) {
         if (c.ts.getIf(WasmToken::OpenParen)) {
@@ -1842,7 +1848,7 @@ ParseBlock(WasmParseContext& c, Op op, bool inParens)
     if (!ParseBlockSignature(c, &type))
         return nullptr;
 
-    if (!ParseExprList(c, &exprs, inParens))
+    if (!ParseExprList(c, &exprs))
         return nullptr;
 
     if (!inParens) {
@@ -2457,7 +2463,7 @@ ParseIf(WasmParseContext& c, bool inParens)
 
     AstExprVector thenExprs(c.lifo);
     if (!inParens || c.ts.getIf(WasmToken::Then)) {
-        if (!ParseExprList(c, &thenExprs, inParens))
+        if (!ParseExprList(c, &thenExprs))
             return nullptr;
     } else {
         AstExpr* thenBranch = ParseExprInsideParens(c);
@@ -2474,7 +2480,7 @@ ParseIf(WasmParseContext& c, bool inParens)
         if (c.ts.getIf(WasmToken::Else)) {
             if (!MaybeMatchName(c, name))
                 return nullptr;
-            if (!ParseExprList(c, &elseExprs, inParens))
+            if (!ParseExprList(c, &elseExprs))
                 return nullptr;
         } else if (inParens) {
             AstExpr* elseBranch = ParseExprInsideParens(c);
@@ -2880,7 +2886,7 @@ ParseWake(WasmParseContext& c, bool inParens)
 }
 
 static AstBranchTable*
-ParseBranchTable(WasmParseContext& c, WasmToken brTable, bool inParens)
+ParseBranchTable(WasmParseContext& c, bool inParens)
 {
     AstRefVector table(c.lifo);
 
@@ -2955,7 +2961,7 @@ ParseExprBody(WasmParseContext& c, WasmToken token, bool inParens)
       case WasmToken::BrIf:
         return ParseBranch(c, Op::BrIf, inParens);
       case WasmToken::BrTable:
-        return ParseBranchTable(c, token, inParens);
+        return ParseBranchTable(c, inParens);
       case WasmToken::Call:
         return ParseCall(c, inParens);
       case WasmToken::CallIndirect:
@@ -3221,7 +3227,7 @@ ParseFunc(WasmParseContext& c, AstModule* module)
             return false;
     }
 
-    if (!ParseExprList(c, &body, true))
+    if (!ParseExprList(c, &body))
         return false;
 
     if (sigRef.isInvalid()) {
@@ -3333,7 +3339,7 @@ ParseLimits(WasmParseContext& c, Limits* limits, Shareable allowShared)
 }
 
 static bool
-ParseMemory(WasmParseContext& c, WasmToken token, AstModule* module)
+ParseMemory(WasmParseContext& c, AstModule* module)
 {
     AstName name = c.ts.getIfName();
 
@@ -3831,7 +3837,7 @@ ParseModule(const char16_t* text, uintptr_t stackLimit, LifoAlloc& lifo, UniqueC
             break;
           }
           case WasmToken::Memory: {
-            if (!ParseMemory(c, section, module))
+            if (!ParseMemory(c, module))
                 return nullptr;
             break;
           }

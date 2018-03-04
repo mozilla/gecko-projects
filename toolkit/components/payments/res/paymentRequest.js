@@ -17,7 +17,7 @@ var paymentRequest = {
     // listen to content
     window.addEventListener("paymentChromeToContent", this);
 
-    window.addEventListener("keypress", this);
+    window.addEventListener("keydown", this);
 
     this.domReadyPromise = new Promise(function dcl(resolve) {
       window.addEventListener("DOMContentLoaded", resolve, {once: true});
@@ -33,7 +33,7 @@ var paymentRequest = {
         this.onPaymentRequestLoad();
         break;
       }
-      case "keypress": {
+      case "keydown": {
         if (event.code != "KeyD" || !event.altKey || !event.ctrlKey) {
           break;
         }
@@ -69,6 +69,13 @@ var paymentRequest = {
     let {messageType} = detail;
 
     switch (messageType) {
+      case "responseSent": {
+        document.querySelector("payment-dialog").requestStore.setState({
+          changesPrevented: true,
+          completionState: "processing",
+        });
+        break;
+      }
       case "showPaymentRequest": {
         this.onShowPaymentRequest(detail);
         break;

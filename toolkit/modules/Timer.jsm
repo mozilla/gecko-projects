@@ -8,8 +8,8 @@
  * JS module implementation of setTimeout and clearTimeout.
  */
 
-this.EXPORTED_SYMBOLS = ["setTimeout", "setTimeoutWithTarget", "clearTimeout",
-                         "setInterval", "setIntervalWithTarget", "clearInterval"];
+var EXPORTED_SYMBOLS = ["setTimeout", "setTimeoutWithTarget", "clearTimeout",
+                        "setInterval", "setIntervalWithTarget", "clearInterval"];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -17,6 +17,9 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 var gNextId = 1; // setTimeout and setInterval must return a positive integer
 
 var gTimerTable = new Map(); // int -> nsITimer
+
+// Don't generate this for every timer.
+var setTimeout_timerCallbackQI = XPCOMUtils.generateQI([Ci.nsITimerCallback, Ci.nsINamed]);
 
 function _setTimeoutOrIsInterval(aCallback, aMilliseconds, aIsInterval,
                                  aTarget, aArgs) {
@@ -31,8 +34,7 @@ function _setTimeoutOrIsInterval(aCallback, aMilliseconds, aIsInterval,
   }
 
   let callback = {
-    QueryInterface: XPCOMUtils.generateQI([Ci.nsITimerCallback,
-                                           Ci.nsINamed]),
+    QueryInterface: setTimeout_timerCallbackQI,
 
     // nsITimerCallback
     notify() {
@@ -54,33 +56,33 @@ function _setTimeoutOrIsInterval(aCallback, aMilliseconds, aIsInterval,
   return id;
 }
 
-this.setTimeout = function setTimeout(aCallback, aMilliseconds, ...aArgs) {
+function setTimeout(aCallback, aMilliseconds, ...aArgs) {
   return _setTimeoutOrIsInterval(
     aCallback, aMilliseconds, false, null, aArgs);
-};
+}
 
-this.setTimeoutWithTarget = function setTimeoutWithTarget(aCallback,
+function setTimeoutWithTarget(aCallback,
                                                           aMilliseconds,
                                                           aTarget,
                                                           ...aArgs) {
   return _setTimeoutOrIsInterval(
     aCallback, aMilliseconds, false, aTarget, aArgs);
-};
+}
 
-this.setInterval = function setInterval(aCallback, aMilliseconds, ...aArgs) {
+function setInterval(aCallback, aMilliseconds, ...aArgs) {
   return _setTimeoutOrIsInterval(
     aCallback, aMilliseconds, true, null, aArgs);
-};
+}
 
-this.setIntervalWithTarget = function setIntervalWithTarget(aCallback,
+function setIntervalWithTarget(aCallback,
                                                             aMilliseconds,
                                                             aTarget,
                                                             ...aArgs) {
   return _setTimeoutOrIsInterval(
     aCallback, aMilliseconds, true, aTarget, aArgs);
-};
+}
 
-this.clearInterval = this.clearTimeout = function clearTimeout(aId) {
+var clearInterval = this.clearTimeout = function clearTimeout(aId) {
   if (gTimerTable.has(aId)) {
     gTimerTable.get(aId).cancel();
     gTimerTable.delete(aId);

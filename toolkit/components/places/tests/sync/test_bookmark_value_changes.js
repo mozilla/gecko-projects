@@ -1,3 +1,6 @@
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
+
 add_task(async function test_value_combo() {
   let buf = await openMirror("value_combo");
 
@@ -81,7 +84,7 @@ add_task(async function test_value_combo() {
         id: "bzBmk_______",
         type: "bookmark",
         parentid: "toolbar",
-        hasDupe: false,
+        hasDupe: true,
         parentName: BookmarksToolbarTitle,
         dateAdded: bzBmk.dateAdded.getTime(),
         bmkUri: "https://bugzilla.mozilla.org/",
@@ -97,7 +100,7 @@ add_task(async function test_value_combo() {
         id: "toolbar",
         type: "folder",
         parentid: "places",
-        hasDupe: false,
+        hasDupe: true,
         parentName: "",
         dateAdded: menuInfo.dateAdded.getTime(),
         title: BookmarksToolbarTitle,
@@ -150,15 +153,6 @@ add_task(async function test_value_combo() {
               type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
               parentId: PlacesUtils.bookmarksMenuFolderId, guid: "mozBmk______",
               parentGuid: PlacesUtils.bookmarks.menuGuid, oldValue: "Mozilla",
-              source: PlacesUtils.bookmarks.SOURCES.SYNC },
-  }, {
-    name: "onItemChanged",
-    params: { itemId: localItemIds.get("tbBmk_______"), property: "keyword",
-              isAnnoProperty: false, newValue: "tb",
-              type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
-              parentId: localItemIds.get("tFolder_____"), guid: "tbBmk_______",
-              parentGuid: "tFolder_____",
-              oldValue: "http://getthunderbird.com/",
               source: PlacesUtils.bookmarks.SOURCES.SYNC },
   }]);
 
@@ -526,7 +520,6 @@ add_task(async function test_keywords() {
   await PlacesUtils.keywords.remove("three");
 
   info("Apply remote");
-  let observer = expectBookmarkChangeNotifications();
   let changesToUpload = await buf.apply();
   deepEqual(await buf.fetchUnmergedGuids(), [], "Should merge all items");
 
@@ -535,37 +528,6 @@ add_task(async function test_keywords() {
     updated: ["bookmarkAAAA", "bookmarkCCCC", "bookmarkDDDD"],
     deleted: [],
   }, "Should reupload all local records with changed keywords");
-
-  let localItemIds = await PlacesUtils.promiseManyItemIds(["bookmarkAAAA",
-    "bookmarkBBBB"]);
-  observer.check([{
-    name: "onItemChanged",
-    params: { itemId: localItemIds.get("bookmarkAAAA"), property: "keyword",
-              isAnnoProperty: false, newValue: "",
-              type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
-              parentId: PlacesUtils.bookmarksMenuFolderId, guid: "bookmarkAAAA",
-              parentGuid: PlacesUtils.bookmarks.menuGuid,
-              oldValue: "http://example.com/a",
-              source: PlacesUtils.bookmarks.SOURCES.SYNC },
-  }, {
-    name: "onItemChanged",
-    params: { itemId: localItemIds.get("bookmarkBBBB"), property: "keyword",
-              isAnnoProperty: false, newValue: "",
-              type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
-              parentId: PlacesUtils.bookmarksMenuFolderId, guid: "bookmarkBBBB",
-              parentGuid: PlacesUtils.bookmarks.menuGuid,
-              oldValue: "http://example.com/b",
-              source: PlacesUtils.bookmarks.SOURCES.SYNC },
-  }, {
-    name: "onItemChanged",
-    params: { itemId: localItemIds.get("bookmarkAAAA"), property: "keyword",
-              isAnnoProperty: false, newValue: "two",
-              type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
-              parentId: PlacesUtils.bookmarksMenuFolderId, guid: "bookmarkAAAA",
-              parentGuid: PlacesUtils.bookmarks.menuGuid,
-              oldValue: "http://example.com/a",
-              source: PlacesUtils.bookmarks.SOURCES.SYNC },
-  }]);
 
   let entryForOne = await PlacesUtils.keywords.fetch("one");
   ok(!entryForOne, "Should remove existing keyword from A");
@@ -795,66 +757,6 @@ add_task(async function test_keywords_complex() {
               oldValue: "http://example.com/c",
               source: PlacesUtils.bookmarks.SOURCES.SYNC },
   }];
-  if (entriesForOne.length) {
-    expectedNotifications.push({
-      name: "onItemChanged",
-      params: { itemId: localItemIds.get("bookmarkAAA1"), property: "keyword",
-                isAnnoProperty: false, newValue: "two",
-                type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
-                parentId: PlacesUtils.bookmarksMenuFolderId, guid: "bookmarkAAA1",
-                parentGuid: PlacesUtils.bookmarks.menuGuid,
-                oldValue: "http://example.com/a",
-                source: PlacesUtils.bookmarks.SOURCES.SYNC },
-    }, {
-      name: "onItemChanged",
-      params: { itemId: localItemIds.get("bookmarkAAA1"), property: "keyword",
-                isAnnoProperty: false, newValue: "",
-                type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
-                parentId: PlacesUtils.bookmarksMenuFolderId, guid: "bookmarkAAA1",
-                parentGuid: PlacesUtils.bookmarks.menuGuid,
-                oldValue: "http://example.com/a",
-                source: PlacesUtils.bookmarks.SOURCES.SYNC },
-    }, {
-      name: "onItemChanged",
-      params: { itemId: localItemIds.get("bookmarkAAAA"), property: "keyword",
-                isAnnoProperty: false, newValue: "one",
-                type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
-                parentId: PlacesUtils.bookmarksMenuFolderId, guid: "bookmarkAAAA",
-                parentGuid: PlacesUtils.bookmarks.menuGuid,
-                oldValue: "http://example.com/a",
-                source: PlacesUtils.bookmarks.SOURCES.SYNC },
-    });
-  } else {
-    // TODO(kitcambridge): This never happens, even in chaos mode.
-  }
-  expectedNotifications.push({
-    name: "onItemChanged",
-    params: { itemId: localItemIds.get("bookmarkBBBB"), property: "keyword",
-              isAnnoProperty: false, newValue: "",
-              type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
-              parentId: PlacesUtils.bookmarksMenuFolderId, guid: "bookmarkBBBB",
-              parentGuid: PlacesUtils.bookmarks.menuGuid,
-              oldValue: "http://example.com/b",
-              source: PlacesUtils.bookmarks.SOURCES.SYNC },
-  }, {
-    name: "onItemChanged",
-    params: { itemId: localItemIds.get("bookmarkCCCC"), property: "keyword",
-              isAnnoProperty: false, newValue: "",
-              type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
-              parentId: PlacesUtils.bookmarksMenuFolderId, guid: "bookmarkCCCC",
-              parentGuid: PlacesUtils.bookmarks.menuGuid,
-              oldValue: "http://example.com/c",
-              source: PlacesUtils.bookmarks.SOURCES.SYNC },
-  }, {
-    name: "onItemChanged",
-    params: { itemId: localItemIds.get("bookmarkCCCC"), property: "keyword",
-              isAnnoProperty: false, newValue: "six",
-              type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
-              parentId: PlacesUtils.bookmarksMenuFolderId, guid: "bookmarkCCCC",
-              parentGuid: PlacesUtils.bookmarks.menuGuid,
-              oldValue: "http://example.com/c-remote",
-              source: PlacesUtils.bookmarks.SOURCES.SYNC },
-  });
   observer.check(expectedNotifications);
 
   let entriesForFour = await fetchAllKeywords("four");

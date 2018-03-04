@@ -19,7 +19,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["OS"];
+var EXPORTED_SYMBOLS = ["OS"];
 
 var SharedAll = {};
 ChromeUtils.import("resource://gre/modules/osfile/osfile_shared_allthreads.jsm", SharedAll);
@@ -550,9 +550,6 @@ Services.prefs.addObserver(PREF_OSFILE_NATIVE,
 if (SharedAll.Config.DEBUG && Scheduler.launched) {
   Scheduler.post("SET_DEBUG", [true]);
 }
-
-// Observer topics used for monitoring shutdown
-const WEB_WORKERS_SHUTDOWN_TOPIC = "web-workers-shutdown";
 
 // Preference used to configure test shutdown observer.
 const PREF_OSFILE_TEST_SHUTDOWN_OBSERVER =
@@ -1398,7 +1395,7 @@ File.POS_END = SysAll.POS_END;
 File.Error = OSError;
 File.DirectoryIterator = DirectoryIterator;
 
-this.OS = {};
+var OS = {};
 this.OS.File = File;
 this.OS.Constants = SharedAll.Constants;
 this.OS.Shared = {
@@ -1426,7 +1423,7 @@ Object.defineProperty(OS.File, "queue", {
 // able to replace that field with a custom implementation before it is first
 // called.
 // eslint-disable-next-line mozilla/use-services
-const isContent = Components.classes["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).processType == Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT;
+const isContent = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).processType == Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT;
 
 /**
  * Shutdown barriers, to let clients register to be informed during shutdown.

@@ -175,7 +175,7 @@ class StringifyContext
 static bool Str(JSContext* cx, const Value& v, StringifyContext* scx);
 
 static bool
-WriteIndent(JSContext* cx, StringifyContext* scx, uint32_t limit)
+WriteIndent(StringifyContext* scx, uint32_t limit)
 {
     if (!scx->gap.empty()) {
         if (!scx->sb.append('\n'))
@@ -423,7 +423,7 @@ JO(JSContext* cx, HandleObject obj, StringifyContext* scx)
             return false;
         wroteMember = true;
 
-        if (!WriteIndent(cx, scx, scx->depth))
+        if (!WriteIndent(scx, scx->depth))
             return false;
 
         JSString* s = IdToString(cx, id);
@@ -439,7 +439,7 @@ JO(JSContext* cx, HandleObject obj, StringifyContext* scx)
         }
     }
 
-    if (wroteMember && !WriteIndent(cx, scx, scx->depth - 1))
+    if (wroteMember && !WriteIndent(scx, scx->depth - 1))
         return false;
 
     return scx->sb.append('}');
@@ -475,7 +475,7 @@ JA(JSContext* cx, HandleObject obj, StringifyContext* scx)
     /* Steps 7-10. */
     if (length != 0) {
         /* Steps 4, 10b(i). */
-        if (!WriteIndent(cx, scx, scx->depth))
+        if (!WriteIndent(scx, scx->depth))
             return false;
 
         /* Steps 7-10. */
@@ -527,13 +527,13 @@ JA(JSContext* cx, HandleObject obj, StringifyContext* scx)
             if (i < length - 1) {
                 if (!scx->sb.append(','))
                     return false;
-                if (!WriteIndent(cx, scx, scx->depth))
+                if (!WriteIndent(scx, scx->depth))
                     return false;
             }
         }
 
         /* Step 10(b)(iii). */
-        if (!WriteIndent(cx, scx, scx->depth - 1))
+        if (!WriteIndent(scx, scx->depth - 1))
             return false;
     }
 
@@ -911,7 +911,6 @@ template bool
 js::ParseJSONWithReviver(JSContext* cx, const mozilla::Range<const char16_t> chars, HandleValue reviver,
                          MutableHandleValue vp);
 
-#if JS_HAS_TOSOURCE
 static bool
 json_toSource(JSContext* cx, unsigned argc, Value* vp)
 {
@@ -919,7 +918,6 @@ json_toSource(JSContext* cx, unsigned argc, Value* vp)
     args.rval().setString(cx->names().JSON);
     return true;
 }
-#endif
 
 /* ES5 15.12.2. */
 static bool
@@ -980,9 +978,7 @@ json_stringify(JSContext* cx, unsigned argc, Value* vp)
 }
 
 static const JSFunctionSpec json_static_methods[] = {
-#if JS_HAS_TOSOURCE
     JS_FN(js_toSource_str,  json_toSource,      0, 0),
-#endif
     JS_FN("parse",          json_parse,         2, 0),
     JS_FN("stringify",      json_stringify,     3, 0),
     JS_FS_END

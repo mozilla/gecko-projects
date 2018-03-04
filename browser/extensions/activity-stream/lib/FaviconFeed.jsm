@@ -124,7 +124,7 @@ this.FaviconFeed = class FaviconFeed {
     if (domain in sitesByDomain) {
       let iconUri = Services.io.newURI(sitesByDomain[domain].image_url);
       // The #tippytop is to be able to identify them for telemetry.
-      iconUri.ref = "tippytop";
+      iconUri = iconUri.mutate().setRef("tippytop").finalize();
       PlacesUtils.favicons.setAndFetchFaviconForPage(
         Services.io.newURI(url),
         iconUri,
@@ -158,4 +158,4 @@ this.FaviconFeed = class FaviconFeed {
   }
 };
 
-this.EXPORTED_SYMBOLS = ["FaviconFeed"];
+const EXPORTED_SYMBOLS = ["FaviconFeed"];

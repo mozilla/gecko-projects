@@ -26,8 +26,6 @@
 #include "WidgetUtils.h"
 #include "nsWindow.h"
 
-#include <dlfcn.h>
-
 #include "mozilla/gfx/2D.h"
 
 #include <cairo-gobject.h>
@@ -790,7 +788,7 @@ nsLookAndFeel::GetFontImpl(FontID aID, nsString& aFontName,
   // Scale the font for the current monitor
   double scaleFactor = nsIWidget::DefaultScaleOverride();
   if (scaleFactor > 0) {
-    aFontStyle.size *= aDevPixPerCSSPixel;
+    aFontStyle.size *= mozilla::widget::ScreenHelperGTK::GetGTKMonitorScaleFactor();
   } else {
     // Remove effect of font scale because it has been already applied in
     // GetSystemFontInfo
@@ -1087,35 +1085,29 @@ nsLookAndFeel::EnsureInit()
     mCSDAvailable = (gtk_check_version(3, 10, 0) == nullptr &&
         nsWindow::GetCSDSupportLevel() != nsWindow::CSD_SUPPORT_NONE);
 
+    mCSDCloseButton = false;
+    mCSDMinimizeButton = false;
+    mCSDMaximizeButton = false;
+
     // We need to initialize whole CSD config explicitly because it's queried
     // as -moz-gtk* media features.
-    mCSDCloseButton = true;
-    mCSDMaximizeButton = false;
-    mCSDMinimizeButton = false;
+    WidgetNodeType buttonLayout[TOOLBAR_BUTTONS];
 
-    if (mCSDAvailable) {
-        static auto sGtkHeaderBarGetDecorationLayoutPtr =
-          (const gchar* (*)(GtkWidget*))
-          dlsym(RTLD_DEFAULT, "gtk_header_bar_get_decoration_layout");
-
-        if (sGtkHeaderBarGetDecorationLayoutPtr) {
-            GtkWidget* headerBar = GetWidget(MOZ_GTK_HEADER_BAR);
-            const gchar* decorationLayout =
-                sGtkHeaderBarGetDecorationLayoutPtr(headerBar);
-            if (!decorationLayout) {
-                g_object_get(settings, "gtk-decoration-layout",
-                             &decorationLayout,
-                             nullptr);
-            }
-
-            if (decorationLayout) {
-                mCSDCloseButton =
-                    (strstr(decorationLayout, "close") != nullptr);
-                mCSDMaximizeButton =
-                    (strstr(decorationLayout, "maximize") != nullptr);
-                mCSDMinimizeButton =
-                    (strstr(decorationLayout, "minimize") != nullptr);
-            }
+    int activeButtons =
+        GetGtkHeaderBarButtonLayout(buttonLayout, TOOLBAR_BUTTONS);
+    for (int i = 0; i < activeButtons; i++) {
+        switch(buttonLayout[i]) {
+        case MOZ_GTK_HEADER_BAR_BUTTON_MINIMIZE:
+            mCSDMinimizeButton = true;
+            break;
+        case MOZ_GTK_HEADER_BAR_BUTTON_MAXIMIZE:
+            mCSDMaximizeButton = true;
+            break;
+        case MOZ_GTK_HEADER_BAR_BUTTON_CLOSE:
+            mCSDCloseButton = true;
+            break;
+        default:
+            break;
         }
     }
 }

@@ -19,11 +19,9 @@
 
 #include "jsapi.h"
 #include "jsarray.h"
-#include "jscpucfg.h"
 #include "jsnum.h"
 #include "jstypes.h"
 #include "jsutil.h"
-#include "jswrapper.h"
 
 #include "builtin/DataViewObject.h"
 #include "builtin/TypedObjectConstants.h"
@@ -31,6 +29,7 @@
 #include "gc/Marking.h"
 #include "jit/InlinableNatives.h"
 #include "js/Conversions.h"
+#include "js/Wrapper.h"
 #include "util/Windows.h"
 #include "vm/ArrayBufferObject.h"
 #include "vm/GlobalObject.h"
@@ -409,8 +408,7 @@ class TypedArrayObjectTemplate : public TypedArrayObject
     }
 
     static TypedArrayObject*
-    makeTypedInstance(JSContext* cx, uint32_t len, CreateSingleton createSingleton,
-                      gc::AllocKind allocKind)
+    makeTypedInstance(JSContext* cx, CreateSingleton createSingleton, gc::AllocKind allocKind)
     {
         const Class* clasp = instanceClass();
         if (createSingleton == CreateSingleton::Yes) {
@@ -467,7 +465,7 @@ class TypedArrayObjectTemplate : public TypedArrayObject
         if (proto && proto != checkProto)
             obj = makeProtoInstance(cx, proto, allocKind);
         else
-            obj = makeTypedInstance(cx, len, createSingleton, allocKind);
+            obj = makeTypedInstance(cx, createSingleton, allocKind);
         if (!obj)
             return nullptr;
 

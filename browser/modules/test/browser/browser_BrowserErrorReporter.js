@@ -4,6 +4,8 @@
 
 ChromeUtils.import("resource:///modules/BrowserErrorReporter.jsm", this);
 
+Cu.importGlobalProperties(["fetch"]);
+
 /* global sinon */
 Services.scriptloader.loadSubScript("resource://testing-common/sinon-2.3.2.js");
 registerCleanupFunction(function() {
@@ -46,6 +48,13 @@ function logMessage(message) {
   });
 }
 
+// Clears the console of any previous messages. Should be called at the end of
+// each test that logs to the console.
+function resetConsole() {
+  Services.console.logStringMessage("");
+  Services.console.reset();
+}
+
 // Wrapper similar to logMessage, but for logStringMessage.
 function logStringMessage(message) {
   return new Promise(resolve => {
@@ -80,8 +89,8 @@ function fetchPassedError(fetchSpy, message) {
 }
 
 add_task(async function testInitPrefDisabled() {
-  const fetch = sinon.spy();
-  const reporter = new BrowserErrorReporter(fetch);
+  const fetchSpy = sinon.spy();
+  const reporter = new BrowserErrorReporter(fetchSpy);
   await SpecialPowers.pushPrefEnv({set: [
     [PREF_ENABLED, false],
     [PREF_SAMPLE_RATE, "1.0"],
@@ -90,15 +99,16 @@ add_task(async function testInitPrefDisabled() {
   reporter.init();
   await logMessage(createScriptError({message: "Logged while disabled"}));
   ok(
-    !fetchPassedError(fetch, "Logged while disabled"),
+    !fetchPassedError(fetchSpy, "Logged while disabled"),
     "Reporter does not listen for errors if the enabled pref is false.",
   );
   reporter.uninit();
+  resetConsole();
 });
 
 add_task(async function testInitUninitPrefEnabled() {
-  const fetch = sinon.spy();
-  const reporter = new BrowserErrorReporter(fetch);
+  const fetchSpy = sinon.spy();
+  const reporter = new BrowserErrorReporter(fetchSpy);
   await SpecialPowers.pushPrefEnv({set: [
     [PREF_ENABLED, true],
     [PREF_SAMPLE_RATE, "1.0"],
@@ -107,23 +117,25 @@ add_task(async function testInitUninitPrefEnabled() {
   reporter.init();
   await logMessage(createScriptError({message: "Logged after init"}));
   ok(
-    fetchPassedError(fetch, "Logged after init"),
+    fetchPassedError(fetchSpy, "Logged after init"),
     "Reporter listens for errors if the enabled pref is true.",
   );
 
-  fetch.reset();
-  ok(!fetch.called, "Fetch spy was reset.");
+  fetchSpy.reset();
+  ok(!fetchSpy.called, "Fetch spy was reset.");
   reporter.uninit();
   await logMessage(createScriptError({message: "Logged after uninit"}));
   ok(
-    !fetchPassedError(fetch, "Logged after uninit"),
+    !fetchPassedError(fetchSpy, "Logged after uninit"),
     "Reporter does not listen for errors after uninit.",
   );
+
+  resetConsole();
 });
 
 add_task(async function testInitPastMessages() {
-  const fetch = sinon.spy();
-  const reporter = new BrowserErrorReporter(fetch);
+  const fetchSpy = sinon.spy();
+  const reporter = new BrowserErrorReporter(fetchSpy);
   await SpecialPowers.pushPrefEnv({set: [
     [PREF_ENABLED, true],
     [PREF_SAMPLE_RATE, "1.0"],
@@ -132,15 +144,16 @@ add_task(async function testInitPastMessages() {
   await logMessage(createScriptError({message: "Logged before init"}));
   reporter.init();
   ok(
-    fetchPassedError(fetch, "Logged before init"),
+    fetchPassedError(fetchSpy, "Logged before init"),
     "Reporter collects errors logged before initialization.",
   );
   reporter.uninit();
+  resetConsole();
 });
 
 add_task(async function testEnabledPrefWatcher() {
-  const fetch = sinon.spy();
-  const reporter = new BrowserErrorReporter(fetch);
+  const fetchSpy = sinon.spy();
+  const reporter = new BrowserErrorReporter(fetchSpy);
   await SpecialPowers.pushPrefEnv({set: [
     [PREF_ENABLED, false],
     [PREF_SAMPLE_RATE, "1.0"],
@@ -149,7 +162,7 @@ add_task(async function testEnabledPrefWatcher() {
   reporter.init();
   await logMessage(createScriptError({message: "Shouldn't report"}));
   ok(
-    !fetchPassedError(fetch, "Shouldn't report"),
+    !fetchPassedError(fetchSpy, "Shouldn't report"),
     "Reporter does not collect errors if the enable pref is false.",
   );
 
@@ -157,21 +170,22 @@ add_task(async function testEnabledPrefWatcher() {
     [PREF_ENABLED, true],
   ]});
   ok(
-    !fetchPassedError(fetch, "Shouldn't report"),
+    !fetchPassedError(fetchSpy, "Shouldn't report"),
     "Reporter does not collect past-logged errors if it is enabled mid-run.",
   );
   await logMessage(createScriptError({message: "Should report"}));
   ok(
-    fetchPassedError(fetch, "Should report"),
+    fetchPassedError(fetchSpy, "Should report"),
     "Reporter collects errors logged after the enabled pref is turned on mid-run",
   );
 
   reporter.uninit();
+  resetConsole();
 });
 
 add_task(async function testNonErrorLogs() {
-  const fetch = sinon.spy();
-  const reporter = new BrowserErrorReporter(fetch);
+  const fetchSpy = sinon.spy();
+  const reporter = new BrowserErrorReporter(fetchSpy);
   await SpecialPowers.pushPrefEnv({set: [
     [PREF_ENABLED, true],
     [PREF_SAMPLE_RATE, "1.0"],
@@ -181,7 +195,7 @@ add_task(async function testNonErrorLogs() {
 
   await logStringMessage("Not a scripterror instance.");
   ok(
-    !fetchPassedError(fetch, "Not a scripterror instance."),
+    !fetchPassedError(fetchSpy, "Not a scripterror instance."),
     "Reporter does not collect normal log messages or warnings.",
   );
 
@@ -190,7 +204,7 @@ add_task(async function testNonErrorLogs() {
     flags: Ci.nsIScriptError.warningFlag,
   }));
   ok(
-    !fetchPassedError(fetch, "Warning message"),
+    !fetchPassedError(fetchSpy, "Warning message"),
     "Reporter does not collect normal log messages or warnings.",
   );
 
@@ -199,22 +213,23 @@ add_task(async function testNonErrorLogs() {
     category: "totally from a website",
   }));
   ok(
-    !fetchPassedError(fetch, "Non-chrome category"),
+    !fetchPassedError(fetchSpy, "Non-chrome category"),
     "Reporter does not collect normal log messages or warnings.",
   );
 
   await logMessage(createScriptError({message: "Is error"}));
   ok(
-    fetchPassedError(fetch, "Is error"),
+    fetchPassedError(fetchSpy, "Is error"),
     "Reporter collects error messages.",
   );
 
   reporter.uninit();
+  resetConsole();
 });
 
 add_task(async function testSampling() {
-  const fetch = sinon.spy();
-  const reporter = new BrowserErrorReporter(fetch);
+  const fetchSpy = sinon.spy();
+  const reporter = new BrowserErrorReporter(fetchSpy);
   await SpecialPowers.pushPrefEnv({set: [
     [PREF_ENABLED, true],
     [PREF_SAMPLE_RATE, "1.0"],
@@ -223,7 +238,7 @@ add_task(async function testSampling() {
   reporter.init();
   await logMessage(createScriptError({message: "Should log"}));
   ok(
-    fetchPassedError(fetch, "Should log"),
+    fetchPassedError(fetchSpy, "Should log"),
     "A 1.0 sample rate will cause the reporter to always collect errors.",
   );
 
@@ -232,7 +247,7 @@ add_task(async function testSampling() {
   ]});
   await logMessage(createScriptError({message: "Shouldn't log"}));
   ok(
-    !fetchPassedError(fetch, "Shouldn't log"),
+    !fetchPassedError(fetchSpy, "Shouldn't log"),
     "A 0.0 sample rate will cause the reporter to never collect errors.",
   );
 
@@ -241,14 +256,17 @@ add_task(async function testSampling() {
   ]});
   await logMessage(createScriptError({message: "Also shouldn't log"}));
   ok(
-    !fetchPassedError(fetch, "Also shouldn't log"),
+    !fetchPassedError(fetchSpy, "Also shouldn't log"),
     "An invalid sample rate will cause the reporter to never collect errors.",
   );
+
+  reporter.uninit();
+  resetConsole();
 });
 
 add_task(async function testNameMessage() {
-  const fetch = sinon.spy();
-  const reporter = new BrowserErrorReporter(fetch);
+  const fetchSpy = sinon.spy();
+  const reporter = new BrowserErrorReporter(fetchSpy);
   await SpecialPowers.pushPrefEnv({set: [
     [PREF_ENABLED, true],
     [PREF_SAMPLE_RATE, "1.0"],
@@ -256,7 +274,7 @@ add_task(async function testNameMessage() {
 
   reporter.init();
   await logMessage(createScriptError({message: "No name"}));
-  let call = fetchCallForMessage(fetch, "No name");
+  let call = fetchCallForMessage(fetchSpy, "No name");
   let body = JSON.parse(call.args[1].body);
   is(
     body.exception.values[0].type,
@@ -270,7 +288,7 @@ add_task(async function testNameMessage() {
   );
 
   await logMessage(createScriptError({message: "FooError: Has name"}));
-  call = fetchCallForMessage(fetch, "Has name");
+  call = fetchCallForMessage(fetchSpy, "Has name");
   body = JSON.parse(call.args[1].body);
   is(
     body.exception.values[0].type,
@@ -284,7 +302,7 @@ add_task(async function testNameMessage() {
   );
 
   await logMessage(createScriptError({message: "FooError: Has :extra: colons"}));
-  call = fetchCallForMessage(fetch, "Has :extra: colons");
+  call = fetchCallForMessage(fetchSpy, "Has :extra: colons");
   body = JSON.parse(call.args[1].body);
   is(
     body.exception.values[0].type,
@@ -297,11 +315,12 @@ add_task(async function testNameMessage() {
     "Reporter uses error message as the value parameter.",
   );
   reporter.uninit();
+  resetConsole();
 });
 
 add_task(async function testFetchArguments() {
-  const fetch = sinon.spy();
-  const reporter = new BrowserErrorReporter(fetch);
+  const fetchSpy = sinon.spy();
+  const reporter = new BrowserErrorReporter(fetchSpy);
   await SpecialPowers.pushPrefEnv({set: [
     [PREF_ENABLED, true],
     [PREF_SAMPLE_RATE, "1.0"],
@@ -315,22 +334,13 @@ add_task(async function testFetchArguments() {
     "chrome://mochitests/content/browser/browser/modules/test/browser/" +
     "browser_BrowserErrorReporter.html"
   );
-  const errorRaisedPromise = new Promise(resolve => {
-    Services.console.registerListener({
-      observe(loggedMessage) {
-        if (loggedMessage.message.toString().includes("testFetchArguments error")) {
-          Services.console.unregisterListener(this);
-          resolve();
-        }
-      },
-    });
-  });
 
   SimpleTest.expectUncaughtException();
   await BrowserTestUtils.withNewTab(testPageUrl, async () => {
-    await errorRaisedPromise;
-
-    const call = fetchCallForMessage(fetch, "testFetchArguments error");
+    const call = await TestUtils.waitForCondition(
+      () => fetchCallForMessage(fetchSpy, "testFetchArguments error"),
+      "Wait for error from browser_BrowserErrorReporter.html to be logged",
+    );
     const body = JSON.parse(call.args[1].body);
     const url = new URL(call.args[0]);
 
@@ -346,6 +356,9 @@ add_task(async function testFetchArguments() {
     is(body.project, "123", "Reporter pulls project ID from DSN pref.");
     is(call.args[1].referrer, "https://fake.mozilla.org", "Reporter uses a fake referer.");
 
+    const response = await fetch(testPageUrl);
+    const pageText = await response.text();
+    const pageLines = pageText.split("\n");
     Assert.deepEqual(
       body.exception,
       {
@@ -356,32 +369,41 @@ add_task(async function testFetchArguments() {
             stacktrace: {
               frames: [
                 {
-                  function: "madeToFail2",
-                  filename: testPageUrl,
-                  lineno: 15,
-                  colno: 15,
-                  in_app: true,
+                  function: null,
+                  module: testPageUrl,
+                  lineno: 17,
+                  colno: 7,
+                  pre_context: pageLines.slice(11, 16),
+                  context_line: pageLines[16],
+                  post_context: pageLines.slice(17, 22),
                 },
                 {
                   function: "madeToFail",
-                  filename: testPageUrl,
+                  module: testPageUrl,
                   lineno: 12,
                   colno: 9,
-                  in_app: true,
+                  pre_context: pageLines.slice(6, 11),
+                  context_line: pageLines[11],
+                  post_context: pageLines.slice(12, 17),
                 },
                 {
-                  function: null,
-                  filename: testPageUrl,
-                  lineno: 17,
-                  colno: 7,
-                  in_app: true,
-                }
-              ]
-            }
-          }
-        ]
+                  function: "madeToFail2",
+                  module: testPageUrl,
+                  lineno: 15,
+                  colno: 15,
+                  pre_context: pageLines.slice(9, 14),
+                  context_line: pageLines[14],
+                  post_context: pageLines.slice(15, 20),
+                },
+              ],
+            },
+          },
+        ],
       },
       "Reporter builds stack trace from scriptError correctly.",
     );
   });
+
+  reporter.uninit();
+  resetConsole();
 });

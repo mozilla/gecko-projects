@@ -9,6 +9,7 @@ const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 
 const Types = require("../types");
+const { getStr } = require("../utils/l10n");
 
 class FontPreview extends PureComponent {
   static get propTypes() {
@@ -44,8 +45,9 @@ class FontPreview extends PureComponent {
     this.setState({ isFocused: false });
   }
 
-  onClick() {
+  onClick(event) {
     this.setState({ isFocused: true });
+    event.stopPropagation();
   }
 
   onChange(event) {
@@ -84,6 +86,7 @@ class FontPreview extends PureComponent {
           className: "font-preview",
           src: previewUrl,
           onClick: this.onClick,
+          title: !isFocused ? getStr("fontinspector.editPreview") : "",
         }
       )
     );

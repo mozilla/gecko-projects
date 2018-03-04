@@ -43,11 +43,10 @@ ${helpers.single_keyword("-moz-user-focus",
 
 ${helpers.predefined_type(
     "caret-color",
-    "ColorOrAuto",
-    "Either::Second(Auto)",
+    "CaretColor",
+    "generics::pointing::CaretColor::Auto",
     spec="https://drafts.csswg.org/css-ui/#caret-color",
-    animation_value_type="Either<AnimatedColor, Auto>",
-    boxed=not RUSTC_HAS_PR45225,
+    animation_value_type="AnimatedCaretColor",
     ignored_when_colors_disabled=True,
     products="gecko",
 )}

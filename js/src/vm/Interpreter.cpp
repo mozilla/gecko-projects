@@ -20,7 +20,6 @@
 #include "jsarray.h"
 #include "jslibmath.h"
 #include "jsnum.h"
-#include "jsprf.h"
 #include "jsstr.h"
 
 #include "builtin/Eval.h"
@@ -1146,20 +1145,13 @@ js::UnwindEnvironmentToTryPc(JSScript* script, JSTryNote* tn)
 }
 
 static bool
-ForcedReturn(JSContext* cx, EnvironmentIter& ei, InterpreterRegs& regs, bool frameOk = true)
+ForcedReturn(JSContext* cx, InterpreterRegs& regs)
 {
-    bool ok = Debugger::onLeaveFrame(cx, regs.fp(), regs.pc, frameOk);
+    bool ok = Debugger::onLeaveFrame(cx, regs.fp(), regs.pc, true);
     // Point the frame to the end of the script, regardless of error. The
     // caller must jump to the correct continuation depending on 'ok'.
     regs.setToEndOfScript();
     return ok;
-}
-
-static bool
-ForcedReturn(JSContext* cx, InterpreterRegs& regs)
-{
-    EnvironmentIter ei(cx, regs.fp(), regs.pc);
-    return ForcedReturn(cx, ei, regs);
 }
 
 static void
@@ -1201,7 +1193,7 @@ UnwindIteratorsForUncatchableException(JSContext* cx, const InterpreterRegs& reg
         JSTryNote* tn = *tni;
         if (tn->kind == JSTRY_FOR_IN) {
             Value* sp = regs.spForStackDepth(tn->stackDepth);
-            UnwindIteratorForUncatchableException(cx, &sp[-1].toObject());
+            UnwindIteratorForUncatchableException(&sp[-1].toObject());
         }
     }
 }
@@ -1353,7 +1345,7 @@ HandleError(JSContext* cx, InterpreterRegs& regs)
 
               case JSTRAP_RETURN:
                 UnwindIteratorsForUncatchableException(cx, regs);
-                if (!ForcedReturn(cx, ei, regs))
+                if (!ForcedReturn(cx, regs))
                     return ErrorReturnContinuation;
                 return SuccessfulReturnContinuation;
 
@@ -1384,7 +1376,7 @@ HandleError(JSContext* cx, InterpreterRegs& regs)
         // callback, which cannot easily force a return.
         if (MOZ_UNLIKELY(cx->isPropagatingForcedReturn())) {
             cx->clearPropagatingForcedReturn();
-            if (!ForcedReturn(cx, ei, regs))
+            if (!ForcedReturn(cx, regs))
                 return ErrorReturnContinuation;
             return SuccessfulReturnContinuation;
         }
@@ -1684,11 +1676,11 @@ js::ReportInNotObjectError(JSContext* cx, HandleValue lref, int lindex,
                            HandleValue rref, int rindex)
 {
     auto uniqueCharsFromString = [](JSContext* cx, HandleValue ref) -> UniqueChars {
-        static const size_t MAX_STRING_LENGTH = 16;
+        static const size_t MaxStringLength = 16;
         RootedString str(cx, ref.toString());
-        if (str->length() > MAX_STRING_LENGTH) {
+        if (str->length() > MaxStringLength) {
             StringBuffer buf(cx);
-            if (!buf.appendSubstring(str, 0, MAX_STRING_LENGTH))
+            if (!buf.appendSubstring(str, 0, MaxStringLength))
                 return nullptr;
             if (!buf.append("..."))
                 return nullptr;
@@ -1699,18 +1691,20 @@ js::ReportInNotObjectError(JSContext* cx, HandleValue lref, int lindex,
         return UniqueChars(JS_EncodeString(cx, str));
     };
 
-    UniqueChars lbytes = lref.isString()
-                       ? uniqueCharsFromString(cx, lref)
-                       : DecompileValueGenerator(cx, lindex, lref, nullptr);
-    if (!lbytes)
+    if (lref.isString() && rref.isString()) {
+        UniqueChars lbytes = uniqueCharsFromString(cx, lref);
+        if (!lbytes)
+            return;
+        UniqueChars rbytes = uniqueCharsFromString(cx, rref);
+        if (!rbytes)
+            return;
+        JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr, JSMSG_IN_STRING,
+                                   lbytes.get(), rbytes.get());
         return;
-    UniqueChars rbytes = rref.isString()
-                       ? uniqueCharsFromString(cx, rref)
-                       : DecompileValueGenerator(cx, rindex, rref, nullptr);
-    if (!rbytes)
-        return;
+    }
+
     JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr, JSMSG_IN_NOT_OBJECT,
-                               lbytes.get(), rbytes.get());
+                               InformalValueTypeName(rref));
 }
 
 static MOZ_NEVER_INLINE bool
@@ -2032,7 +2026,7 @@ CASE(JSOP_LOOPENTRY)
     COUNT_COVERAGE();
     // Attempt on-stack replacement with Baseline code.
     if (jit::IsBaselineEnabled(cx)) {
-        jit::MethodStatus status = jit::CanEnterBaselineAtBranch(cx, REGS.fp(), false);
+        jit::MethodStatus status = jit::CanEnterBaselineAtBranch(cx, REGS.fp());
         if (status == jit::Method_Error)
             goto error;
         if (status == jit::Method_Compiled) {
@@ -4128,7 +4122,7 @@ CASE(JSOP_FINALYIELDRVAL)
 {
     ReservedRooted<JSObject*> gen(&rootObject0, &REGS.sp[-1].toObject());
     REGS.sp--;
-    GeneratorObject::finalSuspend(cx, gen);
+    GeneratorObject::finalSuspend(gen);
     goto successful_return_continuation;
 }
 

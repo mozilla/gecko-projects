@@ -10,15 +10,14 @@
 
 #include <stdint.h>
 
-#include "jsprf.h"
-#include "jswrapper.h"
-
 #include "builtin/Promise.h"
 #include "builtin/TestingFunctions.h"
 #include "gc/GCInternals.h"
 #include "gc/PublicIterators.h"
 #include "gc/WeakMap.h"
+#include "js/Printf.h"
 #include "js/Proxy.h"
+#include "js/Wrapper.h"
 #include "proxy/DeadObjectProxy.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/JSCompartment.h"
@@ -1050,8 +1049,7 @@ FormatFrame(JSContext* cx, const FrameIter& iter, JS::UniqueChars&& inBuf, int n
 }
 
 static JS::UniqueChars
-FormatWasmFrame(JSContext* cx, const FrameIter& iter, JS::UniqueChars&& inBuf, int num,
-                bool showArgs)
+FormatWasmFrame(JSContext* cx, const FrameIter& iter, JS::UniqueChars&& inBuf, int num)
 {
     JSAtom* functionDisplayAtom = iter.functionDisplayAtom();
     UniqueChars nameStr;
@@ -1084,7 +1082,7 @@ JS::FormatStackDump(JSContext* cx, JS::UniqueChars&& inBuf, bool showArgs, bool 
         if (i.hasScript())
             buf = FormatFrame(cx, i, Move(buf), num, showArgs, showLocals, showThisProps);
         else
-            buf = FormatWasmFrame(cx, i, Move(buf), num, showArgs);
+            buf = FormatWasmFrame(cx, i, Move(buf), num);
         if (!buf)
             return nullptr;
         num++;

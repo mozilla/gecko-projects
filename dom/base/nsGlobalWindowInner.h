@@ -9,7 +9,6 @@
 
 #include "nsPIDOMWindow.h"
 
-#include "nsTHashtable.h"
 #include "nsHashKeys.h"
 #include "nsRefPtrHashtable.h"
 #include "nsInterfaceHashtable.h"
@@ -58,6 +57,7 @@
 #include "nsCheapSets.h"
 #include "mozilla/dom/ImageBitmapSource.h"
 #include "mozilla/UniquePtr.h"
+#include "nsRefreshDriver.h"
 
 class nsIArray;
 class nsIBaseWindow;
@@ -90,9 +90,10 @@ class IdleRequestExecutor;
 
 class DialogValueHolder;
 
+class PromiseDocumentFlushedResolver;
+
 namespace mozilla {
 class AbstractThread;
-class DOMEventTargetHelper;
 class ThrottledEventQueue;
 namespace dom {
 class BarProp;
@@ -213,7 +214,8 @@ class nsGlobalWindowInner : public mozilla::dom::EventTarget,
                             public nsIScriptObjectPrincipal,
                             public nsSupportsWeakReference,
                             public nsIInterfaceRequestor,
-                            public PRCListStr
+                            public PRCListStr,
+                            public nsAPostRefreshObserver
 {
 public:
   typedef mozilla::TimeStamp TimeStamp;
@@ -354,12 +356,6 @@ public:
   virtual RefPtr<mozilla::dom::ServiceWorker>
   GetOrCreateServiceWorker(const mozilla::dom::ServiceWorkerDescriptor& aDescriptor) override;
 
-  virtual void
-  AddServiceWorker(mozilla::dom::ServiceWorker* aServiceWorker) override;
-
-  virtual void
-  RemoveServiceWorker(mozilla::dom::ServiceWorker* aServiceWorker) override;
-
   void NoteCalledRegisterForServiceWorkerScope(const nsACString& aScope);
 
   virtual nsresult FireDelayedDOMEvents() override;
@@ -406,6 +402,8 @@ public:
   static bool IsWindowPrintEnabled(JSContext* /* unused */, JSObject* /* unused */);
 
   static bool RegisterProtocolHandlerAllowedForContext(JSContext* /* unused */, JSObject* aObj);
+
+  static bool DeviceSensorsEnabled(JSContext* /* unused */, JSObject* aObj);
 
   bool DoResolve(JSContext* aCx, JS::Handle<JSObject*> aObj,
                  JS::Handle<jsid> aId,
@@ -517,10 +515,6 @@ public:
   }
 
   void AddSizeOfIncludingThis(nsWindowSizes& aWindowSizes) const;
-
-  // Inner windows only.
-  void AddEventTargetObject(mozilla::DOMEventTargetHelper* aObject);
-  void RemoveEventTargetObject(mozilla::DOMEventTargetHelper* aObject);
 
   void NotifyIdleObserver(IdleObserverHolder* aIdleObserverHolder,
                           bool aCallOnidle);
@@ -692,7 +686,8 @@ public:
   int16_t Orientation(mozilla::dom::CallerType aCallerType) const;
 #endif
 
-  already_AddRefed<mozilla::dom::Console> GetConsole(mozilla::ErrorResult& aRv);
+  already_AddRefed<mozilla::dom::Console>
+  GetConsole(JSContext* aCx, mozilla::ErrorResult& aRv);
 
   // https://w3c.github.io/webappsec-secure-contexts/#dom-window-issecurecontext
   bool IsSecureContext() const;
@@ -955,6 +950,12 @@ public:
   void BeginWindowMove(mozilla::dom::Event& aMouseDownEvent,
                        mozilla::dom::Element* aPanel,
                        mozilla::ErrorResult& aError);
+
+  already_AddRefed<mozilla::dom::Promise>
+  PromiseDocumentFlushed(mozilla::dom::PromiseDocumentFlushedCallback& aCallback,
+                         mozilla::ErrorResult& aError);
+
+  void DidRefresh() override;
 
   void GetDialogArgumentsOuter(JSContext* aCx, JS::MutableHandle<JS::Value> aRetval,
                                nsIPrincipal& aSubjectPrincipal,
@@ -1260,8 +1261,6 @@ private:
   // Fire the JS engine's onNewGlobalObject hook.  Only used on inner windows.
   void FireOnNewGlobalObject();
 
-  void DisconnectEventTargetObjects();
-
   // nsPIDOMWindow{Inner,Outer} should be able to see these helper methods.
   friend class nsPIDOMWindowInner;
   friend class nsPIDOMWindowOuter;
@@ -1282,6 +1281,15 @@ private:
     }
     mChromeFields.mGroupMessageManagers.Clear();
   }
+
+  // Call or Cancel mDocumentFlushedResolvers items, and perform MicroTask
+  // checkpoint after that, and adds observer if new mDocumentFlushedResolvers
+  // items are added while Promise callbacks inside the checkpoint.
+  template<bool call>
+  void CallOrCancelDocumentFlushedResolvers();
+
+  void CallDocumentFlushedResolvers();
+  void CancelDocumentFlushedResolvers();
 
 public:
   // Dispatch a runnable related to the global.
@@ -1429,7 +1437,13 @@ protected:
   // currently enabled on this window.
   bool                          mAreDialogsEnabled;
 
-  nsTHashtable<nsPtrHashKey<mozilla::DOMEventTargetHelper> > mEventTargetObjects;
+  // This flag keeps track of whether this window is currently
+  // observing DidRefresh notifications from the refresh driver.
+  bool                          mObservingDidRefresh;
+  // This flag keeps track of whether or not we're going through
+  // promiseDocumentFlushed resolvers. When true, promiseDocumentFlushed
+  // cannot be called.
+  bool                          mIteratingDocumentFlushedResolvers;
 
   nsTArray<uint32_t> mEnabledSensors;
 
@@ -1455,11 +1469,9 @@ protected:
 
   mozilla::UniquePtr<mozilla::dom::ClientSource> mClientSource;
 
-  // Weak references added by AddServiceWorker() and cleared by
-  // RemoveServiceWorker() when the ServiceWorker is destroyed.
-  nsTArray<mozilla::dom::ServiceWorker*> mServiceWorkerList;
-
   nsTArray<RefPtr<mozilla::dom::Promise>> mPendingPromises;
+
+  nsTArray<mozilla::UniquePtr<PromiseDocumentFlushedResolver>> mDocumentFlushedResolvers;
 
   static InnerWindowByIdTable* sInnerWindowsById;
 

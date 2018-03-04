@@ -1403,10 +1403,8 @@ public:
   }
 
   mozilla::StyleBackendType GetStyleBackendType() const {
-    if (mStyleBackendType == mozilla::StyleBackendType::None) {
-      const_cast<nsIDocument*>(this)->UpdateStyleBackendType();
-    }
-    MOZ_ASSERT(mStyleBackendType != mozilla::StyleBackendType::None);
+    MOZ_ASSERT(mStyleBackendType != mozilla::StyleBackendType::None,
+               "Not initialized yet");
     return mStyleBackendType;
   }
 
@@ -1415,14 +1413,6 @@ public:
    * this is only used for XBL documents to set their style backend type to
    * their bounding document's.
    */
-  void SetStyleBackendType(mozilla::StyleBackendType aStyleBackendType) {
-    // We cannot assert mStyleBackendType == mozilla::StyleBackendType::None
-    // because NS_NewXBLDocument() might result GetStyleBackendType() being
-    // called.
-    MOZ_ASSERT(aStyleBackendType != mozilla::StyleBackendType::None,
-               "The StyleBackendType should be set to either Gecko or Servo!");
-    mStyleBackendType = aStyleBackendType;
-  }
 
   /**
    * Decide this document's own style backend type.
@@ -2188,10 +2178,7 @@ public:
     return mMayStartLayout;
   }
 
-  virtual void SetMayStartLayout(bool aMayStartLayout)
-  {
-    mMayStartLayout = aMayStartLayout;
-  }
+  virtual void SetMayStartLayout(bool aMayStartLayout);
 
   already_AddRefed<nsIDocumentEncoder> GetCachedEncoder();
 
@@ -3013,6 +3000,8 @@ public:
 
   already_AddRefed<nsIURI> GetMozDocumentURIIfNotForErrorPages();
 
+  mozilla::dom::Promise* GetDocumentReadyForIdle(mozilla::ErrorResult& aRv);
+
   // ParentNode
   nsIHTMLCollection* Children();
   uint32_t ChildElementCount();
@@ -3296,6 +3285,8 @@ protected:
                                  nsAtom* aAtom, void* aData);
   static void* UseExistingNameString(nsINode* aRootNode, const nsString* aName);
 
+  void MaybeResolveReadyForIdle();
+
   nsCString mReferrer;
   nsString mLastModified;
 
@@ -3353,10 +3344,13 @@ protected:
   // The array of all links that need their status resolved.  Links must add themselves
   // to this set by calling RegisterPendingLinkUpdate when added to a document.
   static const size_t kSegmentSize = 128;
-  mozilla::SegmentedVector<nsCOMPtr<mozilla::dom::Link>,
-                           kSegmentSize,
-                           InfallibleAllocPolicy>
-    mLinksToUpdate;
+
+  typedef mozilla::SegmentedVector<nsCOMPtr<mozilla::dom::Link>,
+                                   kSegmentSize,
+                                   InfallibleAllocPolicy>
+    LinksToUpdateList;
+
+  LinksToUpdateList mLinksToUpdate;
 
   // SMIL Animation Controller, lazily-initialized in GetAnimationController
   RefPtr<nsSMILAnimationController> mAnimationController;
@@ -3376,6 +3370,8 @@ protected:
   mozilla::TimeStamp mLastFocusTime;
 
   mozilla::EventStates mDocumentState;
+
+  RefPtr<mozilla::dom::Promise> mReadyForIdle;
 
   // True if BIDI is enabled.
   bool mBidiEnabled : 1;
@@ -3448,11 +3444,11 @@ protected:
   // file, etc.
   bool mIsSyntheticDocument : 1;
 
-  // True if this document has links whose state needs updating
-  bool mHasLinksToUpdate : 1;
-
   // True is there is a pending runnable which will call FlushPendingLinkUpdates().
   bool mHasLinksToUpdateRunnable : 1;
+
+  // True if we're flushing pending link updates.
+  bool mFlushingPendingLinkUpdates : 1;
 
   // True if a DOMMutationObserver is perhaps attached to a node in the document.
   bool mMayHaveDOMMutationObservers : 1;
@@ -3601,12 +3597,6 @@ protected:
   };
 
   Tri mAllowXULXBL;
-
-  /**
-   * This is true while FlushPendingLinkUpdates executes.  Calls to
-   * [Un]RegisterPendingLinkUpdate will assert when this is true.
-   */
-  bool mIsLinkUpdateRegistrationsForbidden;
 
   // The document's script global object, the object from which the
   // document can get its script context and scope. This is the
@@ -3887,8 +3877,7 @@ NS_NewDOMDocument(nsIDOMDocument** aInstancePtrResult,
                   nsIPrincipal* aPrincipal,
                   bool aLoadedAsData,
                   nsIGlobalObject* aEventObject,
-                  DocumentFlavor aFlavor,
-                  mozilla::StyleBackendType aStyleBackend);
+                  DocumentFlavor aFlavor);
 
 // This is used only for xbl documents created from the startup cache.
 // Non-cached documents are created in the same manner as xml documents.
@@ -3896,8 +3885,7 @@ nsresult
 NS_NewXBLDocument(nsIDOMDocument** aInstancePtrResult,
                   nsIURI* aDocumentURI,
                   nsIURI* aBaseURI,
-                  nsIPrincipal* aPrincipal,
-                  mozilla::StyleBackendType aStyleBackend);
+                  nsIPrincipal* aPrincipal);
 
 nsresult
 NS_NewPluginDocument(nsIDocument** aInstancePtrResult);

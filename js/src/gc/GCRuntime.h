@@ -426,7 +426,7 @@ class GCRuntime
     }
 
     inline void updateOnFreeArenaAlloc(const ChunkInfo& info);
-    inline void updateOnArenaFree(const ChunkInfo& info);
+    inline void updateOnArenaFree();
 
     ChunkPool& fullChunks(const AutoLockGC& lock) { return fullChunks_.ref(); }
     ChunkPool& availableChunks(const AutoLockGC& lock) { return availableChunks_.ref(); }
@@ -510,10 +510,9 @@ class GCRuntime
     MOZ_MUST_USE bool gcIfNeededAtAllocation(JSContext* cx);
     template <typename T>
     static void checkIncrementalZoneState(JSContext* cx, T* t);
-    static TenuredCell* refillFreeListFromAnyThread(JSContext* cx, AllocKind thingKind,
-                                                    size_t thingSize);
-    static TenuredCell* refillFreeListFromActiveCooperatingThread(JSContext* cx, AllocKind thingKind,
-                                                                  size_t thingSize);
+    static TenuredCell* refillFreeListFromAnyThread(JSContext* cx, AllocKind thingKind);
+    static TenuredCell* refillFreeListFromActiveCooperatingThread(JSContext* cx,
+                                                                  AllocKind thingKind);
     static TenuredCell* refillFreeListFromHelperThread(JSContext* cx, AllocKind thingKind);
 
     /*
@@ -522,7 +521,7 @@ class GCRuntime
      */
     friend class BackgroundDecommitTask;
     ChunkPool expireEmptyChunkPool(const AutoLockGC& lock);
-    void freeEmptyChunks(JSRuntime* rt, const AutoLockGC& lock);
+    void freeEmptyChunks(const AutoLockGC& lock);
     void prepareToFreeChunk(ChunkInfo& info);
 
     friend class BackgroundAllocTask;
@@ -552,9 +551,9 @@ class GCRuntime
                                  AutoTraceSession& session);
 
     friend class AutoCallGCCallbacks;
-    void maybeCallBeginCallback();
-    void maybeCallEndCallback();
+    void maybeCallGCCallback(JSGCStatus status);
 
+    void changeToNonIncrementalGC();
     void pushZealSelectedObjects();
     void purgeRuntime();
     MOZ_MUST_USE bool beginMarkPhase(JS::gcreason::Reason reason, AutoTraceSession& session);
@@ -612,13 +611,13 @@ class GCRuntime
     void beginCompactPhase();
     IncrementalProgress compactPhase(JS::gcreason::Reason reason, SliceBudget& sliceBudget,
                                      AutoTraceSession& session);
-    void endCompactPhase(JS::gcreason::Reason reason);
+    void endCompactPhase();
     void sweepTypesAfterCompacting(Zone* zone);
     void sweepZoneAfterCompacting(Zone* zone);
     MOZ_MUST_USE bool relocateArenas(Zone* zone, JS::gcreason::Reason reason,
                                      Arena*& relocatedListOut, SliceBudget& sliceBudget);
     void updateTypeDescrObjects(MovingTracer* trc, Zone* zone);
-    void updateCellPointers(MovingTracer* trc, Zone* zone, AllocKinds kinds, size_t bgTaskCount);
+    void updateCellPointers(Zone* zone, AllocKinds kinds, size_t bgTaskCount);
     void updateAllCellPointers(MovingTracer* trc, Zone* zone);
     void updateZonePointersToRelocatedCells(Zone* zone);
     void updateRuntimePointersToRelocatedCells(AutoTraceSession& session);
@@ -626,7 +625,7 @@ class GCRuntime
     void unprotectHeldRelocatedArenas();
     void releaseRelocatedArenas(Arena* arenaList);
     void releaseRelocatedArenasWithoutUnlocking(Arena* arenaList, const AutoLockGC& lock);
-    void finishCollection(JS::gcreason::Reason reason);
+    void finishCollection();
 
     void computeNonIncrementalMarkingForValidation(AutoTraceSession& session);
     void validateIncrementalMarking();
@@ -848,11 +847,6 @@ class GCRuntime
     friend class WeakCacheSweepIterator;
 
     /*
-     * List head of arenas allocated during the sweep phase.
-     */
-    ActiveThreadData<Arena*> arenasAllocatedDuringSweep;
-
-    /*
      * Incremental compacting state.
      */
     ActiveThreadData<bool> startedCompacting;
@@ -924,7 +918,7 @@ class GCRuntime
 
     ActiveThreadData<bool> fullCompartmentChecks;
 
-    ActiveThreadData<uint32_t> gcBeginCallbackDepth;
+    ActiveThreadData<uint32_t> gcCallbackDepth;
 
     Callback<JSGCCallback> gcCallback;
     Callback<JS::DoCycleCollectionCallback> gcDoCycleCollectionCallback;

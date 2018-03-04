@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#define VECS_PER_SPECIFIC_BRUSH 5
+#define VECS_PER_SPECIFIC_BRUSH 1
 #define FORCE_NO_PERSPECTIVE
 
 #include shared,prim_shared,brush
@@ -13,6 +13,7 @@ flat varying float vAmount;
 flat varying int vOp;
 flat varying mat4 vColorMat;
 flat varying vec4 vColorOffset;
+flat varying vec4 vUvClipBounds;
 
 #ifdef WR_VERTEX_SHADER
 
@@ -29,6 +30,10 @@ void brush_vs(
               src_task.common_data.task_rect.p0 -
               src_task.content_origin;
     vUv = vec3(uv / texture_size, src_task.common_data.texture_layer_index);
+
+    vec2 uv0 = src_task.common_data.task_rect.p0;
+    vec2 uv1 = uv0 + src_task.common_data.task_rect.size;
+    vUvClipBounds = vec4(uv0, uv1) / texture_size.xyxy;
 
     vOp = user_data.y;
 
@@ -83,9 +88,10 @@ void brush_vs(
         }
         case 10: {
             // Color Matrix
-            vec4 data[4] = fetch_from_resource_cache_4(prim_address + 1);
-            vColorMat = mat4(amount, data[0], data[1], data[2]);
-            vColorOffset = data[3];
+            vec4 mat_data[4] = fetch_from_resource_cache_4(user_data.z);
+            vec4 offset_data = fetch_from_resource_cache_1(user_data.z + 4);
+            vColorMat = mat4(mat_data[0], mat_data[1], mat_data[2], mat_data[3]);
+            vColorOffset = offset_data;
             break;
         }
         default: break;
@@ -140,6 +146,10 @@ vec4 brush_fs() {
         default:
             color = vColorMat * Cs + vColorOffset;
     }
+
+    // Fail-safe to ensure that we don't sample outside the rendered
+    // portion of a blend source.
+    color.a *= point_inside_rect(vUv.xy, vUvClipBounds.xy, vUvClipBounds.zw);
 
     // Pre-multiply the alpha into the output value.
     color.rgb *= color.a;

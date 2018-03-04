@@ -2,12 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{BoxShadowClipMode, ClipId, ColorF, DeviceIntPoint, DeviceIntRect, FilterOp, LayerPoint};
+use api::{BoxShadowClipMode, ColorF, DeviceIntPoint, DeviceIntRect, FilterOp, LayerPoint};
 use api::{LayerRect, LayerToWorldScale, LayerVector2D, MixBlendMode, PipelineId};
 use api::{PremultipliedColorF, Shadow};
 use box_shadow::{BLUR_SAMPLE_SCALE, BoxShadowCacheKey};
-use frame_builder::{FrameContext, FrameState, PictureState};
-use gpu_cache::GpuDataRequest;
+use clip_scroll_tree::ClipScrollNodeIndex;
+use frame_builder::{FrameBuildingContext, FrameBuildingState, PictureState};
+use gpu_cache::{GpuCacheHandle, GpuDataRequest};
 use gpu_types::{BrushImageKind, PictureType};
 use prim_store::{BrushKind, BrushPrimitive, PrimitiveIndex, PrimitiveRun, PrimitiveRunLocalRect};
 use prim_store::ScrollNodeAndClipChain;
@@ -86,8 +87,12 @@ pub enum PictureKind {
         // The original reference frame ID for this picture.
         // It is only different if this is part of a 3D
         // rendering context.
-        reference_frame_id: ClipId,
+        reference_frame_index: ClipScrollNodeIndex,
         real_local_rect: LayerRect,
+        // An optional cache handle for storing extra data
+        // in the GPU cache, depending on the type of
+        // picture.
+        extra_gpu_data_handle: GpuCacheHandle,
     },
 }
 
@@ -204,7 +209,7 @@ impl PicturePrimitive {
         composite_mode: Option<PictureCompositeMode>,
         is_in_3d_context: bool,
         pipeline_id: PipelineId,
-        reference_frame_id: ClipId,
+        reference_frame_index: ClipScrollNodeIndex,
         frame_output_pipeline_id: Option<PipelineId>,
     ) -> Self {
         PicturePrimitive {
@@ -215,8 +220,9 @@ impl PicturePrimitive {
                 composite_mode,
                 is_in_3d_context,
                 frame_output_pipeline_id,
-                reference_frame_id,
+                reference_frame_index,
                 real_local_rect: LayerRect::zero(),
+                extra_gpu_data_handle: GpuCacheHandle::new(),
             },
             pipeline_id,
             cull_children: true,
@@ -282,31 +288,17 @@ impl PicturePrimitive {
 
                 content_rect.translate(&offset)
             }
-            PictureKind::BoxShadow { blur_radius, clip_mode, image_kind, ref mut content_rect, .. } => {
+            PictureKind::BoxShadow { blur_radius, clip_mode, ref mut content_rect, .. } => {
                 // We need to inflate the content rect if outset.
                 *content_rect = match clip_mode {
                     BoxShadowClipMode::Outset => {
-                        match image_kind {
-                            BrushImageKind::Mirror => {
-                                let half_offset = 0.5 * blur_radius * BLUR_SAMPLE_SCALE;
-                                // If the radii are uniform, we can render just the top
-                                // left corner and mirror it across the primitive. In
-                                // this case, shift the content rect to leave room
-                                // for the blur to take effect.
-                                local_content_rect
-                                    .translate(&-LayerVector2D::new(half_offset, half_offset))
-                                    .inflate(half_offset, half_offset)
-                            }
-                            BrushImageKind::NinePatch | BrushImageKind::Simple => {
-                                let full_offset = blur_radius * BLUR_SAMPLE_SCALE;
-                                // For a non-uniform radii, we need to expand
-                                // the content rect on all sides for the blur.
-                                local_content_rect.inflate(
-                                    full_offset,
-                                    full_offset,
-                                )
-                            }
-                        }
+                        let full_offset = blur_radius * BLUR_SAMPLE_SCALE;
+                        // For a non-uniform radii, we need to expand
+                        // the content rect on all sides for the blur.
+                        local_content_rect.inflate(
+                            full_offset,
+                            full_offset,
+                        )
                     }
                     BoxShadowClipMode::Inset => {
                         local_content_rect
@@ -325,14 +317,15 @@ impl PicturePrimitive {
         prim_local_rect: &LayerRect,
         pic_state_for_children: PictureState,
         pic_state: &mut PictureState,
-        frame_context: &FrameContext,
-        frame_state: &mut FrameState,
+        frame_context: &FrameBuildingContext,
+        frame_state: &mut FrameBuildingState,
     ) {
         let content_scale = LayerToWorldScale::new(1.0) * frame_context.device_pixel_scale;
 
         match self.kind {
             PictureKind::Image {
                 ref mut secondary_render_task_id,
+                ref mut extra_gpu_data_handle,
                 composite_mode,
                 ..
             } => {
@@ -429,6 +422,15 @@ impl PicturePrimitive {
                             pic_state.tasks.extend(pic_state_for_children.tasks);
                             self.surface = None;
                         } else {
+
+                            if let FilterOp::ColorMatrix(m) = filter {
+                                if let Some(mut request) = frame_state.gpu_cache.request(extra_gpu_data_handle) {
+                                    for i in 0..5 {
+                                        request.push([m[i*4], m[i*4+1], m[i*4+2], m[i*4+3]]);
+                                    }
+                                }
+                            }
+
                             let picture_task = RenderTask::new_picture(
                                 RenderTaskLocation::Dynamic(None, prim_screen_rect.size),
                                 prim_index,
@@ -594,17 +596,10 @@ impl PicturePrimitive {
         //           making this more efficient for the common case.
         match self.kind {
             PictureKind::TextShadow { .. } => {
-                for _ in 0 .. 5 {
-                    request.push([0.0; 4]);
-                }
+                request.push([0.0; 4]);
             }
             PictureKind::Image { composite_mode, .. } => {
                 match composite_mode {
-                    Some(PictureCompositeMode::Filter(FilterOp::ColorMatrix(m))) => {
-                        for i in 0..5 {
-                            request.push([m[i*4], m[i*4+1], m[i*4+2], m[i*4+3]]);
-                        }
-                    }
                     Some(PictureCompositeMode::Filter(filter)) => {
                         let amount = match filter {
                             FilterOp::Contrast(amount) => amount,
@@ -623,32 +618,15 @@ impl PicturePrimitive {
                         };
 
                         request.push([amount, 1.0 - amount, 0.0, 0.0]);
-
-                        for _ in 0 .. 4 {
-                            request.push([0.0; 4]);
-                        }
                     }
                     _ => {
-                        for _ in 0 .. 5 {
-                            request.push([0.0; 4]);
-                        }
+                        request.push([0.0; 4]);
                     }
                 }
             }
             PictureKind::BoxShadow { color, .. } => {
                 request.push(color.premultiplied());
-                for _ in 0 .. 4 {
-                    request.push([0.0; 4]);
-                }
             }
-        }
-    }
-
-    pub fn target_kind(&self) -> RenderTargetKind {
-        match self.kind {
-            PictureKind::TextShadow { .. } => RenderTargetKind::Color,
-            PictureKind::BoxShadow { .. } => RenderTargetKind::Alpha,
-            PictureKind::Image { .. } => RenderTargetKind::Color,
         }
     }
 }

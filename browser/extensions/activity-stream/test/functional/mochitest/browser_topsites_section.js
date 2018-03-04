@@ -4,7 +4,12 @@
 test_newtab(
   // it should be able to click the topsites add button to reveal the add top site modal and overlay.
   function topsites_edit() {
-    const topsitesAddBtn = content.document.querySelector(".add-topsites-button button");
+    // Open the section context menu.
+    content.document.querySelector(".top-sites .section-top-bar .context-menu-button").click();
+    let contextMenu = content.document.querySelector(".top-sites .section-top-bar .context-menu");
+    ok(contextMenu, "Should find a visible topsite context menu");
+
+    const topsitesAddBtn = content.document.querySelector(".top-sites .context-menu-item a");
     topsitesAddBtn.click();
 
     let found = content.document.querySelector(".topsite-form");
@@ -17,25 +22,22 @@ test_newtab(
 
 // Test pin/unpin context menu options.
 test_newtab({
-  async before({pushPrefs}) {
-    // The pref for TopSites is empty by default.
-    await pushPrefs(["browser.newtabpage.activity-stream.default.sites", "https://www.youtube.com/,https://www.facebook.com/,https://www.amazon.com/,https://www.reddit.com/,https://www.wikipedia.org/,https://twitter.com/"]);
-    // Toggle the feed off and on as a workaround to read the new prefs.
-    await pushPrefs(["browser.newtabpage.activity-stream.feeds.topsites", false]);
-    await pushPrefs(["browser.newtabpage.activity-stream.feeds.topsites", true]);
-  },
+  before: setDefaultTopSites,
   // it should pin the website when we click the first option of the topsite context menu.
   test: async function topsites_pin_unpin() {
     await ContentTaskUtils.waitForCondition(() => content.document.querySelector(".top-site-icon"),
       "Topsite tippytop icon not found");
     // There are only topsites on the page, the selector with find the first topsite menu button.
-    const topsiteContextBtn = content.document.querySelector(".context-menu-button");
+    let topsiteContextBtn = content.document.querySelector(".top-sites-list .context-menu-button");
     topsiteContextBtn.click();
 
-    const contextMenu = content.document.querySelector(".context-menu");
-    ok(contextMenu && !contextMenu.hidden, "Should find a visible topsite context menu");
+    await ContentTaskUtils.waitForCondition(() => content.document.querySelector(".top-sites-list .context-menu"),
+      "No context menu found");
 
-    const pinUnpinTopsiteBtn = contextMenu.querySelector(".context-menu-item a");
+    let contextMenu = content.document.querySelector(".top-sites-list .context-menu");
+    ok(contextMenu, "Should find a topsite context menu");
+
+    const pinUnpinTopsiteBtn = contextMenu.querySelector(".top-sites .context-menu-item a");
     // Pin the topsite.
     pinUnpinTopsiteBtn.click();
 
@@ -47,7 +49,10 @@ test_newtab({
     is(pinnedIcon, 1, "should find 1 pinned topsite");
 
     // Unpin the topsite.
-    pinUnpinTopsiteBtn.click();
+    topsiteContextBtn = content.document.querySelector(".top-sites-list .context-menu-button");
+    ok(topsiteContextBtn, "Should find a context menu button");
+    topsiteContextBtn.click();
+    content.document.querySelector(".top-sites-list .context-menu-item a").click();
 
     // Need to wait for unpin action.
     await ContentTaskUtils.waitForCondition(() => !content.document.querySelector(".icon-pin-small"),

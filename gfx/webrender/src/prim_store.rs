@@ -2,17 +2,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{AlphaType, BorderRadius, BuiltDisplayList, ClipId, ClipMode, ColorF, ComplexClipRegion};
+use api::{AlphaType, BorderRadius, BuiltDisplayList, ClipMode, ColorF, ComplexClipRegion};
 use api::{DeviceIntRect, DeviceIntSize, DevicePixelScale, Epoch, ExtendMode, FontRenderMode};
 use api::{GlyphInstance, GlyphKey, GradientStop, ImageKey, ImageRendering, ItemRange, ItemTag};
 use api::{LayerPoint, LayerRect, LayerSize, LayerToWorldTransform, LayerVector2D, LineOrientation};
-use api::{LineStyle, PremultipliedColorF, WorldToLayerTransform, YuvColorSpace, YuvFormat};
+use api::{LineStyle, PremultipliedColorF, YuvColorSpace, YuvFormat};
 use border::{BorderCornerInstance, BorderEdgeKind};
-use clip_scroll_tree::{ClipChainIndex, CoordinateSystemId};
+use clip_scroll_tree::{ClipChainIndex, ClipScrollNodeIndex, CoordinateSystemId};
 use clip_scroll_node::ClipScrollNode;
 use clip::{ClipChain, ClipChainNode, ClipChainNodeIter, ClipChainNodeRef, ClipSource};
 use clip::{ClipSourcesHandle, ClipWorkItem};
-use frame_builder::{FrameContext, FrameState, PictureContext, PictureState, PrimitiveRunContext};
+use frame_builder::{FrameBuildingContext, FrameBuildingState, PictureContext, PictureState};
+use frame_builder::PrimitiveRunContext;
 use glyph_rasterizer::{FontInstance, FontTransform};
 use gpu_cache::{GpuBlockData, GpuCache, GpuCacheAddress, GpuCacheHandle, GpuDataRequest,
                 ToGpuBlocks};
@@ -24,21 +25,24 @@ use renderer::{MAX_VERTEX_TEXTURE_WIDTH};
 use resource_cache::{CacheItem, ImageProperties, ImageRequest, ResourceCache};
 use segment::SegmentBuilder;
 use std::{mem, usize};
-use std::rc::Rc;
-use util::{MatrixHelpers, calculate_screen_bounding_rect, pack_as_float};
-use util::recycle_vec;
+use std::sync::Arc;
+use util::{MatrixHelpers, WorldToLayerFastTransform, calculate_screen_bounding_rect};
+use util::{pack_as_float, recycle_vec};
 
 
-const MIN_BRUSH_SPLIT_AREA: f32 = 128.0 * 128.0;
+const MIN_BRUSH_SPLIT_AREA: f32 = 256.0 * 256.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ScrollNodeAndClipChain {
-    pub scroll_node_id: ClipId,
+    pub scroll_node_id: ClipScrollNodeIndex,
     pub clip_chain_index: ClipChainIndex,
 }
 
 impl ScrollNodeAndClipChain {
-    pub fn new(scroll_node_id: ClipId, clip_chain_index: ClipChainIndex) -> ScrollNodeAndClipChain {
+    pub fn new(
+        scroll_node_id: ClipScrollNodeIndex,
+        clip_chain_index: ClipChainIndex
+    ) -> ScrollNodeAndClipChain {
         ScrollNodeAndClipChain { scroll_node_id, clip_chain_index }
     }
 }
@@ -69,9 +73,20 @@ impl PrimitiveOpacity {
             is_opaque: alpha == 1.0,
         }
     }
+}
 
-    pub fn accumulate(&mut self, alpha: f32) {
-        self.is_opaque = self.is_opaque && alpha == 1.0;
+#[derive(Debug, Copy, Clone)]
+pub struct CachedGradientIndex(pub usize);
+
+pub struct CachedGradient {
+    pub handle: GpuCacheHandle,
+}
+
+impl CachedGradient {
+    pub fn new() -> CachedGradient {
+        CachedGradient {
+            handle: GpuCacheHandle::new(),
+        }
     }
 }
 
@@ -124,8 +139,6 @@ pub enum PrimitiveKind {
     TextRun,
     Image,
     Border,
-    AlignedGradient,
-    AngleGradient,
     Picture,
     Brush,
 }
@@ -176,17 +189,11 @@ pub struct PrimitiveMetadata {
 }
 
 #[derive(Debug)]
-pub enum BrushMaskKind {
-    //Rect,         // TODO(gw): Optimization opportunity for masks with 0 border radii.
-    Corner(LayerSize),
-    RoundedRect(LayerRect, BorderRadius),
-}
-
-#[derive(Debug)]
 pub enum BrushKind {
     Mask {
         clip_mode: ClipMode,
-        kind: BrushMaskKind,
+        rect: LayerRect,
+        radii: BorderRadius,
     },
     Solid {
         color: ColorF,
@@ -211,14 +218,23 @@ pub enum BrushKind {
         image_rendering: ImageRendering,
     },
     RadialGradient {
+        gradient_index: CachedGradientIndex,
         stops_range: ItemRange<GradientStop>,
         extend_mode: ExtendMode,
-        stops_handle: GpuCacheHandle,
         start_center: LayerPoint,
         end_center: LayerPoint,
         start_radius: f32,
         end_radius: f32,
         ratio_xy: f32,
+    },
+    LinearGradient {
+        gradient_index: CachedGradientIndex,
+        stops_range: ItemRange<GradientStop>,
+        stops_count: usize,
+        extend_mode: ExtendMode,
+        reverse_stops: bool,
+        start_point: LayerPoint,
+        end_point: LayerPoint,
     }
 }
 
@@ -229,7 +245,8 @@ impl BrushKind {
             BrushKind::Picture |
             BrushKind::Image { .. } |
             BrushKind::YuvImage { .. } |
-            BrushKind::RadialGradient { .. } => true,
+            BrushKind::RadialGradient { .. } |
+            BrushKind::LinearGradient { .. } => true,
 
             BrushKind::Mask { .. } |
             BrushKind::Clear |
@@ -311,8 +328,10 @@ impl BrushPrimitive {
         // has to match VECS_PER_SPECIFIC_BRUSH
         match self.kind {
             BrushKind::Picture |
-            BrushKind::Image { .. } |
             BrushKind::YuvImage { .. } => {
+            }
+            BrushKind::Image { .. } => {
+                request.push([0.0; 4]);
             }
             BrushKind::Solid { color } => {
                 request.push(color.premultiplied());
@@ -321,15 +340,7 @@ impl BrushPrimitive {
                 // Opaque black with operator dest out
                 request.push(PremultipliedColorF::BLACK);
             }
-            BrushKind::Mask { clip_mode, kind: BrushMaskKind::Corner(radius) } => {
-                request.push([
-                    radius.width,
-                    radius.height,
-                    clip_mode as u32 as f32,
-                    0.0,
-                ]);
-            }
-            BrushKind::Mask { clip_mode, kind: BrushMaskKind::RoundedRect(rect, radii) } => {
+            BrushKind::Mask { clip_mode, rect, radii } => {
                 request.push([
                     clip_mode as u32 as f32,
                     0.0,
@@ -356,6 +367,20 @@ impl BrushPrimitive {
                     wavy_line_thickness,
                     pack_as_float(style as u32),
                     pack_as_float(orientation as u32),
+                    0.0,
+                ]);
+            }
+            BrushKind::LinearGradient { start_point, end_point, extend_mode, .. } => {
+                request.push([
+                    start_point.x,
+                    start_point.y,
+                    end_point.x,
+                    end_point.y,
+                ]);
+                request.push([
+                    pack_as_float(extend_mode as u32),
+                    0.0,
+                    0.0,
                     0.0,
                 ]);
             }
@@ -429,46 +454,6 @@ pub struct BorderPrimitiveCpu {
 impl ToGpuBlocks for BorderPrimitiveCpu {
     fn write_gpu_blocks(&self, mut request: GpuDataRequest) {
         request.extend_from_slice(&self.gpu_blocks);
-    }
-}
-
-#[derive(Debug)]
-pub struct GradientPrimitiveCpu {
-    pub stops_range: ItemRange<GradientStop>,
-    pub stops_count: usize,
-    pub extend_mode: ExtendMode,
-    pub reverse_stops: bool,
-    pub gpu_blocks: [GpuBlockData; 3],
-}
-
-impl GradientPrimitiveCpu {
-    fn build_gpu_blocks_for_aligned(
-        &self,
-        display_list: &BuiltDisplayList,
-        mut request: GpuDataRequest,
-    ) -> PrimitiveOpacity {
-        let mut opacity = PrimitiveOpacity::opaque();
-        request.extend_from_slice(&self.gpu_blocks);
-        let src_stops = display_list.get(self.stops_range);
-
-        for src in src_stops {
-            request.push(src.color.premultiplied());
-            request.push([src.offset, 0.0, 0.0, 0.0]);
-            opacity.accumulate(src.color.a);
-        }
-
-        opacity
-    }
-
-    fn build_gpu_blocks_for_angle_radial(
-        &self,
-        display_list: &BuiltDisplayList,
-        mut request: GpuDataRequest,
-    ) {
-        request.extend_from_slice(&self.gpu_blocks);
-
-        let gradient_builder = GradientGpuBlockBuilder::new(self.stops_range, display_list);
-        gradient_builder.build(self.reverse_stops, &mut request);
     }
 }
 
@@ -670,7 +655,7 @@ impl TextRunPrimitiveCpu {
     pub fn get_font(
         &self,
         device_pixel_scale: DevicePixelScale,
-        transform: Option<&LayerToWorldTransform>,
+        transform: Option<LayerToWorldTransform>,
     ) -> FontInstance {
         let mut font = self.font.clone();
         font.size = font.size.scale_by(device_pixel_scale.0);
@@ -678,7 +663,7 @@ impl TextRunPrimitiveCpu {
             if transform.has_perspective_component() || !transform.has_2d_inverse() {
                 font.render_mode = font.render_mode.limit_by(FontRenderMode::Alpha);
             } else {
-                font.transform = FontTransform::from(transform).quantize();
+                font.transform = FontTransform::from(&transform).quantize();
             }
         }
         font
@@ -688,7 +673,7 @@ impl TextRunPrimitiveCpu {
         &mut self,
         resource_cache: &mut ResourceCache,
         device_pixel_scale: DevicePixelScale,
-        transform: Option<&LayerToWorldTransform>,
+        transform: Option<LayerToWorldTransform>,
         display_list: &BuiltDisplayList,
         gpu_cache: &mut GpuCache,
     ) {
@@ -937,8 +922,6 @@ pub enum PrimitiveContainer {
     TextRun(TextRunPrimitiveCpu),
     Image(ImagePrimitiveCpu),
     Border(BorderPrimitiveCpu),
-    AlignedGradient(GradientPrimitiveCpu),
-    AngleGradient(GradientPrimitiveCpu),
     Picture(PicturePrimitive),
     Brush(BrushPrimitive),
 }
@@ -949,7 +932,6 @@ pub struct PrimitiveStore {
     pub cpu_text_runs: Vec<TextRunPrimitiveCpu>,
     pub cpu_pictures: Vec<PicturePrimitive>,
     pub cpu_images: Vec<ImagePrimitiveCpu>,
-    pub cpu_gradients: Vec<GradientPrimitiveCpu>,
     pub cpu_metadata: Vec<PrimitiveMetadata>,
     pub cpu_borders: Vec<BorderPrimitiveCpu>,
 }
@@ -962,7 +944,6 @@ impl PrimitiveStore {
             cpu_text_runs: Vec::new(),
             cpu_pictures: Vec::new(),
             cpu_images: Vec::new(),
-            cpu_gradients: Vec::new(),
             cpu_borders: Vec::new(),
         }
     }
@@ -974,7 +955,6 @@ impl PrimitiveStore {
             cpu_text_runs: recycle_vec(self.cpu_text_runs),
             cpu_pictures: recycle_vec(self.cpu_pictures),
             cpu_images: recycle_vec(self.cpu_images),
-            cpu_gradients: recycle_vec(self.cpu_gradients),
             cpu_borders: recycle_vec(self.cpu_borders),
         }
     }
@@ -1015,6 +995,7 @@ impl PrimitiveStore {
                     BrushKind::Image { .. } => PrimitiveOpacity::translucent(),
                     BrushKind::YuvImage { .. } => PrimitiveOpacity::opaque(),
                     BrushKind::RadialGradient { .. } => PrimitiveOpacity::translucent(),
+                    BrushKind::LinearGradient { .. } => PrimitiveOpacity::translucent(),
                     BrushKind::Picture => {
                         // TODO(gw): This is not currently used. In the future
                         //           we should detect opaque pictures.
@@ -1077,29 +1058,6 @@ impl PrimitiveStore {
                 self.cpu_borders.push(border_cpu);
                 metadata
             }
-            PrimitiveContainer::AlignedGradient(gradient_cpu) => {
-                let metadata = PrimitiveMetadata {
-                    opacity: PrimitiveOpacity::translucent(),
-                    prim_kind: PrimitiveKind::AlignedGradient,
-                    cpu_prim_index: SpecificPrimitiveIndex(self.cpu_gradients.len()),
-                    ..base_metadata
-                };
-
-                self.cpu_gradients.push(gradient_cpu);
-                metadata
-            }
-            PrimitiveContainer::AngleGradient(gradient_cpu) => {
-                let metadata = PrimitiveMetadata {
-                    // TODO: calculate if the gradient is actually opaque
-                    opacity: PrimitiveOpacity::translucent(),
-                    prim_kind: PrimitiveKind::AngleGradient,
-                    cpu_prim_index: SpecificPrimitiveIndex(self.cpu_gradients.len()),
-                    ..base_metadata
-                };
-
-                self.cpu_gradients.push(gradient_cpu);
-                metadata
-            }
         };
 
         self.cpu_metadata.push(metadata);
@@ -1122,8 +1080,8 @@ impl PrimitiveStore {
         pic_state_for_children: PictureState,
         pic_context: &PictureContext,
         pic_state: &mut PictureState,
-        frame_context: &FrameContext,
-        frame_state: &mut FrameState,
+        frame_context: &FrameBuildingContext,
+        frame_state: &mut FrameBuildingState,
     ) {
         let metadata = &mut self.cpu_metadata[prim_index.0];
         match metadata.prim_kind {
@@ -1146,7 +1104,7 @@ impl PrimitiveStore {
                 let text = &mut self.cpu_text_runs[metadata.cpu_prim_index.0];
                 // The transform only makes sense for screen space rasterization
                 let transform = if pic_context.draw_text_transformed {
-                    Some(&prim_run_context.scroll_node.world_content_transform)
+                    Some(prim_run_context.scroll_node.world_content_transform.into())
                 } else {
                     None
                 };
@@ -1304,7 +1262,8 @@ impl PrimitiveStore {
                             );
                         }
                     }
-                    BrushKind::RadialGradient { ref mut stops_handle, stops_range, .. } => {
+                    BrushKind::RadialGradient { gradient_index, stops_range, .. } => {
+                        let stops_handle = &mut frame_state.cached_gradients[gradient_index.0].handle;
                         if let Some(mut request) = frame_state.gpu_cache.request(stops_handle) {
                             let gradient_builder = GradientGpuBlockBuilder::new(
                                 stops_range,
@@ -1316,6 +1275,19 @@ impl PrimitiveStore {
                             );
                         }
                     }
+                    BrushKind::LinearGradient { gradient_index, stops_range, reverse_stops, .. } => {
+                        let stops_handle = &mut frame_state.cached_gradients[gradient_index.0].handle;
+                        if let Some(mut request) = frame_state.gpu_cache.request(stops_handle) {
+                            let gradient_builder = GradientGpuBlockBuilder::new(
+                                stops_range,
+                                pic_context.display_list,
+                            );
+                            gradient_builder.build(
+                                reverse_stops,
+                                &mut request,
+                            );
+                        }
+                    }
                     BrushKind::Mask { .. } |
                     BrushKind::Solid { .. } |
                     BrushKind::Clear |
@@ -1323,8 +1295,6 @@ impl PrimitiveStore {
                     BrushKind::Picture { .. } => {}
                 }
             }
-            PrimitiveKind::AlignedGradient |
-            PrimitiveKind::AngleGradient => {}
         }
 
         // Mark this GPU resource as required for this frame.
@@ -1341,20 +1311,6 @@ impl PrimitiveStore {
                 PrimitiveKind::Image => {
                     let image = &self.cpu_images[metadata.cpu_prim_index.0];
                     image.write_gpu_blocks(request);
-                }
-                PrimitiveKind::AlignedGradient => {
-                    let gradient = &self.cpu_gradients[metadata.cpu_prim_index.0];
-                    metadata.opacity = gradient.build_gpu_blocks_for_aligned(
-                        pic_context.display_list,
-                        request,
-                    );
-                }
-                PrimitiveKind::AngleGradient => {
-                    let gradient = &self.cpu_gradients[metadata.cpu_prim_index.0];
-                    gradient.build_gpu_blocks_for_angle_radial(
-                        pic_context.display_list,
-                        request,
-                    );
                 }
                 PrimitiveKind::TextRun => {
                     let text = &self.cpu_text_runs[metadata.cpu_prim_index.0];
@@ -1403,8 +1359,8 @@ impl PrimitiveStore {
         prim_run_context: &PrimitiveRunContext,
         clips: &Vec<ClipWorkItem>,
         has_clips_from_other_coordinate_systems: bool,
-        frame_context: &FrameContext,
-        frame_state: &mut FrameState,
+        frame_context: &FrameBuildingContext,
+        frame_state: &mut FrameBuildingState,
     ) {
         match brush.segment_desc {
             Some(ref segment_desc) => {
@@ -1471,14 +1427,14 @@ impl PrimitiveStore {
                 let local_clip_rect = if clip_item.scroll_node_data_index == prim_run_context.scroll_node.node_data_index {
                     local_clip_rect
                 } else {
-                    let clip_transform_data = &frame_context
-                        .node_data[clip_item.scroll_node_data_index.0 as usize];
+                    let clip_transform = frame_context
+                        .node_data[clip_item.scroll_node_data_index.0 as usize]
+                        .transform;
                     let prim_transform = &prim_run_context.scroll_node.world_content_transform;
-
                     let relative_transform = prim_transform
                         .inverse()
-                        .unwrap_or(WorldToLayerTransform::identity())
-                        .pre_mul(&clip_transform_data.transform);
+                        .unwrap_or(WorldToLayerFastTransform::identity())
+                        .pre_mul(&clip_transform.into());
 
                     relative_transform.transform_rect(&local_clip_rect)
                 };
@@ -1525,8 +1481,8 @@ impl PrimitiveStore {
         combined_outer_rect: &DeviceIntRect,
         has_clips_from_other_coordinate_systems: bool,
         pic_state: &mut PictureState,
-        frame_context: &FrameContext,
-        frame_state: &mut FrameState,
+        frame_context: &FrameBuildingContext,
+        frame_state: &mut FrameBuildingState,
     ) -> bool {
         let metadata = &self.cpu_metadata[prim_index.0];
         let brush = match metadata.prim_kind {
@@ -1593,8 +1549,8 @@ impl PrimitiveStore {
         prim_run_context: &PrimitiveRunContext,
         prim_screen_rect: &DeviceIntRect,
         pic_state: &mut PictureState,
-        frame_context: &FrameContext,
-        frame_state: &mut FrameState,
+        frame_context: &FrameBuildingContext,
+        frame_state: &mut FrameBuildingState,
     ) -> bool {
         self.cpu_metadata[prim_index.0].clip_task_id = None;
 
@@ -1627,7 +1583,7 @@ impl PrimitiveStore {
                     combined_outer_rect = combined_outer_rect.and_then(|r| r.intersection(&outer));
                 }
 
-                Some(Rc::new(ClipChainNode {
+                Some(Arc::new(ClipChainNode {
                     work_item: ClipWorkItem {
                         scroll_node_data_index: prim_run_context.scroll_node.node_data_index,
                         clip_sources: metadata.clip_sources.weak(),
@@ -1724,8 +1680,8 @@ impl PrimitiveStore {
         prim_run_context: &PrimitiveRunContext,
         pic_context: &PictureContext,
         pic_state: &mut PictureState,
-        frame_context: &FrameContext,
-        frame_state: &mut FrameState,
+        frame_context: &FrameBuildingContext,
+        frame_state: &mut FrameBuildingState,
     ) -> Option<LayerRect> {
         let mut may_need_clip_mask = true;
         let mut pic_state_for_children = PictureState::new();
@@ -1757,10 +1713,10 @@ impl PrimitiveStore {
                     return None;
                 }
 
-                let (draw_text_transformed, original_reference_frame_id) = match pic.kind {
-                    PictureKind::Image { reference_frame_id, .. } => {
-                        may_need_clip_mask = false;
-                        (true, Some(reference_frame_id))
+                let (draw_text_transformed, original_reference_frame_index) = match pic.kind {
+                    PictureKind::Image { reference_frame_index, composite_mode, .. } => {
+                        may_need_clip_mask = composite_mode.is_some();
+                        (true, Some(reference_frame_index))
                     }
                     PictureKind::BoxShadow { .. } |
                     PictureKind::TextShadow { .. } => {
@@ -1783,7 +1739,7 @@ impl PrimitiveStore {
                     pipeline_id: pic.pipeline_id,
                     perform_culling: pic.cull_children,
                     prim_runs: mem::replace(&mut pic.runs, Vec::new()),
-                    original_reference_frame_id,
+                    original_reference_frame_index,
                     display_list,
                     draw_text_transformed,
                     inv_world_transform,
@@ -1883,8 +1839,8 @@ impl PrimitiveStore {
         &mut self,
         pic_context: &PictureContext,
         pic_state: &mut PictureState,
-        frame_context: &FrameContext,
-        frame_state: &mut FrameState,
+        frame_context: &FrameBuildingContext,
+        frame_state: &mut FrameBuildingState,
     ) -> PrimitiveRunLocalRect {
         let mut result = PrimitiveRunLocalRect {
             local_rect_in_actual_parent_space: LayerRect::zero(),
@@ -1897,7 +1853,7 @@ impl PrimitiveStore {
             //           lookups ever show up in a profile).
             let scroll_node = &frame_context
                 .clip_scroll_tree
-                .nodes[&run.clip_and_scroll.scroll_node_id];
+                .nodes[run.clip_and_scroll.scroll_node_id.0];
             let clip_chain = frame_context
                 .clip_scroll_tree
                 .get_clip_chain(run.clip_and_scroll.clip_chain_index);
@@ -1920,11 +1876,11 @@ impl PrimitiveStore {
                     inv_parent.pre_mul(&scroll_node.world_content_transform)
                 });
 
-            let original_relative_transform = pic_context.original_reference_frame_id
-                .and_then(|original_reference_frame_id| {
+            let original_relative_transform = pic_context.original_reference_frame_index
+                .and_then(|original_reference_frame_index| {
                     let parent = frame_context
                         .clip_scroll_tree
-                        .nodes[&original_reference_frame_id]
+                        .nodes[original_reference_frame_index.0]
                         .world_content_transform;
                     parent.inverse()
                         .map(|inv_parent| {
@@ -2061,8 +2017,7 @@ fn get_local_clip_rect_for_nodes(
     );
 
     match local_rect {
-        Some(local_rect) =>
-            Some(scroll_node.coordinate_system_relative_transform.unapply(&local_rect)),
+        Some(local_rect) => scroll_node.coordinate_system_relative_transform.unapply(&local_rect),
         None => None,
     }
 }

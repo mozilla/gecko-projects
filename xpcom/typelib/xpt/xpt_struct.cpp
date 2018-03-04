@@ -14,6 +14,38 @@
 
 using mozilla::WrapNotNull;
 
+#define XPT_MAGIC "XPCOM\nTypeLib\r\n\032"
+#define XPT_MAGIC_STRING "XPCOM\\nTypeLib\\r\\n\\032"
+
+/*
+ * Annotation records are variable-size records used to store secondary
+ * information about the typelib, e.g. such as the name of the tool that
+ * generated the typelib file, the date it was generated, etc.  The
+ * information is stored with very loose format requirements so as to
+ * allow virtually any private data to be stored in the typelib.
+ *
+ * There are two types of Annotations:
+ *
+ * EmptyAnnotation
+ * PrivateAnnotation
+ *
+ * The tag field of the prefix discriminates among the variant record
+ * types for Annotation's.  If the tag is 0, this record is an
+ * EmptyAnnotation. EmptyAnnotation's are ignored - they're only used to
+ * indicate an array of Annotation's that's completely empty.  If the tag
+ * is 1, the record is a PrivateAnnotation.
+ *
+ * We don't actually store annotations; we just skip over them if they are
+ * present.
+ */
+
+#define XPT_ANN_LAST    0x80
+#define XPT_ANN_PRIVATE 0x40
+
+#define XPT_ANN_IS_LAST(flags) (flags & XPT_ANN_LAST)
+#define XPT_ANN_IS_PRIVATE(flags)(flags & XPT_ANN_PRIVATE)
+
+
 /***************************************************************************/
 /* Forward declarations. */
 
@@ -77,8 +109,9 @@ XPT_DoHeader(XPTArena *arena, NotNull<XPTCursor*> cursor, XPTHeader **headerp)
         return false;
     }
 
+    uint8_t minor_version;
     if (!XPT_Do8(cursor, &header->major_version) ||
-        !XPT_Do8(cursor, &header->minor_version)) {
+        !XPT_Do8(cursor, &minor_version)) {
         return false;
     }
 
@@ -272,21 +305,12 @@ DoConstDescriptor(XPTArena *arena, NotNull<XPTCursor*> cursor,
         return false;
     }
 
-    switch(XPT_TDP_TAG(cd->type.prefix)) {
-      case TD_INT8:
-        ok = XPT_Do8(cursor, (uint8_t*) &cd->value.i8);
-        break;
+    switch (cd->type.Tag()) {
       case TD_INT16:
         ok = XPT_Do16(cursor, (uint16_t*) &cd->value.i16);
         break;
       case TD_INT32:
         ok = XPT_Do32(cursor, (uint32_t*) &cd->value.i32);
-        break;
-      case TD_INT64:
-        ok = XPT_Do64(cursor, &cd->value.i64);
-        break;
-      case TD_UINT8:
-        ok = XPT_Do8(cursor, &cd->value.ui8);
         break;
       case TD_UINT16:
         ok = XPT_Do16(cursor, &cd->value.ui16);
@@ -294,23 +318,12 @@ DoConstDescriptor(XPTArena *arena, NotNull<XPTCursor*> cursor,
       case TD_UINT32:
         ok = XPT_Do32(cursor, &cd->value.ui32);
         break;
-      case TD_UINT64:
-        ok = XPT_Do64(cursor, (int64_t *)&cd->value.ui64);
-        break;
-      case TD_CHAR:
-        ok = XPT_Do8(cursor, (uint8_t*) &cd->value.ch);
-        break;
-      case TD_WCHAR:
-        ok = XPT_Do16(cursor, &cd->value.wch);
-        break;
-        /* fall-through */
       default:
-        fprintf(stderr, "illegal type!\n");
+        MOZ_ASSERT(false, "illegal type");
         break;
     }
 
     return ok;
-
 }
 
 bool
@@ -336,7 +349,12 @@ DoMethodDescriptor(XPTArena *arena, NotNull<XPTCursor*> cursor,
             return false;
     }
 
-    if (!DoParamDescriptor(arena, cursor, &md->result, id))
+    // |result| appears in the on-disk format but it isn't used,
+    // because a method is either notxpcom, in which case it can't be
+    // called from script so the XPT information is irrelevant, or the
+    // result type is nsresult.
+    XPTParamDescriptor result;
+    if (!DoParamDescriptor(arena, cursor, &result, id))
         return false;
 
     return true;
@@ -368,7 +386,7 @@ DoTypeDescriptor(XPTArena *arena, NotNull<XPTCursor*> cursor,
         return false;
     }
 
-    switch (XPT_TDP_TAG(td->prefix)) {
+    switch (td->Tag()) {
       case TD_INTERFACE_TYPE:
         uint16_t iface;
         if (!XPT_Do16(cursor, &iface))

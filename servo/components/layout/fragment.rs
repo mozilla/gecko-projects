@@ -10,7 +10,8 @@ use ServoArc;
 use app_units::Au;
 use canvas_traits::canvas::CanvasMsg;
 use context::{LayoutContext, with_thread_local_font_context};
-use euclid::{Transform3D, Point2D, Vector2D, Rect, Size2D};
+use display_list::ToLayout;
+use euclid::{Point2D, Vector2D, Rect, Size2D};
 use floats::ClearType;
 use flow::{GetBaseFlow, ImmutableFlowUtils};
 use flow_ref::FlowRef;
@@ -58,14 +59,13 @@ use style::properties::ComputedValues;
 use style::selector_parser::RestyleDamage;
 use style::servo::restyle_damage::ServoRestyleDamage;
 use style::str::char_is_whitespace;
-use style::values::{self, Either};
 use style::values::computed::{Length, LengthOrPercentage, LengthOrPercentageOrAuto};
 use style::values::computed::counters::ContentItem;
-use style::values::generics::box_::VerticalAlign;
+use style::values::generics::box_::{Perspective, VerticalAlign};
 use style::values::generics::transform;
 use text;
 use text::TextRunScanner;
-use webrender_api;
+use webrender_api::{self, LayoutTransform};
 use wrapper::ThreadSafeLayoutNodeHelpers;
 
 // From gfxFontConstants.h in Firefox.
@@ -2476,7 +2476,7 @@ impl Fragment {
     pub fn has_filter_transform_or_perspective(&self) -> bool {
            !self.style().get_box().transform.0.is_empty() ||
            !self.style().get_effects().filter.0.is_empty() ||
-           self.style().get_box().perspective != Either::Second(values::None_)
+           self.style().get_box().perspective != Perspective::None
     }
 
     /// Returns true if this fragment establishes a new stacking context and false otherwise.
@@ -2867,9 +2867,10 @@ impl Fragment {
     }
 
     /// Returns the 4D matrix representing this fragment's transform.
-    pub fn transform_matrix(&self, stacking_relative_border_box: &Rect<Au>) -> Option<Transform3D<f32>> {
+    pub fn transform_matrix(&self, stacking_relative_border_box: &Rect<Au>) -> Option<LayoutTransform> {
         let list = &self.style.get_box().transform;
-        let transform = list.to_transform_3d_matrix(Some(stacking_relative_border_box)).ok()?.0;
+        let transform = LayoutTransform::from_untyped(
+            &list.to_transform_3d_matrix(Some(stacking_relative_border_box)).ok()?.0);
 
         let transform_origin = &self.style.get_box().transform_origin;
         let transform_origin_x =
@@ -2882,42 +2883,46 @@ impl Fragment {
                 .to_f32_px();
         let transform_origin_z = transform_origin.depth.px();
 
-        let pre_transform = Transform3D::create_translation(transform_origin_x,
-                                                            transform_origin_y,
-                                                            transform_origin_z);
-        let post_transform = Transform3D::create_translation(-transform_origin_x,
-                                                             -transform_origin_y,
-                                                             -transform_origin_z);
+        let pre_transform = LayoutTransform::create_translation(
+            transform_origin_x,
+            transform_origin_y,
+            transform_origin_z);
+        let post_transform = LayoutTransform::create_translation(
+            -transform_origin_x,
+            -transform_origin_y,
+            -transform_origin_z);
 
         Some(pre_transform.pre_mul(&transform).pre_mul(&post_transform))
     }
 
     /// Returns the 4D matrix representing this fragment's perspective.
-    pub fn perspective_matrix(&self, stacking_relative_border_box: &Rect<Au>) -> Option<Transform3D<f32>> {
+    pub fn perspective_matrix(&self, stacking_relative_border_box: &Rect<Au>) -> Option<LayoutTransform> {
         match self.style().get_box().perspective {
-            Either::First(length) => {
+            Perspective::Length(length) => {
                 let perspective_origin = self.style().get_box().perspective_origin;
                 let perspective_origin =
                     Point2D::new(
                         perspective_origin.horizontal
-                            .to_used_value(stacking_relative_border_box.size.width)
-                            .to_f32_px(),
+                            .to_used_value(stacking_relative_border_box.size.width),
                         perspective_origin.vertical
                             .to_used_value(stacking_relative_border_box.size.height)
-                            .to_f32_px());
+                    ).to_layout();
 
-                let pre_transform = Transform3D::create_translation(perspective_origin.x,
-                                                                    perspective_origin.y,
-                                                                    0.0);
-                let post_transform = Transform3D::create_translation(-perspective_origin.x,
-                                                                     -perspective_origin.y,
-                                                                     0.0);
+                let pre_transform = LayoutTransform::create_translation(
+                    perspective_origin.x,
+                    perspective_origin.y,
+                    0.0);
+                let post_transform = LayoutTransform::create_translation(
+                    -perspective_origin.x,
+                    -perspective_origin.y,
+                    0.0);
 
-                let perspective_matrix = transform::create_perspective_matrix(length.px());
+                let perspective_matrix = LayoutTransform::from_untyped(
+                    &transform::create_perspective_matrix(length.px()));
 
                 Some(pre_transform.pre_mul(&perspective_matrix).pre_mul(&post_transform))
             }
-            Either::Second(values::None_) => {
+            Perspective::None => {
                 None
             }
         }

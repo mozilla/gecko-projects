@@ -16,6 +16,7 @@ pub mod basic_shape;
 pub mod border;
 #[path = "box.rs"]
 pub mod box_;
+pub mod column;
 pub mod counters;
 pub mod effects;
 pub mod flex;
@@ -24,6 +25,7 @@ pub mod font;
 pub mod gecko;
 pub mod grid;
 pub mod image;
+pub mod pointing;
 pub mod position;
 pub mod rect;
 pub mod size;

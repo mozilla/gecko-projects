@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-this.EXPORTED_SYMBOLS = [ "BookmarkJSONUtils" ];
+var EXPORTED_SYMBOLS = [ "BookmarkJSONUtils" ];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
@@ -35,7 +35,7 @@ function generateHash(aString) {
   return cryptoHash.finish(true).replace(/\//g, "-");
 }
 
-this.BookmarkJSONUtils = Object.freeze({
+var BookmarkJSONUtils = Object.freeze({
   /**
    * Import bookmarks from a url.
    *
@@ -124,7 +124,7 @@ this.BookmarkJSONUtils = Object.freeze({
               .getHistogramById("PLACES_BACKUPS_TOJSON_MS")
               .add(Date.now() - startTime);
     } catch (ex) {
-      Components.utils.reportError("Unable to report telemetry.");
+      Cu.reportError("Unable to report telemetry.");
     }
 
     let hash = generateHash(jsonString);
@@ -492,7 +492,7 @@ function insertFaviconForNode(node) {
         PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE, null,
         Services.scriptSecurityManager.getSystemPrincipal());
     } catch (ex) {
-      Components.utils.reportError("Failed to import favicon data:" + ex);
+      Cu.reportError("Failed to import favicon data:" + ex);
     }
   }
 
@@ -506,7 +506,7 @@ function insertFaviconForNode(node) {
       PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE, null,
       Services.scriptSecurityManager.getSystemPrincipal());
   } catch (ex) {
-    Components.utils.reportError("Failed to import favicon URI:" + ex);
+    Cu.reportError("Failed to import favicon URI:" + ex);
   }
 }
 

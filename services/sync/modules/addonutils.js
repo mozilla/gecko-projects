@@ -4,7 +4,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["AddonUtils"];
+var EXPORTED_SYMBOLS = ["AddonUtils"];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Log.jsm");
@@ -202,19 +202,9 @@ AddonUtilsInternal.prototype = {
       ids.push(addon.id);
     }
 
-    const {addons, addonsLength} = await new Promise((res, rej) => {
-      AddonRepository.getAddonsByIDs(ids, {
-        searchSucceeded: (addons, addonsLength, total) => {
-          res({addons, addonsLength});
-        },
-        searchFailed() {
-          rej(new Error("AddonRepository search failed"));
-        }
-      });
-    });
-
-    this._log.info("Found " + addonsLength + "/" + ids.length +
-                       " add-ons during repository search.");
+    let addons = await AddonRepository.getAddonsByIDs(ids);
+    this._log.info(`Found ${addons.length} / ${ids.length}` +
+                   " add-ons during repository search.");
 
     let ourResult = {
       installedIDs: [],
@@ -223,10 +213,6 @@ AddonUtilsInternal.prototype = {
       skipped:      [],
       errors:       []
     };
-
-    if (!addonsLength) {
-      return ourResult;
-    }
 
     let toInstall = [];
 
@@ -272,7 +258,9 @@ AddonUtilsInternal.prototype = {
         return param;
       });
 
-      addon.sourceURI.query = params.join("&");
+      addon.sourceURI = addon.sourceURI.mutate()
+                                       .setQuery(params.join("&"))
+                                       .finalize();
     }
 
     if (!toInstall.length) {

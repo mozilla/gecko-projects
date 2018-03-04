@@ -418,7 +418,7 @@ nsJARURI::GetScheme(nsACString &aScheme)
     return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 nsJARURI::SetScheme(const nsACString &aScheme)
 {
     // doesn't make sense to set the scheme of a jar: URL
@@ -431,7 +431,7 @@ nsJARURI::GetUserPass(nsACString &aUserPass)
     return NS_ERROR_FAILURE;
 }
 
-NS_IMETHODIMP
+nsresult
 nsJARURI::SetUserPass(const nsACString &aUserPass)
 {
     return NS_ERROR_FAILURE;
@@ -443,7 +443,7 @@ nsJARURI::GetUsername(nsACString &aUsername)
     return NS_ERROR_FAILURE;
 }
 
-NS_IMETHODIMP
+nsresult
 nsJARURI::SetUsername(const nsACString &aUsername)
 {
     return NS_ERROR_FAILURE;
@@ -455,7 +455,7 @@ nsJARURI::GetPassword(nsACString &aPassword)
     return NS_ERROR_FAILURE;
 }
 
-NS_IMETHODIMP
+nsresult
 nsJARURI::SetPassword(const nsACString &aPassword)
 {
     return NS_ERROR_FAILURE;
@@ -467,14 +467,8 @@ nsJARURI::GetHostPort(nsACString &aHostPort)
     return NS_ERROR_FAILURE;
 }
 
-NS_IMETHODIMP
+nsresult
 nsJARURI::SetHostPort(const nsACString &aHostPort)
-{
-    return NS_ERROR_FAILURE;
-}
-
-NS_IMETHODIMP
-nsJARURI::SetHostAndPort(const nsACString &aHostPort)
 {
     return NS_ERROR_FAILURE;
 }
@@ -485,7 +479,7 @@ nsJARURI::GetHost(nsACString &aHost)
     return NS_ERROR_FAILURE;
 }
 
-NS_IMETHODIMP
+nsresult
 nsJARURI::SetHost(const nsACString &aHost)
 {
     return NS_ERROR_FAILURE;
@@ -497,13 +491,13 @@ nsJARURI::GetPort(int32_t *aPort)
     return NS_ERROR_FAILURE;
 }
 
-NS_IMETHODIMP
+nsresult
 nsJARURI::SetPort(int32_t aPort)
 {
     return NS_ERROR_FAILURE;
 }
 
-NS_IMETHODIMP
+nsresult
 nsJARURI::GetPathQueryRef(nsACString &aPath)
 {
     nsAutoCString entrySpec;
@@ -511,7 +505,7 @@ nsJARURI::GetPathQueryRef(nsACString &aPath)
     return FormatSpec(entrySpec, aPath, false);
 }
 
-NS_IMETHODIMP
+nsresult
 nsJARURI::SetPathQueryRef(const nsACString &aPath)
 {
     return NS_ERROR_FAILURE;
@@ -661,10 +655,12 @@ nsJARURI::GetFilePath(nsACString& filePath)
     return mJAREntry->GetFilePath(filePath);
 }
 
-NS_IMETHODIMP
+nsresult
 nsJARURI::SetFilePath(const nsACString& filePath)
 {
-    return mJAREntry->SetFilePath(filePath);
+    return NS_MutateURI(mJAREntry)
+             .SetFilePath(filePath)
+             .Finalize(mJAREntry);
 }
 
 NS_IMETHODIMP
@@ -673,17 +669,21 @@ nsJARURI::GetQuery(nsACString& query)
     return mJAREntry->GetQuery(query);
 }
 
-NS_IMETHODIMP
+nsresult
 nsJARURI::SetQuery(const nsACString& query)
 {
-    return mJAREntry->SetQuery(query);
+    return NS_MutateURI(mJAREntry)
+             .SetQuery(query)
+             .Finalize(mJAREntry);
 }
 
-NS_IMETHODIMP
+nsresult
 nsJARURI::SetQueryWithEncoding(const nsACString& query,
                                const Encoding* encoding)
 {
-    return mJAREntry->SetQueryWithEncoding(query, encoding);
+    return NS_MutateURI(mJAREntry)
+             .SetQueryWithEncoding(query, encoding)
+             .Finalize(mJAREntry);
 }
 
 NS_IMETHODIMP
@@ -692,10 +692,12 @@ nsJARURI::GetRef(nsACString& ref)
     return mJAREntry->GetRef(ref);
 }
 
-NS_IMETHODIMP
+nsresult
 nsJARURI::SetRef(const nsACString& ref)
 {
-    return mJAREntry->SetRef(ref);
+    return NS_MutateURI(mJAREntry)
+             .SetRef(ref)
+             .Finalize(mJAREntry);
 }
 
 NS_IMETHODIMP

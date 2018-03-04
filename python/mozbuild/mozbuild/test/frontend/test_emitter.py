@@ -1372,10 +1372,10 @@ class TestEmitterBasic(unittest.TestCase):
 
     def test_localized_files_no_en_us(self):
         """Test that LOCALIZED_FILES errors if a path does not start with
-        `en-US/`."""
+        `en-US/` or contain `/locales/en-US/`."""
         reader = self.reader('localized-files-no-en-us')
         with self.assertRaisesRegexp(SandboxValidationError,
-             'LOCALIZED_FILES paths must start with `en-US/`:'):
+             'LOCALIZED_FILES paths must start with `en-US/` or contain `/locales/en-US/`: foo.js'):
             objs = self.read_topsrcdir(reader)
 
     def test_localized_pp_files(self):
@@ -1415,25 +1415,11 @@ class TestEmitterBasic(unittest.TestCase):
              'Cargo.toml for.* has no \\[lib\\] section'):
             self.read_topsrcdir(reader)
 
-    def test_rust_library_no_profile_section(self):
-        '''Test that a RustLibrary Cargo.toml with no [profile] section fails.'''
-        reader = self.reader('rust-library-no-profile-section')
-        with self.assertRaisesRegexp(SandboxValidationError,
-             'Cargo.toml for.* has no \\[profile\\.dev\\] section'):
-            self.read_topsrcdir(reader)
-
     def test_rust_library_invalid_crate_type(self):
         '''Test that a RustLibrary Cargo.toml has a permitted crate-type.'''
         reader = self.reader('rust-library-invalid-crate-type')
         with self.assertRaisesRegexp(SandboxValidationError,
              'crate-type.* is not permitted'):
-            self.read_topsrcdir(reader)
-
-    def test_rust_library_non_abort_panic(self):
-        '''Test that a RustLibrary Cargo.toml has `panic = "abort" set'''
-        reader = self.reader('rust-library-non-abort-panic')
-        with self.assertRaisesRegexp(SandboxValidationError,
-             'does not specify `panic = "abort"`'):
             self.read_topsrcdir(reader)
 
     def test_rust_library_dash_folding(self):
@@ -1547,22 +1533,6 @@ class TestEmitterBasic(unittest.TestCase):
         ldflags, lib = objs
         self.assertIsInstance(ldflags, ComputedFlags)
         self.assertIsInstance(lib, RustLibrary)
-
-    def test_android_res_dirs(self):
-        """Test that ANDROID_RES_DIRS works properly."""
-        reader = self.reader('android-res-dirs')
-        objs = self.read_topsrcdir(reader)
-
-        self.assertEqual(len(objs), 1)
-        self.assertIsInstance(objs[0], AndroidResDirs)
-
-        # Android resource directories are ordered.
-        expected = [
-            mozpath.join(reader.config.topsrcdir, 'dir1'),
-            mozpath.join(reader.config.topobjdir, 'dir2'),
-            '/dir3',
-        ]
-        self.assertEquals([p.full_path for p in objs[0].paths], expected)
 
     def test_install_shared_lib(self):
         """Test that we can install a shared library with TEST_HARNESS_FILES"""

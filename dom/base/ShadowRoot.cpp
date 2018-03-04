@@ -27,7 +27,6 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(ShadowRoot)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(ShadowRoot,
                                                   DocumentFragment)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDOMStyleSheets)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAssociatedBinding)
   for (auto iter = tmp->mIdentifierMap.ConstIter(); !iter.Done();
        iter.Next()) {
     iter.Get()->Traverse(&cb);
@@ -39,7 +38,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(ShadowRoot)
     tmp->GetHost()->RemoveMutationObserver(tmp);
   }
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDOMStyleSheets)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mAssociatedBinding)
   tmp->mIdentifierMap.Clear();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END_INHERITED(DocumentFragment)
 
@@ -51,16 +49,15 @@ NS_INTERFACE_MAP_END_INHERITING(DocumentFragment)
 NS_IMPL_ADDREF_INHERITED(ShadowRoot, DocumentFragment)
 NS_IMPL_RELEASE_INHERITED(ShadowRoot, DocumentFragment)
 
-ShadowRoot::ShadowRoot(Element* aElement, bool aClosed,
-                       already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
-                       nsXBLPrototypeBinding* aProtoBinding)
+ShadowRoot::ShadowRoot(Element* aElement, ShadowRootMode aMode,
+                       already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
   : DocumentFragment(aNodeInfo)
   , DocumentOrShadowRoot(*this)
-  , mProtoBinding(aProtoBinding)
+  , mMode(aMode)
+  , mServoStyles(Servo_AuthorStyles_Create())
   , mIsComposedDocParticipant(false)
 {
   SetHost(aElement);
-  mMode = aClosed ? ShadowRootMode::Closed : ShadowRootMode::Open;
 
   // Nodes in a shadow tree should never store a value
   // in the subtree root pointer, nodes in the shadow tree
@@ -81,8 +78,7 @@ ShadowRoot::ShadowRoot(Element* aElement, bool aClosed,
 ShadowRoot::~ShadowRoot()
 {
   if (auto* host = GetHost()) {
-    // mHost may have been unlinked or a new ShadowRoot may have been
-    // created, making this one obsolete.
+    // mHost may have been unlinked.
     host->RemoveMutationObserver(this);
   }
 
@@ -104,14 +100,13 @@ ShadowRoot::AddSlot(HTMLSlotElement* aSlot)
   MOZ_ASSERT(aSlot);
 
   // Note that if name attribute missing, the slot is a default slot.
- nsAutoString name;
+  nsAutoString name;
   aSlot->GetName(name);
 
   nsTArray<HTMLSlotElement*>* currentSlots = mSlotMap.LookupOrAdd(name);
   MOZ_ASSERT(currentSlots);
 
-  HTMLSlotElement* oldSlot = currentSlots->IsEmpty() ?
-    nullptr : currentSlots->ElementAt(0);
+  HTMLSlotElement* oldSlot = currentSlots->SafeElementAt(0);
 
   TreeOrderComparator comparator;
   currentSlots->InsertElementSorted(aSlot, comparator);
@@ -166,55 +161,57 @@ ShadowRoot::RemoveSlot(HTMLSlotElement* aSlot)
   nsAutoString name;
   aSlot->GetName(name);
 
-  nsTArray<HTMLSlotElement*>* currentSlots = mSlotMap.Get(name);
+  SlotArray* currentSlots = mSlotMap.Get(name);
+  MOZ_DIAGNOSTIC_ASSERT(currentSlots && currentSlots->Contains(aSlot),
+                        "Slot to deregister wasn't found?");
+  if (currentSlots->Length() == 1) {
+    MOZ_ASSERT(currentSlots->ElementAt(0) == aSlot);
+    mSlotMap.Remove(name);
 
-  if (currentSlots) {
-    if (currentSlots->Length() == 1) {
-      MOZ_ASSERT(currentSlots->ElementAt(0) == aSlot);
-      mSlotMap.Remove(name);
-
-      if (aSlot->AssignedNodes().Length() > 0) {
-        aSlot->ClearAssignedNodes();
-        aSlot->EnqueueSlotChangeEvent();
-      }
-    } else {
-      bool doEnqueueSlotChange = false;
-      bool doReplaceSlot = currentSlots->ElementAt(0) == aSlot;
-      currentSlots->RemoveElement(aSlot);
-      HTMLSlotElement* replacementSlot = currentSlots->ElementAt(0);
-
-      // Move assigned nodes from removed slot to the next slot in
-      // tree order with the same name.
-      if (doReplaceSlot) {
-        const nsTArray<RefPtr<nsINode>>& assignedNodes = aSlot->AssignedNodes();
-        while (assignedNodes.Length() > 0) {
-          nsINode* assignedNode = assignedNodes[0];
-
-          aSlot->RemoveAssignedNode(assignedNode);
-          replacementSlot->AppendAssignedNode(assignedNode);
-          doEnqueueSlotChange = true;
-        }
-
-        if (doEnqueueSlotChange) {
-          aSlot->EnqueueSlotChangeEvent();
-          replacementSlot->EnqueueSlotChangeEvent();
-        }
-      }
+    if (!aSlot->AssignedNodes().IsEmpty()) {
+      aSlot->ClearAssignedNodes();
+      aSlot->EnqueueSlotChangeEvent();
     }
+
+    return;
+  }
+
+  const bool wasFirstSlot = currentSlots->ElementAt(0) == aSlot;
+  currentSlots->RemoveElement(aSlot);
+
+  // Move assigned nodes from removed slot to the next slot in
+  // tree order with the same name.
+  if (!wasFirstSlot) {
+    return;
+  }
+
+  HTMLSlotElement* replacementSlot = currentSlots->ElementAt(0);
+  const nsTArray<RefPtr<nsINode>>& assignedNodes = aSlot->AssignedNodes();
+  bool slottedNodesChanged = !assignedNodes.IsEmpty();
+  while (!assignedNodes.IsEmpty()) {
+    nsINode* assignedNode = assignedNodes[0];
+
+    aSlot->RemoveAssignedNode(assignedNode);
+    replacementSlot->AppendAssignedNode(assignedNode);
+  }
+
+  if (slottedNodesChanged) {
+    aSlot->EnqueueSlotChangeEvent();
+    replacementSlot->EnqueueSlotChangeEvent();
   }
 }
 
 void
 ShadowRoot::StyleSheetChanged()
 {
+  // FIXME(emilio): This is not needed to handle sheet additions / removals,
+  // only for CSSOM mutations, we should distinguish both.
+  Servo_AuthorStyles_ForceDirty(mServoStyles.get());
+  // FIXME(emilio): Similarly, we should notify of the particular mutation to
+  // the rule map, instead of this...
+  mStyleRuleMap.reset(nullptr);
+
   nsIDocument* doc = OwnerDoc();
-
-  if (doc->IsStyledByServo()) {
-    mProtoBinding->SyncServoStyles();
-  } else {
-    mProtoBinding->FlushSkinSheets();
-  }
-
   if (nsIPresShell* shell = doc->GetShell()) {
     doc->BeginUpdate(UPDATE_STYLE);
     shell->RecordShadowStyleChange(*this);
@@ -222,9 +219,9 @@ ShadowRoot::StyleSheetChanged()
   }
 }
 
+
 void
-ShadowRoot::InsertSheet(StyleSheet* aSheet,
-                        nsIContent* aLinkingContent)
+ShadowRoot::InsertSheet(StyleSheet* aSheet, nsIContent* aLinkingContent)
 {
   nsCOMPtr<nsIStyleSheetLinkingElement>
     linkingElement = do_QueryInterface(aLinkingContent);
@@ -235,31 +232,21 @@ ShadowRoot::InsertSheet(StyleSheet* aSheet,
 
   linkingElement->SetStyleSheet(aSheet); // This sets the ownerNode on the sheet
 
-  MOZ_DIAGNOSTIC_ASSERT(mProtoBinding->SheetCount() == DocumentOrShadowRoot::SheetCount());
-#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
-  // FIXME(emilio, bug 1425759): For now we keep them duplicated, the proto
-  // binding will disappear soon (tm).
-  {
-    size_t i = 0;
-    for (RefPtr<StyleSheet>& sheet : mStyleSheets) {
-      MOZ_DIAGNOSTIC_ASSERT(sheet.get() == mProtoBinding->StyleSheetAt(i++));
-    }
-  }
-#endif
-
   // Find the correct position to insert into the style sheet list (must
   // be in tree order).
   for (size_t i = 0; i <= SheetCount(); i++) {
     if (i == SheetCount()) {
       AppendStyleSheet(*aSheet);
-      mProtoBinding->AppendStyleSheet(aSheet);
+      Servo_AuthorStyles_AppendStyleSheet(mServoStyles.get(), aSheet->AsServo());
       break;
     }
 
-    nsINode* sheetOwningNode = SheetAt(i)->GetOwnerNode();
+    StyleSheet* sheet = SheetAt(i);
+    nsINode* sheetOwningNode = sheet->GetOwnerNode();
     if (nsContentUtils::PositionIsBefore(aLinkingContent, sheetOwningNode)) {
       InsertSheetAt(i, *aSheet);
-      mProtoBinding->InsertStyleSheetAt(i, aSheet);
+      Servo_AuthorStyles_InsertStyleSheetBefore(
+        mServoStyles.get(), aSheet->AsServo(), sheet->AsServo());
       break;
     }
   }
@@ -272,8 +259,8 @@ ShadowRoot::InsertSheet(StyleSheet* aSheet,
 void
 ShadowRoot::RemoveSheet(StyleSheet* aSheet)
 {
-  mProtoBinding->RemoveStyleSheet(aSheet);
   DocumentOrShadowRoot::RemoveSheet(*aSheet);
+  Servo_AuthorStyles_RemoveStyleSheet(mServoStyles.get(), aSheet->AsServo());
 
   if (aSheet->IsApplicable()) {
     StyleSheetChanged();
@@ -451,8 +438,7 @@ ShadowRoot::SetInnerHTML(const nsAString& aInnerHTML, ErrorResult& aError)
 }
 
 void
-ShadowRoot::AttributeChanged(nsIDocument* aDocument,
-                             Element* aElement,
+ShadowRoot::AttributeChanged(Element* aElement,
                              int32_t aNameSpaceID,
                              nsAtom* aAttribute,
                              int32_t aModType,
@@ -481,26 +467,22 @@ ShadowRoot::AttributeChanged(nsIDocument* aDocument,
 }
 
 void
-ShadowRoot::ContentAppended(nsIDocument* aDocument,
-                            nsIContent* aContainer,
-                            nsIContent* aFirstNewContent)
+ShadowRoot::ContentAppended(nsIContent* aFirstNewContent)
 {
   for (nsIContent* content = aFirstNewContent;
        content;
        content = content->GetNextSibling()) {
-    ContentInserted(aDocument, aContainer, content);
+    ContentInserted(content);
   }
 }
 
 void
-ShadowRoot::ContentInserted(nsIDocument* aDocument,
-                            nsIContent* aContainer,
-                            nsIContent* aChild)
+ShadowRoot::ContentInserted(nsIContent* aChild)
 {
-  // Check to ensure that the content is in the same anonymous tree
-  // as the container because anonymous content may report its container
-  // as the host but it may not be in the host's child list.
-  if (!nsContentUtils::IsInSameAnonymousTree(aContainer, aChild)) {
+  // Check to ensure that the child not an anonymous subtree root because
+  // even though its parent could be the host it may not be in the host's child
+  // list.
+  if (aChild->IsRootOfAnonymousSubtree()) {
     return;
   }
 
@@ -508,7 +490,7 @@ ShadowRoot::ContentInserted(nsIDocument* aDocument,
     return;
   }
 
-  if (aContainer && aContainer == GetHost()) {
+  if (aChild->GetParent() == GetHost()) {
     if (const HTMLSlotElement* slot = AssignSlotFor(aChild)) {
       slot->EnqueueSlotChangeEvent();
     }
@@ -517,7 +499,7 @@ ShadowRoot::ContentInserted(nsIDocument* aDocument,
 
   // If parent's root is a shadow root, and parent is a slot whose assigned
   // nodes is the empty list, then run signal a slot change for parent.
-  HTMLSlotElement* slot = HTMLSlotElement::FromContentOrNull(aContainer);
+  HTMLSlotElement* slot = HTMLSlotElement::FromContentOrNull(aChild->GetParent());
   if (slot && slot->GetContainingShadow() == this &&
       slot->AssignedNodes().IsEmpty()) {
     slot->EnqueueSlotChangeEvent();
@@ -525,15 +507,12 @@ ShadowRoot::ContentInserted(nsIDocument* aDocument,
 }
 
 void
-ShadowRoot::ContentRemoved(nsIDocument* aDocument,
-                           nsIContent* aContainer,
-                           nsIContent* aChild,
-                           nsIContent* aPreviousSibling)
+ShadowRoot::ContentRemoved(nsIContent* aChild, nsIContent* aPreviousSibling)
 {
-  // Check to ensure that the content is in the same anonymous tree
-  // as the container because anonymous content may report its container
-  // as the host but it may not be in the host's child list.
- if (!nsContentUtils::IsInSameAnonymousTree(aContainer, aChild)) {
+  // Check to ensure that the child not an anonymous subtree root because
+  // even though its parent could be the host it may not be in the host's child
+  // list.
+ if (aChild->IsRootOfAnonymousSubtree()) {
     return;
   }
 
@@ -541,7 +520,7 @@ ShadowRoot::ContentRemoved(nsIDocument* aDocument,
     return;
   }
 
-  if (aContainer && aContainer == GetHost()) {
+  if (aChild->GetParent() == GetHost()) {
     nsAutoString slotName;
     if (aChild->IsElement()) {
       aChild->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::slot, slotName);
@@ -554,11 +533,21 @@ ShadowRoot::ContentRemoved(nsIDocument* aDocument,
 
   // If parent's root is a shadow root, and parent is a slot whose assigned
   // nodes is the empty list, then run signal a slot change for parent.
-  HTMLSlotElement* slot = HTMLSlotElement::FromContentOrNull(aContainer);
+  HTMLSlotElement* slot = HTMLSlotElement::FromContentOrNull(aChild->GetParent());
   if (slot && slot->GetContainingShadow() == this &&
       slot->AssignedNodes().IsEmpty()) {
     slot->EnqueueSlotChangeEvent();
   }
+}
+
+ServoStyleRuleMap&
+ShadowRoot::ServoStyleRuleMap()
+{
+  if (!mStyleRuleMap) {
+    mStyleRuleMap = MakeUnique<mozilla::ServoStyleRuleMap>();
+  }
+  mStyleRuleMap->EnsureTable(*this);
+  return *mStyleRuleMap;
 }
 
 nsresult

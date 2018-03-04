@@ -302,9 +302,7 @@ class GlobalHelperThreadState
 
     void cancelParseTask(JSRuntime* rt, ParseTaskKind kind, void* token);
 
-    void mergeParseTaskCompartment(JSContext* cx, ParseTask* parseTask,
-                                   Handle<GlobalObject*> global,
-                                   JSCompartment* dest);
+    void mergeParseTaskCompartment(JSContext* cx, ParseTask* parseTask, JSCompartment* dest);
 
     void trace(JSTracer* trc, js::gc::AutoTraceSession& session);
 
@@ -514,8 +512,7 @@ StartOffThreadPromiseHelperTask(PromiseHelperTask* task);
  * generated and read everything needed from the VM state.
  */
 bool
-StartOffThreadIonCompile(JSContext* cx, jit::IonBuilder* builder,
-                         const AutoLockHelperThreadState& lock);
+StartOffThreadIonCompile(jit::IonBuilder* builder, const AutoLockHelperThreadState& lock);
 
 /*
  * Schedule deletion of Ion compilation data.
@@ -529,6 +526,7 @@ struct CompilationsUsingNursery { JSRuntime* runtime; };
 
 using CompilationSelector = mozilla::Variant<JSScript*,
                                              JSCompartment*,
+                                             Zone*,
                                              ZonesInState,
                                              JSRuntime*,
                                              CompilationsUsingNursery,
@@ -550,6 +548,12 @@ inline void
 CancelOffThreadIonCompile(JSCompartment* comp)
 {
     CancelOffThreadIonCompile(CompilationSelector(comp), true);
+}
+
+inline void
+CancelOffThreadIonCompile(Zone* zone)
+{
+    CancelOffThreadIonCompile(CompilationSelector(zone), true);
 }
 
 inline void

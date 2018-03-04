@@ -42,7 +42,6 @@
 #include "nsIDOMDocument.h"
 #include "nsIDOMDocumentFragment.h"
 #include "nsIDOMElement.h"
-#include "nsIDOMHTMLInputElement.h"
 #include "nsIDOMNode.h"
 #include "nsIDocument.h"
 #include "nsIFile.h"
@@ -228,7 +227,7 @@ HTMLEditor::DoInsertHTMLWithContext(const nsAString& aInputString,
                                            aTrustedInput);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIDOMNode> targetNode;
+  nsCOMPtr<nsINode> targetNode;
   int32_t targetOffset=0;
 
   if (!aDestNode) {
@@ -240,7 +239,7 @@ HTMLEditor::DoInsertHTMLWithContext(const nsAString& aInputString,
       return NS_ERROR_FAILURE;
     }
   } else {
-    targetNode = aDestNode;
+    targetNode = do_QueryInterface(aDestNode);
     targetOffset = aDestOffset;
   }
 

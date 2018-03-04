@@ -4,7 +4,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["XPIProvider", "XPIInternal"];
+var EXPORTED_SYMBOLS = ["XPIProvider", "XPIInternal"];
 
 /* globals WebExtensionPolicy */
 
@@ -1442,7 +1442,7 @@ class XPIStateLocation extends Map {
 /**
  * Keeps track of the state of XPI add-ons on the file system.
  */
-this.XPIStates = {
+var XPIStates = {
   // Map(location name -> Map(add-on ID -> XPIState))
   db: null,
 
@@ -1782,7 +1782,7 @@ this.XPIStates = {
   },
 };
 
-this.XPIProvider = {
+var XPIProvider = {
   get name() {
     return "XPIProvider";
   },
@@ -3934,11 +3934,10 @@ this.XPIProvider = {
       }
 
       for (let addon of aAddons) {
-        AddonRepository.getCachedAddonByID(addon.id, aRepoAddon => {
-          if (aRepoAddon) {
+        AddonRepository.getCachedAddonByID(addon.id).then(aRepoAddon => {
+          if (aRepoAddon || AddonRepository.getCompatibilityOverridesSync(addon.id)) {
             logger.debug("updateAddonRepositoryData got info for " + addon.id);
             addon._repositoryAddon = aRepoAddon;
-            addon.compatibilityOverrides = aRepoAddon.compatibilityOverrides;
             this.updateAddonDisabledState(addon);
           }
 
@@ -4999,13 +4998,13 @@ AddonInternal.prototype = {
 
       // The repository can specify compatibility overrides.
       // Note: For now, only blacklisting is supported by overrides.
-      if (this._repositoryAddon &&
-          this._repositoryAddon.compatibilityOverrides) {
-        let overrides = this._repositoryAddon.compatibilityOverrides;
+      let overrides = AddonRepository.getCompatibilityOverridesSync(this.id);
+      if (overrides) {
         let override = AddonRepository.findMatchingCompatOverride(this.version,
                                                                   overrides);
-        if (override && override.type == "incompatible")
+        if (override) {
           return false;
+        }
       }
 
       // Extremely old extensions should not be compatible by default.
@@ -5746,7 +5745,7 @@ function defineAddonWrapperProperty(name, getter) {
 ["id", "syncGUID", "version", "isCompatible", "isPlatformCompatible",
  "providesUpdatesSecurely", "blocklistState", "blocklistURL", "appDisabled",
  "softDisabled", "skinnable", "size", "foreignInstall", "hasBinaryComponents",
- "strictCompatibility", "compatibilityOverrides", "updateURL", "dependencies",
+ "strictCompatibility", "updateURL", "dependencies",
  "getDataDirectory", "multiprocessCompatible", "signedState", "mpcOptedOut",
  "isCorrectlySigned"].forEach(function(aProp) {
    defineAddonWrapperProperty(aProp, function() {
@@ -5755,10 +5754,9 @@ function defineAddonWrapperProperty(name, getter) {
    });
 });
 
-["fullDescription", "developerComments", "eula", "supportURL",
- "contributionURL", "contributionAmount", "averageRating", "reviewCount",
- "reviewURL", "totalDownloads", "weeklyDownloads", "dailyUsers",
- "repositoryStatus"].forEach(function(aProp) {
+["fullDescription", "developerComments", "supportURL",
+ "contributionURL", "averageRating", "reviewCount",
+ "reviewURL", "weeklyDownloads"].forEach(function(aProp) {
   defineAddonWrapperProperty(aProp, function() {
     let addon = addonFor(this);
     if (addon._repositoryAddon)
@@ -6973,7 +6971,7 @@ class WinRegInstallLocation extends DirectoryInstallLocation {
   }
 }
 
-this.XPIInternal = {
+var XPIInternal = {
   AddonInternal,
   BOOTSTRAP_REASONS,
   KEY_APP_SYSTEM_ADDONS,

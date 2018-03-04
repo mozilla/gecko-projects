@@ -4,7 +4,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "PageActions",
   // PageActions.Action
   // PageActions.Button
@@ -33,7 +33,7 @@ const PREF_PERSISTED_ACTIONS = "browser.pageActions.persistedActions";
 const PERSISTED_ACTIONS_CURRENT_VERSION = 1;
 
 
-this.PageActions = {
+var PageActions = {
   /**
    * Inits.  Call to init.
    */
@@ -1218,8 +1218,11 @@ var gBuiltInActions = [
     onCommand(event, buttonNode) {
       browserPageActions(buttonNode).emailLink.onCommand(event, buttonNode);
     },
-  },
+  }
+];
 
+if (Services.prefs.getBoolPref("identity.fxaccounts.enabled")) {
+  gBuiltInActions.push(
   // send to device
   {
     id: "sendToDevice",
@@ -1247,8 +1250,8 @@ var gBuiltInActions = [
           .onShowingSubview(panelViewNode);
       },
     },
-  }
-];
+  });
+}
 
 
 /**

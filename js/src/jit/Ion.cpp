@@ -10,8 +10,6 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ThreadLocal.h"
 
-#include "jsprf.h"
-
 #include "gc/FreeOp.h"
 #include "gc/Marking.h"
 #include "jit/AliasAnalysis.h"
@@ -48,6 +46,7 @@
 #include "jit/StupidAllocator.h"
 #include "jit/ValueNumbering.h"
 #include "jit/WasmBCE.h"
+#include "js/Printf.h"
 #include "vm/Debugger.h"
 #include "vm/HelperThreads.h"
 #include "vm/JSCompartment.h"
@@ -430,11 +429,7 @@ JitZoneGroup::JitZoneGroup(ZoneGroup* group)
 {}
 
 JitCompartment::JitCompartment()
-  : stubCodes_(nullptr),
-    stringConcatStub_(nullptr),
-    regExpMatcherStub_(nullptr),
-    regExpSearcherStub_(nullptr),
-    regExpTesterStub_(nullptr)
+  : stubCodes_(nullptr)
 {
 }
 
@@ -460,16 +455,38 @@ JitCompartment::initialize(JSContext* cx)
     return true;
 }
 
-bool
-JitCompartment::ensureIonStubsExist(JSContext* cx)
+template <typename T>
+static T
+PopNextBitmaskValue(uint32_t* bitmask)
 {
-    if (!stringConcatStub_) {
-        stringConcatStub_ = generateStringConcatStub(cx);
-        if (!stringConcatStub_)
-            return false;
-    }
+    MOZ_ASSERT(*bitmask);
+    uint32_t index = mozilla::CountTrailingZeroes32(*bitmask);
+    *bitmask ^= 1 << index;
 
-    return true;
+    MOZ_ASSERT(index < uint32_t(T::Count));
+    return T(index);
+}
+
+void
+JitCompartment::performStubReadBarriers(uint32_t stubsToBarrier) const
+{
+    while (stubsToBarrier) {
+        auto stub = PopNextBitmaskValue<StubIndex>(&stubsToBarrier);
+        const ReadBarrieredJitCode& jitCode = stubs_[stub];
+        MOZ_ASSERT(jitCode);
+        jitCode.get();
+    }
+}
+
+void
+JitCompartment::performSIMDTemplateReadBarriers(uint32_t simdTemplatesToBarrier) const
+{
+    while (simdTemplatesToBarrier) {
+        auto type = PopNextBitmaskValue<SimdType>(&simdTemplatesToBarrier);
+        const ReadBarrieredObject& tpl = simdTemplateObjects_[type];
+        MOZ_ASSERT(tpl);
+        tpl.get();
+    }
 }
 
 bool
@@ -655,7 +672,7 @@ JitRuntime::SweepJitcodeGlobalTable(JSRuntime* rt)
 }
 
 void
-JitCompartment::sweep(FreeOp* fop, JSCompartment* compartment)
+JitCompartment::sweep(JSCompartment* compartment)
 {
     // Any outstanding compilations should have been cancelled by the GC.
     MOZ_ASSERT(!HasOffThreadIonCompile(compartment));
@@ -668,17 +685,10 @@ JitCompartment::sweep(FreeOp* fop, JSCompartment* compartment)
            it = BailoutReturnStubInfo();
     }
 
-    if (stringConcatStub_ && IsAboutToBeFinalizedUnbarriered(&stringConcatStub_))
-        stringConcatStub_ = nullptr;
-
-    if (regExpMatcherStub_ && IsAboutToBeFinalizedUnbarriered(&regExpMatcherStub_))
-        regExpMatcherStub_ = nullptr;
-
-    if (regExpSearcherStub_ && IsAboutToBeFinalizedUnbarriered(&regExpSearcherStub_))
-        regExpSearcherStub_ = nullptr;
-
-    if (regExpTesterStub_ && IsAboutToBeFinalizedUnbarriered(&regExpTesterStub_))
-        regExpTesterStub_ = nullptr;
+    for (ReadBarrieredJitCode& stub : stubs_) {
+        if (stub && IsAboutToBeFinalized(&stub))
+            stub.set(nullptr);
+    }
 
     for (ReadBarrieredObject& obj : simdTemplateObjects_) {
         if (obj && IsAboutToBeFinalized(&obj))
@@ -687,7 +697,7 @@ JitCompartment::sweep(FreeOp* fop, JSCompartment* compartment)
 }
 
 void
-JitZone::sweep(FreeOp* fop)
+JitZone::sweep()
 {
     baselineCacheIRStubCodes_.sweep();
 }
@@ -1110,7 +1120,7 @@ IonScript::copyPatchableBackedges(JSContext* cx, JitCode* code,
 }
 
 void
-IonScript::copySafepointIndices(const SafepointIndex* si, MacroAssembler& masm)
+IonScript::copySafepointIndices(const SafepointIndex* si)
 {
     // Jumps in the caches reflect the offset of those jumps in the compiled
     // code, not the absolute positions of the jumps. Update according to the
@@ -1120,7 +1130,7 @@ IonScript::copySafepointIndices(const SafepointIndex* si, MacroAssembler& masm)
 }
 
 void
-IonScript::copyOsiIndices(const OsiIndex* oi, MacroAssembler& masm)
+IonScript::copyOsiIndices(const OsiIndex* oi)
 {
     memcpy(osiIndices(), oi, osiIndexEntries_ * sizeof(OsiIndex));
 }
@@ -1330,7 +1340,7 @@ namespace js {
 namespace jit {
 
 static void
-OptimizeSinCos(MIRGenerator *mir, MIRGraph &graph)
+OptimizeSinCos(MIRGraph &graph)
 {
     // Now, we are looking for:
     // var y = sin(x);
@@ -1774,7 +1784,7 @@ OptimizeMIR(MIRGenerator* mir)
 
     if (mir->optimizationInfo().sincosEnabled()) {
         AutoTraceLog log(logger, TraceLogger_Sincos);
-        OptimizeSinCos(mir, graph);
+        OptimizeSinCos(graph);
         gs.spewPass("Sincos optimization");
         AssertExtendedGraphCoherency(graph);
 
@@ -1806,7 +1816,7 @@ OptimizeMIR(MIRGenerator* mir)
 
     if (mir->optimizationInfo().instructionReorderingEnabled()) {
         AutoTraceLog log(logger, TraceLogger_ReorderInstructions);
-        if (!ReorderInstructions(mir, graph))
+        if (!ReorderInstructions(graph))
             return false;
         gs.spewPass("Reordering");
 
@@ -2161,7 +2171,7 @@ IonCompile(JSContext* cx, JSScript* script,
 
     BaselineFrameInspector* baselineFrameInspector = nullptr;
     if (baselineFrame) {
-        baselineFrameInspector = NewBaselineFrameInspector(temp, baselineFrame, info);
+        baselineFrameInspector = NewBaselineFrameInspector(temp, baselineFrame);
         if (!baselineFrameInspector)
             return AbortReason::Alloc;
     }
@@ -2249,7 +2259,7 @@ IonCompile(JSContext* cx, JSScript* script,
             return AbortReason::Alloc;
 
         AutoLockHelperThreadState lock;
-        if (!StartOffThreadIonCompile(cx, builder, lock)) {
+        if (!StartOffThreadIonCompile(builder, lock)) {
             JitSpew(JitSpew_IonAbort, "Unable to start off-thread ion compilation.");
             builder->graphSpewer().endFunction();
             return AbortReason::Alloc;
@@ -2312,7 +2322,7 @@ CheckFrame(JSContext* cx, BaselineFrame* frame)
 }
 
 static bool
-CheckScript(JSContext* cx, JSScript* script, bool osr)
+CheckScript(JSContext* cx, JSScript* script)
 {
     if (script->isForEval()) {
         // Eval frames are not yet supported. Supporting this will require new
@@ -2382,9 +2392,9 @@ CheckScriptSize(JSContext* cx, JSScript* script)
 }
 
 bool
-CanIonCompileScript(JSContext* cx, JSScript* script, bool osr)
+CanIonCompileScript(JSContext* cx, JSScript* script)
 {
-    if (!script->canIonCompile() || !CheckScript(cx, script, osr))
+    if (!script->canIonCompile() || !CheckScript(cx, script))
         return false;
 
     return CheckScriptSize(cx, script) == Method_Compiled;
@@ -2412,7 +2422,7 @@ Compile(JSContext* cx, HandleScript script, BaselineFrame* osrFrame, jsbytecode*
         return Method_Skipped;
     }
 
-    if (!CheckScript(cx, script, bool(osrPc))) {
+    if (!CheckScript(cx, script)) {
         JitSpew(JitSpew_IonAbort, "Aborted compilation of %s:%zu", script->filename(), script->lineno());
         return Method_CantCompile;
     }
@@ -3157,7 +3167,10 @@ AutoFlushICache::setRange(uintptr_t start, size_t len)
 void
 AutoFlushICache::flush(uintptr_t start, size_t len)
 {
-#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
+#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_NONE)
+    // Nothing
+#elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64) || \
+      defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
     JSContext* cx = TlsContext.get();
     AutoFlushICache* afc = cx ? cx->autoFlushICache() : nullptr;
     if (!afc) {
@@ -3176,6 +3189,8 @@ AutoFlushICache::flush(uintptr_t start, size_t len)
 
     JitSpewCont(JitSpew_CacheFlush, afc->inhibit_ ? "x" : "*");
     ExecutableAllocator::cacheFlush((void*)start, len);
+#else
+    MOZ_CRASH("Unresolved porting API - AutoFlushICache::flush");
 #endif
 }
 
@@ -3184,12 +3199,17 @@ AutoFlushICache::flush(uintptr_t start, size_t len)
 void
 AutoFlushICache::setInhibit()
 {
-#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
+#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_NONE)
+    // Nothing
+#elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64) || \
+      defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
     AutoFlushICache* afc = TlsContext.get()->autoFlushICache();
     MOZ_ASSERT(afc);
     MOZ_ASSERT(afc->start_);
     JitSpewCont(JitSpew_CacheFlush, "I");
     afc->inhibit_ = true;
+#else
+    MOZ_CRASH("Unresolved porting API - AutoFlushICache::setInhibit");
 #endif
 }
 

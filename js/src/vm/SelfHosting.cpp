@@ -15,7 +15,6 @@
 #include "jsdate.h"
 #include "jsfriendapi.h"
 #include "jsstr.h"
-#include "jswrapper.h"
 #include "selfhosted.out.h"
 
 #include "builtin/intl/Collator.h"
@@ -42,6 +41,8 @@
 #include "jit/InlinableNatives.h"
 #include "js/CharacterEncoding.h"
 #include "js/Date.h"
+#include "js/Wrapper.h"
+#include "vm/ArgumentsObject.h"
 #include "vm/Compression.h"
 #include "vm/GeneratorObject.h"
 #include "vm/Interpreter.h"
@@ -2561,8 +2562,6 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("ThrowArgTypeNotObject", intrinsic_ThrowArgTypeNotObject, 2, 0),
 
     // See builtin/RegExp.h for descriptions of the regexp_* functions.
-    JS_FN("regexp_exec_no_statics", regexp_exec_no_statics, 2,0),
-    JS_FN("regexp_test_no_statics", regexp_test_no_statics, 2,0),
     JS_FN("regexp_construct_raw_flags", regexp_construct_raw_flags, 2,0),
 
     JS_FN("IsModule", intrinsic_IsInstanceOfBuiltin<ModuleObject>, 1, 0),
@@ -3196,3 +3195,9 @@ js::GetSelfHostedFunctionName(JSFunction* fun)
 static_assert(JSString::MAX_LENGTH <= INT32_MAX,
               "StringIteratorNext in builtin/String.js assumes the stored index "
               "into the string is an Int32Value");
+
+static_assert(JSString::MAX_LENGTH == MAX_STRING_LENGTH,
+              "JSString::MAX_LENGTH matches self-hosted constant for maximum string length");
+
+static_assert(ARGS_LENGTH_MAX == MAX_ARGS_LENGTH,
+              "ARGS_LENGTH_MAX matches self-hosted constant for maximum arguments length");

@@ -7,6 +7,7 @@
 #include "jit/Lowering.h"
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/EndianUtils.h"
 
 #include "jit/JitSpewer.h"
 #include "jit/LIR.h"
@@ -2791,7 +2792,6 @@ LIRGenerator::visitTypeBarrier(MTypeBarrier* ins)
     // from inside a type barrier test.
 
     const TemporaryTypeSet* types = ins->resultTypeSet();
-    bool needTemp = !types->unknownObject() && types->getObjectCount() > 0;
 
     MIRType inputType = ins->getOperand(0)->type();
     MOZ_ASSERT(inputType == ins->type());
@@ -2806,13 +2806,23 @@ LIRGenerator::visitTypeBarrier(MTypeBarrier* ins)
         return;
     }
 
+    bool hasSpecificObjects = !types->unknownObject() && types->getObjectCount() > 0;
+
     // Handle typebarrier with Value as input.
     if (inputType == MIRType::Value) {
-        LDefinition tmp = needTemp ? temp() : tempToUnbox();
-        LTypeBarrierV* barrier = new(alloc()) LTypeBarrierV(useBox(ins->input()), tmp);
-        assignSnapshot(barrier, Bailout_TypeBarrierV);
-        add(barrier, ins);
-        redefine(ins, ins->input());
+        LDefinition objTemp = hasSpecificObjects ? temp() : LDefinition::BogusTemp();
+        if (ins->canRedefineInput()) {
+            LTypeBarrierV* barrier =
+                new(alloc()) LTypeBarrierV(useBox(ins->input()), tempToUnbox(), objTemp);
+            assignSnapshot(barrier, Bailout_TypeBarrierV);
+            add(barrier, ins);
+            redefine(ins, ins->input());
+        } else {
+            LTypeBarrierV* barrier =
+                new(alloc()) LTypeBarrierV(useBoxAtStart(ins->input()), tempToUnbox(), objTemp);
+            assignSnapshot(barrier, Bailout_TypeBarrierV);
+            defineBoxReuseInput(barrier, ins, 0);
+        }
         return;
     }
 
@@ -2828,31 +2838,24 @@ LIRGenerator::visitTypeBarrier(MTypeBarrier* ins)
     }
 
     if (needsObjectBarrier) {
-        LDefinition tmp = needTemp ? temp() : LDefinition::BogusTemp();
-        LTypeBarrierO* barrier = new(alloc()) LTypeBarrierO(useRegister(ins->getOperand(0)), tmp);
-        assignSnapshot(barrier, Bailout_TypeBarrierO);
-        add(barrier, ins);
-        redefine(ins, ins->getOperand(0));
+        LDefinition tmp = hasSpecificObjects ? temp() : LDefinition::BogusTemp();
+        if (ins->canRedefineInput()) {
+            LTypeBarrierO* barrier =
+                new(alloc()) LTypeBarrierO(useRegister(ins->input()), tmp);
+            assignSnapshot(barrier, Bailout_TypeBarrierO);
+            add(barrier, ins);
+            redefine(ins, ins->getOperand(0));
+        } else {
+            LTypeBarrierO* barrier =
+                new(alloc()) LTypeBarrierO(useRegisterAtStart(ins->input()), tmp);
+            assignSnapshot(barrier, Bailout_TypeBarrierO);
+            defineReuseInput(barrier, ins, 0);
+        }
         return;
     }
 
     // Handle remaining cases: No-op, unbox did everything.
     redefine(ins, ins->getOperand(0));
-}
-
-void
-LIRGenerator::visitMonitorTypes(MMonitorTypes* ins)
-{
-    // Requesting a non-GC pointer is safe here since we never re-enter C++
-    // from inside a type check.
-
-    const TemporaryTypeSet* types = ins->typeSet();
-    bool needTemp = !types->unknownObject() && types->getObjectCount() > 0;
-    LDefinition tmp = needTemp ? temp() : tempToUnbox();
-
-    LMonitorTypes* lir = new(alloc()) LMonitorTypes(useBox(ins->input()), tmp);
-    assignSnapshot(lir, Bailout_MonitorTypes);
-    add(lir, ins);
 }
 
 // Returns true iff |def| is a constant that's either not a GC thing or is not
@@ -3187,8 +3190,7 @@ LIRGenerator::visitSpectreMaskIndex(MSpectreMaskIndex* ins)
     MOZ_ASSERT(ins->length()->type() == MIRType::Int32);
     MOZ_ASSERT(ins->type() == MIRType::Int32);
 
-    LSpectreMaskIndex* lir =
-        new(alloc()) LSpectreMaskIndex(useRegister(ins->index()), useAny(ins->length()));
+    auto* lir = new(alloc()) LSpectreMaskIndex(useRegister(ins->index()), useAny(ins->length()));
     define(lir, ins);
 }
 
@@ -3996,10 +3998,31 @@ LIRGenerator::visitGuardObjectIdentity(MGuardObjectIdentity* ins)
 }
 
 void
+LIRGenerator::visitGuardShape(MGuardShape* ins)
+{
+    MOZ_ASSERT(ins->object()->type() == MIRType::Object);
+
+    LGuardShape* guard = new(alloc()) LGuardShape(useRegisterAtStart(ins->object()));
+    assignSnapshot(guard, ins->bailoutKind());
+    add(guard, ins);
+    redefine(ins, ins->object());
+}
+
+void
+LIRGenerator::visitGuardObjectGroup(MGuardObjectGroup* ins)
+{
+    MOZ_ASSERT(ins->object()->type() == MIRType::Object);
+
+    LGuardObjectGroup* guard = new(alloc()) LGuardObjectGroup(useRegisterAtStart(ins->object()));
+    assignSnapshot(guard, ins->bailoutKind());
+    add(guard, ins);
+    redefine(ins, ins->object());
+}
+
+void
 LIRGenerator::visitGuardClass(MGuardClass* ins)
 {
-    LDefinition t = temp();
-    LGuardClass* guard = new(alloc()) LGuardClass(useRegister(ins->object()), t);
+    LGuardClass* guard = new(alloc()) LGuardClass(useRegister(ins->object()), temp());
     assignSnapshot(guard, Bailout_ObjectIdentityOrTypeGuard);
     add(guard, ins);
 }
@@ -4530,9 +4553,16 @@ LIRGenerator::visitWasmBoundsCheck(MWasmBoundsCheck* ins)
     MDefinition* boundsCheckLimit = ins->boundsCheckLimit();
     MOZ_ASSERT(boundsCheckLimit->type() == MIRType::Int32);
 
-    auto* lir = new(alloc()) LWasmBoundsCheck(useRegisterAtStart(index),
-                                              useRegisterAtStart(boundsCheckLimit));
-    add(lir, ins);
+
+    if (JitOptions.spectreIndexMasking) {
+        auto* lir = new(alloc()) LWasmBoundsCheck(useRegisterAtStart(index),
+                                                  useRegister(boundsCheckLimit));
+        defineReuseInput(lir, ins, 0);
+    } else {
+        auto* lir = new(alloc()) LWasmBoundsCheck(useRegisterAtStart(index),
+                                                  useRegisterAtStart(boundsCheckLimit));
+        add(lir, ins);
+    }
 #endif
 }
 

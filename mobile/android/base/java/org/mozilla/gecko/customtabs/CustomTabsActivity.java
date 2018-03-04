@@ -42,9 +42,6 @@ import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.FormAssistPopup;
 import org.mozilla.gecko.GeckoAccessibility;
 import org.mozilla.gecko.GeckoSharedPrefs;
-import org.mozilla.gecko.GeckoSession;
-import org.mozilla.gecko.GeckoSessionSettings;
-import org.mozilla.gecko.GeckoView;
 import org.mozilla.gecko.preferences.GeckoPreferences;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.SnackbarBuilder;
@@ -67,15 +64,18 @@ import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.webapps.WebApps;
 import org.mozilla.gecko.widget.ActionModePresenter;
 import org.mozilla.gecko.widget.GeckoPopupMenu;
+import org.mozilla.geckoview.GeckoSession;
+import org.mozilla.geckoview.GeckoSessionSettings;
+import org.mozilla.geckoview.GeckoView;
 
 import java.util.List;
 
 public class CustomTabsActivity extends AppCompatActivity
                                 implements ActionModePresenter,
                                            GeckoMenu.Callback,
-                                           GeckoSession.ContentListener,
-                                           GeckoSession.NavigationListener,
-                                           GeckoSession.ProgressListener {
+                                           GeckoSession.ContentDelegate,
+                                           GeckoSession.NavigationDelegate,
+                                           GeckoSession.ProgressDelegate {
 
     private static final String LOGTAG = "CustomTabsActivity";
 
@@ -134,9 +134,9 @@ public class CustomTabsActivity extends AppCompatActivity
         mGeckoSession = new GeckoSession();
         mGeckoView.setSession(mGeckoSession);
 
-        mGeckoSession.setNavigationListener(this);
-        mGeckoSession.setProgressListener(this);
-        mGeckoSession.setContentListener(this);
+        mGeckoSession.setNavigationDelegate(this);
+        mGeckoSession.setProgressDelegate(this);
+        mGeckoSession.setContentDelegate(this);
 
         mPromptService = new PromptService(this, mGeckoView.getEventDispatcher());
         mDoorHangerPopup = new DoorHangerPopup(this, mGeckoView.getEventDispatcher());
@@ -591,7 +591,7 @@ public class CustomTabsActivity extends AppCompatActivity
         return null;
     }
 
-    /* GeckoSession.NavigationListener */
+    /* GeckoSession.NavigationDelegate */
     @Override
     public void onLocationChange(GeckoSession session, String url) {
         mCurrentUrl = url;
@@ -649,7 +649,14 @@ public class CustomTabsActivity extends AppCompatActivity
         return true;
     }
 
-    /* GeckoSession.ProgressListener */
+    @Override
+    public void onNewSession(final GeckoSession session, final String uri,
+                             final GeckoSession.Response<GeckoSession> response) {
+        // We should never get here because we abort loads that need a new session in onLoadUri()
+        throw new IllegalStateException("Unexpected new session");
+    }
+
+    /* GeckoSession.ProgressDelegate */
     @Override
     public void onPageStart(GeckoSession session, String url) {
         mCurrentUrl = url;
@@ -672,7 +679,7 @@ public class CustomTabsActivity extends AppCompatActivity
         updateActionBar();
     }
 
-    /* GeckoSession.ContentListener */
+    /* GeckoSession.ContentDelegate */
     @Override
     public void onTitleChange(GeckoSession session, String title) {
         mCurrentTitle = title;
@@ -684,6 +691,11 @@ public class CustomTabsActivity extends AppCompatActivity
         Intent intent = new Intent(getIntent());
         intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
         startActivity(intent);
+    }
+
+    @Override
+    public void onCloseRequest(GeckoSession session) {
+        // Ignore
     }
 
     @Override

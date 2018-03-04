@@ -18,7 +18,6 @@ let gSiteDataSettings = {
   // - uri: uri of site; instance of nsIURI
   // - baseDomain: base domain of the site
   // - cookies: array of cookies of that site
-  // - status: persistent-storage permission status
   // - usage: disk usage which site uses
   // - userAction: "remove" or "update-permission"; the action user wants to take.
   _sites: null,
@@ -50,22 +49,22 @@ let gSiteDataSettings = {
     // Add "Host" column.
     addColumnItem(site.host, "4");
 
-    // Add "Status" column
-    addColumnItem(site.persisted ?
-      this._prefStrBundle.getString("persistent") : null, "2");
-
     // Add "Cookies" column.
     addColumnItem(site.cookies.length, "1");
 
     // Add "Storage" column
-    if (site.usage > 0) {
+    if (site.usage > 0 || site.persisted) {
       let size = DownloadUtils.convertByteUnits(site.usage);
-      let str = this._prefStrBundle.getFormattedString("siteUsage", size);
-      addColumnItem(str, "1");
+      let strName = site.persisted ? "siteUsagePersistent" : "siteUsage";
+      addColumnItem(this._prefStrBundle.getFormattedString(strName, size), "2");
     } else {
       // Pass null to avoid showing "0KB" when there is no site data stored.
-      addColumnItem(null, "1");
+      addColumnItem(null, "2");
     }
+
+    // Add "Last Used" column.
+    addColumnItem(site.lastAccessed > 0 ?
+      this._formatter.format(site.lastAccessed) : null, "2");
 
     item.appendChild(container);
     return item;
@@ -76,6 +75,10 @@ let gSiteDataSettings = {
       document.getElementById(id)
               .addEventListener(eventType, callback.bind(gSiteDataSettings));
     }
+
+    this._formatter = new Services.intl.DateTimeFormat(undefined, {
+      dateStyle: "short", timeStyle: "short",
+    });
 
     this._list = document.getElementById("sitesList");
     this._searchBox = document.getElementById("searchBox");
@@ -90,13 +93,13 @@ let gSiteDataSettings = {
 
     let brandShortName = document.getElementById("bundle_brand").getString("brandShortName");
     let settingsDescription = document.getElementById("settingsDescription");
-    settingsDescription.textContent = this._prefStrBundle.getFormattedString("siteDataSettings2.description", [brandShortName]);
+    settingsDescription.textContent = this._prefStrBundle.getFormattedString("siteDataSettings3.description", [brandShortName]);
 
     setEventListener("sitesList", "select", this.onSelect);
     setEventListener("hostCol", "click", this.onClickTreeCol);
     setEventListener("usageCol", "click", this.onClickTreeCol);
+    setEventListener("lastAccessedCol", "click", this.onClickTreeCol);
     setEventListener("cookiesCol", "click", this.onClickTreeCol);
-    setEventListener("statusCol", "click", this.onClickTreeCol);
     setEventListener("cancel", "command", this.close);
     setEventListener("save", "command", this.saveChanges);
     setEventListener("searchBox", "command", this.onCommandSearch);
@@ -143,23 +146,16 @@ let gSiteDataSettings = {
         };
         break;
 
-      case "statusCol":
-        sortFunc = (a, b) => {
-          if (a.persisted && !b.persisted) {
-            return 1;
-          } else if (!a.persisted && b.persisted) {
-            return -1;
-          }
-          return 0;
-        };
-        break;
-
       case "cookiesCol":
         sortFunc = (a, b) => a.cookies.length - b.cookies.length;
         break;
 
       case "usageCol":
         sortFunc = (a, b) => a.usage - b.usage;
+        break;
+
+      case "lastAccessedCol":
+        sortFunc = (a, b) => a.lastAccessed - b.lastAccessed;
         break;
     }
     if (sortDirection === "descending") {

@@ -4,13 +4,13 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "AUSTLMY"
 ];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm", this);
 
-this.AUSTLMY = {
+var AUSTLMY = {
   // Telemetry for the application update background update check occurs when
   // the background update timer fires after the update interval which is
   // determined by the app.update.interval preference and its telemetry
@@ -174,8 +174,6 @@ this.AUSTLMY = {
   DWNLD_ERR_DOCUMENT_NOT_CACHED: 12,
   DWNLD_ERR_VERIFY_NO_REQUEST: 13,
   DWNLD_ERR_VERIFY_PATCH_SIZE_NOT_EQUAL: 14,
-  // DWNLD_ERR_VERIFY_NO_HASH_MATCH: 15 - no longer in use
-  DWNLD_RESUME_FAILURE: 16,
 
   /**
    * Submit a telemetry ping for the update download result code.

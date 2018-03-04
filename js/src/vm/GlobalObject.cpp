@@ -10,7 +10,6 @@
 #include "jsexn.h"
 #include "jsfriendapi.h"
 #include "jsmath.h"
-#include "jsprototypes.h"
 
 #include "builtin/AtomicsObject.h"
 #include "builtin/DataViewObject.h"
@@ -28,6 +27,7 @@
 #include "builtin/WeakMapObject.h"
 #include "builtin/WeakSetObject.h"
 #include "gc/FreeOp.h"
+#include "js/ProtoKey.h"
 #include "vm/Debugger.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/HelperThreads.h"
@@ -847,7 +847,7 @@ GlobalObject::getRegExpStatics(JSContext* cx, Handle<GlobalObject*> global)
     const Value& val = global->getSlot(REGEXP_STATICS);
     if (!val.isObject()) {
         MOZ_ASSERT(val.isUndefined());
-        resObj = RegExpStatics::create(cx, global);
+        resObj = RegExpStatics::create(cx);
         if (!resObj)
             return nullptr;
 

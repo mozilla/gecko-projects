@@ -7,7 +7,7 @@ ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
-  NetUtil: "resource://gre/modules/NetUtil.jsm",
+  WindowsGPOParser: "resource:///modules/policies/WindowsGPOParser.jsm",
   Policies: "resource:///modules/policies/Policies.jsm",
   PoliciesValidator: "resource:///modules/policies/PoliciesValidator.jsm",
 });
@@ -51,7 +51,7 @@ const EnterprisePoliciesFactory = {
   _instance: null,
   createInstance: function BGSF_createInstance(outer, iid) {
     if (outer != null)
-      throw Components.results.NS_ERROR_NO_AGGREGATION;
+      throw Cr.NS_ERROR_NO_AGGREGATION;
     return this._instance == null ?
       this._instance = new EnterprisePoliciesManager() : this._instance;
   }
@@ -100,7 +100,12 @@ EnterprisePoliciesManager.prototype = {
   },
 
   _chooseProvider() {
-    // TODO: Bug 1433136 - Add GPO provider with higher precendence here
+    if (AppConstants.platform == "win") {
+      let gpoProvider = new GPOPoliciesProvider();
+      if (gpoProvider.hasPolicies) {
+        return gpoProvider;
+      }
+    }
 
     let jsonProvider = new JSONPoliciesProvider();
     if (jsonProvider.hasPolicies) {
@@ -134,11 +139,11 @@ EnterprisePoliciesManager.prototype = {
       let policyImpl = Policies[policyName];
 
       for (let timing of Object.keys(this._callbacks)) {
-        let policyCallback = policyImpl["on" + timing];
+        let policyCallback = policyImpl[timing];
         if (policyCallback) {
           this._schedulePolicyCallback(
             timing,
-            policyCallback.bind(null,
+            policyCallback.bind(policyImpl,
                                 this, /* the EnterprisePoliciesManager */
                                 parsedParameters));
         }
@@ -147,10 +152,24 @@ EnterprisePoliciesManager.prototype = {
   },
 
   _callbacks: {
-    BeforeAddons: [],
-    ProfileAfterChange: [],
-    BeforeUIStartup: [],
-    AllWindowsRestored: [],
+    // The earlist that a policy callback can run. This will
+    // happen right after the Policy Engine itself has started,
+    // and before the Add-ons Manager has started.
+    onBeforeAddons: [],
+
+    // This happens after all the initialization related to
+    // the profile has finished (prefs, places database, etc.).
+    onProfileAfterChange: [],
+
+    // Just before the first browser window gets created.
+    onBeforeUIStartup: [],
+
+    // Called after all windows from the last session have been
+    // restored (or the default window and homepage tab, if the
+    // session is not being restored).
+    // The content of the tabs themselves have not necessarily
+    // finished loading.
+    onAllWindowsRestored: [],
   },
 
   _schedulePolicyCallback(timing, callback) {
@@ -210,22 +229,23 @@ EnterprisePoliciesManager.prototype = {
   observe: function BG_observe(subject, topic, data) {
     switch (topic) {
       case "policies-startup":
+        // Before the first set of policy callbacks runs, we must
+        // initialize the service.
         this._initialize();
-        this._runPoliciesCallbacks("BeforeAddons");
+
+        this._runPoliciesCallbacks("onBeforeAddons");
         break;
 
       case "profile-after-change":
-        // Before the first set of policy callbacks runs, we must
-        // initialize the service.
-        this._runPoliciesCallbacks("ProfileAfterChange");
+        this._runPoliciesCallbacks("onProfileAfterChange");
         break;
 
       case "final-ui-startup":
-        this._runPoliciesCallbacks("BeforeUIStartup");
+        this._runPoliciesCallbacks("onBeforeUIStartup");
         break;
 
       case "sessionstore-windows-restored":
-        this._runPoliciesCallbacks("AllWindowsRestored");
+        this._runPoliciesCallbacks("onAllWindowsRestored");
 
         // After the last set of policy callbacks ran, notify the test observer.
         Services.obs.notifyObservers(null,
@@ -366,6 +386,46 @@ class JSONPoliciesProvider {
   }
 }
 
+class GPOPoliciesProvider {
+  constructor() {
+    this._policies = null;
+
+    let wrk = Cc["@mozilla.org/windows-registry-key;1"].createInstance(Ci.nsIWindowsRegKey);
+    // Machine policies override user policies, so we read
+    // user policies first and then replace them if necessary.
+    wrk.open(wrk.ROOT_KEY_CURRENT_USER,
+             "SOFTWARE\\Policies",
+             wrk.ACCESS_READ);
+    if (wrk.hasChild("Mozilla\\Firefox")) {
+      this._readData(wrk);
+    }
+    wrk.close();
+
+    wrk.open(wrk.ROOT_KEY_LOCAL_MACHINE,
+             "SOFTWARE\\Policies",
+             wrk.ACCESS_READ);
+    if (wrk.hasChild("Mozilla\\Firefox")) {
+      this._readData(wrk);
+    }
+    wrk.close();
+  }
+
+  get hasPolicies() {
+    return this._policies !== null;
+  }
+
+  get policies() {
+    return this._policies;
+  }
+
+  get failed() {
+    return this._failed;
+  }
+
+  _readData(wrk) {
+    this._policies = WindowsGPOParser.readPolicies(wrk, this._policies);
+  }
+}
 
 var components = [EnterprisePoliciesManager];
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory(components);

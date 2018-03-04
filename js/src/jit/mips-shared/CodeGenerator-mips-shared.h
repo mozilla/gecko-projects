@@ -12,8 +12,11 @@
 namespace js {
 namespace jit {
 
+class CodeGeneratorMIPSShared;
 class OutOfLineBailout;
 class OutOfLineTableSwitch;
+
+using OutOfLineWasmTruncateCheck = OutOfLineWasmTruncateCheckBase<CodeGeneratorMIPSShared>;
 
 class CodeGeneratorMIPSShared : public CodeGeneratorShared
 {
@@ -119,6 +122,8 @@ class CodeGeneratorMIPSShared : public CodeGeneratorShared
         emitBranch(reg, Imm32(0), cond, ifTrue, ifFalse);
     }
 
+    void emitTableSwitchDispatch(MTableSwitch* mir, Register index, Register base);
+
     template <typename T>
     void emitWasmLoad(T* ins);
     template <typename T>
@@ -189,13 +194,11 @@ class CodeGeneratorMIPSShared : public CodeGeneratorShared
     void visitWasmTruncateToInt32(LWasmTruncateToInt32* lir);
 
     // Out of line visitors.
-    virtual void visitOutOfLineBailout(OutOfLineBailout* ool) = 0;
+    void visitOutOfLineBailout(OutOfLineBailout* ool);
+    void visitOutOfLineTableSwitch(OutOfLineTableSwitch* ool);
     void visitOutOfLineWasmTruncateCheck(OutOfLineWasmTruncateCheck* ool);
     void visitCopySignD(LCopySignD* ins);
     void visitCopySignF(LCopySignF* ins);
-
-  protected:
-    virtual ValueOperand ToOutValue(LInstruction* ins) = 0;
 
   public:
     CodeGeneratorMIPSShared(MIRGenerator* gen, LIRGraph* graph, MacroAssembler* masm);
@@ -203,11 +206,6 @@ class CodeGeneratorMIPSShared : public CodeGeneratorShared
     void visitValue(LValue* value);
     void visitDouble(LDouble* ins);
     void visitFloat32(LFloat32* ins);
-
-    void visitGuardShape(LGuardShape* guard);
-    void visitGuardObjectGroup(LGuardObjectGroup* guard);
-    void visitGuardClass(LGuardClass* guard);
-
     void visitNegI(LNegI* lir);
     void visitNegD(LNegD* lir);
     void visitNegF(LNegF* lir);

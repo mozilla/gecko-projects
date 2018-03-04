@@ -246,83 +246,10 @@ add_task(async function test_bookmarks() {
   bs.setItemTitle(newId6, "Google Sites");
   Assert.equal(bookmarksObserver._itemChangedProperty, "title");
 
-  // move folder, appending, to different folder
-  let oldParentCC = getChildCount(testRoot);
-  bs.moveItem(workFolder, homeFolder, bs.DEFAULT_INDEX);
-  Assert.equal(bookmarksObserver._itemMovedId, workFolder);
-  Assert.equal(bookmarksObserver._itemMovedOldParent, testRoot);
-  Assert.equal(bookmarksObserver._itemMovedOldIndex, 0);
-  Assert.equal(bookmarksObserver._itemMovedNewParent, homeFolder);
-  Assert.equal(bookmarksObserver._itemMovedNewIndex, 1);
-
-  // test that the new index is properly stored
-  Assert.equal(bs.getFolderIdForItem(workFolder), homeFolder);
-
-  // XXX expose FolderCount, and check that the old parent has one less child?
-  Assert.equal(getChildCount(testRoot), oldParentCC - 1);
-
-  // move item, appending, to different folder
-  bs.moveItem(newId5, testRoot, bs.DEFAULT_INDEX);
-  Assert.equal(bookmarksObserver._itemMovedId, newId5);
-  Assert.equal(bookmarksObserver._itemMovedOldParent, homeFolder);
-  Assert.equal(bookmarksObserver._itemMovedOldIndex, 0);
-  Assert.equal(bookmarksObserver._itemMovedNewParent, testRoot);
-  Assert.equal(bookmarksObserver._itemMovedNewIndex, 3);
-
-  // test get folder's index
-  let tmpFolder = bs.createFolder(testRoot, "tmp", 2);
-
-  // test setKeywordForBookmark
-  let kwTestItemId = bs.insertBookmark(testRoot, uri("http://keywordtest.com"),
-                                       bs.DEFAULT_INDEX, "");
-  bs.setKeywordForBookmark(kwTestItemId, "bar");
-
-  // test getKeywordForBookmark
-  let k = bs.getKeywordForBookmark(kwTestItemId);
-  Assert.equal("bar", k);
-
-  // test PlacesUtils.keywords.fetch()
-  let u = await PlacesUtils.keywords.fetch("bar");
-  Assert.equal("http://keywordtest.com/", u.url);
-  // test removeFolderChildren
-  // 1) add/remove each child type (bookmark, separator, folder)
-  tmpFolder = bs.createFolder(testRoot, "removeFolderChildren",
-                              bs.DEFAULT_INDEX);
-  bs.insertBookmark(tmpFolder, uri("http://foo9.com/"), bs.DEFAULT_INDEX, "");
-  bs.createFolder(tmpFolder, "subfolder", bs.DEFAULT_INDEX);
-  bs.insertSeparator(tmpFolder, bs.DEFAULT_INDEX);
-  // 2) confirm that folder has 3 children
-  let options = hs.getNewQueryOptions();
-  let query = hs.getNewQuery();
-  query.setFolders([tmpFolder], 1);
-  try {
-    let result = hs.executeQuery(query, options);
-    let rootNode = result.root;
-    rootNode.containerOpen = true;
-    Assert.equal(rootNode.childCount, 3);
-    rootNode.containerOpen = false;
-  } catch (ex) {
-    do_throw("test removeFolderChildren() - querying for children failed: " + ex);
-  }
-  // 3) remove all children
-  bs.removeFolderChildren(tmpFolder);
-  // 4) confirm that folder has 0 children
-  try {
-    let result = hs.executeQuery(query, options);
-    let rootNode = result.root;
-    rootNode.containerOpen = true;
-    Assert.equal(rootNode.childCount, 0);
-    rootNode.containerOpen = false;
-  } catch (ex) {
-    do_throw("removeFolderChildren(): " + ex);
-  }
-
-  // XXX - test folderReadOnly
-
   // test bookmark id in query output
   try {
-    options = hs.getNewQueryOptions();
-    query = hs.getNewQuery();
+    let options = hs.getNewQueryOptions();
+    let query = hs.getNewQuery();
     query.setFolders([testRoot], 1);
     let result = hs.executeQuery(query, options);
     let rootNode = result.root;
@@ -358,8 +285,8 @@ add_task(async function test_bookmarks() {
     bs.insertBookmark(testFolder, mURI, bs.DEFAULT_INDEX, "title 2");
 
     // query
-    options = hs.getNewQueryOptions();
-    query = hs.getNewQuery();
+    let options = hs.getNewQueryOptions();
+    let query = hs.getNewQuery();
     query.setFolders([testFolder], 1);
     let result = hs.executeQuery(query, options);
     let rootNode = result.root;
@@ -402,7 +329,7 @@ add_task(async function test_bookmarks() {
                                   bs.DEFAULT_INDEX, "");
   Assert.equal(bookmarksObserver._itemAddedId, newId13);
   Assert.equal(bookmarksObserver._itemAddedParent, testRoot);
-  Assert.equal(bookmarksObserver._itemAddedIndex, 10);
+  Assert.equal(bookmarksObserver._itemAddedIndex, 7);
 
   // set bookmark title
   bs.setItemTitle(newId13, "ZZZXXXYYY");
@@ -420,10 +347,10 @@ add_task(async function test_bookmarks() {
 
   // test search on bookmark title ZZZXXXYYY
   try {
-    options = hs.getNewQueryOptions();
+    let options = hs.getNewQueryOptions();
     options.excludeQueries = 1;
     options.queryType = Ci.nsINavHistoryQueryOptions.QUERY_TYPE_BOOKMARKS;
-    query = hs.getNewQuery();
+    let query = hs.getNewQuery();
     query.searchTerms = "ZZZXXXYYY";
     let result = hs.executeQuery(query, options);
     let rootNode = result.root;
@@ -441,10 +368,10 @@ add_task(async function test_bookmarks() {
   // test dateAdded and lastModified properties
   // for a search query
   try {
-    options = hs.getNewQueryOptions();
+    let options = hs.getNewQueryOptions();
     options.excludeQueries = 1;
     options.queryType = Ci.nsINavHistoryQueryOptions.QUERY_TYPE_BOOKMARKS;
-    query = hs.getNewQuery();
+    let query = hs.getNewQuery();
     query.searchTerms = "ZZZXXXYYY";
     let result = hs.executeQuery(query, options);
     let rootNode = result.root;
@@ -467,8 +394,8 @@ add_task(async function test_bookmarks() {
   // test dateAdded and lastModified properties
   // for a folder query
   try {
-    options = hs.getNewQueryOptions();
-    query = hs.getNewQuery();
+    let options = hs.getNewQueryOptions();
+    let query = hs.getNewQuery();
     query.setFolders([testRoot], 1);
     let result = hs.executeQuery(query, options);
     let rootNode = result.root;
@@ -544,9 +471,6 @@ function testSimpleFolderResult() {
   let beforeInsert = Date.now() * 1000 - 1;
   Assert.ok(beforeInsert > 0);
 
-  // insert a separator
-  let sep = bs.insertSeparator(parent, bs.DEFAULT_INDEX);
-
   // re-set item title separately so can test nodes' last modified
   let item = bs.insertBookmark(parent, uri("about:blank"),
                                bs.DEFAULT_INDEX, "");
@@ -566,24 +490,19 @@ function testSimpleFolderResult() {
   let result = hs.executeQuery(query, options);
   let rootNode = result.root;
   rootNode.containerOpen = true;
-  Assert.equal(rootNode.childCount, 4);
+  Assert.equal(rootNode.childCount, 3);
 
   let node = rootNode.getChild(0);
-  Assert.ok(node.dateAdded > 0);
-  Assert.equal(node.lastModified, node.dateAdded);
-  Assert.equal(node.itemId, sep);
-  Assert.equal(node.title, "");
-  node = rootNode.getChild(1);
   Assert.equal(node.itemId, item);
   Assert.ok(node.dateAdded > 0);
   Assert.ok(node.lastModified > 0);
   Assert.equal(node.title, "test bookmark");
-  node = rootNode.getChild(2);
+  node = rootNode.getChild(1);
   Assert.equal(node.itemId, folder);
   Assert.equal(node.title, "test folder");
   Assert.ok(node.dateAdded > 0);
   Assert.ok(node.lastModified > 0);
-  node = rootNode.getChild(3);
+  node = rootNode.getChild(2);
   Assert.equal(node.itemId, folderLongName);
   Assert.equal(node.title, longName.substring(0, TITLE_LENGTH_MAX));
   Assert.ok(node.dateAdded > 0);
@@ -595,7 +514,7 @@ function testSimpleFolderResult() {
   Assert.equal(bookmarksObserver._itemChangedProperty, "title");
   Assert.equal(bookmarksObserver._itemChangedValue, longName.substring(0, TITLE_LENGTH_MAX));
 
-  node = rootNode.getChild(3);
+  node = rootNode.getChild(2);
   Assert.equal(node.title, longName.substring(0, TITLE_LENGTH_MAX));
 
   rootNode.containerOpen = false;

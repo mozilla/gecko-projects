@@ -27,11 +27,11 @@ pub mod platform;
 #[path = "stub/mod.rs"]
 pub mod platform;
 
+extern crate boxfnonce;
+extern crate libc;
 #[macro_use]
 extern crate log;
 extern crate rand;
-extern crate libc;
-extern crate boxfnonce;
 extern crate runloop;
 
 #[macro_use]
@@ -74,6 +74,10 @@ pub struct KeyHandle {
     pub credential: Vec<u8>,
     pub transports: AuthenticatorTransports,
 }
+
+pub type AppId = Vec<u8>;
+pub type RegisterResult = Vec<u8>;
+pub type SignResult = (AppId, Vec<u8>, Vec<u8>);
 
 #[cfg(fuzzing)]
 pub use u2fprotocol::*;

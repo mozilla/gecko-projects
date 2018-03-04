@@ -2,10 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-this.EXPORTED_SYMBOLS = ["BookmarksEngine", "PlacesItem", "Bookmark",
-                         "BookmarkFolder", "BookmarkQuery",
-                         "Livemark", "BookmarkSeparator",
-                         "BufferedBookmarksEngine"];
+var EXPORTED_SYMBOLS = ["BookmarksEngine", "PlacesItem", "Bookmark",
+                        "BookmarkFolder", "BookmarkQuery",
+                        "Livemark", "BookmarkSeparator",
+                        "BufferedBookmarksEngine"];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
@@ -87,10 +87,10 @@ function getTypeObject(type) {
   return null;
 }
 
-this.PlacesItem = function PlacesItem(collection, id, type) {
+function PlacesItem(collection, id, type) {
   CryptoWrapper.call(this, collection, id);
   this.type = type || "item";
-};
+}
 PlacesItem.prototype = {
   async decrypt(keyBundle) {
     // Do the normal CryptoWrapper decrypt, but change types before returning
@@ -145,9 +145,9 @@ Utils.deferGetSet(PlacesItem,
                   "cleartext",
                   ["hasDupe", "parentid", "parentName", "type", "dateAdded"]);
 
-this.Bookmark = function Bookmark(collection, id, type) {
+function Bookmark(collection, id, type) {
   PlacesItem.call(this, collection, id, type || "bookmark");
-};
+}
 Bookmark.prototype = {
   __proto__: PlacesItem.prototype,
   _logName: "Sync.Record.Bookmark",
@@ -179,9 +179,9 @@ Utils.deferGetSet(Bookmark,
                   ["title", "bmkUri", "description",
                    "loadInSidebar", "tags", "keyword"]);
 
-this.BookmarkQuery = function BookmarkQuery(collection, id) {
+function BookmarkQuery(collection, id) {
   Bookmark.call(this, collection, id, "query");
-};
+}
 BookmarkQuery.prototype = {
   __proto__: Bookmark.prototype,
   _logName: "Sync.Record.BookmarkQuery",
@@ -204,9 +204,9 @@ Utils.deferGetSet(BookmarkQuery,
                   "cleartext",
                   ["folderName", "queryId"]);
 
-this.BookmarkFolder = function BookmarkFolder(collection, id, type) {
+function BookmarkFolder(collection, id, type) {
   PlacesItem.call(this, collection, id, type || "folder");
-};
+}
 BookmarkFolder.prototype = {
   __proto__: PlacesItem.prototype,
   _logName: "Sync.Record.Folder",
@@ -229,9 +229,9 @@ BookmarkFolder.prototype = {
 Utils.deferGetSet(BookmarkFolder, "cleartext", ["description", "title",
                                                 "children"]);
 
-this.Livemark = function Livemark(collection, id) {
+function Livemark(collection, id) {
   BookmarkFolder.call(this, collection, id, "livemark");
-};
+}
 Livemark.prototype = {
   __proto__: BookmarkFolder.prototype,
   _logName: "Sync.Record.Livemark",
@@ -254,9 +254,9 @@ Livemark.prototype = {
 
 Utils.deferGetSet(Livemark, "cleartext", ["siteUri", "feedUri"]);
 
-this.BookmarkSeparator = function BookmarkSeparator(collection, id) {
+function BookmarkSeparator(collection, id) {
   PlacesItem.call(this, collection, id, "separator");
-};
+}
 BookmarkSeparator.prototype = {
   __proto__: PlacesItem.prototype,
   _logName: "Sync.Record.Separator",
@@ -379,9 +379,9 @@ BaseBookmarksEngine.prototype = {
  * the default implementation for reconciling changes. Handles child ordering
  * and deletions at the end of a sync.
  */
-this.BookmarksEngine = function BookmarksEngine(service) {
+function BookmarksEngine(service) {
   BaseBookmarksEngine.apply(this, arguments);
-};
+}
 
 BookmarksEngine.prototype = {
   __proto__: BaseBookmarksEngine.prototype,
@@ -681,9 +681,9 @@ BookmarksEngine.prototype = {
  * buffer handles reconciliation, so we stub out `_reconcile`, and wait to pull
  * changes until we're ready to upload.
  */
-this.BufferedBookmarksEngine = function BufferedBookmarksEngine() {
+function BufferedBookmarksEngine() {
   BaseBookmarksEngine.apply(this, arguments);
-};
+}
 
 BufferedBookmarksEngine.prototype = {
   __proto__: BaseBookmarksEngine.prototype,
@@ -692,6 +692,10 @@ BufferedBookmarksEngine.prototype = {
   // errors that happen when the buffered engine is enabled vs when the
   // non-buffered engine is enabled.
   overrideTelemetryName: "bookmarks-buffered",
+
+  // Needed to ensure we don't miss items when resuming a sync that failed or
+  // aborted early.
+  _defaultSort: "oldest",
 
   async getLastSync() {
     let mirror = await this._store.ensureOpenMirror();
@@ -719,15 +723,14 @@ BufferedBookmarksEngine.prototype = {
   },
 
   async _processIncoming(newitems) {
-    try {
-      await super._processIncoming(newitems);
-    } finally {
-      let buf = await this._store.ensureOpenMirror();
-      let recordsToUpload = await buf.apply({
-        remoteTimeSeconds: Resource.serverTime,
-      });
-      this._modified.replace(recordsToUpload);
-    }
+    await super._processIncoming(newitems);
+    let buf = await this._store.ensureOpenMirror();
+    let recordsToUpload = await buf.apply({
+      remoteTimeSeconds: Resource.serverTime,
+      weakUpload: [...this._needWeakUpload.keys()],
+    });
+    this._needWeakUpload.clear();
+    this._modified.replace(recordsToUpload);
   },
 
   async _reconcile(item) {
@@ -735,6 +738,19 @@ BufferedBookmarksEngine.prototype = {
   },
 
   async _createRecord(id) {
+    let record = await this._doCreateRecord(id);
+    if (!record.deleted) {
+      // Set hasDupe on all (non-deleted) records since we don't use it (e.g.
+      // the buffered engine doesn't), and we want to minimize the risk of older
+      // clients corrupting records. Note that the SyncedBookmarksMirror sets it
+      // for all records that it created, but we would like to ensure that
+      // weakly uploaded records are marked as hasDupe as well.
+      record.hasDupe = true;
+    }
+    return record;
+  },
+
+  async _doCreateRecord(id) {
     if (this._needWeakUpload.has(id)) {
       return this._store.createRecord(id, this.name);
     }
@@ -1076,6 +1092,9 @@ BufferedBookmarksStore.prototype = {
   __proto__: BaseBookmarksStore.prototype,
   _openMirrorPromise: null,
 
+  // For tests.
+  _batchChunkSize: 500,
+
   ensureOpenMirror() {
     if (!this._openMirrorPromise) {
       this._openMirrorPromise = this._openMirror().catch(err => {
@@ -1103,6 +1122,15 @@ BufferedBookmarksStore.prototype = {
                                                  extra);
       },
     });
+  },
+
+  async applyIncomingBatch(records) {
+    let buf = await this.ensureOpenMirror();
+    for (let chunk of PlacesSyncUtils.chunkArray(records, this._batchChunkSize)) {
+      await buf.store(chunk);
+    }
+    // Array of failed records.
+    return [];
   },
 
   async applyIncoming(record) {

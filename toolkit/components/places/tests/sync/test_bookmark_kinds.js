@@ -1,3 +1,6 @@
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
+
 add_task(async function test_livemarks() {
   let { site, stopServer } = makeLivemarkServer();
 
@@ -94,7 +97,7 @@ add_task(async function test_livemarks() {
           id: "livemarkDDDD",
           type: "livemark",
           parentid: "menu",
-          hasDupe: false,
+          hasDupe: true,
           parentName: BookmarksMenuTitle,
           dateAdded: PlacesUtils.toDate(livemarkD.dateAdded).getTime(),
           title: "D",
@@ -110,7 +113,7 @@ add_task(async function test_livemarks() {
           id: "menu",
           type: "folder",
           parentid: "places",
-          hasDupe: false,
+          hasDupe: true,
           parentName: "",
           dateAdded: menuInfo.dateAdded.getTime(),
           title: menuInfo.title,
@@ -125,7 +128,7 @@ add_task(async function test_livemarks() {
           id: "toolbar",
           type: "folder",
           parentid: "places",
-          hasDupe: false,
+          hasDupe: true,
           parentName: "",
           dateAdded: toolbarInfo.dateAdded.getTime(),
           title: toolbarInfo.title,

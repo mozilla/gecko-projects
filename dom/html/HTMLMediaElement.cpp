@@ -1538,9 +1538,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED_0(HTMLMediaElement, nsGenericHTMLElement)
 
 void
-HTMLMediaElement::ContentRemoved(nsIDocument* aDocument,
-                                 nsIContent* aContainer,
-                                 nsIContent* aChild,
+HTMLMediaElement::ContentRemoved(nsIContent* aChild,
                                  nsIContent* aPreviousSibling)
 {
   if (aChild == mSourcePointer) {
@@ -1652,11 +1650,10 @@ HTMLMediaElement::MozDumpDebugInfo()
 void
 HTMLMediaElement::SetVisible(bool aVisible)
 {
-  if (!mDecoder) {
-    return;
+  mForcedHidden = !aVisible;
+  if (mDecoder) {
+    mDecoder->SetForcedHidden(!aVisible);
   }
-
-  mDecoder->SetForcedHidden(!aVisible);
 }
 
 already_AddRefed<layers::Image>
@@ -1956,14 +1953,43 @@ static bool HasSourceChildren(nsIContent* aElement)
   return false;
 }
 
+static nsCString
+DocumentOrigin(nsIDocument* aDoc)
+{
+  if (!aDoc) {
+    return NS_LITERAL_CSTRING("null");
+  }
+  nsCOMPtr<nsIPrincipal> principal = aDoc->NodePrincipal();
+  if (!principal) {
+    return NS_LITERAL_CSTRING("null");
+  }
+  nsCString origin;
+  if (NS_FAILED(principal->GetOrigin(origin))) {
+    return NS_LITERAL_CSTRING("null");
+  }
+  return origin;
+}
+
 void
 HTMLMediaElement::Load()
 {
   LOG(LogLevel::Debug,
       ("%p Load() hasSrcAttrStream=%d hasSrcAttr=%d hasSourceChildren=%d "
-       "handlingInput=%d",
-       this, !!mSrcAttrStream, HasAttr(kNameSpaceID_None, nsGkAtoms::src),
-       HasSourceChildren(this), EventStateManager::IsHandlingUserInput()));
+       "handlingInput=%d hasAutoplayAttr=%d IsAllowedToPlay=%d "
+       "ownerDoc=%p (%s) ownerDocUserActivated=%d "
+       "muted=%d volume=%f",
+       this,
+       !!mSrcAttrStream,
+       HasAttr(kNameSpaceID_None, nsGkAtoms::src),
+       HasSourceChildren(this),
+       EventStateManager::IsHandlingUserInput(),
+       HasAttr(kNameSpaceID_None, nsGkAtoms::autoplay),
+       IsAllowedToPlay(),
+       OwnerDoc(),
+       DocumentOrigin(OwnerDoc()).get(),
+       OwnerDoc() ? OwnerDoc()->HasBeenUserActivated() : 0,
+       mMuted,
+       mVolume));
 
   if (mIsRunningLoadMethod) {
     return;
@@ -2664,6 +2690,7 @@ HTMLMediaElement::CurrentTime() const
 void
 HTMLMediaElement::FastSeek(double aTime, ErrorResult& aRv)
 {
+  LOG(LogLevel::Debug, ("%p FastSeek(%f) called by JS", this, aTime));
   LOG(LogLevel::Debug, ("Reporting telemetry VIDEO_FASTSEEK_USED"));
   Telemetry::Accumulate(Telemetry::VIDEO_FASTSEEK_USED, 1);
   RefPtr<Promise> tobeDropped = Seek(aTime, SeekTarget::PrevSyncPoint, aRv);
@@ -2681,11 +2708,10 @@ HTMLMediaElement::SeekToNextFrame(ErrorResult& aRv)
   /* This will cause JIT code to be kept around longer, to help performance
    * when using SeekToNextFrame to iterate through every frame of a video.
    */
-  nsCOMPtr<nsIGlobalObject> global =
-    do_QueryInterface(OwnerDoc()->GetInnerWindow());
+  nsPIDOMWindowInner* win = OwnerDoc()->GetInnerWindow();
 
-  if (global) {
-    if (JSObject *obj = global->GetGlobalJSObject()) {
+  if (win) {
+    if (JSObject *obj = win->AsGlobal()->GetGlobalJSObject()) {
       js::NotifyAnimationActivity(obj);
     }
   }
@@ -2696,6 +2722,8 @@ HTMLMediaElement::SeekToNextFrame(ErrorResult& aRv)
 void
 HTMLMediaElement::SetCurrentTime(double aCurrentTime, ErrorResult& aRv)
 {
+  LOG(LogLevel::Debug,
+      ("%p SetCurrentTime(%f) called by JS", this, aCurrentTime));
   RefPtr<Promise> tobeDropped = Seek(aCurrentTime, SeekTarget::Accurate, aRv);
 }
 
@@ -2905,6 +2933,7 @@ HTMLMediaElement::Played()
 void
 HTMLMediaElement::Pause(ErrorResult& aRv)
 {
+  LOG(LogLevel::Debug, ("%p Pause() called by JS", this));
   if (mNetworkState == NETWORK_EMPTY) {
     LOG(LogLevel::Debug, ("Loading due to Pause()"));
     DoLoad();
@@ -2932,6 +2961,8 @@ HTMLMediaElement::Pause(ErrorResult& aRv)
 void
 HTMLMediaElement::SetVolume(double aVolume, ErrorResult& aRv)
 {
+  LOG(LogLevel::Debug, ("%p SetVolume(%f) called by JS", this, aVolume));
+
   if (aVolume < 0.0 || aVolume > 1.0) {
     aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
     return;
@@ -3014,6 +3045,7 @@ HTMLMediaElement::SetVolumeInternal()
 void
 HTMLMediaElement::SetMuted(bool aMuted)
 {
+  LOG(LogLevel::Debug, ("%p SetMuted(%d) called by JS", this, aMuted));
   if (aMuted == Muted()) {
     return;
   }
@@ -3852,6 +3884,7 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
     mFirstFrameLoaded(false),
     mDefaultPlaybackStartPosition(0.0),
     mHasSuspendTaint(false),
+    mForcedHidden(false),
     mMediaTracksConstructed(false),
     mVisibilityState(Visibility::UNTRACKED),
     mErrorSink(new ErrorSink(this)),
@@ -3959,6 +3992,8 @@ HTMLMediaElement::NotifyXPCOMShutdown()
 already_AddRefed<Promise>
 HTMLMediaElement::Play(ErrorResult& aRv)
 {
+  LOG(LogLevel::Debug, ("%p Play() called by JS", this));
+
   if (mAudioChannelWrapper && mAudioChannelWrapper->IsPlaybackBlocked()) {
     MaybeDoLoad();
 
@@ -3970,6 +4005,8 @@ HTMLMediaElement::Play(ErrorResult& aRv)
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
+
+    LOG(LogLevel::Debug, ("%p Play() call delayed by AudioChannelAgent", this));
 
     mPendingPlayPromises.AppendElement(promise);
     return promise.forget();
@@ -3996,6 +4033,8 @@ HTMLMediaElement::PlayInternal(ErrorResult& aRv)
   // with a "NotAllowedError" DOMException and abort these steps.
   if (!IsAllowedToPlay()) {
     // NOTE: for promise-based-play, will return a rejected promise here.
+    LOG(LogLevel::Debug,
+        ("%p Play() promise rejected because not allowed to play.", this));
     aRv.Throw(NS_ERROR_DOM_MEDIA_NOT_ALLOWED_ERR);
     return nullptr;
   }
@@ -4005,6 +4044,8 @@ HTMLMediaElement::PlayInternal(ErrorResult& aRv)
   // attribute has the value MEDIA_ERR_SRC_NOT_SUPPORTED, return a promise
   // rejected with a "NotSupportedError" DOMException and abort these steps.
   if (GetError() && GetError()->Code() == MEDIA_ERR_SRC_NOT_SUPPORTED) {
+    LOG(LogLevel::Debug,
+        ("%p Play() promise rejected because source not supported.", this));
     aRv.Throw(NS_ERROR_DOM_MEDIA_NOT_SUPPORTED_ERR);
     return nullptr;
   }
@@ -4056,6 +4097,9 @@ HTMLMediaElement::PlayInternal(ErrorResult& aRv)
         // the _promise_ won't be returned to JS at all, so just leave it in the
         // _mPendingPlayPromises_ and let it be resolved/rejected with the
         // following actions and the promise-resolution won't be observed at all.
+        LOG(LogLevel::Debug,
+            ("%p Play() promise rejected because failed to play MediaDecoder.",
+             this));
         aRv.Throw(rv);
         return nullptr;
       }
@@ -6790,21 +6834,33 @@ HTMLMediaElement::IsAllowedToPlay()
                                          false,
                                          false);
 #endif
+    LOG(LogLevel::Debug,
+        ("%p %s AutoplayPolicy blocked autoplay.", this, __func__));
     return false;
   }
+
+  LOG(LogLevel::Debug,
+      ("%p %s AutoplayPolicy did not block autoplay.", this, __func__));
 
   // Check our custom playback policy.
   if (mAudioChannelWrapper) {
     // Note: SUSPENDED_PAUSE and SUSPENDED_BLOCK will be merged into one single state.
     if (mAudioChannelWrapper->GetSuspendType() == nsISuspendedTypes::SUSPENDED_PAUSE ||
         mAudioChannelWrapper->GetSuspendType() == nsISuspendedTypes::SUSPENDED_BLOCK) {
+      LOG(LogLevel::Debug,
+          ("%p IsAllowedToPlay() returning false due to AudioChannelAgent.",
+           this));
       return false;
     }
 
+    LOG(LogLevel::Debug, ("%p IsAllowedToPlay() returning true.", this));
     return true;
   }
 
   // If the mAudioChannelWrapper doesn't exist that means the CC happened.
+  LOG(LogLevel::Debug,
+      ("%p IsAllowedToPlay() returning false due to null AudioChannelAgent.",
+       this));
   return false;
 }
 
@@ -7058,13 +7114,12 @@ HTMLMediaElement::SetMediaKeys(mozilla::dom::MediaKeys* aMediaKeys,
     return nullptr;
   }
 
-  nsCOMPtr<nsIGlobalObject> global =
-    do_QueryInterface(OwnerDoc()->GetInnerWindow());
-  if (!global) {
+  nsPIDOMWindowInner* win = OwnerDoc()->GetInnerWindow();
+  if (!win) {
     aRv.Throw(NS_ERROR_UNEXPECTED);
     return nullptr;
   }
-  RefPtr<DetailedPromise> promise = DetailedPromise::Create(global, aRv,
+  RefPtr<DetailedPromise> promise = DetailedPromise::Create(win->AsGlobal(), aRv,
     NS_LITERAL_CSTRING("HTMLMediaElement.setMediaKeys"));
   if (aRv.Failed()) {
     return nullptr;
@@ -7281,6 +7336,9 @@ HTMLMediaElement::SetDecoder(MediaDecoder* aDecoder)
   }
   mDecoder = aDecoder;
   DDLINKCHILD("decoder", mDecoder.get());
+  if (mDecoder && mForcedHidden) {
+    mDecoder->SetForcedHidden(mForcedHidden);
+  }
 }
 
 float
@@ -7555,14 +7613,14 @@ HTMLMediaElement::NotifyAboutPlaying()
 already_AddRefed<Promise>
 HTMLMediaElement::CreateDOMPromise(ErrorResult& aRv) const
 {
-  nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(OwnerDoc()->GetInnerWindow());
+  nsPIDOMWindowInner* win = OwnerDoc()->GetInnerWindow();
 
-  if (!global) {
+  if (!win) {
     aRv.Throw(NS_ERROR_UNEXPECTED);
     return nullptr;
   }
 
-  return Promise::Create(global, aRv);
+  return Promise::Create(win->AsGlobal(), aRv);
 }
 
 void

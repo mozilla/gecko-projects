@@ -124,12 +124,18 @@ public:
 protected:
   virtual bool CreatePDFiumEngineIfNeed() override {
     if (!mPDFiumEngine) {
-    #ifdef _WIN64
-      nsAutoCString externalDll("pdfium_ref_x64.dll");
-    #else
-      nsAutoCString externalDll("pdfium_ref_x86.dll");
-    #endif
-      mPDFiumEngine = PDFiumEngineShim::GetInstanceOrNull(externalDll);
+#ifdef _WIN64
+#define PDFIUM_FILENAME "pdfium_ref_x64.dll"
+#else
+#define PDFIUM_FILENAME "pdfium_ref_x86.dll"
+#endif
+      nsAutoString pdfiumPath;
+      MOZ_RELEASE_ASSERT(NS_SUCCEEDED(GetFilePathViaSpecialDirectory(
+                                        NS_OS_CURRENT_WORKING_DIR,
+                                        PDFIUM_FILENAME,
+                                        pdfiumPath)));
+      mPDFiumEngine = PDFiumEngineShim::GetInstanceOrNull(pdfiumPath);
+      MOZ_RELEASE_ASSERT(mPDFiumEngine);
     }
 
     return !!mPDFiumEngine;

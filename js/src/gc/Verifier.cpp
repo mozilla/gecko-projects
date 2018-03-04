@@ -4,15 +4,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef MOZ_VALGRIND
-# include <valgrind/memcheck.h>
-#endif
-
 #include "mozilla/DebugOnly.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Sprintf.h"
 
-#include "jsprf.h"
+#ifdef MOZ_VALGRIND
+# include <valgrind/memcheck.h>
+#endif
 
 #include "gc/GCInternals.h"
 #include "gc/PublicIterators.h"
@@ -20,6 +18,7 @@
 #include "js/HashTable.h"
 #include "vm/JSContext.h"
 
+#include "gc/ArenaList-inl.h"
 #include "gc/GC-inl.h"
 #include "gc/Marking-inl.h"
 #include "vm/JSContext-inl.h"
@@ -251,7 +250,7 @@ gc::GCRuntime::startVerifyPreBarriers()
     for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
         MOZ_ASSERT(!zone->usedByHelperThread());
         zone->setNeedsIncrementalBarrier(true);
-        zone->arenas.purge();
+        zone->arenas.clearFreeLists();
     }
 
     return;
@@ -265,7 +264,7 @@ oom:
 static bool
 IsMarkedOrAllocated(TenuredCell* cell)
 {
-    return cell->isMarkedAny() || cell->arena()->allocatedDuringIncremental;
+    return cell->isMarkedAny();
 }
 
 struct CheckEdgeTracer : public JS::CallbackTracer {

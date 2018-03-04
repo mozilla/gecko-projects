@@ -24,12 +24,10 @@
 
 #include "jsapi.h"
 #include "jsarray.h"
-#include "jscpucfg.h"
 #include "jsfriendapi.h"
 #include "jsnum.h"
 #include "jstypes.h"
 #include "jsutil.h"
-#include "jswrapper.h"
 
 #include "builtin/DataViewObject.h"
 #include "gc/Barrier.h"
@@ -37,6 +35,7 @@
 #include "gc/Memory.h"
 #include "js/Conversions.h"
 #include "js/MemoryMetrics.h"
+#include "js/Wrapper.h"
 #include "util/Windows.h"
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
@@ -646,8 +645,7 @@ class js::WasmArrayRawBuffer
     size_t mappedSize_;         // Not including the header page
 
   protected:
-    WasmArrayRawBuffer(uint8_t* buffer, uint32_t length, const Maybe<uint32_t>& maxSize,
-                       size_t mappedSize)
+    WasmArrayRawBuffer(uint8_t* buffer, const Maybe<uint32_t>& maxSize, size_t mappedSize)
       : maxSize_(maxSize), mappedSize_(mappedSize)
     {
         MOZ_ASSERT(buffer == dataPointer());
@@ -761,7 +759,7 @@ WasmArrayRawBuffer::Allocate(uint32_t numBytes, const Maybe<uint32_t>& maxSize)
     uint8_t* base = reinterpret_cast<uint8_t*>(data) + gc::SystemPageSize();
     uint8_t* header = base - sizeof(WasmArrayRawBuffer);
 
-    auto rawBuf = new (header) WasmArrayRawBuffer(base, numBytes, maxSize, mappedSize);
+    auto rawBuf = new (header) WasmArrayRawBuffer(base, maxSize, mappedSize);
     return rawBuf;
 }
 
@@ -1212,8 +1210,7 @@ ArrayBufferObject::create(JSContext* cx, uint32_t nbytes, BufferContents content
 
 ArrayBufferObject*
 ArrayBufferObject::create(JSContext* cx, uint32_t nbytes,
-                          HandleObject proto /* = nullptr */,
-                          NewObjectKind newKind /* = GenericObject */)
+                          HandleObject proto /* = nullptr */)
 {
     return create(cx, nbytes, BufferContents::createPlain(nullptr),
                   OwnsState::OwnsData, proto);

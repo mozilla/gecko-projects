@@ -12,20 +12,20 @@ use clip_scroll_tree::{CoordinateSystemId};
 use euclid::{TypedTransform3D, vec3};
 use glyph_rasterizer::GlyphFormat;
 use gpu_cache::{GpuCache, GpuCacheAddress};
-use gpu_types::{BrushFlags, BrushImageKind, BrushInstance, ClipChainRectIndex};
+use gpu_types::{BrushFlags, BrushInstance, ClipChainRectIndex};
 use gpu_types::{ClipMaskInstance, ClipScrollNodeIndex};
 use gpu_types::{CompositePrimitiveInstance, PrimitiveInstance, SimplePrimitiveInstance};
 use internal_types::{FastHashMap, SavedTargetIndex, SourceTexture};
 use picture::{ContentOrigin, PictureCompositeMode, PictureKind, PicturePrimitive, PictureSurface};
 use plane_split::{BspSplitter, Polygon, Splitter};
-use prim_store::{ImageSource, PrimitiveIndex, PrimitiveKind, PrimitiveMetadata, PrimitiveStore};
+use prim_store::{CachedGradient, ImageSource, PrimitiveIndex, PrimitiveKind, PrimitiveMetadata, PrimitiveStore};
 use prim_store::{BrushPrimitive, BrushKind, DeferredResolve, EdgeAaSegmentMask, PrimitiveRun};
 use render_task::{RenderTaskAddress, RenderTaskId, RenderTaskKind, RenderTaskTree};
 use renderer::{BlendMode, ImageBufferKind};
 use renderer::BLOCKS_PER_UV_RECT;
 use resource_cache::{CacheItem, GlyphFetchResult, ImageRequest, ResourceCache};
 use std::{usize, f32, i32};
-use tiling::{RenderTargetContext, RenderTargetKind};
+use tiling::{RenderTargetContext};
 use util::{MatrixHelpers, TransformedRectKind};
 
 // Special sentinel value recognized by the shader. It is considered to be
@@ -38,8 +38,6 @@ const OPAQUE_TASK_ADDRESS: RenderTaskAddress = RenderTaskAddress(0x7fff);
 pub enum TransformBatchKind {
     TextRun(GlyphFormat),
     Image(ImageBufferKind),
-    AlignedGradient,
-    AngleGradient,
     BorderCorner,
     BorderEdge,
 }
@@ -48,25 +46,16 @@ pub enum TransformBatchKind {
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub enum BrushImageSourceKind {
-    Alpha,
-    Color,
-    ColorAlphaMask,
-}
-
-impl BrushImageSourceKind {
-    pub fn from_render_target_kind(render_target_kind: RenderTargetKind) -> BrushImageSourceKind {
-        match render_target_kind {
-            RenderTargetKind::Color => BrushImageSourceKind::Color,
-            RenderTargetKind::Alpha => BrushImageSourceKind::Alpha,
-        }
-    }
+    Color = 0,
+    //Alpha = 1,            // Unused for now, but left here as shaders need to match.
+    ColorAlphaMask = 2,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub enum BrushBatchKind {
-    Picture(BrushImageSourceKind),
+    Picture,
     Solid,
     Line,
     Image(ImageBufferKind),
@@ -78,6 +67,7 @@ pub enum BrushBatchKind {
     },
     YuvImage(ImageBufferKind, YuvFormat, YuvColorSpace),
     RadialGradient,
+    LinearGradient,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -311,12 +301,19 @@ impl BatchList {
         }
     }
 
+    fn add_bounding_rect(
+        &mut self,
+        task_relative_bounding_rect: &DeviceIntRect,
+    ) {
+        self.combined_bounding_rect = self.combined_bounding_rect.union(task_relative_bounding_rect);
+    }
+
     pub fn get_suitable_batch(
         &mut self,
         key: BatchKey,
         task_relative_bounding_rect: &DeviceIntRect,
     ) -> &mut Vec<PrimitiveInstance> {
-        self.combined_bounding_rect = self.combined_bounding_rect.union(task_relative_bounding_rect);
+        self.add_bounding_rect(task_relative_bounding_rect);
 
         match key.blend_mode {
             BlendMode::None => {
@@ -487,7 +484,7 @@ impl AlphaBatchBuilder {
 
         // Add each run in this picture to the batch.
         for run in &pic.runs {
-            let scroll_node = &ctx.clip_scroll_tree.nodes[&run.clip_and_scroll.scroll_node_id];
+            let scroll_node = &ctx.clip_scroll_tree.nodes[run.clip_and_scroll.scroll_node_id.0];
             let scroll_id = scroll_node.node_data_index;
             self.add_run_to_batch(
                 run,
@@ -682,6 +679,7 @@ impl AlphaBatchBuilder {
                     ctx.resource_cache,
                     gpu_cache,
                     deferred_resolves,
+                    &ctx.cached_gradients,
                 ) {
                     self.add_brush_to_batch(
                         brush,
@@ -811,7 +809,7 @@ impl AlphaBatchBuilder {
                 let font_transform = if is_shadow {
                     None
                 } else {
-                    Some(&scroll_node.transform)
+                    Some(scroll_node.transform)
                 };
 
                 let font = text_cpu.get_font(
@@ -904,9 +902,7 @@ impl AlphaBatchBuilder {
                             }
                             PictureKind::BoxShadow { image_kind, .. } => {
                                 let textures = BatchTextures::color(cache_item.texture_id);
-                                let kind = BrushBatchKind::Picture(
-                                    BrushImageSourceKind::from_render_target_kind(picture.target_kind()),
-                                );
+                                let kind = BrushBatchKind::Picture;
 
                                 self.add_brush_to_batch(
                                     &picture.brush,
@@ -936,11 +932,14 @@ impl AlphaBatchBuilder {
                         match picture.kind {
                             PictureKind::TextShadow { .. } => {
                                 let kind = BatchKind::Brush(
-                                    BrushBatchKind::Picture(
-                                        BrushImageSourceKind::from_render_target_kind(picture.target_kind())),
+                                    BrushBatchKind::Image(ImageBufferKind::Texture2DArray)
                                 );
                                 let key = BatchKey::new(kind, non_segmented_blend_mode, textures);
                                 let batch = self.batch_list.get_suitable_batch(key, &task_relative_bounding_rect);
+
+                                let uv_rect_address = render_tasks[cache_task_id]
+                                    .get_texture_handle()
+                                    .as_int(gpu_cache);
 
                                 let instance = BrushInstance {
                                     picture_address: task_address,
@@ -953,8 +952,8 @@ impl AlphaBatchBuilder {
                                     edge_flags: EdgeAaSegmentMask::empty(),
                                     brush_flags: BrushFlags::PERSPECTIVE_INTERPOLATION,
                                     user_data: [
-                                        cache_task_address.0 as i32,
-                                        BrushImageKind::Simple as i32,
+                                        uv_rect_address,
+                                        BrushImageSourceKind::Color as i32,
                                         0,
                                     ],
                                 };
@@ -967,8 +966,9 @@ impl AlphaBatchBuilder {
                                 composite_mode,
                                 secondary_render_task_id,
                                 is_in_3d_context,
-                                reference_frame_id,
+                                reference_frame_index,
                                 real_local_rect,
+                                ref extra_gpu_data_handle,
                                 ..
                             } => {
                                 // If this picture is participating in a 3D rendering context,
@@ -977,8 +977,10 @@ impl AlphaBatchBuilder {
                                 if is_in_3d_context {
                                     // Push into parent plane splitter.
 
-                                    let real_xf = &ctx.clip_scroll_tree.nodes[&reference_frame_id].world_content_transform;
-
+                                    let real_xf = &ctx.clip_scroll_tree
+                                        .nodes[reference_frame_index.0]
+                                        .world_content_transform
+                                        .into();
                                     let polygon = make_polygon(
                                         real_local_rect,
                                         &real_xf,
@@ -1025,9 +1027,13 @@ impl AlphaBatchBuilder {
                                             }
                                             FilterOp::DropShadow(offset, _, _) => {
                                                 let kind = BatchKind::Brush(
-                                                    BrushBatchKind::Picture(BrushImageSourceKind::ColorAlphaMask),
+                                                    BrushBatchKind::Image(ImageBufferKind::Texture2DArray),
                                                 );
                                                 let key = BatchKey::new(kind, non_segmented_blend_mode, textures);
+
+                                                let uv_rect_address = render_tasks[cache_task_id]
+                                                    .get_texture_handle()
+                                                    .as_int(gpu_cache);
 
                                                 let instance = BrushInstance {
                                                     picture_address: task_address,
@@ -1040,8 +1046,8 @@ impl AlphaBatchBuilder {
                                                     edge_flags: EdgeAaSegmentMask::empty(),
                                                     brush_flags: BrushFlags::PERSPECTIVE_INTERPOLATION,
                                                     user_data: [
-                                                        cache_task_address.0 as i32,
-                                                        BrushImageKind::Simple as i32,
+                                                        uv_rect_address,
+                                                        BrushImageSourceKind::ColorAlphaMask as i32,
                                                         0,
                                                     ],
                                                 };
@@ -1093,18 +1099,20 @@ impl AlphaBatchBuilder {
                                                     BatchTextures::render_target_cache(),
                                                 );
 
-                                                let filter_mode = match filter {
-                                                    FilterOp::Blur(..) => 0,
-                                                    FilterOp::Contrast(..) => 1,
-                                                    FilterOp::Grayscale(..) => 2,
-                                                    FilterOp::HueRotate(..) => 3,
-                                                    FilterOp::Invert(..) => 4,
-                                                    FilterOp::Saturate(..) => 5,
-                                                    FilterOp::Sepia(..) => 6,
-                                                    FilterOp::Brightness(..) => 7,
-                                                    FilterOp::Opacity(..) => 8,
-                                                    FilterOp::DropShadow(..) => 9,
-                                                    FilterOp::ColorMatrix(..) => 10,
+                                                let (filter_mode, extra_cache_address) = match filter {
+                                                    FilterOp::Blur(..) => (0, 0),
+                                                    FilterOp::Contrast(..) => (1, 0),
+                                                    FilterOp::Grayscale(..) => (2, 0),
+                                                    FilterOp::HueRotate(..) => (3, 0),
+                                                    FilterOp::Invert(..) => (4, 0),
+                                                    FilterOp::Saturate(..) => (5, 0),
+                                                    FilterOp::Sepia(..) => (6, 0),
+                                                    FilterOp::Brightness(..) => (7, 0),
+                                                    FilterOp::Opacity(..) => (8, 0),
+                                                    FilterOp::DropShadow(..) => (9, 0),
+                                                    FilterOp::ColorMatrix(..) => {
+                                                        (10, extra_gpu_data_handle.as_int(gpu_cache))
+                                                    }
                                                 };
 
                                                 let instance = BrushInstance {
@@ -1120,7 +1128,7 @@ impl AlphaBatchBuilder {
                                                     user_data: [
                                                         cache_task_address.0 as i32,
                                                         filter_mode,
-                                                        0,
+                                                        extra_cache_address,
                                                     ],
                                                 };
 
@@ -1206,28 +1214,6 @@ impl AlphaBatchBuilder {
                     }
                 }
             }
-            PrimitiveKind::AlignedGradient => {
-                let gradient_cpu =
-                    &ctx.prim_store.cpu_gradients[prim_metadata.cpu_prim_index.0];
-                let kind = BatchKind::Transformable(
-                    transform_kind,
-                    TransformBatchKind::AlignedGradient,
-                );
-                let key = BatchKey::new(kind, non_segmented_blend_mode, no_textures);
-                let batch = self.batch_list.get_suitable_batch(key, &task_relative_bounding_rect);
-                for part_index in 0 .. (gradient_cpu.stops_count - 1) {
-                    batch.push(base_instance.build(part_index as i32, 0, 0));
-                }
-            }
-            PrimitiveKind::AngleGradient => {
-                let kind = BatchKind::Transformable(
-                    transform_kind,
-                    TransformBatchKind::AngleGradient,
-                );
-                let key = BatchKey::new(kind, non_segmented_blend_mode, no_textures);
-                let batch = self.batch_list.get_suitable_batch(key, &task_relative_bounding_rect);
-                batch.push(base_instance.build(0, 0, 0));
-            }
         }
     }
 
@@ -1262,6 +1248,8 @@ impl AlphaBatchBuilder {
             brush_flags: BrushFlags::PERSPECTIVE_INTERPOLATION,
             user_data,
         };
+
+        self.batch_list.add_bounding_rect(task_relative_bounding_rect);
 
         match brush.segment_desc {
             Some(ref segment_desc) => {
@@ -1330,6 +1318,7 @@ impl BrushPrimitive {
         resource_cache: &ResourceCache,
         gpu_cache: &mut GpuCache,
         deferred_resolves: &mut Vec<DeferredResolve>,
+        cached_gradients: &[CachedGradient],
     ) -> Option<(BrushBatchKind, BatchTextures, [i32; 3])> {
         match self.kind {
             BrushKind::Line { .. } => {
@@ -1355,7 +1344,11 @@ impl BrushPrimitive {
                     Some((
                         BrushBatchKind::Image(get_buffer_kind(cache_item.texture_id)),
                         textures,
-                        [cache_item.uv_rect_handle.as_int(gpu_cache), 0, 0],
+                        [
+                            cache_item.uv_rect_handle.as_int(gpu_cache),
+                            BrushImageSourceKind::Color as i32,
+                            0,
+                        ],
                     ))
                 }
             }
@@ -1376,9 +1369,22 @@ impl BrushPrimitive {
                     [0; 3],
                 ))
             }
-            BrushKind::RadialGradient { ref stops_handle, .. } => {
+            BrushKind::RadialGradient { gradient_index, .. } => {
+                let stops_handle = &cached_gradients[gradient_index.0].handle;
                 Some((
                     BrushBatchKind::RadialGradient,
+                    BatchTextures::no_texture(),
+                    [
+                        stops_handle.as_int(gpu_cache),
+                        0,
+                        0,
+                    ],
+                ))
+            }
+            BrushKind::LinearGradient { gradient_index, .. } => {
+                let stops_handle = &cached_gradients[gradient_index.0].handle;
+                Some((
+                    BrushBatchKind::LinearGradient,
                     BatchTextures::no_texture(),
                     [
                         stops_handle.as_int(gpu_cache),
@@ -1464,8 +1470,6 @@ impl AlphaBatchHelpers for PrimitiveStore {
             }
 
             PrimitiveKind::Border |
-            PrimitiveKind::AlignedGradient |
-            PrimitiveKind::AngleGradient |
             PrimitiveKind::Picture => {
                 BlendMode::PremultipliedAlpha
             }
@@ -1487,6 +1491,7 @@ impl AlphaBatchHelpers for PrimitiveStore {
                     BrushKind::Line { .. } |
                     BrushKind::YuvImage { .. } |
                     BrushKind::RadialGradient { .. } |
+                    BrushKind::LinearGradient { .. } |
                     BrushKind::Picture => {
                         BlendMode::PremultipliedAlpha
                     }

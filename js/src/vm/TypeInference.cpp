@@ -13,7 +13,6 @@
 #include "mozilla/Sprintf.h"
 
 #include "jsapi.h"
-#include "jsprf.h"
 #include "jsstr.h"
 
 #include "gc/HashUtil.h"
@@ -3952,6 +3951,10 @@ TypeNewScript::maybeAnalyze(JSContext* cx, ObjectGroup* group, bool* regenerate,
     group->detachNewScript();
     initialGroup->setNewScript(this);
 
+    // prefixShape was read via a weak pointer, so we need a read barrier before
+    // we store it into the heap.
+    Shape::readBarrier(prefixShape);
+
     initializedShape_ = prefixShape;
     initializedGroup_ = group;
 
@@ -4308,6 +4311,8 @@ ObjectGroup::sweep(AutoClearTypeInferenceStateOnOOM* oom)
     Maybe<AutoClearTypeInferenceStateOnOOM> fallbackOOM;
     EnsureHasAutoClearTypeInferenceStateOnOOM(oom, zone(), fallbackOOM);
 
+    AutoTouchingGrayThings tgt;
+
     if (maybeUnboxedLayout()) {
         // Remove unboxed layouts that are about to be finalized from the
         // compartment wide list while we are still on the active thread.
@@ -4520,7 +4525,7 @@ TypeZone::~TypeZone()
 }
 
 void
-TypeZone::beginSweep(FreeOp* fop, bool releaseTypes, AutoClearTypeInferenceStateOnOOM& oom)
+TypeZone::beginSweep(bool releaseTypes, AutoClearTypeInferenceStateOnOOM& oom)
 {
     MOZ_ASSERT(zone()->isGCSweepingOrCompacting());
     MOZ_ASSERT(!sweepCompilerOutputs);

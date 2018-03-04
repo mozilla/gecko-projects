@@ -63,18 +63,6 @@ MacroAssembler::clampDoubleToUint8(FloatRegister input, Register output)
     bind(&done);
 }
 
-void
-MacroAssembler::alignFrameForICArguments(AfterICSaveLive& aic)
-{
-    // Exists for MIPS compatibility.
-}
-
-void
-MacroAssembler::restoreFrameAlignmentForICArguments(AfterICSaveLive& aic)
-{
-    // Exists for MIPS compatibility.
-}
-
 bool
 MacroAssemblerX86Shared::buildOOLFakeExitFrame(void* fakeReturnAddr)
 {
@@ -659,9 +647,9 @@ MacroAssembler::pushFakeReturnAddress(Register scratch)
 {
     CodeLabel cl;
 
-    mov(cl.patchAt(), scratch);
+    mov(&cl, scratch);
     Push(scratch);
-    use(cl.target());
+    bind(&cl);
     uint32_t retAddr = currentOffset();
 
     addCodeLabel(cl);

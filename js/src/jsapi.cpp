@@ -30,11 +30,9 @@
 #include "jsfriendapi.h"
 #include "jsmath.h"
 #include "jsnum.h"
-#include "jsprf.h"
 #include "jsstr.h"
 #include "jstypes.h"
 #include "jsutil.h"
-#include "jswrapper.h"
 
 #include "builtin/AtomicsObject.h"
 #include "builtin/Eval.h"
@@ -67,6 +65,7 @@
 #include "js/SliceBudget.h"
 #include "js/StructuredClone.h"
 #include "js/Utility.h"
+#include "js/Wrapper.h"
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
 #include "vm/DateObject.h"
@@ -1058,9 +1057,7 @@ static const JSStdName builtin_property_names[] = {
     { EAGER_ATOM(encodeURI), JSProto_String },
     { EAGER_ATOM(decodeURIComponent), JSProto_String },
     { EAGER_ATOM(encodeURIComponent), JSProto_String },
-#if JS_HAS_UNEVAL
     { EAGER_ATOM(uneval), JSProto_String },
-#endif
 
     { 0, JSProto_LIMIT }
 };
@@ -3997,6 +3994,7 @@ JS::TransitiveCompileOptions::copyPODTransitiveOptions(const TransitiveCompileOp
     introductionOffset = rhs.introductionOffset;
     hasIntroductionInfo = rhs.hasIntroductionInfo;
     isProbablySystemOrAddonCode = rhs.isProbablySystemOrAddonCode;
+    hideScriptFromDebugger = rhs.hideScriptFromDebugger;
 };
 
 void
@@ -4682,6 +4680,17 @@ JS::InitScriptSourceElement(JSContext* cx, HandleScript script,
 
     RootedScriptSource sso(cx, &script->sourceObject()->as<ScriptSourceObject>());
     return ScriptSourceObject::initElementProperties(cx, sso, element, elementAttrName);
+}
+
+JS_PUBLIC_API(void)
+JS::ExposeScriptToDebugger(JSContext* cx, HandleScript script)
+{
+    MOZ_ASSERT(cx);
+    MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
+
+    MOZ_ASSERT(script->hideScriptFromDebugger());
+    script->clearHideScriptFromDebugger();
+    Debugger::onNewScript(cx, script);
 }
 
 JS_PUBLIC_API(JSString*)
@@ -7272,6 +7281,9 @@ JS_SetGlobalJitCompilerOption(JSContext* cx, JSJitCompilerOption opt, uint32_t v
         break;
       case JSJITCOMPILER_SPECTRE_INDEX_MASKING:
         jit::JitOptions.spectreIndexMasking = !!value;
+        break;
+      case JSJITCOMPILER_SPECTRE_OBJECT_MITIGATIONS_BARRIERS:
+        jit::JitOptions.spectreObjectMitigationsBarriers = !!value;
         break;
       case JSJITCOMPILER_SPECTRE_STRING_MITIGATIONS:
         jit::JitOptions.spectreStringMitigations = !!value;

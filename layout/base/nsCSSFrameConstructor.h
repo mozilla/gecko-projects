@@ -320,7 +320,7 @@ public:
                       RemoveFlags aFlags);
 
   void CharacterDataChanged(nsIContent* aContent,
-                            CharacterDataChangeInfo* aInfo);
+                            const CharacterDataChangeInfo& aInfo);
 
   // If aContent is a text node that has been optimized away due to being
   // whitespace next to a block boundary (or for some other reason), ensure that
@@ -392,6 +392,8 @@ public:
   // Get the frame that is the parent of the root element.
   nsContainerFrame* GetDocElementContainingBlock()
     { return mDocElementContainingBlock; }
+
+  void AddSizeOfIncludingThis(nsWindowSizes& aSizes) const;
 
 private:
   struct FrameConstructionItem;
@@ -2153,9 +2155,11 @@ private:
                         mozilla::StyleDisplay& aTargetContentDisplay);
 
   // Helper for the implementation of FindSibling.
+  //
+  // Beware that this function does mutate the iterator.
   template<SiblingDirection>
   nsIFrame* FindSiblingInternal(
-    mozilla::dom::FlattenedChildIterator,
+    mozilla::dom::FlattenedChildIterator&,
     nsIContent* aTargetContent,
     mozilla::StyleDisplay& aTargetContentDisplay);
 

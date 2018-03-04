@@ -121,7 +121,7 @@
 
 // We expose a singleton from this module. Some tests may import the
 // constructor via a backstage pass.
-this.EXPORTED_SYMBOLS = ["profileStorage"];
+var EXPORTED_SYMBOLS = ["profileStorage"];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
@@ -146,7 +146,7 @@ XPCOMUtils.defineLazyGetter(this, "REGION_NAMES", function() {
   let regionNames = {};
   let countries = Services.strings.createBundle("chrome://global/locale/regionNames.properties").getSimpleEnumeration();
   while (countries.hasMoreElements()) {
-    let country = countries.getNext().QueryInterface(Components.interfaces.nsIPropertyElement);
+    let country = countries.getNext().QueryInterface(Ci.nsIPropertyElement);
     regionNames[country.key.toUpperCase()] = country.value;
   }
   return regionNames;
@@ -1802,5 +1802,5 @@ FormAutofillStorage.prototype = {
 };
 
 // The singleton exposed by this module.
-this.profileStorage = new FormAutofillStorage(
+var profileStorage = new FormAutofillStorage(
   OS.Path.join(OS.Constants.Path.profileDir, PROFILE_JSON_FILE_NAME));

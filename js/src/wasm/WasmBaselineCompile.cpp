@@ -1191,7 +1191,7 @@ class BaseStackFrame
 
     static const size_t StackSizeOfPtr    = sizeof(intptr_t);
     static const size_t StackSizeOfInt64  = sizeof(int64_t);
-#ifdef JS_CODEGEN_ARM
+#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS32)
     static const size_t StackSizeOfFloat  = sizeof(float);
 #else
     static const size_t StackSizeOfFloat  = sizeof(double);
@@ -3386,7 +3386,7 @@ class BaseCompiler final : public BaseCompilerInterface
 
         for (uint32_t i = 0; i < labels.length(); i++) {
             CodeLabel cl;
-            masm.writeCodePointer(cl.patchAt());
+            masm.writeCodePointer(&cl);
             cl.target()->bind(labels[i].offset());
             masm.addCodeLabel(cl);
         }
@@ -3399,7 +3399,7 @@ class BaseCompiler final : public BaseCompilerInterface
         ScratchI32 scratch(*this);
         CodeLabel tableCl;
 
-        masm.mov(tableCl.patchAt(), scratch);
+        masm.mov(&tableCl, scratch);
 
         tableCl.target()->bind(theTable->offset());
         masm.addCodeLabel(tableCl);
@@ -3435,18 +3435,12 @@ class BaseCompiler final : public BaseCompilerInterface
         ScratchI32 scratch(*this);
         CodeLabel tableCl;
 
-        masm.ma_li(scratch, tableCl.patchAt());
-# ifdef JS_CODEGEN_MIPS32
-        masm.lshiftPtr(Imm32(4), switchValue);
-# else
-        masm.ma_mul(switchValue, switchValue, Imm32(6 * 4));
-# endif
-        masm.addPtr(switchValue, scratch);
+        masm.ma_li(scratch, &tableCl);
 
         tableCl.target()->bind(theTable->offset());
         masm.addCodeLabel(tableCl);
 
-        masm.branch(scratch);
+        masm.branchToComputedAddress(BaseIndex(scratch, switchValue, ScalePointer));
 #else
         MOZ_CRASH("BaseCompiler platform hook: tableSwitch");
 #endif
@@ -3750,12 +3744,13 @@ class BaseCompiler final : public BaseCompilerInterface
         if (!ool)
             return false;
         bool isSaturating = flags & TRUNC_SATURATING;
-        if (flags & TRUNC_UNSIGNED)
+        if (flags & TRUNC_UNSIGNED) {
             masm.wasmTruncateFloat32ToUInt64(src, dest, isSaturating, ool->entry(),
                                              ool->rejoin(), temp);
-        else
+        } else {
             masm.wasmTruncateFloat32ToInt64(src, dest, isSaturating, ool->entry(),
                                             ool->rejoin(), temp);
+        }
         return true;
     }
 
@@ -3768,12 +3763,13 @@ class BaseCompiler final : public BaseCompilerInterface
         if (!ool)
             return false;
         bool isSaturating = flags & TRUNC_SATURATING;
-        if (flags & TRUNC_UNSIGNED)
+        if (flags & TRUNC_UNSIGNED) {
             masm.wasmTruncateDoubleToUInt64(src, dest, isSaturating, ool->entry(),
                                             ool->rejoin(), temp);
-        else
+        } else {
             masm.wasmTruncateDoubleToInt64(src, dest, isSaturating, ool->entry(),
                                            ool->rejoin(), temp);
+        }
         return true;
     }
 #endif // RABALDR_FLOAT_TO_I64_CALLOUT

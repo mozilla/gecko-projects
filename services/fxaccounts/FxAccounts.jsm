@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["fxAccounts", "FxAccounts"];
+var EXPORTED_SYMBOLS = ["fxAccounts", "FxAccounts"];
 
 Cu.importGlobalProperties(["URL"]);
 
@@ -35,6 +35,9 @@ ChromeUtils.defineModuleGetter(this, "FxAccountsProfile",
 
 ChromeUtils.defineModuleGetter(this, "Utils",
   "resource://services-sync/util.js");
+
+XPCOMUtils.defineLazyPreferenceGetter(this, "FXA_ENABLED",
+    "identity.fxaccounts.enabled", true);
 
 // All properties exposed by the public FxAccounts API.
 var publicProperties = [
@@ -325,7 +328,7 @@ function urlsafeBase64Encode(key) {
 /**
  * The public API's constructor.
  */
-this.FxAccounts = function(mockInternal) {
+var FxAccounts = function(mockInternal) {
   let external = {};
   let internal;
 
@@ -343,8 +346,8 @@ this.FxAccounts = function(mockInternal) {
     // internal.fxaPushService option is used in testing.
     // Otherwise we load the service lazily.
     XPCOMUtils.defineLazyGetter(internal, "fxaPushService", function() {
-      return Components.classes["@mozilla.org/fxaccounts/push;1"]
-        .getService(Components.interfaces.nsISupports)
+      return Cc["@mozilla.org/fxaccounts/push;1"]
+        .getService(Ci.nsISupports)
         .wrappedJSObject;
     });
   }
@@ -521,20 +524,23 @@ FxAccountsInternal.prototype = {
    *        }
    *        or null if no user is signed in.
    */
-  getSignedInUser: function getSignedInUser() {
+  async getSignedInUser() {
     let currentState = this.currentAccountState;
-    return currentState.getUserAccountData().then(data => {
-      if (!data) {
-        return null;
-      }
-      if (!this.isUserEmailVerified(data)) {
-        // If the email is not verified, start polling for verification,
-        // but return null right away.  We don't want to return a promise
-        // that might not be fulfilled for a long time.
-        this.startVerifiedCheck(data);
-      }
-      return data;
-    }).then(result => currentState.resolve(result));
+    const data = await currentState.getUserAccountData();
+    if (!data) {
+      return currentState.resolve(null);
+    }
+    if (!FXA_ENABLED) {
+      await this.signOut();
+      return currentState.resolve(null);
+    }
+    if (!this.isUserEmailVerified(data)) {
+      // If the email is not verified, start polling for verification,
+      // but return null right away.  We don't want to return a promise
+      // that might not be fulfilled for a long time.
+      this.startVerifiedCheck(data);
+    }
+    return currentState.resolve(data);
   },
 
   /**
@@ -558,37 +564,32 @@ FxAccountsInternal.prototype = {
    *         The promise resolves to null when the data is saved
    *         successfully and is rejected on error.
    */
-  setSignedInUser: function setSignedInUser(credentials) {
+  async setSignedInUser(credentials) {
+    if (!FXA_ENABLED) {
+      throw new Error("Cannot call setSignedInUser when FxA is disabled.");
+    }
     log.debug("setSignedInUser - aborting any existing flows");
-    return this.getSignedInUser().then(signedInUser => {
-      if (signedInUser) {
-        return this.deleteDeviceRegistration(signedInUser.sessionToken, signedInUser.deviceId);
-      }
-      return null;
-    }).then(() =>
-      this.abortExistingFlow()
-    ).then(() => {
-      let currentAccountState = this.currentAccountState = this.newAccountState(
-        Cu.cloneInto(credentials, {}) // Pass a clone of the credentials object.
-      );
-      // This promise waits for storage, but not for verification.
-      // We're telling the caller that this is durable now (although is that
-      // really something we should commit to? Why not let the write happen in
-      // the background? Already does for updateAccountData ;)
-      return currentAccountState.promiseInitialized.then(() => {
-        // Starting point for polling if new user
-        if (!this.isUserEmailVerified(credentials)) {
-          this.startVerifiedCheck(credentials);
-        }
-
-        return this.updateDeviceRegistration();
-      }).then(() => {
-        Services.telemetry.getHistogramById("FXA_CONFIGURED").add(1);
-        return this.notifyObservers(ONLOGIN_NOTIFICATION);
-      }).then(() => {
-        return currentAccountState.resolve();
-      });
-    });
+    const signedInUser = await this.getSignedInUser();
+    if (signedInUser) {
+      await this.deleteDeviceRegistration(signedInUser.sessionToken, signedInUser.deviceId);
+    }
+    await this.abortExistingFlow();
+    let currentAccountState = this.currentAccountState = this.newAccountState(
+      Cu.cloneInto(credentials, {}) // Pass a clone of the credentials object.
+    );
+    // This promise waits for storage, but not for verification.
+    // We're telling the caller that this is durable now (although is that
+    // really something we should commit to? Why not let the write happen in
+    // the background? Already does for updateAccountData ;)
+    await currentAccountState.promiseInitialized;
+    // Starting point for polling if new user
+    if (!this.isUserEmailVerified(credentials)) {
+      this.startVerifiedCheck(credentials);
+    }
+    await this.updateDeviceRegistration();
+    Services.telemetry.getHistogramById("FXA_CONFIGURED").add(1);
+    await this.notifyObservers(ONLOGIN_NOTIFICATION);
+    return currentAccountState.resolve();
   },
 
   /**

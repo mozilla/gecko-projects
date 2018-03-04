@@ -4,7 +4,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["FinderHighlighter"];
+var EXPORTED_SYMBOLS = ["FinderHighlighter"];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -1704,7 +1704,7 @@ FinderHighlighter.prototype = {
             iid.equals(Ci.nsISupports))
           return this;
 
-        throw Components.results.NS_ERROR_NO_INTERFACE;
+        throw Cr.NS_ERROR_NO_INTERFACE;
       },
 
       NotifyDocumentWillBeDestroyed() {

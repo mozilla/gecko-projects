@@ -42,7 +42,7 @@ add_task(async function() {
   await openSiteDataSettingsDialog();
   assertSitesListed(doc, fakeHosts.filter(host => host != "shopping.xyz.com"));
 
-  mockSiteDataManager.unregister();
+  await mockSiteDataManager.unregister();
   await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
@@ -94,17 +94,14 @@ add_task(async function() {
   let expected = "account.xyz.com";
   is(columns[0].value, expected, "Should group and list sites by host");
 
+  is(columns[1].value, "5", "Should group cookies across scheme, port and origin attributes");
+
   let prefStrBundle = frameDoc.getElementById("bundlePreferences");
-  expected = prefStrBundle.getString("persistent");
-  is(columns[1].value, expected, "Should mark persisted status across scheme, port and origin attributes");
-
-  is(columns[2].value, "5", "Should group cookies across scheme, port and origin attributes");
-
-  expected = prefStrBundle.getFormattedString("siteUsage",
+  expected = prefStrBundle.getFormattedString("siteUsagePersistent",
     DownloadUtils.convertByteUnits(quotaUsage * mockSiteDataManager.fakeSites.length));
-  is(columns[3].value, expected, "Should sum up usages across scheme, port and origin attributes");
+  is(columns[2].value, expected, "Should sum up usages across scheme, port, origin attributes and persistent status");
 
-  mockSiteDataManager.unregister();
+  await mockSiteDataManager.unregister();
   await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
@@ -116,19 +113,19 @@ add_task(async function() {
       usage: 1024,
       origin: "https://account.xyz.com",
       cookies: 6,
-      persisted: true
+      persisted: true,
     },
     {
       usage: 1024 * 2,
       origin: "https://books.foo.com",
       cookies: 0,
-      persisted: false
+      persisted: false,
     },
     {
       usage: 1024 * 3,
       origin: "http://cinema.bar.com",
       cookies: 3,
-      persisted: true
+      persisted: true,
     },
   ]);
 
@@ -143,7 +140,6 @@ add_task(async function() {
   let frameDoc = dialogFrame.contentDocument;
   let hostCol = frameDoc.getElementById("hostCol");
   let usageCol = frameDoc.getElementById("usageCol");
-  let statusCol = frameDoc.getElementById("statusCol");
   let cookiesCol = frameDoc.getElementById("cookiesCol");
   let sitesList = frameDoc.getElementById("sitesList");
 
@@ -162,19 +158,13 @@ add_task(async function() {
   hostCol.click();
   assertSortByBaseDomain("descending");
 
-  // Test sorting on the permission status column
+  // Test sorting on the cookies column
   cookiesCol.click();
   assertSortByCookies("ascending");
   cookiesCol.click();
   assertSortByCookies("descending");
 
-  // Test sorting on the cookies column
-  statusCol.click();
-  assertSortByStatus("ascending");
-  statusCol.click();
-  assertSortByStatus("descending");
-
-  mockSiteDataManager.unregister();
+  await mockSiteDataManager.unregister();
   await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 
   function assertSortByBaseDomain(order) {
@@ -189,27 +179,6 @@ add_task(async function() {
         Assert.lessOrEqual(result, 0, "Should sort sites in the ascending order by host");
       } else {
         Assert.greaterOrEqual(result, 0, "Should sort sites in the descending order by host");
-      }
-    }
-  }
-
-  function assertSortByStatus(order) {
-    let siteItems = sitesList.getElementsByTagName("richlistitem");
-    for (let i = 0; i < siteItems.length - 1; ++i) {
-      let aHost = siteItems[i].getAttribute("host");
-      let bHost = siteItems[i + 1].getAttribute("host");
-      let a = findSiteByHost(aHost);
-      let b = findSiteByHost(bHost);
-      let result = 0;
-      if (a.persisted && !b.persisted) {
-        result = 1;
-      } else if (!a.persisted && b.persisted) {
-        result = -1;
-      }
-      if (order == "ascending") {
-        Assert.lessOrEqual(result, 0, "Should sort sites in the ascending order by permission status");
-      } else {
-        Assert.greaterOrEqual(result, 0, "Should sort sites in the descending order by permission status");
       }
     }
   }
@@ -242,6 +211,72 @@ add_task(async function() {
         Assert.lessOrEqual(result, 0, "Should sort sites in the ascending order by number of cookies");
       } else {
         Assert.greaterOrEqual(result, 0, "Should sort sites in the descending order by number of cookies");
+      }
+    }
+  }
+
+  function findSiteByHost(host) {
+    return mockSiteDataManager.fakeSites.find(site => site.principal.URI.host == host);
+  }
+});
+
+// Test sorting based on access date (separate from cookies for simplicity,
+// since cookies access date affects this as well, but we don't mock our cookies)
+add_task(async function() {
+  mockSiteDataManager.register(SiteDataManager, [
+    {
+      usage: 1024,
+      origin: "https://account.xyz.com",
+      persisted: true,
+      lastAccessed: (Date.now() - 120 * 1000) * 1000,
+    },
+    {
+      usage: 1024 * 2,
+      origin: "https://books.foo.com",
+      persisted: false,
+      lastAccessed: (Date.now() - 240 * 1000) * 1000,
+    },
+    {
+      usage: 1024 * 3,
+      origin: "http://cinema.bar.com",
+      persisted: true,
+      lastAccessed: Date.now() * 1000,
+    },
+  ]);
+
+  let updatePromise = promiseSiteDataManagerSitesUpdated();
+  await openPreferencesViaOpenPreferencesAPI("privacy", { leaveOpen: true });
+  await updatePromise;
+  await openSiteDataSettingsDialog();
+
+  // eslint-disable-next-line mozilla/no-cpows-in-tests
+  let dialog = content.gSubDialog._topDialog;
+  let dialogFrame = dialog._frame;
+  let frameDoc = dialogFrame.contentDocument;
+  let lastAccessedCol = frameDoc.getElementById("lastAccessedCol");
+  let sitesList = frameDoc.getElementById("sitesList");
+
+  // Test sorting on the date column
+  lastAccessedCol.click();
+  assertSortByDate("ascending");
+  lastAccessedCol.click();
+  assertSortByDate("descending");
+
+  await mockSiteDataManager.unregister();
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
+
+  function assertSortByDate(order) {
+    let siteItems = sitesList.getElementsByTagName("richlistitem");
+    for (let i = 0; i < siteItems.length - 1; ++i) {
+      let aHost = siteItems[i].getAttribute("host");
+      let bHost = siteItems[i + 1].getAttribute("host");
+      let a = findSiteByHost(aHost);
+      let b = findSiteByHost(bHost);
+      let result = a.lastAccessed - b.lastAccessed;
+      if (order == "ascending") {
+        Assert.lessOrEqual(result, 0, "Should sort sites in the ascending order by date");
+      } else {
+        Assert.greaterOrEqual(result, 0, "Should sort sites in the descending order date");
       }
     }
   }

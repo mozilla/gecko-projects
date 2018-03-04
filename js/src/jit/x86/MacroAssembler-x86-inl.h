@@ -1035,6 +1035,12 @@ MacroAssembler::test32MovePtr(Condition cond, const Address& addr, Imm32 mask, R
     cmovCCl(cond, Operand(src), dest);
 }
 
+void
+MacroAssembler::spectreMovePtr(Condition cond, Register src, Register dest)
+{
+    cmovCCl(cond, Operand(src), dest);
+}
+
 // ========================================================================
 // Truncate floating point.
 
@@ -1103,6 +1109,8 @@ MacroAssembler::wasmBoundsCheck(Condition cond, Register index, Register boundsC
 {
     cmp32(index, boundsCheckLimit);
     j(cond, label);
+    if (JitOptions.spectreIndexMasking)
+        cmovCCl(cond, Operand(boundsCheckLimit), index);
 }
 
 template <class L>
@@ -1111,6 +1119,8 @@ MacroAssembler::wasmBoundsCheck(Condition cond, Register index, Address boundsCh
 {
     cmp32(index, Operand(boundsCheckLimit));
     j(cond, label);
+    if (JitOptions.spectreIndexMasking)
+        cmovCCl(cond, Operand(boundsCheckLimit), index);
 }
 
 //}}} check_macroassembler_style

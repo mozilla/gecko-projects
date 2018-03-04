@@ -4840,7 +4840,7 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
         break;
       case NS_ERROR_BLOCKED_BY_POLICY:
         // Page blocked by policy
-        error = "blockedByPolicyTemp";
+        error = "blockedByPolicy";
         break;
       default:
         break;
@@ -9643,14 +9643,16 @@ nsDocShell::InternalLoad(nsIURI* aURI,
     // outside of Gecko.
     const int where = (aWindowTarget.IsEmpty() || targetDocShell)
                       ? nsIBrowserDOMWindow::OPEN_CURRENTWINDOW
-                      : nsIBrowserDOMWindow::OPEN_NEW;
+                      : nsIBrowserDOMWindow::OPEN_NEWWINDOW;
 
-    if (where == nsIBrowserDOMWindow::OPEN_NEW && isDocumentAuxSandboxed) {
+    if (where == nsIBrowserDOMWindow::OPEN_NEWWINDOW && isDocumentAuxSandboxed) {
       return NS_ERROR_DOM_INVALID_ACCESS_ERR;
     }
 
-    if (NS_SUCCEEDED(mLoadURIDelegate->LoadURI(aURI, where, aFlags,
-                                               aTriggeringPrincipal))) {
+    bool loadURIHandled = false;
+    rv = mLoadURIDelegate->LoadURI(aURI, where, aFlags, aTriggeringPrincipal,
+                                   &loadURIHandled);
+    if (NS_SUCCEEDED(rv) && loadURIHandled) {
       // The request has been handled, nothing to do here.
       return NS_OK;
     }
@@ -14495,6 +14497,34 @@ nsDocShell::SetDisplayMode(uint32_t aDisplayMode)
         MediaFeatureChangeReason::DisplayModeChange });
     }
   }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::SetColorMatrix(float* aMatrix, uint32_t aMatrixLen)
+{
+  if (aMatrixLen == 20) {
+    mColorMatrix.reset(new gfx::Matrix5x4());
+    MOZ_ASSERT(aMatrixLen * sizeof(*aMatrix) == sizeof(mColorMatrix->components));
+    memcpy(mColorMatrix->components, aMatrix, sizeof(mColorMatrix->components));
+  } else if (aMatrixLen == 0) {
+    mColorMatrix.reset();
+  } else {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  nsIPresShell* presShell = GetPresShell();
+  if (!presShell) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsIFrame* frame = presShell->GetRootFrame();
+  if (!frame) {
+    return NS_ERROR_FAILURE;
+  }
+
+  frame->SchedulePaint();
 
   return NS_OK;
 }

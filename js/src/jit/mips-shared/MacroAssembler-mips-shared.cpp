@@ -6,6 +6,8 @@
 
 #include "jit/mips-shared/MacroAssembler-mips-shared.h"
 
+#include "mozilla/EndianUtils.h"
+
 #include "jit/MacroAssembler.h"
 
 using namespace js;
@@ -786,9 +788,17 @@ MacroAssemblerMIPSShared::ma_b(Register lhs, Imm32 imm, Label* label, Condition 
         else
             asMasm().branchWithCode(getBranchCode(lhs, c), label, jumpKind);
     } else {
-        MOZ_ASSERT(lhs != ScratchRegister);
-        ma_li(ScratchRegister, imm);
-        ma_b(lhs, ScratchRegister, label, c, jumpKind);
+      switch (c) {
+        case Equal:
+        case NotEqual:
+          MOZ_ASSERT(lhs != ScratchRegister);
+          ma_li(ScratchRegister, imm);
+          ma_b(lhs, ScratchRegister, label, c, jumpKind);
+          break;
+        default:
+          Condition cond = ma_cmp(ScratchRegister, lhs, imm, c);
+          asMasm().branchWithCode(getBranchCode(ScratchRegister, cond), label, jumpKind);
+        }
     }
 }
 
@@ -884,20 +894,59 @@ MacroAssemblerMIPSShared::ma_cmp(Register scratch, Register lhs, Register rhs, C
         //   beq at,$zero,offs
         as_slt(scratch, rhs, lhs);
         return Equal;
-      case Equal :
-      case NotEqual:
-      case Zero:
-      case NonZero:
-      case Always:
-      case Signed:
-      case NotSigned:
-        MOZ_CRASH("There is a better way to compare for equality.");
-        break;
-      case Overflow:
-        MOZ_CRASH("Overflow condition not supported for MIPS.");
-        break;
       default:
-        MOZ_CRASH("Invalid condition for branch.");
+        MOZ_CRASH("Invalid condition.");
+    }
+    return Always;
+}
+
+Assembler::Condition
+MacroAssemblerMIPSShared::ma_cmp(Register scratch, Register lhs, Imm32 imm, Condition c)
+{
+    switch (c) {
+      case Above:
+      case BelowOrEqual:
+        if (Imm16::IsInSignedRange(imm.value + 1) && imm.value != -1) {
+          // lhs <= rhs via lhs < rhs + 1 if rhs + 1 does not overflow
+          as_sltiu(scratch, lhs, imm.value + 1);
+
+          return (c == BelowOrEqual ? NotEqual : Equal);
+        } else {
+          ma_li(scratch, imm);
+          as_sltu(scratch, scratch, lhs);
+          return (c == BelowOrEqual ? Equal : NotEqual);
+        }
+      case AboveOrEqual:
+      case Below:
+        if (Imm16::IsInSignedRange(imm.value)) {
+          as_sltiu(scratch, lhs, imm.value);
+        } else {
+          ma_li(scratch, imm);
+          as_sltu(scratch, lhs, scratch);
+        }
+        return (c == AboveOrEqual ? Equal : NotEqual);
+      case GreaterThan:
+      case LessThanOrEqual:
+        if (Imm16::IsInSignedRange(imm.value + 1)) {
+          // lhs <= rhs via lhs < rhs + 1.
+          as_slti(scratch, lhs, imm.value + 1);
+          return (c == LessThanOrEqual ? NotEqual : Equal);
+        } else {
+          ma_li(scratch, imm);
+          as_slt(scratch, scratch, lhs);
+          return (c == LessThanOrEqual ? Equal : NotEqual);
+        }
+      case GreaterThanOrEqual:
+      case LessThan:
+        if (Imm16::IsInSignedRange(imm.value)) {
+          as_slti(scratch, lhs, imm.value);
+        } else {
+          ma_li(scratch, imm);
+          as_slt(scratch, lhs, scratch);
+        }
+        return (c == GreaterThanOrEqual ? Equal : NotEqual);
+      default:
+        MOZ_CRASH("Invalid condition.");
     }
     return Always;
 }
@@ -969,22 +1018,21 @@ MacroAssemblerMIPSShared::ma_cmp_set(Register rd, Register rs, Register rt, Cond
       case Zero:
         MOZ_ASSERT(rs == rt);
         // seq d,s,$zero =>
-        //   xor d,s,$zero
-        //   sltiu d,d,1
-        as_xor(rd, rs, zero);
-        as_sltiu(rd, rd, 1);
+        //   sltiu d,s,1
+        as_sltiu(rd, rs, 1);
         break;
       case NonZero:
+        MOZ_ASSERT(rs == rt);
         // sne d,s,$zero =>
-        //   xor d,s,$zero
-        //   sltu d,$zero,d
-        as_xor(rd, rs, zero);
-        as_sltu(rd, zero, rd);
+        //   sltu d,$zero,s
+        as_sltu(rd, zero, rs);
         break;
       case Signed:
+        MOZ_ASSERT(rs == rt);
         as_slt(rd, rs, zero);
         break;
       case NotSigned:
+        MOZ_ASSERT(rs == rt);
         // sge d,s,$zero =>
         //   slt d,s,$zero
         //   xori d,d,1
@@ -992,7 +1040,7 @@ MacroAssemblerMIPSShared::ma_cmp_set(Register rd, Register rs, Register rt, Cond
         as_xori(rd, rd, 1);
         break;
       default:
-        MOZ_CRASH("Invalid condition for ma_cmp_set.");
+        MOZ_CRASH("Invalid condition.");
     }
 }
 
@@ -1067,39 +1115,102 @@ void
 MacroAssemblerMIPSShared::ma_cmp_set_double(Register dest, FloatRegister lhs, FloatRegister rhs,
                                             DoubleCondition c)
 {
-    ma_li(dest, Imm32(0));
-    ma_li(ScratchRegister, Imm32(1));
-
     FloatTestKind moveCondition;
     compareFloatingPoint(DoubleFloat, lhs, rhs, c, &moveCondition);
 
+    ma_li(dest, Imm32(1));
+
     if (moveCondition == TestForTrue)
-        as_movt(dest, ScratchRegister);
+        as_movf(dest, zero);
     else
-        as_movf(dest, ScratchRegister);
+        as_movt(dest, zero);
 }
 
 void
 MacroAssemblerMIPSShared::ma_cmp_set_float32(Register dest, FloatRegister lhs, FloatRegister rhs,
                                              DoubleCondition c)
 {
-    ma_li(dest, Imm32(0));
-    ma_li(ScratchRegister, Imm32(1));
-
     FloatTestKind moveCondition;
     compareFloatingPoint(SingleFloat, lhs, rhs, c, &moveCondition);
 
+    ma_li(dest, Imm32(1));
+
     if (moveCondition == TestForTrue)
-        as_movt(dest, ScratchRegister);
+        as_movf(dest, zero);
     else
-        as_movf(dest, ScratchRegister);
+        as_movt(dest, zero);
 }
 
 void
 MacroAssemblerMIPSShared::ma_cmp_set(Register rd, Register rs, Imm32 imm, Condition c)
 {
-    ma_li(ScratchRegister, imm);
-    ma_cmp_set(rd, rs, ScratchRegister, c);
+    if (imm.value == 0) {
+        switch (c) {
+          case Equal :
+          case BelowOrEqual:
+            as_sltiu(rd, rs, 1);
+            break;
+          case NotEqual:
+          case Above:
+            as_sltu(rd, zero, rs);
+            break;
+          case AboveOrEqual:
+          case Below:
+            as_ori(rd, zero, c == AboveOrEqual ? 1: 0);
+            break;
+          case GreaterThan:
+          case LessThanOrEqual:
+            as_slt(rd, zero, rs);
+            if (c == LessThanOrEqual)
+                as_xori(rd, rd, 1);
+            break;
+          case LessThan:
+          case GreaterThanOrEqual:
+            as_slt(rd, rs, zero);
+            if (c == GreaterThanOrEqual)
+                as_xori(rd, rd, 1);
+            break;
+          case Zero:
+            as_sltiu(rd, rs, 1);
+            break;
+          case NonZero:
+            as_sltu(rd, zero, rs);
+            break;
+          case Signed:
+            as_slt(rd, rs, zero);
+            break;
+          case NotSigned:
+            as_slt(rd, rs, zero);
+            as_xori(rd, rd, 1);
+            break;
+          default:
+            MOZ_CRASH("Invalid condition.");
+        }
+        return;
+    }
+
+    switch (c) {
+      case Equal:
+      case NotEqual:
+        MOZ_ASSERT(rs != ScratchRegister);
+        ma_xor(rd, rs, imm);
+        if (c == Equal)
+            as_sltiu(rd, rd, 1);
+        else
+            as_sltu(rd, zero, rd);
+        break;
+      case Zero:
+      case NonZero:
+      case Signed:
+      case NotSigned:
+        MOZ_CRASH("Invalid condition.");
+      default:
+        Condition cond = ma_cmp(rd, rs, imm, c);
+        MOZ_ASSERT(cond == Equal || cond == NotEqual);
+
+        if(cond == Equal)
+            as_xori(rd, rd, 1);
+    }
 }
 
 // fp instructions
@@ -1108,16 +1219,12 @@ MacroAssemblerMIPSShared::ma_lis(FloatRegister dest, float value)
 {
     Imm32 imm(mozilla::BitwiseCast<uint32_t>(value));
 
-    ma_li(ScratchRegister, imm);
-    moveToFloat32(ScratchRegister, dest);
-}
-
-void
-MacroAssemblerMIPSShared::ma_liNegZero(FloatRegister dest)
-{
-    moveToDoubleLo(zero, dest);
-    ma_li(ScratchRegister, Imm32(INT_MIN));
-    asMasm().moveToDoubleHi(ScratchRegister, dest);
+    if(imm.value != 0) {
+        ma_li(ScratchRegister, imm);
+        moveToFloat32(ScratchRegister, dest);
+    } else {
+        moveToFloat32(zero, dest);
+    }
 }
 
 void
@@ -1170,6 +1277,20 @@ MacroAssemblerMIPSShared::ma_ss(FloatRegister ft, BaseIndex address)
 
     asMasm().computeScaledAddress(address, SecondScratchReg);
     asMasm().ma_ss(ft, Address(SecondScratchReg, address.offset));
+}
+
+void
+MacroAssemblerMIPSShared::ma_ld(FloatRegister ft, const BaseIndex& src)
+{
+    asMasm().computeScaledAddress(src, SecondScratchReg);
+    asMasm().ma_ld(ft, Address(SecondScratchReg, src.offset));
+}
+
+void
+MacroAssemblerMIPSShared::ma_ls(FloatRegister ft, const BaseIndex& src)
+{
+    asMasm().computeScaledAddress(src, SecondScratchReg);
+    asMasm().ma_ls(ft, Address(SecondScratchReg, src.offset));
 }
 
 void
@@ -1285,6 +1406,44 @@ MacroAssemblerMIPSShared::minMaxFloat32(FloatRegister srcDest, FloatRegister sec
 }
 
 void
+MacroAssemblerMIPSShared::loadDouble(const Address& address, FloatRegister dest)
+{
+    asMasm().ma_ld(dest, address);
+}
+
+void
+MacroAssemblerMIPSShared::loadDouble(const BaseIndex& src, FloatRegister dest)
+{
+    asMasm().ma_ld(dest, src);
+}
+
+void
+MacroAssemblerMIPSShared::loadFloatAsDouble(const Address& address, FloatRegister dest)
+{
+    asMasm().ma_ls(dest, address);
+    as_cvtds(dest, dest);
+}
+
+void
+MacroAssemblerMIPSShared::loadFloatAsDouble(const BaseIndex& src, FloatRegister dest)
+{
+    asMasm().loadFloat32(src, dest);
+    as_cvtds(dest, dest);
+}
+
+void
+MacroAssemblerMIPSShared::loadFloat32(const Address& address, FloatRegister dest)
+{
+    asMasm().ma_ls(dest, address);
+}
+
+void
+MacroAssemblerMIPSShared::loadFloat32(const BaseIndex& src, FloatRegister dest)
+{
+    asMasm().ma_ls(dest, src);
+}
+
+void
 MacroAssemblerMIPSShared::ma_call(ImmPtr dest)
 {
     asMasm().ma_liPatchable(CallReg, dest);
@@ -1365,7 +1524,7 @@ void
 MacroAssembler::Push(FloatRegister f)
 {
     ma_push(f);
-    adjustFrame(int32_t(sizeof(double)));
+    adjustFrame(int32_t(f.pushSize()));
 }
 
 void
@@ -1379,21 +1538,21 @@ void
 MacroAssembler::Pop(FloatRegister f)
 {
     ma_pop(f);
-    adjustFrame(-int32_t(sizeof(double)));
+    adjustFrame(-int32_t(f.pushSize()));
 }
 
 void
 MacroAssembler::Pop(const ValueOperand& val)
 {
     popValue(val);
-    framePushed_ -= sizeof(Value);
+    adjustFrame(-int32_t(sizeof(Value)));
 }
 
 void
 MacroAssembler::PopStackPtr()
 {
     loadPtr(Address(StackPointer, 0), StackPointer);
-    framePushed_ -= sizeof(intptr_t);
+    adjustFrame(-int32_t(sizeof(intptr_t)));
 }
 
 
@@ -1605,13 +1764,22 @@ MacroAssembler::pushFakeReturnAddress(Register scratch)
 {
     CodeLabel cl;
 
-    ma_li(scratch, cl.patchAt());
+    ma_li(scratch, &cl);
     Push(scratch);
-    bind(cl.target());
+    bind(&cl);
     uint32_t retAddr = currentOffset();
 
     addCodeLabel(cl);
     return retAddr;
+}
+
+void
+MacroAssembler::loadStoreBuffer(Register ptr, Register buffer)
+{
+    if (ptr != buffer)
+        movePtr(ptr, buffer);
+    orPtr(Imm32(gc::ChunkMask), buffer);
+    loadPtr(Address(buffer, gc::ChunkStoreBufferOffsetFromLastByte), buffer);
 }
 
 void
@@ -1652,7 +1820,7 @@ MacroAssembler::wasmTruncateDoubleToInt32(FloatRegister input, Register output, 
     as_truncwd(ScratchFloat32Reg, input);
     as_cfc1(ScratchRegister, Assembler::FCSR);
     moveFromFloat32(ScratchFloat32Reg, output);
-    ma_ext(ScratchRegister, ScratchRegister, 6, 1);
+    ma_ext(ScratchRegister, ScratchRegister, Assembler::CauseV, 1);
     ma_b(ScratchRegister, Imm32(0), oolEntry, Assembler::NotEqual);
 }
 
@@ -1664,113 +1832,198 @@ MacroAssembler::wasmTruncateFloat32ToInt32(FloatRegister input, Register output,
     as_truncws(ScratchFloat32Reg, input);
     as_cfc1(ScratchRegister, Assembler::FCSR);
     moveFromFloat32(ScratchFloat32Reg, output);
-    ma_ext(ScratchRegister, ScratchRegister, 6, 1);
+    ma_ext(ScratchRegister, ScratchRegister, Assembler::CauseV, 1);
     ma_b(ScratchRegister, Imm32(0), oolEntry, Assembler::NotEqual);
 }
 
 void
-MacroAssembler::oolWasmTruncateCheckF32ToI32(FloatRegister input, Register, TruncFlags flags,
-                                             wasm::BytecodeOffset off, Label* rejoin)
+MacroAssembler::oolWasmTruncateCheckF32ToI32(FloatRegister input, Register output,
+                                             TruncFlags flags, wasm::BytecodeOffset off,
+                                             Label* rejoin)
 {
-    outOfLineWasmTruncateToIntCheck(input, MIRType::Float32, MIRType::Int32, flags & TRUNC_UNSIGNED,
-                                    rejoin, off);
+    outOfLineWasmTruncateToInt32Check(input, output, MIRType::Float32, flags, rejoin, off);
 }
 
 void
-MacroAssembler::oolWasmTruncateCheckF64ToI32(FloatRegister input, Register, TruncFlags flags,
-                                             wasm::BytecodeOffset off, Label* rejoin)
+MacroAssembler::oolWasmTruncateCheckF64ToI32(FloatRegister input, Register output,
+                                             TruncFlags flags, wasm::BytecodeOffset off,
+                                             Label* rejoin)
 {
-    outOfLineWasmTruncateToIntCheck(input, MIRType::Double, MIRType::Int32, flags & TRUNC_UNSIGNED,
-                                    rejoin, off);
+    outOfLineWasmTruncateToInt32Check(input, output, MIRType::Double, flags, rejoin, off);
 }
 
 void
-MacroAssembler::oolWasmTruncateCheckF32ToI64(FloatRegister input, Register64, TruncFlags flags,
-                                             wasm::BytecodeOffset off, Label* rejoin)
+MacroAssembler::oolWasmTruncateCheckF32ToI64(FloatRegister input, Register64 output,
+                                             TruncFlags flags, wasm::BytecodeOffset off,
+                                             Label* rejoin)
 {
-    outOfLineWasmTruncateToIntCheck(input, MIRType::Float32, MIRType::Int64, flags & TRUNC_UNSIGNED,
-                                    rejoin, off);
+    outOfLineWasmTruncateToInt64Check(input, output, MIRType::Float32, flags, rejoin, off);
 }
 
 void
-MacroAssembler::oolWasmTruncateCheckF64ToI64(FloatRegister input, Register64, TruncFlags flags,
-                                             wasm::BytecodeOffset off, Label* rejoin)
+MacroAssembler::oolWasmTruncateCheckF64ToI64(FloatRegister input, Register64 output,
+                                             TruncFlags flags, wasm::BytecodeOffset off,
+                                             Label* rejoin)
 {
-    outOfLineWasmTruncateToIntCheck(input, MIRType::Double, MIRType::Int64, flags & TRUNC_UNSIGNED,
-                                    rejoin, off);
+    outOfLineWasmTruncateToInt64Check(input, output, MIRType::Double, flags, rejoin, off);
 }
 
 void
-MacroAssemblerMIPSShared::outOfLineWasmTruncateToIntCheck(FloatRegister input, MIRType fromType,
-                                                          MIRType toType, bool isUnsigned,
-                                                          Label* rejoin,
-                                                          wasm::BytecodeOffset trapOffset)
+MacroAssemblerMIPSShared::outOfLineWasmTruncateToInt32Check(FloatRegister input, Register output,
+                                                            MIRType fromType, TruncFlags flags,
+                                                            Label* rejoin,
+                                                            wasm::BytecodeOffset trapOffset)
 {
-    // Eagerly take care of NaNs.
+    bool isUnsigned = flags & TRUNC_UNSIGNED;
+    bool isSaturating = flags & TRUNC_SATURATING;
+
+    if(isSaturating) {
+
+        if(fromType == MIRType::Double)
+            asMasm().loadConstantDouble(0.0, ScratchDoubleReg);
+        else
+            asMasm().loadConstantFloat32(0.0f, ScratchFloat32Reg);
+
+        if(isUnsigned) {
+
+            ma_li(output, Imm32(UINT32_MAX));
+
+            FloatTestKind moveCondition;
+            compareFloatingPoint(fromType == MIRType::Double ? DoubleFloat : SingleFloat,
+                                 input,
+                                 fromType == MIRType::Double ? ScratchDoubleReg : ScratchFloat32Reg,
+                                 Assembler::DoubleLessThanOrUnordered, &moveCondition);
+            MOZ_ASSERT(moveCondition == TestForTrue);
+
+            as_movt(output, zero);
+        } else {
+
+            // Positive overflow is already saturated to INT32_MAX, so we only have
+            // to handle NaN and negative overflow here.
+
+            FloatTestKind moveCondition;
+            compareFloatingPoint(fromType == MIRType::Double ? DoubleFloat : SingleFloat,
+                                 input,
+                                 input,
+                                 Assembler::DoubleUnordered, &moveCondition);
+            MOZ_ASSERT(moveCondition == TestForTrue);
+
+            as_movt(output, zero);
+
+            compareFloatingPoint(fromType == MIRType::Double ? DoubleFloat : SingleFloat,
+                                 input,
+                                 fromType == MIRType::Double ? ScratchDoubleReg : ScratchFloat32Reg,
+                                 Assembler::DoubleLessThan, &moveCondition);
+            MOZ_ASSERT(moveCondition == TestForTrue);
+
+            ma_li(ScratchRegister, Imm32(INT32_MIN));
+            as_movt(output, ScratchRegister);
+        }
+
+        MOZ_ASSERT(rejoin->bound());
+        asMasm().jump(rejoin);
+        return;
+    }
+
     Label inputIsNaN;
+
     if (fromType == MIRType::Double)
         asMasm().branchDouble(Assembler::DoubleUnordered, input, input, &inputIsNaN);
     else if (fromType == MIRType::Float32)
         asMasm().branchFloat(Assembler::DoubleUnordered, input, input, &inputIsNaN);
-    else
-        MOZ_CRASH("unexpected type in visitOutOfLineWasmTruncateCheck");
 
-    // By default test for the following inputs and bail:
-    // signed:   ] -Inf, INTXX_MIN - 1.0 ] and [ INTXX_MAX + 1.0 : +Inf [
-    // unsigned: ] -Inf, -1.0 ] and [ UINTXX_MAX + 1.0 : +Inf [
-    // Note: we cannot always represent those exact values. As a result
-    // this changes the actual comparison a bit.
-    double minValue, maxValue;
-    Assembler::DoubleCondition minCond = Assembler::DoubleLessThanOrEqual;
-    Assembler::DoubleCondition maxCond = Assembler::DoubleGreaterThanOrEqual;
-    if (toType == MIRType::Int64) {
-        if (isUnsigned) {
-            minValue = -1;
-            maxValue = double(UINT64_MAX) + 1.0;
+    asMasm().wasmTrap(wasm::Trap::IntegerOverflow, trapOffset);
+    asMasm().bind(&inputIsNaN);
+    asMasm().wasmTrap(wasm::Trap::InvalidConversionToInteger, trapOffset);
+}
+
+void
+MacroAssemblerMIPSShared::outOfLineWasmTruncateToInt64Check(FloatRegister input, Register64 output_,
+                                                            MIRType fromType, TruncFlags flags,
+                                                            Label* rejoin,
+                                                            wasm::BytecodeOffset trapOffset)
+{
+    bool isUnsigned = flags & TRUNC_UNSIGNED;
+    bool isSaturating = flags & TRUNC_SATURATING;
+
+
+    if(isSaturating) {
+#if defined(JS_CODEGEN_MIPS32)
+        // Saturating callouts don't use ool path.
+        return;
+#else
+        Register output = output_.reg;
+
+        if(fromType == MIRType::Double)
+            asMasm().loadConstantDouble(0.0, ScratchDoubleReg);
+        else
+            asMasm().loadConstantFloat32(0.0f, ScratchFloat32Reg);
+
+        if(isUnsigned) {
+
+            asMasm().ma_li(output, ImmWord(UINT64_MAX));
+
+            FloatTestKind moveCondition;
+            compareFloatingPoint(fromType == MIRType::Double ? DoubleFloat : SingleFloat,
+                                 input,
+                                 fromType == MIRType::Double ? ScratchDoubleReg : ScratchFloat32Reg,
+                                 Assembler::DoubleLessThanOrUnordered, &moveCondition);
+            MOZ_ASSERT(moveCondition == TestForTrue);
+
+            as_movt(output, zero);
         } else {
-            // In the float32/double range there exists no value between
-            // INT64_MIN and INT64_MIN - 1.0. Making INT64_MIN the lower-bound.
-            minValue = double(INT64_MIN);
-            minCond = Assembler::DoubleLessThan;
-            maxValue = double(INT64_MAX) + 1.0;
+
+            // Positive overflow is already saturated to INT64_MAX, so we only have
+            // to handle NaN and negative overflow here.
+
+            FloatTestKind moveCondition;
+            compareFloatingPoint(fromType == MIRType::Double ? DoubleFloat : SingleFloat,
+                                 input,
+                                 input,
+                                 Assembler::DoubleUnordered, &moveCondition);
+            MOZ_ASSERT(moveCondition == TestForTrue);
+
+            as_movt(output, zero);
+
+            compareFloatingPoint(fromType == MIRType::Double ? DoubleFloat : SingleFloat,
+                                 input,
+                                 fromType == MIRType::Double ? ScratchDoubleReg : ScratchFloat32Reg,
+                                 Assembler::DoubleLessThan, &moveCondition);
+            MOZ_ASSERT(moveCondition == TestForTrue);
+
+            asMasm().ma_li(ScratchRegister, ImmWord(INT64_MIN));
+            as_movt(output, ScratchRegister);
         }
-    } else {
-        if (isUnsigned) {
-            minValue = -1;
-            maxValue = double(UINT32_MAX) + 1.0;
-        } else {
-            if (fromType == MIRType::Float32) {
-                // In the float32 range there exists no value between
-                // INT32_MIN and INT32_MIN - 1.0. Making INT32_MIN the lower-bound.
-                minValue = double(INT32_MIN);
-                minCond = Assembler::DoubleLessThan;
-            } else {
-                minValue = double(INT32_MIN) - 1.0;
-            }
-            maxValue = double(INT32_MAX) + 1.0;
-        }
+
+        MOZ_ASSERT(rejoin->bound());
+        asMasm().jump(rejoin);
+        return;
+#endif
+
     }
 
-    Label fail;
+    Label inputIsNaN;
+
+    if (fromType == MIRType::Double)
+        asMasm().branchDouble(Assembler::DoubleUnordered, input, input, &inputIsNaN);
+    else if (fromType == MIRType::Float32)
+        asMasm().branchFloat(Assembler::DoubleUnordered, input, input, &inputIsNaN);
+
+#if defined(JS_CODEGEN_MIPS32)
+
+    // Only possible valid input that produces INT64_MIN result.
+    double validInput = isUnsigned ? double(uint64_t(INT64_MIN)) : double(int64_t(INT64_MIN));
 
     if (fromType == MIRType::Double) {
-        asMasm().loadConstantDouble(minValue, ScratchDoubleReg);
-        asMasm().branchDouble(minCond, input, ScratchDoubleReg, &fail);
-
-        asMasm().loadConstantDouble(maxValue, ScratchDoubleReg);
-        asMasm().branchDouble(maxCond, input, ScratchDoubleReg, &fail);
+        asMasm().loadConstantDouble(validInput, ScratchDoubleReg);
+        asMasm().branchDouble(Assembler::DoubleEqual, input, ScratchDoubleReg, rejoin);
     } else {
-        asMasm().loadConstantFloat32(float(minValue), ScratchFloat32Reg);
-        asMasm().branchFloat(minCond, input, ScratchFloat32Reg, &fail);
-
-        asMasm().loadConstantFloat32(float(maxValue), ScratchFloat32Reg);
-        asMasm().branchFloat(maxCond, input, ScratchFloat32Reg, &fail);
+        asMasm().loadConstantFloat32(float(validInput), ScratchFloat32Reg);
+        asMasm().branchFloat(Assembler::DoubleEqual, input, ScratchDoubleReg, rejoin);
     }
 
-    asMasm().jump(rejoin);
+#endif
 
-    // Handle errors.
-    asMasm().bind(&fail);
     asMasm().wasmTrap(wasm::Trap::IntegerOverflow, trapOffset);
     asMasm().bind(&inputIsNaN);
     asMasm().wasmTrap(wasm::Trap::InvalidConversionToInteger, trapOffset);
@@ -1872,12 +2125,10 @@ MacroAssemblerMIPSShared::wasmLoadImpl(const wasm::MemoryAccessDesc& access, Reg
 
     asMasm().memoryBarrierBefore(access.sync());
     if (isFloat) {
-        if (byteSize == 4) {
-            asMasm().loadFloat32(address, output.fpu());
-        } else {
-            asMasm().computeScaledAddress(address, SecondScratchReg);
-            asMasm().as_ld(output.fpu(), SecondScratchReg, 0);
-        }
+        if (byteSize == 4)
+            asMasm().ma_ls(output.fpu(), address);
+         else
+            asMasm().ma_ld(output.fpu(), address);
     } else {
         asMasm().ma_load(output.gpr(), address, static_cast<LoadStoreSize>(8 * byteSize),
                          isSigned ? SignExtend : ZeroExtend);
@@ -1936,15 +2187,10 @@ MacroAssemblerMIPSShared::wasmStoreImpl(const wasm::MemoryAccessDesc& access, An
 
     asMasm().memoryBarrierBefore(access.sync());
     if (isFloat) {
-        if (byteSize == 4) {
-            asMasm().storeFloat32(value.fpu(), address);
-        } else {
-            //asMasm().storeDouble(value.fpu(), address);
-            // For time being storeDouble for mips32 uses two store instructions,
-            // so we emit only one to get correct behavior in case of OOB access.
-            asMasm().computeScaledAddress(address, SecondScratchReg);
-            asMasm().as_sd(value.fpu(), SecondScratchReg, 0);
-        }
+        if (byteSize == 4)
+            asMasm().ma_ss(value.fpu(), address);
+        else
+            asMasm().ma_sd(value.fpu(), address);
     } else {
         asMasm().ma_store(value.gpr(), address,
                       static_cast<LoadStoreSize>(8 * byteSize),

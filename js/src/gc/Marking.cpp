@@ -13,7 +13,6 @@
 #include "mozilla/TypeTraits.h"
 
 #include "jsfriendapi.h"
-#include "jsprf.h"
 
 #include "builtin/ModuleObject.h"
 #include "gc/GCInternals.h"
@@ -353,7 +352,7 @@ static void
 AssertShouldMarkInZone(JSString* str)
 {
 #ifdef DEBUG
-    Zone* zone = str->asTenured().zone();
+    Zone* zone = str->zone();
     MOZ_ASSERT(zone->shouldMarkInZone() || zone->isAtomsZone());
 #endif
 }
@@ -1006,10 +1005,13 @@ bool
 js::GCMarker::mark(T* thing)
 {
     AssertShouldMarkInZone(thing);
-    MOZ_ASSERT(!IsInsideNursery(TenuredCell::fromPointer(thing)));
-    return ParticipatesInCC<T>::value
-           ? TenuredCell::fromPointer(thing)->markIfUnmarked(markColor())
-           : TenuredCell::fromPointer(thing)->markIfUnmarked(MarkColor::Black);
+    TenuredCell* cell = TenuredCell::fromPointer(thing);
+    MOZ_ASSERT(!IsInsideNursery(cell));
+
+    if (!ParticipatesInCC<T>::value)
+        return cell->markIfUnmarked(MarkColor::Black);
+
+    return cell->markIfUnmarked(markColor());
 }
 
 
@@ -2478,7 +2480,7 @@ GCMarker::reset()
         unmarkedArenaStackTop = arena->getNextDelayedMarking();
         arena->unsetDelayedMarking();
         arena->markOverflow = 0;
-        arena->allocatedDuringIncremental = 0;
+
 #ifdef DEBUG
         markLaterArenas--;
 #endif
@@ -2557,27 +2559,16 @@ GCMarker::leaveWeakMarkingMode()
 void
 GCMarker::markDelayedChildren(Arena* arena)
 {
-    if (arena->markOverflow) {
-        bool always = arena->allocatedDuringIncremental;
-        arena->markOverflow = 0;
+    MOZ_ASSERT(arena->markOverflow);
+    arena->markOverflow = 0;
 
-        for (ArenaCellIterUnderGC i(arena); !i.done(); i.next()) {
-            TenuredCell* t = i.getCell();
-            if (always || t->isMarkedAny()) {
-                t->markIfUnmarked();
-                js::TraceChildren(this, t, MapAllocToTraceKind(arena->getAllocKind()));
-            }
+    for (ArenaCellIterUnderGC i(arena); !i.done(); i.next()) {
+        TenuredCell* t = i.getCell();
+        if (t->isMarkedAny()) {
+            t->markIfUnmarked();
+            js::TraceChildren(this, t, MapAllocToTraceKind(arena->getAllocKind()));
         }
-    } else {
-        MOZ_ASSERT(arena->allocatedDuringIncremental);
-        PushArena(this, arena);
     }
-    arena->allocatedDuringIncremental = 0;
-    /*
-     * Note that during an incremental GC we may still be allocating into
-     * the arena. However, prepareForIncrementalGC sets the
-     * allocatedDuringIncremental flag if we continue marking.
-     */
 }
 
 bool
@@ -2786,18 +2777,21 @@ js::gc::StoreBuffer::SlotsEdge::trace(TenuringTracer& mover) const
         return;
 
     if (kind() == ElementKind) {
-        int32_t initLen = obj->getDenseInitializedLength();
-        int32_t numShifted = obj->getElementsHeader()->numShiftedElements();
-        int32_t clampedStart = Min(Max(0, start_ - numShifted), initLen);
-        int32_t clampedEnd = Min(Max(0, start_ + count_ - numShifted), initLen);
-        MOZ_ASSERT(clampedStart >= 0);
+        uint32_t initLen = obj->getDenseInitializedLength();
+        uint32_t numShifted = obj->getElementsHeader()->numShiftedElements();
+        uint32_t clampedStart = start_;
+        clampedStart = numShifted < clampedStart ? clampedStart - numShifted : 0;
+        clampedStart = Min(clampedStart, initLen);
+        uint32_t clampedEnd = start_ + count_;
+        clampedEnd = numShifted < clampedEnd ? clampedEnd - numShifted : 0;
+        clampedEnd = Min(clampedEnd, initLen);
         MOZ_ASSERT(clampedStart <= clampedEnd);
         mover.traceSlots(static_cast<HeapSlot*>(obj->getDenseElements() + clampedStart)
                             ->unsafeUnbarrieredForTracing(), clampedEnd - clampedStart);
     } else {
-        int32_t start = Min(uint32_t(start_), obj->slotSpan());
-        int32_t end = Min(uint32_t(start_) + count_, obj->slotSpan());
-        MOZ_ASSERT(end >= start);
+        uint32_t start = Min(start_, obj->slotSpan());
+        uint32_t end = Min(start_ + count_, obj->slotSpan());
+        MOZ_ASSERT(start <= end);
         mover.traceObjectSlots(obj, start, end - start);
     }
 }
@@ -3058,7 +3052,7 @@ js::TenuringTracer::moveToTenuredSlow(JSObject* src)
     if (src->isNative()) {
         NativeObject* ndst = &dst->as<NativeObject>();
         NativeObject* nsrc = &src->as<NativeObject>();
-        tenuredSize += moveSlotsToTenured(ndst, nsrc, dstKind);
+        tenuredSize += moveSlotsToTenured(ndst, nsrc);
         tenuredSize += moveElementsToTenured(ndst, nsrc, dstKind);
 
         // There is a pointer into a dictionary mode object from the head of its
@@ -3103,7 +3097,7 @@ js::TenuringTracer::movePlainObjectToTenured(PlainObject* src)
     js_memcpy(dst, src, srcSize);
 
     // Move the slots and elements.
-    tenuredSize += moveSlotsToTenured(dst, src, dstKind);
+    tenuredSize += moveSlotsToTenured(dst, src);
     tenuredSize += moveElementsToTenured(dst, src, dstKind);
 
     MOZ_ASSERT(!dst->getClass()->extObjectMovedOp());
@@ -3117,7 +3111,7 @@ js::TenuringTracer::movePlainObjectToTenured(PlainObject* src)
 }
 
 size_t
-js::TenuringTracer::moveSlotsToTenured(NativeObject* dst, NativeObject* src, AllocKind dstKind)
+js::TenuringTracer::moveSlotsToTenured(NativeObject* dst, NativeObject* src)
 {
     /* Fixed slots have already been copied over. */
     if (!src->hasDynamicSlots())
@@ -3209,6 +3203,7 @@ js::TenuringTracer::moveToTenured(JSString* src)
 
     AllocKind dstKind = src->getAllocKind();
     Zone* zone = src->zone();
+    zone->tenuredStrings++;
 
     TenuredCell* t = zone->arenas.allocateFromFreeList(dstKind, Arena::thingSize(dstKind));
     if (!t) {
@@ -3312,7 +3307,7 @@ IsMarkedInternalCommon(T* thingp)
         return true;
     }
 
-    return thing.isMarkedAny() || thing.arena()->allocatedDuringIncremental;
+    return thing.isMarkedAny();
 }
 
 template <typename T>
@@ -3362,8 +3357,6 @@ js::gc::IsAboutToBeFinalizedDuringSweep(TenuredCell& tenured)
 {
     MOZ_ASSERT(!IsInsideNursery(&tenured));
     MOZ_ASSERT(tenured.zoneFromAnyThread()->isGCSweeping());
-    if (tenured.arena()->allocatedDuringIncremental)
-        return false;
     return !tenured.isMarkedAny();
 }
 

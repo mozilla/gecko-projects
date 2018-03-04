@@ -10,8 +10,8 @@
 #include <algorithm>
 #include <stdint.h>
 
-#include "jsbytecode.h"
 #include "jstypes.h"
+
 #include "js/TypeDecls.h"
 #include "js/Utility.h"
 
@@ -299,7 +299,7 @@ RegisterContextProfilingEventMarker(JSContext* cx, void (*fn)(const char*));
 // - When popping an old entry, the only operation is the decrementing of the
 //   stack pointer, which is obviously atomic.
 //
-class PseudoStack
+class PseudoStack final
 {
   public:
     PseudoStack()

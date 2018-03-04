@@ -4,13 +4,10 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["SessionStorage"];
+var EXPORTED_SYMBOLS = ["SessionStorage"];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-
-ChromeUtils.defineModuleGetter(this, "console",
-  "resource://gre/modules/Console.jsm");
 
 const ssu = Cc["@mozilla.org/browser/sessionstore/utils;1"]
               .createInstance(Ci.nsISessionStoreUtils);
@@ -25,7 +22,7 @@ function getPrincipalForFrame(docShell, frame) {
   return ssm.getDocShellCodebasePrincipal(uri, docShell);
 }
 
-this.SessionStorage = Object.freeze({
+var SessionStorage = Object.freeze({
   /**
    * Updates all sessionStorage "super cookies"
    * @param content

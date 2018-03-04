@@ -1,7 +1,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["MockRegistry"];
+var EXPORTED_SYMBOLS = ["MockRegistry"];
 
 ChromeUtils.import("resource://testing-common/MockRegistrar.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -50,7 +50,7 @@ class MockRegistry {
 
       get valueCount() {
         if (!this.values)
-          throw Components.results.NS_ERROR_FAILURE;
+          throw Cr.NS_ERROR_FAILURE;
         return this.values.size;
       },
 
@@ -67,7 +67,7 @@ class MockRegistry {
 
       getValueName(index) {
         if (!this.values || index >= this.values.size)
-          throw Components.results.NS_ERROR_FAILURE;
+          throw Cr.NS_ERROR_FAILURE;
         let names = Array.from(this.values.keys());
         return names[index];
       },

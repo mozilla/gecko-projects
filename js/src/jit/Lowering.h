@@ -216,7 +216,6 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitStoreSlot(MStoreSlot* ins) override;
     void visitFilterTypeSet(MFilterTypeSet* ins) override;
     void visitTypeBarrier(MTypeBarrier* ins) override;
-    void visitMonitorTypes(MMonitorTypes* ins) override;
     void visitPostWriteBarrier(MPostWriteBarrier* ins) override;
     void visitPostWriteElementBarrier(MPostWriteElementBarrier* ins) override;
     void visitArrayLength(MArrayLength* ins) override;
@@ -265,6 +264,8 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitBindNameCache(MBindNameCache* ins) override;
     void visitCallBindVar(MCallBindVar* ins) override;
     void visitGuardObjectIdentity(MGuardObjectIdentity* ins) override;
+    void visitGuardShape(MGuardShape* ins) override;
+    void visitGuardObjectGroup(MGuardObjectGroup* ins) override;
     void visitGuardClass(MGuardClass* ins) override;
     void visitGuardObject(MGuardObject* ins) override;
     void visitGuardString(MGuardString* ins) override;

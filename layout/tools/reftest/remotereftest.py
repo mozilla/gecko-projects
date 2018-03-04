@@ -143,12 +143,12 @@ class ReftestServer:
 
 class RemoteReftest(RefTest):
     use_marionette = False
-    parse_manifest = False
     remoteApp = ''
     resolver_cls = RemoteReftestResolver
 
     def __init__(self, automation, devicemanager, options, scriptDir):
-        RefTest.__init__(self)
+        RefTest.__init__(self, options.suite)
+        self.run_by_manifest = False
         self.automation = automation
         self._devicemanager = devicemanager
         self.scriptDir = scriptDir
@@ -202,8 +202,7 @@ class RemoteReftest(RefTest):
             localAutomation.BIN_SUFFIX = ".exe"
             localAutomation.IS_WIN32 = True
 
-        paths = [options.xrePath, localAutomation.DIST_BIN, self.automation._product,
-                 os.path.join('..', self.automation._product)]
+        paths = [options.xrePath, localAutomation.DIST_BIN]
         options.xrePath = self.findPath(paths)
         if options.xrePath is None:
             print ("ERROR: unable to find xulrunner path for %s, "
@@ -260,17 +259,13 @@ class RemoteReftest(RefTest):
                 # may not be able to access process info for all processes
                 continue
 
-    def createReftestProfile(self, options, startAfter=None, **kwargs):
+    def createReftestProfile(self, options, **kwargs):
         profile = RefTest.createReftestProfile(self,
                                                options,
                                                server=options.remoteWebServer,
                                                port=options.httpPort,
                                                **kwargs)
-        if startAfter is not None:
-            print ("WARNING: Continuing after a crash is not supported for remote "
-                   "reftest yet.")
         profileDir = profile.profile
-
         prefs = {}
         prefs["app.update.url.android"] = ""
         prefs["browser.firstrun.show.localepicker"] = False
@@ -283,11 +278,6 @@ class RemoteReftest(RefTest):
         # Because Fennec is a little wacky (see bug 1156817) we need to load the
         # reftest pages at 1.0 zoom, rather than zooming to fit the CSS viewport.
         prefs["apz.allow_zooming"] = False
-
-        if options.totalChunks:
-            prefs['reftest.totalChunks'] = options.totalChunks
-        if options.thisChunk:
-            prefs['reftest.thisChunk'] = options.thisChunk
 
         # Set the extra prefs.
         profile.set_preferences(prefs)
@@ -354,21 +344,18 @@ class RemoteReftest(RefTest):
         env = self.buildBrowserEnv(options, profile.profile)
 
         self.log.info("Running with e10s: {}".format(options.e10s))
-        status, lastTestSeen = self.automation.runApp(None, env,
-                                                      binary,
-                                                      profile.profile,
-                                                      cmdargs,
-                                                      utilityPath=options.utilityPath,
-                                                      xrePath=options.xrePath,
-                                                      debuggerInfo=debuggerInfo,
-                                                      symbolsPath=symbolsPath,
-                                                      timeout=timeout)
-        if status == 1:
-            # when max run time exceeded, avoid restart
-            lastTestSeen = RefTest.TEST_SEEN_FINAL
+        status, self.lastTestSeen = self.automation.runApp(None, env,
+                                                           binary,
+                                                           profile.profile,
+                                                           cmdargs,
+                                                           utilityPath=options.utilityPath,
+                                                           xrePath=options.xrePath,
+                                                           debuggerInfo=debuggerInfo,
+                                                           symbolsPath=symbolsPath,
+                                                           timeout=timeout)
 
         self.cleanup(profile.profile)
-        return status, lastTestSeen, self.outputHandler.results
+        return status
 
     def cleanup(self, profileDir):
         # Pull results back from device
@@ -414,9 +401,6 @@ def run_test_harness(parser, options):
 
     automation = RemoteAutomation(None)
     automation.setDeviceManager(dm)
-
-    if options.remoteProductName:
-        automation.setProduct(options.remoteProductName)
 
     # Set up the defaults and ensure options are set
     parser.validate_remote(options, automation)

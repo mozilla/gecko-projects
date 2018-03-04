@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-this.EXPORTED_SYMBOLS = ["PopupNotifications"];
+var EXPORTED_SYMBOLS = ["PopupNotifications"];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
@@ -24,7 +24,7 @@ const PREF_SECURITY_DELAY = "security.notification_enable_delay";
 const TELEMETRY_STAT_OFFERED = 0;
 const TELEMETRY_STAT_ACTION_1 = 1;
 const TELEMETRY_STAT_ACTION_2 = 2;
-const TELEMETRY_STAT_ACTION_3 = 3;
+// const TELEMETRY_STAT_ACTION_3 = 3;
 const TELEMETRY_STAT_ACTION_LAST = 4;
 const TELEMETRY_STAT_DISMISSAL_CLICK_ELSEWHERE = 5;
 const TELEMETRY_STAT_DISMISSAL_LEAVE_PAGE = 6;
@@ -188,7 +188,7 @@ Notification.prototype = {
  * The PopupNotifications object manages popup notifications for a given browser
  * window.
  * @param tabbrowser
- *        window's <xul:tabbrowser/>. Used to observe tab switching events and
+ *        window's TabBrowser. Used to observe tab switching events and
  *        for determining the active browser element.
  * @param panel
  *        The <xul:panel/> element to use for notifications. The panel is
@@ -209,9 +209,9 @@ Notification.prototype = {
  *            and when the "anchorVisibilityChange" method is called.
  *        }
  */
-this.PopupNotifications = function PopupNotifications(tabbrowser, panel,
+function PopupNotifications(tabbrowser, panel,
                                                       iconBox, options = {}) {
-  if (!(tabbrowser instanceof Ci.nsIDOMXULElement))
+  if (!tabbrowser)
     throw "Invalid tabbrowser";
   if (iconBox && !(iconBox instanceof Ci.nsIDOMXULElement))
     throw "Invalid iconBox";
@@ -277,7 +277,7 @@ this.PopupNotifications = function PopupNotifications(tabbrowser, panel,
   this.window.addEventListener("activate", this, true);
   if (this.tabbrowser.tabContainer)
     this.tabbrowser.tabContainer.addEventListener("TabSelect", this, true);
-};
+}
 
 PopupNotifications.prototype = {
 

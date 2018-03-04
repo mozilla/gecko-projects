@@ -58,7 +58,7 @@ using Generation = mozilla::Opaque<uint64_t>;
 // HashPolicy requirements:
 //  - see Hash Policy section below
 // AllocPolicy:
-//  - see jsalloc.h
+//  - see AllocPolicy.h
 // RecordingBehavior:
 //  - Whether to preserve iteration order while recording/replaying executions.
 //
@@ -324,7 +324,7 @@ class HashMap
 // HashPolicy requirements:
 //  - see Hash Policy section below
 // AllocPolicy:
-//  - see jsalloc.h
+//  - see AllocPolicy.h
 // RecordingBehavior:
 //  - Whether to preserve iteration order while recording/replaying executions.
 //

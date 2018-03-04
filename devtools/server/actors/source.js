@@ -212,6 +212,13 @@ let SourceActor = ActorClassWithSpec(sourceSpec, {
     return this.threadActor.prettyPrintWorker;
   },
 
+  get isCacheEnabled() {
+    if (this.threadActor._parent._getCacheDisabled) {
+      return !this.threadActor._parent._getCacheDisabled();
+    }
+    return true;
+  },
+
   form: function () {
     let source = this.source || this.generatedSource;
     // This might not have a source or a generatedSource because we
@@ -384,7 +391,10 @@ let SourceActor = ActorClassWithSpec(sourceSpec, {
       // fetching the original text for sourcemapped code, and the
       // page hasn't requested it before (if it has, it was a
       // previous debugging session).
-      let loadFromCache = this.isInlineSource;
+      // Additionally, we should only try the cache if it is currently enabled
+      // for the document.  Without this check, the cache may return stale data
+      // that doesn't match the document shown in the browser.
+      let loadFromCache = this.isInlineSource && this.isCacheEnabled;
 
       // Fetch the sources with the same principal as the original document
       let win = this.threadActor._parent.window;
@@ -936,14 +946,20 @@ let SourceActor = ActorClassWithSpec(sourceSpec, {
         }
       }
 
-      // If we don't find any matching entrypoints, then
-      // we should check to see if the breakpoint is to the left of the first offset.
+      // If we don't find any matching entrypoints,
+      // then we should see if the breakpoint comes before or after the column offsets.
       if (entryPoints.length === 0) {
         for (let [script, columnToOffsetMap] of columnToOffsetMaps) {
           if (columnToOffsetMap.length > 0) {
-            let { columnNumber: column, offset } = columnToOffsetMap[0];
-            if (generatedColumn < column) {
-              entryPoints.push({ script, offsets: [offset] });
+            const firstColumnOffset = columnToOffsetMap[0];
+            const lastColumnOffset = columnToOffsetMap[columnToOffsetMap.length - 1];
+
+            if (generatedColumn < firstColumnOffset.columnNumber) {
+              entryPoints.push({ script, offsets: [firstColumnOffset.offset] });
+            }
+
+            if (generatedColumn > lastColumnOffset.columnNumber) {
+              entryPoints.push({ script, offsets: [lastColumnOffset.offset] });
             }
           }
         }

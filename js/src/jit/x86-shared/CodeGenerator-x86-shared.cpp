@@ -577,7 +577,7 @@ CodeGeneratorX86Shared::bailoutIf(Assembler::DoubleCondition condition, LSnapsho
 void
 CodeGeneratorX86Shared::bailoutFrom(Label* label, LSnapshot* snapshot)
 {
-    MOZ_ASSERT(label->used() && !label->bound());
+    MOZ_ASSERT_IF(!masm.oom(), label->used() && !label->bound());
     bailout(BailoutLabel(label), snapshot);
 }
 
@@ -1847,7 +1847,7 @@ CodeGeneratorX86Shared::visitOutOfLineTableSwitch(OutOfLineTableSwitch* ool)
     MTableSwitch* mir = ool->mir();
 
     masm.haltingAlign(sizeof(void*));
-    masm.use(ool->jumpLabel()->target());
+    masm.bind(ool->jumpLabel());
     masm.addCodeLabel(*ool->jumpLabel());
 
     for (size_t i = 0; i < mir->numCases(); i++) {
@@ -1858,7 +1858,7 @@ CodeGeneratorX86Shared::visitOutOfLineTableSwitch(OutOfLineTableSwitch* ool)
         // The entries of the jump table need to be absolute addresses and thus
         // must be patched after codegen is finished.
         CodeLabel cl;
-        masm.writeCodePointer(cl.patchAt());
+        masm.writeCodePointer(&cl);
         cl.target()->bind(caseoffset);
         masm.addCodeLabel(cl);
     }
@@ -1885,7 +1885,7 @@ CodeGeneratorX86Shared::emitTableSwitchDispatch(MTableSwitch* mir, Register inde
     addOutOfLineCode(ool, mir);
 
     // Compute the position where a pointer to the right case stands.
-    masm.mov(ool->jumpLabel()->patchAt(), base);
+    masm.mov(ool->jumpLabel(), base);
     BaseIndex pointer(base, index, ScalePointer);
 
     // Jump to the right case
@@ -2370,38 +2370,6 @@ CodeGeneratorX86Shared::visitNearbyIntF(LNearbyIntF* lir)
 
     RoundingMode roundingMode = lir->mir()->roundingMode();
     masm.vroundss(Assembler::ToX86RoundingMode(roundingMode), input, output, output);
-}
-
-void
-CodeGeneratorX86Shared::visitGuardShape(LGuardShape* guard)
-{
-    Register obj = ToRegister(guard->input());
-    masm.cmpPtr(Operand(obj, ShapedObject::offsetOfShape()), ImmGCPtr(guard->mir()->shape()));
-
-    bailoutIf(Assembler::NotEqual, guard->snapshot());
-}
-
-void
-CodeGeneratorX86Shared::visitGuardObjectGroup(LGuardObjectGroup* guard)
-{
-    Register obj = ToRegister(guard->input());
-
-    masm.cmpPtr(Operand(obj, JSObject::offsetOfGroup()), ImmGCPtr(guard->mir()->group()));
-
-    Assembler::Condition cond =
-        guard->mir()->bailOnEquality() ? Assembler::Equal : Assembler::NotEqual;
-    bailoutIf(cond, guard->snapshot());
-}
-
-void
-CodeGeneratorX86Shared::visitGuardClass(LGuardClass* guard)
-{
-    Register obj = ToRegister(guard->input());
-    Register tmp = ToRegister(guard->tempInt());
-
-    masm.loadPtr(Address(obj, JSObject::offsetOfGroup()), tmp);
-    masm.cmpPtr(Operand(tmp, ObjectGroup::offsetOfClasp()), ImmPtr(guard->mir()->getClass()));
-    bailoutIf(Assembler::NotEqual, guard->snapshot());
 }
 
 void

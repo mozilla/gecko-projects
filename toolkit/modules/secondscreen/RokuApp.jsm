@@ -5,16 +5,16 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["RokuApp"];
+var EXPORTED_SYMBOLS = ["RokuApp"];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 Cu.importGlobalProperties(["XMLHttpRequest"]);
 
-function log(msg) {
-  // Services.console.logStringMessage(msg);
-}
+// function log(msg) {
+//   Services.console.logStringMessage(msg);
+// }
 
 const PROTOCOL_VERSION = 1;
 

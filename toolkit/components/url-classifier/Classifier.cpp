@@ -15,6 +15,7 @@
 #include "nsNetCID.h"
 #include "nsPrintfCString.h"
 #include "nsThreadUtils.h"
+#include "mozilla/EndianUtils.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Logging.h"
@@ -359,8 +360,13 @@ Classifier::DeleteTables(nsIFile* aDirectory, const nsTArray<nsCString>& aTables
     rv = file->GetNativeLeafName(leafName);
     NS_ENSURE_SUCCESS_VOID(rv);
 
-    leafName.Truncate(leafName.RFind("."));
-    if (aTables.Contains(leafName)) {
+    // Remove file extension if there's one.
+    int32_t dotPosition = leafName.RFind(".");
+    if (dotPosition >= 0) {
+      leafName.Truncate(dotPosition);
+    }
+
+    if (!leafName.IsEmpty() && aTables.Contains(leafName)) {
       if (NS_FAILED(file->Remove(false))) {
         NS_WARNING(nsPrintfCString("Fail to remove file %s from the disk",
                                    leafName.get()).get());
@@ -926,10 +932,12 @@ Classifier::RegenActiveTables()
 
     LookupCache *lookupCache = GetLookupCache(table);
     if (!lookupCache) {
+      LOG(("Inactive table (no cache): %s", table.get()));
       continue;
     }
 
     if (!lookupCache->IsPrimed()) {
+      LOG(("Inactive table (cache not primed): %s", table.get()));
       continue;
     }
 

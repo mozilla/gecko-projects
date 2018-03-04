@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-this.EXPORTED_SYMBOLS = ["SafeBrowsing"];
+var EXPORTED_SYMBOLS = ["SafeBrowsing"];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
@@ -50,7 +50,7 @@ const tablePreferences = [
   "urlclassifier.flashInfobarTable"
 ];
 
-this.SafeBrowsing = {
+var SafeBrowsing = {
 
   init() {
     if (this.initialized) {
@@ -180,7 +180,7 @@ this.SafeBrowsing = {
 
       default:
         let err = "SafeBrowsing getReportURL() called with unknown kind: " + kind;
-        Components.utils.reportError(err);
+        Cu.reportError(err);
         throw err;
     }
 

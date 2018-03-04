@@ -3,7 +3,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-this.EXPORTED_SYMBOLS = ["RemoteWebProgressManager"];
+var EXPORTED_SYMBOLS = ["RemoteWebProgressManager"];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
@@ -143,7 +143,7 @@ RemoteWebProgressManager.prototype = {
     let deserialized = null;
     if (aStatus) {
       let helper = Cc["@mozilla.org/network/serialization-helper;1"]
-                    .getService(Components.interfaces.nsISerializationHelper);
+                    .getService(Ci.nsISerializationHelper);
 
       deserialized = helper.deserializeObject(aStatus);
       deserialized.QueryInterface(Ci.nsISSLStatus);

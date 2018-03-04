@@ -2666,9 +2666,21 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
 
     WebRenderLayerManager* wrManager = static_cast<WebRenderLayerManager*>(layerManager.get());
 
+    nsIDocShell* docShell = presContext->GetDocShell();
+    nsTArray<wr::WrFilterOp> wrFilters;
+    gfx::Matrix5x4* colorMatrix = nsDocShell::Cast(docShell)->GetColorMatrix();
+    if (colorMatrix) {
+      wr::WrFilterOp gs = {
+        wr::WrFilterOpType::ColorMatrix
+      };
+      MOZ_ASSERT(sizeof(gs.matrix) == sizeof(colorMatrix->components));
+      memcpy(&(gs.matrix), colorMatrix->components, sizeof(gs.matrix));
+      wrFilters.AppendElement(gs);
+    }
+
     MaybeSetupTransactionIdAllocator(layerManager, presContext);
     bool temp = aBuilder->SetIsCompositingCheap(layerManager->IsCompositingCheap());
-    wrManager->EndTransactionWithoutLayer(this, aBuilder);
+    wrManager->EndTransactionWithoutLayer(this, aBuilder, wrFilters);
 
     // For layers-free mode, we check the invalidation state bits in the EndTransaction.
     // So we clear the invalidation state bits after EndTransaction.
@@ -3082,6 +3094,7 @@ nsDisplayItem::nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
   , mForceNotVisible(aBuilder->IsBuildingInvisibleItems())
   , mDisableSubpixelAA(false)
   , mReusedItem(false)
+  , mMergedItem(false)
   , mBackfaceHidden(mFrame->In3DContextAndBackfaceIsHidden())
 #ifdef MOZ_DUMP_PAINTING
   , mPainted(false)
@@ -3283,7 +3296,7 @@ nsDisplayItem::IntersectClip(nsDisplayListBuilder* aBuilder,
                              const DisplayItemClipChain* aOther,
                              bool aStore)
 {
-  if (!aOther) {
+  if (!aOther || mClipChain == aOther) {
     return;
   }
 
@@ -6700,21 +6713,8 @@ nsDisplayOpacity::ShouldFlattenAway(nsDisplayListBuilder* aBuilder)
     }
   }
 
-  // When intersecting the children's clip, only intersect with the clip for
-  // our ASR and not with the whole clip chain, because the rest of the clip
-  // chain is usually already set on the children. In fact, opacity items
-  // usually never have their own clip because during display item creation
-  // time we propagated the clip to our contents, so maybe we should just
-  // remove the clip parameter from ApplyOpacity completely.
-  const DisplayItemClipChain* clip = nullptr;
-
-  if (mClip) {
-    clip = aBuilder->AllocateDisplayItemClipChain(*mClip, mActiveScrolledRoot,
-                                                  nullptr);
-  }
-
   for (uint32_t i = 0; i < childCount; i++) {
-    children[i].item->ApplyOpacity(aBuilder, mOpacity, clip);
+    children[i].item->ApplyOpacity(aBuilder, mOpacity, mClipChain);
   }
 
   return true;

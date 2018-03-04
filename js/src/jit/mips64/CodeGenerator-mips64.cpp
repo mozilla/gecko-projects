@@ -23,122 +23,10 @@
 using namespace js;
 using namespace js::jit;
 
-class js::jit::OutOfLineTableSwitch : public OutOfLineCodeBase<CodeGeneratorMIPS64>
-{
-    MTableSwitch* mir_;
-    CodeLabel jumpLabel_;
-
-    void accept(CodeGeneratorMIPS64* codegen) {
-        codegen->visitOutOfLineTableSwitch(this);
-    }
-
-  public:
-    OutOfLineTableSwitch(MTableSwitch* mir)
-      : mir_(mir)
-    {}
-
-    MTableSwitch* mir() const {
-        return mir_;
-    }
-
-    CodeLabel* jumpLabel() {
-        return &jumpLabel_;
-    }
-};
-
-void
-CodeGeneratorMIPS64::visitOutOfLineBailout(OutOfLineBailout* ool)
-{
-    masm.push(ImmWord(ool->snapshot()->snapshotOffset()));
-
-    masm.jump(&deoptLabel_);
-}
-
-void
-CodeGeneratorMIPS64::visitOutOfLineTableSwitch(OutOfLineTableSwitch* ool)
-{
-    MTableSwitch* mir = ool->mir();
-
-    masm.haltingAlign(sizeof(void*));
-    masm.bind(ool->jumpLabel()->target());
-    masm.addCodeLabel(*ool->jumpLabel());
-
-    for (size_t i = 0; i < mir->numCases(); i++) {
-        LBlock* caseblock = skipTrivialBlocks(mir->getCase(i))->lir();
-        Label* caseheader = caseblock->label();
-        uint32_t caseoffset = caseheader->offset();
-
-        // The entries of the jump table need to be absolute addresses and thus
-        // must be patched after codegen is finished. Each table entry uses 8
-        // instructions (4 for load address, 2 for branch, and 2 padding).
-        CodeLabel cl;
-        masm.ma_li(ScratchRegister, cl.patchAt());
-        masm.branch(ScratchRegister);
-        masm.as_nop();
-        masm.as_nop();
-        cl.target()->bind(caseoffset);
-        masm.addCodeLabel(cl);
-    }
-}
-
-void
-CodeGeneratorMIPS64::emitTableSwitchDispatch(MTableSwitch* mir, Register index,
-                                             Register address)
-{
-    Label* defaultcase = skipTrivialBlocks(mir->getDefault())->lir()->label();
-
-    // Lower value with low value
-    if (mir->low() != 0)
-        masm.subPtr(Imm32(mir->low()), index);
-
-    // Jump to default case if input is out of range
-    int32_t cases = mir->numCases();
-    masm.branch32(Assembler::AboveOrEqual, index, Imm32(cases), defaultcase);
-
-    // To fill in the CodeLabels for the case entries, we need to first
-    // generate the case entries (we don't yet know their offsets in the
-    // instruction stream).
-    OutOfLineTableSwitch* ool = new(alloc()) OutOfLineTableSwitch(mir);
-    addOutOfLineCode(ool, mir);
-
-    // Compute the position where a pointer to the right case stands.
-    masm.ma_li(address, ool->jumpLabel()->patchAt());
-    // index = size of table entry * index.
-    // See CodeGeneratorMIPS64::visitOutOfLineTableSwitch
-    masm.lshiftPtr(Imm32(5), index);
-    masm.addPtr(index, address);
-
-    masm.branch(address);
-}
-
-FrameSizeClass
-FrameSizeClass::FromDepth(uint32_t frameDepth)
-{
-    return FrameSizeClass::None();
-}
-
-FrameSizeClass
-FrameSizeClass::ClassLimit()
-{
-    return FrameSizeClass(0);
-}
-
-uint32_t
-FrameSizeClass::frameSize() const
-{
-    MOZ_CRASH("MIPS64 does not use frame size classes");
-}
-
 ValueOperand
 CodeGeneratorMIPS64::ToValue(LInstruction* ins, size_t pos)
 {
     return ValueOperand(ToRegister(ins->getOperand(pos)));
-}
-
-ValueOperand
-CodeGeneratorMIPS64::ToOutValue(LInstruction* ins)
-{
-    return ValueOperand(ToRegister(ins->getDef(0)));
 }
 
 ValueOperand
@@ -225,12 +113,10 @@ CodeGeneratorMIPS64::visitUnbox(LUnbox* unbox)
     }
 }
 
-Register
-CodeGeneratorMIPS64::splitTagForTest(const ValueOperand& value)
+void
+CodeGeneratorMIPS64::splitTagForTest(const ValueOperand& value, ScratchTagScope& tag)
 {
-    MOZ_ASSERT(value.valueReg() != SecondScratchReg);
-    masm.splitTag(value.valueReg(), SecondScratchReg);
-    return SecondScratchReg;
+    masm.splitTag(value.valueReg(), tag);
 }
 
 void
@@ -554,13 +440,15 @@ CodeGeneratorMIPS64::visitSignExtendInt64(LSignExtendInt64* lir)
     Register64 output = ToOutRegister64(lir);
     switch (lir->mode()) {
       case MSignExtendInt64::Byte:
-        masm.move8SignExtend(input.reg, output.reg);
+        masm.move32To64SignExtend(input.reg, output);
+        masm.move8SignExtend(output.reg, output.reg);
         break;
       case MSignExtendInt64::Half:
-        masm.move16SignExtend(input.reg, output.reg);
+        masm.move32To64SignExtend(input.reg, output);
+        masm.move16SignExtend(output.reg, output.reg);
         break;
       case MSignExtendInt64::Word:
-        masm.ma_sll(output.reg, input.reg, Imm32(0));
+        masm.move32To64SignExtend(input.reg, output);
         break;
     }
 }
@@ -594,18 +482,35 @@ void
 CodeGeneratorMIPS64::visitWasmTruncateToInt64(LWasmTruncateToInt64* lir)
 {
     FloatRegister input = ToFloatRegister(lir->input());
-    Register output = ToRegister(lir->output());
+    Register64 output = ToOutRegister64(lir);
 
     MWasmTruncateToInt64* mir = lir->mir();
     MIRType fromType = mir->input()->type();
 
     MOZ_ASSERT(fromType == MIRType::Double || fromType == MIRType::Float32);
 
-    auto* ool = new (alloc()) OutOfLineWasmTruncateCheck(mir, input);
+    auto* ool = new (alloc()) OutOfLineWasmTruncateCheck(mir, input, output);
     addOutOfLineCode(ool, mir);
 
-    masm.wasmTruncateToI64(input, output, fromType, mir->isUnsigned(),
-                           ool->entry(), ool->rejoin());
+    Label* oolEntry = ool->entry();
+    Label* oolRejoin = ool->rejoin();
+    bool isSaturating = mir->isSaturating();
+
+    if (fromType == MIRType::Double) {
+        if (mir->isUnsigned())
+            masm.wasmTruncateDoubleToUInt64(input, output, isSaturating, oolEntry, oolRejoin,
+                                            InvalidFloatReg);
+        else
+            masm.wasmTruncateDoubleToInt64(input, output, isSaturating, oolEntry, oolRejoin,
+                                           InvalidFloatReg);
+    } else {
+        if (mir->isUnsigned())
+            masm.wasmTruncateFloat32ToUInt64(input, output, isSaturating, oolEntry, oolRejoin,
+                                             InvalidFloatReg);
+        else
+            masm.wasmTruncateFloat32ToInt64(input, output, isSaturating, oolEntry, oolRejoin,
+                                            InvalidFloatReg);
+    }
 }
 
 void

@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["ExtensionUtils"];
+var EXPORTED_SYMBOLS = ["ExtensionUtils"];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -30,6 +30,10 @@ XPCOMUtils.defineLazyGetter(this, "utf8Encoder", () => {
 XPCOMUtils.defineLazyGetter(this, "utf8Decoder", () => {
   return new TextDecoder("utf-8");
 });
+
+// xpcshell doesn't handle idle callbacks well.
+XPCOMUtils.defineLazyGetter(this, "idleTimeout",
+                            () => Services.appinfo.name === "XPCShell" ? 500 : undefined);
 
 // It would be nicer to go through `Services.appinfo`, but some tests need to be
 // able to replace that field with a custom implementation before it is first
@@ -304,6 +308,22 @@ function promiseDocumentReady(doc) {
         resolve(doc);
       }
     }, true);
+  });
+}
+
+/**
+  * Returns a Promise which resolves when the given window's document's DOM has
+  * fully loaded, the <head> stylesheets have fully loaded, and we have hit an
+  * idle time.
+  *
+  * @param {Window} window The window whose document we will await
+                           the readiness of.
+  * @returns {Promise<IdleDeadline>}
+  */
+function promiseDocumentIdle(window) {
+  return window.document.documentReadyForIdle.then(() => {
+    return new Promise(resolve =>
+      window.requestIdleCallback(resolve, {timeout: idleTimeout}));
   });
 }
 
@@ -656,7 +676,7 @@ async function stringToCryptoHash(text, algo = "SHA-1") {
   return utf8Decoder.decode(buffer);
 }
 
-this.ExtensionUtils = {
+var ExtensionUtils = {
   checkLoadURL,
   defineLazyGetter,
   flushJarCache,
@@ -668,6 +688,7 @@ this.ExtensionUtils = {
   getWinUtils,
   instanceOf,
   normalizeTime,
+  promiseDocumentIdle,
   promiseDocumentLoaded,
   promiseDocumentReady,
   promiseEvent,

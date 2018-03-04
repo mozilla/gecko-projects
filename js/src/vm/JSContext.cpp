@@ -27,8 +27,8 @@
 #ifdef XP_WIN
 # include <processthreadsapi.h>
 #endif // XP_WIN
+
 #include "jsexn.h"
-#include "jsprf.h"
 #include "jspubtd.h"
 #include "jsstr.h"
 #include "jstypes.h"
@@ -38,6 +38,7 @@
 #include "jit/Ion.h"
 #include "jit/PcScriptCache.h"
 #include "js/CharacterEncoding.h"
+#include "js/Printf.h"
 #include "util/DoubleToString.h"
 #include "util/NativeStack.h"
 #include "util/Windows.h"
@@ -513,7 +514,7 @@ enum class PrintErrorKind {
 };
 
 static void
-PrintErrorLine(JSContext* cx, FILE* file, const char* prefix, JSErrorReport* report)
+PrintErrorLine(FILE* file, const char* prefix, JSErrorReport* report)
 {
     if (const char16_t* linebuf = report->linebuf()) {
         size_t n = report->linebufLength();
@@ -547,7 +548,7 @@ PrintErrorLine(JSContext* cx, FILE* file, const char* prefix, JSErrorReport* rep
 }
 
 static void
-PrintErrorLine(JSContext* cx, FILE* file, const char* prefix, JSErrorNotes::Note* note)
+PrintErrorLine(FILE* file, const char* prefix, JSErrorNotes::Note* note)
 {
 }
 
@@ -601,7 +602,7 @@ PrintSingleError(JSContext* cx, FILE* file, JS::ConstUTF8CharsZ toStringResult,
         fputs(prefix.get(), file);
     fputs(message, file);
 
-    PrintErrorLine(cx, file, prefix.get(), report);
+    PrintErrorLine(file, prefix.get(), report);
     fputc('\n', file);
 
     fflush(file);
@@ -1310,6 +1311,7 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
     performingGC(false),
     gcSweeping(false),
     gcHelperStateThread(false),
+    isTouchingGrayThings(false),
     noGCOrAllocationCheck(0),
     noNurseryAllocationCheck(0),
     disableStrictProxyCheckingCount(0),

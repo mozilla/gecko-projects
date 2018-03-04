@@ -337,15 +337,6 @@ const PanelUI = {
   },
 
   /**
-   * Switch the panel to the main view if it's not already
-   * in that view.
-   */
-  showMainView() {
-    this._ensureEventListenersAdded();
-    this.multiView.showMainView();
-  },
-
-  /**
    * Switch the panel to the help view if it's not already
    * in that view.
    */
@@ -415,19 +406,10 @@ const PanelUI = {
       tempPanel.classList.toggle("cui-widget-panelWithFooter",
                                  viewNode.querySelector(".panel-subview-footer"));
 
-      // If the panelview is already selected in another PanelMultiView instance
-      // as a subview, make sure to properly hide it there.
-      let oldMultiView = viewNode.panelMultiView;
-      if (oldMultiView && oldMultiView.current == viewNode) {
-        await oldMultiView.showMainView();
-      }
-
       let multiView = document.createElement("panelmultiview");
       multiView.setAttribute("id", "customizationui-widget-multiview");
       multiView.setAttribute("viewCacheId", "appMenu-viewCache");
       multiView.setAttribute("mainViewId", viewNode.id);
-      multiView.setAttribute("ephemeral", true);
-      document.getElementById("appMenu-viewCache").appendChild(viewNode);
       tempPanel.appendChild(multiView);
       viewNode.classList.add("cui-widget-panelview");
 
@@ -440,10 +422,7 @@ const PanelUI = {
         }
         aAnchor.open = false;
 
-        // Ensure we run the destructor:
-        multiView.instance.destructor();
-
-        tempPanel.remove();
+        PanelMultiView.removePopup(tempPanel);
       };
 
       if (aAnchor.parentNode.id == "PersonalToolbar") {

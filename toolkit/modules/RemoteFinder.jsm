@@ -4,7 +4,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-this.EXPORTED_SYMBOLS = ["RemoteFinder", "RemoteFinderListener"];
+var EXPORTED_SYMBOLS = ["RemoteFinder", "RemoteFinderListener"];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Geometry.jsm");
@@ -314,7 +314,8 @@ RemoteFinderListener.prototype = {
         break;
 
       case "Finder:KeyPress":
-        this._finder.keyPress(data);
+        var KeyboardEvent = this._finder._getWindow().KeyboardEvent;
+        this._finder.keyPress(new KeyboardEvent("keypress", data));
         break;
 
       case "Finder:MatchesCount":

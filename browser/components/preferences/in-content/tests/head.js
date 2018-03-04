@@ -145,24 +145,11 @@ function openPreferencesViaOpenPreferencesAPI(aPane, aOptions) {
 }
 
 function promiseWindowDialogOpen(buttonAction, url) {
-  return new Promise(resolve => {
-    Services.ww.registerNotification(function onOpen(subj, topic, data) {
-      if (topic == "domwindowopened" && subj instanceof Ci.nsIDOMWindow) {
-        subj.addEventListener("load", function onLoad() {
-          if (subj.document.documentURI == url) {
-            Services.ww.unregisterNotification(onOpen);
-            let doc = subj.document.documentElement;
-            doc.getButton(buttonAction).click();
-            resolve();
-          }
-        }, { once: true });
-      }
-    });
-  });
+  return BrowserTestUtils.promiseAlertDialogOpen(buttonAction, url);
 }
 
 function promiseAlertDialogOpen(buttonAction) {
-  return promiseWindowDialogOpen(buttonAction, "chrome://global/content/commonDialog.xul");
+  return BrowserTestUtils.promiseAlertDialogOpen(buttonAction);
 }
 
 function promiseSiteDataManagerSitesUpdated() {
@@ -229,9 +216,10 @@ const mockSiteDataManager = {
     let result = this.fakeSites.map(site => ({
       origin: site.principal.origin,
       usage: site.usage,
-      persisted: site.persisted
+      persisted: site.persisted,
+      lastAccessed: site.lastAccessed,
     }));
-    onUsageResult({ result, resultCode: Components.results.NS_OK });
+    onUsageResult({ result, resultCode: Cr.NS_OK });
   },
 
   _removeQuotaUsage(site) {
@@ -270,9 +258,9 @@ const mockSiteDataManager = {
     }
   },
 
-  unregister() {
+  async unregister() {
+    await this._SiteDataManager.removeAll();
     this.fakeSites = null;
-    this._SiteDataManager.removeAll();
     this._SiteDataManager._qms = this._originalQMS;
     this._SiteDataManager._removeQuotaUsage = this._originalRemoveQuotaUsage;
   }

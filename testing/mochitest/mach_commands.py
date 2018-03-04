@@ -281,6 +281,7 @@ class MachCommands(MachCommandBase):
     def run_mochitest_general(self, flavor=None, test_objects=None, resolve_tests=True, **kwargs):
         from mochitest_options import ALL_FLAVORS
         from mozlog.commandline import setup_logging
+        from mozlog.handlers import StreamHandler
 
         buildapp = None
         for app in SUPPORTED_APPS:
@@ -305,7 +306,9 @@ class MachCommands(MachCommandBase):
             default_level = self._mach_context.settings['test']['level']
             kwargs['log'] = setup_logging('mach-mochitest', kwargs, {default_format: sys.stdout},
                                           {'level': default_level})
-            kwargs['log'].handlers[0].formatter.inner.summary_on_shutdown = True
+            for handler in kwargs['log'].handlers:
+                if isinstance(handler, StreamHandler):
+                    handler.formatter.inner.summary_on_shutdown = True
 
         from mozbuild.controller.building import BuildDriver
         self._ensure_state_subdir_exists('.')
@@ -393,9 +396,13 @@ class MachCommands(MachCommandBase):
         if buildapp == 'android':
             from mozrunner.devices.android_device import grant_runtime_permissions
             from mozrunner.devices.android_device import verify_android_device
+            app = kwargs.get('app')
+            if not app:
+                app = self.substs["ANDROID_PACKAGE_NAME"]
+
             # verify installation
-            verify_android_device(self, install=True, xre=False, app=kwargs['app'])
-            grant_runtime_permissions(self)
+            verify_android_device(self, install=True, xre=False, app=app)
+            grant_runtime_permissions(self, app)
             run_mochitest = mochitest.run_android_test
         else:
             run_mochitest = mochitest.run_desktop_test
@@ -467,8 +474,11 @@ class RobocopCommands(MachCommandBase):
         from mozrunner.devices.android_device import grant_runtime_permissions, get_adb_path
         from mozrunner.devices.android_device import verify_android_device
         # verify installation
-        verify_android_device(self, install=True, xre=False, app=kwargs['app'])
-        grant_runtime_permissions(self)
+        app = kwargs.get('app')
+        if not app:
+            app = self.substs["ANDROID_PACKAGE_NAME"]
+        verify_android_device(self, install=True, xre=False, app=app)
+        grant_runtime_permissions(self, app)
 
         if not kwargs['adbPath']:
             kwargs['adbPath'] = get_adb_path(self)

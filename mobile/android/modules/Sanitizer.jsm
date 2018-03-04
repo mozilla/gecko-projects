@@ -18,11 +18,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   TelemetryStopwatch: "resource://gre/modules/TelemetryStopwatch.jsm",
 });
 
-function dump(a) {
-  Services.console.logStringMessage(a);
-}
-
-this.EXPORTED_SYMBOLS = ["Sanitizer"];
+var EXPORTED_SYMBOLS = ["Sanitizer"];
 
 function Sanitizer() {}
 Sanitizer.prototype = {
@@ -71,9 +67,8 @@ Sanitizer.prototype = {
           let refObj = {};
           TelemetryStopwatch.start("FX_SANITIZE_CACHE", refObj);
 
-          var cache = Cc["@mozilla.org/netwerk/cache-storage-service;1"].getService(Ci.nsICacheStorageService);
           try {
-            cache.clear();
+            Services.cache2.clear();
           } catch (er) {}
 
           let imageCache = Cc["@mozilla.org/image/tools;1"].getService(Ci.imgITools)
@@ -152,8 +147,7 @@ Sanitizer.prototype = {
     offlineApps: {
       clear: function() {
         return new Promise(function(resolve, reject) {
-          var cacheService = Cc["@mozilla.org/netwerk/cache-storage-service;1"].getService(Ci.nsICacheStorageService);
-          var appCacheStorage = cacheService.appCacheStorage(Services.loadContextInfo.default, null);
+          var appCacheStorage = Services.cache2.appCacheStorage(Services.loadContextInfo.default, null);
           try {
             appCacheStorage.asyncEvictStorage(null);
           } catch (er) {}
@@ -361,4 +355,4 @@ Sanitizer.prototype = {
   }
 };
 
-this.Sanitizer = new Sanitizer();
+var Sanitizer = new Sanitizer();

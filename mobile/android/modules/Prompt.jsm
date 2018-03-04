@@ -12,7 +12,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   Services: "resource://gre/modules/Services.jsm",
 });
 
-this.EXPORTED_SYMBOLS = ["Prompt", "DoorHanger"];
+var EXPORTED_SYMBOLS = ["Prompt", "DoorHanger"];
 
 function log(msg) {
   Services.console.logStringMessage(msg);
@@ -192,7 +192,6 @@ Prompt.prototype = {
   },
 
   _setListItems: function(aItems) {
-    let hasSelected = false;
     this.msg.listitems = [];
 
     aItems.forEach(function(item) {

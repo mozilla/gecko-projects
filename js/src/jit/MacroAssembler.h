@@ -7,6 +7,7 @@
 #ifndef jit_MacroAssembler_h
 #define jit_MacroAssembler_h
 
+#include "mozilla/EndianUtils.h"
 #include "mozilla/MacroForEach.h"
 #include "mozilla/MathAlgorithms.h"
 
@@ -1176,12 +1177,31 @@ class MacroAssembler : public MacroAssemblerSpecific
     inline void branchIfObjectEmulatesUndefined(Register objReg, Register scratch, Label* slowCheck,
                                                 Label* label);
 
-    inline void branchTestObjClass(Condition cond, Register obj, Register scratch, const js::Class* clasp,
-                                   Label* label);
+    inline void branchTestObjClass(Condition cond, Register obj, Register scratch,
+                                   const js::Class* clasp, Label* label);
+    inline void branchTestObjClass(Condition cond, Register obj, Register scratch,
+                                   const Address& clasp, Label* label);
     inline void branchTestObjShape(Condition cond, Register obj, const Shape* shape, Label* label);
     inline void branchTestObjShape(Condition cond, Register obj, Register shape, Label* label);
-    inline void branchTestObjGroup(Condition cond, Register obj, ObjectGroup* group, Label* label);
+    inline void branchTestObjGroup(Condition cond, Register obj, const ObjectGroup* group,
+                                   Label* label);
     inline void branchTestObjGroup(Condition cond, Register obj, Register group, Label* label);
+
+    void branchTestObjGroup(Condition cond, Register obj, const Address& group, Register scratch,
+                            Label* label);
+
+    void branchTestObjCompartment(Condition cond, Register obj, const Address& compartment,
+                                  Register scratch, Label* label);
+    void branchTestObjCompartment(Condition cond, Register obj, const JSCompartment* compartment,
+                                  Register scratch, Label* label);
+    void branchIfObjGroupHasNoAddendum(Register obj, Register scratch, Label* label);
+    void branchIfPretenuredGroup(const ObjectGroup* group, Register scratch, Label* label);
+
+    void branchIfNonNativeObj(Register obj, Register scratch, Label* label);
+
+    void branchIfInlineTypedObject(Register obj, Register scratch, Label* label);
+
+    void branchIfNotSimdObject(Register obj, Register scratch, SimdType simdType, Label* label);
 
     inline void branchTestClassIsProxy(bool proxy, Register clasp, Label* label);
 
@@ -1189,6 +1209,11 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     inline void branchTestProxyHandlerFamily(Condition cond, Register proxy, Register scratch,
                                              const void* handlerp, Label* label);
+
+    void copyObjGroupNoPreBarrier(Register sourceObj, Register destObj, Register scratch);
+
+    void loadTypedObjectDescr(Register obj, Register dest);
+    void loadTypedObjectLength(Register obj, Register dest);
 
     // Emit type case branch on tag matching if the type tag in the definition
     // might actually be that type.
@@ -1305,7 +1330,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         DEFINED_ON(x86);
     template <typename T>
     void branchValueIsNurseryCellImpl(Condition cond, const T& value, Register temp, Label* label)
-        DEFINED_ON(arm64, mips64, x64);
+        DEFINED_ON(arm64, x64);
 
     template <typename T>
     inline void branchTestUndefinedImpl(Condition cond, const T& t, Label* label)
@@ -1364,6 +1389,10 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     inline void test32MovePtr(Condition cond, const Address& addr, Imm32 mask, Register src,
                               Register dest)
+        DEFINED_ON(arm, arm64, mips_shared, x86, x64);
+
+    // Conditional move for Spectre mitigations.
+    inline void spectreMovePtr(Condition cond, Register src, Register dest)
         DEFINED_ON(arm, arm64, mips_shared, x86, x64);
 
     // Performs a bounds check and zeroes the index register if out-of-bounds
@@ -1465,8 +1494,10 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     void wasmTrap(wasm::Trap trap, wasm::BytecodeOffset bytecodeOffset);
 
-    // Emit a bounds check against the wasm heap limit, jumping to 'label' if 'cond' holds.
-    // Required when WASM_HUGE_MEMORY is not defined.
+    // Emit a bounds check against the wasm heap limit, jumping to 'label' if
+    // 'cond' holds. Required when WASM_HUGE_MEMORY is not defined. If
+    // JitOptions.spectreMaskIndex is true, in speculative executions 'index' is
+    // saturated in-place to 'boundsCheckLimit'.
     template <class L>
     inline void wasmBoundsCheck(Condition cond, Register index, Register boundsCheckLimit, L label)
         DEFINED_ON(arm, arm64, mips32, mips64, x86);
@@ -1484,23 +1515,23 @@ class MacroAssembler : public MacroAssemblerSpecific
     void wasmStore(const wasm::MemoryAccessDesc& access, AnyRegister value, Operand dstAddr) DEFINED_ON(x86, x64);
     void wasmStoreI64(const wasm::MemoryAccessDesc& access, Register64 value, Operand dstAddr) DEFINED_ON(x86);
 
-    // For all the ARM wasmLoad and wasmStore functions, `ptr` MUST equal
-    // `ptrScratch`, and that register will be updated based on conditions
+    // For all the ARM and ARM64 wasmLoad and wasmStore functions, `ptr` MUST
+    // equal `ptrScratch`, and that register will be updated based on conditions
     // listed below (where it is only mentioned as `ptr`).
 
     // `ptr` will be updated if access.offset() != 0 or access.type() == Scalar::Int64.
     void wasmLoad(const wasm::MemoryAccessDesc& access, Register memoryBase, Register ptr,
                   Register ptrScratch, AnyRegister output)
-        DEFINED_ON(arm, mips_shared);
+        DEFINED_ON(arm, arm64, mips_shared);
     void wasmLoadI64(const wasm::MemoryAccessDesc& access, Register memoryBase, Register ptr,
                      Register ptrScratch, Register64 output)
-        DEFINED_ON(arm, mips32, mips64);
+        DEFINED_ON(arm, arm64, mips32, mips64);
     void wasmStore(const wasm::MemoryAccessDesc& access, AnyRegister value, Register memoryBase,
                    Register ptr, Register ptrScratch)
-        DEFINED_ON(arm, mips_shared);
+        DEFINED_ON(arm, arm64, mips_shared);
     void wasmStoreI64(const wasm::MemoryAccessDesc& access, Register64 value, Register memoryBase,
                       Register ptr, Register ptrScratch)
-        DEFINED_ON(arm, mips32, mips64);
+        DEFINED_ON(arm, arm64, mips32, mips64);
 
     // `ptr` will always be updated.
     void wasmUnalignedLoad(const wasm::MemoryAccessDesc& access, Register memoryBase, Register ptr,
@@ -1932,29 +1963,36 @@ class MacroAssembler : public MacroAssemblerSpecific
     // Emits a test of a value against all types in a TypeSet. A scratch
     // register is required.
     template <typename Source>
-    void guardTypeSet(const Source& address, const TypeSet* types, BarrierKind kind, Register scratch, Label* miss);
+    void guardTypeSet(const Source& address, const TypeSet* types, BarrierKind kind,
+                      Register unboxScratch, Register objScratch, Register spectreRegToZero,
+                      Label* miss);
 
-    void guardObjectType(Register obj, const TypeSet* types, Register scratch, Label* miss);
+    void guardObjectType(Register obj, const TypeSet* types, Register scratch,
+                         Register spectreRegToZero, Label* miss);
 
 #ifdef DEBUG
     void guardTypeSetMightBeIncomplete(const TypeSet* types, Register obj, Register scratch,
                                        Label* label);
 #endif
 
-    void loadObjShape(Register objReg, Register dest) {
-        loadPtr(Address(objReg, ShapedObject::offsetOfShape()), dest);
+    // Unsafe here means the caller is responsible for Spectre mitigations if
+    // needed. Prefer branchTestObjGroup or one of the other masm helpers!
+    void loadObjGroupUnsafe(Register obj, Register dest) {
+        loadPtr(Address(obj, JSObject::offsetOfGroup()), dest);
     }
-    void loadObjGroup(Register objReg, Register dest) {
-        loadPtr(Address(objReg, JSObject::offsetOfGroup()), dest);
-    }
-    void loadBaseShape(Register objReg, Register dest) {
-        loadObjShape(objReg, dest);
-        loadPtr(Address(dest, Shape::offsetOfBase()), dest);
-    }
-    void loadObjClass(Register objReg, Register dest) {
-        loadObjGroup(objReg, dest);
+    void loadObjClassUnsafe(Register obj, Register dest) {
+        loadPtr(Address(obj, JSObject::offsetOfGroup()), dest);
         loadPtr(Address(dest, ObjectGroup::offsetOfClasp()), dest);
     }
+
+    template <typename EmitPreBarrier>
+    inline void storeObjGroup(Register group, Register obj, EmitPreBarrier emitPreBarrier);
+    template <typename EmitPreBarrier>
+    inline void storeObjGroup(ObjectGroup* group, Register obj, EmitPreBarrier emitPreBarrier);
+    template <typename EmitPreBarrier>
+    inline void storeObjShape(Register shape, Register obj, EmitPreBarrier emitPreBarrier);
+    template <typename EmitPreBarrier>
+    inline void storeObjShape(Shape* shape, Register obj, EmitPreBarrier emitPreBarrier);
 
     void loadObjPrivate(Register obj, uint32_t nfixed, Register dest) {
         loadPtr(Address(obj, NativeObject::getPrivateDataOffset(nfixed)), dest);
@@ -2182,6 +2220,7 @@ class MacroAssembler : public MacroAssemblerSpecific
                               const ConstantOrRegister& value, Label* failure);
 
     void debugAssertIsObject(const ValueOperand& val);
+    void debugAssertObjHasFixedSlots(Register obj, Register scratch);
 
     using MacroAssemblerSpecific::extractTag;
     Register extractTag(const TypedOrValueRegister& reg, Register scratch) {
@@ -2575,29 +2614,6 @@ class MacroAssembler : public MacroAssemblerSpecific
                                               IntConversionBehavior::ClampToUint8);
     }
 
-  public:
-    class AfterICSaveLive {
-        friend class MacroAssembler;
-        explicit AfterICSaveLive(uint32_t initialStack)
-#ifdef JS_DEBUG
-          : initialStack(initialStack)
-#endif
-        {}
-
-      public:
-#ifdef JS_DEBUG
-        uint32_t initialStack;
-#endif
-        uint32_t alignmentPadding;
-    };
-
-    void alignFrameForICArguments(AfterICSaveLive& aic) PER_ARCH;
-    void restoreFrameAlignmentForICArguments(AfterICSaveLive& aic) PER_ARCH;
-
-    AfterICSaveLive icSaveLive(LiveRegisterSet& liveRegs);
-    MOZ_MUST_USE bool icBuildOOLFakeExitFrame(void* fakeReturnAddr, AfterICSaveLive& aic);
-    void icRestoreLive(LiveRegisterSet& liveRegs, AfterICSaveLive& aic);
-
     MOZ_MUST_USE bool icBuildOOLFakeExitFrame(void* fakeReturnAddr, AutoSaveLiveRegisters& save);
 
     // Align the stack pointer based on the number of arguments which are pushed
@@ -2607,6 +2623,18 @@ class MacroAssembler : public MacroAssemblerSpecific
     void alignJitStackBasedOnNArgs(uint32_t nargs);
 
     inline void assertStackAlignment(uint32_t alignment, int32_t offset = 0);
+
+    void performPendingReadBarriers();
+
+  private:
+    // Methods to get a singleton object or object group from a type set without
+    // a read barrier, and record the result so that we can perform the barrier
+    // later.
+    JSObject* getSingletonAndDelayBarrier(const TypeSet* types, size_t i);
+    ObjectGroup* getGroupAndDelayBarrier(const TypeSet* types, size_t i);
+
+    Vector<JSObject*, 0, SystemAllocPolicy> pendingObjectReadBarriers_;
+    Vector<ObjectGroup*, 0, SystemAllocPolicy> pendingObjectGroupReadBarriers_;
 };
 
 //{{{ check_macroassembler_style

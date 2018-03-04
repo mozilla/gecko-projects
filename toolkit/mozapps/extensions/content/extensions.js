@@ -2253,7 +2253,7 @@ var gDiscoverView = {
 
     // Canceling the request will send an error to onStateChange which will show
     // the error page
-    aRequest.cancel(Components.results.NS_BINDING_ABORTED);
+    aRequest.cancel(Cr.NS_BINDING_ABORTED);
   },
 
   onSecurityChange(aWebProgress, aRequest, aState) {
@@ -2267,7 +2267,7 @@ var gDiscoverView = {
 
     // Canceling the request will send an error to onStateChange which will show
     // the error page
-    aRequest.cancel(Components.results.NS_BINDING_ABORTED);
+    aRequest.cancel(Cr.NS_BINDING_ABORTED);
   },
 
   onStateChange(aWebProgress, aRequest, aStateFlags, aStatus) {
@@ -2794,15 +2794,6 @@ var gDetailView = {
     var contributions = document.getElementById("detail-contributions");
     if ("contributionURL" in aAddon && aAddon.contributionURL) {
       contributions.hidden = false;
-      var amount = document.getElementById("detail-contrib-suggested");
-      if (aAddon.contributionAmount) {
-        amount.value = gStrings.ext.formatStringFromName("contributionAmount2",
-                                                         [aAddon.contributionAmount],
-                                                         1);
-        amount.hidden = false;
-      } else {
-        amount.hidden = true;
-      }
     } else {
       contributions.hidden = true;
     }
@@ -2864,14 +2855,6 @@ var gDetailView = {
       sizeRow.value = formatted;
     } else {
       sizeRow.value = null;
-    }
-
-    var downloadsRow = document.getElementById("detail-downloads");
-    if (aAddon.totalDownloads && aIsRemote) {
-      var downloads = aAddon.totalDownloads;
-      downloadsRow.value = downloads;
-    } else {
-      downloadsRow.value = null;
     }
 
     var canUpdate = !aIsRemote && hasPermission(aAddon, "upgrade");
@@ -3150,7 +3133,7 @@ var gDetailView = {
   },
 
   emptySettingsRows() {
-    var lastRow = document.getElementById("detail-downloads");
+    var lastRow = document.getElementById("detail-rating-row");
     var rows = lastRow.parentNode;
     while (lastRow.nextSibling)
       rows.removeChild(rows.lastChild);
@@ -3191,11 +3174,12 @@ var gDetailView = {
       });
     };
 
-    var rows = document.getElementById("detail-downloads").parentNode;
+    var rows = document.getElementById("detail-rows");
 
     if (this._addon.optionsType == AddonManager.OPTIONS_TYPE_INLINE_BROWSER) {
       whenViewLoaded(async () => {
-        await this._addon.startupPromise;
+        const addon = this._addon;
+        await addon.startupPromise;
 
         const browserContainer = await this.createOptionsBrowser(rows);
 
@@ -3203,6 +3187,15 @@ var gDetailView = {
           // Make sure the browser is unloaded as soon as we change views,
           // rather than waiting for the next detail view to load.
           document.addEventListener("ViewChanged", function() {
+            // Do not remove the addon options container if the view changed
+            // event is not related to a change to the current selected view
+            // or the current selected addon (e.g. it could be related to the
+            // disco pane view that has completed to load, See Bug 1435705 for
+            // a rationale).
+            if (gViewController.currentViewObj === gDetailView &&
+                gDetailView._addon === addon) {
+              return;
+            }
             browserContainer.remove();
           }, {once: true});
         }

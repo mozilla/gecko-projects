@@ -37,8 +37,7 @@
     <command id="cmd_CustomizeToolbars" oncommand="gCustomizeMode.enter()"/>
     <command id="cmd_quitApplication" oncommand="goQuitApplication()"/>
 
-
-    <commandset id="editMenuCommands"/>
+#include ../../../toolkit/content/editMenuCommands.inc.xul
 
     <command id="View:PageSource" oncommand="BrowserViewSource(window.gBrowser.selectedBrowser);" observes="canViewSource"/>
     <command id="View:PageInfo" oncommand="BrowserPageInfo();"/>
@@ -109,6 +108,14 @@
 
 #ifdef NIGHTLY_BUILD
     <command id="wrCaptureCmd" oncommand="gWebRender.capture();"/>
+#endif
+#ifdef XP_MACOSX
+    <command id="minimizeWindow"
+             label="&minimizeWindow.label;"
+             oncommand="window.minimize();" />
+    <command id="zoomWindow"
+             label="&zoomWindow.label;"
+             oncommand="zoomWindow();" />
 #endif
   </commandset>
 
@@ -410,10 +417,24 @@
 #endif
     command="wrCaptureCmd"/>
 #endif
-  </keyset>
-
-# Used by baseMenuOverlay
 #ifdef XP_MACOSX
-  <commandset id="baseMenuCommandSet" />
+    <key id="key_minimizeWindow"
+         command="minimizeWindow"
+         key="&minimizeWindow.key;"
+         modifiers="accel"/>
+    <key id="key_openHelpMac"
+         oncommand="openHelpLink('firefox-osxkey');"
+         key="&helpMac.commandkey;"
+         modifiers="accel"/>
+    <!-- These are used to build the Application menu -->
+    <key id="key_preferencesCmdMac"
+         key="&preferencesCmdMac.commandkey;"
+         modifiers="accel"/>
+    <key id="key_hideThisAppCmdMac"
+         key="&hideThisAppCmdMac2.commandkey;"
+         modifiers="accel"/>
+    <key id="key_hideOtherAppsCmdMac"
+         key="&hideOtherAppsCmdMac.commandkey;"
+         modifiers="accel,alt"/>
 #endif
-  <keyset id="baseMenuKeyset" />
+  </keyset>

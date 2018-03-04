@@ -173,6 +173,7 @@ import org.mozilla.gecko.widget.AnchoredPopup;
 import org.mozilla.gecko.widget.AnimatedProgressBar;
 import org.mozilla.gecko.widget.GeckoActionProvider;
 import org.mozilla.gecko.widget.SplashScreen;
+import org.mozilla.geckoview.GeckoSession;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -3595,7 +3596,7 @@ public class BrowserApp extends GeckoApp
             super.closeOptionsMenu();
     }
 
-    @Override // GeckoView.ContentListener
+    @Override // GeckoView.ContentDelegate
     public void onFullScreen(final GeckoSession session, final boolean fullscreen) {
         super.onFullScreen(session, fullscreen);
 

@@ -37,10 +37,7 @@ import org.mozilla.gecko.DoorHangerPopup;
 import org.mozilla.gecko.FormAssistPopup;
 import org.mozilla.gecko.GeckoAccessibility;
 import org.mozilla.gecko.GeckoScreenOrientation;
-import org.mozilla.gecko.GeckoSession;
-import org.mozilla.gecko.GeckoSessionSettings;
 import org.mozilla.gecko.GeckoSharedPrefs;
-import org.mozilla.gecko.GeckoView;
 import org.mozilla.gecko.preferences.GeckoPreferences;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.customtabs.CustomTabsActivity;
@@ -50,11 +47,14 @@ import org.mozilla.gecko.text.TextSelection;
 import org.mozilla.gecko.util.ActivityUtils;
 import org.mozilla.gecko.util.ColorUtil;
 import org.mozilla.gecko.widget.ActionModePresenter;
+import org.mozilla.geckoview.GeckoSession;
+import org.mozilla.geckoview.GeckoSessionSettings;
+import org.mozilla.geckoview.GeckoView;
 
 public class WebAppActivity extends AppCompatActivity
                             implements ActionModePresenter,
-                                       GeckoSession.ContentListener,
-                                       GeckoSession.NavigationListener {
+                                       GeckoSession.ContentDelegate,
+                                       GeckoSession.NavigationDelegate {
     private static final String LOGTAG = "WebAppActivity";
 
     public static final String MANIFEST_PATH = "MANIFEST_PATH";
@@ -103,9 +103,9 @@ public class WebAppActivity extends AppCompatActivity
         mGeckoSession = new GeckoSession();
         mGeckoView.setSession(mGeckoSession);
 
-        mGeckoSession.setNavigationListener(this);
-        mGeckoSession.setContentListener(this);
-        mGeckoSession.setProgressListener(new GeckoSession.ProgressListener() {
+        mGeckoSession.setNavigationDelegate(this);
+        mGeckoSession.setContentDelegate(this);
+        mGeckoSession.setProgressDelegate(new GeckoSession.ProgressDelegate() {
             @Override
             public void onPageStart(GeckoSession session, String url) {
 
@@ -332,31 +332,36 @@ public class WebAppActivity extends AppCompatActivity
         mGeckoView.getSettings().setInt(GeckoSessionSettings.DISPLAY_MODE, mode);
     }
 
-    @Override // GeckoSession.NavigationListener
+    @Override // GeckoSession.NavigationDelegate
     public void onLocationChange(GeckoSession session, String url) {
     }
 
-    @Override // GeckoSession.NavigationListener
+    @Override // GeckoSession.NavigationDelegate
     public void onCanGoBack(GeckoSession session, boolean canGoBack) {
         mCanGoBack = canGoBack;
     }
 
-    @Override // GeckoSession.NavigationListener
+    @Override // GeckoSession.NavigationDelegate
     public void onCanGoForward(GeckoSession session, boolean canGoForward) {
     }
 
-    @Override // GeckoSession.ContentListener
+    @Override // GeckoSession.ContentDelegate
     public void onTitleChange(GeckoSession session, String title) {
     }
 
-    @Override // GeckoSession.ContentListener
+    @Override // GeckoSession.ContentDelegate
     public void onFocusRequest(GeckoSession session) {
         Intent intent = new Intent(getIntent());
         intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
         startActivity(intent);
     }
 
-    @Override // GeckoSession.ContentListener
+    @Override // GeckoSession.ContentDelegate
+    public void onCloseRequest(GeckoSession session) {
+        // Ignore
+    }
+
+    @Override // GeckoSession.ContentDelegate
     public void onContextMenu(GeckoSession session, int screenX, int screenY,
                               String uri, String elementSrc) {
         final String content = uri != null ? uri : elementSrc != null ? elementSrc : "";
@@ -368,7 +373,7 @@ public class WebAppActivity extends AppCompatActivity
         WebApps.openInFennec(validUri, WebAppActivity.this);
     }
 
-    @Override // GeckoSession.ContentListener
+    @Override // GeckoSession.ContentDelegate
     public void onFullScreen(GeckoSession session, boolean fullScreen) {
         updateFullScreenContent(fullScreen);
     }
@@ -420,6 +425,13 @@ public class WebAppActivity extends AppCompatActivity
             }
         }
         return true;
+    }
+
+    @Override
+    public void onNewSession(final GeckoSession session, final String uri,
+                             final GeckoSession.Response<GeckoSession> response) {
+        // We should never get here because we abort loads that need a new session in onLoadUri()
+        throw new IllegalStateException("Unexpected new session");
     }
 
     private void updateFullScreen() {

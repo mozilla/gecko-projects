@@ -4,7 +4,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "DownloadAddonInstall",
   "LocalAddonInstall",
   "StagedAddonInstall",
@@ -375,7 +375,7 @@ async function loadManifestFromWebManifest(aUri) {
   addon.iconURL = null;
   addon.icon64URL = null;
   addon.icons = manifest.icons || {};
-  addon.userPermissions = extension.userPermissions;
+  addon.userPermissions = extension.manifestPermissions;
 
   addon.applyBackgroundUpdates = AddonManager.AUTOUPDATE_DEFAULT;
 
@@ -531,7 +531,7 @@ async function loadManifestFromRDF(aUri, aStream) {
       pos += count;
       count = aStream.available();
     }
-    listener.onStopRequest(channel, null, Components.results.NS_OK);
+    listener.onStopRequest(channel, null, Cr.NS_OK);
   } catch (e) {
     listener.onStopRequest(channel, null, e.result);
     throw e;
@@ -956,7 +956,7 @@ var loadManifestFromZipFile = async function(aXPIFile, aInstallLocation) {
   }
 };
 
-this.loadManifestFromFile = function(aFile, aInstallLocation) {
+var loadManifestFromFile = function(aFile, aInstallLocation) {
   if (aFile.isFile())
     return loadManifestFromZipFile(aFile, aInstallLocation);
   return loadManifestFromDir(aFile, aInstallLocation);
@@ -1170,7 +1170,7 @@ function verifyDirSignedState(aDir, aAddon) {
  *         the add-on object to verify
  * @return a Promise that resolves to an AddonManager.SIGNEDSTATE_* constant.
  */
-this.verifyBundleSignedState = function(aBundle, aAddon) {
+var verifyBundleSignedState = function(aBundle, aAddon) {
   let promise = aBundle.isFile() ? verifyZipSignedState(aBundle, aAddon)
       : verifyDirSignedState(aBundle, aAddon);
   return promise.then(({signedState}) => signedState);
@@ -1622,19 +1622,19 @@ class AddonInstall {
     // makes it impossible to delete on Windows.
 
     // Try to load from the existing cache first
-    let repoAddon = await new Promise(resolve => AddonRepository.getCachedAddonByID(this.addon.id, resolve));
+    let repoAddon = await AddonRepository.getCachedAddonByID(this.addon.id);
 
     // It wasn't there so try to re-download it
     if (!repoAddon) {
-      await new Promise(resolve => AddonRepository.cacheAddons([this.addon.id], resolve));
-      repoAddon = await new Promise(resolve => AddonRepository.getCachedAddonByID(this.addon.id, resolve));
+      try {
+        [repoAddon] = await AddonRepository.cacheAddons([this.addon.id]);
+      } catch (err) {
+        logger.debug(`Error getting metadata for ${this.addon.id}: ${err.message}`);
+      }
     }
 
     this.addon._repositoryAddon = repoAddon;
     this.name = this.name || this.addon._repositoryAddon.name;
-    this.addon.compatibilityOverrides = repoAddon ?
-      repoAddon.compatibilityOverrides :
-      null;
     this.addon.appDisabled = !isUsableAddon(this.addon);
     return undefined;
   }
@@ -1989,7 +1989,7 @@ class AddonInstall {
   }
 }
 
-this.LocalAddonInstall = class extends AddonInstall {
+var LocalAddonInstall = class extends AddonInstall {
   /**
    * Initialises this install to be an install from a local file.
    *
@@ -2099,7 +2099,7 @@ this.LocalAddonInstall = class extends AddonInstall {
   }
 };
 
-this.DownloadAddonInstall = class extends AddonInstall {
+var DownloadAddonInstall = class extends AddonInstall {
   /**
    * Instantiates a DownloadAddonInstall
    *
@@ -2511,7 +2511,7 @@ this.DownloadAddonInstall = class extends AddonInstall {
  * can clean it up if the same add-on is installed again (see the comment
  * about "pending installs for the same add-on" in AddonInstall.startInstall)
  */
-this.StagedAddonInstall = class extends AddonInstall {
+var StagedAddonInstall = class extends AddonInstall {
   constructor(installLocation, dir, manifest) {
     super(installLocation, dir);
 
@@ -2659,7 +2659,7 @@ AddonInstallWrapper.prototype = {
  *         An optional platform version to check for updates for
  * @throws if the aListener or aReason arguments are not valid
  */
-this.UpdateChecker = function(aAddon, aListener, aReason, aAppVersion, aPlatformVersion) {
+var UpdateChecker = function(aAddon, aListener, aReason, aAppVersion, aPlatformVersion) {
   if (!aListener || !aReason)
     throw Cr.NS_ERROR_INVALID_ARG;
 
@@ -2726,7 +2726,7 @@ UpdateChecker.prototype = {
    * @param  updates
    *         The list of update details for the add-on
    */
-  onUpdateCheckComplete(aUpdates) {
+  async onUpdateCheckComplete(aUpdates) {
     XPIProvider.done(this.addon._updateCheck);
     this.addon._updateCheck = null;
     let AUC = AddonUpdateChecker;
@@ -2784,8 +2784,8 @@ UpdateChecker.prototype = {
     }
 
     let compatOverrides = AddonManager.strictCompatibility ?
-                            null :
-                            this.addon.compatibilityOverrides;
+                          null :
+                          await AddonRepository.getCompatibilityOverrides(this.addon.id);
 
     let update = AUC.getNewestCompatibleUpdate(aUpdates,
                                            this.appVersion,

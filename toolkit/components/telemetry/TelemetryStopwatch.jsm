@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-this.EXPORTED_SYMBOLS = ["TelemetryStopwatch"];
+var EXPORTED_SYMBOLS = ["TelemetryStopwatch"];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
@@ -110,7 +110,7 @@ let Timers = {
   }
 };
 
-this.TelemetryStopwatch = {
+var TelemetryStopwatch = {
   /**
    * Starts a timer associated with a telemetry histogram. The timer can be
    * directly associated with a histogram, or with a pair of a histogram and
@@ -337,7 +337,7 @@ this.TelemetryStopwatch = {
   },
 };
 
-this.TelemetryStopwatchImpl = {
+var TelemetryStopwatchImpl = {
   // Suppress errors. Used when testing.
   _suppressErrors: false,
 
@@ -355,7 +355,7 @@ this.TelemetryStopwatchImpl = {
       return false;
     }
 
-    return Timers.put(histogram, object, key, Components.utils.now());
+    return Timers.put(histogram, object, key, Cu.now());
   },
 
   running(histogram, object, key) {
@@ -378,7 +378,7 @@ this.TelemetryStopwatchImpl = {
     }
 
     try {
-      let delta = Components.utils.now() - startTime;
+      let delta = Cu.now() - startTime;
       return Math.round(delta);
     } catch (e) {
       if (!this._suppressErrors) {

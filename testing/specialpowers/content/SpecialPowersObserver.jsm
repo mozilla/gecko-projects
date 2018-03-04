@@ -15,7 +15,7 @@ var EXPORTED_SYMBOLS = ["SpecialPowersObserver", "SpecialPowersObserverFactory"]
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-Components.utils.importGlobalProperties(["File"]);
+Cu.importGlobalProperties(["File"]);
 
 const CHILD_SCRIPT = "chrome://specialpowers/content/specialpowers.js";
 const CHILD_SCRIPT_API = "chrome://specialpowers/content/specialpowersAPI.js";
@@ -26,11 +26,11 @@ const CHILD_LOGGER_SCRIPT = "chrome://specialpowers/content/MozillaLogger.js";
 Services.scriptloader.loadSubScript("chrome://specialpowers/content/SpecialPowersObserverAPI.js");
 
 /* XPCOM gunk */
-this.SpecialPowersObserver = function SpecialPowersObserver() {
+function SpecialPowersObserver() {
   this._isFrameScriptLoaded = false;
   this._messageManager = Cc["@mozilla.org/globalmessagemanager;1"].
                          getService(Ci.nsIMessageBroadcaster);
-};
+}
 
 
 SpecialPowersObserver.prototype = new SpecialPowersObserverAPI();
@@ -38,7 +38,7 @@ SpecialPowersObserver.prototype = new SpecialPowersObserverAPI();
 SpecialPowersObserver.prototype.classDescription = "Special powers Observer for use in testing.";
 SpecialPowersObserver.prototype.classID = Components.ID("{59a52458-13e0-4d93-9d85-a637344f29a1}");
 SpecialPowersObserver.prototype.contractID = "@mozilla.org/special-powers-observer;1";
-SpecialPowersObserver.prototype.QueryInterface = XPCOMUtils.generateQI([Components.interfaces.nsIObserver]);
+SpecialPowersObserver.prototype.QueryInterface = XPCOMUtils.generateQI([Ci.nsIObserver]);
 
 SpecialPowersObserver.prototype.observe = function(aSubject, aTopic, aData) {
   switch (aTopic) {
@@ -291,10 +291,9 @@ SpecialPowersObserver.prototype.receiveMessage = function(aMessage) {
   return undefined;
 };
 
-this.NSGetFactory = XPCOMUtils.generateNSGetFactory([SpecialPowersObserver]);
-this.SpecialPowersObserverFactory = Object.freeze({
+var SpecialPowersObserverFactory = Object.freeze({
   createInstance(outer, id) {
-    if (outer) { throw Components.results.NS_ERROR_NO_AGGREGATION; }
+    if (outer) { throw Cr.NS_ERROR_NO_AGGREGATION; }
     return new SpecialPowersObserver();
   },
   loadFactory(lock) {},

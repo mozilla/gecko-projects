@@ -20,10 +20,10 @@
 #include "nsTransform2D.h"
 #include "nsMenuFrame.h"
 #include "prlink.h"
-#include "nsIDOMHTMLInputElement.h"
 #include "nsGkAtoms.h"
 #include "nsAttrValueInlines.h"
 
+#include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/Services.h"
 
@@ -54,6 +54,7 @@
 using namespace mozilla;
 using namespace mozilla::gfx;
 using namespace mozilla::widget;
+using mozilla::dom::HTMLInputElement;
 
 NS_IMPL_ISUPPORTS_INHERITED(nsNativeThemeGTK, nsNativeTheme, nsITheme,
                                                              nsIObserver)
@@ -76,11 +77,20 @@ GetMonitorScaleFactor(nsIFrame* aFrame)
         // updated in nsPuppetWidget.
         // Since we don't want to apply font scale factor for UI elements
         // (because GTK does not do so) we need to remove that from returned value.
-        return rootWidget->GetDefaultScale().scale / gfxPlatformGtk::GetFontScaleFactor();
+        // The computed monitor scale factor needs to be rounded before casting to
+        // integer to avoid rounding errors which would lead to returning 0.
+        int monitorScale = int(round(rootWidget->GetDefaultScale().scale
+              / gfxPlatformGtk::GetFontScaleFactor()));
+        // Monitor scale can be negative if it has not been initialized in the
+        // puppet widget yet. We also make sure that we return positive value.
+        if (monitorScale < 1) {
+          return 1;
+        }
+        return monitorScale;
     }
   }
-  // We cannot return zero scale because that would lead to divide by zero
-  return (scale < 1) ? 1 : int(round(scale));
+  // Use monitor scaling factor where devPixelsPerPx is set
+  return ScreenHelperGTK::GetGTKMonitorScaleFactor();
 }
 
 nsNativeThemeGTK::nsNativeThemeGTK()
@@ -246,14 +256,10 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
         }
       } else {
         if (aWidgetFlags) {
-          nsCOMPtr<nsIDOMHTMLInputElement> inputElt(do_QueryInterface(aFrame->GetContent()));
           *aWidgetFlags = 0;
-          if (inputElt) {
-            bool isHTMLChecked;
-            inputElt->GetChecked(&isHTMLChecked);
-            if (isHTMLChecked)
-              *aWidgetFlags |= MOZ_GTK_WIDGET_CHECKED;
-          }
+          HTMLInputElement* inputElt = HTMLInputElement::FromContent(aFrame->GetContent());
+          if (inputElt && inputElt->Checked())
+            *aWidgetFlags |= MOZ_GTK_WIDGET_CHECKED;
 
           if (GetIndeterminate(aFrame))
             *aWidgetFlags |= MOZ_GTK_WIDGET_INCONSISTENT;
@@ -749,7 +755,7 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
     aGtkWidgetType = MOZ_GTK_HEADER_BAR_BUTTON_MAXIMIZE;
     break;
   case NS_THEME_WINDOW_BUTTON_RESTORE:
-    aGtkWidgetType = MOZ_GTK_HEADER_BAR_BUTTON_RESTORE;
+    aGtkWidgetType = MOZ_GTK_HEADER_BAR_BUTTON_MAXIMIZE_RESTORE;
     break;
   default:
     return false;
@@ -1620,17 +1626,10 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
       break;
     }
   case NS_THEME_WINDOW_BUTTON_MAXIMIZE:
-    {
-      const ToolbarButtonGTKMetrics* metrics =
-          GetToolbarButtonMetrics(MOZ_GTK_HEADER_BAR_BUTTON_MAXIMIZE);
-      aResult->width = metrics->minSizeWithBorderMargin.width;
-      aResult->height = metrics->minSizeWithBorderMargin.height;
-      break;
-    }
   case NS_THEME_WINDOW_BUTTON_RESTORE:
     {
       const ToolbarButtonGTKMetrics* metrics =
-          GetToolbarButtonMetrics(MOZ_GTK_HEADER_BAR_BUTTON_RESTORE);
+          GetToolbarButtonMetrics(MOZ_GTK_HEADER_BAR_BUTTON_MAXIMIZE);
       aResult->width = metrics->minSizeWithBorderMargin.width;
       aResult->height = metrics->minSizeWithBorderMargin.height;
       break;

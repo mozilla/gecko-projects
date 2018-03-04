@@ -4,7 +4,7 @@
   "no-unused-vars": ["error", {
     vars: "local",
     args: "none",
-    varsIgnorePattern: "^(Cc|Ci|Cr|Cu|EXPORTED_SYMBOLS)$",
+    varsIgnorePattern: "^(EXPORTED_SYMBOLS)$",
   }],
 */
 
@@ -130,6 +130,61 @@ function spawnTaskInNewDialog(requestId, contentTaskFn, args = null) {
   return withNewDialogFrame(requestId, async function spawnTaskInNewDialog_tabTask(reqFrame) {
     await spawnPaymentDialogTask(reqFrame, contentTaskFn, args);
   });
+}
+
+async function addSampleAddressesAndBasicCard() {
+  let onChanged = TestUtils.topicObserved("formautofill-storage-changed",
+                                          (subject, data) => data == "add");
+  profileStorage.addresses.add(PTU.Addresses.TimBL);
+  await onChanged;
+
+  onChanged = TestUtils.topicObserved("formautofill-storage-changed",
+                                      (subject, data) => data == "add");
+  profileStorage.addresses.add(PTU.Addresses.TimBL2);
+  await onChanged;
+
+  onChanged = TestUtils.topicObserved("formautofill-storage-changed",
+                                      (subject, data) => data == "add");
+  profileStorage.creditCards.add(PTU.BasicCards.JohnDoe);
+  await onChanged;
+}
+
+/**
+ * Create a PaymentRequest object with the given parameters, then
+ * run the given merchantTaskFn.
+ *
+ * @param {Object} browser
+ * @param {Object} options
+ * @param {Object} options.methodData
+ * @param {Object} options.details
+ * @param {Object} options.options
+ * @param {Function} options.merchantTaskFn
+ * @returns {Object} References to the window, requestId, and frame
+ */
+async function setupPaymentDialog(browser, {methodData, details, options, merchantTaskFn}) {
+  let dialogReadyPromise = waitForWidgetReady();
+  await ContentTask.spawn(browser,
+                          {
+                            methodData,
+                            details,
+                            options,
+                          },
+                          merchantTaskFn);
+
+  // get a reference to the UI dialog and the requestId
+  let [win] = await Promise.all([getPaymentWidget(), dialogReadyPromise]);
+  ok(win, "Got payment widget");
+  let requestId = paymentUISrv.requestIdForWindow(win);
+  ok(requestId, "requestId should be defined");
+  is(win.closed, false, "dialog should not be closed");
+
+  let frame = await getPaymentFrame(win);
+  ok(frame, "Got payment frame");
+
+  await dialogReadyPromise;
+  info("dialog ready");
+
+  return {win, requestId, frame};
 }
 
 /**
