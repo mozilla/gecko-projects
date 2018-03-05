@@ -279,7 +279,7 @@ public:
   // nsWrapperCache
   virtual JSObject *WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto) override
   {
-    MOZ_CRASH("We should never get here!");
+    return GetWrapper();
   }
 
   // nsIGlobalJSObjectHolder
@@ -1280,6 +1280,12 @@ private:
     }
     mChromeFields.mGroupMessageManagers.Clear();
   }
+
+  // Call or Cancel mDocumentFlushedResolvers items, and perform MicroTask
+  // checkpoint after that, and adds observer if new mDocumentFlushedResolvers
+  // items are added while Promise callbacks inside the checkpoint.
+  template<bool call>
+  void CallOrCancelDocumentFlushedResolvers();
 
   void CallDocumentFlushedResolvers();
   void CancelDocumentFlushedResolvers();
