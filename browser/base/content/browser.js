@@ -34,6 +34,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   LightweightThemeManager: "resource://gre/modules/LightweightThemeManager.jsm",
   Log: "resource://gre/modules/Log.jsm",
   LoginManagerParent: "resource://gre/modules/LoginManagerParent.jsm",
+  NetUtil: "resource://gre/modules/NetUtil.jsm",
   NewTabUtils: "resource://gre/modules/NewTabUtils.jsm",
   OpenInTabsUtils: "resource:///modules/OpenInTabsUtils.jsm",
   PageActions: "resource:///modules/PageActions.jsm",
@@ -1370,6 +1371,13 @@ var gBrowserInit = {
     this._boundDelayedStartup = this._delayedStartup.bind(this);
     window.addEventListener("MozAfterPaint", this._boundDelayedStartup);
 
+    if (!PrivateBrowsingUtils.enabled) {
+      document.getElementById("Tools:PrivateBrowsing").hidden = true;
+      // Setting disabled doesn't disable the shortcut, so we just remove
+      // the keybinding.
+      document.getElementById("key_privatebrowsing").remove();
+    }
+
     this._loadHandled = true;
   },
 
@@ -1970,6 +1978,9 @@ if (AppConstants.platform == "macosx") {
 
     if (PrivateBrowsingUtils.permanentPrivateBrowsing) {
       document.getElementById("macDockMenuNewWindow").hidden = true;
+    }
+    if (!PrivateBrowsingUtils.enabled) {
+      document.getElementById("macDockMenuNewPrivateWindow").hidden = true;
     }
 
     this._delayedStartupTimeoutId = setTimeout(this.nonBrowserWindowDelayedStartup.bind(this), 0);
@@ -4139,7 +4150,7 @@ function OpenBrowserWindow(options) {
   var wintype = document.documentElement.getAttribute("windowtype");
 
   var extraFeatures = "";
-  if (options && options.private) {
+  if (options && options.private && PrivateBrowsingUtils.enabled) {
     extraFeatures = ",private";
     if (!PrivateBrowsingUtils.permanentPrivateBrowsing) {
       // Force the new window to load about:privatebrowsing instead of the default home page
@@ -8061,32 +8072,31 @@ var gIdentityHandler = {
     container.setAttribute("align", "center");
 
     let img = document.createElement("image");
-    let classes = "identity-popup-permission-icon " + aPermission.id + "-icon";
+    img.classList.add("identity-popup-permission-icon");
+    if (aPermission.id == "plugin:flash") {
+      img.classList.add("plugin-icon");
+    } else {
+      img.classList.add(aPermission.id + "-icon");
+    }
     if (aPermission.state == SitePermissions.BLOCK)
-      classes += " blocked-permission-icon";
+      img.classList.add("blocked-permission-icon");
 
     if (aPermission.sharingState == Ci.nsIMediaManagerService.STATE_CAPTURE_ENABLED ||
        (aPermission.id == "screen" && aPermission.sharingState &&
         !aPermission.sharingState.includes("Paused"))) {
-      classes += " in-use";
+      img.classList.add("in-use");
 
       // Synchronize control center and identity block blinking animations.
-      window.promiseDocumentFlushed(() => {}).then(() => {
+      window.promiseDocumentFlushed(() => {
         let sharingIconBlink = document.getElementById("sharing-icon").getAnimations()[0];
-        if (sharingIconBlink) {
-          let startTime = sharingIconBlink.startTime;
-          window.requestAnimationFrame(() => {
-            // TODO(Bug 1440607): This could cause a style flush, but putting
-            // the getAnimations() call outside of rAF causes a leak.
-            let imgBlink = img.getAnimations()[0];
-            if (imgBlink) {
-              imgBlink.startTime = startTime;
-            }
-          });
+        let imgBlink = img.getAnimations()[0];
+        return [sharingIconBlink, imgBlink];
+      }).then(([sharingIconBlink, imgBlink]) => {
+        if (sharingIconBlink && imgBlink) {
+          imgBlink.startTime = sharingIconBlink.startTime;
         }
       });
     }
-    img.setAttribute("class", classes);
 
     let nameLabel = document.createElement("label");
     nameLabel.setAttribute("flex", "1");
@@ -8148,7 +8158,7 @@ var gIdentityHandler = {
       state = SitePermissions.ALLOW;
       scope = SitePermissions.SCOPE_REQUEST;
     }
-    stateLabel.textContent = SitePermissions.getCurrentStateLabel(state, scope);
+    stateLabel.textContent = SitePermissions.getCurrentStateLabel(state, aPermission.id, scope);
 
     container.appendChild(img);
     container.appendChild(nameLabel);

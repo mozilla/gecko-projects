@@ -18,6 +18,7 @@
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Move.h"
+#include "mozilla/mozalloc.h"
 #include "mozilla/ReverseIterator.h"
 #include "mozilla/TypeTraits.h"
 #include "mozilla/Span.h"
@@ -1727,6 +1728,18 @@ public:
 
   // A variation on the RemoveElementsAt method defined above.
   void RemoveElementAt(index_type aIndex) { RemoveElementsAt(aIndex, 1); }
+
+  // A variation on the RemoveElementAt that removes the last element.
+  void RemoveLastElement() { RemoveElementAt(Length() - 1); }
+
+  // Removes the last element of the array and returns a copy of it.
+  MOZ_MUST_USE
+  elem_type PopLastElement()
+  {
+    elem_type elem = mozilla::Move(LastElement());
+    RemoveLastElement();
+    return elem;
+  }
 
   // This method performs index-based removals from an array without preserving
   // the order of the array. This is useful if you are using the array as a

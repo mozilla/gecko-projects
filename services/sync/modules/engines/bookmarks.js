@@ -727,7 +727,9 @@ BufferedBookmarksEngine.prototype = {
     let buf = await this._store.ensureOpenMirror();
     let recordsToUpload = await buf.apply({
       remoteTimeSeconds: Resource.serverTime,
+      weakUpload: [...this._needWeakUpload.keys()],
     });
+    this._needWeakUpload.clear();
     this._modified.replace(recordsToUpload);
   },
 
@@ -736,6 +738,19 @@ BufferedBookmarksEngine.prototype = {
   },
 
   async _createRecord(id) {
+    let record = await this._doCreateRecord(id);
+    if (!record.deleted) {
+      // Set hasDupe on all (non-deleted) records since we don't use it (e.g.
+      // the buffered engine doesn't), and we want to minimize the risk of older
+      // clients corrupting records. Note that the SyncedBookmarksMirror sets it
+      // for all records that it created, but we would like to ensure that
+      // weakly uploaded records are marked as hasDupe as well.
+      record.hasDupe = true;
+    }
+    return record;
+  },
+
+  async _doCreateRecord(id) {
     if (this._needWeakUpload.has(id)) {
       return this._store.createRecord(id, this.name);
     }

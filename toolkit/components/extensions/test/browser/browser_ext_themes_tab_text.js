@@ -1,7 +1,7 @@
 "use strict";
 
 // This test checks whether applied WebExtension themes that attempt to change
-// the background color of toolbars are applied properly.
+// the text color of the selected tab are applied properly.
 
 add_task(async function setup() {
   await SpecialPowers.pushPrefEnv({
@@ -50,7 +50,7 @@ add_task(async function test_support_tab_text_chrome_array() {
         },
         "colors": {
           "accentcolor": FRAME_COLOR,
-          "textcolor": BACKGROUND_TAB_TEXT_COLOR,
+          "textcolor": TAB_BACKGROUND_TEXT_COLOR,
           "tab_text": TAB_TEXT_COLOR,
         },
       },

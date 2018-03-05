@@ -95,6 +95,24 @@ ShadowRoot::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 }
 
 void
+ShadowRoot::CloneInternalDataFrom(ShadowRoot* aOther)
+{
+  size_t sheetCount = aOther->SheetCount();
+  for (size_t i = 0; i < sheetCount; ++i) {
+    StyleSheet* sheet = aOther->SheetAt(i);
+    if (sheet->IsApplicable()) {
+      RefPtr<StyleSheet> clonedSheet =
+        sheet->Clone(nullptr, nullptr, nullptr, nullptr);
+      if (clonedSheet) {
+        AppendStyleSheet(*clonedSheet.get());
+        Servo_AuthorStyles_AppendStyleSheet(mServoStyles.get(),
+                                            clonedSheet->AsServo());
+      }
+    }
+  }
+}
+
+void
 ShadowRoot::AddSlot(HTMLSlotElement* aSlot)
 {
   MOZ_ASSERT(aSlot);
@@ -438,8 +456,7 @@ ShadowRoot::SetInnerHTML(const nsAString& aInnerHTML, ErrorResult& aError)
 }
 
 void
-ShadowRoot::AttributeChanged(nsIDocument* aDocument,
-                             Element* aElement,
+ShadowRoot::AttributeChanged(Element* aElement,
                              int32_t aNameSpaceID,
                              nsAtom* aAttribute,
                              int32_t aModType,
@@ -468,26 +485,22 @@ ShadowRoot::AttributeChanged(nsIDocument* aDocument,
 }
 
 void
-ShadowRoot::ContentAppended(nsIDocument* aDocument,
-                            nsIContent* aContainer,
-                            nsIContent* aFirstNewContent)
+ShadowRoot::ContentAppended(nsIContent* aFirstNewContent)
 {
   for (nsIContent* content = aFirstNewContent;
        content;
        content = content->GetNextSibling()) {
-    ContentInserted(aDocument, aContainer, content);
+    ContentInserted(content);
   }
 }
 
 void
-ShadowRoot::ContentInserted(nsIDocument* aDocument,
-                            nsIContent* aContainer,
-                            nsIContent* aChild)
+ShadowRoot::ContentInserted(nsIContent* aChild)
 {
-  // Check to ensure that the content is in the same anonymous tree
-  // as the container because anonymous content may report its container
-  // as the host but it may not be in the host's child list.
-  if (!nsContentUtils::IsInSameAnonymousTree(aContainer, aChild)) {
+  // Check to ensure that the child not an anonymous subtree root because
+  // even though its parent could be the host it may not be in the host's child
+  // list.
+  if (aChild->IsRootOfAnonymousSubtree()) {
     return;
   }
 
@@ -495,7 +508,7 @@ ShadowRoot::ContentInserted(nsIDocument* aDocument,
     return;
   }
 
-  if (aContainer && aContainer == GetHost()) {
+  if (aChild->GetParent() == GetHost()) {
     if (const HTMLSlotElement* slot = AssignSlotFor(aChild)) {
       slot->EnqueueSlotChangeEvent();
     }
@@ -504,7 +517,7 @@ ShadowRoot::ContentInserted(nsIDocument* aDocument,
 
   // If parent's root is a shadow root, and parent is a slot whose assigned
   // nodes is the empty list, then run signal a slot change for parent.
-  HTMLSlotElement* slot = HTMLSlotElement::FromContentOrNull(aContainer);
+  HTMLSlotElement* slot = HTMLSlotElement::FromContentOrNull(aChild->GetParent());
   if (slot && slot->GetContainingShadow() == this &&
       slot->AssignedNodes().IsEmpty()) {
     slot->EnqueueSlotChangeEvent();
@@ -512,15 +525,12 @@ ShadowRoot::ContentInserted(nsIDocument* aDocument,
 }
 
 void
-ShadowRoot::ContentRemoved(nsIDocument* aDocument,
-                           nsIContent* aContainer,
-                           nsIContent* aChild,
-                           nsIContent* aPreviousSibling)
+ShadowRoot::ContentRemoved(nsIContent* aChild, nsIContent* aPreviousSibling)
 {
-  // Check to ensure that the content is in the same anonymous tree
-  // as the container because anonymous content may report its container
-  // as the host but it may not be in the host's child list.
- if (!nsContentUtils::IsInSameAnonymousTree(aContainer, aChild)) {
+  // Check to ensure that the child not an anonymous subtree root because
+  // even though its parent could be the host it may not be in the host's child
+  // list.
+ if (aChild->IsRootOfAnonymousSubtree()) {
     return;
   }
 
@@ -528,7 +538,7 @@ ShadowRoot::ContentRemoved(nsIDocument* aDocument,
     return;
   }
 
-  if (aContainer && aContainer == GetHost()) {
+  if (aChild->GetParent() == GetHost()) {
     nsAutoString slotName;
     if (aChild->IsElement()) {
       aChild->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::slot, slotName);
@@ -541,7 +551,7 @@ ShadowRoot::ContentRemoved(nsIDocument* aDocument,
 
   // If parent's root is a shadow root, and parent is a slot whose assigned
   // nodes is the empty list, then run signal a slot change for parent.
-  HTMLSlotElement* slot = HTMLSlotElement::FromContentOrNull(aContainer);
+  HTMLSlotElement* slot = HTMLSlotElement::FromContentOrNull(aChild->GetParent());
   if (slot && slot->GetContainingShadow() == this &&
       slot->AssignedNodes().IsEmpty()) {
     slot->EnqueueSlotChangeEvent();

@@ -6939,7 +6939,7 @@ class LGetPropertyPolymorphicV : public LInstructionHelper<BOX_PIECES, 1, 0>
     const MGetPropertyPolymorphic* mir() const {
         return mir_->toGetPropertyPolymorphic();
     }
-    virtual const char* extraName() const {
+    const char* extraName() const {
         return PropertyNameToExtraName(mir()->name());
     }
 };
@@ -6964,7 +6964,7 @@ class LGetPropertyPolymorphicT : public LInstructionHelper<1, 1, 1>
     const MGetPropertyPolymorphic* mir() const {
         return mir_->toGetPropertyPolymorphic();
     }
-    virtual const char* extraName() const {
+    const char* extraName() const {
         return PropertyNameToExtraName(mir()->name());
     }
 };
@@ -8038,6 +8038,32 @@ class LGuardObjectIdentity : public LInstructionHelper<0, 2, 0>
     }
     const MGuardObjectIdentity* mir() const {
         return mir_->toGuardObjectIdentity();
+    }
+};
+
+class LGuardShape : public LInstructionHelper<0, 1, 0>
+{
+  public:
+    LIR_HEADER(GuardShape)
+
+    explicit LGuardShape(const LAllocation& in) {
+        setOperand(0, in);
+    }
+    const MGuardShape* mir() const {
+        return mir_->toGuardShape();
+    }
+};
+
+class LGuardObjectGroup : public LInstructionHelper<0, 1, 0>
+{
+  public:
+    LIR_HEADER(GuardObjectGroup)
+
+    explicit LGuardObjectGroup(const LAllocation& in) {
+        setOperand(0, in);
+    }
+    const MGuardObjectGroup* mir() const {
+        return mir_->toGuardObjectGroup();
     }
 };
 

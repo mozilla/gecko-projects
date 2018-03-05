@@ -1,3 +1,6 @@
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
+
 add_task(async function test_value_combo() {
   let buf = await openMirror("value_combo");
 
@@ -81,7 +84,7 @@ add_task(async function test_value_combo() {
         id: "bzBmk_______",
         type: "bookmark",
         parentid: "toolbar",
-        hasDupe: false,
+        hasDupe: true,
         parentName: BookmarksToolbarTitle,
         dateAdded: bzBmk.dateAdded.getTime(),
         bmkUri: "https://bugzilla.mozilla.org/",
@@ -97,7 +100,7 @@ add_task(async function test_value_combo() {
         id: "toolbar",
         type: "folder",
         parentid: "places",
-        hasDupe: false,
+        hasDupe: true,
         parentName: "",
         dateAdded: menuInfo.dateAdded.getTime(),
         title: BookmarksToolbarTitle,

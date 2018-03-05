@@ -112,8 +112,6 @@ DEFAULTS = dict(
         'browser.newtabpage.activity-stream.tippyTop.service.endpoint': '',
         'browser.newtabpage.activity-stream.feeds.section.topstories': False,
         'browser.newtabpage.activity-stream.feeds.snippets': False,
-        'browser.newtabpage.directory.source':
-            '${webserver}/directoryLinks.json',
         'browser.newtabpage.introShown': True,
         'browser.safebrowsing.downloads.remote.url':
             'http://127.0.0.1/safebrowsing-dummy/downloads',
@@ -168,7 +166,7 @@ DEFAULTS = dict(
         'media.gmp-manager.updateEnabled': False,
         'extensions.systemAddon.update.url':
             'http://127.0.0.1/dummy-system-addons.xml',
-        'extensions.shield-recipe-client.api_url':
+        'app.normandy.api_url':
             'https://127.0.0.1/selfsupport-dummy/',
         'browser.ping-centre.staging.endpoint':
             'https://127.0.0.1/pingcentre/dummy/',

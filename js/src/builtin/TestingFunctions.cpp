@@ -530,6 +530,14 @@ WasmIsSupported(JSContext* cx, unsigned argc, Value* vp)
 }
 
 static bool
+WasmIsSupportedByHardware(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    args.rval().setBoolean(wasm::HasCompilerSupport(cx));
+    return true;
+}
+
+static bool
 WasmDebuggingIsSupported(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -4932,6 +4940,33 @@ IsLegacyIterator(JSContext* cx, unsigned argc, Value* vp)
 }
 
 static bool
+SetTimeResolution(JSContext* cx, unsigned argc, Value* vp)
+{
+   CallArgs args = CallArgsFromVp(argc, vp);
+   RootedObject callee(cx, &args.callee());
+
+   if (!args.requireAtLeast(cx, "setTimeResolution", 2))
+        return false;
+
+   if (!args[0].isInt32()) {
+      ReportUsageErrorASCII(cx, callee, "First argument must be an Int32.");
+      return false;
+   }
+   int32_t resolution = args[0].toInt32();
+
+   if (!args[1].isBoolean()) {
+       ReportUsageErrorASCII(cx, callee, "Second argument must be a Boolean");
+       return false;
+   }
+   bool jitter = args[1].toBoolean();
+
+   JS::SetTimeResolutionUsec(resolution, jitter);
+
+   args.rval().setUndefined();
+   return true;
+}
+
+static bool
 EnableExpressionClosures(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -5375,6 +5410,10 @@ gc::ZealModeHelpText),
 "wasmIsSupported()",
 "  Returns a boolean indicating whether WebAssembly is supported on the current device."),
 
+    JS_FN_HELP("wasmIsSupportedByHardware", WasmIsSupportedByHardware, 0, 0,
+"wasmIsSupportedByHardware()",
+"  Returns a boolean indicating whether WebAssembly is supported on the current hardware (regardless of whether we've enabled support)."),
+
     JS_FN_HELP("wasmDebuggingIsSupported", WasmDebuggingIsSupported, 0, 0,
 "wasmDebuggingIsSupported()",
 "  Returns a boolean indicating whether WebAssembly debugging is supported on the current device;\n"
@@ -5692,6 +5731,11 @@ gc::ZealModeHelpText),
     JS_FN_HELP("getTimeZone", GetTimeZone, 0, 0,
 "getTimeZone()",
 "  Get the current time zone.\n"),
+
+    JS_FN_HELP("setTimeResolution", SetTimeResolution, 2, 0,
+"setTimeResolution(resolution, jitter)",
+"  Enables time clamping and jittering. Specify a time resolution in\n"
+"  microseconds and whether or not to jitter\n"),
 
     JS_FN_HELP("enableExpressionClosures", EnableExpressionClosures, 0, 0,
 "enableExpressionClosures()",

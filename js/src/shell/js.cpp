@@ -8890,7 +8890,10 @@ class AutoLibraryLoader {
     }
 
     PRLibrary* load(const char* path) {
-        PRLibrary* dll = PR_LoadLibrary(path);
+        PRLibSpec libSpec;
+        libSpec.type = PR_LibSpec_Pathname;
+        libSpec.value.pathname = path;
+        PRLibrary* dll = PR_LoadLibraryWithFlags(libSpec, PR_LD_NOW | PR_LD_GLOBAL);
         if (!dll) {
 #ifdef JS_POSIX_NSPR
             fprintf(stderr, "LoadLibrary '%s' failed: %s\n", path, dlerror());
@@ -9085,7 +9088,8 @@ main(int argc, char** argv, char** envp)
         || !op.addBoolOption('\0', "no-ggc", "Disable Generational GC")
         || !op.addBoolOption('\0', "no-cgc", "Disable Compacting GC")
         || !op.addBoolOption('\0', "no-incremental-gc", "Disable Incremental GC")
-        || !op.addBoolOption('\0', "nursery-strings", "Allocate strings in the nursery")
+        || !op.addStringOption('\0', "nursery-strings", "on/off",
+                               "Allocate strings in the nursery")
         || !op.addIntOption('\0', "available-memory", "SIZE",
                             "Select GC settings based on available memory (MB)", 0)
         || !op.addStringOption('\0', "arm-hwcap", "[features]",
@@ -9233,8 +9237,14 @@ main(int argc, char** argv, char** envp)
 
     js::UseInternalJobQueues(cx);
 
-    if (op.getBoolOption("nursery-strings"))
-        cx->runtime()->gc.nursery().enableStrings();
+    if (const char* opt = op.getStringOption("nursery-strings")) {
+        if (strcmp(opt, "on") == 0)
+            cx->runtime()->gc.nursery().enableStrings();
+        else if (strcmp(opt, "off") == 0)
+            cx->runtime()->gc.nursery().disableStrings();
+        else
+            MOZ_CRASH("invalid option value for --nursery-strings, must be on/off");
+    }
 
     if (!JS::InitSelfHostedCode(cx))
         return 1;

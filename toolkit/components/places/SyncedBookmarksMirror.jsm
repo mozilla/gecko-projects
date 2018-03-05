@@ -310,14 +310,17 @@ class SyncedBookmarksMirror {
    *         The current local time, in seconds.
    * @param  {Number} [options.remoteTimeSeconds]
    *         The current server time, in seconds.
+   * @param  {String[]} [options.weakUpload]
+   *         GUIDs of bookmarks to weakly upload.
    * @return {Object.<String, BookmarkChangeRecord>}
    *         A changeset containing locally changed and reconciled records to
    *         upload to the server, and to store in the mirror once upload
    *         succeeds.
    */
   async apply({ localTimeSeconds = Date.now() / 1000,
-                remoteTimeSeconds = 0 } = {}) {
-    let hasChanges = await this.hasChanges();
+                remoteTimeSeconds = 0,
+                weakUpload = [] } = {}) {
+    let hasChanges = weakUpload.length > 0 || (await this.hasChanges());
     if (!hasChanges) {
       MirrorLog.debug("No changes detected in both mirror and Places");
       return {};
@@ -425,7 +428,7 @@ class SyncedBookmarksMirror {
       await this.noteObserverChanges(observersToNotify);
 
       MirrorLog.debug("Staging locally changed items for upload");
-      await this.stageItemsToUpload();
+      await this.stageItemsToUpload(weakUpload);
 
       MirrorLog.debug("Fetching records for local items to upload");
       let changeRecords = await this.fetchLocalChangeRecords();
@@ -1472,8 +1475,21 @@ class SyncedBookmarksMirror {
    * items. The change counter in Places is the persistent record of items that
    * we need to upload, so, if upload is interrupted or fails, we'll stage the
    * items again on the next sync.
+   *
+   * @param  {String[]} weakUpload
+   *         GUIDs of bookmarks to weakly upload.
    */
-  async stageItemsToUpload() {
+  async stageItemsToUpload(weakUpload) {
+    // Stage explicit weak uploads such as repair responses.
+    for (let chunk of PlacesSyncUtils.chunkArray(weakUpload,
+      SQLITE_MAX_VARIABLE_NUMBER)) {
+      await this.db.execute(`
+        INSERT INTO itemsToWeaklyReupload(id)
+        SELECT b.id FROM moz_bookmarks b
+        WHERE b.guid IN (${new Array(chunk.length).fill("?").join(",")})`,
+        chunk);
+    }
+
     // Stage remotely changed items with older local creation dates. These are
     // tracked "weakly": if the upload is interrupted or fails, we won't
     // reupload the record on the next sync.
@@ -1653,8 +1669,12 @@ class SyncedBookmarksMirror {
               // iOS is stricter and requires both `children` and `parentid` to
               // match.
               parentid: parentRecordId,
-              // Older Desktops use `hasDupe` and `parentName` for deduping.
-              hasDupe: false,
+              // Older Desktops use `hasDupe` (along with `parentName` for
+              // deduping), if hasDupe is true, then they won't attempt deduping
+              // (since they believe that a duplicate for this record should
+              // exist). We set it to true to prevent them from applying their
+              // deduping logic.
+              hasDupe: true,
               parentName: row.getResultByName("parentTitle"),
               dateAdded,
               bmkUri: row.getResultByName("url"),
@@ -1675,7 +1695,7 @@ class SyncedBookmarksMirror {
             id: recordId,
             type: "bookmark",
             parentid: parentRecordId,
-            hasDupe: false,
+            hasDupe: true,
             parentName: row.getResultByName("parentTitle"),
             dateAdded,
             bmkUri: row.getResultByName("url"),
@@ -1711,7 +1731,7 @@ class SyncedBookmarksMirror {
               id: recordId,
               type: "livemark",
               parentid: parentRecordId,
-              hasDupe: false,
+              hasDupe: true,
               parentName: row.getResultByName("parentTitle"),
               dateAdded,
               title: row.getResultByName("title"),
@@ -1734,7 +1754,7 @@ class SyncedBookmarksMirror {
             id: recordId,
             type: "folder",
             parentid: parentRecordId,
-            hasDupe: false,
+            hasDupe: true,
             parentName: row.getResultByName("parentTitle"),
             dateAdded,
             title: row.getResultByName("title"),
@@ -1762,7 +1782,7 @@ class SyncedBookmarksMirror {
             id: recordId,
             type: "separator",
             parentid: parentRecordId,
-            hasDupe: false,
+            hasDupe: true,
             parentName: row.getResultByName("parentTitle"),
             dateAdded,
             // Older Desktops use `pos` for deduping.

@@ -1047,11 +1047,7 @@ pref("dom.ipc.plugins.sandbox-level.flash", 0);
 // On windows these levels are:
 // See - security/sandbox/win/src/sandboxbroker/sandboxBroker.cpp
 // SetSecurityLevelForContentProcess() for what the different settings mean.
-#if defined(NIGHTLY_BUILD)
 pref("security.sandbox.content.level", 5);
-#else
-pref("security.sandbox.content.level", 4);
-#endif
 
 // This controls the depth of stack trace that is logged when Windows sandbox
 // logging is turned on.  This is only currently available for the content
@@ -1227,6 +1223,7 @@ pref("services.sync.prefs.sync.privacy.trackingprotection.pbmode.enabled", true)
 pref("services.sync.prefs.sync.privacy.resistFingerprinting", true);
 pref("services.sync.prefs.sync.privacy.reduceTimerPrecision", true);
 pref("services.sync.prefs.sync.privacy.resistFingerprinting.reduceTimerPrecision.microseconds", true);
+pref("services.sync.prefs.sync.privacy.resistFingerprinting.reduceTimerPrecision.jitter", true);
 pref("services.sync.prefs.sync.security.OCSP.enabled", true);
 pref("services.sync.prefs.sync.security.OCSP.require", true);
 pref("services.sync.prefs.sync.security.default_personal_cert", true);
@@ -1282,9 +1279,6 @@ pref("browser.newtabpage.rows", 3);
 
 // number of columns of newtab grid
 pref("browser.newtabpage.columns", 5);
-
-// directory tiles download URL
-pref("browser.newtabpage.directory.source", "https://tiles.services.mozilla.com/v3/links/fetch/%LOCALE%/%CHANNEL%");
 
 // Activity Stream prefs that control to which page to redirect
 pref("browser.newtabpage.activity-stream.prerender", true);
@@ -1762,3 +1756,20 @@ pref("browser.chrome.errorReporter.logLevel", "Error");
 // URL for Learn More link for browser error logging in preferences
 pref("browser.chrome.errorReporter.infoURL",
      "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/nightly-error-collection");
+
+#ifdef EARLY_BETA_OR_EARLIER
+pref("browser.policies.enabled", true);
+#endif
+
+// Normandy client preferences
+pref("app.normandy.api_url", "https://normandy.cdn.mozilla.net/api/v1");
+pref("app.normandy.dev_mode", false);
+pref("app.normandy.enabled", true);
+pref("app.normandy.logging.level", 50); // Warn
+pref("app.normandy.run_interval_seconds", 86400); // 24 hours
+pref("app.normandy.shieldLearnMoreUrl", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/shield");
+#ifdef MOZ_DATA_REPORTING
+pref("app.shield.optoutstudies.enabled", true);
+#else
+pref("app.shield.optoutstudies.enabled", false);
+#endif
