@@ -1104,13 +1104,18 @@ CheckFixedMemory(void* aAddress, size_t aSize)
   }
 
   {
-    // The memory should already be tracked.
+    // The memory should already be tracked. Check each page in the allocation
+    // because there might be tracked regions adjacent to one another, neither
+    // of which entirely contains this memory.
     AutoSpinLock lock(gMemoryInfo->mTrackedRegionsLock);
-    Maybe<AllocatedMemoryRegion> region =
-      gMemoryInfo->mTrackedRegions.lookupClosestLessOrEqual(aAddress);
-    if (!region.isSome() ||
-        !MemoryContains(region.ref().mBase, region.ref().mSize, aAddress, aSize)) {
-      child::ReportFatalError("Fixed memory is not tracked!");
+    for (size_t offset = 0; offset < aSize; offset += PageSize) {
+      uint8_t* page = (uint8_t*)aAddress + offset;
+      Maybe<AllocatedMemoryRegion> region =
+        gMemoryInfo->mTrackedRegions.lookupClosestLessOrEqual(page);
+      if (!region.isSome() ||
+          !MemoryContains(region.ref().mBase, region.ref().mSize, page, PageSize)) {
+        child::ReportFatalError("Fixed memory is not tracked!");
+      }
     }
   }
 
