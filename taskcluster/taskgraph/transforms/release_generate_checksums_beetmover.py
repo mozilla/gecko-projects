@@ -14,7 +14,7 @@ from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
                                          get_phase)
 from taskgraph.transforms.beetmover import craft_release_properties
 from taskgraph.transforms.task import task_description_schema
-from voluptuous import Any, Required, Optional
+from voluptuous import Required, Optional
 
 transforms = TransformSequence()
 
@@ -36,11 +36,6 @@ CHECKSUMS_SIGNED_ARTIFACTS = [
 task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
 
 transforms = TransformSequence()
-
-# shortcut for a string where task references are allowed
-taskref_or_string = Any(
-    basestring,
-    {Required('task-reference'): basestring})
 
 release_generate_checksums_beetmover_schema = Schema({
     # the dependent task (object) for this beetmover job, used to inform beetmover.

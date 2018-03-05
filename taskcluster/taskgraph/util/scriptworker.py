@@ -424,8 +424,6 @@ def get_release_config(config):
     if partial_updates != "" and config.kind in ('release-bouncer-sub',
                                                  'release-bouncer-check',
                                                  'release-update-verify-config',
-                                                 'release-balrog-submit-toplevel',
-                                                 'release-secondary-balrog-submit-toplevel',
                                                  'release-secondary-update-verify-config',
                                                  'release-balrog-submit-toplevel',
                                                  'release-secondary-balrog-submit-toplevel',
