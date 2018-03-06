@@ -55,7 +55,7 @@ def define_upstream_artifacts(config, jobs):
                 job['upstream-artifacts'] = []
                 yield job
                 continue
-            
+
             artifacts_specifications = generate_specifications_of_artifacts_to_sign(
                 build_platform,
                 dep_job.attributes.get('nightly'),

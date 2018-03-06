@@ -99,10 +99,10 @@ def verify_task_graph_symbol(task, taskgraph, scratch_pad):
             key = (collection_keys, platform, group_symbol, symbol)
             if key in scratch_pad:
                 pass
-                #raise Exception(
-                #    "conflict between `{}`:`{}` for values `{}`"
-                #    .format(task.label, scratch_pad[key], key)
-                #)
+#                raise Exception(
+#                    "conflict between `{}`:`{}` for values `{}`"
+#                    .format(task.label, scratch_pad[key], key)
+#                )
             else:
                 scratch_pad[key] = task.label
 
