@@ -19,6 +19,17 @@ function f() {
 function updateNumber() {
   number++;
   document.getElementById("maindiv").innerHTML = "Number: " + number;
+  testStepping();
+}
+function testStepping() {
+  var a = 0;
+  testStepping2();
+  return a;
+}
+function testStepping2() {
+  var c = this; // Note: using 'this' causes the script to have a prologue.
+  c++;
+  c--;
 }
 window.setTimeout(f, 1);
 </script>

@@ -14,7 +14,6 @@
 using namespace js;
 using namespace mozilla::recordreplay;
 using mozilla::Maybe;
-using mozilla::recordreplay::AutoPassThroughThreadEvents;
 
 extern JS_FRIEND_API(void) JS_StackDump();
 
@@ -1838,7 +1837,7 @@ ReplayDebugger::setFrameOnStep(JSContext* cx, HandleObject obj, CallArgs& args)
     if (!getScriptStructure(cx, scriptObj, &structure))
         return false;
 
-    jsbytecode* startPc = structure.code + offset;
+    jsbytecode* startPc = structure.code + std::max(offset, structure.mainOffset);
 
     // Find all successor or predecessor bytecodes in a script with a different
     // line number from the starting bytecode. The normal debugger relies on
@@ -1849,13 +1848,6 @@ ReplayDebugger::setFrameOnStep(JSContext* cx, HandleObject obj, CallArgs& args)
     // after the replaying process does any execution.
 
     PcVector adjacent;
-
-    // Include the pc itself in the adjacent bytecodes list. This is used for
-    // step handlers in the second-to-topmost frame, where we want to step back
-    // to the call site itself.
-    if (!adjacent.append(startPc))
-        return false;
-
     GetSuccessorsOrPredecessorsMatchingSearch(structure, startPc, DifferentLine, true, adjacent);
 
     PcVector predecessors;
@@ -1871,8 +1863,10 @@ ReplayDebugger::setFrameOnStep(JSContext* cx, HandleObject obj, CallArgs& args)
     }
 
     for (size_t i = 0; i < adjacent.length(); i++) {
-        BreakpointPosition position(BreakpointPosition::OnStep, scriptId,
-                                    adjacent[i] - structure.code, frameIndex);
+        size_t offset = adjacent[i] - structure.code;
+        if (offset < structure.mainOffset)
+            continue;
+        BreakpointPosition position(BreakpointPosition::OnStep, scriptId, offset, frameIndex);
         if (!SetReplayBreakpoint(cx, debugger->toJSObject(), &handler.toObject(), position))
             return false;
     }

@@ -414,7 +414,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
 
       // When rewinding into a frame, we end up at the point when it is being popped.
       if (rewinding) {
-        aFrame.reportedPop = true;
+        frame.reportedPop = true;
       }
 
       return this.sources.isBlackBoxed(url)
