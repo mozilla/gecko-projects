@@ -12,7 +12,6 @@ transforms:
    - taskgraph.transforms.task:transforms
 
 kind-dependencies:
-   - post-beetmover-dummy
    - build
 
 job-defaults:
