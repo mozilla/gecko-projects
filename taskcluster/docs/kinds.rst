@@ -345,6 +345,10 @@ release-partner-repack
 ----------------------
 Generates customized versions of releases for partners.
 
+release-partner-repack-signing
+------------------------------
+Internal signing of partner repacks
+
 repackage
 ---------
 Repackage tasks take a signed output and package them up into something suitable

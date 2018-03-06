@@ -7,117 +7,169 @@ loader: taskgraph.loader.transform:loader
 transforms:
    - taskgraph.transforms.release_deps:transforms
    - taskgraph.transforms.partner_repack:transforms
-   - taskgraph.transforms.job:transforms
    - taskgraph.transforms.release_notifications:transforms
+   - taskgraph.transforms.job:transforms
    - taskgraph.transforms.task:transforms
 
 kind-dependencies:
    - post-beetmover-dummy
+   - build
 
 job-defaults:
+   name: partner-repack
    description: Release Promotion partner repacks
-   worker-type: buildbot-bridge/buildbot-bridge
-   run-on-projects: []
+   run-on-projects: []  # to make sure this never runs as part of CI
    shipping-product: firefox
    shipping-phase: promote
+   routes:
+      - index.releases.v1.{branch}.{revision}.{product}.{underscore_version}.build{build_number}.partner_repack
+      - index.releases.v1.{branch}.latest.{product}.partner_repack
+   worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+   worker:
+      docker-image:
+         in-tree: "update-verify"
+      max-run-time: 7200
+      artifacts:
+         - name: public/build/partner1.dmg
+           path: /builds/worker/checkouts/gecko/partner1.dmg
+           type: file
    run:
-      using: buildbot
-      release-promotion: true
-      product: firefox
+      using: run-task
+      sparse-profile: update-verify
 
 jobs:
    firefox-linux:
       label: firefox linux partner repacks
       worker:
-         properties:
-            repack_manifests_url:
+         env:
+            REPACK_MANIFESTS_URL:
                by-project:
                   mozilla-beta: "git@github.com:mozilla-partners/repack-manifests.git"
                   mozilla-release: "git@github.com:mozilla-partners/repack-manifests.git"
                   default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
-      run:
-         buildername: release-{branch}-firefox-linux_partner_repacks
+      treeherder:
+         symbol: PR
+         platform: linux/opt
+         kind: test
+         tier: 1
+      attributes:
+         build_platform: linux-nightly
 
    firefox-linux64:
       label: firefox linux64 partner repacks
       worker:
-         properties:
-            repack_manifests_url:
+         env:
+            REPACK_MANIFESTS_URL:
                by-project:
                   mozilla-beta: "git@github.com:mozilla-partners/repack-manifests.git"
                   mozilla-release: "git@github.com:mozilla-partners/repack-manifests.git"
                   default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
-      run:
-         buildername: release-{branch}-firefox-linux64_partner_repacks
+      treeherder:
+         symbol: PR
+         platform: linux64/opt
+         kind: test
+         tier: 1
+      attributes:
+         build_platform: linux64-nightly
 
    firefox-macosx:
       label: firefox macosx64 partner repacks
       worker:
-         properties:
-            repack_manifests_url:
+         env:
+            REPACK_MANIFESTS_URL:
                by-project:
                   mozilla-beta: "git@github.com:mozilla-partners/repack-manifests.git"
                   mozilla-release: "git@github.com:mozilla-partners/repack-manifests.git"
                   default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
-      run:
-         buildername: release-{branch}-firefox-macosx64_partner_repacks
+      treeherder:
+         symbol: PR
+         platform: macosx64/opt
+         kind: test
+         tier: 1
+      attributes:
+         build_platform: macosx64-nightly
 
    firefox-win32:
       label: firefox win32 partner repacks
       worker:
-         properties:
-            repack_manifests_url:
+         env:
+            REPACK_MANIFESTS_URL:
                by-project:
                   mozilla-beta: "git@github.com:mozilla-partners/repack-manifests.git"
                   mozilla-release: "git@github.com:mozilla-partners/repack-manifests.git"
                   default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
-      run:
-         buildername: release-{branch}-firefox-win32_partner_repacks
+      treeherder:
+         symbol: PR
+         platform: win32/opt
+         kind: test
+         tier: 1
+      attributes:
+         build_platform: win32-nightly
 
    firefox-win64:
       label: firefox win64 partner repacks
       worker:
-         properties:
-            repack_manifests_url:
+         env:
+            REPACK_MANIFESTS_URL:
                by-project:
                   mozilla-beta: "git@github.com:mozilla-partners/repack-manifests.git"
                   mozilla-release: "git@github.com:mozilla-partners/repack-manifests.git"
                   default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
-      run:
-         buildername: release-{branch}-firefox-win64_partner_repacks
+      treeherder:
+         symbol: PR
+         platform: win64/opt
+         kind: test
+         tier: 1
+      attributes:
+         build_platform: win64-nightly
 
    firefox-macosx-eme-free:
       label: firefox macosx64 EME-free repacks
       worker:
-         properties:
-            repack_manifests_url:
+         env:
+            REPACK_MANIFESTS_URL:
                by-project:
                   mozilla-beta: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
                   mozilla-release: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
                   default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
-      run:
-         buildername: release-{branch}-firefox-macosx64_partner_repacks
+      treeherder:
+         symbol: EME
+         platform: macosx64/opt
+         kind: test
+         tier: 1
+      attributes:
+         build_platform: macosx64-nightly
 
    firefox-win32-eme-free:
       label: firefox win32 EME-free repacks
       worker:
-         properties:
-            repack_manifests_url:
+         env:
+            REPACK_MANIFESTS_URL:
                by-project:
                   mozilla-beta: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
                   mozilla-release: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
                   default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
-      run:
-         buildername: release-{branch}-firefox-win32_partner_repacks
+      treeherder:
+         symbol: EME
+         platform: win32/opt
+         kind: test
+         tier: 1
+      attributes:
+         build_platform: win32-nightly
 
    firefox-win64-eme-free:
       label: firefox win64 EME-free repacks
       worker:
-         properties:
-            repack_manifests_url:
+         env:
+            REPACK_MANIFESTS_URL:
                by-project:
                   mozilla-beta: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
                   mozilla-release: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
                   default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
-      run:
-         buildername: release-{branch}-firefox-win64_partner_repacks
+      treeherder:
+         symbol: EME
+         platform: win64/opt
+         kind: test
+         tier: 1
+      attributes:
+         build_platform: win64-nightly
