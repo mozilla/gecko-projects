@@ -27,6 +27,7 @@ job-defaults:
    worker:
       docker-image:
          in-tree: "update-verify"
+      chain-of-trust: true
       max-run-time: 7200
       artifacts:
          - name: public/build/partner1/target.dmg
