@@ -56,6 +56,14 @@ RELEASE_PROMOTION_CONFIG = {
         'product': 'firefox',
         'release_type': 'rc',
     },
+    'promote_firefox_partners': {
+        'target_tasks_method': 'promote_firefox',
+        'product': 'firefox',
+        'rebuild_kinds': [
+            'release-partner-repack',
+            'release-partner-repack-signing',
+        ],
+    },
     'promote_devedition': {
         'target_tasks_method': 'promote_devedition',
         'product': 'devedition',
