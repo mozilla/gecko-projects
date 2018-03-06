@@ -9,7 +9,6 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import resolve_keyed_by
-from taskgraph.util.taskcluster import get_taskcluster_artifact_prefix
 
 
 transforms = TransformSequence()
@@ -36,9 +35,7 @@ def add_command(config, tasks):
 
         task["run"]["command"] = " ".join([
             "cd", "/builds/worker/checkouts/gecko", "&&",
-            "curl -L {}target.dmg > partner1.dmg".format(
-                get_taskcluster_artifact_prefix("<{}>".format(build_task))
-            )
+            "curl -L https://queue.taskcluster.net/v1/task/YfqwST9zRo2-QddTuetDQA/runs/0/artifacts/public/build/target.dmg > partner1.dmg"
         ])
 
         yield task
