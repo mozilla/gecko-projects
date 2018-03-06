@@ -21,9 +21,9 @@ job-defaults:
    run-on-projects: []  # to make sure this never runs as part of CI
    shipping-product: firefox
    shipping-phase: promote
-#   routes:
-#      - index.releases.v1.{branch}.{revision}.{product}.{underscore_version}.build{build_number}.partner_repack
-#      - index.releases.v1.{branch}.latest.{product}.partner_repack
+   #routes:
+   #   - index.releases.v1.{branch}.{revision}.{product}.{underscore_version}.build{build_number}.partner_repack
+   #   - index.releases.v1.{branch}.latest.{product}.partner_repack
    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
    worker:
       docker-image:
