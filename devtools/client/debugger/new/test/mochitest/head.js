@@ -1097,3 +1097,73 @@ async function takeScreenshot(dbg) {
   await waitForTime(1000);
   dump(`[SCREENSHOT] ${canvas.toDataURL()}\n`);
 }
+
+// Attach a debugger to a tab, returning a promise that resolves with the
+// debugger's thread client.
+function attachDebugger(tab) {
+  let target = TargetFactory.forTab(tab);
+  return new Promise(function(resolve) {
+    gDevTools.showToolbox(target, "jsdebugger").then(aToolbox => {
+      ok(aToolbox.threadClient.state == "attached", "Thread is attached");
+      resolve(aToolbox.threadClient);
+    });
+  });
+}
+
+// Return a promise that resolves when a breakpoint has been set.
+function setBreakpoint(threadClient, expectedFile, lineno) {
+  return new Promise(function(resolve) {
+    threadClient.getSources().then(function({sources}) {
+      ok(sources.length == 1, "Got one source");
+      ok(RegExp(expectedFile).test(sources[0].url), "Source is " + expectedFile);
+      let sourceClient = threadClient.source(sources[0]);
+      sourceClient.setBreakpoint({ line: lineno }, function(response, bpClient) {
+        resolve(response);
+      });
+    });
+  });
+}
+
+function resumeThenPauseAtLineFunctionFactory(method) {
+  return function(threadClient, lineno) {
+    threadClient[method]();
+    return new Promise(function(resolve) {
+      threadClient.addOneTimeListener("paused", function(event, packet) {
+        let frameLine = ("frame" in packet) ? packet.frame.where.line : undefined;
+        ok(frameLine == lineno, "Paused at line " + frameLine + " expected " + lineno);
+        resolve();
+      });
+    });
+  };
+}
+
+// Define various methods that resume a thread in a specific way and ensure it
+// pauses at a specified line.
+var rewindToLine = resumeThenPauseAtLineFunctionFactory("rewind");
+var resumeToLine = resumeThenPauseAtLineFunctionFactory("resume");
+var reverseStepOverToLine = resumeThenPauseAtLineFunctionFactory("reverseStepOver");
+var stepOverToLine = resumeThenPauseAtLineFunctionFactory("stepOver");
+var reverseStepInToLine = resumeThenPauseAtLineFunctionFactory("reverseStepIn");
+var stepInToLine = resumeThenPauseAtLineFunctionFactory("stepIn");
+var reverseStepOutToLine = resumeThenPauseAtLineFunctionFactory("reverseStepOut");
+var stepOutToLine = resumeThenPauseAtLineFunctionFactory("stepOut");
+
+// Return a promise that resolves when a thread evaluates a string in the
+// topmost frame, ensuring the result matches the expected value.
+function checkEvaluateInTopFrame(threadClient, text, expected) {
+  return new Promise(function(resolve) {
+    threadClient.getFrames(0, 1).then(function({frames}) {
+      ok(frames.length == 1, "Got one frame");
+      return threadClient.eval(frames[0].actor, text);
+    }).then(function(response) {
+      ok(response.type == "resumed", "Got resume response from eval");
+      threadClient.addOneTimeListener("paused", function(event, packet) {
+        ok(packet.type == "paused" &&
+           packet.why.type == "clientEvaluated" &&
+           "return" in packet.why.frameFinished &&
+           packet.why.frameFinished["return"] == expected, "Eval returned " + expected);
+        resolve();
+      });
+    });
+  });
+}
