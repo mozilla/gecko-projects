@@ -14,6 +14,9 @@ transforms:
 kind-dependencies:
    - release-partner-repack
 
+only-for-build-platforms:
+   - macosx64-nightly/opt
+
 job-template:
    shipping-product: firefox
    shipping-phase: promote

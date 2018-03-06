@@ -54,6 +54,7 @@ jobs:
          tier: 1
       attributes:
          build_platform: linux-nightly
+         build_type: opt
 
    firefox-linux64:
       label: firefox linux64 partner repacks
@@ -71,6 +72,7 @@ jobs:
          tier: 1
       attributes:
          build_platform: linux64-nightly
+         build_type: opt
 
    firefox-macosx:
       label: firefox macosx64 partner repacks
@@ -88,6 +90,7 @@ jobs:
          tier: 1
       attributes:
          build_platform: macosx64-nightly
+         build_type: opt
 
    firefox-win32:
       label: firefox win32 partner repacks
@@ -105,6 +108,7 @@ jobs:
          tier: 1
       attributes:
          build_platform: win32-nightly
+         build_type: opt
 
    firefox-win64:
       label: firefox win64 partner repacks
@@ -122,6 +126,7 @@ jobs:
          tier: 1
       attributes:
          build_platform: win64-nightly
+         build_type: opt
 
    firefox-macosx-eme-free:
       label: firefox macosx64 EME-free repacks
@@ -139,6 +144,7 @@ jobs:
          tier: 1
       attributes:
          build_platform: macosx64-nightly
+         build_type: opt
 
    firefox-win32-eme-free:
       label: firefox win32 EME-free repacks
@@ -156,6 +162,7 @@ jobs:
          tier: 1
       attributes:
          build_platform: win32-nightly
+         build_type: opt
 
    firefox-win64-eme-free:
       label: firefox win64 EME-free repacks
@@ -173,3 +180,4 @@ jobs:
          tier: 1
       attributes:
          build_platform: win64-nightly
+         build_type: opt
