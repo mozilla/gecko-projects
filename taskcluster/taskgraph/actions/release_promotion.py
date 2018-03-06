@@ -242,10 +242,6 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
                 partial_updates=input['partial_updates']
             )
 
-    release_eta = input.get('release_eta', '')
-    if release_eta:
-        os.environ['RELEASE_ETA'] = release_eta
-
     promotion_config = RELEASE_PROMOTION_CONFIG[release_promotion_flavor]
 
     target_tasks_method = promotion_config['target_tasks_method'].format(
