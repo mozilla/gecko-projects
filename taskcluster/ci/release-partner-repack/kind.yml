@@ -30,7 +30,7 @@ job-defaults:
          in-tree: "update-verify"
       max-run-time: 7200
       artifacts:
-         - name: public/build/partner1.dmg
+         - name: public/build/partner1/target.dmg
            path: /builds/worker/checkouts/gecko/partner1.dmg
            type: file
    run:
