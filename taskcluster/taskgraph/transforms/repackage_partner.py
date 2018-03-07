@@ -175,6 +175,8 @@ def make_job_description(config, jobs):
             'max-run-time': 7200 if build_platform.startswith('win') else 3600,
         }
 
+        worker['env'].update(REPACK_ID=repack_id)
+
         if build_platform.startswith('win'):
             worker_type = 'aws-provisioner-v1/gecko-%s-b-win2012' % level
             run['use-magic-mh-args'] = False

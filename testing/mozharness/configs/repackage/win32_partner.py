@@ -19,9 +19,9 @@ repackage_config = [[
 
 config = {
     "input_home": "{abs_work_dir}\\inputs",
-    "output_home": "{base_work_dir}\\public\\build{locale}",
+    "output_home": "{base_work_dir}\\public\\build{repack_id}",
 
-    "locale": os.environ.get("LOCALE"),
+    "repack_id": os.environ.get("REPACK_ID"),
 
     "download_config": download_config,
 
