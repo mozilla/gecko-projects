@@ -38,7 +38,7 @@ def define_upstream_artifacts(config, jobs):
             kind=config.kind,
         )
         job['upstream-artifacts'] = [{
-            'taskId': {'task-reference': '<release-partner-repack>'},
+            'taskId': {'task-reference': '<{}>'.format(job['depname'])},
             'taskType': 'build',
             'paths': [
                 path_template.format(locale=repack_id)
