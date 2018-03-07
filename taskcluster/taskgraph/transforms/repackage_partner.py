@@ -1,0 +1,267 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+"""
+Transform the repackage task into an actual task description.
+"""
+
+from __future__ import absolute_import, print_function, unicode_literals
+
+import copy
+
+from taskgraph.transforms.base import TransformSequence
+from taskgraph.util.attributes import copy_attributes_from_dependent_job
+from taskgraph.util.schema import (
+    validate_schema,
+    optionally_keyed_by,
+    resolve_keyed_by,
+    Schema,
+)
+from taskgraph.util.taskcluster import get_taskcluster_artifact_prefix
+from taskgraph.transforms.task import task_description_schema
+from voluptuous import Any, Required, Optional
+
+transforms = TransformSequence()
+
+# Voluptuous uses marker objects as dictionary *keys*, but they are not
+# comparable, so we cast all of the keys back to regular strings
+task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
+
+
+def _by_platform(arg):
+    return optionally_keyed_by('build-platform', arg)
+
+
+# shortcut for a string where task references are allowed
+taskref_or_string = Any(
+    basestring,
+    {Required('task-reference'): basestring})
+
+packaging_description_schema = Schema({
+    # the dependant task (object) for this  job, used to inform repackaging.
+    Required('dependent-task'): object,
+
+    # depname is used in taskref's to identify the taskID of the signed things
+    Required('depname', default='build'): basestring,
+
+    # unique label to describe this repackaging task
+    Optional('label'): basestring,
+
+    # treeherder is allowed here to override any defaults we use for repackaging.  See
+    # taskcluster/taskgraph/transforms/task.py for the schema details, and the
+    # below transforms for defaults of various values.
+    Optional('treeherder'): task_description_schema['treeherder'],
+
+    # Routes specific to this task, if defined
+    Optional('routes'): [basestring],
+
+    # passed through directly to the job description
+    Optional('extra'): task_description_schema['extra'],
+
+    # Shipping product and phase
+    Optional('shipping-product'): task_description_schema['shipping-product'],
+    Optional('shipping-phase'): task_description_schema['shipping-phase'],
+
+    # All l10n jobs use mozharness
+    Required('mozharness'): {
+        # Config files passed to the mozharness script
+        Required('config'): _by_platform([basestring]),
+
+        # Additional paths to look for mozharness configs in. These should be
+        # relative to the base of the source checkout
+        Optional('config-paths'): [basestring],
+
+        # if true, perform a checkout of a comm-central based branch inside the
+        # gecko checkout
+        Required('comm-checkout', default=False): bool,
+    }
+})
+
+
+@transforms.add
+def validate(config, jobs):
+    for job in jobs:
+        label = job.get('dependent-task', object).__dict__.get('label', '?no-label?')
+        validate_schema(
+            packaging_description_schema, job,
+            "In packaging ({!r} kind) task for {!r}:".format(config.kind, label))
+        yield job
+
+
+@transforms.add
+def copy_in_useful_magic(config, jobs):
+    """Copy attributes from upstream task to be used for keyed configuration."""
+    for job in jobs:
+        dep = job['dependent-task']
+        job['build-platform'] = dep.attributes.get("build_platform")
+        yield job
+
+
+@transforms.add
+def handle_keyed_by(config, jobs):
+    """Resolve fields that can be keyed by platform, etc."""
+    fields = [
+        "mozharness.config",
+    ]
+    for job in jobs:
+        job = copy.deepcopy(job)  # don't overwrite dict values here
+        for field in fields:
+            resolve_keyed_by(item=job, field=field, item_name="?")
+        yield job
+
+
+@transforms.add
+def make_repackage_description(config, jobs):
+    for job in jobs:
+        dep_job = job['dependent-task']
+
+        label = job.get('label',
+                        dep_job.label.replace("signing-", "repackage-"))
+        job['label'] = label
+
+        yield job
+
+
+@transforms.add
+def make_job_description(config, jobs):
+    for job in jobs:
+        dep_job = job['dependent-task']
+        attributes = copy_attributes_from_dependent_job(dep_job)
+        build_platform = attributes['build_platform']
+
+        if job['build-platform'].startswith('win'):
+            if dep_job.kind.endswith('signing'):
+                continue
+        if job['build-platform'].startswith('macosx'):
+            if dep_job.kind.endswith('repack'):
+                continue
+        dependencies = {dep_job.attributes.get('kind'): dep_job.label}
+        dependencies.update(dep_job.dependencies)
+
+        treeherder = job.get('treeherder', {})
+        treeherder.setdefault('symbol', 'Pr')
+        dep_th_platform = dep_job.task.get('extra', {}).get(
+            'treeherder', {}).get('machine', {}).get('platform', '')
+        treeherder.setdefault('platform', "{}/opt".format(dep_th_platform))
+        treeherder.setdefault('tier', 1)
+        treeherder.setdefault('kind', 'build')
+
+        signing_task = None
+        for dependency in dependencies.keys():
+            if build_platform.startswith('macosx') and 'signing' in dependency:
+                signing_task = dependency
+            elif build_platform.startswith('win') and 'partner-repack' in dependency:
+                signing_task = dependency
+        signing_task_ref = "<{}>".format(signing_task)
+
+        attributes['repackage_type'] = 'repackage'
+
+        level = config.params['level']
+        repack_id = job['extra']['repack_id']
+
+        run = job.get('mozharness', {})
+        run.update({
+            'using': 'mozharness',
+            'script': 'mozharness/scripts/repackage.py',
+            'job-script': 'taskcluster/scripts/builder/repackage.sh',
+            'actions': ['download_input', 'setup', 'repackage'],
+            'extra-workspace-cache-key': 'repackage',
+        })
+
+        worker = {
+            'env': _generate_task_env(build_platform, signing_task_ref, partner=repack_id),
+            'artifacts': _generate_task_output_files(build_platform, partner=repack_id),
+            'chain-of-trust': True,
+            'max-run-time': 7200 if build_platform.startswith('win') else 3600,
+        }
+
+        if build_platform.startswith('win'):
+            worker_type = 'aws-provisioner-v1/gecko-%s-b-win2012' % level
+            run['use-magic-mh-args'] = False
+        else:
+            if build_platform.startswith('macosx'):
+                worker_type = 'aws-provisioner-v1/gecko-%s-b-macosx64' % level
+            elif build_platform.startswith('linux'):
+                worker_type = 'aws-provisioner-v1/gecko-%s-b-linux' % level
+            else:
+                raise NotImplementedError(
+                    'Unsupported build_platform: "{}"'.format(build_platform)
+                )
+
+            run['tooltool-downloads'] = 'internal'
+            worker['docker-image'] = {"in-tree": "debian7-amd64-build"}
+
+        description = (
+            "Repackaging for repack_id '{repack_id}' for build '"
+            "{build_platform}/{build_type}'".format(
+                repack_id=job['extra'].get('repack_id', 'FIXME'),
+                build_platform=attributes.get('build_platform'),
+                build_type=attributes.get('build_type')
+            )
+        )
+
+        task = {
+            'label': job['label'],
+            'description': description,
+            'worker-type': worker_type,
+            'dependencies': dependencies,
+            'attributes': attributes,
+            'run-on-projects': dep_job.attributes.get('run_on_projects'),
+            'treeherder': job['treeherder'],
+            'routes': job.get('routes', []),
+            'extra': job.get('extra', {}),
+            'worker': worker,
+            'run': run,
+        }
+
+        if build_platform.startswith('macosx'):
+            task['toolchains'] = [
+                'linux64-libdmg',
+                'linux64-hfsplus',
+            ]
+        yield task
+
+
+def _generate_task_env(build_platform, signing_task_ref, partner):
+    signed_prefix = get_taskcluster_artifact_prefix(signing_task_ref, locale=partner)
+
+    if build_platform.startswith('linux') or build_platform.startswith('macosx'):
+        tarball_extension = 'bz2' if build_platform.startswith('linux') else 'gz'
+        return {
+            'SIGNED_INPUT': {'task-reference': '{}target.tar.{}'.format(
+                signed_prefix, tarball_extension
+            )}
+        }
+    elif build_platform.startswith('win'):
+        task_env = {
+            'SIGNED_ZIP': {'task-reference': '{}target.zip'.format(signed_prefix)},
+            'SIGNED_SETUP': {'task-reference': '{}setup.exe'.format(signed_prefix)},
+        }
+
+        return task_env
+
+    raise NotImplementedError('Unsupported build_platform: "{}"'.format(build_platform))
+
+
+def _generate_task_output_files(build_platform, partner):
+    partner_output_path = '{}/'.format(partner)
+
+    if build_platform.startswith('macosx'):
+        output_files = [{
+            'type': 'file',
+            'path': '/builds/worker/workspace/build/artifacts/{}target.dmg'
+                    .format(partner_output_path),
+            'name': 'public/build/{}target.dmg'.format(partner_output_path),
+        }]
+
+    elif build_platform.startswith('win'):
+        output_files = [{
+            'type': 'file',
+            'path': 'public/build/{}target.installer.exe'.format(partner_output_path),
+            'name': 'public/build/{}target.installer.exe'.format(partner_output_path),
+        }]
+
+    if output_files:
+        return output_files
+
+    raise NotImplementedError('Unsupported build_platform: "{}"'.format(build_platform))

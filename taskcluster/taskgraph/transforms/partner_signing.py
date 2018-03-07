@@ -15,47 +15,36 @@ transforms = TransformSequence()
 
 
 @transforms.add
-def add_signed_routes(config, jobs):
-    """Add routes corresponding to the routes of the build task
-       this corresponds to, with .signed inserted, for all gecko.v2 routes"""
-
-    for job in jobs:
-        dep_job = job['dependent-task']
-
-        job['routes'] = []
-        if dep_job.attributes.get('nightly'):
-            for dep_route in dep_job.task.get('routes', []):
-                if not dep_route.startswith('index.gecko.v2'):
-                    continue
-                branch = dep_route.split(".")[3]
-                rest = ".".join(dep_route.split(".")[4:])
-                job['routes'].append(
-                    'index.gecko.v2.{}.signed-nightly.{}'.format(branch, rest))
-
-        yield job
-
-
-@transforms.add
 def define_upstream_artifacts(config, jobs):
     for job in jobs:
         dep_job = job['dependent-task']
         build_platform = dep_job.attributes.get('build_platform')
 
+        # TODO: this should get passed in. for eme it's probably just eme-free
+        repack_ids = ('partner1', 'partner2')
+        if "eme" in config.kind:
+            repack_ids = ('emefree',)
+
+        # Windows and Linux partner repacks have no internal signing to be done
+        if 'win' in build_platform or 'linux' in build_platform:
+            job['upstream-artifacts'] = []
+            yield job
+            continue
+
         artifacts_specifications = generate_specifications_of_artifacts_to_sign(
             build_platform,
             dep_job.attributes.get('nightly'),
-            keep_locale_template=False,
+            keep_locale_template=True,
             kind=config.kind,
         )
-
-        if 'android' in build_platform:
-            # We're in the job that creates both multilocale and en-US APKs
-            artifacts_specifications[0]['artifacts'].append('public/build/en-US/target.apk')
-
         job['upstream-artifacts'] = [{
-            'taskId': {'task-reference': '<build>'},
+            'taskId': {'task-reference': '<release-partner-repack>'},
             'taskType': 'build',
-            'paths': spec['artifacts'],
+            'paths': [
+                path_template.format(locale=repack_id)
+                for repack_id in repack_ids
+                for path_template in spec['artifacts']
+            ],
             'formats': spec['formats'],
         } for spec in artifacts_specifications]
 

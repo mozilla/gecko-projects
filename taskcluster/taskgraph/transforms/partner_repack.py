@@ -24,6 +24,13 @@ def resolve_properties(config, tasks):
 
 
 @transforms.add
+def make_label(config, tasks):
+    for task in tasks:
+        task['label'] = "{}-{}".format(config.kind, task['name'])
+        yield task
+
+
+@transforms.add
 def add_command(config, tasks):
     for task in tasks:
         build_task = None
@@ -35,7 +42,9 @@ def add_command(config, tasks):
 
         task["run"]["command"] = " ".join([
             "cd", "/builds/worker/checkouts/gecko", "&&",
-            "curl -L https://queue.taskcluster.net/v1/task/YfqwST9zRo2-QddTuetDQA/runs/0/artifacts/public/build/target.dmg > partner1.dmg"
+            "curl -L https://queue.taskcluster.net/v1/task/YfqwST9zRo2-QddTuetDQA/runs/0/artifacts/public/build/target.dmg > partner1.dmg && "
+            "cp partner1.dmg partner2.dmg && "
+            "cp partner1.dmg emefree.dmg"
         ])
 
         yield task

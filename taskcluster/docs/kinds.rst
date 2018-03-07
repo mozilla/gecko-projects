@@ -349,6 +349,22 @@ release-partner-repack-signing
 ------------------------------
 Internal signing of partner repacks
 
+release-partner-repack-repackage
+------------------------------
+Repackaging of partner repacks
+
+release-eme-free-repack
+----------------------
+Generates customized versions of releases for eme-free repacks.
+
+release-eme-free-repack-signing
+------------------------------
+Internal signing of eme-free repacks
+
+release-eme-free-repack-repackage
+------------------------------
+Repackaging of eme-free repacks
+
 repackage
 ---------
 Repackage tasks take a signed output and package them up into something suitable

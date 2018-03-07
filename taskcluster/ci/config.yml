@@ -1,6 +1,7 @@
 trust-domain: gecko
 treeherder:
     group-names:
+        'REMOVEME-Rpk': 'temporary group for partner repacks until we figure out how to remove them from treeherder'
         'cram': 'Cram tests'
         'mocha': 'Mocha unit tests'
         'py': 'Python unit tests'

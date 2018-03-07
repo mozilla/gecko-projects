@@ -15,8 +15,8 @@ kind-dependencies:
    - build
 
 job-defaults:
-   name: partner-repack
-   description: Release Promotion partner repacks
+   name: eme-free-repack
+   description: Release Promotion eme-free repacks
    run-on-projects: []  # to make sure this never runs as part of CI
    shipping-product: firefox
    shipping-phase: promote
@@ -27,58 +27,24 @@ job-defaults:
       chain-of-trust: true
       max-run-time: 7200
       artifacts:
-         - name: public/build/partner1/target.dmg
-           path: /builds/worker/checkouts/gecko/partner1.dmg
+         - name: public/build/emefree/target.dmg
+           path: /builds/worker/checkouts/gecko/emefree.dmg
            type: file
    run:
       using: run-task
       sparse-profile: update-verify
 
 jobs:
-   linux:
-      worker:
-         env:
-            REPACK_MANIFESTS_URL:
-               by-project:
-                  mozilla-beta: "git@github.com:mozilla-partners/repack-manifests.git"
-                  mozilla-release: "git@github.com:mozilla-partners/repack-manifests.git"
-                  default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
-      treeherder:
-         symbol: PR
-         platform: linux/opt
-         kind: test
-         tier: 1
-      attributes:
-         build_platform: linux-nightly
-         build_type: opt
-
-   linux64:
-      worker:
-         env:
-            REPACK_MANIFESTS_URL:
-               by-project:
-                  mozilla-beta: "git@github.com:mozilla-partners/repack-manifests.git"
-                  mozilla-release: "git@github.com:mozilla-partners/repack-manifests.git"
-                  default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
-      treeherder:
-         symbol: PR
-         platform: linux64/opt
-         kind: test
-         tier: 1
-      attributes:
-         build_platform: linux64-nightly
-         build_type: opt
-
    macosx:
       worker:
          env:
             REPACK_MANIFESTS_URL:
                by-project:
-                  mozilla-beta: "git@github.com:mozilla-partners/repack-manifests.git"
-                  mozilla-release: "git@github.com:mozilla-partners/repack-manifests.git"
+                  mozilla-beta: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
+                  mozilla-release: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
                   default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
       treeherder:
-         symbol: PR
+         symbol: EME
          platform: macosx64/opt
          kind: test
          tier: 1
@@ -91,11 +57,11 @@ jobs:
          env:
             REPACK_MANIFESTS_URL:
                by-project:
-                  mozilla-beta: "git@github.com:mozilla-partners/repack-manifests.git"
-                  mozilla-release: "git@github.com:mozilla-partners/repack-manifests.git"
+                  mozilla-beta: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
+                  mozilla-release: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
                   default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
       treeherder:
-         symbol: PR
+         symbol: EME
          platform: win32/opt
          kind: test
          tier: 1
@@ -108,11 +74,11 @@ jobs:
          env:
             REPACK_MANIFESTS_URL:
                by-project:
-                  mozilla-beta: "git@github.com:mozilla-partners/repack-manifests.git"
-                  mozilla-release: "git@github.com:mozilla-partners/repack-manifests.git"
+                  mozilla-beta: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
+                  mozilla-release: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
                   default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
       treeherder:
-         symbol: PR
+         symbol: EME
          platform: win64/opt
          kind: test
          tier: 1

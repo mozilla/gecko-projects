@@ -104,7 +104,7 @@ def make_task_description(config, jobs):
 
         treeherder = job.get('treeherder', {})
         is_nightly = dep_job.attributes.get('nightly', False)
-        treeherder.setdefault('symbol', _generate_treeherder_symbol(is_nightly))
+        treeherder.setdefault('symbol', _generate_treeherder_symbol(is_nightly, config.kind))
 
         dep_th_platform = dep_job.task.get('extra', {}).get(
             'treeherder', {}).get('machine', {}).get('platform', '')
@@ -169,5 +169,12 @@ def _generate_treeherder_platform(dep_th_platform, build_platform, build_type):
     return '{}/{}'.format(dep_th_platform, actual_build_type)
 
 
-def _generate_treeherder_symbol(is_nightly):
-    return 'Ns' if is_nightly else 'Bs'
+def _generate_treeherder_symbol(is_nightly, kind):
+    if is_nightly:
+        return 'Ns'
+    elif 'partner' in kind:
+        return 'Ps'
+    elif 'eme' in kind:
+        return 'Es'
+    else:
+        return 'Bs'

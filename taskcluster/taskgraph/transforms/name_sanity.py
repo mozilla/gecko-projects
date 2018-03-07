@@ -26,8 +26,11 @@ def make_label(config, jobs):
             template = "{kind}-{locale}-{build_platform}/{build_type}"
         elif attr('l10n_chunk'):
             template = "{kind}-{build_platform}-{l10n_chunk}/{build_type}"
-        elif 'partner' in dep_job.label or 'EME' in dep_job.label:
-            template = dep_job.label + ' signing'
+        elif 'partner' in dep_job.label or 'eme-free' in dep_job.label:
+            extra = job.get("extra", {}).get("repack_id", None)
+            template = "{kind}-{build_platform}"
+            if extra:
+                template += "-{}".format(extra)
         else:
             template = "{kind}-{build_platform}/{build_type}"
         job['label'] = template.format(

@@ -26,5 +26,5 @@ def loader(kind, path, config, params, loaded_tasks):
         dependent_task = job['dependent-task']
         if dependent_task.attributes.get('nightly') or \
                 dependent_task.label in LABELS_WHICH_SHOULD_SIGN_CI_BUILDS or \
-                'EME-free' in dependent_task.label or 'partner repack' in dependent_task.label:
+                'eme-free' in dependent_task.label or 'partner-repack' in dependent_task.label:
             yield job
