@@ -148,9 +148,9 @@ def make_job_description(config, jobs):
 
         signing_task = None
         for dependency in dependencies.keys():
-            if build_platform.startswith('macosx') and 'signing' in dependency:
+            if build_platform.startswith('macosx') and dependency.endswith('signing'):
                 signing_task = dependency
-            elif build_platform.startswith('win') and 'partner-repack' in dependency:
+            elif build_platform.startswith('win') and dependency.endswith('repack'):
                 signing_task = dependency
         signing_task_ref = "<{}>".format(signing_task)
 
