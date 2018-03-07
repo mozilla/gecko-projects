@@ -56,9 +56,6 @@ enum class ThreadEvent : uint32_t
   // Restoring a data pointer used in a callback (see Callback.h).
   RestoreCallbackData,
 
-  // Called RegisterTrigger.
-  RegisterTrigger,
-
   // Executed a trigger within a call to ExecuteTriggers.
   ExecuteTrigger,
 

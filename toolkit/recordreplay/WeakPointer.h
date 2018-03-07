@@ -24,6 +24,7 @@ void WriteWeakPointers(File* aFile);
 void ReadWeakPointers();
 
 void FixupWeakPointersAfterRecordingRewind();
+void FixupOffThreadWeakPointerAfterRecordingRewind(const void* aPtr);
 
 } // namespace recordreplay
 } // namespace mozilla

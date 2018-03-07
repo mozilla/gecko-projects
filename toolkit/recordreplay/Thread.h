@@ -160,6 +160,10 @@ private:
   std::function<void()> mUnrecordedWaitCallback;
   bool mUnrecordedWaitNotified;
 
+  // Any weak pointers associated with this thread which need to be fixed up
+  // due to the process just having rewound to a point when it was recording.
+  InfallibleVector<const void*> mPendingWeakPointerFixups;
+
 public:
 ///////////////////////////////////////////////////////////////////////////////
 // Public Routines
@@ -253,6 +257,7 @@ public:
 
   // Lookup a Thread by various methods.
   static Thread* GetById(size_t aId);
+  static Thread* GetByVirtualId(size_t aId);
   static Thread* GetByStackPointer(void* aSp);
 
   // Spawn all non-main recorded threads used for recording/replaying.
@@ -277,6 +282,12 @@ public:
 
   // Return whether a virtual id appears to be valid.
   static bool IsValidVirtualId(size_t aVirtualId);
+
+  // Note a weak pointer that needs to be fixed on this thread after it
+  // restores its stack during a recording rewind.
+  void AddPendingWeakPointerFixup(const void* aPtr) {
+    mPendingWeakPointerFixups.append(aPtr);
+  }
 
 ///////////////////////////////////////////////////////////////////////////////
 // Thread Coordination

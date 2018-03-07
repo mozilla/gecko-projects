@@ -262,9 +262,10 @@ MFBT_API void SetWeakPointerJSRoot(const void* aPtr, /*JSObject*/void* aJSObj);
 // replay, thread events are disallowed during a GC). Triggers can be
 // registered at a point where thread events are allowed, then activated at
 // a point where thread events are not allowed. When recording, the trigger's
-// callback will execute at the next point when ExecuteTriggers is called
-// (typically at the top of the main thread's event loop), and when replaying
-// the callback will execute at the same point, even if it was never activated.
+// callback will execute at the next point when ExecuteTriggers is called on
+// the thread which originally registered the trigger (typically at the top of
+// the thread's event loop), and when replaying the callback will execute at
+// the same point, even if it was never activated.
 //
 // Below is an example of how this API can be used.
 //

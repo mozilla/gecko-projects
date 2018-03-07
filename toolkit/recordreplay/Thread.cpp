@@ -92,6 +92,19 @@ Thread::GetById(size_t aId)
 }
 
 /* static */ Thread*
+Thread::GetByVirtualId(size_t aId)
+{
+  // Note: We're not doing any locking here, so be careful with this method.
+  for (size_t id = MainThreadId; id <= MaxRecordedThreadId; id++) {
+    Thread* thread = GetById(id);
+    if (thread->mVirtualId == aId) {
+      return thread;
+    }
+  }
+  return nullptr;
+}
+
+/* static */ Thread*
 Thread::GetByStackPointer(void* aSp)
 {
   if (!gThreads) {
@@ -306,14 +319,7 @@ Thread::JoinThread(size_t aVirtualId)
 
   while (true) {
     MonitorAutoLock lock(*gMonitor);
-    bool found = false;
-    for (size_t id = MainThreadId + 1; id <= MaxRecordedThreadId; id++) {
-      if (GetById(id)->mVirtualId == aVirtualId) {
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
+    if (!GetByVirtualId(aVirtualId)) {
       break;
     }
     gMonitor->Wait();
@@ -605,8 +611,14 @@ Thread::Wait()
   thread->SetPassThrough(true);
   int stackSeparator = 0;
   if (!SaveThreadState(thread->Id(), &stackSeparator)) {
-    // We just restored a snapshot, the main thread is waiting for all other
-    // threads to restore their stacks.
+    // We just restored a snapshot, fixup any weak pointers and notify the main
+    // thread since it is waiting for all threads to restore their stacks.
+    for (const void* ptr : thread->mPendingWeakPointerFixups) {
+      thread->SetPassThrough(false);
+      FixupOffThreadWeakPointerAfterRecordingRewind(ptr);
+      thread->SetPassThrough(true);
+    }
+    thread->mPendingWeakPointerFixups.clear();
     Notify(MainThreadId);
   }
 
@@ -624,7 +636,7 @@ Thread::Wait()
     // thread is responsible for rewinding its own stack.
     if (ShouldRestoreThreadStack(thread->Id())) {
       RestoreThreadStack(thread->Id());
-      MOZ_CRASH(); // RestoreThreadState does not return.
+      Unreachable();
     }
   } while (gThreadsShouldIdle);
 

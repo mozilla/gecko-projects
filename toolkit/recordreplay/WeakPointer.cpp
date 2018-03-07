@@ -20,11 +20,12 @@ namespace recordreplay {
 static ValueIndex* gWeakPointers;
 
 struct WeakPointerInfo {
+  size_t mThreadId;
   std::function<void(bool)> mCallback;
   JS::PersistentRootedObject* mRoot;
 
-  explicit WeakPointerInfo(const std::function<void(bool)>& aCallback)
-    : mCallback(aCallback), mRoot(nullptr)
+  WeakPointerInfo(size_t aThreadId, const std::function<void(bool)>& aCallback)
+    : mThreadId(aThreadId), mCallback(aCallback), mRoot(nullptr)
   {}
 
   ~WeakPointerInfo() {
@@ -45,13 +46,14 @@ static WeakPointerInfoMap* gWeakPointerInfoMap;
 // for each weak pointer index.
 static StaticInfallibleVector<size_t> gWeakPointerHits;
 
+static StaticMutexNotRecorded gWeakPointerMutex;
+
 extern "C" {
 
 MOZ_EXPORT void
 RecordReplayInterface_InternalRegisterWeakPointer(const void* aPtr,
                                                   const std::function<void(bool)>& aCallback)
 {
-  MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
 
   if (HasDivergedFromRecording()) {
@@ -60,27 +62,38 @@ RecordReplayInterface_InternalRegisterWeakPointer(const void* aPtr,
 
   MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
 
-  size_t id = gWeakPointers->Insert(aPtr);
-  gWeakPointerInfoMap->insert(WeakPointerInfoMap::value_type(aPtr, WeakPointerInfo(aCallback)));
+  size_t id;
+  {
+    AutoOrderedAtomicAccess order;
+    StaticMutexAutoLock lock(gWeakPointerMutex);
 
-  RecordReplayAssert("RegisterWeakPointer %d", (int) id);
+    id = gWeakPointers->Insert(aPtr);
+    WeakPointerInfo info(Thread::Current()->VirtualId(), aCallback);
+    gWeakPointerInfoMap->insert(WeakPointerInfoMap::value_type(aPtr, info));
 
-  if (IsRecording()) {
-    MOZ_RELEASE_ASSERT(id == gWeakPointerHits.length());
-    gWeakPointerHits.append(0);
+    if (IsRecording()) {
+      MOZ_RELEASE_ASSERT(id == gWeakPointerHits.length());
+      gWeakPointerHits.append(0);
+    }
   }
+
+  RecordReplayAssert("RegisterWeakPointer %zu", id);
 }
 
 MOZ_EXPORT void
 RecordReplayInterface_InternalUnregisterWeakPointer(const void* aPtr)
 {
-  MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
   MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
   MOZ_RELEASE_ASSERT(gWeakPointers->Contains(aPtr));
 
+  StaticMutexAutoLock lock(gWeakPointerMutex);
+
   size_t id = gWeakPointers->GetIndex(aPtr);
   RecordReplayAssert("UnregisterWeakPointer %d", (int) id);
+
+  size_t threadId = Thread::Current()->VirtualId();
+  MOZ_RELEASE_ASSERT(gWeakPointerInfoMap->find(aPtr)->second.mThreadId == threadId);
 
   gWeakPointerInfoMap->erase(aPtr);
   gWeakPointers->Remove(aPtr);
@@ -89,7 +102,6 @@ RecordReplayInterface_InternalUnregisterWeakPointer(const void* aPtr)
 MOZ_EXPORT void
 RecordReplayInterface_InternalWeakPointerAccess(const void* aPtr, bool aSuccess)
 {
-  MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
 
   if (HasDivergedFromRecording()) {
@@ -98,9 +110,10 @@ RecordReplayInterface_InternalWeakPointerAccess(const void* aPtr, bool aSuccess)
 
   MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
 
-  size_t id = gWeakPointers->GetIndex(aPtr);
+  Maybe<StaticMutexAutoLock> lock;
+  lock.emplace(gWeakPointerMutex);
 
-  RecordReplayAssert("WeakPointerAccess %d", (int) id);
+  size_t id = gWeakPointers->GetIndex(aPtr);
 
   // The caller should use the weak pointer API to ensure that success values
   // are the same between recording and replay (e.g. see the example in
@@ -114,6 +127,9 @@ RecordReplayInterface_InternalWeakPointerAccess(const void* aPtr, bool aSuccess)
   auto iter = gWeakPointerInfoMap->find(aPtr);
   MOZ_RELEASE_ASSERT(iter != gWeakPointerInfoMap->end());
   const WeakPointerInfo& info = iter->second;
+  MOZ_RELEASE_ASSERT(info.mThreadId == Thread::Current()->VirtualId());
+
+  RecordReplayAssert("WeakPointerAccess %d", (int) id);
 
   if (aSuccess) {
     if (IsRecording()) {
@@ -140,7 +156,13 @@ RecordReplayInterface_InternalWeakPointerAccess(const void* aPtr, bool aSuccess)
   // When replaying, invoke the callback associated with the weak pointer,
   // specifying whether there are any remaining hits on this pointer.
   if (IsReplaying()) {
-    info.mCallback(!!gWeakPointerHits[id]);
+    // Release lock before invoking the callback, which may call back into
+    // e.g. SetWeakPointerJSRoot.
+    std::function<void(bool)> callback = info.mCallback;
+    bool success = !!gWeakPointerHits[id];
+    lock.reset();
+
+    callback(success);
   }
 }
 
@@ -148,7 +170,6 @@ MOZ_EXPORT void
 RecordReplayInterface_SetWeakPointerJSRoot(const void* aPtr, JSObject* aJSObj)
 {
   MOZ_RELEASE_ASSERT(IsReplaying());
-  MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
 
   if (HasDivergedFromRecording()) {
@@ -157,9 +178,13 @@ RecordReplayInterface_SetWeakPointerJSRoot(const void* aPtr, JSObject* aJSObj)
 
   MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
 
+  StaticMutexAutoLock lock(gWeakPointerMutex);
+
   auto iter = gWeakPointerInfoMap->find(aPtr);
   MOZ_RELEASE_ASSERT(iter != gWeakPointerInfoMap->end());
   WeakPointerInfo& info = iter->second;
+  MOZ_RELEASE_ASSERT(info.mThreadId == Thread::Current()->VirtualId());
+
   if (info.mRoot) {
     delete info.mRoot;
     info.mRoot = nullptr;
@@ -216,13 +241,44 @@ ReadWeakPointers()
 void
 FixupWeakPointersAfterRecordingRewind()
 {
+  Thread* thread = Thread::Current();
+  MOZ_RELEASE_ASSERT(thread->IsMainThread());
+
   ReadWeakPointers();
 
-  // Invoke the callback for every weak pointer that currently exists.
+  // Invoke the callback for every weak pointer that currently exists. Invokes
+  // need to be done on the thread associated with the weak pointer, so note
+  // those on lists associated with those threads to be consumed after the
+  // thread restores its stack and resumes execution.
   for (auto& iter : *gWeakPointerInfoMap) {
-    size_t id = gWeakPointers->GetIndex(iter.first);
-    iter.second.mCallback(!!gWeakPointerHits[id]);
+    if (iter.second.mThreadId == thread->VirtualId()) {
+      size_t id = gWeakPointers->GetIndex(iter.first);
+      iter.second.mCallback(!!gWeakPointerHits[id]);
+    } else {
+      Thread* other = Thread::GetByVirtualId(iter.second.mThreadId);
+      other->AddPendingWeakPointerFixup(iter.first);
+    }
   }
+}
+
+void
+FixupOffThreadWeakPointerAfterRecordingRewind(const void* aPtr)
+{
+  Maybe<StaticMutexAutoLock> lock;
+  lock.emplace(gWeakPointerMutex);
+
+  auto iter = gWeakPointerInfoMap->find(aPtr);
+  MOZ_RELEASE_ASSERT(iter != gWeakPointerInfoMap->end());
+  WeakPointerInfo& info = iter->second;
+  MOZ_RELEASE_ASSERT(info.mThreadId == Thread::Current()->VirtualId());
+
+  size_t id = gWeakPointers->GetIndex(iter->first);
+
+  std::function<void(bool)> callback = info.mCallback;
+  bool success = !!gWeakPointerHits[id];
+  lock.reset();
+
+  callback(success);
 }
 
 } // namespace recordreplay

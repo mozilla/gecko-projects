@@ -19,13 +19,17 @@ namespace recordreplay {
 // Information about each trigger.
 struct TriggerInfo
 {
+  // Virtual ID of the thread which registered this trigger.
+  size_t mThreadId;
+
+  // Callback to execute when the trigger is activated.
   std::function<void()> mCallback;
+
+  // Number of times this trigger has been activated.
   size_t mRegisterCount;
 
-  TriggerInfo() { PodZero(this); }
-
-  explicit TriggerInfo(const std::function<void()>& aCallback)
-    : mCallback(aCallback), mRegisterCount(1)
+  TriggerInfo(size_t aThreadId, const std::function<void()>& aCallback)
+    : mThreadId(aThreadId), mCallback(aCallback), mRegisterCount(1)
   {}
 };
 
@@ -53,7 +57,6 @@ MOZ_EXPORT void
 RecordReplayInterface_RegisterTrigger(void* aObj, const std::function<void()>& aCallback)
 {
   MOZ_ASSERT(IsRecordingOrReplaying());
-  MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
   MOZ_RELEASE_ASSERT(aObj);
 
@@ -63,28 +66,33 @@ RecordReplayInterface_RegisterTrigger(void* aObj, const std::function<void()>& a
 
   MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
 
-  RecordReplayAssert("RegisterTrigger");
+  size_t threadId = Thread::Current()->VirtualId();
 
-  Thread* thread = Thread::Current();
-  thread->Events().RecordOrReplayThreadEvent(ThreadEvent::RegisterTrigger);
+  size_t id;
+  {
+    AutoOrderedAtomicAccess order;
+    StaticMutexAutoLock lock(gTriggersMutex);
 
-  StaticMutexAutoLock lock(gTriggersMutex);
-
-  TriggerInfoMap::iterator iter = gTriggerInfoMap->find(aObj);
-  if (iter != gTriggerInfoMap->end()) {
-    iter->second.mCallback = aCallback;
-    iter->second.mRegisterCount++;
-  } else {
-    gTriggers->Insert(aObj);
-    gTriggerInfoMap->insert(TriggerInfoMap::value_type(aObj, TriggerInfo(aCallback)));
+    TriggerInfoMap::iterator iter = gTriggerInfoMap->find(aObj);
+    if (iter != gTriggerInfoMap->end()) {
+      id = gTriggers->GetIndex(aObj);
+      MOZ_RELEASE_ASSERT(iter->second.mThreadId == threadId);
+      iter->second.mCallback = aCallback;
+      iter->second.mRegisterCount++;
+    } else {
+      id = gTriggers->Insert(aObj);
+      TriggerInfo info(threadId, aCallback);
+      gTriggerInfoMap->insert(TriggerInfoMap::value_type(aObj, info));
+    }
   }
+
+  RecordReplayAssert("RegisterTrigger %zu", id);
 }
 
 MOZ_EXPORT void
 RecordReplayInterface_UnregisterTrigger(void* aObj)
 {
   MOZ_ASSERT(IsRecordingOrReplaying());
-  MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
 
   StaticMutexAutoLock lock(gTriggersMutex);
@@ -114,25 +122,42 @@ static void
 InvokeTriggerCallback(size_t aId)
 {
   void* obj;
-  TriggerInfo info;
+  std::function<void()> callback;
   {
     StaticMutexAutoLock lock(gTriggersMutex);
     obj = const_cast<void*>(gTriggers->GetValue(aId));
     TriggerInfoMap::iterator iter = gTriggerInfoMap->find(obj);
     MOZ_RELEASE_ASSERT(iter != gTriggerInfoMap->end());
-    info = iter->second;
+    MOZ_RELEASE_ASSERT(iter->second.mThreadId == Thread::Current()->VirtualId());
+    MOZ_RELEASE_ASSERT(iter->second.mRegisterCount);
+    MOZ_RELEASE_ASSERT(iter->second.mCallback);
+    callback = iter->second.mCallback;
   }
 
-  MOZ_RELEASE_ASSERT(info.mCallback);
-  MOZ_RELEASE_ASSERT(info.mRegisterCount);
-  info.mCallback();
+  callback();
+}
+
+static Maybe<size_t>
+RemoveTriggerCallbackForThreadId(size_t aThreadId)
+{
+  StaticMutexAutoLock lock(gTriggersMutex);
+  for (size_t i = 0; i < gActivatedTriggers.length(); i++) {
+    size_t id = gActivatedTriggers[i];
+    void* obj = const_cast<void*>(gTriggers->GetValue(id));
+    TriggerInfoMap::iterator iter = gTriggerInfoMap->find(obj);
+    MOZ_RELEASE_ASSERT(iter != gTriggerInfoMap->end());
+    if (iter->second.mThreadId == aThreadId) {
+      gActivatedTriggers.erase(&gActivatedTriggers[i]);
+      return Some(id);
+    }
+  }
+  return Nothing();
 }
 
 MOZ_EXPORT void
 RecordReplayInterface_ExecuteTriggers()
 {
   MOZ_ASSERT(IsRecordingOrReplaying());
-  MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
   MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
 
@@ -144,18 +169,14 @@ RecordReplayInterface_ExecuteTriggers()
     // Invoke the callbacks for any triggers waiting for execution, including
     // any whose callbacks are triggered by earlier callback invocations.
     while (true) {
-      size_t id;
-      {
-        StaticMutexAutoLock lock(gTriggersMutex);
-        if (gActivatedTriggers.empty()) {
-          break;
-        }
-        id = gActivatedTriggers.popCopy();
+      Maybe<size_t> id = RemoveTriggerCallbackForThreadId(thread->VirtualId());
+      if (id.isNothing()) {
+        break;
       }
 
       thread->Events().RecordOrReplayThreadEvent(ThreadEvent::ExecuteTrigger);
-      thread->Events().WriteScalar(id);
-      InvokeTriggerCallback(id);
+      thread->Events().WriteScalar(id.ref());
+      InvokeTriggerCallback(id.ref());
     }
     thread->Events().RecordOrReplayThreadEvent(ThreadEvent::ExecuteTriggersFinished);
   } else {
