@@ -28,8 +28,8 @@ job-template:
       config:
          by-build-platform:
             macosx64-.*:
-               - repackage/osx_signed.py
+               - repackage/osx_partner.py
             win32-.*:
-               - repackage/win32_signed.py
+               - repackage/win32_partner.py
             win64-.*:
-               - repackage/win64_signed.py
+               - repackage/win64_partner.py
