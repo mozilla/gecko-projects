@@ -44,14 +44,6 @@ namespace ipc {
 class Shmem;
 } // namespace ipc
 
-// FIXME
-namespace recordreplay {
-  namespace child {
-    void NotifyPaintStart();
-    void WaitForPaintToComplete();
-  }
-}
-
 namespace layers {
 
 using namespace mozilla::gfx;

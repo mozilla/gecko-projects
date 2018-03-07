@@ -13,6 +13,9 @@
 #include "Units.h"
 
 namespace mozilla {
+
+class VsyncObserver;
+
 namespace recordreplay {
 namespace child {
 
@@ -43,7 +46,13 @@ void InitRecordingOrReplayingProcess(base::ProcessId aParentPid,
 base::ProcessId MiddlemanProcessId();
 base::ProcessId ParentProcessId();
 
+void SetVsyncObserver(VsyncObserver* aObserver);
+void NotifyVsyncObserver();
+
 void NotifyPaint();
+void NotifyPaintStart();
+void NotifyPaintComplete();
+void WaitForPaintToComplete();
 
 already_AddRefed<gfx::DrawTarget> DrawTargetForRemoteDrawing(LayoutDeviceIntSize aSize);
 

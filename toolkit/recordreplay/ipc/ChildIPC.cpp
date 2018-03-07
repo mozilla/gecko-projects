@@ -14,6 +14,8 @@
 #include "chrome/common/child_thread.h"
 #include "ipc/Channel.h"
 #include "js/ReplayHooks.h"
+#include "mozilla/VsyncDispatcher.h"
+
 #include "InfallibleVector.h"
 #include "MemorySnapshot.h"
 #include "Monitor.h"
@@ -229,6 +231,27 @@ ReportFatalError(const char* aError)
 
   // Block until we get a terminate message and die.
   Thread::WaitForeverNoIdle();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Vsyncs
+///////////////////////////////////////////////////////////////////////////////
+
+static VsyncObserver* gVsyncObserver;
+
+void
+SetVsyncObserver(VsyncObserver* aObserver)
+{
+  MOZ_RELEASE_ASSERT(!gVsyncObserver || !aObserver);
+  gVsyncObserver = aObserver;
+}
+
+void
+NotifyVsyncObserver()
+{
+  if (gVsyncObserver) {
+    gVsyncObserver->NotifyVsync(TimeStamp::Now());
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////

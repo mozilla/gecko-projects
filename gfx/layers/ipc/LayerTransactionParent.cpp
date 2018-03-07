@@ -42,14 +42,6 @@
 using mozilla::layout::RenderFrameParent;
 
 namespace mozilla {
-
-// FIXME
-namespace recordreplay {
-  namespace child {
-    extern void NotifyPaintComplete();
-  }
-}
-
 namespace layers {
 
 //--------------------------------------------------
