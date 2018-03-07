@@ -1,4 +1,4 @@
-import os
+emport os
 import sys
 
 sys.path.insert(1, os.path.dirname(sys.path[0]))  # noqa - don't warn about imports
@@ -66,7 +66,7 @@ class Repackage(BaseScript):
             repack_id_dir = "{}{}".format(os.path.sep, config['repack_id_dir'])
         dirs['output_home'] = config['output_home'].format(
             locale=locale_dir,
-            repack_id_dir=repack_id_dir,
+            repack_id=repack_id_dir,
             **abs_dirs
         )
         for key in dirs.keys():
