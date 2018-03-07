@@ -573,6 +573,10 @@ InterruptCallback(JSContext* aCx)
   WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
   MOZ_ASSERT(worker);
 
+  if (recordreplay::IsRecordingOrReplaying()) {
+    return true;
+  }
+
   // Now is a good time to turn on profiling if it's pending.
   PROFILER_JS_INTERRUPT_CALLBACK();
 
@@ -984,6 +988,10 @@ public:
         NS_WARNING("failed to set workerCx's default locale");
       }
     }
+
+    if (recordreplay::IsRecordingOrReplaying()) {
+      recordreplay::RegisterTrigger(this, [=]() { nsCycleCollector_collect(nullptr); });
+    }
   }
 
   void Shutdown(JSContext* cx) override
@@ -998,6 +1006,10 @@ public:
   ~WorkerJSRuntime()
   {
     MOZ_COUNT_DTOR_INHERITED(WorkerJSRuntime, CycleCollectedJSRuntime);
+
+    if (recordreplay::IsRecordingOrReplaying()) {
+      recordreplay::UnregisterTrigger(this);
+    }
   }
 
   virtual void
@@ -1034,7 +1046,11 @@ public:
     mWorkerPrivate->AssertIsOnWorkerThread();
 
     if (aStatus == JSGC_END) {
-      nsCycleCollector_collect(nullptr);
+      if (recordreplay::IsRecordingOrReplaying()) {
+        recordreplay::ActivateTrigger(this);
+      } else {
+        nsCycleCollector_collect(nullptr);
+      }
     }
   }
 

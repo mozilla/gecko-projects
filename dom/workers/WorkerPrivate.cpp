@@ -2739,12 +2739,6 @@ WorkerPrivate::Constructor(JSContext* aCx,
                            const nsACString& aServiceWorkerScope,
                            WorkerLoadInfo* aLoadInfo, ErrorResult& aRv)
 {
-  // DOM workers are not currently allowed when recording or replaying.
-  if (recordreplay::IsRecordingOrReplaying()) {
-    aRv.Throw(NS_ERROR_NOT_AVAILABLE);
-    return nullptr;
-  }
-
   // If this is a sub-worker, we need to keep the parent worker alive until this
   // one is registered.
   UniquePtr<SimpleWorkerHolder> holder;
