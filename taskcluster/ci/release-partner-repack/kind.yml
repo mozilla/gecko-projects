@@ -106,10 +106,10 @@ jobs:
    win32:
       worker:
          artifacts:
-            - name: public/build/partner1/target.exe
+            - name: public/build/partner1/setup.exe
               path: /builds/worker/checkouts/gecko/partner1.exe
               type: file
-            - name: public/build/partner2/target.exe
+            - name: public/build/partner2/setup.exe
               path: /builds/worker/checkouts/gecko/partner2.exe
               type: file
             - name: public/build/partner1/target.zip
@@ -136,10 +136,10 @@ jobs:
    win64:
       worker:
          artifacts:
-            - name: public/build/partner1/target.exe
+            - name: public/build/partner1/setup.exe
               path: /builds/worker/checkouts/gecko/partner1.exe
               type: file
-            - name: public/build/partner2/target.exe
+            - name: public/build/partner2/setup.exe
               path: /builds/worker/checkouts/gecko/partner2.exe
               type: file
             - name: public/build/partner1/target.zip
