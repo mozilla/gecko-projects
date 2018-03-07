@@ -921,7 +921,7 @@ nsThread::ProcessNextEvent(bool aMayWait, bool* aResult)
 
   // When recording or replaying, execute triggers that were activated
   // non-deterministically at some point since the last turn of the event loop.
-  if (mIsMainThread == MAIN_THREAD && recordreplay::IsRecordingOrReplaying()) {
+  if (recordreplay::IsRecordingOrReplaying()) {
     recordreplay::ExecuteTriggers();
   }
 
