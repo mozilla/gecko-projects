@@ -2694,8 +2694,12 @@ Respond_getSource(ReplayDebugger::Activity& a, HandleObject request)
     if (ss->hasDisplayURL())
         a.defineProperty(response, "displayUrl", ss->displayURL());
 
-    if (sso->elementAttributeName().isString())
-        a.defineProperty(response, "elementProperty", a.handlify(sso->elementAttributeName()));
+    if (sso->elementAttributeName().isString()) {
+        RootedString atom(a.cx, AtomizeString(a.cx, sso->elementAttributeName().toString()));
+        if (!atom)
+            return nullptr;
+        a.defineProperty(response, "elementProperty", atom);
+    }
 
     if (JSScript* script = sso->introductionScript()) {
         if (ConsiderScript(script)) {
