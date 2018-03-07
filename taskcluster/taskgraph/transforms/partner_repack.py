@@ -70,14 +70,14 @@ def add_command(config, tasks):
         elif 'linux-' in task['attributes']['build_platform']:
             task["run"]["command"] = " ".join([
                 "cd", "/builds/worker/checkouts/gecko", "&&",
-                "curl -L https://queue.taskcluster.net/v1/task/Q8txUznsRke5OQ-CVZuB1Q/runs/0/artifacts/public/build/target.tar.bz2 > target.tar.bz2 && "
+                "curl -L https://queue.taskcluster.net/v1/task/Q8txUznsRke5OQ-CVZuB1Q/runs/0/artifacts/public/build/target.tar.bz2 > partner1.tar.bz2 && "
                 "cp partner1.tar.bz2 partner2.tar.bz2 && "
                 "cp partner1.tar.bz2 emefree.tar.bz2"
             ])
         elif 'linux64-' in task['attributes']['build_platform']:
             task["run"]["command"] = " ".join([
                 "cd", "/builds/worker/checkouts/gecko", "&&",
-                "curl -L https://queue.taskcluster.net/v1/task/FkBd2xC_SSeBG4_ihZG5Zw/runs/0/artifacts/public/build/target.tar.bz2 > target.tar.bz2 && "
+                "curl -L https://queue.taskcluster.net/v1/task/FkBd2xC_SSeBG4_ihZG5Zw/runs/0/artifacts/public/build/target.tar.bz2 > partner1.tar.bz2 && "
                 "cp partner1.tar.bz2 partner2.tar.bz2 && "
                 "cp partner1.tar.bz2 emefree.tar.bz2"
             ])
