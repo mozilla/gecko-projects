@@ -30,6 +30,9 @@ job-defaults:
          - name: public/build/partner1/target.dmg
            path: /builds/worker/checkouts/gecko/partner1.dmg
            type: file
+         - name: public/build/partner2/target.dmg
+           path: /builds/worker/checkouts/gecko/partner2.dmg
+           type: file
    run:
       using: run-task
       sparse-profile: update-verify
