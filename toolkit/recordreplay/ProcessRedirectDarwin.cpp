@@ -2695,6 +2695,9 @@ DirectSpawnThread(void (*aFunction)(void*), void* aArgument)
   int rv = pthread_attr_init(&attr);
   MOZ_RELEASE_ASSERT(rv == 0);
 
+  rv = pthread_attr_setstacksize(&attr, 2 * 1024 * 1024);
+  MOZ_RELEASE_ASSERT(rv == 0);
+
   rv = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
   MOZ_RELEASE_ASSERT(rv == 0);
 
