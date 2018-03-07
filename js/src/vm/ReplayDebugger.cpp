@@ -461,11 +461,6 @@ FillCharBufferCallback(const char16_t* buf, uint32_t len, void* data)
 HandleObject
 ReplayDebugger::Activity::sendRequest(HandleObject request, bool needResponse)
 {
-    /*
-    fprintf(stderr, "MIDDLEMAN_REQUEST_STACK:\n");
-    JS_StackDump();
-    */
-
     if (!success())
         return nullptr;
 
@@ -2190,6 +2185,10 @@ ReplayDebugger::convertValueFromJSON(Activity& a, HandleObject jsonValue)
 // Replaying process data
 ///////////////////////////////////////////////////////////////////////////////
 
+// Runtime which all data considered in the replaying process is associated
+// with. Worker runtimes are ignored entirely.
+static JSRuntime* gMainRuntime;
+
 static Vector<JSScript*, 0, SystemAllocPolicy> gDebuggerScripts;
 static Vector<ScriptSourceObject*, 0, SystemAllocPolicy> gDebuggerScriptSources;
 
@@ -2266,7 +2265,7 @@ ReplayDebugger::onNewScript(JSContext* cx, HandleScript script)
         return;
     }
 
-    if (!ConsiderScript(script))
+    if (cx->runtime() != gMainRuntime || !ConsiderScript(script))
         return;
 
     AutoEnterOOMUnsafeRegion oomUnsafe;
@@ -2319,8 +2318,10 @@ ReplayDebugger::NoteNewGlobalObject(JSContext* cx, GlobalObject* global)
 {
     MOZ_RELEASE_ASSERT(IsRecordingOrReplaying());
 
-    if (!gHookContext)
+    if (!gHookContext) {
         gHookContext = cx;
+        gMainRuntime = cx->runtime();
+    }
 
     // The replay debugger is created in the first global with trusted principals.
     if (!gHookGlobal &&
@@ -2341,7 +2342,7 @@ ReplayDebugger::NoteNewGlobalObject(JSContext* cx, GlobalObject* global)
 ReplayDebugger::markRoots(JSTracer* trc)
 {
     // Never collect scripts which the debugger might be interested in.
-    if (!IsRecordingOrReplaying())
+    if (!IsRecordingOrReplaying() || trc->runtime() != gMainRuntime)
         return;
 
     for (size_t i = 1; i < gDebuggerScripts.length(); i++)
@@ -2587,11 +2588,6 @@ struct BreakpointState
 
     void setPhase(RunPhase phase) {
         this->phase = phase;
-
-        /*
-        AutoEnsurePassThroughThreadEvents pt;
-        fprintf(stderr, "BreakpointState::setPhase %d\n", (int) phase);
-        */
     }
 };
 
