@@ -62,8 +62,8 @@ class Repackage(BaseScript):
         if config.get('locale'):
             locale_dir = "{}{}".format(os.path.sep, config['locale'])
         repack_id_dir = ''
-        if config.get('repack_id_dir'):
-            repack_id_dir = "{}{}".format(os.path.sep, config['repack_id_dir'])
+        if config.get('repack_id'):
+            repack_id_dir = "{}{}".format(os.path.sep, config['repack_id'])
         dirs['output_home'] = config['output_home'].format(
             locale=locale_dir,
             repack_id=repack_id_dir,
