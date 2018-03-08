@@ -27,18 +27,18 @@ def split_partners(config, jobs):
             for locale in config["locales"]:
                 repack_id = "{}-{}".format(partner, locale)
 
-            partner_job = copy.deepcopy(job)  # don't overwrite dict values here
-            if 'extra' not in partner_job:
-                partner_job['extra'] = {}
-            partner_job['extra']['repack_id'] = repack_id
+                partner_job = copy.deepcopy(job)  # don't overwrite dict values here
+                if 'extra' not in partner_job:
+                    partner_job['extra'] = {}
+                partner_job['extra']['repack_id'] = repack_id
 
-            treeherder = job.get('treeherder', {})
-            treeherder['symbol'] = 'REMOVEME-Rpk({})'.format(repack_id)
-            dep_th_platform = dep_job.task.get('extra', {}).get(
-                'treeherder', {}).get('machine', {}).get('platform', '')
-            treeherder['platform'] = "{}/opt".format(dep_th_platform)
-            treeherder['tier'] = 1
-            treeherder['kind'] = 'build'
-            partner_job['treeherder'] = treeherder
+                treeherder = job.get('treeherder', {})
+                treeherder['symbol'] = 'REMOVEME-Rpk({})'.format(repack_id)
+                dep_th_platform = dep_job.task.get('extra', {}).get(
+                    'treeherder', {}).get('machine', {}).get('platform', '')
+                treeherder['platform'] = "{}/opt".format(dep_th_platform)
+                treeherder['tier'] = 1
+                treeherder['kind'] = 'build'
+                partner_job['treeherder'] = treeherder
 
-            yield partner_job
+                yield partner_job

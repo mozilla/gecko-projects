@@ -43,7 +43,8 @@ def add_command(config, tasks):
         if not build_task:
             raise Exception("Couldn't find build task")
 
-        task["worker"]["artifacts"] = []
+        if not task["worker"].get("artifacts"):
+            task["worker"]["artifacts"] = []
 
         repack_ids = []
         for partner, cfg in release_config["partner_config"].iteritems():
@@ -71,7 +72,7 @@ def add_command(config, tasks):
                             "> emefree.zip"
             for repack_id in repack_ids:
                 task["worker"]["artifacts"].append({
-                    "name": "public/build/{}/target.exe".format(repack_id),
+                    "name": "public/build/{}/setup.exe".format(repack_id),
                     "path": "/builds/worker/checkouts/gecko/{}.exe".format(repack_id),
                     "type": "file"
                 })
@@ -91,7 +92,7 @@ def add_command(config, tasks):
                             "> emefree.zip"
             for repack_id in repack_ids:
                 task["worker"]["artifacts"].append({
-                    "name": "public/build/{}/target.exe".format(repack_id),
+                    "name": "public/build/{}/setup.exe".format(repack_id),
                     "path": "/builds/worker/checkouts/gecko/{}.exe".format(repack_id),
                     "type": "file"
                 })
