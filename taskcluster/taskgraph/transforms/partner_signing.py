@@ -8,6 +8,7 @@ Transform the signing task into an actual task description.
 from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
+from taskgraph.util.scriptworker import get_release_config
 from taskgraph.util.signed_artifacts import generate_specifications_of_artifacts_to_sign
 
 
@@ -16,14 +17,21 @@ transforms = TransformSequence()
 
 @transforms.add
 def define_upstream_artifacts(config, jobs):
+    release_config = get_release_config(config)
+
     for job in jobs:
         dep_job = job['dependent-task']
         build_platform = dep_job.attributes.get('build_platform')
 
-        # TODO: this should get passed in. for eme it's probably just eme-free
-        repack_ids = ('partner1', 'partner2')
+        repack_ids = []
         if "eme" in config.kind:
-            repack_ids = ('emefree',)
+            repack_ids.append("emefree")
+        else:
+            for partner, cfg in release_config["partner_config"].iteritems():
+                if build_platform not in cfg["platforms"]:
+                    continue
+                for locale in cfg["locales"]:
+                    repack_ids.append("{}-{}".format(partner, locale))
 
         # Windows and Linux partner repacks have no internal signing to be done
         if 'win' in build_platform or 'linux' in build_platform:

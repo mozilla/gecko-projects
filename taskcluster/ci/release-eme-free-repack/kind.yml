@@ -26,10 +26,6 @@ job-defaults:
          in-tree: "update-verify"
       chain-of-trust: true
       max-run-time: 7200
-      artifacts:
-         - name: public/build/emefree/target.dmg
-           path: /builds/worker/checkouts/gecko/emefree.dmg
-           type: file
    run:
       using: run-task
       sparse-profile: update-verify
@@ -38,11 +34,8 @@ jobs:
    macosx:
       worker:
          artifacts:
-            - name: public/build/partner1/target.dmg
-              path: /builds/worker/checkouts/gecko/partner1.dmg
-              type: file
-            - name: public/build/partner2/target.dmg
-              path: /builds/worker/checkouts/gecko/partner2.dmg
+            - name: public/build/emefree/target.dmg
+              path: /builds/worker/checkouts/gecko/emefree.dmg
               type: file
          env:
             REPACK_MANIFESTS_URL:
@@ -62,17 +55,11 @@ jobs:
    win32:
       worker:
          artifacts:
-            - name: public/build/partner1/setup.exe
-              path: /builds/worker/checkouts/gecko/partner1.exe
+            - name: public/build/emefree/setup.exe
+              path: /builds/worker/checkouts/gecko/emefree.exe
               type: file
-            - name: public/build/partner2/setup.exe
-              path: /builds/worker/checkouts/gecko/partner2.exe
-              type: file
-            - name: public/build/partner1/target.zip
-              path: /builds/worker/checkouts/gecko/partner1.zip
-              type: file
-            - name: public/build/partner2/target.zip
-              path: /builds/worker/checkouts/gecko/partner2.zip
+            - name: public/build/emefree/target.zip
+              path: /builds/worker/checkouts/gecko/emefree.zip
               type: file
          env:
             REPACK_MANIFESTS_URL:
@@ -92,17 +79,11 @@ jobs:
    win64:
       worker:
          artifacts:
-            - name: public/build/partner1/setup.exe
-              path: /builds/worker/checkouts/gecko/partner1.exe
+            - name: public/build/emefree/setup.exe
+              path: /builds/worker/checkouts/gecko/emefree.exe
               type: file
-            - name: public/build/partner2/setup.exe
-              path: /builds/worker/checkouts/gecko/partner2.exe
-              type: file
-            - name: public/build/partner1/target.zip
-              path: /builds/worker/checkouts/gecko/partner1.zip
-              type: file
-            - name: public/build/partner2/target.zip
-              path: /builds/worker/checkouts/gecko/partner2.zip
+            - name: public/build/emefree/target.zip
+              path: /builds/worker/checkouts/gecko/emefree.zip
               type: file
          env:
             REPACK_MANIFESTS_URL:

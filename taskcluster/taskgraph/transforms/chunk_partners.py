@@ -10,15 +10,23 @@ from __future__ import absolute_import, print_function, unicode_literals
 import copy
 
 from taskgraph.transforms.base import TransformSequence
+from taskgraph.util.scriptworker import get_release_config
 
 transforms = TransformSequence()
 
 
 @transforms.add
 def split_partners(config, jobs):
+    release_config = get_release_config(config)
+
     for job in jobs:
         dep_job = job['dependent-task']
-        for repack_id in ('partner1', 'partner2'):
+        for partner, config in release_config["partner_config"].iteritems():
+            if dep_job.attributes["build_platform"] not in config["platforms"]:
+                continue
+            for locale in config["locales"]:
+                repack_id = "{}-{}".format(partner, locale)
+
             partner_job = copy.deepcopy(job)  # don't overwrite dict values here
             if 'extra' not in partner_job:
                 partner_job['extra'] = {}

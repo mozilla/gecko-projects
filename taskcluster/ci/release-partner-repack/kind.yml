@@ -33,13 +33,6 @@ job-defaults:
 jobs:
    linux:
       worker:
-         artifacts:
-            - name: public/build/partner1/target.tar.bz2
-              path: /builds/worker/checkouts/gecko/partner1.tar.bz2
-              type: file
-            - name: public/build/partner2/target.tar.bz2
-              path: /builds/worker/checkouts/gecko/partner2.tar.bz2
-              type: file
          env:
             REPACK_MANIFESTS_URL:
                by-project:
@@ -57,13 +50,6 @@ jobs:
 
    linux64:
       worker:
-         artifacts:
-            - name: public/build/partner1/target.tar.bz2
-              path: /builds/worker/checkouts/gecko/partner1.tar.bz2
-              type: file
-            - name: public/build/partner2/target.tar.bz2
-              path: /builds/worker/checkouts/gecko/partner2.tar.bz2
-              type: file
          env:
             REPACK_MANIFESTS_URL:
                by-project:
@@ -81,13 +67,6 @@ jobs:
 
    macosx:
       worker:
-         artifacts:
-            - name: public/build/partner1/target.dmg
-              path: /builds/worker/checkouts/gecko/partner1.dmg
-              type: file
-            - name: public/build/partner2/target.dmg
-              path: /builds/worker/checkouts/gecko/partner2.dmg
-              type: file
          env:
             REPACK_MANIFESTS_URL:
                by-project:
@@ -105,19 +84,6 @@ jobs:
 
    win32:
       worker:
-         artifacts:
-            - name: public/build/partner1/setup.exe
-              path: /builds/worker/checkouts/gecko/partner1.exe
-              type: file
-            - name: public/build/partner2/setup.exe
-              path: /builds/worker/checkouts/gecko/partner2.exe
-              type: file
-            - name: public/build/partner1/target.zip
-              path: /builds/worker/checkouts/gecko/partner1.zip
-              type: file
-            - name: public/build/partner2/target.zip
-              path: /builds/worker/checkouts/gecko/partner2.zip
-              type: file
          env:
             REPACK_MANIFESTS_URL:
                by-project:
@@ -135,19 +101,6 @@ jobs:
 
    win64:
       worker:
-         artifacts:
-            - name: public/build/partner1/setup.exe
-              path: /builds/worker/checkouts/gecko/partner1.exe
-              type: file
-            - name: public/build/partner2/setup.exe
-              path: /builds/worker/checkouts/gecko/partner2.exe
-              type: file
-            - name: public/build/partner1/target.zip
-              path: /builds/worker/checkouts/gecko/partner1.zip
-              type: file
-            - name: public/build/partner2/target.zip
-              path: /builds/worker/checkouts/gecko/partner2.zip
-              type: file
          env:
             REPACK_MANIFESTS_URL:
                by-project:
