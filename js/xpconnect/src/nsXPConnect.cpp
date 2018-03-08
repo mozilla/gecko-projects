@@ -315,6 +315,11 @@ xpc::ErrorReport::LogToConsole()
 void
 xpc::ErrorReport::LogToConsoleWithStack(JS::HandleObject aStack)
 {
+    // Don't log failures after diverging from a recording during replay, as
+    // this will cause the associated debugger operation to fail opaquely.
+    if (recordreplay::HasDivergedFromRecording())
+        return;
+
     LogToStderr();
 
     MOZ_LOG(gJSDiagnostics,
