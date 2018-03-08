@@ -242,6 +242,12 @@ struct ReplayDebugger::Activity
     void defineProperty(HandleObject obj, const char* property, Type v) { \
         RootedValue nv(cx, valueFrom(v));                               \
         if (obj && success()) {                                         \
+            if (nv.isString()) {                                        \
+                RootedString newString(cx, nv.toString());              \
+                if (!cx->compartment()->wrap(cx, &newString))           \
+                    return;                                             \
+                nv.setString(newString);                                \
+            }                                                           \
             if (JS_DefineProperty(cx, obj, property, nv, JSPROP_ENUMERATE)) \
                 return;                                                 \
         }                                                               \
@@ -2694,12 +2700,8 @@ Respond_getSource(ReplayDebugger::Activity& a, HandleObject request)
     if (ss->hasDisplayURL())
         a.defineProperty(response, "displayUrl", ss->displayURL());
 
-    if (sso->elementAttributeName().isString()) {
-        RootedString atom(a.cx, AtomizeString(a.cx, sso->elementAttributeName().toString()));
-        if (!atom)
-            return nullptr;
-        a.defineProperty(response, "elementProperty", atom);
-    }
+    if (sso->elementAttributeName().isString())
+        a.defineProperty(response, "elementProperty", a.handlify(sso->elementAttributeName()));
 
     if (JSScript* script = sso->introductionScript()) {
         if (ConsiderScript(script)) {
@@ -2911,7 +2913,6 @@ Respond_objectCall(ReplayDebugger::Activity& a, HandleObject request)
 
     size_t id = a.getScalarProperty(request, "functionId");
     RootedObject function(a.cx, IdObject(id));
-    AutoCompartment ac(a.cx, function);
 
     RootedValue calleev(a.cx, ObjectValue(*function));
     RootedValue thisv(a.cx, ConvertValueFromJSON(a, a.getObjectProperty(request, "thisv")));
@@ -2928,6 +2929,9 @@ Respond_objectCall(ReplayDebugger::Activity& a, HandleObject request)
             return nullptr;
     }
 
+    Maybe<AutoCompartment> ac;
+    ac.emplace(a.cx, function);
+
     if (!a.cx->compartment()->wrap(a.cx, &thisv))
         return nullptr;
     for (unsigned i = 0; i < args.length(); i++) {
@@ -2936,12 +2940,21 @@ Respond_objectCall(ReplayDebugger::Activity& a, HandleObject request)
     }
 
     RootedValue rval(a.cx);
-    bool throwing = !Call(a.cx, thisv, calleev, args, &rval);
+    bool throwing = !Call(a.cx, calleev, thisv, args, &rval);
     if (throwing) {
         if (!a.cx->getPendingException(&rval))
             return nullptr;
         a.cx->clearPendingException();
+
+        // Convert object errors to strings for simpler error reporting in the
+        // middleman process.
+        if (rval.isObject()) {
+            if (!ToPrimitive(a.cx, &rval))
+                a.cx->clearPendingException();
+        }
     }
+
+    ac.reset();
 
     HandleObject response = a.newObject();
     a.defineProperty(response, "throwing", throwing);
