@@ -25,7 +25,7 @@ def define_upstream_artifacts(config, jobs):
 
         repack_ids = []
         if "eme" in config.kind:
-            repack_ids.append("emefree")
+            repack_ids.append("eme-free")
         else:
             for partner, cfg in release_config["partner_config"].iteritems():
                 if build_platform not in cfg["platforms"]:

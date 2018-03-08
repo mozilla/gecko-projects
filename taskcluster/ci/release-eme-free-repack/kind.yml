@@ -34,8 +34,8 @@ jobs:
    macosx:
       worker:
          artifacts:
-            - name: public/build/emefree/target.dmg
-              path: /builds/worker/checkouts/gecko/emefree.dmg
+            - name: public/build/eme-free/target.dmg
+              path: /builds/worker/checkouts/gecko/eme-free.dmg
               type: file
          env:
             REPACK_MANIFESTS_URL:
@@ -55,11 +55,11 @@ jobs:
    win32:
       worker:
          artifacts:
-            - name: public/build/emefree/setup.exe
-              path: /builds/worker/checkouts/gecko/emefree.exe
+            - name: public/build/eme-free/setup.exe
+              path: /builds/worker/checkouts/gecko/eme-free.exe
               type: file
-            - name: public/build/emefree/target.zip
-              path: /builds/worker/checkouts/gecko/emefree.zip
+            - name: public/build/eme-free/target.zip
+              path: /builds/worker/checkouts/gecko/eme-free.zip
               type: file
          env:
             REPACK_MANIFESTS_URL:
@@ -79,11 +79,11 @@ jobs:
    win64:
       worker:
          artifacts:
-            - name: public/build/emefree/setup.exe
-              path: /builds/worker/checkouts/gecko/emefree.exe
+            - name: public/build/eme-free/setup.exe
+              path: /builds/worker/checkouts/gecko/eme-free.exe
               type: file
-            - name: public/build/emefree/target.zip
-              path: /builds/worker/checkouts/gecko/emefree.zip
+            - name: public/build/eme-free/target.zip
+              path: /builds/worker/checkouts/gecko/eme-free.zip
               type: file
          env:
             REPACK_MANIFESTS_URL:

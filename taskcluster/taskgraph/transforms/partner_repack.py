@@ -55,21 +55,21 @@ def add_command(config, tasks):
 
         if 'mac' in task['attributes']['build_platform']:
             download_cmd = "curl -L https://queue.taskcluster.net/v1/task/YfqwST9zRo2-QddTuetDQA"\
-                           "/runs/0/artifacts/public/build/target.dmg > emefree.dmg"
+                           "/runs/0/artifacts/public/build/target.dmg > eme-free.dmg"
             for repack_id in repack_ids:
                 task["worker"]["artifacts"].append({
                     "name": "public/build/{}/target.dmg".format(repack_id),
                     "path": "/builds/worker/checkouts/gecko/{}.dmg".format(repack_id),
                     "type": "file"
                 })
-                download_cmd += " && cp emefree.dmg {}.dmg".format(repack_id)
+                download_cmd += " && cp eme-free.dmg {}.dmg".format(repack_id)
 
         elif 'win32' in task['attributes']['build_platform']:
             download_cmd = "curl -L https://queue.taskcluster.net/v1/task/aSYhH66QRDyYwhyjmt2wGQ"\
-                           "/runs/0/artifacts/public/build/setup.exe > emefree.exe"
+                           "/runs/0/artifacts/public/build/setup.exe > eme-free.exe"
             download_cmd += " && curl -L https://queue.taskcluster.net/v1/task"\
                             "/aSYhH66QRDyYwhyjmt2wGQ/runs/0/artifacts/public/build/target.zip "\
-                            "> emefree.zip"
+                            "> eme-free.zip"
             for repack_id in repack_ids:
                 task["worker"]["artifacts"].append({
                     "name": "public/build/{}/setup.exe".format(repack_id),
@@ -81,15 +81,15 @@ def add_command(config, tasks):
                     "path": "/builds/worker/checkouts/gecko/{}.zip".format(repack_id),
                     "type": "file"
                 })
-                download_cmd += " && cp emefree.exe {}.exe".format(repack_id)
-                download_cmd += " && cp emefree.zip {}.zip".format(repack_id)
+                download_cmd += " && cp eme-free.exe {}.exe".format(repack_id)
+                download_cmd += " && cp eme-free.zip {}.zip".format(repack_id)
 
         elif 'win64' in task['attributes']['build_platform']:
             download_cmd = "curl -L https://queue.taskcluster.net/v1/task/QKLcYMFQTCiMWz1rlRlSoA"\
-                           "/runs/0/artifacts/public/build/setup.exe > emefree.exe"
+                           "/runs/0/artifacts/public/build/setup.exe > eme-free.exe"
             download_cmd += " && curl -L https://queue.taskcluster.net/v1/task"\
                             "/QKLcYMFQTCiMWz1rlRlSoA/runs/0/artifacts/public/build/target.zip "\
-                            "> emefree.zip"
+                            "> eme-free.zip"
             for repack_id in repack_ids:
                 task["worker"]["artifacts"].append({
                     "name": "public/build/{}/setup.exe".format(repack_id),
@@ -101,30 +101,30 @@ def add_command(config, tasks):
                     "path": "/builds/worker/checkouts/gecko/{}.zip".format(repack_id),
                     "type": "file"
                 })
-                download_cmd += " && cp emefree.exe {}.exe".format(repack_id)
-                download_cmd += " && cp emefree.zip {}.zip".format(repack_id)
+                download_cmd += " && cp eme-free.exe {}.exe".format(repack_id)
+                download_cmd += " && cp eme-free.zip {}.zip".format(repack_id)
 
         elif 'linux-' in task['attributes']['build_platform']:
             download_cmd = "curl -L https://queue.taskcluster.net/v1/task/Q8txUznsRke5OQ-CVZuB1Q"\
-                           "/runs/0/artifacts/public/build/target.tar.bz2 > emefree.tar.bz2"
+                           "/runs/0/artifacts/public/build/target.tar.bz2 > eme-free.tar.bz2"
             for repack_id in repack_ids:
                 task["worker"]["artifacts"].append({
                     "name": "public/build/{}/target.tar.bz2".format(repack_id),
                     "path": "/builds/worker/checkouts/gecko/{}.tar.bz2".format(repack_id),
                     "type": "file"
                 })
-                download_cmd += " && cp emefree.tar.bz2 {}.tar.bz2".format(repack_id)
+                download_cmd += " && cp eme-free.tar.bz2 {}.tar.bz2".format(repack_id)
 
         elif 'linux64-' in task['attributes']['build_platform']:
             download_cmd = "curl -L https://queue.taskcluster.net/v1/task/FkBd2xC_SSeBG4_ihZG5Zw"\
-                           "/runs/0/artifacts/public/build/target.tar.bz2 > emefree.tar.bz2"
+                           "/runs/0/artifacts/public/build/target.tar.bz2 > eme-free.tar.bz2"
             for repack_id in repack_ids:
                 task["worker"]["artifacts"].append({
                     "name": "public/build/{}/target.tar.bz2".format(repack_id),
                     "path": "/builds/worker/checkouts/gecko/{}.tar.bz2".format(repack_id),
                     "type": "file"
                 })
-                download_cmd += " && cp emefree.tar.bz2 {}.tar.bz2".format(repack_id)
+                download_cmd += " && cp eme-free.tar.bz2 {}.tar.bz2".format(repack_id)
 
         task["run"]["command"] = " ".join([
             "cd", "/builds/worker/checkouts/gecko", "&&", download_cmd
