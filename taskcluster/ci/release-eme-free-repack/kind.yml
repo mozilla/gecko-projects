@@ -29,9 +29,11 @@ job-defaults:
    run:
       using: run-task
       sparse-profile: update-verify
+   extra:
+      repack_id: eme-free
 
 jobs:
-   macosx:
+   macosx-nightly:
       worker:
          artifacts:
             - name: public/build/eme-free/target.dmg
@@ -52,7 +54,7 @@ jobs:
          build_platform: macosx64-nightly
          build_type: opt
 
-   win32:
+   win32-nightly:
       worker:
          artifacts:
             - name: public/build/eme-free/setup.exe
@@ -76,7 +78,7 @@ jobs:
          build_platform: win32-nightly
          build_type: opt
 
-   win64:
+   win64-nightly:
       worker:
          artifacts:
             - name: public/build/eme-free/setup.exe
