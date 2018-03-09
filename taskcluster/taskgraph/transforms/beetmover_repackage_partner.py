@@ -100,8 +100,7 @@ def make_task_description(config, jobs):
             )
         )
 
-        dependent_kind = str(dep_job.kind)
-        dependencies = {dependent_kind: dep_job.label}
+        dependencies = {}
 
         if "eme" in repack_id:
             dependencies["build"] = "release-eme-free-repack-{}".format(build_platform)
