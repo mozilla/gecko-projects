@@ -71,13 +71,14 @@ namespace recordreplay {
 // replay behaviors that never occurred while recording.
 //
 // To allow these callbacks the freedom to operate without bringing down the
-// entire replay, the TakeSnapshotAndDivergeFromRecording API is provided
-// (see RecordReplay.h). After this is called, some thread events will happen
-// as if events were passed through, but other events that require interacting
-// with the system will trigger an unhandled divergence from the recording via
-// EnsureNotDivergedFromRecording, causing the process to rewind to the
-// snapshot taken by TakeSnapshotAndDivergeFromRecording. The callback can then
-// recover from the failure and debugging can continue.
+// entire replay, the DivergeFromRecording API is provided; see RecordReplay.h
+// After this is called, some thread events will happen as if events were
+// passed through, but other events that require interacting with the system
+// will trigger an unhandled divergence from the recording via
+// EnsureNotDivergedFromRecording, causing the process to rewind to the most
+// recent snapshot. The debugger will recognize this rewind and play back in a
+// way that restores the state when DivergeFromRecording() was called, but
+// without performing the later operation that triggered the rewind.
 ///////////////////////////////////////////////////////////////////////////////
 
 ///////////////////////////////////////////////////////////////////////////////

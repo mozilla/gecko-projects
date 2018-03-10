@@ -405,15 +405,12 @@ MFBT_API bool CanRestoreSnapshots();
 // and resume execution.
 MFBT_API void RestoreSnapshotAndResume(size_t aId);
 
-// Take a snapshot, and allow execution after this point to diverge from the
-// recording. Execution will remain diverged until a snapshot preceding the
-// call to TakeSnapshotAndDivergeFromRecording is restored.
+// Allow execution after this point to diverge from the recording. Execution
+// will remain diverged until an earlier snapshot is restored.
 //
 // If an unhandled divergence occurs (see the 'Recording Divergence' comment
-// in ProcessRewind.h) then the process rewinds to the snapshot that was taken.
-// This call returns true if the snapshot was just taken, and false if the
-// snapshot was just restored due to such an unhandled divergence.
-MFBT_API bool TakeSnapshotAndDivergeFromRecording();
+// in ProcessRewind.h) then the process rewinds to the most recent snapshot.
+MFBT_API void DivergeFromRecording();
 
 // After a call to TakeSnapshotAndDivergeFromRecording, this may be called to
 // prevent future unhandled divergence from causing the snapshot to be

@@ -185,15 +185,13 @@ ShouldRecordSnapshot(size_t aSnapshot)
 }
 
 // Take a snapshot, which we might or might not record.
-static bool
-TakeSnapshotHelper(bool aFinal, bool aDiverged)
+void
+TakeSnapshot(bool aFinal)
 {
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
 
-  if (!aDiverged) {
-    gBeforeSnapshotHook();
-  }
+  gBeforeSnapshotHook();
 
   // Get the ID of the new snapshot.
   size_t snapshot = gRewindInfo->mTakenSnapshot ? gRewindInfo->mLastSnapshot + 1 : 0;
@@ -211,7 +209,7 @@ TakeSnapshotHelper(bool aFinal, bool aDiverged)
 
   bool justTookSnapshot = true;
 
-  bool recordSnapshot = ShouldRecordSnapshot(snapshot) || aDiverged;
+  bool recordSnapshot = ShouldRecordSnapshot(snapshot);
   if (recordSnapshot) {
     gLastRecordedSnapshot = CurrentTime();
 
@@ -235,11 +233,9 @@ TakeSnapshotHelper(bool aFinal, bool aDiverged)
     // Save all thread stacks for the snapshot. If we rewind here from a later
     // point of execution then this will return false.
     if (Thread::SaveAllThreads(snapshot)) {
-      PrintSpew("Took snapshot #%d%s %.2fs\n", (int) snapshot,
-                aDiverged ? " (diverged)" : "", (end - start) / 1000000.0);
+      PrintSpew("Took snapshot #%d %.2fs\n", (int) snapshot, (end - start) / 1000000.0);
     } else {
-      PrintSpew("Restored snapshot #%d%s\n", (int) snapshot,
-                aDiverged ? " (diverged)" : "");
+      PrintSpew("Restored snapshot #%d\n", (int) snapshot);
 
       justTookSnapshot = false;
 
@@ -266,19 +262,15 @@ TakeSnapshotHelper(bool aFinal, bool aDiverged)
     }
   }
 
-  if (!aDiverged) {
-    size_t snapshot = gRewindInfo->mLastSnapshot;
-    bool final = snapshot && snapshot == gRewindInfo->mFinalSnapshot;
-    bool interim = !!gRewindInfo->mRestoreTargetSnapshot;
-    MOZ_RELEASE_ASSERT(!interim || snapshot < gRewindInfo->mRestoreTargetSnapshot);
+  bool final = snapshot && snapshot == gRewindInfo->mFinalSnapshot;
+  bool interim = !!gRewindInfo->mRestoreTargetSnapshot;
+  MOZ_RELEASE_ASSERT(!interim || snapshot < gRewindInfo->mRestoreTargetSnapshot);
 
-    AutoDisallowThreadEvents disallow;
+  AutoDisallowThreadEvents disallow;
 
-    dom::AutoJSAPI jsapi;
-    jsapi.Init();
-    gAfterSnapshotHook(snapshot, final, interim, recordSnapshot);
-  }
-  return justTookSnapshot;
+  dom::AutoJSAPI jsapi;
+  jsapi.Init();
+  gAfterSnapshotHook(snapshot, final, interim, recordSnapshot);
 }
 
 static const size_t MAX_LAST_DITCH_RESTORES = 5;
@@ -340,21 +332,13 @@ static bool gUnhandledDivergeAllowed;
 
 extern "C" {
 
-MOZ_EXPORT bool
-RecordReplayInterface_TakeSnapshotAndDivergeFromRecording()
+MOZ_EXPORT void
+RecordReplayInterface_DivergeFromRecording()
 {
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
-  if (IsRecording()) {
-    // Recording divergence is not supported if we are still recording.
-    // We don't rewind processes that are still recording, and can't simply
-    // allow execution to proceed from here as if we were not diverged, since
-    // any events or other activity that show up afterwards won't occur when we
-    // are replaying later.
-    return false;
-  }
+  MOZ_RELEASE_ASSERT(IsReplaying());
   gRecordingDiverged = true;
   gUnhandledDivergeAllowed = true;
-  return TakeSnapshotHelper(false, true);
 }
 
 MOZ_EXPORT bool
@@ -381,12 +365,6 @@ EnsureNotDivergedFromRecording()
     RestoreSnapshotAndResume(gRewindInfo->mActiveRecordedSnapshot);
     Unreachable();
   }
-}
-
-void
-TakeSnapshot(bool aFinal)
-{
-  TakeSnapshotHelper(aFinal, false);
 }
 
 bool

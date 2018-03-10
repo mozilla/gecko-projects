@@ -25,7 +25,6 @@ namespace recordreplay {
   Macro(InternalAreThreadEventsPassedThrough, bool, (), ())     \
   Macro(InternalAreThreadEventsDisallowed, bool, (), ())        \
   Macro(InternalRecordReplayValue, size_t, (size_t aValue), (aValue)) \
-  Macro(TakeSnapshotAndDivergeFromRecording, bool, (), ())      \
   Macro(InternalHasDivergedFromRecording, bool, (), ())         \
   Macro(InternalGeneratePLDHashTableCallbacks, const PLDHashTableOps*, \
         (const PLDHashTableOps* aOps), (aOps))                  \
@@ -64,6 +63,7 @@ namespace recordreplay {
         (aBefore, aAfter, aBeforeRestore))                      \
   Macro(ResumeExecution, (), ())                                \
   Macro(RestoreSnapshotAndResume, (size_t aId), (aId))          \
+  Macro(DivergeFromRecording, (), ())                           \
   Macro(DeallocateMemory,                                       \
         (void* aAddress, size_t aSize, AllocatedMemoryKind aKind), (aAddress, aSize, aKind)) \
   Macro(InternalRegisterWeakPointer,                            \

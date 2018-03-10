@@ -363,11 +363,18 @@ DebuggerResponseHook(const JS::replay::CharBuffer& aBuffer)
 }
 
 static void
-HitBreakpoint(size_t aId)
+HitBreakpoint(size_t aId, bool aRecoveringFromDivergence)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   PauseMainThreadAndInvokeCallback([=]() {
-      channel::SendMessage(channel::HitBreakpointMessage(aId));
+      // If we hit this breakpoint while recording from a divergence, the next
+      // message the middleman expects is a response to the last debugger
+      // request. Otherwise, notify the middleman a breakpoint was hit.
+      if (aRecoveringFromDivergence) {
+        JS::replay::hooks.respondAfterRecoveringFromDivergence();
+      } else {
+        channel::SendMessage(channel::HitBreakpointMessage(aId));
+      }
     }, /* aSynchronous = */ true);
 }
 
