@@ -30,10 +30,10 @@ extern JS_FRIEND_API(void) JS_StackDump();
 //
 // Other things --- objects, envs, and frames --- which the replay debugger
 // tracks can only be manipulated while the replaying process is paused at some
-// point of execution. The ids for these things are raw pointer values from the
-// replaying process, and after the replaying process either resumes execution
-// or is rewound the ReplayDebugger disallows further access on the debug
-// object wrappers which represent the things.
+// point of execution. The ids for these things are indexes into vectors which
+// are reset after unpausing. After the replaying process either resumes
+// execution or is rewound the ReplayDebugger disallows further access on the
+// debug object wrappers which represent the things.
 
 JS::replay::Hooks JS::replay::hooks;
 
@@ -2195,10 +2195,13 @@ ReplayDebugger::convertValueFromJSON(Activity& a, HandleObject jsonValue)
 // with. Worker runtimes are ignored entirely.
 static JSRuntime* gMainRuntime;
 
+// All scripts and script sources which are considered by the replay debugger.
 static Vector<JSScript*, 0, SystemAllocPolicy> gDebuggerScripts;
 static Vector<ScriptSourceObject*, 0, SystemAllocPolicy> gDebuggerScriptSources;
 
-static size_t ScriptId(JSScript* script) {
+static size_t
+ScriptId(JSScript* script)
+{
     for (size_t i = 0; i < gDebuggerScripts.length(); i++) {
         if (script == gDebuggerScripts[i])
             return i;
@@ -2206,7 +2209,9 @@ static size_t ScriptId(JSScript* script) {
     return 0;
 }
 
-static size_t ScriptSourceId(ScriptSourceObject* sso) {
+static size_t
+ScriptSourceId(ScriptSourceObject* sso)
+{
     for (size_t i = 0; i < gDebuggerScriptSources.length(); i++) {
         if (sso == gDebuggerScriptSources[i])
             return i;
@@ -2214,27 +2219,32 @@ static size_t ScriptSourceId(ScriptSourceObject* sso) {
     MOZ_CRASH();
 }
 
-static size_t ObjectId(JSContext* cx, JSObject* obj) {
-    MOZ_RELEASE_ASSERT(!obj || !obj->is<ScriptSourceObject>());
-    if (IsInsideNursery(obj)) {
-        RootedObject nobj(cx, obj);
-        cx->runtime()->gc.minorGC(JS::gcreason::API);
-        MOZ_RELEASE_ASSERT(!IsInsideNursery(nobj));
-        obj = nobj;
-    }
-    PersistentRootedObject* persist = js_new<PersistentRootedObject>(cx);
-    if (!persist)
-        MOZ_CRASH();
-    *persist = obj;
+// All objects for which IDs have been generated during the current pause.
+// This is reset when unpausing.
+static Vector<JSObject*, 0, SystemAllocPolicy> gDebuggerPausedObjects;
 
-    // Compacting GCs are disabled in replaying processes
-    // (see GCRuntime::shouldCompact), and since obj is not in the nursery and
-    // has been permanently rooted we can use the raw pointer as an id.
-    return (size_t) obj;
+static size_t
+ObjectId(JSContext* cx, JSObject* obj)
+{
+    if (!obj)
+        return 0;
+    MOZ_RELEASE_ASSERT(!obj->is<ScriptSourceObject>());
+    for (size_t i = 1; i < gDebuggerPausedObjects.length(); i++) {
+        if (obj == gDebuggerPausedObjects[i])
+            return i;
+    }
+    AutoEnterOOMUnsafeRegion oomUnsafe;
+    if (gDebuggerPausedObjects.empty() && !gDebuggerPausedObjects.append(nullptr))
+        oomUnsafe.crash("ObjectId");
+    if (!gDebuggerPausedObjects.append(obj))
+        oomUnsafe.crash("ObjectId");
+    return gDebuggerPausedObjects.length() - 1;
 }
 
-static JSObject* IdObject(size_t id) {
-    return (JSObject*) id;
+static JSObject*
+IdObject(size_t id)
+{
+    return gDebuggerPausedObjects[id];
 }
 
 static bool
@@ -2355,6 +2365,8 @@ ReplayDebugger::markRoots(JSTracer* trc)
         TraceRoot(trc, &gDebuggerScripts[i], "ReplayDebugger::markRoots script");
     for (size_t i = 1; i < gDebuggerScriptSources.length(); i++)
         TraceRoot(trc, &gDebuggerScriptSources[i], "ReplayDebugger::markRoots script source");
+    for (size_t i = 1; i < gDebuggerPausedObjects.length(); i++)
+        TraceRoot(trc, &gDebuggerPausedObjects[i], "ReplayDebugger::markRoots object");
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2524,6 +2536,12 @@ struct BreakpointState
         ForwardReachPoint
     } phase;
 
+    // We are supposed to be paused at a breakpoint but had to restore the
+    // last snapshot due to an unhandled recording divergence. We will be in
+    // either the BackwardReachPoint or Paused phase as we return to
+    // |executionPoint| and re-execute all old debugger requests.
+    bool recoveringFromDivergence;
+
     // If isSeekingExecutionPoint(), the next position in |executionPoint| we
     // need to hit.
     size_t executionPointIndex;
@@ -2531,9 +2549,6 @@ struct BreakpointState
     // Information about an installed breakpoint, corresponding to a
     // ReplayDebugger::Breakpoint in the middleman process.
     struct BreakpointInfo {
-        // ID supplied by the middleman process, or zero.
-        size_t breakpointId;
-
         // Position of the breakpoint.
         BreakpointPosition position;
 
@@ -2541,7 +2556,7 @@ struct BreakpointState
         // breakpoint's position since |snapshot| executed.
         size_t hits;
 
-        BreakpointInfo() : breakpointId(0), hits(0) {}
+        BreakpointInfo() : hits(0) {}
     };
 
     // All installed breakpoints.
@@ -2554,10 +2569,27 @@ struct BreakpointState
     // During the BackwardCountHits phase, the last breakpoint that was hit.
     size_t lastBreakpointId;
 
+    // If we are paused at a breakpoint, information about all requests we have
+    // seen so far.
+    struct RequestInfo {
+        // JSON contents for the request and (possibly) response.
+        Vector<char16_t, 0, AllocPolicy<DebuggerAllocatedMemoryKind>> requestBuffer;
+        Vector<char16_t, 0, AllocPolicy<DebuggerAllocatedMemoryKind>> responseBuffer;
+
+        // Whether processing this request triggered an unhandled divergence.
+        bool unhandledDivergence;
+
+        RequestInfo() : unhandledDivergence(false) {}
+    };
+    Vector<RequestInfo, 4, AllocPolicy<DebuggerAllocatedMemoryKind>> breakpointRequests;
+
+    // Index of the request currently being processed.
+    size_t currentRequestIndex;
+
     BreakpointInfo& getBreakpoint(size_t id) {
         AutoEnterOOMUnsafeRegion oomUnsafe;
         while (id >= breakpoints.length()) {
-            if (!breakpoints.append(BreakpointInfo()))
+            if (!breakpoints.emplaceBack())
                 oomUnsafe.crash("BreakpointState::getBreakpoint");
         }
         return breakpoints[id];
@@ -2602,6 +2634,25 @@ static BreakpointState* gBreakpointState;
 // If we are paused at an OnPop breakpoint, the execution status of the frame.
 static bool gPopFrameBreakpointThrowing;
 static PersistentRootedValue* gPopFrameBreakpointResult;
+
+static bool
+MaybeDivergeFromRecording()
+{
+    if (IsRecording()) {
+        // Recording divergence is not supported if we are still recording.
+        // We don't rewind processes that are still recording, and can't simply
+        // allow execution to proceed from here as if we were not diverged, since
+        // any events or other activity that show up afterwards won't occur when we
+        // are replaying later.
+        return false;
+    }
+    const BreakpointState::RequestInfo& info =
+        gBreakpointState->breakpointRequests[gBreakpointState->currentRequestIndex];
+    if (info.unhandledDivergence)
+        return false;
+    DivergeFromRecording();
+    return true;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // Replaying process hooks
@@ -2807,7 +2858,7 @@ Respond_getObject(ReplayDebugger::Activity& a, HandleObject request)
 static HandleObject
 Respond_getObjectProperties(ReplayDebugger::Activity& a, HandleObject request)
 {
-    if (!TakeSnapshotAndDivergeFromRecording()) {
+    if (!MaybeDivergeFromRecording()) {
         HandleObject response = a.newArray();
         HandleObject entry = a.newObject();
         a.pushArray(response, entry);
@@ -2903,7 +2954,7 @@ Respond_getObjectParameterNames(ReplayDebugger::Activity& a, HandleObject reques
 static HandleObject
 Respond_objectCall(ReplayDebugger::Activity& a, HandleObject request)
 {
-    if (!TakeSnapshotAndDivergeFromRecording()) {
+    if (!MaybeDivergeFromRecording()) {
         HandleObject response = a.newObject();
         a.defineProperty(response, "throwing", true);
         HandleValue rval = a.valueify("Recording divergence in objectCall");
@@ -2982,7 +3033,7 @@ Respond_getEnvironment(ReplayDebugger::Activity& a, HandleObject request)
 static HandleObject
 Respond_getEnvironmentNames(ReplayDebugger::Activity& a, HandleObject request)
 {
-    if (!TakeSnapshotAndDivergeFromRecording()) {
+    if (!MaybeDivergeFromRecording()) {
         HandleObject response = a.newArray();
         HandleObject entry = a.newObject();
         a.pushArray(response, entry);
@@ -3129,7 +3180,7 @@ Respond_getFrame(ReplayDebugger::Activity& a, HandleObject request)
 static HandleObject
 Respond_frameEvaluate(ReplayDebugger::Activity& a, HandleObject request)
 {
-    if (!TakeSnapshotAndDivergeFromRecording()) {
+    if (!MaybeDivergeFromRecording()) {
         HandleObject response = a.newObject();
         a.defineProperty(response, "throwing", true);
         HandleValue rval = a.valueify("Recording divergence in frameEvaluate");
@@ -3186,6 +3237,29 @@ Respond_popFrameResult(ReplayDebugger::Activity& a, HandleObject request)
     return response;
 }
 
+// Breakpoint operations to perform before resuming. These are delayed until
+// we resume so that changes to breakpoints don't interfere with activity when
+// recovering from an unhandled divergence.
+static Vector<std::pair<size_t, BreakpointPosition>, 0, SystemAllocPolicy> gPendingBreakpointOperations;
+
+static void
+ApplyPendingBreakpointOperations()
+{
+    for (auto entry : gPendingBreakpointOperations) {
+        BreakpointState::BreakpointInfo& breakpoint = gBreakpointState->getBreakpoint(entry.first);
+        if (entry.second.isValid()) {
+            // Setting a breakpoint.
+            MOZ_RELEASE_ASSERT(!breakpoint.position.isValid());
+            breakpoint.position = entry.second;
+        } else {
+            // Clearing a breakpoint.
+            breakpoint.position = BreakpointPosition();
+            breakpoint.hits = 0;
+        }
+    }
+    gPendingBreakpointOperations.clear();
+}
+
 static bool
 Respond_setBreakpoint(ReplayDebugger::Activity& a, HandleObject request)
 {
@@ -3198,25 +3272,25 @@ Respond_setBreakpoint(ReplayDebugger::Activity& a, HandleObject request)
     size_t kind = a.getScalarProperty(request, "breakpointKind");
     MOZ_RELEASE_ASSERT(script);
 
-    BreakpointState::BreakpointInfo& breakpoint = gBreakpointState->getBreakpoint(id);
-
-    if (breakpoint.position.isValid()) {
-        JS_ReportErrorASCII(a.cx, "Duplicate breakpoint ID");
+    BreakpointPosition position((BreakpointPosition::Kind) kind, script, offset, frameIndex);
+    if (!gPendingBreakpointOperations.emplaceBack(id, position)) {
+        ReportOutOfMemory(a.cx);
         return false;
     }
-
-    breakpoint.breakpointId = id;
-    breakpoint.position = BreakpointPosition((BreakpointPosition::Kind) kind, script, offset, frameIndex);
     return true;
 }
 
 static bool
 Respond_clearBreakpoint(ReplayDebugger::Activity& a, HandleObject request)
 {
+    MOZ_RELEASE_ASSERT(gBreakpointState->isPaused());
+
     size_t id = a.getScalarProperty(request, "id");
 
-    BreakpointState::BreakpointInfo& breakpoint = gBreakpointState->getBreakpoint(id);
-    breakpoint = BreakpointState::BreakpointInfo();
+    if (!gPendingBreakpointOperations.emplaceBack(id, BreakpointPosition())) {
+        ReportOutOfMemory(a.cx);
+        return false;
+    }
     return true;
 }
 
@@ -3246,15 +3320,15 @@ RequestMatch(ReplayDebugger::Activity& a, HandleString kind, const char* name)
 }
 
 static void
-DebugRequestHook(JS::replay::CharBuffer* requestBuffer)
+ProcessRequest(const char16_t* requestBuffer, size_t requestLength,
+               Maybe<JS::replay::CharBuffer>* responseBuffer)
 {
     JSContext* cx = gHookContext;
     AutoCompartment ac(cx, *gHookGlobal);
 
     RootedValue requestValue(cx);
-    if (!JS_ParseJSON(cx, requestBuffer->begin(), requestBuffer->length(), &requestValue))
+    if (!JS_ParseJSON(cx, requestBuffer, requestLength, &requestValue))
         MOZ_CRASH();
-    js_delete(requestBuffer);
 
     if (!requestValue.isObject())
         MOZ_CRASH();
@@ -3297,7 +3371,7 @@ FOR_EACH_NON_RESPONSE(HANDLE_NON_RESPONSE)
             MOZ_CRASH();
         cx->clearPendingException();
         RootedString str(cx);
-        if (TakeSnapshotAndDivergeFromRecording()) {
+        if (MaybeDivergeFromRecording()) {
             str = ToString<CanGC>(cx, exception);
             if (!str)
                 cx->clearPendingException();
@@ -3312,11 +3386,79 @@ FOR_EACH_NON_RESPONSE(HANDLE_NON_RESPONSE)
             MOZ_CRASH();
     }
 
-    JS::replay::CharBuffer responseBuffer;
-    if (!ToJSONMaybeSafely(cx, response, FillCharBufferCallback, &responseBuffer))
+    responseBuffer->emplace();
+    if (!ToJSONMaybeSafely(cx, response, FillCharBufferCallback, &responseBuffer->ref()))
         MOZ_CRASH();
+}
 
-    JS::replay::hooks.debugResponseReplay(responseBuffer);
+static void
+DebugRequestHook(JS::replay::CharBuffer* requestBuffer)
+{
+    AutoEnterOOMUnsafeRegion oomUnsafe;
+
+    if (!gBreakpointState->breakpointRequests.emplaceBack())
+        oomUnsafe.crash("DebugRequestHook");
+    BreakpointState::RequestInfo& info = gBreakpointState->breakpointRequests.back();
+    gBreakpointState->currentRequestIndex = gBreakpointState->breakpointRequests.length() - 1;
+
+    if (!info.requestBuffer.append(requestBuffer->begin(), requestBuffer->length()))
+        oomUnsafe.crash("DebugRequestHook");
+
+    Maybe<JS::replay::CharBuffer> responseBuffer;
+    ProcessRequest(requestBuffer->begin(), requestBuffer->length(), &responseBuffer);
+
+    js_delete(requestBuffer);
+
+    if (responseBuffer.isSome()) {
+        if (!info.responseBuffer.append(responseBuffer.ref().begin(), responseBuffer.ref().length()))
+            oomUnsafe.crash("DebugRequestHook");
+        JS::replay::hooks.debugResponseReplay(responseBuffer.ref());
+    }
+}
+
+static void
+RespondAfterRecoveringFromDivergenceHook()
+{
+    MOZ_RELEASE_ASSERT(gBreakpointState->isPausedAtBreakpoint());
+    MOZ_RELEASE_ASSERT(gBreakpointState->recoveringFromDivergence);
+    MOZ_RELEASE_ASSERT(gBreakpointState->breakpointRequests.length());
+
+    // Remember that the last request has triggered an unhandled divergence.
+    MOZ_RELEASE_ASSERT(!gBreakpointState->breakpointRequests.back().unhandledDivergence);
+    gBreakpointState->breakpointRequests.back().unhandledDivergence = true;
+
+    // Redo all existing requests.
+    for (size_t i = 0; i < gBreakpointState->breakpointRequests.length(); i++) {
+        BreakpointState::RequestInfo& info = gBreakpointState->breakpointRequests[i];
+        gBreakpointState->currentRequestIndex = i;
+
+        Maybe<JS::replay::CharBuffer> responseBuffer;
+        ProcessRequest(info.requestBuffer.begin(), info.requestBuffer.length(), &responseBuffer);
+
+        if (i < gBreakpointState->breakpointRequests.length() - 1) {
+            // This is an old request, and we don't need to send another
+            // response to it. Make sure the response we just generated matched
+            // the earlier one we sent, though.
+            if (responseBuffer.isSome()) {
+                MOZ_RELEASE_ASSERT(responseBuffer.ref().length() == info.responseBuffer.length());
+                MOZ_RELEASE_ASSERT(memcmp(responseBuffer.ref().begin(), info.responseBuffer.begin(),
+                                          responseBuffer.ref().length() * sizeof(char16_t)) == 0);
+            } else {
+                MOZ_RELEASE_ASSERT(info.responseBuffer.empty());
+            }
+        } else {
+            // This is the current request we need to respond to.
+            MOZ_RELEASE_ASSERT(responseBuffer.isSome());
+            MOZ_RELEASE_ASSERT(info.responseBuffer.empty());
+            AutoEnterOOMUnsafeRegion oomUnsafe;
+            if (!info.responseBuffer.append(responseBuffer.ref().begin(), responseBuffer.ref().length()))
+                oomUnsafe.crash("RespondAfterRecoveringFromDivergenceHook");
+            JS::replay::hooks.debugResponseReplay(responseBuffer.ref());
+        }
+    }
+
+    // We've finished recovering, and can now process new incoming requests.
+    gBreakpointState->recoveringFromDivergence = false;
 }
 
 static void
@@ -3327,8 +3469,7 @@ BeforeSnapshotHook()
 {
     // Reset the debugger to a consistent state before each snapshot. Ensure
     // that the hook context and global exist and have a debugger object, and
-    // that no debuggees have debugger information attached. Note that this
-    // hook is not called by TakeSnapshotAndDivergeFromRecording.
+    // that no debuggees have debugger information attached.
 
     if (!gHookContext || !gHookGlobal)
         MOZ_CRASH();
@@ -3411,10 +3552,11 @@ ExecutionPointPositionHit(JSContext* cx)
 }
 
 static void
-BreakpointHit(JSContext* cx, BreakpointState::BreakpointInfo& breakpoint,
-              bool popFrameOk, const Value& popFrameResult)
+BreakpointHit(JSContext* cx, size_t breakpointId, bool popFrameOk, const Value& popFrameResult)
 {
     AutoEnterOOMUnsafeRegion oomUnsafe;
+
+    BreakpointState::BreakpointInfo& breakpoint = gBreakpointState->getBreakpoint(breakpointId);
 
     switch (gBreakpointState->phase) {
       case BreakpointState::Paused:
@@ -3431,7 +3573,7 @@ BreakpointHit(JSContext* cx, BreakpointState::BreakpointInfo& breakpoint,
         // Keep track of the number of hits on each breakpoint and the last
         // breakpoint which was hit.
         breakpoint.hits++;
-        gBreakpointState->lastBreakpointId = breakpoint.breakpointId;
+        gBreakpointState->lastBreakpointId = breakpointId;
         return;
       case BreakpointState::BackwardReachPoint:
       case BreakpointState::ForwardReachPoint:
@@ -3449,7 +3591,7 @@ BreakpointHit(JSContext* cx, BreakpointState::BreakpointInfo& breakpoint,
         *gPopFrameBreakpointResult = popFrameResult;
     }
 
-    JS::replay::hooks.hitBreakpointReplay(breakpoint.breakpointId);
+    JS::replay::hooks.hitBreakpointReplay(breakpointId, gBreakpointState->recoveringFromDivergence);
 
     if (breakpoint.position.kind == BreakpointPosition::OnPop) {
         gPopFrameBreakpointThrowing = false;
@@ -3486,9 +3628,10 @@ HandlerHit(JSContext* cx, const std::function<bool(const BreakpointPosition&)>& 
             return;
     }
 
-    for (BreakpointState::BreakpointInfo& breakpoint : gBreakpointState->breakpoints) {
+    for (size_t id = 0; id < gBreakpointState->breakpoints.length(); id++) {
+        const BreakpointState::BreakpointInfo& breakpoint = gBreakpointState->breakpoints[id];
         if (breakpoint.position.isValid() && match(breakpoint.position)) {
-            BreakpointHit(cx, breakpoint, popFrameOk, popFrameResult);
+            BreakpointHit(cx, id, popFrameOk, popFrameResult);
 
             // If there is no pending resume then we are supposed to resume
             // immediately, so skip other breakpoints at this position.
@@ -3645,6 +3788,8 @@ BackwardCountHitsOnRegionEnd()
         gBreakpointState->executionPoint.clear();
         BreakpointState::BreakpointInfo& breakpoint =
             gBreakpointState->getBreakpoint(gBreakpointState->lastBreakpointId);
+
+        MOZ_RELEASE_ASSERT(breakpoint.hits);
         if (!gBreakpointState->executionPoint.appendN(breakpoint.position, breakpoint.hits))
             oomUnsafe.crash("BackwardCountHitsOnRegionEnd");
 
@@ -3674,7 +3819,14 @@ AfterSnapshotHook(size_t snapshot, bool final, bool interim, bool recorded)
 
     switch (gBreakpointState->phase) {
       case BreakpointState::Paused:
-        MOZ_CRASH();
+        // We just restored a snapshot because an unhandled recording
+        // divergence was encountered while responding to a debugger request.
+        MOZ_RELEASE_ASSERT(gBreakpointState->isPausedAtBreakpoint());
+        MOZ_RELEASE_ASSERT(snapshot == gBreakpointState->snapshot);
+        MOZ_RELEASE_ASSERT(!gBreakpointState->recoveringFromDivergence);
+        gBreakpointState->recoveringFromDivergence = true;
+        gBreakpointState->setPhase(BreakpointState::BackwardReachPoint);
+        break;
       case BreakpointState::Forward:
         // Notify the middleman that we just hit a snapshot during the course
         // of normal execution.
@@ -3694,8 +3846,7 @@ AfterSnapshotHook(size_t snapshot, bool final, bool interim, bool recorded)
         MOZ_FALLTHROUGH;
       case BreakpointState::BackwardReachPoint:
       case BreakpointState::ForwardReachPoint:
-        // We just restored the snapshot we were starting the search from, fall
-        // through and set up breakpoints as usual.
+        // We just restored the snapshot we were starting the search from.
         MOZ_RELEASE_ASSERT(snapshot == gBreakpointState->snapshot);
         JS::replay::hooks.hitSnapshotReplay(snapshot, false, true, recorded);
         break;
@@ -3711,6 +3862,7 @@ AfterSnapshotHook(size_t snapshot, bool final, bool interim, bool recorded)
         }
         breakpoint.hits = 0;
     }
+    gBreakpointState->lastBreakpointId = BreakpointState::INVALID_BREAKPOINT;
 
     if (!gBreakpointState->executionPoint.empty()) {
         MOZ_RELEASE_ASSERT(gBreakpointState->isSeekingExecutionPoint());
@@ -3718,8 +3870,6 @@ AfterSnapshotHook(size_t snapshot, bool final, bool interim, bool recorded)
             oomUnsafe.crash("AfterSnapshotHook");
         gBreakpointState->executionPointIndex = 0;
     }
-
-    gBreakpointState->lastBreakpointId = BreakpointState::INVALID_BREAKPOINT;
 }
 
 static void
@@ -3769,9 +3919,14 @@ ReplayDebugger::onLeaveFrame(JSContext* cx, AbstractFramePtr frame, jsbytecode* 
 static void
 ResumeHook(bool forward, bool hitOtherBreakpoints)
 {
+    // Tidy up before unpausing.
+    gDebuggerPausedObjects.clear();
+    gBreakpointState->breakpointRequests.clear();
+    gBreakpointState->currentRequestIndex = 0;
+    ApplyPendingBreakpointOperations();
+
     if (hitOtherBreakpoints) {
         MOZ_RELEASE_ASSERT(gBreakpointState->isPausedAtBreakpoint());
-        ResumeExecution();
 
         gPendingResume = true;
         gPendingResumeForward = forward;
@@ -3783,11 +3938,11 @@ ResumeHook(bool forward, bool hitOtherBreakpoints)
     if (forward) {
         MOZ_RELEASE_ASSERT(gBreakpointState->phase != BreakpointState::Forward);
 
-        // If we are paused at a breakpoint and are replaying, we may have taken
-        // snapshots that caused us to diverge from the recording. We have to clear
-        // these by rewinding to the last snapshot encountered, then running
-        // forward to the current execution point and resuming normal forward
-        // execution from there.
+        // If we are paused at a breakpoint and are replaying, we may have
+        // diverged from the recording. We have to clear any unwanted changes
+        // induced by evals and so forth by rewinding to the last snapshot
+        // encountered, then running  forward to the current execution point
+        // and resuming normal forward execution from there.
         if (gBreakpointState->isPausedAtBreakpoint() && IsReplaying()) {
             gBreakpointState->setPhase(BreakpointState::ForwardReachPoint);
             RestoreSnapshotAndResume(gBreakpointState->snapshot);
@@ -3814,6 +3969,7 @@ ResumeHook(bool forward, bool hitOtherBreakpoints)
     }
 
     gBreakpointState->setPhase(BreakpointState::BackwardCountHits);
+
     RestoreSnapshotAndResume(gBreakpointState->snapshot);
     MOZ_CRASH(); // Unreachable.
 }
@@ -3836,6 +3992,7 @@ ReplayDebugger::Initialize()
 
         JS::replay::hooks.debugRequestReplay = DebugRequestHook;
         JS::replay::hooks.resumeReplay = ResumeHook;
+        JS::replay::hooks.respondAfterRecoveringFromDivergence = RespondAfterRecoveringFromDivergenceHook;
 
         SetSnapshotHooks(::BeforeSnapshotHook, ::AfterSnapshotHook, ::BeforeLastDitchRestoreHook);
     }
