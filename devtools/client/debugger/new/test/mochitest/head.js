@@ -1167,3 +1167,22 @@ function checkEvaluateInTopFrame(threadClient, text, expected) {
     });
   });
 }
+
+// Return a promise that resolves when a thread evaluates a string in the
+// topmost frame, with the result throwing an exception.
+function checkEvaluateInTopFrameThrows(threadClient, text) {
+  return new Promise(function(resolve) {
+    threadClient.getFrames(0, 1).then(function({frames}) {
+      ok(frames.length == 1, "Got one frame");
+      return threadClient.eval(frames[0].actor, text);
+    }).then(function(response) {
+      ok(response.type == "resumed", "Got resume response from eval");
+      threadClient.addOneTimeListener("paused", function(event, packet) {
+        ok(packet.type == "paused" &&
+           packet.why.type == "clientEvaluated" &&
+           "throw" in packet.why.frameFinished, "Eval threw an exception");
+        resolve();
+      });
+    });
+  });
+}
