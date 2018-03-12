@@ -102,7 +102,7 @@ void InitializeRewindState();
 
 // Take a new snapshot. This increases the ID of the last encountered snapshot,
 // but the rewind mechanism is not required to actually record this snapshot.
-void TakeSnapshot(bool aFinal);
+void TakeSnapshot(bool aFinal, bool aTemporary = false);
 
 // Return whether we are rewinding and the last snapshot was before the point
 // where we are trying to rewind to.
@@ -132,6 +132,9 @@ size_t GetActiveRecordedSnapshot();
 // Get the ID of the last snapshot which was recorded and had its diff versus
 // the following recorded snapshot computed.
 size_t GetLastRecordedDiffSnapshot();
+
+// Whether the last snapshot is a temporary one.
+bool HasTemporarySnapshot();
 
 // Make sure that execution has not diverged from the recording after a call to
 // TakeSnapshotAndDivergeFromRecording, by rewinding to that snapshot if so.

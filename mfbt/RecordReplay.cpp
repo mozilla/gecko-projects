@@ -47,6 +47,7 @@ namespace recordreplay {
   Macro(InternalRecordReplayBytes,                              \
         (void* aData, size_t aSize), (aData, aSize))            \
   Macro(DisallowUnhandledDivergeFromRecording, (), ())          \
+  Macro(TakeTemporarySnapshot, (), ())                          \
   Macro(NotifyUnrecordedWait,                                   \
         (const std::function<void()>& aCallback), (aCallback))  \
   Macro(MaybeWaitForSnapshot, (), ())                           \

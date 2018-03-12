@@ -415,6 +415,11 @@ MFBT_API void DivergeFromRecording();
 // restore of an earlier snapshot.
 MFBT_API void DisallowUnhandledDivergeFromRecording();
 
+// Take a temporary snapshot: one whose ID does not universally represent a
+// particular point of execution. Note that when this snapshot is restored
+// control flow will resume after this call.
+MFBT_API void TakeTemporarySnapshot();
+
 ///////////////////////////////////////////////////////////////////////////////
 // Allocation policies
 ///////////////////////////////////////////////////////////////////////////////

@@ -150,6 +150,15 @@ RecordReplayInterface_SetSnapshotHooks(BeforeSnapshotHook aBeforeSnapshot,
 
 } // extern "C"
 
+// Whether we have recorded a temporary snapshot.
+static bool gHasTemporarySnapshot;
+
+bool
+HasTemporarySnapshot()
+{
+  return gHasTemporarySnapshot;
+}
+
 static double gLastRecordedSnapshot;
 
 static double SecondsBetweenSnapshots = 3.0;
@@ -161,8 +170,8 @@ ShouldRecordSnapshot(size_t aSnapshot)
     return false;
   }
 
-  // The first snapshot is always recorded.
-  if (!aSnapshot) {
+  // The first snapshot and temporary snapshots are always recorded.
+  if (!aSnapshot || gHasTemporarySnapshot) {
     return true;
   }
 
@@ -181,10 +190,12 @@ ShouldRecordSnapshot(size_t aSnapshot)
 
 // Take a snapshot, which we might or might not record.
 void
-TakeSnapshot(bool aFinal)
+TakeSnapshot(bool aFinal, bool aTemporary)
 {
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
+  MOZ_RELEASE_ASSERT(!aFinal || !aTemporary);
+  MOZ_RELEASE_ASSERT(IsReplaying() || !aTemporary);
 
   gBeforeSnapshotHook();
 
@@ -193,6 +204,8 @@ TakeSnapshot(bool aFinal)
   if (aFinal) {
     MOZ_RELEASE_ASSERT(!gRewindInfo->mFinalSnapshot || gRewindInfo->mFinalSnapshot == snapshot);
     gRewindInfo->mFinalSnapshot = snapshot;
+  } else if (aTemporary) {
+    gHasTemporarySnapshot = true;
   }
 
   if (!gTakeSnapshots) {
@@ -227,9 +240,11 @@ TakeSnapshot(bool aFinal)
     // Save all thread stacks for the snapshot. If we rewind here from a later
     // point of execution then this will return false.
     if (Thread::SaveAllThreads(snapshot)) {
-      PrintSpew("Took snapshot #%d %.2fs\n", (int) snapshot, (end - start) / 1000000.0);
+      PrintSpew("Took snapshot #%d%s %.2fs\n", (int) snapshot,
+                aTemporary ? " (temporary)" : "", (end - start) / 1000000.0);
     } else {
-      PrintSpew("Restored snapshot #%d\n", (int) snapshot);
+      PrintSpew("Restored snapshot #%d%s\n", (int) snapshot,
+                aTemporary ? " (temporary)" : "");
 
       justTookSnapshot = false;
 
@@ -247,6 +262,7 @@ TakeSnapshot(bool aFinal)
     Thread::ResumeIdleThreads();
   } else {
     MOZ_RELEASE_ASSERT(!gRewindInfo->mRestoreTargetSnapshot);
+    MOZ_RELEASE_ASSERT(!aTemporary);
     gRewindInfo->mLastSnapshot = snapshot;
   }
 
@@ -265,6 +281,12 @@ TakeSnapshot(bool aFinal)
   dom::AutoJSAPI jsapi;
   jsapi.Init();
   gAfterSnapshotHook(snapshot, final, interim);
+
+  // Taking snapshots after a temporary one is allowed, but we shouldn't be
+  // executing past the point of the next normal snapshot point. We might get
+  // to such normal snapshots after having taken temporary snapshots, but the
+  // AfterSnapshot hook should rewind in such cases.
+  MOZ_RELEASE_ASSERT(!gHasTemporarySnapshot || aTemporary);
 }
 
 static const size_t MAX_LAST_DITCH_RESTORES = 5;
@@ -346,6 +368,12 @@ RecordReplayInterface_DisallowUnhandledDivergeFromRecording()
 {
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
   gUnhandledDivergeAllowed = false;
+}
+
+MFBT_API void
+RecordReplayInterface_TakeTemporarySnapshot()
+{
+  TakeSnapshot(/* aFinal = */ false, /* aTemporary = */ true);
 }
 
 } // extern "C"

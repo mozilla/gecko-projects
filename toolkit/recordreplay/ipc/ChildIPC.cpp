@@ -342,6 +342,7 @@ static void
 HitSnapshot(size_t aId, bool aFinal, bool aInterim)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
+  MOZ_RELEASE_ASSERT(!HasTemporarySnapshot());
   PauseMainThreadAndInvokeCallback([=]() {
       channel::SendMessage(channel::HitSnapshotMessage(aId, aFinal, aInterim));
     });
