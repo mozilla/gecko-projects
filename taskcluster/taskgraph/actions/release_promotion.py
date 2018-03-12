@@ -61,6 +61,7 @@ RELEASE_PROMOTION_CONFIG = {
         'product': 'firefox',
         'rebuild_kinds': [
             'release-partner-repack',
+            'release-partner-repack-chunking-dummy',
             'release-partner-repack-signing',
         ],
     },
