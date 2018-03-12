@@ -96,3 +96,5 @@ jobs:
     symbol: I(uv)
   diffoscope:
     symbol: I(diff)
+  firefox-snap:
+    symbol: I(snap)
