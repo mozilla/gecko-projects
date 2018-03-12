@@ -70,6 +70,30 @@ def validate(config, jobs):
 
 
 @transforms.add
+def skip_for_indirect_dependencies(config, jobs):
+    for job in jobs:
+        dep_job = job['dependent-task']
+        build_platform = dep_job.attributes.get("build_platform")
+        if not build_platform:
+            raise Exception("Cannot find build platform!")
+
+        # Skip any jobs that aren't the immediate upstream for a given platform.
+        # For Linux, the immediate upstream is the eme-free/partner repack build tasks.
+        # For Mac, it is repackage.
+        # For Windows, it is repackage-signing.
+        if "win" in build_platform:
+            if "repackage" not in dep_job.label:
+                continue
+            elif "signing" not in dep_job.label:
+                continue
+        if "macosx" in build_platform:
+            if "repackage" not in dep_job.label:
+                continue
+
+        yield job
+
+
+@transforms.add
 def make_task_description(config, jobs):
     for job in jobs:
         dep_job = job['dependent-task']
@@ -91,6 +115,8 @@ def make_task_description(config, jobs):
         treeherder.setdefault('tier', 1)
         treeherder.setdefault('kind', 'build')
         label = dep_job.label.replace("repackage-signing-", "beetmover-")
+        label = label.replace("repackage-", "beetmover-")
+        label = label.replace("chunking-dummy-", "beetmover-")
         description = (
             "Beetmover submission for repack_id '{repack_id}' for build '"
             "{build_platform}/{build_type}'".format(
@@ -102,34 +128,19 @@ def make_task_description(config, jobs):
 
         dependencies = {}
 
+        base_label = "release-partner-repack"
         if "eme" in repack_id:
-            dependencies["build"] = "release-eme-free-repack-{}".format(build_platform)
-            if "macosx" in build_platform:
-                dependencies["signing"] = "release-eme-free-repack-signing-{}".format(
-                    build_platform
-                )
-            if "win" in build_platform:
-                dependencies["repackage"] = "release-eme-free-repack-repackage-{}-{}".format(
-                    build_platform, repack_id
-                )
-            if "macosx" in build_platform or "win" in build_platform:
-                dependencies["repackage-signing"] = "release-eme-free-repack-"\
-                                                    "repackage-signing-{}-{}".format(
-                    build_platform, repack_id
-                )
-            build_name = "release-eme-free-repack"
-            signing_name = "release-eme-free-repack-signing"
-            repackage_name = "release-eme-free-repack-repackage"
-        else:
-            dependencies["build"] = "release-partner-repack-repack-{}".format(build_platform)
-            dependencies["signing"] = "release-partner-repack-repack-"\
-                                      "signing-{}".format(build_platform)
-            dependencies["repackage"] = "release-partner-repack-repack-repackage-{}-{}".format(
-                build_platform, repack_id
+            base_label = "release-eme-free-repack"
+        dependencies["build"] = "{}-{}".format(base_label, build_platform)
+        if "macosx" in build_platform:
+            dependencies["signing"] = "{}-signing-{}".format(base_label, build_platform)
+        if "macosx" in build_platform or "win" in build_platform:
+            dependencies["repackage"] = "{}-repackage-{}-{}".format(
+                base_label, build_platform, repack_id
             )
-            dependencies["repackage-signing"] = "release-partner-repack-repack-"\
-                                                "repackage-signing-{}-{}".format(
-                build_platform, repack_id
+        if "win" in build_platform:
+            dependencies["repackage-signing"] = "{}-repackage-signing-{}-{}".format(
+                base_label, build_platform, repack_id
             )
 
         attributes = copy_attributes_from_dependent_job(dep_job)

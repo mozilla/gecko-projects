@@ -33,7 +33,7 @@ job-defaults:
       repack_id: eme-free
 
 jobs:
-   macosx-nightly:
+   macosx64-nightly:
       worker:
          artifacts:
             - name: public/build/eme-free/target.dmg

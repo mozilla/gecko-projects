@@ -345,6 +345,10 @@ release-partner-repack
 ----------------------
 Generates customized versions of releases for partners.
 
+release-partner-repack-chunking-dummy
+----------------------
+Generates customized versions of releases for partners.
+
 release-partner-repack-signing
 ------------------------------
 Internal signing of partner repacks
@@ -354,6 +358,10 @@ release-partner-repack-repackage
 Repackaging of partner repacks
 
 release-partner-repack-repackage-signing
+------------------------------
+Repackaging of partner repacks
+
+release-partner-repack-beetmover
 ------------------------------
 Repackaging of partner repacks
 

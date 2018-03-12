@@ -16,7 +16,7 @@ transforms = TransformSequence()
 
 
 @transforms.add
-def split_partners(config, jobs):
+def chunk_partners(config, jobs):
     release_config = get_release_config(config)
 
     for job in jobs:

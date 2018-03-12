@@ -11,6 +11,8 @@ transforms:
    - taskgraph.transforms.task:transforms
 
 kind-dependencies:
+   - release-eme-free-repack
+   - release-eme-free-repack-repackage
    - release-eme-free-repack-repackage-signing
 
 only-for-build-platforms:

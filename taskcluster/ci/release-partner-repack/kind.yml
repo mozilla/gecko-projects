@@ -31,7 +31,7 @@ job-defaults:
       sparse-profile: update-verify
 
 jobs:
-   linux:
+   linux-nightly:
       worker:
          env:
             REPACK_MANIFESTS_URL:
@@ -48,7 +48,7 @@ jobs:
          build_platform: linux-nightly
          build_type: opt
 
-   linux64:
+   linux64-nightly:
       worker:
          env:
             REPACK_MANIFESTS_URL:
@@ -65,7 +65,7 @@ jobs:
          build_platform: linux64-nightly
          build_type: opt
 
-   macosx:
+   macosx64-nightly:
       worker:
          env:
             REPACK_MANIFESTS_URL:
@@ -82,7 +82,7 @@ jobs:
          build_platform: macosx64-nightly
          build_type: opt
 
-   win32:
+   win32-nightly:
       worker:
          env:
             REPACK_MANIFESTS_URL:
@@ -99,7 +99,7 @@ jobs:
          build_platform: win32-nightly
          build_type: opt
 
-   win64:
+   win64-nightly:
       worker:
          env:
             REPACK_MANIFESTS_URL:
