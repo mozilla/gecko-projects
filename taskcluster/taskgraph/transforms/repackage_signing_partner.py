@@ -13,7 +13,6 @@ from taskgraph.util.schema import validate_schema, Schema
 from taskgraph.util.scriptworker import (
     add_scope_prefix,
     get_signing_cert_scope_per_platform,
-    get_worker_type_for_scope,
 )
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Required, Optional
@@ -104,7 +103,7 @@ def make_repackage_signing_description(config, jobs):
         task = {
             'label': label,
             'description': description,
-            #'worker-type': get_worker_type_for_scope(config, signing_cert_scope),
+            # 'worker-type': get_worker_type_for_scope(config, signing_cert_scope),
             'worker-type': 'scriptworker-prov-v1/signing-linux-v1',
             'worker': {'implementation': 'scriptworker-signing',
                        'upstream-artifacts': upstream_artifacts,
