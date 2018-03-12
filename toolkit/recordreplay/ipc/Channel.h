@@ -324,14 +324,12 @@ struct HitSnapshotMessage : public Message
   uint32_t mSnapshotId;
   bool mFinal;
   bool mInterim;
-  bool mRecorded;
 
-  HitSnapshotMessage(uint32_t aSnapshotId, bool aFinal, bool aInterim, bool aRecorded)
+  HitSnapshotMessage(uint32_t aSnapshotId, bool aFinal, bool aInterim)
     : Message(MessageType::HitSnapshot, sizeof(*this))
     , mSnapshotId(aSnapshotId)
     , mFinal(aFinal)
     , mInterim(aInterim)
-    , mRecorded(aRecorded)
   {}
 };
 

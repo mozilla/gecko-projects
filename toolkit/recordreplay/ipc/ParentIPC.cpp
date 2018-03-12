@@ -775,7 +775,7 @@ static size_t gFinalSnapshot;
 
 // Update snapshot state when we encounter a new or old snapshot.
 static void
-HandleUpdatesForSnapshot(size_t aSnapshot, bool aFinal, bool aRecorded)
+HandleUpdatesForSnapshot(size_t aSnapshot, bool aFinal)
 {
   gLastSnapshot = aSnapshot;
   if (aFinal) {
@@ -902,7 +902,7 @@ RecvHitSnapshot(const channel::HitSnapshotMessage& aMsg)
     SetChildIsPaused(true);
   }
 
-  HandleUpdatesForSnapshot(aMsg.mSnapshotId, aMsg.mFinal, aMsg.mRecorded);
+  HandleUpdatesForSnapshot(aMsg.mSnapshotId, aMsg.mFinal);
 
   // Interim snapshots always resume forward (these are generated when we
   // rewound past the point of the last snapshot we were trying to get to).
@@ -920,12 +920,6 @@ RecvHitSnapshot(const channel::HitSnapshotMessage& aMsg)
                                                          ResumeForwardOrBackward,
                                                          /* aHitOtherBreakpoints = */ false));
   }
-
-  // Uncomment this to resume when certain snapshots are reached.
-  //if (aMsg.mSnapshotId == 300) { HookResume(false, false); }
-  //if (aMsg.mSnapshotId == 0) { HookResume(true, false); }
-
-  //if (aMsg.mFinal) { HookResume(false, false); }
 }
 
 static void

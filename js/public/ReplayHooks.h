@@ -37,7 +37,7 @@ struct Hooks
     bool (*hitBreakpointMiddleman)(JSContext* cx, size_t id);
 
     // Notify the middleman about a snapshot that was hit.
-    void (*hitSnapshotReplay)(size_t id, bool final, bool interim, bool recorded);
+    void (*hitSnapshotReplay)(size_t id, bool final, bool interim);
 
     // Finish recovering from an unhandled divergence at a breakpoint, and send
     // a response to the middleman for the last request.

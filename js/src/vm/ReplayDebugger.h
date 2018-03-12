@@ -158,6 +158,45 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
 
     struct Activity;
 
+    // Identification for a position during JS execution in the replaying process.
+    struct ExecutionPosition
+    {
+        enum Kind {
+            Invalid,
+            Break,       // No frameIndex
+            OnStep,
+            OnPop,       // No offset, script/frameIndex is optional
+            EnterFrame,  // No offset/script/frameIndex
+        } kind;
+        size_t script;
+        size_t offset;
+        size_t frameIndex;
+
+        static const size_t EMPTY_SCRIPT = (size_t) -1;
+        static const size_t EMPTY_OFFSET = (size_t) -1;
+        static const size_t EMPTY_FRAME_INDEX = (size_t) -1;
+
+        ExecutionPosition()
+          : kind(Invalid), script(0), offset(0), frameIndex(0)
+        {}
+
+        explicit ExecutionPosition(Kind kind,
+                                   size_t script = EMPTY_SCRIPT,
+                                   size_t offset = EMPTY_OFFSET,
+                                   size_t frameIndex = EMPTY_FRAME_INDEX)
+          : kind(kind), script(script), offset(offset), frameIndex(frameIndex)
+        {}
+
+        bool isValid() const { return kind != Invalid; }
+
+        inline bool operator ==(const ExecutionPosition& o) const {
+            return kind == o.kind
+                && script == o.script
+                && offset == o.offset
+                && frameIndex == o.frameIndex;
+        }
+    };
+
   private:
     JSObject* addScript(JSContext* cx, size_t id, HandleObject data);
 
@@ -187,6 +226,47 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
     static mozilla::LinkedList<ReplayDebugger> gReplayDebuggers;
 
     JSRuntime* runtime;
+
+    static void InitializeContentSet();
+
+    // Internal state/methods for coordinating between breakpoint/navigation
+    // logic and the rest of the replaying process debugger.
+  public:
+    // Runtime which all data considered in the replaying process is associated
+    // with. Worker runtimes are ignored entirely.
+    static JSRuntime* gMainRuntime;
+
+    // Global in which the debugger is installed in the replaying process.
+    static PersistentRootedObject* gHookGlobal;
+
+    // Handle a debugger request from the middleman.
+    static void ProcessRequest(const char16_t* requestBuffer, size_t requestLength,
+                               Maybe<JS::replay::CharBuffer>* responseBuffer);
+
+    // Attempt to diverge from the recording during a debugger request,
+    // returning whether the diverge was allowed.
+    static bool MaybeDivergeFromRecording();
+
+    // While paused, mark a change to an installed breakpoint to make before
+    // the process resumes (or rewinds) execution.
+    static void AddBreakpointOperation(size_t id, const ExecutionPosition& position);
+
+    // While paused after popping a frame, indicate whether the frame threw and
+    // the returned/thrown value. Returns false if not at the exit to a frame.
+    static bool GetPoppedFrameResult(bool* throwing, MutableHandleValue result);
+
+    // Convert between scripts and script IDs.
+    static JSScript* IdScript(size_t id);
+    static size_t ScriptId(JSScript* script);
+
+    // Install any necessary breakpoints on a newly created script.
+    static void MaybeSetupBreakpointsForScript(size_t id);
+
+    // Clear the mapping from IDs to objects used when paused at a breakpoint.
+    static void ClearDebuggerPausedObjects();
+
+    // Return how many frames for scripts considered by the debugger are on the stack.
+    static size_t CountScriptFrames(JSContext* cx);
 };
 
 } // namespace js

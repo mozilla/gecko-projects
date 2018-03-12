@@ -12,7 +12,6 @@
 #include "vm/Debugger-inl.h"
 
 using namespace js;
-using namespace mozilla::recordreplay;
 using mozilla::Maybe;
 
 extern JS_FRIEND_API(void) JS_StackDump();
@@ -1555,44 +1554,15 @@ ReplayDebugger::envVariable(JSContext* cx, HandleObject obj, CallArgs& args)
 // Breakpoints
 ///////////////////////////////////////////////////////////////////////////////
 
-struct BreakpointPosition
-{
-    enum Kind {
-        Invalid,
-        Break,       // No frameIndex
-        OnStep,
-        OnPop,       // No offset, script/frameIndex is optional
-        EnterFrame,  // No offset/script/frameIndex
-    } kind;
-    size_t script;
-    size_t offset;
-    size_t frameIndex;
-
-    static const size_t EMPTY_SCRIPT = (size_t) -1;
-    static const size_t EMPTY_OFFSET = (size_t) -1;
-    static const size_t EMPTY_FRAME_INDEX = (size_t) -1;
-
-    BreakpointPosition()
-      : kind(Invalid), script(0), offset(0), frameIndex(0)
-    {}
-
-    explicit BreakpointPosition(Kind kind,
-                                size_t script = EMPTY_SCRIPT,
-                                size_t offset = EMPTY_OFFSET,
-                                size_t frameIndex = EMPTY_FRAME_INDEX)
-      : kind(kind), script(script), offset(offset), frameIndex(frameIndex)
-    {}
-
-    bool isValid() const { return kind != Invalid; }
-};
+typedef ReplayDebugger::ExecutionPosition ExecutionPosition;
 
 struct ReplayDebugger::Breakpoint
 {
     PersistentRootedObject debugger;
     PersistentRootedObject handler;
-    BreakpointPosition position;
+    ExecutionPosition position;
     Breakpoint(JSContext* cx, JSObject* debugger, JSObject* handler,
-               const BreakpointPosition& position)
+               const ExecutionPosition& position)
       : debugger(cx, debugger), handler(cx, handler), position(position)
     {}
 };
@@ -1600,7 +1570,7 @@ static Vector<ReplayDebugger::Breakpoint*, 0, SystemAllocPolicy> gReplayBreakpoi
 
 static bool
 SetReplayBreakpoint(JSContext* cx, JSObject* debugger, JSObject* handler,
-                    const BreakpointPosition& position)
+                    const ExecutionPosition& position)
 {
     // Make sure we are always on the process main thread when using gReplayBreakpoints.
     MOZ_RELEASE_ASSERT(!cx->runtime()->parentRuntime);
@@ -1686,7 +1656,7 @@ ReplayDebugger::setScriptBreakpoint(JSContext* cx, HandleObject obj, CallArgs& a
     if (!a.success())
         return false;
 
-    BreakpointPosition position(BreakpointPosition::Break, scriptId, offset);
+    ExecutionPosition position(ExecutionPosition::Break, scriptId, offset);
     return SetReplayBreakpoint(cx, debugger->toJSObject(), handler, position);
 }
 
@@ -1708,7 +1678,7 @@ ReplayDebugger::clearScriptBreakpoint(JSContext* cx, HandleObject obj, CallArgs&
         if (breakpoint &&
             breakpoint->debugger == debugger->toJSObject() &&
             breakpoint->handler == handler &&
-            breakpoint->position.kind == BreakpointPosition::Break &&
+            breakpoint->position.kind == ExecutionPosition::Break &&
             breakpoint->position.script == scriptId)
         {
             if (!ClearReplayBreakpoint(cx, id))
@@ -1823,7 +1793,7 @@ ReplayDebugger::setFrameOnStep(JSContext* cx, HandleObject obj, CallArgs& args)
                 breakpoint->debugger == debugger->toJSObject() &&
                 breakpoint->position.script == scriptId &&
                 breakpoint->position.frameIndex == frameIndex &&
-                breakpoint->position.kind == BreakpointPosition::OnStep)
+                breakpoint->position.kind == ExecutionPosition::OnStep)
             {
                 if (!ClearReplayBreakpoint(cx, i))
                     return false;
@@ -1867,7 +1837,7 @@ ReplayDebugger::setFrameOnStep(JSContext* cx, HandleObject obj, CallArgs& args)
         size_t offset = adjacent[i] - structure.code;
         if (offset < structure.mainOffset)
             continue;
-        BreakpointPosition position(BreakpointPosition::OnStep, scriptId, offset, frameIndex);
+        ExecutionPosition position(ExecutionPosition::OnStep, scriptId, offset, frameIndex);
         if (!SetReplayBreakpoint(cx, debugger->toJSObject(), &handler.toObject(), position))
             return false;
     }
@@ -1889,7 +1859,7 @@ ReplayDebugger::getFrameOnStep(JSContext* cx, HandleObject obj, CallArgs& args)
             breakpoint->debugger == debugger->toJSObject() &&
             breakpoint->position.script == scriptId &&
             breakpoint->position.frameIndex == frameIndex &&
-            breakpoint->position.kind == BreakpointPosition::OnStep)
+            breakpoint->position.kind == ExecutionPosition::OnStep)
         {
             args.rval().setObject(*breakpoint->handler);
             return a.success();
@@ -1924,7 +1894,7 @@ ReplayDebugger::setFrameOnPop(JSContext* cx, HandleObject obj, CallArgs& args)
                 breakpoint->debugger == debugger->toJSObject() &&
                 breakpoint->position.script == scriptId &&
                 breakpoint->position.frameIndex == frameIndex &&
-                breakpoint->position.kind == BreakpointPosition::OnPop)
+                breakpoint->position.kind == ExecutionPosition::OnPop)
             {
                 if (!ClearReplayBreakpoint(cx, i))
                     return false;
@@ -1934,8 +1904,8 @@ ReplayDebugger::setFrameOnPop(JSContext* cx, HandleObject obj, CallArgs& args)
     }
     MOZ_RELEASE_ASSERT(handler.isObject());
 
-    BreakpointPosition position(BreakpointPosition::OnPop, scriptId,
-                                BreakpointPosition::EMPTY_OFFSET, frameIndex);
+    ExecutionPosition position(ExecutionPosition::OnPop, scriptId,
+                               ExecutionPosition::EMPTY_OFFSET, frameIndex);
     return SetReplayBreakpoint(cx, debugger->toJSObject(), &handler.toObject(), position);
 }
 
@@ -1953,7 +1923,7 @@ ReplayDebugger::getFrameOnPop(JSContext* cx, HandleObject obj, CallArgs& args)
             breakpoint->debugger == debugger->toJSObject() &&
             breakpoint->position.script == scriptId &&
             breakpoint->position.frameIndex == frameIndex &&
-            breakpoint->position.kind == BreakpointPosition::OnPop)
+            breakpoint->position.kind == ExecutionPosition::OnPop)
         {
             args.rval().setObject(*breakpoint->handler);
             return a.success();
@@ -1971,7 +1941,7 @@ ReplayDebugger::setOnEnterFrame(JSContext* cx, HandleValue handler)
             Breakpoint* breakpoint = gReplayBreakpoints[i];
             if (breakpoint &&
                 breakpoint->debugger == debugger->toJSObject() &&
-                breakpoint->position.kind == BreakpointPosition::EnterFrame)
+                breakpoint->position.kind == ExecutionPosition::EnterFrame)
             {
                 if (!ClearReplayBreakpoint(cx, i))
                     return false;
@@ -1984,7 +1954,7 @@ ReplayDebugger::setOnEnterFrame(JSContext* cx, HandleValue handler)
         return false;
     }
 
-    BreakpointPosition position(BreakpointPosition::EnterFrame);
+    ExecutionPosition position(ExecutionPosition::EnterFrame);
     return SetReplayBreakpoint(cx, debugger->toJSObject(), &handler.toObject(), position);
 }
 
@@ -2003,8 +1973,8 @@ ReplayDebugger::setOnPopFrame(JSContext* cx, HandleValue handler)
             Breakpoint* breakpoint = gReplayBreakpoints[i];
             if (breakpoint &&
                 breakpoint->debugger == debugger->toJSObject() &&
-                breakpoint->position.kind == BreakpointPosition::OnPop &&
-                breakpoint->position.script == BreakpointPosition::EMPTY_SCRIPT)
+                breakpoint->position.kind == ExecutionPosition::OnPop &&
+                breakpoint->position.script == ExecutionPosition::EMPTY_SCRIPT)
             {
                 if (!ClearReplayBreakpoint(cx, i))
                     return false;
@@ -2017,7 +1987,7 @@ ReplayDebugger::setOnPopFrame(JSContext* cx, HandleValue handler)
         return false;
     }
 
-    BreakpointPosition position(BreakpointPosition::OnPop);
+    ExecutionPosition position(ExecutionPosition::OnPop);
     return SetReplayBreakpoint(cx, debugger->toJSObject(), &handler.toObject(), position);
 }
 
@@ -2032,16 +2002,16 @@ ReplayDebugger::hitBreakpoint(JSContext* cx, Breakpoint* breakpoint)
         return false;
     RootedValue rv(cx);
     switch (breakpoint->position.kind) {
-      case BreakpointPosition::Break:
+      case ExecutionPosition::Break:
         if (!CallMethodIfPresent(cx, handler, "hit", 1, frameValue.address(), &rv))
             return false;
         break;
-      case BreakpointPosition::OnStep:
+      case ExecutionPosition::OnStep:
         if (!Call(cx, handlerValue, frameValue, &rv))
             return false;
         break;
-      case BreakpointPosition::OnPop: {
-        if (breakpoint->position.script != BreakpointPosition::EMPTY_SCRIPT) {
+      case ExecutionPosition::OnPop: {
+        if (breakpoint->position.script != ExecutionPosition::EMPTY_SCRIPT) {
             Activity a(cx);
             HandleObject request = a.newRequestObject("popFrameResult");
             HandleObject response = a.sendRequest(request);
@@ -2063,7 +2033,7 @@ ReplayDebugger::hitBreakpoint(JSContext* cx, Breakpoint* breakpoint)
         // OnPop handlers without a script behave like an EnterFrame handler.
         MOZ_FALLTHROUGH;
       }
-      case BreakpointPosition::EnterFrame:
+      case ExecutionPosition::EnterFrame:
         if (!Call(cx, handlerValue, debuggerValue, frameValue, &rv))
             return false;
         break;
@@ -2191,22 +2161,24 @@ ReplayDebugger::convertValueFromJSON(Activity& a, HandleObject jsonValue)
 // Replaying process data
 ///////////////////////////////////////////////////////////////////////////////
 
-// Runtime which all data considered in the replaying process is associated
-// with. Worker runtimes are ignored entirely.
-static JSRuntime* gMainRuntime;
-
 // All scripts and script sources which are considered by the replay debugger.
 static Vector<JSScript*, 0, SystemAllocPolicy> gDebuggerScripts;
 static Vector<ScriptSourceObject*, 0, SystemAllocPolicy> gDebuggerScriptSources;
 
-static size_t
-ScriptId(JSScript* script)
+/* static */ size_t
+ReplayDebugger::ScriptId(JSScript* script)
 {
     for (size_t i = 0; i < gDebuggerScripts.length(); i++) {
         if (script == gDebuggerScripts[i])
             return i;
     }
     return 0;
+}
+
+/* static */ JSScript*
+ReplayDebugger::IdScript(size_t id)
+{
+    return (id < gDebuggerScripts.length()) ? gDebuggerScripts[id] : nullptr;
 }
 
 static size_t
@@ -2247,6 +2219,12 @@ IdObject(size_t id)
     return gDebuggerPausedObjects[id];
 }
 
+/* static */ void
+ReplayDebugger::ClearDebuggerPausedObjects()
+{
+    gDebuggerPausedObjects.clear();
+}
+
 static bool
 ConsiderScript(JSScript* script)
 {
@@ -2268,15 +2246,12 @@ ConsiderScript(JSScript* script)
     return true;
 }
 
-static void
-MaybeSetupBreakpointsForScript(JSContext* cx, size_t id);
-
 /* static */ void
 ReplayDebugger::onNewScript(JSContext* cx, HandleScript script)
 {
-    MOZ_RELEASE_ASSERT(IsRecordingOrReplaying());
+    MOZ_RELEASE_ASSERT(mozilla::recordreplay::IsRecordingOrReplaying());
 
-    if (AreThreadEventsDisallowed()) {
+    if (mozilla::recordreplay::AreThreadEventsDisallowed()) {
         // This script is part of an eval on behalf of the debugger.
         return;
     }
@@ -2322,43 +2297,14 @@ ReplayDebugger::onNewScript(JSContext* cx, HandleScript script)
     if (!found && !gDebuggerScriptSources.append(sso))
         oomUnsafe.crash("ReplayDebugger::onNewScript");
 
-    MaybeSetupBreakpointsForScript(cx, gDebuggerScripts.length() - 1);
-}
-
-static JSContext* gHookContext = nullptr;
-static PersistentRootedObject* gHookGlobal = nullptr;
-static PersistentRootedObject* gHookDebugger = nullptr;
-
-/* static */ void
-ReplayDebugger::NoteNewGlobalObject(JSContext* cx, GlobalObject* global)
-{
-    MOZ_RELEASE_ASSERT(IsRecordingOrReplaying());
-
-    if (!gHookContext) {
-        gHookContext = cx;
-        gMainRuntime = cx->runtime();
-    }
-
-    // The replay debugger is created in the first global with trusted principals.
-    if (!gHookGlobal &&
-        cx->runtime()->trustedPrincipals() &&
-        cx->runtime()->trustedPrincipals() == global->compartment()->principals())
-    {
-        gHookGlobal = js_new<PersistentRootedObject>(cx);
-        {
-            AutoPassThroughThreadEvents pt;
-            *gHookGlobal = global;
-        }
-        if (!*gHookGlobal)
-            MOZ_CRASH();
-    }
+    MaybeSetupBreakpointsForScript(gDebuggerScripts.length() - 1);
 }
 
 /* static */ void
 ReplayDebugger::markRoots(JSTracer* trc)
 {
     // Never collect scripts which the debugger might be interested in.
-    if (!IsRecordingOrReplaying() || trc->runtime() != gMainRuntime)
+    if (!mozilla::recordreplay::IsRecordingOrReplaying() || trc->runtime() != gMainRuntime)
         return;
 
     for (size_t i = 1; i < gDebuggerScripts.length(); i++)
@@ -2402,6 +2348,12 @@ struct ContentSet
 
 static ContentSet* gContentSet;
 
+/* static */ void
+ReplayDebugger::InitializeContentSet()
+{
+    gContentSet = new ContentSet();
+}
+
 JS_PUBLIC_API(void)
 JS::BeginContentParseForRecordReplay(const void* token,
                                      const char* filename, const char* contentType,
@@ -2411,7 +2363,7 @@ JS::BeginContentParseForRecordReplay(const void* token,
 
     mozilla::recordreplay::RecordReplayAssert("BeginContentParseForRecordReplay %s", filename);
 
-    MOZ_RELEASE_ASSERT(IsRecordingOrReplaying());
+    MOZ_RELEASE_ASSERT(mozilla::recordreplay::IsRecordingOrReplaying());
     AutoEnterOOMUnsafeRegion oomUnsafe;
     LockGuard<Mutex> guard(gContentSet->mutex);
     for (ContentInfo& info : gContentSet->contentList)
@@ -2427,7 +2379,7 @@ JS::AddContentParseDataForRecordReplay(const void* token, const void* buffer, si
 
     mozilla::recordreplay::RecordReplayAssert("AddContentParseDataForRecordReplay %d", (int) length);
 
-    MOZ_RELEASE_ASSERT(IsRecordingOrReplaying());
+    MOZ_RELEASE_ASSERT(mozilla::recordreplay::IsRecordingOrReplaying());
     AutoEnterOOMUnsafeRegion oomUnsafe;
     LockGuard<Mutex> guard(gContentSet->mutex);
     for (ContentInfo& info : gContentSet->contentList) {
@@ -2445,7 +2397,7 @@ JS::EndContentParseForRecordReplay(const void* token)
 {
     MOZ_RELEASE_ASSERT(token);
 
-    MOZ_RELEASE_ASSERT(IsRecordingOrReplaying());
+    MOZ_RELEASE_ASSERT(mozilla::recordreplay::IsRecordingOrReplaying());
     LockGuard<Mutex> guard(gContentSet->mutex);
     for (ContentInfo& info : gContentSet->contentList) {
         if (info.token == token) {
@@ -2488,180 +2440,13 @@ FetchContent(JSContext* cx, HandleString filename,
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Replaying process snapshot management
-///////////////////////////////////////////////////////////////////////////////
-
-// Magic constant for the kind to use for untracked debugger memory.
-// See UntrackedMemoryKind in ProcessRecordReplay.h
-static const size_t DebuggerAllocatedMemoryKind = 1;
-
-// The precise execution position of the replaying process is managed by the
-// replaying process itself. The middleman will send the replaying process
-// ResumeForward and ResumeBackward messages, but it is up to the replaying
-// process to keep track of the rewinding and resuming necessary to find the
-// next or previous point where a breakpoint or snapshot is hit.
-
-// Structure which manages state about the breakpoints in existence and about
-// how the process is being rewound. This is allocated using untracked memory
-// and its contents will not change when restoring an earlier snapshot.
-struct BreakpointState
-{
-    // Snapshot which |executionPoint| is relative to.
-    size_t snapshot;
-
-    // Some point in the execution space between |snapshot| and the
-    // following snapshot. The meaning of this depends on the run phase below.
-    Vector<BreakpointPosition, 4, AllocPolicy<DebuggerAllocatedMemoryKind>> executionPoint;
-
-    // The current run phase for finding breakpoint hits.
-    enum RunPhase {
-        // We are paused at |executionPoint|.
-        Paused,
-
-        // We are running forwards normally from |executionPoint|, looking for
-        // breakpoint hits.
-        Forward,
-
-        // We are running backwards and are determining the last time the
-        // [snapshot, executionPoint> range hits a breakpoint.
-        BackwardCountHits,
-
-        // We are running backwards and are scanning forward from |snapshot|
-        // until we reach |executionPoint|, a breakpoint we will pause at.
-        BackwardReachPoint,
-
-        // We are running forwards and are scanning forward from |snapshot|
-        // until we reach |executionPoint|, after which we will resume normal
-        // forward execution.
-        ForwardReachPoint
-    } phase;
-
-    // We are supposed to be paused at a breakpoint but had to restore the
-    // last snapshot due to an unhandled recording divergence. We will be in
-    // either the BackwardReachPoint or Paused phase as we return to
-    // |executionPoint| and re-execute all old debugger requests.
-    bool recoveringFromDivergence;
-
-    // If isSeekingExecutionPoint(), the next position in |executionPoint| we
-    // need to hit.
-    size_t executionPointIndex;
-
-    // Information about an installed breakpoint, corresponding to a
-    // ReplayDebugger::Breakpoint in the middleman process.
-    struct BreakpointInfo {
-        // Position of the breakpoint.
-        BreakpointPosition position;
-
-        // During the BackwardCountHits phase, the total number of hits to this
-        // breakpoint's position since |snapshot| executed.
-        size_t hits;
-
-        BreakpointInfo() : hits(0) {}
-    };
-
-    // All installed breakpoints.
-    Vector<BreakpointInfo, 4, AllocPolicy<DebuggerAllocatedMemoryKind>> breakpoints;
-
-    // Invalid breakpoint, used during the BackwardCountHits phase when no
-    // breakpoints have been encountered yet.
-    static const size_t INVALID_BREAKPOINT = (size_t) -1;
-
-    // During the BackwardCountHits phase, the last breakpoint that was hit.
-    size_t lastBreakpointId;
-
-    // If we are paused at a breakpoint, information about all requests we have
-    // seen so far.
-    struct RequestInfo {
-        // JSON contents for the request and (possibly) response.
-        Vector<char16_t, 0, AllocPolicy<DebuggerAllocatedMemoryKind>> requestBuffer;
-        Vector<char16_t, 0, AllocPolicy<DebuggerAllocatedMemoryKind>> responseBuffer;
-
-        // Whether processing this request triggered an unhandled divergence.
-        bool unhandledDivergence;
-
-        RequestInfo() : unhandledDivergence(false) {}
-    };
-    Vector<RequestInfo, 4, AllocPolicy<DebuggerAllocatedMemoryKind>> breakpointRequests;
-
-    // Index of the request currently being processed.
-    size_t currentRequestIndex;
-
-    BreakpointInfo& getBreakpoint(size_t id) {
-        AutoEnterOOMUnsafeRegion oomUnsafe;
-        while (id >= breakpoints.length()) {
-            if (!breakpoints.emplaceBack())
-                oomUnsafe.crash("BreakpointState::getBreakpoint");
-        }
-        return breakpoints[id];
-    }
-
-    bool isPaused() { return phase == Paused; }
-    bool isPausedAtBreakpoint() { return isPaused() && !executionPoint.empty(); }
-
-    bool isSeekingExecutionPoint() {
-        return phase == BackwardCountHits
-            || phase == BackwardReachPoint
-            || phase == ForwardReachPoint;
-    }
-
-    BreakpointPosition nextExecutionPointPosition() {
-        if (isSeekingExecutionPoint()) {
-            if (executionPointIndex < executionPoint.length())
-                return executionPoint[executionPointIndex];
-        }
-        return BreakpointPosition();
-    }
-
-    BreakpointPosition advanceExecutionPointPosition() {
-        MOZ_RELEASE_ASSERT(isSeekingExecutionPoint());
-        MOZ_RELEASE_ASSERT(executionPointIndex < executionPoint.length());
-        executionPointIndex++;
-        return nextExecutionPointPosition();
-    }
-
-    // Note: BreakpointState is initially zeroed.
-    BreakpointState()
-      : phase(Forward)
-    {}
-
-    void setPhase(RunPhase phase) {
-        this->phase = phase;
-    }
-};
-
-static BreakpointState* gBreakpointState;
-
-// If we are paused at an OnPop breakpoint, the execution status of the frame.
-static bool gPopFrameBreakpointThrowing;
-static PersistentRootedValue* gPopFrameBreakpointResult;
-
-static bool
-MaybeDivergeFromRecording()
-{
-    if (IsRecording()) {
-        // Recording divergence is not supported if we are still recording.
-        // We don't rewind processes that are still recording, and can't simply
-        // allow execution to proceed from here as if we were not diverged, since
-        // any events or other activity that show up afterwards won't occur when we
-        // are replaying later.
-        return false;
-    }
-    const BreakpointState::RequestInfo& info =
-        gBreakpointState->breakpointRequests[gBreakpointState->currentRequestIndex];
-    if (info.unhandledDivergence)
-        return false;
-    DivergeFromRecording();
-    return true;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// Replaying process hooks
+// Replaying process request handling
 ///////////////////////////////////////////////////////////////////////////////
 
 static HandleObject
 ConvertValueToJSON(ReplayDebugger::Activity& a, HandleValue value)
 {
-    MOZ_RELEASE_ASSERT(IsRecordingOrReplaying());
+    MOZ_RELEASE_ASSERT(mozilla::recordreplay::IsRecordingOrReplaying());
     if (!value.isObject())
         return ConvertPrimitiveValueToJSON(a, value);
     HandleObject res = a.newObject();
@@ -2672,7 +2457,7 @@ ConvertValueToJSON(ReplayDebugger::Activity& a, HandleValue value)
 static HandleValue
 ConvertValueFromJSON(ReplayDebugger::Activity& a, HandleObject jsonValue)
 {
-    MOZ_RELEASE_ASSERT(IsRecordingOrReplaying());
+    MOZ_RELEASE_ASSERT(mozilla::recordreplay::IsRecordingOrReplaying());
     if (size_t id = a.getScalarProperty(jsonValue, "object"))
         return a.handlify(ObjectValue(*IdObject(id)));
     return ConvertPrimitiveValueFromJSON(a, jsonValue);
@@ -2756,7 +2541,7 @@ Respond_getSource(ReplayDebugger::Activity& a, HandleObject request)
 
     if (JSScript* script = sso->introductionScript()) {
         if (ConsiderScript(script)) {
-            a.defineProperty(response, "introductionScript", ScriptId(script));
+            a.defineProperty(response, "introductionScript", ReplayDebugger::ScriptId(script));
             if (ss->hasIntroductionOffset())
                 a.defineProperty(response, "introductionOffset", ss->introductionOffset());
         }
@@ -2848,7 +2633,7 @@ Respond_getObject(ReplayDebugger::Activity& a, HandleObject request)
     a.defineProperty(response, "isExtensible", isExtensible);
     a.defineProperty(response, "isSealed", isSealed);
     a.defineProperty(response, "isFrozen", isFrozen);
-    a.defineProperty(response, "script", ScriptId(script));
+    a.defineProperty(response, "script", ReplayDebugger::ScriptId(script));
     a.defineProperty(response, "environment", ObjectId(a.cx, env));
     a.defineProperty(response, "proto", ObjectId(a.cx, proto));
     a.defineProperty(response, "global", ObjectId(a.cx, &obj->global()));
@@ -2858,7 +2643,7 @@ Respond_getObject(ReplayDebugger::Activity& a, HandleObject request)
 static HandleObject
 Respond_getObjectProperties(ReplayDebugger::Activity& a, HandleObject request)
 {
-    if (!MaybeDivergeFromRecording()) {
+    if (!ReplayDebugger::MaybeDivergeFromRecording()) {
         HandleObject response = a.newArray();
         HandleObject entry = a.newObject();
         a.pushArray(response, entry);
@@ -2954,7 +2739,7 @@ Respond_getObjectParameterNames(ReplayDebugger::Activity& a, HandleObject reques
 static HandleObject
 Respond_objectCall(ReplayDebugger::Activity& a, HandleObject request)
 {
-    if (!MaybeDivergeFromRecording()) {
+    if (!ReplayDebugger::MaybeDivergeFromRecording()) {
         HandleObject response = a.newObject();
         a.defineProperty(response, "throwing", true);
         HandleValue rval = a.valueify("Recording divergence in objectCall");
@@ -3033,7 +2818,7 @@ Respond_getEnvironment(ReplayDebugger::Activity& a, HandleObject request)
 static HandleObject
 Respond_getEnvironmentNames(ReplayDebugger::Activity& a, HandleObject request)
 {
-    if (!MaybeDivergeFromRecording()) {
+    if (!ReplayDebugger::MaybeDivergeFromRecording()) {
         HandleObject response = a.newArray();
         HandleObject entry = a.newObject();
         a.pushArray(response, entry);
@@ -3079,8 +2864,8 @@ Respond_getEnvironmentNames(ReplayDebugger::Activity& a, HandleObject request)
     return response;
 }
 
-static size_t
-CountScriptFrames(JSContext* cx)
+/* static */ size_t
+ReplayDebugger::CountScriptFrames(JSContext* cx)
 {
     size_t numFrames = 0;
     for (ScriptFrameIter iter(cx); !iter.done(); ++iter) {
@@ -3093,7 +2878,7 @@ CountScriptFrames(JSContext* cx)
 static bool
 ScriptFrameIterForIndex(JSContext* cx, size_t index, ScriptFrameIter& iter)
 {
-    size_t numFrames = CountScriptFrames(cx);
+    size_t numFrames = ReplayDebugger::CountScriptFrames(cx);
     if (index >= numFrames) {
         JS_ReportErrorASCII(cx, "Not enough frames on stack");
         return false;
@@ -3119,16 +2904,12 @@ Respond_getFrame(ReplayDebugger::Activity& a, HandleObject request)
     size_t index = a.getScalarProperty(request, "index");
     HandleObject response = a.newObject();
 
-    MOZ_RELEASE_ASSERT(gBreakpointState->isPaused());
-    if (!gBreakpointState->isPausedAtBreakpoint()) {
-        // The hook was called while the main thread is paused at a snapshot.
-        // Return an empty object.
-        return response;
-    }
-
     if (index == NEWEST_FRAME_INDEX) {
-        size_t numFrames = CountScriptFrames(a.cx);
-        MOZ_RELEASE_ASSERT(numFrames);
+        size_t numFrames = ReplayDebugger::CountScriptFrames(a.cx);
+        if (!numFrames) {
+            // Return an empty object when there are no frames.
+            return response;
+        }
         index = numFrames - 1;
     }
 
@@ -3159,7 +2940,7 @@ Respond_getFrame(ReplayDebugger::Activity& a, HandleObject request)
                      iter.isFunctionFrame() && iter.isConstructing());
     a.defineProperty(response, "hasArguments", framePtr.hasArgs());
     a.defineProperty(response, "thisv", ConvertValueToJSON(a, thisv));
-    a.defineProperty(response, "script", ScriptId(framePtr.script()));
+    a.defineProperty(response, "script", ReplayDebugger::ScriptId(framePtr.script()));
     a.defineProperty(response, "offset", framePtr.script()->pcToOffset(iter.pc()));
 
     if (framePtr.hasArgs() && framePtr.numActualArgs() > 0) {
@@ -3180,7 +2961,7 @@ Respond_getFrame(ReplayDebugger::Activity& a, HandleObject request)
 static HandleObject
 Respond_frameEvaluate(ReplayDebugger::Activity& a, HandleObject request)
 {
-    if (!MaybeDivergeFromRecording()) {
+    if (!ReplayDebugger::MaybeDivergeFromRecording()) {
         HandleObject response = a.newObject();
         a.defineProperty(response, "throwing", true);
         HandleValue rval = a.valueify("Recording divergence in frameEvaluate");
@@ -3230,41 +3011,19 @@ static HandleObject
 Respond_popFrameResult(ReplayDebugger::Activity& a, HandleObject request)
 {
     HandleObject response = a.newObject();
-    if (gPopFrameBreakpointResult) {
-        a.defineProperty(response, "throwing", gPopFrameBreakpointThrowing);
-        a.defineProperty(response, "result", ConvertValueToJSON(a, *gPopFrameBreakpointResult));
+
+    bool throwing;
+    RootedValue result(a.cx);
+    if (ReplayDebugger::GetPoppedFrameResult(&throwing, &result)) {
+        a.defineProperty(response, "throwing", throwing);
+        a.defineProperty(response, "result", ConvertValueToJSON(a, result));
     }
     return response;
-}
-
-// Breakpoint operations to perform before resuming. These are delayed until
-// we resume so that changes to breakpoints don't interfere with activity when
-// recovering from an unhandled divergence.
-static Vector<std::pair<size_t, BreakpointPosition>, 0, SystemAllocPolicy> gPendingBreakpointOperations;
-
-static void
-ApplyPendingBreakpointOperations()
-{
-    for (auto entry : gPendingBreakpointOperations) {
-        BreakpointState::BreakpointInfo& breakpoint = gBreakpointState->getBreakpoint(entry.first);
-        if (entry.second.isValid()) {
-            // Setting a breakpoint.
-            MOZ_RELEASE_ASSERT(!breakpoint.position.isValid());
-            breakpoint.position = entry.second;
-        } else {
-            // Clearing a breakpoint.
-            breakpoint.position = BreakpointPosition();
-            breakpoint.hits = 0;
-        }
-    }
-    gPendingBreakpointOperations.clear();
 }
 
 static bool
 Respond_setBreakpoint(ReplayDebugger::Activity& a, HandleObject request)
 {
-    MOZ_RELEASE_ASSERT(gBreakpointState->isPaused());
-
     size_t id = a.getScalarProperty(request, "id");
     size_t script = a.getScalarProperty(request, "script");
     size_t offset = a.getScalarProperty(request, "offset");
@@ -3272,25 +3031,17 @@ Respond_setBreakpoint(ReplayDebugger::Activity& a, HandleObject request)
     size_t kind = a.getScalarProperty(request, "breakpointKind");
     MOZ_RELEASE_ASSERT(script);
 
-    BreakpointPosition position((BreakpointPosition::Kind) kind, script, offset, frameIndex);
-    if (!gPendingBreakpointOperations.emplaceBack(id, position)) {
-        ReportOutOfMemory(a.cx);
-        return false;
-    }
+    ExecutionPosition position((ExecutionPosition::Kind) kind, script, offset, frameIndex);
+    ReplayDebugger::AddBreakpointOperation(id, position);
     return true;
 }
 
 static bool
 Respond_clearBreakpoint(ReplayDebugger::Activity& a, HandleObject request)
 {
-    MOZ_RELEASE_ASSERT(gBreakpointState->isPaused());
-
     size_t id = a.getScalarProperty(request, "id");
 
-    if (!gPendingBreakpointOperations.emplaceBack(id, BreakpointPosition())) {
-        ReportOutOfMemory(a.cx);
-        return false;
-    }
+    ReplayDebugger::AddBreakpointOperation(id, ExecutionPosition());
     return true;
 }
 
@@ -3319,11 +3070,11 @@ RequestMatch(ReplayDebugger::Activity& a, HandleString kind, const char* name)
     return a.stringEquals(kind, name);
 }
 
-static void
-ProcessRequest(const char16_t* requestBuffer, size_t requestLength,
-               Maybe<JS::replay::CharBuffer>* responseBuffer)
+/* static */ void
+ReplayDebugger::ProcessRequest(const char16_t* requestBuffer, size_t requestLength,
+                               Maybe<JS::replay::CharBuffer>* responseBuffer)
 {
-    JSContext* cx = gHookContext;
+    JSContext* cx = TlsContext.get();
     AutoCompartment ac(cx, *gHookGlobal);
 
     RootedValue requestValue(cx);
@@ -3356,7 +3107,7 @@ FOR_EACH_RESPONSE(HANDLE_RESPONSE)
 FOR_EACH_NON_RESPONSE(HANDLE_NON_RESPONSE)
 #undef HANDLE_NON_RESPONSE
 
-    DisallowUnhandledDivergeFromRecording();
+    mozilla::recordreplay::DisallowUnhandledDivergeFromRecording();
 
     if (!needResponse) {
         MOZ_RELEASE_ASSERT(!cx->isExceptionPending());
@@ -3370,18 +3121,8 @@ FOR_EACH_NON_RESPONSE(HANDLE_NON_RESPONSE)
         if (!cx->getPendingException(&exception))
             MOZ_CRASH();
         cx->clearPendingException();
-        RootedString str(cx);
-        if (MaybeDivergeFromRecording()) {
-            str = ToString<CanGC>(cx, exception);
-            if (!str)
-                cx->clearPendingException();
-        }
-        DisallowUnhandledDivergeFromRecording();
         response = a.newObject();
-        if (str)
-            a.defineProperty(response, "exception", str);
-        else
-            a.defineProperty(response, "exception", "Unknown exception");
+        a.defineProperty(response, "exception", ConvertValueToJSON(a, exception));
         if (!a.success())
             MOZ_CRASH();
     }
@@ -3389,611 +3130,4 @@ FOR_EACH_NON_RESPONSE(HANDLE_NON_RESPONSE)
     responseBuffer->emplace();
     if (!ToJSONMaybeSafely(cx, response, FillCharBufferCallback, &responseBuffer->ref()))
         MOZ_CRASH();
-}
-
-static void
-DebugRequestHook(JS::replay::CharBuffer* requestBuffer)
-{
-    AutoEnterOOMUnsafeRegion oomUnsafe;
-
-    if (!gBreakpointState->breakpointRequests.emplaceBack())
-        oomUnsafe.crash("DebugRequestHook");
-    BreakpointState::RequestInfo& info = gBreakpointState->breakpointRequests.back();
-    gBreakpointState->currentRequestIndex = gBreakpointState->breakpointRequests.length() - 1;
-
-    if (!info.requestBuffer.append(requestBuffer->begin(), requestBuffer->length()))
-        oomUnsafe.crash("DebugRequestHook");
-
-    Maybe<JS::replay::CharBuffer> responseBuffer;
-    ProcessRequest(requestBuffer->begin(), requestBuffer->length(), &responseBuffer);
-
-    js_delete(requestBuffer);
-
-    if (responseBuffer.isSome()) {
-        if (!info.responseBuffer.append(responseBuffer.ref().begin(), responseBuffer.ref().length()))
-            oomUnsafe.crash("DebugRequestHook");
-        JS::replay::hooks.debugResponseReplay(responseBuffer.ref());
-    }
-}
-
-static void
-RespondAfterRecoveringFromDivergenceHook()
-{
-    MOZ_RELEASE_ASSERT(gBreakpointState->isPausedAtBreakpoint());
-    MOZ_RELEASE_ASSERT(gBreakpointState->recoveringFromDivergence);
-    MOZ_RELEASE_ASSERT(gBreakpointState->breakpointRequests.length());
-
-    // Remember that the last request has triggered an unhandled divergence.
-    MOZ_RELEASE_ASSERT(!gBreakpointState->breakpointRequests.back().unhandledDivergence);
-    gBreakpointState->breakpointRequests.back().unhandledDivergence = true;
-
-    // Redo all existing requests.
-    for (size_t i = 0; i < gBreakpointState->breakpointRequests.length(); i++) {
-        BreakpointState::RequestInfo& info = gBreakpointState->breakpointRequests[i];
-        gBreakpointState->currentRequestIndex = i;
-
-        Maybe<JS::replay::CharBuffer> responseBuffer;
-        ProcessRequest(info.requestBuffer.begin(), info.requestBuffer.length(), &responseBuffer);
-
-        if (i < gBreakpointState->breakpointRequests.length() - 1) {
-            // This is an old request, and we don't need to send another
-            // response to it. Make sure the response we just generated matched
-            // the earlier one we sent, though.
-            if (responseBuffer.isSome()) {
-                MOZ_RELEASE_ASSERT(responseBuffer.ref().length() == info.responseBuffer.length());
-                MOZ_RELEASE_ASSERT(memcmp(responseBuffer.ref().begin(), info.responseBuffer.begin(),
-                                          responseBuffer.ref().length() * sizeof(char16_t)) == 0);
-            } else {
-                MOZ_RELEASE_ASSERT(info.responseBuffer.empty());
-            }
-        } else {
-            // This is the current request we need to respond to.
-            MOZ_RELEASE_ASSERT(responseBuffer.isSome());
-            MOZ_RELEASE_ASSERT(info.responseBuffer.empty());
-            AutoEnterOOMUnsafeRegion oomUnsafe;
-            if (!info.responseBuffer.append(responseBuffer.ref().begin(), responseBuffer.ref().length()))
-                oomUnsafe.crash("RespondAfterRecoveringFromDivergenceHook");
-            JS::replay::hooks.debugResponseReplay(responseBuffer.ref());
-        }
-    }
-
-    // We've finished recovering, and can now process new incoming requests.
-    gBreakpointState->recoveringFromDivergence = false;
-}
-
-static void
-ResetInstalledHandlers();
-
-static void
-BeforeSnapshotHook()
-{
-    // Reset the debugger to a consistent state before each snapshot. Ensure
-    // that the hook context and global exist and have a debugger object, and
-    // that no debuggees have debugger information attached.
-
-    if (!gHookContext || !gHookGlobal)
-        MOZ_CRASH();
-
-    if (!gHookDebugger) {
-        JSContext* cx = gHookContext;
-        JSAutoRequest ar(cx);
-
-        JSAutoCompartment ac(cx, *gHookGlobal);
-
-        if (!JS_DefineDebuggerObject(cx, *gHookGlobal))
-            MOZ_CRASH();
-
-        RootedValue debuggerFunctionValue(cx);
-        if (!JS_GetProperty(cx, *gHookGlobal, "Debugger", &debuggerFunctionValue))
-            MOZ_CRASH();
-
-        RootedObject debuggerFunction(cx, &debuggerFunctionValue.toObject());
-        RootedObject debuggerObject(cx);
-        if (!JS::Construct(cx, debuggerFunctionValue, debuggerFunction, JS::HandleValueArray::empty(), &debuggerObject))
-            MOZ_CRASH();
-
-        gHookDebugger = js_new<PersistentRootedObject>(gHookContext);
-        *gHookDebugger = debuggerObject;
-        return;
-    }
-
-    JSContext* cx = gHookContext;
-    JSAutoRequest ar(cx);
-    JSAutoCompartment ac(cx, *gHookGlobal);
-
-    AutoDisallowThreadEvents disallow;
-    RootedValue unused(cx);
-    if (!JS_CallFunctionName(cx, *gHookDebugger, "clearAllBreakpoints", JS::HandleValueArray::empty(), &unused))
-        MOZ_CRASH();
-    if (!JS_CallFunctionName(cx, *gHookDebugger, "removeAllDebuggees", JS::HandleValueArray::empty(), &unused))
-        MOZ_CRASH();
-
-    ResetInstalledHandlers();
-}
-
-static void BackwardCountHitsOnRegionEnd();
-static bool SetupHandler(JSContext* cx, const BreakpointPosition& position);
-
-// Update breakpoint state after the next position in the execution point was
-// hit. Returns whether to call any other breakpoint handlers at this position.
-static bool
-ExecutionPointPositionHit(JSContext* cx)
-{
-    MOZ_RELEASE_ASSERT(gBreakpointState->isSeekingExecutionPoint());
-
-    BreakpointPosition nextPosition = gBreakpointState->advanceExecutionPointPosition();
-
-    if (nextPosition.isValid()) {
-        // We have not reached the end of the searched region yet.
-        AutoEnterOOMUnsafeRegion oomUnsafe;
-        if (!SetupHandler(cx, nextPosition))
-            oomUnsafe.crash("ExecutionPointPositionHit");
-        return true;
-    }
-
-    // We have reached the execution point marking the end of our search.
-    switch (gBreakpointState->phase) {
-      case BreakpointState::BackwardCountHits:
-        BackwardCountHitsOnRegionEnd();
-        MOZ_CRASH(); // Unreachable.
-      case BreakpointState::BackwardReachPoint:
-        // The search is over, we can change state so that the actual
-        // breakpoint for this position can have its handler called.
-        gBreakpointState->setPhase(BreakpointState::Paused);
-        return true;
-      case BreakpointState::ForwardReachPoint:
-        // We've returned to the original position where we rewound from.
-        // Return false so other breakpoint handlers are not called.
-        gBreakpointState->setPhase(BreakpointState::Forward);
-        return false;
-      default:
-        MOZ_CRASH();
-    }
-}
-
-static void
-BreakpointHit(JSContext* cx, size_t breakpointId, bool popFrameOk, const Value& popFrameResult)
-{
-    AutoEnterOOMUnsafeRegion oomUnsafe;
-
-    BreakpointState::BreakpointInfo& breakpoint = gBreakpointState->getBreakpoint(breakpointId);
-
-    switch (gBreakpointState->phase) {
-      case BreakpointState::Paused:
-        // If we are paused then we just finished the BackwardReachPoint
-        // phase and |executionPoint| reflects the current position.
-        break;
-      case BreakpointState::Forward:
-        // Hit a breakpoint, update |executionPoint|.
-        if (!gBreakpointState->executionPoint.append(breakpoint.position))
-            oomUnsafe.crash("BreakpointHit");
-        gBreakpointState->setPhase(BreakpointState::Paused);
-        break;
-      case BreakpointState::BackwardCountHits:
-        // Keep track of the number of hits on each breakpoint and the last
-        // breakpoint which was hit.
-        breakpoint.hits++;
-        gBreakpointState->lastBreakpointId = breakpointId;
-        return;
-      case BreakpointState::BackwardReachPoint:
-      case BreakpointState::ForwardReachPoint:
-        // Ignore all breakpoint hits.
-        return;
-    }
-
-    MOZ_RELEASE_ASSERT(gBreakpointState->isPaused());
-
-    if (breakpoint.position.kind == BreakpointPosition::OnPop) {
-        gPopFrameBreakpointThrowing = !popFrameOk;
-        gPopFrameBreakpointResult = js_new<PersistentRootedValue>(cx);
-        if (!gPopFrameBreakpointResult)
-            oomUnsafe.crash("BreakpointHit");
-        *gPopFrameBreakpointResult = popFrameResult;
-    }
-
-    JS::replay::hooks.hitBreakpointReplay(breakpointId, gBreakpointState->recoveringFromDivergence);
-
-    if (breakpoint.position.kind == BreakpointPosition::OnPop) {
-        gPopFrameBreakpointThrowing = false;
-        js_delete(gPopFrameBreakpointResult);
-        gPopFrameBreakpointResult = nullptr;
-    }
-}
-
-static void ResumeHook(bool forward, bool hitOtherBreakpoints);
-
-// Whether there is a HandlerHit frame on the stack.
-static bool gHasHandlerHit;
-
-// Whether to resume after all breakpoints at a position have executed.
-static bool gPendingResume;
-static bool gPendingResumeForward;
-
-static void
-HandlerHit(JSContext* cx, const std::function<bool(const BreakpointPosition&)>& match,
-           bool popFrameOk = true, const Value& popFrameResult = UndefinedValue())
-{
-    // Don't call breakpoint handlers for code that executes while we are
-    // paused at a breakpoint.
-    if (gHasHandlerHit)
-        return;
-    gHasHandlerHit = true;
-    auto guard = mozilla::MakeScopeExit([&]() { gHasHandlerHit = false; });
-
-    MOZ_RELEASE_ASSERT(!gPendingResume);
-
-    BreakpointPosition nextPosition = gBreakpointState->nextExecutionPointPosition();
-    if (nextPosition.isValid() && match(nextPosition)) {
-        if (!ExecutionPointPositionHit(cx))
-            return;
-    }
-
-    for (size_t id = 0; id < gBreakpointState->breakpoints.length(); id++) {
-        const BreakpointState::BreakpointInfo& breakpoint = gBreakpointState->breakpoints[id];
-        if (breakpoint.position.isValid() && match(breakpoint.position)) {
-            BreakpointHit(cx, id, popFrameOk, popFrameResult);
-
-            // If there is no pending resume then we are supposed to resume
-            // immediately, so skip other breakpoints at this position.
-            if (!gPendingResume)
-                break;
-        }
-    }
-
-    if (gPendingResume) {
-        gPendingResume = false;
-        ResumeHook(gPendingResumeForward, /* hitOtherBreakpoints = */ false);
-    }
-}
-
-// Handler installed for hits on a script/pc.
-static bool
-ScriptPcHandler(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-
-    jsbytecode* pc;
-    JSScript* script = cx->currentScript(&pc, JSContext::ALLOW_CROSS_COMPARTMENT);
-    MOZ_RELEASE_ASSERT(script && pc);
-
-    size_t scriptId = ScriptId(script);
-    size_t offset = pc - script->code();
-    size_t frameIndex = CountScriptFrames(cx) - 1;
-
-    HandlerHit(cx, [=](const BreakpointPosition& position) {
-                     return position.script == scriptId
-                         && position.offset == offset
-                         && (position.kind == BreakpointPosition::Break ||
-                             position.frameIndex == frameIndex);
-                   });
-
-    args.rval().setUndefined();
-    return true;
-}
-
-static bool
-EnterFrameHandler(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-
-    HandlerHit(cx, [=](const BreakpointPosition& position) {
-                     return position.kind == BreakpointPosition::EnterFrame;
-                   });
-
-    args.rval().setUndefined();
-    return true;
-}
-
-// Which handlers are currently installed. We cannot have duplicate handlers,
-// even if there are multiple breakpoints for the same position, as each
-// handler triggers all breakpoints for the position.
-typedef Vector<std::pair<size_t, size_t>, 4, SystemAllocPolicy> InstalledScriptPcHandlerVector;
-static InstalledScriptPcHandlerVector* gInstalledScriptPcHandlers;
-static bool gInstalledEnterFrameHandler;
-
-static void
-ResetInstalledHandlers()
-{
-    gInstalledScriptPcHandlers->clear();
-    gInstalledEnterFrameHandler = false;
-}
-
-static bool
-SetupHandler(JSContext* cx, const BreakpointPosition& position)
-{
-    MOZ_RELEASE_ASSERT(position.isValid());
-    JSAutoCompartment ac(cx, *gHookGlobal);
-    RootedValue unused(cx);
-    RootedScript script(cx);
-    if (position.script != BreakpointPosition::EMPTY_SCRIPT) {
-        if (position.script >= gDebuggerScripts.length())
-            return true;
-        script = gDebuggerScripts[position.script];
-        RootedValue scriptGlobal(cx, ObjectValue(script->global()));
-        if (!JS_WrapValue(cx, &scriptGlobal))
-            return false;
-        if (!JS_CallFunctionName(cx, *gHookDebugger, "addDebuggee", HandleValueArray(scriptGlobal), &unused))
-            return false;
-    }
-    Debugger* debugger = Debugger::fromJSObject(*gHookDebugger);
-    switch (position.kind) {
-      case BreakpointPosition::Break:
-      case BreakpointPosition::OnStep: {
-        for (auto pair : *gInstalledScriptPcHandlers) {
-            if (pair.first == position.script && pair.second == position.offset)
-                return true;
-        }
-
-        Rooted<TaggedProto> nullProto(cx, TaggedProto(nullptr));
-        RootedObject handler(cx, JS_NewObject(cx, nullptr));
-        if (!handler)
-            return false;
-
-        RootedObject fun(cx, NewNativeFunction(cx, ScriptPcHandler, 1, nullptr));
-        if (!fun)
-            return false;
-
-        RootedValue funValue(cx, ObjectValue(*fun));
-        if (!JS_DefineProperty(cx, handler, "hit", funValue, 0))
-            return false;
-
-        RootedObject debugScript(cx, debugger->wrapScript(cx, script));
-        if (!debugScript)
-            return false;
-        JS::AutoValueArray<2> args(cx);
-        args[0].setInt32(position.offset);
-        args[1].setObject(*handler);
-        if (!JS_CallFunctionName(cx, debugScript, "setBreakpoint", args, &unused))
-            return false;
-
-        if (!gInstalledScriptPcHandlers->emplaceBack(position.script, position.offset))
-            return false;
-        break;
-      }
-      case BreakpointPosition::OnPop:
-        if (script) {
-            if (!debugger->ensureExecutionObservabilityOfScript(cx, script))
-                return false;
-        } else {
-            if (!debugger->updateObservesAllExecutionOnDebuggees(cx, Debugger::Observing))
-                return false;
-        }
-        break;
-      case BreakpointPosition::EnterFrame: {
-        if (gInstalledEnterFrameHandler)
-            return true;
-        RootedObject handler(cx, NewNativeFunction(cx, EnterFrameHandler, 1, nullptr));
-        if (!handler)
-            return false;
-        RootedValue handlerValue(cx, ObjectValue(*handler));
-        if (!JS_SetProperty(cx, *gHookDebugger, "onEnterFrame", handlerValue))
-            return false;
-        gInstalledEnterFrameHandler = true;
-        break;
-      }
-      default:
-        MOZ_CRASH();
-    }
-    return true;
-}
-
-static void
-BackwardCountHitsOnRegionEnd()
-{
-    AutoEnterOOMUnsafeRegion oomUnsafe;
-
-    MOZ_RELEASE_ASSERT(gBreakpointState->phase == BreakpointState::BackwardCountHits);
-    if (gBreakpointState->lastBreakpointId != BreakpointState::INVALID_BREAKPOINT) {
-        // Update the execution point to reflect the last breakpoint hit.
-        gBreakpointState->executionPoint.clear();
-        BreakpointState::BreakpointInfo& breakpoint =
-            gBreakpointState->getBreakpoint(gBreakpointState->lastBreakpointId);
-
-        MOZ_RELEASE_ASSERT(breakpoint.hits);
-        if (!gBreakpointState->executionPoint.appendN(breakpoint.position, breakpoint.hits))
-            oomUnsafe.crash("BackwardCountHitsOnRegionEnd");
-
-        // After rewinding we will run forward to the last breakpoint hit.
-        gBreakpointState->setPhase(BreakpointState::BackwardReachPoint);
-    } else {
-        // No breakpoints were encountered up until the execution point.
-        // Rewind to the last snapshot and pause.
-        gBreakpointState->executionPoint.clear();
-        gBreakpointState->setPhase(BreakpointState::Forward);
-    }
-    RestoreSnapshotAndResume(gBreakpointState->snapshot);
-    MOZ_CRASH(); // Unreachable.
-}
-
-static void
-AfterSnapshotHook(size_t snapshot, bool final, bool interim, bool recorded)
-{
-    MOZ_RELEASE_ASSERT(IsRecordingOrReplaying());
-
-    // Interim snapshots come before the one we were trying to restore to.
-    // Just notify the middleman so it can do the processing it needs.
-    if (interim) {
-        JS::replay::hooks.hitSnapshotReplay(snapshot, final, true, recorded);
-        return;
-    }
-
-    switch (gBreakpointState->phase) {
-      case BreakpointState::Paused:
-        // We just restored a snapshot because an unhandled recording
-        // divergence was encountered while responding to a debugger request.
-        MOZ_RELEASE_ASSERT(gBreakpointState->isPausedAtBreakpoint());
-        MOZ_RELEASE_ASSERT(snapshot == gBreakpointState->snapshot);
-        MOZ_RELEASE_ASSERT(!gBreakpointState->recoveringFromDivergence);
-        gBreakpointState->recoveringFromDivergence = true;
-        gBreakpointState->setPhase(BreakpointState::BackwardReachPoint);
-        break;
-      case BreakpointState::Forward:
-        // Notify the middleman that we just hit a snapshot during the course
-        // of normal execution.
-        gBreakpointState->snapshot = snapshot;
-        gBreakpointState->executionPoint.clear();
-        gBreakpointState->setPhase(BreakpointState::Paused);
-        JS::replay::hooks.hitSnapshotReplay(snapshot, final, false, recorded);
-        break;
-      case BreakpointState::BackwardCountHits:
-        if (snapshot == gBreakpointState->snapshot + 1) {
-            // We just searched the entire region between two snapshots for
-            // a breakpoint.
-            MOZ_RELEASE_ASSERT(gBreakpointState->executionPoint.empty());
-            BackwardCountHitsOnRegionEnd();
-            MOZ_CRASH(); // Unreachable.
-        }
-        MOZ_FALLTHROUGH;
-      case BreakpointState::BackwardReachPoint:
-      case BreakpointState::ForwardReachPoint:
-        // We just restored the snapshot we were starting the search from.
-        MOZ_RELEASE_ASSERT(snapshot == gBreakpointState->snapshot);
-        JS::replay::hooks.hitSnapshotReplay(snapshot, false, true, recorded);
-        break;
-    }
-
-    JSContext* cx = gHookContext;
-    AutoEnterOOMUnsafeRegion oomUnsafe;
-
-    for (BreakpointState::BreakpointInfo& breakpoint : gBreakpointState->breakpoints) {
-        if (breakpoint.position.isValid()) {
-            if (!SetupHandler(cx, breakpoint.position))
-                oomUnsafe.crash("AfterSnapshotHook");
-        }
-        breakpoint.hits = 0;
-    }
-    gBreakpointState->lastBreakpointId = BreakpointState::INVALID_BREAKPOINT;
-
-    if (!gBreakpointState->executionPoint.empty()) {
-        MOZ_RELEASE_ASSERT(gBreakpointState->isSeekingExecutionPoint());
-        if (!SetupHandler(cx, gBreakpointState->executionPoint[0]))
-            oomUnsafe.crash("AfterSnapshotHook");
-        gBreakpointState->executionPointIndex = 0;
-    }
-}
-
-static void
-BeforeLastDitchRestoreHook()
-{
-    MOZ_CRASH();
-}
-
-static void
-MaybeSetupBreakpointsForScript(JSContext* cx, size_t scriptId)
-{
-    AutoEnterOOMUnsafeRegion oomUnsafe;
-
-    for (BreakpointState::BreakpointInfo& breakpoint : gBreakpointState->breakpoints) {
-        if (breakpoint.position.script == scriptId) {
-            if (!SetupHandler(cx, breakpoint.position))
-                oomUnsafe.crash("MaybeSetupBreakpointsForScript");
-        }
-    }
-
-    BreakpointPosition nextPosition = gBreakpointState->nextExecutionPointPosition();
-    if (nextPosition.script == scriptId) {
-        if (!SetupHandler(cx, nextPosition))
-            oomUnsafe.crash("MaybeSetupBreakpointsForScript");
-    }
-}
-
-/* static */ bool
-ReplayDebugger::onLeaveFrame(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc, bool ok)
-{
-    MOZ_RELEASE_ASSERT(IsRecordingOrReplaying());
-
-    JSScript* script = frame.script();
-    if (!script)
-        return ok;
-
-    HandlerHit(cx, [=](const BreakpointPosition& position) {
-                     return position.kind == BreakpointPosition::OnPop
-                         && (position.script == BreakpointPosition::EMPTY_SCRIPT ||
-                             position.script == ScriptId(script));
-                   },
-               ok, frame.returnValue());
-
-    return ok;
-}
-
-static void
-ResumeHook(bool forward, bool hitOtherBreakpoints)
-{
-    // Tidy up before unpausing.
-    gDebuggerPausedObjects.clear();
-    gBreakpointState->breakpointRequests.clear();
-    gBreakpointState->currentRequestIndex = 0;
-    ApplyPendingBreakpointOperations();
-
-    if (hitOtherBreakpoints) {
-        MOZ_RELEASE_ASSERT(gBreakpointState->isPausedAtBreakpoint());
-
-        gPendingResume = true;
-        gPendingResumeForward = forward;
-
-        ResumeExecution();
-        return;
-    }
-
-    if (forward) {
-        MOZ_RELEASE_ASSERT(gBreakpointState->phase != BreakpointState::Forward);
-
-        // If we are paused at a breakpoint and are replaying, we may have
-        // diverged from the recording. We have to clear any unwanted changes
-        // induced by evals and so forth by rewinding to the last snapshot
-        // encountered, then running  forward to the current execution point
-        // and resuming normal forward execution from there.
-        if (gBreakpointState->isPausedAtBreakpoint() && IsReplaying()) {
-            gBreakpointState->setPhase(BreakpointState::ForwardReachPoint);
-            RestoreSnapshotAndResume(gBreakpointState->snapshot);
-            MOZ_CRASH(); // Unreachable.
-        }
-
-        if (gBreakpointState->isPaused())
-            gBreakpointState->setPhase(BreakpointState::Forward);
-
-        ResumeExecution();
-        return;
-    }
-
-    MOZ_RELEASE_ASSERT(gBreakpointState->isPaused());
-
-    if (!gBreakpointState->isPausedAtBreakpoint()) {
-        if (!gBreakpointState->snapshot) {
-            // We are at the beginning of execution and can't rewind anymore,
-            // so just notify the middleman we hit a snapshot.
-            JS::replay::hooks.hitSnapshotReplay(0, false, false, false);
-            return;
-        }
-        gBreakpointState->snapshot--;
-    }
-
-    gBreakpointState->setPhase(BreakpointState::BackwardCountHits);
-
-    RestoreSnapshotAndResume(gBreakpointState->snapshot);
-    MOZ_CRASH(); // Unreachable.
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// Initialization
-///////////////////////////////////////////////////////////////////////////////
-
-/* static */ void
-ReplayDebugger::Initialize()
-{
-    if (IsMiddleman()) {
-        JS::replay::hooks.hitBreakpointMiddleman = ReplayDebugger::hitBreakpointMiddleman;
-    } else if (IsRecordingOrReplaying()) {
-        gContentSet = new ContentSet();
-        void* breakpointMem =
-            AllocateMemory(sizeof(BreakpointState), DebuggerAllocatedMemoryKind);
-        gBreakpointState = new (breakpointMem) BreakpointState();
-        gInstalledScriptPcHandlers = js_new<InstalledScriptPcHandlerVector>();
-
-        JS::replay::hooks.debugRequestReplay = DebugRequestHook;
-        JS::replay::hooks.resumeReplay = ResumeHook;
-        JS::replay::hooks.respondAfterRecoveringFromDivergence = RespondAfterRecoveringFromDivergenceHook;
-
-        SetSnapshotHooks(::BeforeSnapshotHook, ::AfterSnapshotHook, ::BeforeLastDitchRestoreHook);
-    }
 }

@@ -377,11 +377,7 @@ typedef void (*BeforeSnapshotHook)();
 //   us to rewind to snapshot N, but we did not record N but rather an earlier
 //   snapshot M, then we reach N by rewinding to M and then playing forward
 //   to N. Snapshots in the range [M, N-1] are interim.
-//
-// - aRecorded is whether the snapshot was recorded, and can be directly
-//   rewound to.
-typedef void (*AfterSnapshotHook)(size_t aSnapshot,
-                                  bool aFinal, bool aInterim, bool aRecorded);
+typedef void (*AfterSnapshotHook)(size_t aSnapshot, bool aFinal, bool aInterim);
 
 // Signature for the hook called immediately before the process rewinds to the
 // last snapshot in an attempt to avoid a replay failure.

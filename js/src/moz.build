@@ -350,6 +350,7 @@ UNIFIED_SOURCES += [
     'vm/RegExpObject.cpp',
     'vm/RegExpStatics.cpp',
     'vm/ReplayDebugger.cpp',
+    'vm/ReplayDebuggerNavigation.cpp',
     'vm/Runtime.cpp',
     'vm/SavedStacks.cpp',
     'vm/Scope.cpp',

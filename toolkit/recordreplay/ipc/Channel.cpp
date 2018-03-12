@@ -222,20 +222,20 @@ PrintMessage(const char* aPrefix, const Message& aMsg)
   case MessageType::HitSnapshot: {
     const HitSnapshotMessage& nmsg = *(const HitSnapshotMessage*)&aMsg;
     data = new char[128];
-    snprintf(data, 128, "Id %d, Final %d, Interim %d, Recorded %d", (int) nmsg.mSnapshotId,
-             nmsg.mFinal, nmsg.mInterim, nmsg.mRecorded);
+    snprintf(data, 128, "Id %zu, Final %d, Interim %d",
+             nmsg.mSnapshotId, nmsg.mFinal, nmsg.mInterim);
     break;
   }
   case MessageType::HitBreakpoint: {
     const HitBreakpointMessage& nmsg = *(const HitBreakpointMessage*)&aMsg;
     data = new char[128];
-    snprintf(data, 128, "Id %d", (int) nmsg.mBreakpointId);
+    snprintf(data, 128, "Id %zu", nmsg.mBreakpointId);
     break;
   }
   case MessageType::Resume: {
     const ResumeMessage& nmsg = *(const ResumeMessage*)&aMsg;
     data = new char[128];
-    snprintf(data, 128, "Forward %d, HitOtherBreakpoints %d", (int) nmsg.mForward, (int) nmsg.mHitOtherBreakpoints);
+    snprintf(data, 128, "Forward %d, HitOtherBreakpoints %d", nmsg.mForward, nmsg.mHitOtherBreakpoints);
     break;
   }
   case MessageType::DebuggerRequest: {

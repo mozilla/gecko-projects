@@ -91,8 +91,7 @@ ChannelThreadMain(void*)
     case channel::MessageType::SaveRecording: {
       MOZ_RELEASE_ASSERT(MainThreadShouldPause());
       channel::SaveRecordingMessage* nmsg = (channel::SaveRecordingMessage*) msg;
-      PauseMainThreadAndInvokeCallback([=]() { SaveRecording(nmsg->Filename()); },
-                                       /* aSynchronous = */ true);
+      PauseMainThreadAndInvokeCallback([=]() { SaveRecording(nmsg->Filename()); });
       break;
     }
     case channel::MessageType::DebuggerRequest: {
@@ -102,8 +101,7 @@ ChannelThreadMain(void*)
       if (!buf->append(nmsg.Buffer(), nmsg.BufferSize())) {
         MOZ_CRASH();
       }
-      PauseMainThreadAndInvokeCallback([=]() { JS::replay::hooks.debugRequestReplay(buf); },
-                                       /* aSynchronous = */ false);
+      PauseMainThreadAndInvokeCallback([=]() { JS::replay::hooks.debugRequestReplay(buf); });
       break;
     }
     case channel::MessageType::Resume: {
@@ -111,7 +109,7 @@ ChannelThreadMain(void*)
       const channel::ResumeMessage& nmsg = *(channel::ResumeMessage*) msg;
       PauseMainThreadAndInvokeCallback([=]() {
           JS::replay::hooks.resumeReplay(nmsg.mForward, nmsg.mHitOtherBreakpoints);
-        }, /* aSynchronous = */ true);
+        });
       break;
     }
     case channel::MessageType::Terminate:
@@ -341,12 +339,12 @@ NotifyPaintComplete()
 ///////////////////////////////////////////////////////////////////////////////
 
 static void
-HitSnapshot(size_t aId, bool aFinal, bool aInterim, bool aRecorded)
+HitSnapshot(size_t aId, bool aFinal, bool aInterim)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   PauseMainThreadAndInvokeCallback([=]() {
-      channel::SendMessage(channel::HitSnapshotMessage(aId, aFinal, aInterim, aRecorded));
-    }, /* aSynchronous = */ true);
+      channel::SendMessage(channel::HitSnapshotMessage(aId, aFinal, aInterim));
+    });
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -375,7 +373,7 @@ HitBreakpoint(size_t aId, bool aRecoveringFromDivergence)
       } else {
         channel::SendMessage(channel::HitBreakpointMessage(aId));
       }
-    }, /* aSynchronous = */ true);
+    });
 }
 
 static void

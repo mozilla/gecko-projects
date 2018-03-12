@@ -58,12 +58,12 @@ struct RewindInfo {
 
 static RewindInfo* gRewindInfo;
 
-// Callback to execute on the main thread, assigned by either the main thread or
-// the replay message loop thread. Protected by the global lock.
-static std::function<void()> gMainThreadCallback;
-
-// Condvar for notifying when a callback has been executed.
+// Lock for managing pending main thread callbacks.
 static Monitor* gMainThreadCallbackMonitor;
+
+// Callbacks to execute on the main thread, in FIFO order. Protected by
+// gMainThreadCallbackMonitor.
+static StaticInfallibleVector<std::function<void()>> gMainThreadCallbacks;
 
 void
 InitializeRewindState()
@@ -90,13 +90,8 @@ RecordReplayInterface_RestoreSnapshotAndResume(size_t aSnapshot)
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
   MOZ_RELEASE_ASSERT(aSnapshot <= gRewindInfo->mLastSnapshot);
 
-  // If this restore is part of a main thread callback, clear the callback and
-  // notify the replay message loop thread first.
-  if (gMainThreadCallback) {
-    gMainThreadCallback = std::function<void()>();
-    MonitorAutoLock lock(*gMainThreadCallbackMonitor);
-    gMainThreadCallbackMonitor->Notify();
-  }
+  // Make sure we don't lose pending main thread callbacks due to rewinding.
+  MOZ_RELEASE_ASSERT(gMainThreadCallbacks.empty());
 
   Thread::WaitForIdleThreads();
 
@@ -209,8 +204,7 @@ TakeSnapshot(bool aFinal)
 
   bool justTookSnapshot = true;
 
-  bool recordSnapshot = ShouldRecordSnapshot(snapshot);
-  if (recordSnapshot) {
+  if (ShouldRecordSnapshot(snapshot)) {
     gLastRecordedSnapshot = CurrentTime();
 
     Thread::WaitForIdleThreads();
@@ -270,7 +264,7 @@ TakeSnapshot(bool aFinal)
 
   dom::AutoJSAPI jsapi;
   jsapi.Init();
-  gAfterSnapshotHook(snapshot, final, interim, recordSnapshot);
+  gAfterSnapshotHook(snapshot, final, interim);
 }
 
 static const size_t MAX_LAST_DITCH_RESTORES = 5;
@@ -400,68 +394,60 @@ MainThreadShouldPause()
   return gMainThreadShouldPause;
 }
 
+// Whether there is a MaybePauseMainThread frame on the stack.
+static bool gMainThreadIsPaused = false;
+
 void
 MaybePauseMainThread()
 {
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
   MOZ_RELEASE_ASSERT(!gRecordingDiverged);
+
+  if (gMainThreadIsPaused)
+    return;
+  gMainThreadIsPaused = true;
+
   MonitorAutoLock lock(*gMainThreadCallbackMonitor);
 
   // Loop and invoke callbacks until one of them unpauses this thread.
   while (gMainThreadShouldPause) {
-    if (gMainThreadCallback) {
+    if (!gMainThreadCallbacks.empty()) {
+      std::function<void()> callback = gMainThreadCallbacks[0];
+      gMainThreadCallbacks.erase(&gMainThreadCallbacks[0]);
       {
         MonitorAutoUnlock unlock(*gMainThreadCallbackMonitor);
         AutoDisallowThreadEvents disallow;
-        gMainThreadCallback();
+        callback();
       }
-      gMainThreadCallback = std::function<void()>();
-      gMainThreadCallbackMonitor->Notify();
       continue;
     }
     gMainThreadCallbackMonitor->Wait();
   }
 
+  // As for RestoreSnapshotAndResume, we shouldn't resume the main thread while
+  // it still has callbacks to execute.
+  MOZ_RELEASE_ASSERT(gMainThreadCallbacks.empty());
+
   // If we diverge from the recording the only way we can get back to resuming
   // normal execution is to rewind to a snapshot prior to the divergence.
   MOZ_RELEASE_ASSERT(!gRecordingDiverged);
+
+  gMainThreadIsPaused = false;
 }
 
 void
-PauseMainThreadAndInvokeCallback(const std::function<void()>& aCallback, bool aSynchronous)
+PauseMainThreadAndInvokeCallback(const std::function<void()>& aCallback)
 {
-  MonitorAutoLock lock(*gMainThreadCallbackMonitor);
-  gMainThreadShouldPause = true;
-
-  // Clear any existing callback.
-  if (Thread::CurrentIsMainThread()) {
-    if (gMainThreadCallback) {
-      {
-        MonitorAutoUnlock unlock(*gMainThreadCallbackMonitor);
-        AutoDisallowThreadEvents disallow;
-        gMainThreadCallback();
-      }
-      gMainThreadCallback = std::function<void()>();
-    }
-  } else {
-    while (gMainThreadCallback) {
-      gMainThreadCallbackMonitor->Wait();
-    }
+  {
+    MonitorAutoLock lock(*gMainThreadCallbackMonitor);
+    gMainThreadShouldPause = true;
+    gMainThreadCallbacks.append(aCallback);
+    gMainThreadCallbackMonitor->Notify();
   }
 
-  gMainThreadCallback = aCallback;
-
   if (Thread::CurrentIsMainThread()) {
-    MonitorAutoUnlock unlock(*gMainThreadCallbackMonitor);
     MaybePauseMainThread();
-  } else {
-    gMainThreadCallbackMonitor->Notify();
-    if (aSynchronous) {
-      while (gMainThreadCallback) {
-        gMainThreadCallbackMonitor->Wait();
-      }
-    }
   }
 }
 
