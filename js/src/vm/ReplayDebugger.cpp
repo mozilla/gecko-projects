@@ -79,8 +79,10 @@ ReplayDebugger::trace(JSTracer* trc)
     for (DebugObjectMap::Enum e(debugEnvs); !e.empty(); e.popFront())
         TraceManuallyBarrieredEdge(trc, &e.front().value(), "ReplayDebugger::debugEnvs");
 
-    for (size_t i = 0; i < debugFrames.length(); i++)
-        TraceManuallyBarrieredEdge(trc, &debugFrames[i], "ReplayDebugger::debugFrames");
+    for (size_t i = 0; i < debugFrames.length(); i++) {
+        if (debugFrames[i])
+            TraceManuallyBarrieredEdge(trc, &debugFrames[i], "ReplayDebugger::debugFrames");
+    }
 }
 
 void
