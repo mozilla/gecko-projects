@@ -38,6 +38,8 @@ PersistentRootedObject* ReplayDebugger::gHookGlobal;
 static bool gPopFrameThrowing;
 static PersistentRootedValue* gPopFrameResult;
 
+static bool gSpewEnabled;
+
 #define TRY(op) do { if (!(op)) MOZ_CRASH(); } while (false)
 
 /* static */ void
@@ -290,36 +292,41 @@ class ForwardPhase : public NavigationPhase
     void positionHit(const std::function<bool(const ExecutionPosition&)>& match) override;
 };
 
-// Information about how to reach a point and what to do afterwards.
-struct ReachPointInfo
+// Phase when the replaying process is running forward from a snapshot to a
+// particular execution point.
+class ReachPointPhase : public NavigationPhase
 {
+  public:
+    // The action to take after reaching the point.
     enum Kind {
         Resume,
         HitBreakpoint,
         RecoverFromDivergence
     };
+
+  private:
     Kind mKind;
 
     // The point we are running to.
     ExecutionPoint mPoint;
 
-    // If we are recovering from a recording divergence, the information to
-    // instantiate the pause state with when we reach the target point.
-    PauseInfo mPauseInfo;
-};
-
-// Phase when the replaying process is running forward from a snapshot to a
-// particular execution point.
-class ReachPointPhase : public NavigationPhase
-{
-    // Information about the search.
-    ReachPointInfo mInfo;
-
     // How much of the point we have reached so far.
     ExecutionPoint::Prefix mReached;
 
+    // Prefix after which to decide whether to take a temporary snapshot.
+    Maybe<ExecutionPoint::Prefix> mTemporarySnapshotPrefix;
+
+    // If we are recovering from a recording divergence, the information to
+    // instantiate the pause state with when we reach the target point.
+    PauseInfo mPauseInfo;
+
+    // The time at which we started running forward from the initial snapshot.
+    TimeStamp mStartTime;
+
   public:
-    void enter(const ReachPointInfo& info, bool rewind);
+    void enter(Kind kind, ExecutionPoint point,
+               Maybe<ExecutionPoint::Prefix> temporarySnapshotPrefix,
+               const PauseInfo& pauseInfo, bool rewind);
 
     void toString(char* buf, size_t len) override {
         snprintf(buf, len, "ReachPoint");
@@ -348,10 +355,14 @@ class FindLastHitPhase : public NavigationPhase
     // order they were reached.
     UntrackedExecutionPositionVector mTrackedHits;
 
-    void addTrackedPosition(const ExecutionPosition& position);
+    void addTrackedPosition(const ExecutionPosition& position, bool allowSubsumeExisting);
+    size_t countTrackedHitsInRange(const ExecutionPosition& pos, size_t start, size_t end);
+    Maybe<size_t> lastMatchingTrackedHit(const std::function<bool(const ExecutionPosition&)> match,
+                                         size_t start, size_t end);
     void onRegionEnd();
 
   public:
+    // Note: this always rewinds.
     void enter(const ExecutionPoint& point);
 
     void toString(char* buf, size_t len) override {
@@ -363,11 +374,37 @@ class FindLastHitPhase : public NavigationPhase
     void positionHit(const std::function<bool(const ExecutionPosition&)>& match) override;
 };
 
+// Phase when the replaying process ran forward to a normal snapshot point but
+// needs to strip out all temporary snapshots before it can pause.
+class RemoveTemporarySnapshotsPhase : public NavigationPhase
+{
+    // Snapshot to restore.
+    size_t mSnapshot;
+
+  public:
+    // Note: this always rewinds.
+    void enter(size_t snapshot);
+
+    void toString(char* buf, size_t len) override {
+        snprintf(buf, len, "RemoveTemporarySnapshots");
+    }
+
+    void afterSnapshot(size_t snapshot, bool final) override;
+    void positionHit(const std::function<bool(const ExecutionPosition&)>& match) override;
+};
+
 // Structure which manages state about the breakpoints in existence and about
 // how the process is being navigated through. This is allocated in untracked
 // memory and its contents will not change when restoring an earlier snapshot.
 struct NavigationState
 {
+    // The number of temporary snapshots we have taken. All temporary snapshots
+    // are between two adjacent normal snapshots, i.e. we cannot execute past a
+    // normal snapshot point without first erasing all temporary ones. Each
+    // temporary snapshot's position is expressed in relation to the previous
+    // temporary/normal snapshot.
+    Vector<ExecutionPoint, 0, AllocPolicy<DebuggerAllocatedMemoryKind>> temporarySnapshots;
+
     // All the currently installed breakpoints, indexed by their ID.
     UntrackedExecutionPositionVector breakpoints;
 
@@ -383,13 +420,13 @@ struct NavigationState
     void setPhase(NavigationPhase* phase) {
         mPhase = phase;
 
-        /*
-        char buf[1024];
-        mPhase->toString(buf, sizeof(buf));
+        if (gSpewEnabled) {
+            char buf[1024];
+            mPhase->toString(buf, sizeof(buf));
 
-        AutoEnsurePassThroughThreadEvents pt;
-        fprintf(stderr, "SetNavigationPhase %s\n", buf);
-        */
+            AutoEnsurePassThroughThreadEvents pt;
+            fprintf(stderr, "SetNavigationPhase %s\n", buf);
+        }
     }
 
     BreakpointPausedPhase mBreakpointPausedPhase;
@@ -397,6 +434,7 @@ struct NavigationState
     ForwardPhase mForwardPhase;
     ReachPointPhase mReachPointPhase;
     FindLastHitPhase mFindLastHitPhase;
+    RemoveTemporarySnapshotsPhase mRemoveTemporarySnapshotsPhase;
 
     // Note: NavigationState is initially zeroed.
     NavigationState()
@@ -449,11 +487,9 @@ BreakpointPausedPhase::afterSnapshot(size_t snapshot, bool final)
 
     // Return to the point where we were just paused at, remembering that we
     // will need to finish recovering from the divergence once we get there.
-    ReachPointInfo info;
-    info.mKind = ReachPointInfo::RecoverFromDivergence;
-    info.mPoint = mInfo.mPoint;
-    info.mPauseInfo = mInfo;
-    gNavigation->mReachPointPhase.enter(info, /* rewind = */ false);
+    gNavigation->mReachPointPhase.enter(ReachPointPhase::RecoverFromDivergence,
+                                        mInfo.mPoint, Nothing(), mInfo,
+                                        /* rewind = */ false);
 }
 
 void
@@ -495,10 +531,11 @@ BreakpointPausedPhase::resume(bool forward, bool hitOtherBreakpoints)
         // encountered, then running  forward to the current execution point
         // and resuming normal forward execution from there.
         if (IsReplaying()) {
-            ReachPointInfo info;
-            info.mKind = ReachPointInfo::Resume;
-            info.mPoint = mInfo.mPoint;
-            gNavigation->mReachPointPhase.enter(info, /* rewind = */ true);
+            // Allow taking a temporary snapshot after reaching the destination.
+            ExecutionPoint::Prefix temporarySnapshotPrefix = mInfo.mPoint.positions.length();
+            gNavigation->mReachPointPhase.enter(ReachPointPhase::Resume,
+                                                mInfo.mPoint, Some(temporarySnapshotPrefix),
+                                                PauseInfo(), /* rewind = */ true);
             MOZ_CRASH(); // Unreachable.
         }
 
@@ -706,6 +743,13 @@ void
 ForwardPhase::afterSnapshot(size_t snapshot, bool final)
 {
     MOZ_RELEASE_ASSERT(snapshot == mPoint.snapshot + 1);
+
+    // Clear out any temporary snapshots before pausing.
+    if (!gNavigation->temporarySnapshots.empty()) {
+        gNavigation->mRemoveTemporarySnapshotsPhase.enter(mPoint.snapshot);
+        MOZ_CRASH(); // Unreachable.
+    }
+
     gNavigation->mSnapshotPausedPhase.enter(snapshot, final, /* rewind = */ false);
 }
 
@@ -733,62 +777,121 @@ ForwardPhase::positionHit(const std::function<bool(const ExecutionPosition&)>& m
 ///////////////////////////////////////////////////////////////////////////////
 
 void
-ReachPointPhase::enter(const ReachPointInfo& info, bool rewind)
+ReachPointPhase::enter(Kind kind, ExecutionPoint point,
+                       Maybe<ExecutionPoint::Prefix> temporarySnapshotPrefix,
+                       const PauseInfo& pauseInfo, bool rewind)
 {
-    MOZ_RELEASE_ASSERT(!info.mPoint.positions.empty());
+    MOZ_RELEASE_ASSERT(!point.positions.empty());
 
-    mInfo = info;
+    mKind = kind;
+    mPoint = point;
     mReached = 0;
+    mTemporarySnapshotPrefix = temporarySnapshotPrefix;
+    mPauseInfo = pauseInfo;
 
     gNavigation->setPhase(this);
 
     if (rewind) {
-        RestoreSnapshotAndResume(mInfo.mPoint.snapshot);
+        RestoreSnapshotAndResume(mPoint.snapshot);
         MOZ_CRASH(); // Unreachable.
     } else {
-        afterSnapshot(mInfo.mPoint.snapshot, false);
+        afterSnapshot(mPoint.snapshot, false);
     }
 }
 
 void
 ReachPointPhase::afterSnapshot(size_t snapshot, bool final)
 {
-    MOZ_RELEASE_ASSERT(snapshot == mInfo.mPoint.snapshot);
-    EnsurePositionHandler(mInfo.mPoint.positions[0]);
+    if (snapshot != mPoint.snapshot) {
+        // We just took a temporary snapshot.
+        MOZ_RELEASE_ASSERT(snapshot == mPoint.snapshot + 1);
+        MOZ_RELEASE_ASSERT(mTemporarySnapshotPrefix.isSome() &&
+                           mTemporarySnapshotPrefix.ref() == mReached);
+        return;
+    }
+
+    MOZ_RELEASE_ASSERT(snapshot == mPoint.snapshot);
+    EnsurePositionHandler(mPoint.positions[0]);
+
+    if (mTemporarySnapshotPrefix.isSome()) {
+        // Remember the time we started running forwards from the initial snapshot.
+        mStartTime = ReallyNow();
+    }
 }
+
+// The number of milliseconds to elapse during a ReachPoint search before we
+// will take a temporary snapshot.
+static const double TemporarySnapshotThresholdMs = 10;
 
 void
 ReachPointPhase::positionHit(const std::function<bool(const ExecutionPosition&)>& match)
 {
-    if (!match(mInfo.mPoint.positions[mReached]))
+    if (!match(mPoint.positions[mReached]))
         return;
 
-    if (++mReached < mInfo.mPoint.positions.length()) {
-        EnsurePositionHandler(mInfo.mPoint.positions[mReached]);
+    ++mReached;
+
+    if (mTemporarySnapshotPrefix.isSome() && mTemporarySnapshotPrefix.ref() == mReached) {
+        // We've reached the point at which we have the option of taking a snapshot.
+        double elapsedMs = (ReallyNow() - mStartTime).ToMilliseconds();
+        if (elapsedMs >= TemporarySnapshotThresholdMs) {
+            size_t numTemporarySnapshots = gNavigation->temporarySnapshots.length();
+
+            TakeTemporarySnapshot();
+
+            if (numTemporarySnapshots == gNavigation->temporarySnapshots.length()) {
+                // We just took the snapshot, add it to the navigation list.
+                ExecutionPoint snapshotPoint;
+                snapshotPoint.snapshot = mPoint.snapshot;
+                TRY(snapshotPoint.positions.append(mPoint.positions.begin(), mReached));
+                TRY(gNavigation->temporarySnapshots.append(snapshotPoint));
+
+                // Update our state to be in relation to the snapshot just taken.
+                ExecutionPoint newPoint;
+                newPoint.snapshot = mPoint.snapshot + 1;
+                if (mReached < mPoint.positions.length()) {
+                    TRY(newPoint.positions.append(&mPoint.positions[mReached],
+                                                  mPoint.positions.length() - mReached));
+                }
+                mPoint = newPoint;
+                mReached = 0;
+                mTemporarySnapshotPrefix = Nothing();
+                MOZ_RELEASE_ASSERT(mKind != RecoverFromDivergence);
+            } else {
+                // We just restored the snapshot, and could be in any phase.
+                MOZ_RELEASE_ASSERT(numTemporarySnapshots + 1 == gNavigation->temporarySnapshots.length());
+                gNavigation->mPhase->positionHit(match);
+                return;
+            }
+        }
+    }
+
+    if (mReached < mPoint.positions.length()) {
+        EnsurePositionHandler(mPoint.positions[mReached]);
         return;
     }
 
-    switch (mInfo.mKind) {
-      case ReachPointInfo::Resume:
-        gNavigation->mForwardPhase.enter(mInfo.mPoint);
+    switch (mKind) {
+      case Resume:
+        gNavigation->mForwardPhase.enter(mPoint);
         return;
-      case ReachPointInfo::HitBreakpoint: {
+      case HitBreakpoint: {
         BreakpointVector hitBreakpoints;
         GetAllBreakpointHits(match, hitBreakpoints);
         MOZ_RELEASE_ASSERT(!hitBreakpoints.empty());
-        
+
         PauseInfo info;
-        info.mPoint = mInfo.mPoint;
+        info.mPoint = mPoint;
         info.mBreakpoint = hitBreakpoints[0];
         for (size_t i = 1; i < hitBreakpoints.length(); i++)
             TRY(info.mRemainingBreakpoints.append(hitBreakpoints[i]));
         gNavigation->mBreakpointPausedPhase.enter(info);
         return;
       }
-      case ReachPointInfo::RecoverFromDivergence:
-        MOZ_RELEASE_ASSERT(match(gNavigation->getBreakpoint(mInfo.mPauseInfo.mBreakpoint)));
-        gNavigation->mBreakpointPausedPhase.enter(mInfo.mPauseInfo,
-                                                       /* recoveringFromDivergence = */ true);
+      case RecoverFromDivergence:
+        MOZ_RELEASE_ASSERT(match(gNavigation->getBreakpoint(mPauseInfo.mBreakpoint)));
+        gNavigation->mBreakpointPausedPhase.enter(mPauseInfo,
+                                                  /* recoveringFromDivergence = */ true);
         return;
     }
 }
@@ -798,13 +901,37 @@ ReachPointPhase::positionHit(const std::function<bool(const ExecutionPosition&)>
 ///////////////////////////////////////////////////////////////////////////////
 
 void
-FindLastHitPhase::addTrackedPosition(const ExecutionPosition& position)
+FindLastHitPhase::addTrackedPosition(const ExecutionPosition& position,
+                                     bool allowSubsumeExisting)
 {
-    for (const ExecutionPosition& existing : mTrackedPositions) {
-        if (existing == position)
+    // Maintain an invariant that no tracked positions subsume one other.
+    // Whenever we hit a position, there can be at most one tracked position
+    // which matches it.
+    for (ExecutionPosition& existing : mTrackedPositions) {
+        if (existing.subsumes(position))
             return;
+        if (position.subsumes(existing)) {
+            if (allowSubsumeExisting)
+                existing = position;
+            return;
+        }
     }
     TRY(mTrackedPositions.append(position));
+}
+
+static Maybe<ExecutionPosition>
+GetEntryPosition(const ExecutionPosition& position)
+{
+    if (position.kind == ExecutionPosition::Break ||
+        position.kind == ExecutionPosition::OnStep)
+    {
+        if (JSScript* script = ReplayDebugger::IdScript(position.script)) {
+            ExecutionPosition entry(ExecutionPosition::Break, position.script,
+                                    script->mainOffset());
+            return Some(entry);
+        }
+    }
+    return Nothing();
 }
 
 void
@@ -821,7 +948,16 @@ FindLastHitPhase::enter(const ExecutionPoint& point)
     // All breakpoints are tracked positions.
     for (const ExecutionPosition& breakpoint : gNavigation->breakpoints) {
         if (breakpoint.isValid())
-            addTrackedPosition(breakpoint);
+            addTrackedPosition(breakpoint, /* allowSubsumeExisting = */ true);
+    }
+
+    // All entry points to scripts containing breakpoints are tracked
+    // positions, unless there is a breakpoint which the entry point subsumes.
+    // We don't want hits on the entry point to mask hits on real breakpoints.
+    for (const ExecutionPosition& breakpoint : gNavigation->breakpoints) {
+        Maybe<ExecutionPosition> entry = GetEntryPosition(breakpoint);
+        if (entry.isSome())
+            addTrackedPosition(entry.ref(), /* allowSubsumeExisting = */ false);
     }
 
     RestoreSnapshotAndResume(mPoint.snapshot);
@@ -879,6 +1015,28 @@ FindLastHitPhase::positionHit(const std::function<bool(const ExecutionPosition&)
     }
 }
 
+size_t
+FindLastHitPhase::countTrackedHitsInRange(const ExecutionPosition& pos, size_t start, size_t end)
+{
+    size_t count = 0;
+    for (size_t i = start; i <= end; i++) {
+        if (pos == mTrackedHits[i])
+            count++;
+    }
+    return count;
+}
+
+Maybe<size_t>
+FindLastHitPhase::lastMatchingTrackedHit(const std::function<bool(const ExecutionPosition&)> match,
+                                         size_t start, size_t end)
+{
+    for (int i = end; i >= (int) start; i--) {
+        if (match(mTrackedHits[i]))
+            return Some((size_t) i);
+    }
+    return Nothing();
+}
+
 static bool
 PositionMatchesBreakpoint(const ExecutionPosition& pos)
 {
@@ -893,35 +1051,113 @@ void
 FindLastHitPhase::onRegionEnd()
 {
     // Find the index of the last hit which coincides with a breakpoint.
-    int lastHit;
-    for (lastHit = mTrackedHits.length() - 1; lastHit >= 0; lastHit--) {
-        if (PositionMatchesBreakpoint(mTrackedHits[lastHit]))
-            break;
-    }
+    Maybe<size_t> lastBreakpointHit =
+        lastMatchingTrackedHit(PositionMatchesBreakpoint, 0, mTrackedHits.length() - 1);
 
-    if (lastHit < 0) {
+    if (lastBreakpointHit.isNothing()) {
         // No breakpoints were encountered up until the execution point.
-        // Rewind to the last snapshot and pause.
-        gNavigation->mSnapshotPausedPhase.enter(mPoint.snapshot, false, /* rewind = */ true);
-        MOZ_CRASH(); // Unreachable.
+        if (!gNavigation->temporarySnapshots.empty()) {
+            // The last snapshot is a temporary one. Continue searching
+            // backwards without notifying the middleman.
+            ExecutionPoint newPoint = gNavigation->temporarySnapshots.popCopy();
+            gNavigation->mFindLastHitPhase.enter(newPoint);
+            MOZ_CRASH(); // Unreachable.
+        } else {
+            // Rewind to the last snapshot and pause.
+            gNavigation->mSnapshotPausedPhase.enter(mPoint.snapshot, false, /* rewind = */ true);
+            MOZ_CRASH(); // Unreachable.
+        }
     }
 
-    // Construct an execution point for the last breakpoint hit to return to
-    // after rewinding.
+    const ExecutionPosition& breakpoint = mTrackedHits[lastBreakpointHit.ref()];
+
+    // When running backwards, we don't want to place temporary snapshots at
+    // the breakpoint where we are going to stop at. If the user continues
+    // rewinding then we will just have to discard the snapshot and waste the
+    // work we did in taking it.
+    //
+    // Instead, try to place a temporary snapshot at the last time the
+    // breakpoint's script was entered. This optimizes for the case of stepping
+    // around within a frame.
+    Maybe<ExecutionPosition> baseEntry = GetEntryPosition(breakpoint);
+    if (baseEntry.isSome() && baseEntry.ref().offset != breakpoint.offset) {
+        Maybe<size_t> lastEntryHit =
+            lastMatchingTrackedHit([=](const ExecutionPosition& pos) {
+                return baseEntry.ref().subsumes(pos);
+            }, 0, lastBreakpointHit.ref() - 1);
+        if (lastEntryHit.isSome()) {
+            // The hit we found might not be identical to |baseEntry|
+            // if there is an OnStep breakpoint at the script's entry point.
+            ExecutionPosition entry = mTrackedHits[lastEntryHit.ref()];
+            MOZ_RELEASE_ASSERT(baseEntry.ref().subsumes(entry));
+
+            size_t entryHits = countTrackedHitsInRange(entry, 0, lastBreakpointHit.ref() - 1);
+            MOZ_RELEASE_ASSERT(entryHits);
+
+            size_t breakpointHitsAfterEntry =
+                countTrackedHitsInRange(breakpoint,
+                                        lastEntryHit.ref() + 1, lastBreakpointHit.ref());
+            MOZ_RELEASE_ASSERT(breakpointHitsAfterEntry);
+
+            ExecutionPoint newPoint;
+            newPoint.snapshot = mPoint.snapshot;
+            TRY(newPoint.positions.appendN(entry, entryHits));
+            TRY(newPoint.positions.appendN(breakpoint, breakpointHitsAfterEntry));
+
+            gNavigation->mReachPointPhase.enter(ReachPointPhase::HitBreakpoint,
+                                                newPoint, Some(entryHits), PauseInfo(),
+                                                /* rewind = */ true);
+            MOZ_CRASH(); // Unreachable.
+        }
+    }
+
+    // There was no suitable place for a temporary snapshot, so rewind to the
+    // last snapshot and play forward to the last breakpoint hit we found.
+    size_t breakpointHits = countTrackedHitsInRange(breakpoint, 0, lastBreakpointHit.ref());
+    MOZ_RELEASE_ASSERT(breakpointHits);
+
     ExecutionPoint newPoint;
     newPoint.snapshot = mPoint.snapshot;
-    for (size_t i = 0; i <= (size_t) lastHit; i++) {
-        const ExecutionPosition& pos = mTrackedHits[i];
-        if (pos == mTrackedHits[lastHit])
-            TRY(newPoint.positions.append(pos));
-    }
-    MOZ_RELEASE_ASSERT(!newPoint.positions.empty());
+    TRY(newPoint.positions.appendN(breakpoint, breakpointHits));
 
-    ReachPointInfo info;
-    info.mKind = ReachPointInfo::HitBreakpoint;
-    info.mPoint = newPoint;
-    gNavigation->mReachPointPhase.enter(info, /* rewind = */ true);
+    gNavigation->mReachPointPhase.enter(ReachPointPhase::HitBreakpoint,
+                                        newPoint, Nothing(), PauseInfo(),
+                                        /* rewind = */ true);
     MOZ_CRASH(); // Unreachable.
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// RemoveTemporarySnapshotsPhase Handlers
+///////////////////////////////////////////////////////////////////////////////
+
+void
+RemoveTemporarySnapshotsPhase::enter(size_t lastTemporarySnapshot)
+{
+    MOZ_RELEASE_ASSERT(!gNavigation->temporarySnapshots.empty());
+    mSnapshot = lastTemporarySnapshot - gNavigation->temporarySnapshots.length();
+
+    gNavigation->setPhase(this);
+
+    gNavigation->temporarySnapshots.clear();
+    RestoreSnapshotAndResume(mSnapshot);
+    MOZ_CRASH(); // Unreachable.
+}
+
+void
+RemoveTemporarySnapshotsPhase::afterSnapshot(size_t snapshot, bool final)
+{
+    if (snapshot == mSnapshot)
+        return;
+
+    MOZ_RELEASE_ASSERT(snapshot == mSnapshot + 1);
+    gNavigation->mSnapshotPausedPhase.enter(snapshot, final, /* rewind = */ false);
+}
+
+void
+RemoveTemporarySnapshotsPhase::positionHit(const std::function<bool(const ExecutionPosition&)>& match)
+{
+    // Even though we don't install any handlers, the onLeaveFrame hook will
+    // still be called.
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1239,5 +1475,11 @@ ReplayDebugger::Initialize()
         JS::replay::hooks.respondAfterRecoveringFromDivergence = RespondAfterRecoveringFromDivergenceHook;
 
         SetSnapshotHooks(::BeforeSnapshotHook, ::AfterSnapshotHook, ::BeforeLastDitchRestoreHook);
+
+        {
+            AutoPassThroughThreadEvents pt;
+            const char* env = getenv("RECORD_REPLAY_SPEW");
+            gSpewEnabled = env && env[0];
+        }
     }
 }

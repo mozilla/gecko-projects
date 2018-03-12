@@ -195,6 +195,13 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
                 && offset == o.offset
                 && frameIndex == o.frameIndex;
         }
+
+        // Return whether an execution point matching |o| also matches this.
+        inline bool subsumes(const ExecutionPosition& o) const {
+            return (*this == o)
+                || (kind == OnPop && o.kind == OnPop && script == EMPTY_SCRIPT)
+                || (kind == Break && o.kind == OnStep && script == o.script && offset == o.offset);
+        }
     };
 
   private:
