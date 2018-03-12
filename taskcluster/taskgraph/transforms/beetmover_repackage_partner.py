@@ -10,9 +10,6 @@ from __future__ import absolute_import, print_function, unicode_literals
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.beetmover import craft_release_properties
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
-from taskgraph.util.partials import (get_balrog_platform_name,
-                                     get_partials_artifacts,
-                                     get_partials_artifact_map)
 from taskgraph.util.schema import validate_schema, Schema
 from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
                                          get_beetmover_action_scope,
@@ -22,7 +19,6 @@ from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
 
 import logging
-import re
 
 logger = logging.getLogger(__name__)
 
