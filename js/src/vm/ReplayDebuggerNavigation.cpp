@@ -324,8 +324,8 @@ class ReachPointPhase : public NavigationPhase
     TimeStamp mStartTime;
 
   public:
-    void enter(Kind kind, ExecutionPoint point,
-               Maybe<ExecutionPoint::Prefix> temporarySnapshotPrefix,
+    void enter(Kind kind, const ExecutionPoint& point,
+               const Maybe<ExecutionPoint::Prefix>& temporarySnapshotPrefix,
                const PauseInfo& pauseInfo, bool rewind);
 
     void toString(char* buf, size_t len) override {
@@ -357,7 +357,7 @@ class FindLastHitPhase : public NavigationPhase
 
     void addTrackedPosition(const ExecutionPosition& position, bool allowSubsumeExisting);
     size_t countTrackedHitsInRange(const ExecutionPosition& pos, size_t start, size_t end);
-    Maybe<size_t> lastMatchingTrackedHit(const std::function<bool(const ExecutionPosition&)> match,
+    Maybe<size_t> lastMatchingTrackedHit(const std::function<bool(const ExecutionPosition&)>& match,
                                          size_t start, size_t end);
     void onRegionEnd();
 
@@ -777,8 +777,8 @@ ForwardPhase::positionHit(const std::function<bool(const ExecutionPosition&)>& m
 ///////////////////////////////////////////////////////////////////////////////
 
 void
-ReachPointPhase::enter(Kind kind, ExecutionPoint point,
-                       Maybe<ExecutionPoint::Prefix> temporarySnapshotPrefix,
+ReachPointPhase::enter(Kind kind, const ExecutionPoint& point,
+                       const Maybe<ExecutionPoint::Prefix>& temporarySnapshotPrefix,
                        const PauseInfo& pauseInfo, bool rewind)
 {
     MOZ_RELEASE_ASSERT(!point.positions.empty());
@@ -1026,7 +1026,7 @@ FindLastHitPhase::countTrackedHitsInRange(const ExecutionPosition& pos, size_t s
 }
 
 Maybe<size_t>
-FindLastHitPhase::lastMatchingTrackedHit(const std::function<bool(const ExecutionPosition&)> match,
+FindLastHitPhase::lastMatchingTrackedHit(const std::function<bool(const ExecutionPosition&)>& match,
                                          size_t start, size_t end)
 {
     for (int i = end; i >= (int) start; i--) {
