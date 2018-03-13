@@ -940,7 +940,6 @@ FindLastHitPhase::enter(const ExecutionPoint& point)
     mPoint = point;
 
     mTrackedPositions.clear();
-    mTrackedHits.clear();
     mReached = 0;
 
     gNavigation->setPhase(this);
@@ -976,7 +975,7 @@ FindLastHitPhase::afterSnapshot(size_t snapshot, bool final)
 
     // We are at the start of the search.
     MOZ_RELEASE_ASSERT(snapshot == mPoint.snapshot);
-    MOZ_RELEASE_ASSERT(mTrackedHits.empty());
+    mTrackedHits.clear();
 
     for (const ExecutionPosition& position : mTrackedPositions)
         EnsurePositionHandler(position);
