@@ -76,10 +76,8 @@ DirtyMemoryExceptionHandlerThread(void*)
         // suspended indefinitely.
         continue;
       } else {
-        char buf[4096];
-        SprintfLiteral(buf, "HandleDirtyMemoryFault failed %p %s", faultingAddress,
-                       gMozCrashReason ? gMozCrashReason : "");
-        child::ReportFatalError(buf);
+        child::ReportFatalError("HandleDirtyMemoryFault failed %p %s", faultingAddress,
+                                gMozCrashReason ? gMozCrashReason : "");
       }
     } else {
       child::ReportFatalError("DirtyMemoryExceptionHandlerThread mach_msg returned unexpected data");

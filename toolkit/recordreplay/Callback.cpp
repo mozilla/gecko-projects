@@ -6,6 +6,7 @@
 
 #include "Callback.h"
 
+#include "ipc/ChildIPC.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/RecordReplay.h"
 #include "mozilla/StaticMutex.h"
@@ -142,7 +143,7 @@ PassThroughThreadEventsAllowCallbacks(const std::function<void()>& aFn)
       ThreadEvent ev = (ThreadEvent) thread->Events().ReadScalar();
       if (ev != ThreadEvent::ExecuteCallback) {
         if (ev != ThreadEvent::CallbacksFinished) {
-          LastDitchRestoreSnapshot();
+          child::ReportFatalError("Unexpected event while replaying callback events");
         }
         break;
       }

@@ -37,13 +37,6 @@ struct RewindInfo {
   // The last snapshot in the execution, zero if it has not been encountered.
   size_t mFinalSnapshot;
 
-  // Set from another thread if the main thread should restore the last
-  // snapshot.
-  bool mNeedLastDitchRestore;
-
-  // The number of times a last ditch snapshot restore has been performed.
-  size_t mNumLastDitchRestores;
-
   // The snapshot which will become the next recorded snapshot, unless
   // RestoreSnapshotAndResume is called first.
   size_t mActiveRecordedSnapshot;
@@ -99,9 +92,6 @@ RecordReplayInterface_RestoreSnapshotAndResume(size_t aSnapshot)
     PrepareForFirstRecordingRewind();
   }
 
-  // Reset the last ditch restore bit.
-  gRewindInfo->mNeedLastDitchRestore = false;
-
   double start = CurrentTime();
 
   // Rewind heap memory to the last recorded point which is at or before the
@@ -136,16 +126,13 @@ RecordReplayInterface_RestoreSnapshotAndResume(size_t aSnapshot)
 
 static BeforeSnapshotHook gBeforeSnapshotHook;
 static AfterSnapshotHook gAfterSnapshotHook;
-static BeforeLastDitchRestoreHook gBeforeLastDitchRestoreHook;
 
 MOZ_EXPORT void
 RecordReplayInterface_SetSnapshotHooks(BeforeSnapshotHook aBeforeSnapshot,
-                                       AfterSnapshotHook aAfterSnapshot,
-                                       BeforeLastDitchRestoreHook aBeforeLastDitchRestore)
+                                       AfterSnapshotHook aAfterSnapshot)
 {
   gBeforeSnapshotHook = aBeforeSnapshot;
   gAfterSnapshotHook = aAfterSnapshot;
-  gBeforeLastDitchRestoreHook = aBeforeLastDitchRestore;
 }
 
 } // extern "C"
@@ -287,60 +274,6 @@ TakeSnapshot(bool aFinal, bool aTemporary)
   // to such normal snapshots after having taken temporary snapshots, but the
   // AfterSnapshot hook should rewind in such cases.
   MOZ_RELEASE_ASSERT(!gHasTemporarySnapshot || aTemporary);
-}
-
-static const size_t MAX_LAST_DITCH_RESTORES = 5;
-
-static StaticMutexNotRecorded gLastDitchRestoreMutex;
-
-bool
-NeedLastDitchRestore()
-{
-  return gRewindInfo->mNeedLastDitchRestore;
-}
-
-void
-LastDitchRestoreSnapshot()
-{
-  if (!gRewindInfo->mTakenSnapshot) {
-    MOZ_CRASH();
-  }
-
-  if (HasDivergedFromRecording()) {
-    MOZ_CRASH();
-  }
-
-  {
-    StaticMutexAutoLock lock(gLastDitchRestoreMutex);
-    if (!gRewindInfo->mNeedLastDitchRestore) {
-      if (gRewindInfo->mNumLastDitchRestores == MAX_LAST_DITCH_RESTORES) {
-        MOZ_CRASH();
-      }
-      gRewindInfo->mNeedLastDitchRestore = true;
-      gRewindInfo->mNumLastDitchRestores++;
-    }
-  }
-
-  // If we are on the main thread then we can restore to the last recorded
-  // snapshot immediately.
-  if (Thread::CurrentIsMainThread()) {
-    if (!gRewindInfo->mRestoreTargetSnapshot) {
-      gBeforeLastDitchRestoreHook();
-    }
-    RestoreSnapshotAndResume(gRewindInfo->mActiveRecordedSnapshot);
-    Unreachable();
-  }
-
-  // Otherwise, notify the main thread so that it can wake up from any
-  // Thread::Wait it is in. The main thread will check NeedLastDitchRestore()
-  // before waiting.
-  Thread::Notify(MainThreadId);
-
-  // Wait indefinitely until the main thread rewinds us.
-  while (true) {
-    Thread::Wait();
-  }
-  Unreachable();
 }
 
 static bool gRecordingDiverged;

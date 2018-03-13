@@ -58,10 +58,8 @@ namespace recordreplay {
         (const PLDHashTableOps* aFirstOps, const PLDHashTableOps* aSecondOps), \
         (aFirstOps, aSecondOps))                                \
   Macro(SetSnapshotHooks,                                       \
-        (BeforeSnapshotHook aBefore,                            \
-         AfterSnapshotHook aAfter,                              \
-         BeforeLastDitchRestoreHook aBeforeRestore),            \
-        (aBefore, aAfter, aBeforeRestore))                      \
+        (BeforeSnapshotHook aBefore, AfterSnapshotHook aAfter), \
+        (aBefore, aAfter))                                      \
   Macro(ResumeExecution, (), ())                                \
   Macro(RestoreSnapshotAndResume, (size_t aId), (aId))          \
   Macro(DivergeFromRecording, (), ())                           \

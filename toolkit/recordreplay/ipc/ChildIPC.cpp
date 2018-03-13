@@ -14,6 +14,7 @@
 #include "chrome/common/child_thread.h"
 #include "ipc/Channel.h"
 #include "js/ReplayHooks.h"
+#include "mozilla/Sprintf.h"
 #include "mozilla/VsyncDispatcher.h"
 
 #include "InfallibleVector.h"
@@ -193,7 +194,7 @@ InitRecordingOrReplayingProcess(base::ProcessId aParentPid,
 
   // If we failed to initialize then report it to the user.
   if (gInitializationFailureMessage) {
-    ReportFatalError(gInitializationFailureMessage);
+    ReportFatalError("%s", gInitializationFailureMessage);
     Unreachable();
   }
 }
@@ -211,17 +212,23 @@ ParentProcessId()
 }
 
 void
-ReportFatalError(const char* aError)
+ReportFatalError(const char* aFormat, ...)
 {
-  Print("***** Fatal Record/Replay Error *****\n%s\n", aError);
+  va_list ap;
+  va_start(ap, aFormat);
+  char buf[2048];
+  VsprintfLiteral(buf, aFormat, ap);
+  va_end(ap);
+
+  Print("***** Fatal Record/Replay Error *****\n%s\n", buf);
 
   // Construct a FatalErrorMessage on the stack, to avoid touching the heap.
-  char buf[4096];
+  char msgBuf[4096];
   size_t header = sizeof(channel::FatalErrorMessage);
-  size_t len = std::min(strlen(aError) + 1, sizeof(buf) - header);
-  channel::FatalErrorMessage* msg = new(buf) channel::FatalErrorMessage(header + len);
-  memcpy(&buf[header], aError, len);
-  buf[sizeof(buf) - 1] = 0;
+  size_t len = std::min(strlen(buf) + 1, sizeof(msgBuf) - header);
+  channel::FatalErrorMessage* msg = new(msgBuf) channel::FatalErrorMessage(header + len);
+  memcpy(&msgBuf[header], buf, len);
+  msgBuf[sizeof(msgBuf) - 1] = 0;
 
   channel::SendMessage(*msg);
 

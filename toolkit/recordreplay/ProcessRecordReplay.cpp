@@ -217,9 +217,7 @@ RecordReplayInterface_InternalInvalidateRecording(const char* aWhy)
     return;
   }
 
-  Print("!!!!!!!! Recording Invalidated: %s !!!!!!!!\n", aWhy);
-
-  LastDitchRestoreSnapshot();
+  child::ReportFatalError("Recording invalidated while replaying: %s", aWhy);
   Unreachable();
 }
 
@@ -229,9 +227,7 @@ static void
 CheckForInvalidRecording()
 {
   if (gRecordingInvalidReason) {
-    char buf[4096];
-    SprintfLiteral(buf, "Recording is unusable: %s", gRecordingInvalidReason);
-    child::ReportFatalError(buf);
+    child::ReportFatalError("Recording is unusable: %s", gRecordingInvalidReason);
     Unreachable();
   }
 }
@@ -447,11 +443,11 @@ RecordReplayInterface_InternalRecordReplayAssert(const char* aFormat, va_list aA
         SetCurrentStackString(text, text + strlen(text), sizeof(text) - strlen(text));
       }
 
-      char buf[4096];
-      SprintfLiteral(buf, "Assertion Mismatch: Thread %d Recorded: %s [%d]\nReplayed: %s [%d]\n",
-                     (int) thread->Id(), buffer, (int) streamPos, text,
-                     (int) thread->Events().StreamPosition());
-      child::ReportFatalError(buf);
+      child::ReportFatalError("Assertion Mismatch: Thread %d\n"
+                              "Recorded: %s [%d]\n"
+                              "Replayed: %s [%d]\n",
+                              (int) thread->Id(), buffer, (int) streamPos, text,
+                              (int) thread->Events().StreamPosition());
       Unreachable();
     }
 
@@ -521,11 +517,9 @@ RecordReplayInterface_InternalRecordReplayAssertBytes(const void* aData, size_t 
         }
       }
 
-      char buf[4096];
-      SprintfLiteral(buf, "Byte Comparison Check Failed: Position %d %d Length %d %d\n",
-                     (int) streamPos, (int) thread->Events().StreamPosition(),
-                     (int) oldSize, (int) aSize);
-      child::ReportFatalError(buf);
+      child::ReportFatalError("Byte Comparison Check Failed: Position %d %d Length %d %d\n",
+                              (int) streamPos, (int) thread->Events().StreamPosition(),
+                              (int) oldSize, (int) aSize);
       Unreachable();
     }
 

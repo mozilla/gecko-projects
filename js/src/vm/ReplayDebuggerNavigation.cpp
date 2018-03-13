@@ -1429,12 +1429,6 @@ AfterSnapshotHook(size_t snapshot, bool final, bool interim)
 }
 
 static void
-BeforeLastDitchRestoreHook()
-{
-    MOZ_CRASH();
-}
-
-static void
 DebugRequestHook(JS::replay::CharBuffer* requestBuffer)
 {
     gNavigation->mPhase->handleDebuggerRequest(requestBuffer);
@@ -1487,7 +1481,7 @@ ReplayDebugger::Initialize()
         JS::replay::hooks.resumeReplay = ResumeHook;
         JS::replay::hooks.respondAfterRecoveringFromDivergence = RespondAfterRecoveringFromDivergenceHook;
 
-        SetSnapshotHooks(::BeforeSnapshotHook, ::AfterSnapshotHook, ::BeforeLastDitchRestoreHook);
+        SetSnapshotHooks(::BeforeSnapshotHook, ::AfterSnapshotHook);
 
         {
             AutoPassThroughThreadEvents pt;

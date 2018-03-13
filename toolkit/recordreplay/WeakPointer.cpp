@@ -120,7 +120,7 @@ RecordReplayInterface_InternalWeakPointerAccess(const void* aPtr, bool aSuccess)
   // RecordReplay.h)
   if (IsReplaying() && aSuccess != !!gWeakPointerHits[id]) {
     EnsureNotDivergedFromRecording();
-    LastDitchRestoreSnapshot();
+    child::ReportFatalError("Inconsistent weak pointer success values during replay");
     Unreachable();
   }
 

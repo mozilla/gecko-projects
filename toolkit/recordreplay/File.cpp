@@ -167,10 +167,7 @@ StreamTemplate<Kind>::CheckInput(size_t aValue)
   size_t oldValue = aValue;
   RecordOrReplayScalar(&oldValue);
   if (oldValue != aValue) {
-    char buf[4096];
-    SprintfLiteral(buf,
-                   "Input Mismatch: Recorded: %d Replayed %d\n", (int) oldValue, (int) aValue);
-    child::ReportFatalError(buf);
+    child::ReportFatalError("Input Mismatch: Recorded: %zu Replayed %zu\n", oldValue, aValue);
     Unreachable();
   }
 }

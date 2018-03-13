@@ -81,22 +81,6 @@ namespace recordreplay {
 // without performing the later operation that triggered the rewind.
 ///////////////////////////////////////////////////////////////////////////////
 
-///////////////////////////////////////////////////////////////////////////////
-// Last Ditch Restoring.
-//
-// Sometimes while replaying we can go out of sync with the recording and be
-// unable to continue with execution. This is usually due to a bug in the
-// record/replay system, though it can be a bug somewhere else, like a data
-// race.
-//
-// Ideally this would never happen, but if it does we can improve quality of
-// service by trying to recover. The LastDitchRestoreSnapshot API will rewind
-// to the last recorded snapshot (if any) and resume from there, hopefully
-// avoiding the inconsistency and allowing execution to get further. Think of
-// the scene in Groundhog Day where Bill Murray drives off a cliff and then
-// wakes up in his hotel room back in the morning.
-///////////////////////////////////////////////////////////////////////////////
-
 // Initialize state needed for rewinding.
 void InitializeRewindState();
 
@@ -139,16 +123,6 @@ bool HasTemporarySnapshot();
 // Make sure that execution has not diverged from the recording after a call to
 // TakeSnapshotAndDivergeFromRecording, by rewinding to that snapshot if so.
 void EnsureNotDivergedFromRecording();
-
-// Restore state to the last snapshot, when an inconsistency with the recording
-// has been detected. This may be called on any thread. If it is not called on
-// the main thread, it will block until the main thread reaches a point where
-// it can restore the last snapshot. In either case it does not return.
-void LastDitchRestoreSnapshot();
-
-// For use by the main thread in testing if another thread has requested a last
-// ditch restore.
-bool NeedLastDitchRestore();
 
 } // namespace recordreplay
 } // namespace mozilla

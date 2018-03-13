@@ -60,7 +60,7 @@ already_AddRefed<gfx::DrawTarget> DrawTargetForRemoteDrawing(LayoutDeviceIntSize
 void SaveRecording(const char* aFilename);
 
 // Report a fatal error to the middleman process.
-void ReportFatalError(const char* aMessage);
+void ReportFatalError(const char* aFormat, ...);
 
 } // namespace child
 } // namespace recordreplay

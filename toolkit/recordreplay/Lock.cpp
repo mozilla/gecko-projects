@@ -158,8 +158,8 @@ Lock::EnterHelper(bool aBlockUntilAcquired)
 
   // Include an event in each thread's record when a lock acquire begins. This
   // is not required by the replay but is used to check that lock acquire order
-  // is consistent with the recording and that we will fail or recover with a
-  // last ditch restore instead of deadlocking.
+  // is consistent with the recording and that we will fail explicitly instead
+  // of deadlocking.
   thread->Events().RecordOrReplayThreadEvent(aBlockUntilAcquired
                                              ? ThreadEvent::Lock
                                              : ThreadEvent::TryLock);

@@ -593,12 +593,6 @@ Thread::Wait()
   MOZ_ASSERT(thread->IsRecordedThread() && !thread->PassThroughEvents());
 
   if (thread->IsMainThread()) {
-    if (NeedLastDitchRestore()) {
-      // Check for last ditch restores that were triggered from another thread.
-      LastDitchRestoreSnapshot();
-      Unreachable();
-    }
-
     WaitNoIdle();
     return;
   }

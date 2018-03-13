@@ -159,8 +159,7 @@ public:
   }
 
   // Make sure that a value is the same while replaying as it was while
-  // recording. If a failure occurs then a last ditch snapshot restore is
-  // attempted (see ProcessRewind.h).
+  // recording.
   void CheckInput(size_t aValue);
 
   // Add a thread event to this file. Each thread event in a file is followed

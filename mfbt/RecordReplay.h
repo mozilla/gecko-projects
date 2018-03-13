@@ -379,15 +379,9 @@ typedef void (*BeforeSnapshotHook)();
 //   to N. Snapshots in the range [M, N-1] are interim.
 typedef void (*AfterSnapshotHook)(size_t aSnapshot, bool aFinal, bool aInterim);
 
-// Signature for the hook called immediately before the process rewinds to the
-// last snapshot in an attempt to avoid a replay failure.
-// See 'Last Ditch Restoring' in ProcessRewind.h.
-typedef void (*BeforeLastDitchRestoreHook)();
-
 // Set hooks to call when encountering snapshots.
 MFBT_API void SetSnapshotHooks(BeforeSnapshotHook aBeforeSnapshot,
-                               AfterSnapshotHook aAfterSnapshot,
-                               BeforeLastDitchRestoreHook aBeforeLastDitchRestore);
+                               AfterSnapshotHook aAfterSnapshot);
 
 // When paused at a breakpoint or at a snapshot, unpause and proceed with
 // execution.
