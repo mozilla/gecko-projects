@@ -334,11 +334,12 @@ GeckoChildProcessHost::SyncLaunch(std::vector<std::string> aExtraOpts, int aTime
   MessageLoop* ioLoop = XRE_GetIOMessageLoop();
   NS_ASSERTION(MessageLoop::current() != ioLoop, "sync launch from the IO thread NYI");
 
-  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>, nsString, nsString>(
+  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>,
+                                              RecordReplayKind, nsString>(
     "ipc::GeckoChildProcessHost::RunPerformAsyncLaunch",
     this,
     &GeckoChildProcessHost::RunPerformAsyncLaunch,
-    aExtraOpts, nsString(), nsString()));
+    aExtraOpts, RecordReplayKind::None, nsString()));
 
   return WaitUntilConnected(aTimeoutMs);
 }
@@ -350,11 +351,12 @@ GeckoChildProcessHost::AsyncLaunch(std::vector<std::string> aExtraOpts)
 
   MessageLoop* ioLoop = XRE_GetIOMessageLoop();
 
-  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>, nsString, nsString>(
+  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>,
+                                              RecordReplayKind, nsString>(
     "ipc::GeckoChildProcessHost::RunPerformAsyncLaunch",
     this,
     &GeckoChildProcessHost::RunPerformAsyncLaunch,
-    aExtraOpts, nsString(), nsString()));
+    aExtraOpts, RecordReplayKind::None, nsString()));
 
   // This may look like the sync launch wait, but we only delay as
   // long as it takes to create the channel.
@@ -406,17 +408,18 @@ GeckoChildProcessHost::WaitUntilConnected(int32_t aTimeoutMs)
 
 bool
 GeckoChildProcessHost::LaunchAndWaitForProcessHandle(StringVector aExtraOpts,
-                                                     const nsAString& aRecordExecution,
-                                                     const nsAString& aReplayExecution)
+                                                     RecordReplayKind aRecordReplayKind,
+                                                     const nsAString& aRecordReplayFile)
 {
   PrepareLaunch();
 
   MessageLoop* ioLoop = XRE_GetIOMessageLoop();
-  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>, nsString, nsString>(
+  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>,
+                                              RecordReplayKind, nsString>(
     "ipc::GeckoChildProcessHost::RunPerformAsyncLaunch",
     this,
     &GeckoChildProcessHost::RunPerformAsyncLaunch,
-    aExtraOpts, nsString(aRecordExecution), nsString(aReplayExecution)));
+    aExtraOpts, aRecordReplayKind, nsString(aRecordReplayFile)));
 
   MonitorAutoLock lock(mMonitor);
   while (mProcessState < PROCESS_CREATED) {
@@ -518,8 +521,8 @@ SetEnv(const char* aEnv, const char* aValue)
 
 bool
 GeckoChildProcessHost::PerformAsyncLaunch(std::vector<std::string> aExtraOpts,
-                                          const nsAString& aRecordExecution,
-                                          const nsAString& aReplayExecution)
+                                          RecordReplayKind aRecordReplayKind,
+                                          const nsAString& aRecordReplayFile)
 {
 #ifdef MOZ_GECKO_PROFILER
   AutoSetProfilerEnvVarsForChildProcess profilerEnvironment;
@@ -527,22 +530,18 @@ GeckoChildProcessHost::PerformAsyncLaunch(std::vector<std::string> aExtraOpts,
 
   // Set environment variables if we want the child process to record or replay
   // its behavior.
-  MOZ_ASSERT(!aRecordExecution.Length() || !aReplayExecution.Length());
-  if (recordreplay::IsMiddleman()) {
-    MOZ_ASSERT(TestEnv("MIDDLEMAN_RECORD") != TestEnv("MIDDLEMAN_REPLAY"));
-    if (TestEnv("MIDDLEMAN_RECORD")) {
-      SetEnv("RECORD", getenv("MIDDLEMAN_RECORD"));
-    } else {
-      SetEnv("REPLAY", getenv("MIDDLEMAN_REPLAY"));
-    }
-  } else if (aRecordExecution.Length()) {
+  const char* recordReplayEnv;
+  switch (aRecordReplayKind) {
+  case RecordReplayKind::None: recordReplayEnv = nullptr; break;
+  case RecordReplayKind::MiddlemanRecord: recordReplayEnv = "MIDDLEMAN_RECORD"; break;
+  case RecordReplayKind::MiddlemanReplay: recordReplayEnv = "MIDDLEMAN_REPLAY"; break;
+  case RecordReplayKind::Record: recordReplayEnv = "RECORD"; break;
+  case RecordReplayKind::Replay: recordReplayEnv = "REPLAY"; break;
+  }
+  if (recordReplayEnv) {
     nsAutoCString cmd;
-    cmd.Append(NS_ConvertUTF16toUTF8(aRecordExecution));
-    SetEnv("MIDDLEMAN_RECORD", cmd.get());
-  } else if (aReplayExecution.Length()) {
-    nsAutoCString cmd;
-    cmd.Append(NS_ConvertUTF16toUTF8(aReplayExecution));
-    SetEnv("MIDDLEMAN_REPLAY", cmd.get());
+    cmd.Append(NS_ConvertUTF16toUTF8(aRecordReplayFile));
+    SetEnv(recordReplayEnv, cmd.get());
   }
 
   // - Note: this code is not called re-entrantly, nor are restoreOrig*LogName
@@ -586,10 +585,8 @@ GeckoChildProcessHost::PerformAsyncLaunch(std::vector<std::string> aExtraOpts,
 
   bool retval = PerformAsyncLaunchInternal(aExtraOpts);
 
-  if (aRecordExecution.Length()) {
-    SetEnv("MIDDLEMAN_RECORD", nullptr);
-  } else if (aReplayExecution.Length()) {
-    SetEnv("MIDDLEMAN_REPLAY", nullptr);
+  if (recordReplayEnv) {
+    SetEnv(recordReplayEnv, nullptr);
   }
 
   return retval;
@@ -597,12 +594,12 @@ GeckoChildProcessHost::PerformAsyncLaunch(std::vector<std::string> aExtraOpts,
 
 bool
 GeckoChildProcessHost::RunPerformAsyncLaunch(std::vector<std::string> aExtraOpts,
-                                             nsString aRecordExecution,
-                                             nsString aReplayExecution)
+                                             RecordReplayKind aRecordReplayKind,
+                                             nsString aRecordReplayFile)
 {
   InitializeChannel();
 
-  bool ok = PerformAsyncLaunch(aExtraOpts, aRecordExecution, aReplayExecution);
+  bool ok = PerformAsyncLaunch(aExtraOpts, aRecordReplayKind, aRecordReplayFile);
   if (!ok) {
     // WaitUntilConnected might be waiting for us to signal.
     // If something failed let's set the error state and notify.

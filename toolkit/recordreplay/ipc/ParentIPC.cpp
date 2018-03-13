@@ -219,6 +219,9 @@ ChannelToUIProcess()
   return gChildProtocol->GetIPCChannel();
 }
 
+static bool gChildProcessIsRecording;
+static char* gChildProcessFilename;
+
 // Message loop for forwarding messages between the parent process and a
 // recording process.
 static MessageLoop* gForwardingMessageLoop;
@@ -241,7 +244,13 @@ ForwardingMessageLoopMain(void*)
   ipc::GeckoChildProcessHost* childProcess =
     new ipc::GeckoChildProcessHost(GeckoProcessType_Content);
   std::vector<std::string> extraArgs;
-  if (!childProcess->LaunchAndWaitForProcessHandle(extraArgs, nsAutoString(), nsAutoString())) {
+  ipc::GeckoChildProcessHost::RecordReplayKind recordReplayKind =
+    gChildProcessIsRecording
+    ? ipc::GeckoChildProcessHost::RecordReplayKind::Record
+    : ipc::GeckoChildProcessHost::RecordReplayKind::Replay;
+  nsAutoString recordReplayFile;
+  recordReplayFile.Append(NS_ConvertUTF8toUTF16(gChildProcessFilename));
+  if (!childProcess->LaunchAndWaitForProcessHandle(extraArgs, recordReplayKind, recordReplayFile)) {
     MOZ_CRASH();
   }
 
@@ -263,8 +272,6 @@ static void ChannelThreadMain(void*);
 // Initialize hooks used by the debugger.
 static void InitDebuggerHooks();
 
-static bool gChildProcessIsRecording;
-
 void
 Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChildID,
            dom::ContentChild* aContentChild)
@@ -272,6 +279,11 @@ Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChild
   MOZ_ASSERT(NS_IsMainThread());
 
   gChildProcessIsRecording = TestEnv("MIDDLEMAN_RECORD");
+
+  gChildProcessFilename =
+    gChildProcessIsRecording
+    ? strdup(getenv("MIDDLEMAN_RECORD"))
+    : strdup(getenv("MIDDLEMAN_REPLAY"));
 
   InitDebuggerHooks();
   channel::InitParent();

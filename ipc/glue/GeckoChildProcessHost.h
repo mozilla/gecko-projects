@@ -52,6 +52,14 @@ public:
 
   virtual bool WaitUntilConnected(int32_t aTimeoutMs = 0);
 
+  enum class RecordReplayKind {
+    None,
+    MiddlemanRecord,
+    MiddlemanReplay,
+    Record,
+    Replay
+  };
+
   // Block until the IPC channel for our subprocess is initialized and
   // the OS process is created.  The subprocess may or may not have
   // connected back to us when this method returns.
@@ -65,8 +73,8 @@ public:
   // we return.  But we don't know if dynamic linking succeeded on
   // either platform.
   bool LaunchAndWaitForProcessHandle(StringVector aExtraOpts,
-                                     const nsAString& aRecordExecution,
-                                     const nsAString& aReplayExecution);
+                                     RecordReplayKind aRecordReplayKind,
+                                     const nsAString& aRecordReplayFile);
 
   // Block until the child process has been created and it connects to
   // the IPC channel, meaning it's fully initialized.  (Or until an
@@ -75,8 +83,8 @@ public:
                   int32_t timeoutMs=0);
 
   virtual bool PerformAsyncLaunch(StringVector aExtraOpts,
-                                  const nsAString& aRecordExecution,
-                                  const nsAString& aReplayExecution);
+                                  RecordReplayKind aRecordReplayKind,
+                                  const nsAString& aRecordReplayFile);
 
   virtual void OnChannelConnected(int32_t peer_pid) override;
   virtual void OnMessageReceived(IPC::Message&& aMsg) override;
@@ -176,8 +184,8 @@ private:
   bool PerformAsyncLaunchInternal(std::vector<std::string>& aExtraOpts);
 
   bool RunPerformAsyncLaunch(StringVector aExtraOpts,
-                             nsString aRecordExecution,
-                             nsString aReplayExecution);
+                             RecordReplayKind aRecordReplayKind,
+                             nsString aRecordReplayFile);
 
   enum class BinaryPathType {
     Self,

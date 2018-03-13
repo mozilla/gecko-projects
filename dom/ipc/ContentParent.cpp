@@ -2074,7 +2074,18 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
     extraArgs.push_back("-safeMode");
   }
 
-  if (!mSubprocess->LaunchAndWaitForProcessHandle(extraArgs, mRecordExecution, mReplayExecution)) {
+  GeckoChildProcessHost::RecordReplayKind recordReplayKind =
+    GeckoChildProcessHost::RecordReplayKind::None;
+  nsAutoString recordReplayFile;
+  if (mRecordExecution.Length()) {
+    recordReplayFile.Append(mRecordExecution);
+    recordReplayKind = GeckoChildProcessHost::RecordReplayKind::MiddlemanRecord;
+  } else if (mReplayExecution.Length()) {
+    recordReplayFile.Append(mReplayExecution);
+    recordReplayKind = GeckoChildProcessHost::RecordReplayKind::MiddlemanReplay;
+  }
+
+  if (!mSubprocess->LaunchAndWaitForProcessHandle(extraArgs, recordReplayKind, recordReplayFile)) {
     MarkAsDead();
     return false;
   }
