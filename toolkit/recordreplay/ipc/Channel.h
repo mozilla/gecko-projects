@@ -9,6 +9,7 @@
 
 #include "base/process.h"
 
+#include "js/ReplayHooks.h"
 #include "mozilla/gfx/Types.h"
 #include "mozilla/Maybe.h"
 
@@ -67,10 +68,12 @@ void InitAndConnectChild(base::ProcessId aMiddlemanPid);
   /* Save the current recording. */                            \
   Macro(SaveRecording)                                         \
                                                                \
-  /* Debugger JSON messages are initially sent from the parent. If needResponse */ \
-  /* is set in the message then the child unpauses after receiving the message, */ \
-  /* and will pause after it sends a DebuggerResponse for the message. */ \
+  /* Debugger JSON messages are initially sent from the parent. The child unpauses */ \
+  /* after receiving the message and will pause after it sends a DebuggerResponse. */ \
   Macro(DebuggerRequest)                                       \
+                                                               \
+  /* Set or clear a JavaScript breakpoint. */                  \
+  Macro(SetBreakpoint)                                         \
                                                                \
   /* Unpause the child and play execution either to the next point when a */ \
   /* breakpoint is hit, or to the next snapshot. Resumption may be either */ \
@@ -227,19 +230,16 @@ struct SaveRecordingMessage : public Message
 
 struct DebuggerRequestMessage : public Message
 {
-  bool mNeedResponse;
-
-  DebuggerRequestMessage(uint32_t aSize, bool aNeedResponse)
+  DebuggerRequestMessage(uint32_t aSize)
     : Message(MessageType::DebuggerRequest, aSize)
-    , mNeedResponse(aNeedResponse)
   {}
 
   const char16_t* Buffer() const { return Data<DebuggerRequestMessage, char16_t>(); }
   size_t BufferSize() const { return DataSize<DebuggerRequestMessage, char16_t>(); }
 
-  static DebuggerRequestMessage* New(const char16_t* aBuffer, size_t aBufferSize, bool aNeedResponse) {
+  static DebuggerRequestMessage* New(const char16_t* aBuffer, size_t aBufferSize) {
     DebuggerRequestMessage* res =
-      NewWithData<DebuggerRequestMessage, char16_t>(aBufferSize, aNeedResponse);
+      NewWithData<DebuggerRequestMessage, char16_t>(aBufferSize);
     MOZ_RELEASE_ASSERT(res->BufferSize() == aBufferSize);
     PodCopy(res->Data<DebuggerRequestMessage, char16_t>(), aBuffer, aBufferSize);
     return res;
@@ -262,6 +262,22 @@ struct DebuggerResponseMessage : public Message
     PodCopy(res->Data<DebuggerResponseMessage, char16_t>(), aBuffer, aBufferSize);
     return res;
   }
+};
+
+struct SetBreakpointMessage : public Message
+{
+  // ID of the breakpoint to change.
+  size_t mId;
+
+  // New position of the breakpoint. If this is invalid then the breakpoint is
+  // being cleared.
+  JS::replay::ExecutionPosition mPosition;
+
+  SetBreakpointMessage(size_t aId, const JS::replay::ExecutionPosition& aPosition)
+    : Message(MessageType::SetBreakpoint, sizeof(*this))
+    , mId(aId)
+    , mPosition(aPosition)
+  {}
 };
 
 struct ResumeMessage : public Message

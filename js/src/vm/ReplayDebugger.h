@@ -158,52 +158,6 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
 
     struct Activity;
 
-    // Identification for a position during JS execution in the replaying process.
-    struct ExecutionPosition
-    {
-        enum Kind {
-            Invalid,
-            Break,       // No frameIndex
-            OnStep,
-            OnPop,       // No offset, script/frameIndex is optional
-            EnterFrame,  // No offset/script/frameIndex
-        } kind;
-        size_t script;
-        size_t offset;
-        size_t frameIndex;
-
-        static const size_t EMPTY_SCRIPT = (size_t) -1;
-        static const size_t EMPTY_OFFSET = (size_t) -1;
-        static const size_t EMPTY_FRAME_INDEX = (size_t) -1;
-
-        ExecutionPosition()
-          : kind(Invalid), script(0), offset(0), frameIndex(0)
-        {}
-
-        explicit ExecutionPosition(Kind kind,
-                                   size_t script = EMPTY_SCRIPT,
-                                   size_t offset = EMPTY_OFFSET,
-                                   size_t frameIndex = EMPTY_FRAME_INDEX)
-          : kind(kind), script(script), offset(offset), frameIndex(frameIndex)
-        {}
-
-        bool isValid() const { return kind != Invalid; }
-
-        inline bool operator ==(const ExecutionPosition& o) const {
-            return kind == o.kind
-                && script == o.script
-                && offset == o.offset
-                && frameIndex == o.frameIndex;
-        }
-
-        // Return whether an execution point matching |o| also matches this.
-        inline bool subsumes(const ExecutionPosition& o) const {
-            return (*this == o)
-                || (kind == OnPop && o.kind == OnPop && script == EMPTY_SCRIPT)
-                || (kind == Break && o.kind == OnStep && script == o.script && offset == o.offset);
-        }
-    };
-
   private:
     JSObject* addScript(JSContext* cx, size_t id, HandleObject data);
 
@@ -248,15 +202,11 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
 
     // Handle a debugger request from the middleman.
     static void ProcessRequest(const char16_t* requestBuffer, size_t requestLength,
-                               Maybe<JS::replay::CharBuffer>* responseBuffer);
+                               JS::replay::CharBuffer* responseBuffer);
 
     // Attempt to diverge from the recording during a debugger request,
     // returning whether the diverge was allowed.
     static bool MaybeDivergeFromRecording();
-
-    // While paused, mark a change to an installed breakpoint to make before
-    // the process resumes (or rewinds) execution.
-    static void AddBreakpointOperation(size_t id, const ExecutionPosition& position);
 
     // While paused after popping a frame, indicate whether the frame threw and
     // the returned/thrown value. Returns false if not at the exit to a frame.

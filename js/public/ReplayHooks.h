@@ -18,6 +18,52 @@ namespace replay {
 
 typedef mozilla::Vector<char16_t> CharBuffer;
 
+// Identification for a position during JS execution in the replaying process.
+struct ExecutionPosition
+{
+    enum Kind {
+        Invalid,
+        Break,       // No frameIndex
+        OnStep,
+        OnPop,       // No offset, script/frameIndex is optional
+        EnterFrame,  // No offset/script/frameIndex
+    } kind;
+    size_t script;
+    size_t offset;
+    size_t frameIndex;
+
+    static const size_t EMPTY_SCRIPT = (size_t) -1;
+    static const size_t EMPTY_OFFSET = (size_t) -1;
+    static const size_t EMPTY_FRAME_INDEX = (size_t) -1;
+
+    ExecutionPosition()
+      : kind(Invalid), script(0), offset(0), frameIndex(0)
+    {}
+
+    explicit ExecutionPosition(Kind kind,
+                               size_t script = EMPTY_SCRIPT,
+                               size_t offset = EMPTY_OFFSET,
+                               size_t frameIndex = EMPTY_FRAME_INDEX)
+      : kind(kind), script(script), offset(offset), frameIndex(frameIndex)
+    {}
+
+    bool isValid() const { return kind != Invalid; }
+
+    inline bool operator ==(const ExecutionPosition& o) const {
+        return kind == o.kind
+            && script == o.script
+            && offset == o.offset
+            && frameIndex == o.frameIndex;
+    }
+
+    // Return whether an execution point matching |o| also matches this.
+    inline bool subsumes(const ExecutionPosition& o) const {
+        return (*this == o)
+            || (kind == OnPop && o.kind == OnPop && script == EMPTY_SCRIPT)
+            || (kind == Break && o.kind == OnStep && script == o.script && offset == o.offset);
+    }
+};
+
 // These hooks are used for transmitting messages between a ReplayDebugger in
 // a middleman process and corresponding state in the replaying process.
 struct Hooks
@@ -26,6 +72,10 @@ struct Hooks
     void (*debugRequestMiddleman)(const CharBuffer& buffer, CharBuffer* response);
     void (*debugRequestReplay)(CharBuffer* buffer);
     void (*debugResponseReplay)(const CharBuffer& buffer);
+
+    // Set or clear a breakpoint in the replayed process.
+    void (*setBreakpointMiddleman)(size_t id, const ExecutionPosition& pos);
+    void (*setBreakpointReplay)(size_t id, const ExecutionPosition& pos);
 
     // Allow the replayed process to resume execution.
     void (*resumeMiddleman)(bool forward, bool hitOtherBreakpoint);

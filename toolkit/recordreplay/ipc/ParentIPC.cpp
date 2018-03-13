@@ -828,26 +828,29 @@ HookDebuggerRequest(const JS::replay::CharBuffer& aBuffer, JS::replay::CharBuffe
 {
   WaitUntilChildIsPaused(/* aPokeChild = */ true);
 
-  // If aResponse is set then the child will need to unpause while it answers
-  // the query we are sending it.
+  // The child will need to unpause while it answers the query we are sending it.
   MOZ_RELEASE_ASSERT(!gResponseBuffer);
-  if (aResponse) {
-    gResponseBuffer = aResponse;
-    SetChildIsPaused(false);
-  }
+  gResponseBuffer = aResponse;
+  SetChildIsPaused(false);
 
   channel::DebuggerRequestMessage* msg =
-    channel::DebuggerRequestMessage::New(aBuffer.begin(), aBuffer.length(), !!aResponse);
+    channel::DebuggerRequestMessage::New(aBuffer.begin(), aBuffer.length());
   channel::SendMessage(*msg);
   free(msg);
 
   // Wait for the child to respond to the query.
-  if (aResponse) {
-    WaitUntilChildIsPaused();
-    MOZ_RELEASE_ASSERT(gResponseBuffer == aResponse);
-    MOZ_RELEASE_ASSERT(gResponseBuffer->length() != 0);
-    gResponseBuffer = nullptr;
-  }
+  WaitUntilChildIsPaused();
+  MOZ_RELEASE_ASSERT(gResponseBuffer == aResponse);
+  MOZ_RELEASE_ASSERT(gResponseBuffer->length() != 0);
+  gResponseBuffer = nullptr;
+}
+
+static void
+HookSetBreakpoint(size_t aId, const JS::replay::ExecutionPosition& aPosition)
+{
+  WaitUntilChildIsPaused(/* aPokeChild = */ true);
+
+  channel::SendMessage(channel::SetBreakpointMessage(aId, aPosition));
 }
 
 // Flags for the preferred direction of travel when execution unpauses,
@@ -984,6 +987,7 @@ static void
 InitDebuggerHooks()
 {
   JS::replay::hooks.debugRequestMiddleman = HookDebuggerRequest;
+  JS::replay::hooks.setBreakpointMiddleman = HookSetBreakpoint;
   JS::replay::hooks.resumeMiddleman = HookResume;
   JS::replay::hooks.pauseMiddleman = HookPause;
 }

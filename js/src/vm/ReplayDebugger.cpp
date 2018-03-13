@@ -335,7 +335,7 @@ struct ReplayDebugger::Activity
         defineProperty(obj, property, handlify(v));
     }
 
-    HandleObject sendRequest(HandleObject request, bool needResponse = true);
+    HandleObject sendRequest(HandleObject request);
 
     bool stringEquals(HandleString str, const char* ascii) {
         bool match;
@@ -466,7 +466,7 @@ FillCharBufferCallback(const char16_t* buf, uint32_t len, void* data)
 }
 
 HandleObject
-ReplayDebugger::Activity::sendRequest(HandleObject request, bool needResponse)
+ReplayDebugger::Activity::sendRequest(HandleObject request)
 {
     if (!success())
         return nullptr;
@@ -475,30 +475,25 @@ ReplayDebugger::Activity::sendRequest(HandleObject request, bool needResponse)
     if (!ToJSONMaybeSafely(cx, request, FillCharBufferCallback, &requestBuffer))
         return nullptr;
 
-    if (needResponse) {
-        JS::replay::CharBuffer responseBuffer;
-        JS::replay::hooks.debugRequestMiddleman(requestBuffer, &responseBuffer);
+    JS::replay::CharBuffer responseBuffer;
+    JS::replay::hooks.debugRequestMiddleman(requestBuffer, &responseBuffer);
 
-        RootedValue responseValue(cx);
-        if (!JS_ParseJSON(cx, responseBuffer.begin(), responseBuffer.length(), &responseValue))
-            return nullptr;
+    RootedValue responseValue(cx);
+    if (!JS_ParseJSON(cx, responseBuffer.begin(), responseBuffer.length(), &responseValue))
+        return nullptr;
 
-        if (!responseValue.isObject()) {
-            JS_ReportErrorASCII(cx, "Expected object from ParseJSON");
-            return nullptr;
-        }
-        HandleObject response = handlify(&responseValue.toObject());
-        if (HandleString exception = getStringProperty(response, "exception")) {
-            char* str = JS_EncodeString(cx, exception);
-            JS_ReportErrorASCII(cx, "Exception thrown in replaying process: %s", str);
-            js_free(str);
-            return nullptr;
-        }
-        return response;
+    if (!responseValue.isObject()) {
+        JS_ReportErrorASCII(cx, "Expected object from ParseJSON");
+        return nullptr;
     }
-
-    JS::replay::hooks.debugRequestMiddleman(requestBuffer, nullptr);
-    return nullptr;
+    HandleObject response = handlify(&responseValue.toObject());
+    if (HandleString exception = getStringProperty(response, "exception")) {
+        char* str = JS_EncodeString(cx, exception);
+        JS_ReportErrorASCII(cx, "Exception thrown in replaying process: %s", str);
+        js_free(str);
+        return nullptr;
+    }
+    return response;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1556,7 +1551,7 @@ ReplayDebugger::envVariable(JSContext* cx, HandleObject obj, CallArgs& args)
 // Breakpoints
 ///////////////////////////////////////////////////////////////////////////////
 
-typedef ReplayDebugger::ExecutionPosition ExecutionPosition;
+typedef JS::replay::ExecutionPosition ExecutionPosition;
 
 struct ReplayDebugger::Breakpoint
 {
@@ -1594,32 +1589,20 @@ SetReplayBreakpoint(JSContext* cx, JSObject* debugger, JSObject* handler,
         return false;
     }
 
-    ReplayDebugger::Activity a(cx);
-    HandleObject request = a.newRequestObject("setBreakpoint");
-    a.defineProperty(request, "id", breakpointId);
-    a.defineProperty(request, "script", position.script);
-    a.defineProperty(request, "offset", position.offset);
-    a.defineProperty(request, "frameIndex", position.frameIndex);
-    a.defineProperty(request, "breakpointKind", (size_t) position.kind);
-    a.sendRequest(request, /* needResponse = */ false);
-    if (!a.success())
-        return false;
-
+    JS::replay::hooks.setBreakpointMiddleman(breakpointId, position);
     return true;
 }
 
 static bool
 ClearReplayBreakpoint(JSContext* cx, size_t breakpointId)
 {
-    ReplayDebugger::Activity a(cx);
-    HandleObject request = a.newRequestObject("clearBreakpoint");
-    a.defineProperty(request, "id", breakpointId);
-    a.sendRequest(request, /* needResponse = */ false);
-    if (!a.success())
-        return false;
+    // Make sure we are always on the process main thread when using gReplayBreakpoints.
+    MOZ_RELEASE_ASSERT(!cx->runtime()->parentRuntime);
 
     js_delete(gReplayBreakpoints[breakpointId]);
     gReplayBreakpoints[breakpointId] = nullptr;
+
+    JS::replay::hooks.setBreakpointMiddleman(breakpointId, ExecutionPosition());
     return true;
 }
 
@@ -3023,31 +3006,7 @@ Respond_popFrameResult(ReplayDebugger::Activity& a, HandleObject request)
     return response;
 }
 
-static bool
-Respond_setBreakpoint(ReplayDebugger::Activity& a, HandleObject request)
-{
-    size_t id = a.getScalarProperty(request, "id");
-    size_t script = a.getScalarProperty(request, "script");
-    size_t offset = a.getScalarProperty(request, "offset");
-    size_t frameIndex = a.getScalarProperty(request, "frameIndex");
-    size_t kind = a.getScalarProperty(request, "breakpointKind");
-    MOZ_RELEASE_ASSERT(script);
-
-    ExecutionPosition position((ExecutionPosition::Kind) kind, script, offset, frameIndex);
-    ReplayDebugger::AddBreakpointOperation(id, position);
-    return true;
-}
-
-static bool
-Respond_clearBreakpoint(ReplayDebugger::Activity& a, HandleObject request)
-{
-    size_t id = a.getScalarProperty(request, "id");
-
-    ReplayDebugger::AddBreakpointOperation(id, ExecutionPosition());
-    return true;
-}
-
-#define FOR_EACH_RESPONSE(Macro)                \
+#define FOR_EACH_REQUEST(Macro)                 \
     Macro(findScripts)                          \
     Macro(getContent)                           \
     Macro(getSource)                            \
@@ -3062,10 +3021,6 @@ Respond_clearBreakpoint(ReplayDebugger::Activity& a, HandleObject request)
     Macro(getEnvironmentNames)                  \
     Macro(frameEvaluate)
 
-#define FOR_EACH_NON_RESPONSE(Macro)            \
-    Macro(setBreakpoint)                        \
-    Macro(clearBreakpoint)
-
 static bool
 RequestMatch(ReplayDebugger::Activity& a, HandleString kind, const char* name)
 {
@@ -3074,7 +3029,7 @@ RequestMatch(ReplayDebugger::Activity& a, HandleString kind, const char* name)
 
 /* static */ void
 ReplayDebugger::ProcessRequest(const char16_t* requestBuffer, size_t requestLength,
-                               Maybe<JS::replay::CharBuffer>* responseBuffer)
+                               JS::replay::CharBuffer* responseBuffer)
 {
     JSContext* cx = TlsContext.get();
     AutoCompartment ac(cx, *gHookGlobal);
@@ -3093,28 +3048,14 @@ ReplayDebugger::ProcessRequest(const char16_t* requestBuffer, size_t requestLeng
         MOZ_CRASH();
 
     RootedObject response(cx);
-    bool needResponse = true;
 
-#define HANDLE_RESPONSE(Name)                                   \
+#define HANDLE_REQUEST(Name)                                    \
     if (RequestMatch(a, kind, #Name))                           \
         response = Respond_ ##Name (a, request);
-FOR_EACH_RESPONSE(HANDLE_RESPONSE)
+FOR_EACH_REQUEST(HANDLE_REQUEST)
 #undef HANDLE_RESPONSE
 
-#define HANDLE_NON_RESPONSE(Name)               \
-    if (RequestMatch(a, kind, #Name)) {         \
-        Respond_ ##Name (a, request);           \
-        needResponse = false;                   \
-    }
-FOR_EACH_NON_RESPONSE(HANDLE_NON_RESPONSE)
-#undef HANDLE_NON_RESPONSE
-
     mozilla::recordreplay::DisallowUnhandledDivergeFromRecording();
-
-    if (!needResponse) {
-        MOZ_RELEASE_ASSERT(!cx->isExceptionPending());
-        return;
-    }
 
     MOZ_RELEASE_ASSERT(cx->isExceptionPending() || response);
 
@@ -3129,7 +3070,6 @@ FOR_EACH_NON_RESPONSE(HANDLE_NON_RESPONSE)
             MOZ_CRASH();
     }
 
-    responseBuffer->emplace();
-    if (!ToJSONMaybeSafely(cx, response, FillCharBufferCallback, &responseBuffer->ref()))
+    if (!ToJSONMaybeSafely(cx, response, FillCharBufferCallback, responseBuffer))
         MOZ_CRASH();
 }

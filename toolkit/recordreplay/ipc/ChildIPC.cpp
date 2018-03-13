@@ -13,7 +13,6 @@
 #include "base/task.h"
 #include "chrome/common/child_thread.h"
 #include "ipc/Channel.h"
-#include "js/ReplayHooks.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/VsyncDispatcher.h"
 
@@ -103,6 +102,14 @@ ChannelThreadMain(void*)
         MOZ_CRASH();
       }
       PauseMainThreadAndInvokeCallback([=]() { JS::replay::hooks.debugRequestReplay(buf); });
+      break;
+    }
+    case channel::MessageType::SetBreakpoint: {
+      MOZ_RELEASE_ASSERT(MainThreadShouldPause());
+      const channel::SetBreakpointMessage& nmsg = *(channel::SetBreakpointMessage*) msg;
+      PauseMainThreadAndInvokeCallback([=]() {
+          JS::replay::hooks.setBreakpointReplay(nmsg.mId, nmsg.mPosition);
+        });
       break;
     }
     case channel::MessageType::Resume: {
