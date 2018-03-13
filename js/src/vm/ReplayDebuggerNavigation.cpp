@@ -246,6 +246,7 @@ class BreakpointPausedPhase : public NavigationPhase
     }
 
     void afterSnapshot(size_t snapshot, bool final) override;
+    void positionHit(const std::function<bool(const ExecutionPosition&)>& match) override;
     void resume(bool forward, bool hitOtherBreakpoints) override;
     bool getPoppedFrameResult(bool* throwing, MutableHandleValue result) override;
     void handleDebuggerRequest(JS::replay::CharBuffer* requestBuffer) override;
@@ -269,6 +270,7 @@ class SnapshotPausedPhase : public NavigationPhase
     }
 
     void afterSnapshot(size_t snapshot, bool final) override;
+    void positionHit(const std::function<bool(const ExecutionPosition&)>& match) override;
     void resume(bool forward, bool hitOtherBreakpoints) override;
     void handleDebuggerRequest(JS::replay::CharBuffer* requestBuffer) override;
     void addBreakpointOperation(size_t id, const ExecutionPosition& pos) override;
@@ -493,6 +495,12 @@ BreakpointPausedPhase::afterSnapshot(size_t snapshot, bool final)
 }
 
 void
+BreakpointPausedPhase::positionHit(const std::function<bool(const ExecutionPosition&)>& match)
+{
+    // Ignore positions hit while paused (we're probably doing an eval).
+}
+
+void
 BreakpointPausedPhase::resume(bool forward, bool hitOtherBreakpoints)
 {
     MOZ_RELEASE_ASSERT(!mRecoveringFromDivergence);
@@ -674,6 +682,12 @@ SnapshotPausedPhase::afterSnapshot(size_t snapshot, bool final)
     MOZ_RELEASE_ASSERT(snapshot == mSnapshot);
     MOZ_RELEASE_ASSERT(final == mFinal);
     JS::replay::hooks.hitSnapshotReplay(mSnapshot, mFinal, /* interim = */ false);
+}
+
+void
+SnapshotPausedPhase::positionHit(const std::function<bool(const ExecutionPosition&)>& match)
+{
+    // Ignore positions hit while paused (we're probably doing an eval).
 }
 
 void
