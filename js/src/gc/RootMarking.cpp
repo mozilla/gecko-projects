@@ -365,6 +365,9 @@ js::gc::GCRuntime::traceRuntimeCommon(JSTracer* trc, TraceOrMarkRuntime traceOrM
     // Trace helper thread roots.
     HelperThreadState().trace(trc, session);
 
+    // Trace roots used while debugging a replaying process.
+    ReplayDebugger::markRoots(trc);
+
     // Trace the embedding's black and gray roots.
     if (!JS::CurrentThreadIsHeapMinorCollecting()) {
         gcstats::AutoPhase ap(stats(), gcstats::PhaseKind::MARK_EMBEDDING);
@@ -386,8 +389,6 @@ js::gc::GCRuntime::traceRuntimeCommon(JSTracer* trc, TraceOrMarkRuntime traceOrM
             if (traceOrMark == TraceRuntime)
                 (*op)(trc, grayRootTracer.data);
         }
-
-        ReplayDebugger::markRoots(trc);
     }
 }
 
