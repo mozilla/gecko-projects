@@ -14,7 +14,7 @@ def generate_specifications_of_artifacts_to_sign(
     if kind == 'release-source-signing':
         artifacts_specifications = [{
             'artifacts': [
-                'public/build/source.tar.xz'
+                'public/build/SOURCE'
             ],
             'formats': ['gpg'],
         }]
