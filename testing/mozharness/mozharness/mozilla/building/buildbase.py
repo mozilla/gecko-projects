@@ -1135,6 +1135,7 @@ or run without that action (ie: --no-{action})"
         # TODO make this method its own action
         c = self.config
         dirs = self.query_abs_dirs()
+        self.mkdir_p(os.path.dirname(dirs['abs_src_dir']))
         repo = self._query_repo()
         vcs_checkout_kwargs = {
             'repo': repo,
