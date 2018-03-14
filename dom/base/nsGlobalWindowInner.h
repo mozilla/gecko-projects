@@ -312,6 +312,7 @@ public:
   void ReleaseEvents();
   void Dump(const nsAString& aStr);
   void RecordReplayAssert(const nsAString& aStr);
+  void RecordReplayDirective(long aDirective);
   void SetResizable(bool aResizable) const;
 
   // nsIDOMEventTarget

@@ -98,6 +98,10 @@ void FixupFreeRegionsAfterRewind();
 void PrepareMemoryForFirstRecordingRewind(FileHandle aReplayFd);
 FileHandle GetReplayFileAfterRecordingRewind();
 
+// Set whether to allow intentionally crashing in this process via the
+// RecordReplayDirective method.
+void SetAllowIntentionalCrashes(bool aAllowed);
+
 // When WANT_COUNTDOWN_THREAD is defined (see MemorySnapshot.cpp), set a count
 // that, after a thread consumes it, causes the thread to busy-wait. This is
 // used for debugging and is a workaround for lldb often being unable to

@@ -312,6 +312,7 @@ partial interface Window {
   void                      dump(DOMString str);
 
   void                      recordReplayAssert(DOMString str);
+  void                      recordReplayDirective(long directive);
 
   /**
    * This method is here for backwards compatibility with 4.x only,

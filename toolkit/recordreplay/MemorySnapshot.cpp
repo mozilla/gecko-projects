@@ -374,10 +374,17 @@ struct MemoryInfo {
   // Recent dirty memory faults.
   void* mDirtyMemoryFaults[50];
 
+  // Whether RecordReplayDirective may crash this process.
+  bool mIntentionalCrashesAllowed;
+
+  // Whether the CrashSoon directive has been given to this process.
+  bool mCrashSoon;
+
   MemoryInfo()
     : mMemoryChangesAllowed(true)
     , mFreeUntrackedRegions(UntrackedMemoryKind::FreeRegions)
     , mStartTime(CurrentTime())
+    , mIntentionalCrashesAllowed(true)
   {
     // The singleton MemoryInfo is allocated with zeroed memory, so other
     // fields do not need explicit initialization.
@@ -474,6 +481,38 @@ DumpTimers()
           gTimerKindNames[i], (int) hits, time / 1000000.0);
   }
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// Directives
+///////////////////////////////////////////////////////////////////////////////
+
+void
+SetAllowIntentionalCrashes(bool aAllowed)
+{
+  gMemoryInfo->mIntentionalCrashesAllowed = aAllowed;
+}
+
+extern "C" {
+
+MOZ_EXPORT void
+RecordReplayInterface_InternalRecordReplayDirective(long aDirective)
+{
+  switch ((Directive) aDirective) {
+  case Directive::CrashSoon:
+    gMemoryInfo->mCrashSoon = true;
+    break;
+  case Directive::MaybeCrash:
+    if (gMemoryInfo->mIntentionalCrashesAllowed && gMemoryInfo->mCrashSoon) {
+      MOZ_CRASH("RecordReplayDirective intentional crash");
+    }
+    gMemoryInfo->mCrashSoon = false;
+    break;
+  default:
+    MOZ_CRASH("Unknown directive");
+  }
+}
+
+} // extern "C"
 
 ///////////////////////////////////////////////////////////////////////////////
 // Preserving Memory Writability

@@ -107,6 +107,16 @@ void Print(const char* aFormat, ...);
 // Print some text to stderr if spew is enabled, bypassing the recording.
 void PrintSpew(const char* aFormat, ...);
 
+// Possible directives to give via the RecordReplayDirective function.
+enum class Directive
+{
+  // Crash at the next use of MaybeCrash.
+  CrashSoon = 1,
+
+  // Irrevocably crash if CrashSoon has ever been used on the process.
+  MaybeCrash = 2
+};
+
 ///////////////////////////////////////////////////////////////////////////////
 // Helper Functions
 ///////////////////////////////////////////////////////////////////////////////

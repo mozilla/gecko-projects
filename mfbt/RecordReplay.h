@@ -340,6 +340,10 @@ static inline void RegisterThing(void* aThing);
 static inline void UnregisterThing(void* aThing);
 static inline size_t ThingIndex(void* aThing);
 
+// Give a directive to the record/replay system. For possible values for
+// aDirective, see ProcessRecordReplay.h. This is used for testing purposes.
+static inline void RecordReplayDirective(long aDirective);
+
 // Helper for record/replay asserts, try to determine a name for a C++ object
 // with virtual methods based on its vtable.
 static inline const char* VirtualThingName(void* aThing);
@@ -537,6 +541,7 @@ MOZ_MakeRecordReplayWrapperVoid(RegisterThing, (void* aThing), (aThing))
 MOZ_MakeRecordReplayWrapperVoid(UnregisterThing, (void* aThing), (aThing))
 MOZ_MakeRecordReplayWrapper(ThingIndex, size_t, 0, (void* aThing), (aThing))
 MOZ_MakeRecordReplayWrapper(VirtualThingName, const char*, nullptr, (void* aThing), (aThing))
+MOZ_MakeRecordReplayWrapperVoid(RecordReplayDirective, (long aDirective), (aDirective))
 
 #undef MOZ_MakeRecordReplayWrapperVoid
 #undef MOZ_MakeRecordReplayWrapper

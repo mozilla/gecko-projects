@@ -84,7 +84,8 @@ namespace recordreplay {
   Macro(InternalRecordReplayAssertBytes,                        \
         (const void* aData, size_t aSize), (aData, aSize))      \
   Macro(InternalRegisterThing, (void* aThing), (aThing))        \
-  Macro(InternalUnregisterThing, (void* aThing), (aThing))
+  Macro(InternalUnregisterThing, (void* aThing), (aThing))      \
+  Macro(InternalRecordReplayDirective, (long aDirective), (aDirective))
 
 #define DECLARE_SYMBOL(aName, aReturnType, aFormals, _) \
   static aReturnType (*gPtr ##aName) aFormals;

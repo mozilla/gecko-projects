@@ -3660,6 +3660,12 @@ nsGlobalWindowInner::RecordReplayAssert(const nsAString& aStr)
 }
 
 void
+nsGlobalWindowInner::RecordReplayDirective(long aDirective)
+{
+  recordreplay::RecordReplayDirective(aDirective);
+}
+
+void
 nsGlobalWindowInner::Alert(nsIPrincipal& aSubjectPrincipal,
                            ErrorResult& aError)
 {
