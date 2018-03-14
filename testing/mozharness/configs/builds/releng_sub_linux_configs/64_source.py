@@ -2,7 +2,6 @@ config = {
     'default_actions': [
         'clobber',
         'checkout-sources',
-        'setup-mock',
         'package-source',
     ],
     'stage_platform': 'source',  # Not used, but required by the script
