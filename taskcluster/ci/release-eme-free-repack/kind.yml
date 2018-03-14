@@ -26,6 +26,12 @@ job-defaults:
          in-tree: "update-verify"
       chain-of-trust: true
       max-run-time: 7200
+      env:
+         REPACK_MANIFESTS_URL:
+            by-project:
+               mozilla-beta: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
+               mozilla-release: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
+               default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
    run:
       using: run-task
       sparse-profile: update-verify
@@ -39,12 +45,6 @@ jobs:
             - name: public/build/eme-free/target.dmg
               path: /builds/worker/checkouts/gecko/eme-free.dmg
               type: file
-         env:
-            REPACK_MANIFESTS_URL:
-               by-project:
-                  mozilla-beta: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
-                  mozilla-release: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
-                  default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
       treeherder:
          symbol: EME
          platform: macosx64/opt
@@ -63,12 +63,6 @@ jobs:
             - name: public/build/eme-free/target.zip
               path: /builds/worker/checkouts/gecko/eme-free.zip
               type: file
-         env:
-            REPACK_MANIFESTS_URL:
-               by-project:
-                  mozilla-beta: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
-                  mozilla-release: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
-                  default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
       treeherder:
          symbol: EME
          platform: win32/opt
@@ -87,12 +81,6 @@ jobs:
             - name: public/build/eme-free/target.zip
               path: /builds/worker/checkouts/gecko/eme-free.zip
               type: file
-         env:
-            REPACK_MANIFESTS_URL:
-               by-project:
-                  mozilla-beta: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
-                  mozilla-release: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
-                  default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
       treeherder:
          symbol: EME
          platform: win64/opt

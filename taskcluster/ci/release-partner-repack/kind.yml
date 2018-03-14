@@ -26,19 +26,18 @@ job-defaults:
          in-tree: "update-verify"
       chain-of-trust: true
       max-run-time: 7200
+      env:
+         REPACK_MANIFESTS_URL:
+            by-project:
+               mozilla-beta: "git@github.com:mozilla-partners/repack-manifests.git"
+               mozilla-release: "git@github.com:mozilla-partners/repack-manifests.git"
+               default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
    run:
       using: run-task
       sparse-profile: update-verify
 
 jobs:
    linux-nightly:
-      worker:
-         env:
-            REPACK_MANIFESTS_URL:
-               by-project:
-                  mozilla-beta: "git@github.com:mozilla-partners/repack-manifests.git"
-                  mozilla-release: "git@github.com:mozilla-partners/repack-manifests.git"
-                  default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
       treeherder:
          symbol: PR
          platform: linux/opt
@@ -49,13 +48,6 @@ jobs:
          build_type: opt
 
    linux64-nightly:
-      worker:
-         env:
-            REPACK_MANIFESTS_URL:
-               by-project:
-                  mozilla-beta: "git@github.com:mozilla-partners/repack-manifests.git"
-                  mozilla-release: "git@github.com:mozilla-partners/repack-manifests.git"
-                  default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
       treeherder:
          symbol: PR
          platform: linux64/opt
@@ -66,13 +58,6 @@ jobs:
          build_type: opt
 
    macosx64-nightly:
-      worker:
-         env:
-            REPACK_MANIFESTS_URL:
-               by-project:
-                  mozilla-beta: "git@github.com:mozilla-partners/repack-manifests.git"
-                  mozilla-release: "git@github.com:mozilla-partners/repack-manifests.git"
-                  default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
       treeherder:
          symbol: PR
          platform: macosx64/opt
@@ -83,13 +68,6 @@ jobs:
          build_type: opt
 
    win32-nightly:
-      worker:
-         env:
-            REPACK_MANIFESTS_URL:
-               by-project:
-                  mozilla-beta: "git@github.com:mozilla-partners/repack-manifests.git"
-                  mozilla-release: "git@github.com:mozilla-partners/repack-manifests.git"
-                  default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
       treeherder:
          symbol: PR
          platform: win32/opt
@@ -100,13 +78,6 @@ jobs:
          build_type: opt
 
    win64-nightly:
-      worker:
-         env:
-            REPACK_MANIFESTS_URL:
-               by-project:
-                  mozilla-beta: "git@github.com:mozilla-partners/repack-manifests.git"
-                  mozilla-release: "git@github.com:mozilla-partners/repack-manifests.git"
-                  default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
       treeherder:
          symbol: PR
          platform: win64/opt
