@@ -1,5 +1,3 @@
-import os
-
 config = {
     'default_actions': [
         'clobber',
