@@ -317,6 +317,7 @@ EnsureNotDivergedFromRecording()
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
   if (HasDivergedFromRecording()) {
     MOZ_RELEASE_ASSERT(gUnhandledDivergeAllowed);
+    PrintSpew("Unhandled recording divergence, restoring snapshot...\n");
     RestoreSnapshotAndResume(gRewindInfo->mActiveRecordedSnapshot);
     Unreachable();
   }

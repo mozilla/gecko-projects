@@ -769,6 +769,10 @@ RR_getsockopt(int aSockFd, int aLevel, int aOptName, void* aOptVal, int* aOptLen
 static ssize_t
 RR_gettimeofday(struct timeval* aTimeVal, struct timezone* aTimeZone)
 {
+  if (HasDivergedFromRecording()) {
+    AutoEnsurePassThroughThreadEvents pt;
+    return OriginalCall(gettimeofday, ssize_t, aTimeVal, aTimeZone);
+  }
   RecordReplayFunction(gettimeofday, ssize_t, aTimeVal, aTimeZone);
   if (!RecordOrReplayHadErrorNegative(rrf)) {
     events.CheckInput((aTimeVal ? 1 : 0) | (aTimeZone ? 2 : 0));
