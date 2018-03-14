@@ -21,6 +21,10 @@ from mozharness.base.log import FATAL
 
 class FxSource(BaseScript):
     config_options = [
+        [["--product"], {
+            "dest": "product",
+            "help": "the product name, e.g. firefox",
+        }],
         [["--repo"], {
             "dest": "repo",
             "help": "the URL to the source repo",
@@ -28,6 +32,10 @@ class FxSource(BaseScript):
         [["--revision"], {
             "dest": "revision",
             "help": "the revision of the source",
+        }],
+        [["--version"], {
+            "dest": "version",
+            "help": "the product version, e.g. 60.0b3",
         }],
         [["--disable-mock"], {
             "dest": "disable_mock",
@@ -60,7 +68,10 @@ class FxSource(BaseScript):
 
     def build(self):
         c = self.config
-        contents = c['tmpl'].format(**c)
+        # clone
+        # mkdir -p ../../dist/
+        # /bin/gtar -c --owner=0 --group=0 --numeric-owner --mode=go-w --exclude='.hg*' --exclude='.mozconfig*' --exclude='*.pyc' --exclude='/home/worker/workspace/build/src/Makefile' --exclude='/home/worker/workspace/build/src/dist' --exclude='obj-firefox' --transform='s,^\./,{product}-{version}/,' -f - ./ )
+        # xz -9e
         self.write_to_file(c['out_path'], contents, create_parent_dir=True,
                            error_level=FATAL)
 

@@ -16,6 +16,7 @@ from textwrap import dedent
 from taskgraph.util.schema import Schema
 from voluptuous import Required, Optional, Any
 
+from taskgraph.util.scriptworker import get_release_config
 from taskgraph.transforms.job import run_job_using
 from taskgraph.transforms.job.common import (
     docker_worker_add_workspace_cache,
@@ -143,6 +144,7 @@ def mozharness_on_docker_worker_setup(config, job, taskdesc):
     docker_worker_add_workspace_cache(config, job, taskdesc,
                                       extra=run.get('extra-workspace-cache-key'))
     support_vcs_checkout(config, job, taskdesc)
+    release_config = get_release_config(config)
 
     env = worker.setdefault('env', {})
     env.update({
@@ -175,6 +177,12 @@ def mozharness_on_docker_worker_setup(config, job, taskdesc):
 
     if config.params.is_try():
         env['TRY_COMMIT_MSG'] = config.params['message']
+
+    if 'shipping-product' in job:
+        env['SHIPPING_PRODUCT'] = job['shipping-product']
+
+    if release_config and 'appVersion' in release_config:
+        env['VERSION'] = release_config['version']
 
     # if we're not keeping artifacts, set some env variables to empty values
     # that will cause the build process to skip copying the results to the
