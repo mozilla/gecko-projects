@@ -1160,8 +1160,10 @@ function checkEvaluateInTopFrame(threadClient, text, expected) {
       threadClient.addOneTimeListener("paused", function(event, packet) {
         ok(packet.type == "paused" &&
            packet.why.type == "clientEvaluated" &&
-           "return" in packet.why.frameFinished &&
-           packet.why.frameFinished["return"] == expected, "Eval returned " + expected);
+           "return" in packet.why.frameFinished, "Eval returned a value");
+        let rval = packet.why.frameFinished["return"];
+        let match = (expected == undefined) ? rval.type == "undefined" : rval == expected;
+        ok(match, "Eval returned " + expected);
         resolve();
       });
     });

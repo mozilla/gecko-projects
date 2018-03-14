@@ -3,18 +3,17 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-// Test unhandled divergence while evaluating at a breakpoint with Web Replay.
+// Test basic recovery of crashed child processes in web replay.
 async function runTest(tab) {
   let client = await attachDebugger(tab);
   await client.interrupt();
-  await setBreakpoint(client, "doc_rr_basic.html", 21);
+  await setBreakpoint(client, "doc_rr_recovery.html", 21);
   await rewindToLine(client, 21);
-  await checkEvaluateInTopFrame(client, "number", 10);
-  await checkEvaluateInTopFrameThrows(client, "window.alert(3)");
-  await checkEvaluateInTopFrame(client, "number", 10);
-  await checkEvaluateInTopFrameThrows(client, "window.alert(3)");
-  await checkEvaluateInTopFrame(client, "number", 10);
-  await checkEvaluateInTopFrame(client, "testStepping2()", undefined);
+  await checkEvaluateInTopFrame(client, "recordReplayDirective(/* CrashSoon */ 1)", undefined);
+  await stepOverToLine(client, 22);
+  await stepOverToLine(client, 23);
+  await checkEvaluateInTopFrame(client, "recordReplayDirective(/* CrashSoon */ 1); " +
+                                        "recordReplayDirective(/* MaybeCrash */ 2)", undefined);
   finish();
 }
 
@@ -28,5 +27,5 @@ function test() {
   ppmm.addMessageListener("RecordingFinished", () => runTest(tab));
 
   gBrowser.selectedTab = tab;
-  openUILinkIn(EXAMPLE_URL + "doc_rr_basic.html", "current");
+  openUILinkIn(EXAMPLE_URL + "doc_rr_recovery.html", "current");
 }
