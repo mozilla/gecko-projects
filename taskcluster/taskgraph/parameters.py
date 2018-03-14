@@ -60,6 +60,7 @@ PARAMETERS = {
     'project': 'mozilla-central',
     'pushdate': lambda: int(time.time()),
     'pushlog_id': '0',
+    'release_enable_partners': False,
     'release_eta': '',
     'release_history': {},
     'release_type': '',

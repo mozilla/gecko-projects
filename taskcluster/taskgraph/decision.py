@@ -204,6 +204,7 @@ def get_decision_parameters(options):
     parameters['next_version'] = None
     parameters['release_type'] = ''
     parameters['release_eta'] = ''
+    parameters['release_enable_partners'] = False
 
     # owner must be an email, but sometimes (e.g., for ffxbld) it is not, in which
     # case, fake it

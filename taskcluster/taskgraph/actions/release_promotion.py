@@ -220,10 +220,14 @@ def is_release_promotion_available(parameters):
                     'additionalProperties': False,
                 }
             },
-
             'release_eta': {
                 'type': 'string',
                 'default': '',
+            },
+            'release_enable_partners': {
+                'type': 'boolean',
+                'default': False,
+                'description': ('Toggle for creating partner repacks'),
             },
         },
         "required": ['release_promotion_flavor', 'build_number'],
@@ -304,6 +308,7 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     parameters['release_history'] = release_history
     parameters['release_type'] = promotion_config.get('release_type', '')
     parameters['release_eta'] = input.get('release_eta', '')
+    parameters['release_enable_partners'] = input('release_enable_partners')
     if input['version']:
         parameters['version'] = input['version']
 

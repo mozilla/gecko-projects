@@ -159,6 +159,9 @@ Release Promotion
 ``release_eta``
    The time and date when a release is scheduled to live. This value is passed to Balrog.
 
+``release_enable_partners``
+   Boolean which controls repacking vanilla Firefox builds for partners.
+
 Comm Push Information
 ---------------------
 

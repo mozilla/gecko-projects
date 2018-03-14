@@ -16,6 +16,16 @@ transforms = TransformSequence()
 
 
 @transforms.add
+# We can disable the whole tree of partner jobs by skipping the repacking here
+# TODO - is this better implemented in a loader (which 'subclasses'
+# taskgraph.loader.transform) ??
+def filter_early_if_partners_disabled(config, tasks):
+    if config.params['release_enable_partners']:
+        for task in tasks:
+            yield task
+
+
+@transforms.add
 def resolve_properties(config, tasks):
     for task in tasks:
         for property in ("REPACK_MANIFESTS_URL", ):
