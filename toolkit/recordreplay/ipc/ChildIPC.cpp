@@ -83,6 +83,11 @@ ChannelThreadMain(void*)
       gTakeSnapshots = nmsg->mTakeSnapshots;
       break;
     }
+    case channel::MessageType::SetAllowIntentionalCrashes: {
+      channel::SetAllowIntentionalCrashesMessage* nmsg = (channel::SetAllowIntentionalCrashesMessage*) msg;
+      SetAllowIntentionalCrashes(nmsg->mAllowed);
+      break;
+    }
     case channel::MessageType::TakeSnapshot: {
       uint8_t data = 0;
       DirectWrite(gSnapshotWriteFd, &data, 1);
@@ -120,9 +125,6 @@ ChannelThreadMain(void*)
         });
       break;
     }
-    case channel::MessageType::Terminate:
-      _exit(0);
-      break;
     default:
       MOZ_CRASH();
     }
@@ -237,12 +239,23 @@ ReportFatalError(const char* aFormat, ...)
   memcpy(&msgBuf[header], buf, len);
   msgBuf[sizeof(msgBuf) - 1] = 0;
 
-  channel::SendMessage(*msg);
+  // Don't take the message lock when sending this, to avoid touching the heap.
+  channel::SendMessage(*msg, /* aTakeLock = */ false);
 
   UnrecoverableSnapshotFailure();
 
   // Block until we get a terminate message and die.
   Thread::WaitForeverNoIdle();
+}
+
+void
+NotifySavedRecording(const char* aFilename)
+{
+  PrintSpew("Saved Recording %s\n", aFilename);
+
+  channel::SaveRecordingMessage* msg = channel::SaveRecordingMessage::New(aFilename);
+  channel::SendMessage(*msg);
+  free(msg);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -11,6 +11,8 @@
 
 #include <pthread.h>
 
+#include "mozilla/TimeStamp.h"
+
 namespace mozilla {
 namespace recordreplay {
 
@@ -36,6 +38,15 @@ public:
   void Wait() { PR_WaitCondVar(mCondVar, PR_INTERVAL_NO_TIMEOUT); }
   void Notify() { PR_NotifyCondVar(mCondVar); }
   void NotifyAll() { PR_NotifyAllCondVar(mCondVar); }
+
+  void WaitUntil(TimeStamp aTime) {
+    AutoEnsurePassThroughThreadEvents pt;
+    TimeStamp now = TimeStamp::Now();
+    if (now < aTime) {
+      size_t milliseconds = (aTime - now).ToMilliseconds();
+      PR_WaitCondVar(mCondVar, PR_MillisecondsToInterval(milliseconds));
+    }
+  }
 
 private:
   PRLock* mLock;

@@ -118,9 +118,11 @@ InitAndConnectChild(base::ProcessId aMiddlemanPid)
 }
 
 void
-SendMessage(const Message& aMsg)
+SendMessage(const Message& aMsg, bool aTakeLock)
 {
-  PR_Lock(gLock);
+  if (aTakeLock) {
+    PR_Lock(gLock);
+  }
 
   PrintMessage("SEND_MSG", aMsg);
 
@@ -137,7 +139,9 @@ SendMessage(const Message& aMsg)
     }
   }
 
-  PR_Unlock(gLock);
+  if (aTakeLock) {
+    PR_Unlock(gLock);
+  }
 }
 
 // Buffer for message data received from the other side of the channel.
@@ -154,6 +158,14 @@ NeededMessageSize()
     return msg->mSize;
   }
   return sizeof(Message);
+}
+
+static size_t gNumAllowedDisconnects;
+
+void
+AllowDisconnect()
+{
+  gNumAllowedDisconnects++;
 }
 
 Message*
@@ -177,13 +189,18 @@ WaitForMessage()
       MOZ_CRASH();
     } else if (nbytes == 0) {
       // The other side of the connection has shut down.
-      _exit(0);
+      PrintSpew("Channel disconnected.\n");
+      if (gNumAllowedDisconnects) {
+        gNumAllowedDisconnects--;
+      } else {
+        _exit(0);
+      }
     }
 
     gMessageBytes += nbytes;
   }
 
-  Message* res = Message::Clone((Message*) gMessageBuffer.begin());
+  Message* res = ((Message*)gMessageBuffer.begin())->Clone();
 
   // Remove the message we just received from the incoming buffer.
   size_t remaining = gMessageBytes - NeededMessageSize();

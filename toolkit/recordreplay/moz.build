@@ -19,6 +19,7 @@ UNIFIED_SOURCES += [
     'ipc/Channel.cpp',
     'ipc/ChildIPC.cpp',
     'ipc/ParentIPC.cpp',
+    'ipc/ParentRecovery.cpp',
     'Lock.cpp',
     'MemorySnapshot.cpp',
     'ProcessRecordReplay.cpp',

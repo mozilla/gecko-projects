@@ -94,6 +94,9 @@ extern bool gTakeSnapshots;
 #define INCLUDE_RECORD_REPLAY_ASSERTIONS 1
 //#endif
 
+// Save a complete recording up to the current point to aFilename.
+void SaveRecording(const char* aFilename);
+
 // Tidy up state before we transition a recording process to a replaying
 // process and rewind.
 void PrepareForFirstRecordingRewind();

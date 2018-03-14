@@ -52,21 +52,28 @@ void ConnectParent();
 // have already called InitParent().
 void InitAndConnectChild(base::ProcessId aMiddlemanPid);
 
+// Allow a single disconnection from the other side of the channel. Otherwise
+// this process will be terminated when the channel disconnects.
+void AllowDisconnect();
+
 #define ForEachMessageType(Macro)                              \
+  /* Messages sent in both directions. */                      \
+                                                               \
+  /* Save the current recording, or notify that the recording was saved. */ \
+  Macro(SaveRecording)                                         \
+                                                               \
   /* Messages sent from the middleman to the child process. */ \
                                                                \
   /* Sent at startup. */                                       \
   Macro(Introduction)                                          \
                                                                \
-  /* Sent later during startup, before the first snapshot is taken. */ \
+  /* Set child process runtime options. */                     \
   Macro(Initialize)                                            \
+  Macro(SetAllowIntentionalCrashes)                            \
                                                                \
   /* Poke a child that is recording to take a snapshot, rather than (potentially) */ \
   /* idling indefinitely. This has no effect on a replaying process. */ \
   Macro(TakeSnapshot)                                          \
-                                                               \
-  /* Save the current recording. */                            \
-  Macro(SaveRecording)                                         \
                                                                \
   /* Debugger JSON messages are initially sent from the parent. The child unpauses */ \
   /* after receiving the message and will pause after it sends a DebuggerResponse. */ \
@@ -81,9 +88,6 @@ void InitAndConnectChild(base::ProcessId aMiddlemanPid);
   /* (if the last recorded snapshot precedes the most recent snapshot), in which */ \
   /* case interim HitSnapshot messages will be sent for those earlier snapshots. */ \
   Macro(Resume)                                                \
-                                                               \
-  /* Sent at teardown to destroy the child process. */         \
-  Macro(Terminate)                                             \
                                                                \
   /* Messages sent from the child process to the middleman. */ \
                                                                \
@@ -122,9 +126,9 @@ struct Message
     MOZ_RELEASE_ASSERT(mSize >= sizeof(*this));
   }
 
-  static Message* Clone(const Message* aMsg) {
-    char* res = (char*) malloc(aMsg->mSize);
-    memcpy(res, aMsg, aMsg->mSize);
+  Message* Clone() const {
+    char* res = (char*) malloc(mSize);
+    memcpy(res, this, mSize);
     return (Message*) res;
   }
 
@@ -157,7 +161,7 @@ protected:
 
 // Send a message to the other side of the channel. This may be called from any
 // thread.
-void SendMessage(const Message& aMsg);
+void SendMessage(const Message& aMsg, bool aTakeLock = true);
 
 // Block until a complete message is received from the other side of the
 // channel. The returned message must be freed by the caller.
@@ -202,6 +206,16 @@ struct InitializeMessage : public Message
   explicit InitializeMessage(bool aTakeSnapshots)
     : Message(MessageType::Initialize, sizeof(*this))
     , mTakeSnapshots(aTakeSnapshots)
+  {}
+};
+
+struct SetAllowIntentionalCrashesMessage : public Message
+{
+  bool mAllowed;
+
+  explicit SetAllowIntentionalCrashesMessage(bool aAllowed)
+    : Message(MessageType::SetAllowIntentionalCrashes, sizeof(*this))
+    , mAllowed(aAllowed)
   {}
 };
 
@@ -294,13 +308,6 @@ struct ResumeMessage : public Message
     : Message(MessageType::Resume, sizeof(*this))
     , mForward(aForward)
     , mHitOtherBreakpoints(aHitOtherBreakpoints)
-  {}
-};
-
-struct TerminateMessage : public Message
-{
-  TerminateMessage()
-    : Message(MessageType::Terminate, sizeof(*this))
   {}
 };
 

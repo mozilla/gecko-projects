@@ -233,7 +233,7 @@ CheckForInvalidRecording()
 }
 
 void
-child::SaveRecording(const char* aFilename)
+SaveRecording(const char* aFilename)
 {
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
 
@@ -249,7 +249,7 @@ child::SaveRecording(const char* aFilename)
     WriteRecordingMetadata(&file);
   }
 
-  Print("Saved Recording %s\n", aFilename);
+  child::NotifySavedRecording(aFilename);
 
   Thread::ResumeIdleThreads();
 }
@@ -264,12 +264,16 @@ PrepareForFirstRecordingRewind()
 
   CheckForInvalidRecording();
 
-  FileHandle fd = DirectOpenFile(gRecordingFile->Filename(), /* aWriting = */ false);
+  char* filename = strdup(gRecordingFile->Filename());
+  FileHandle fd = DirectOpenFile(filename, /* aWriting = */ false);
 
   // Finish up the recording file.
   WriteWeakPointers(gRecordingFile);
   WriteRecordingMetadata(gRecordingFile);
   gRecordingFile->Close();
+
+  child::NotifySavedRecording(filename);
+  free(filename);
 
   PrepareMemoryForFirstRecordingRewind(fd);
 

@@ -56,8 +56,8 @@ void WaitForPaintToComplete();
 
 already_AddRefed<gfx::DrawTarget> DrawTargetForRemoteDrawing(LayoutDeviceIntSize aSize);
 
-// Save a complete recording up to the current point to aFilename.
-void SaveRecording(const char* aFilename);
+// Notify the middleman that a recording was saved.
+void NotifySavedRecording(const char* aFilename);
 
 // Report a fatal error to the middleman process.
 void ReportFatalError(const char* aFormat, ...);

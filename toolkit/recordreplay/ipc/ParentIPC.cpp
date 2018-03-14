@@ -22,6 +22,7 @@
 #include "mozilla/ipc/IOThreadChild.h"
 #include "Monitor.h"
 #include "InfallibleVector.h"
+#include "ParentRecovery.h"
 #include "ProcessRecordReplay.h"
 #include "ProcessRedirect.h"
 
@@ -219,6 +220,8 @@ ChannelToUIProcess()
   return gChildProtocol->GetIPCChannel();
 }
 
+// Information about the child process.
+static ipc::GeckoChildProcessHost* gChildProcess;
 static bool gChildProcessIsRecording;
 static char* gChildProcessFilename;
 
@@ -231,6 +234,23 @@ static MessageLoop* gMainThreadMessageLoop;
 
 static bool gParentProtocolOpened = false;
 
+static void
+SpawnChildProcess()
+{
+  MOZ_RELEASE_ASSERT(!gChildProcess);
+  gChildProcess = new ipc::GeckoChildProcessHost(GeckoProcessType_Content);
+  std::vector<std::string> extraArgs;
+  ipc::GeckoChildProcessHost::RecordReplayKind recordReplayKind =
+    gChildProcessIsRecording
+    ? ipc::GeckoChildProcessHost::RecordReplayKind::Record
+    : ipc::GeckoChildProcessHost::RecordReplayKind::Replay;
+  nsAutoString recordReplayFile;
+  recordReplayFile.Append(NS_ConvertUTF8toUTF16(gChildProcessFilename));
+  if (!gChildProcess->LaunchAndWaitForProcessHandle(extraArgs, recordReplayKind, recordReplayFile)) {
+    MOZ_CRASH();
+  }
+}
+
 // Main routine for the forwarding message loop thread.
 static void
 ForwardingMessageLoopMain(void*)
@@ -240,22 +260,10 @@ ForwardingMessageLoopMain(void*)
 
   gChildProtocol->mOppositeMessageLoop = gForwardingMessageLoop;
 
-  // Spawn the child process.
-  ipc::GeckoChildProcessHost* childProcess =
-    new ipc::GeckoChildProcessHost(GeckoProcessType_Content);
-  std::vector<std::string> extraArgs;
-  ipc::GeckoChildProcessHost::RecordReplayKind recordReplayKind =
-    gChildProcessIsRecording
-    ? ipc::GeckoChildProcessHost::RecordReplayKind::Record
-    : ipc::GeckoChildProcessHost::RecordReplayKind::Replay;
-  nsAutoString recordReplayFile;
-  recordReplayFile.Append(NS_ConvertUTF8toUTF16(gChildProcessFilename));
-  if (!childProcess->LaunchAndWaitForProcessHandle(extraArgs, recordReplayKind, recordReplayFile)) {
-    MOZ_CRASH();
-  }
+  SpawnChildProcess();
 
-  gParentProtocol->Open(childProcess->GetChannel(),
-                        base::GetProcId(childProcess->GetChildProcessHandle()));
+  gParentProtocol->Open(gChildProcess->GetChannel(),
+                        base::GetProcId(gChildProcess->GetChildProcessHandle()));
 
   // Notify the main thread that we have finished initialization.
   {
@@ -271,6 +279,12 @@ static void ChannelThreadMain(void*);
 
 // Initialize hooks used by the debugger.
 static void InitDebuggerHooks();
+
+// A saved introduction message for sending to any respawned children.
+static channel::IntroductionMessage* gIntroductionMessage;
+
+// The last time we received a message from the child.
+static TimeStamp gLastMessageTime;
 
 void
 Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChildID,
@@ -320,16 +334,18 @@ Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChild
 
   channel::ConnectParent();
 
-  channel::IntroductionMessage* msg =
-    channel::IntroductionMessage::New(aParentPid, aArgc, aArgv);
+  gIntroductionMessage = channel::IntroductionMessage::New(aParentPid, aArgc, aArgv);
 
-  channel::SendMessage(*msg);
-  free(msg);
+  channel::SendMessage(*gIntroductionMessage);
 
   if (!PR_CreateThread(PR_USER_THREAD, ChannelThreadMain, nullptr,
                        PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD, PR_JOINABLE_THREAD, 0)) {
     MOZ_CRASH();
   }
+
+  // Initialize the last message time so we can always compute a deadline when
+  // waiting for the child to pause.
+  gLastMessageTime = TimeStamp::Now();
 }
 
 static void
@@ -349,6 +365,56 @@ SendInitializeMessage()
   }
 
   channel::SendMessage(channel::InitializeMessage(gTakeSnapshots));
+}
+
+// Whether the main thread is waiting on its child process to be terminated.
+static bool gWaitingOnTerminateChildProcess;
+
+static void
+TerminateChildProcess()
+{
+  // The destructor for GeckoChildProcessHost will teardown the child process.
+  delete gChildProcess;
+  gChildProcess = nullptr;
+
+  MonitorAutoLock lock(*gCommunicationMonitor);
+  gWaitingOnTerminateChildProcess = false;
+  gCommunicationMonitor->Notify();
+}
+
+static bool CanRecoverChildProcess();
+
+static void
+DeadChildProcess(const nsCString& aWhy)
+{
+  if (CanRecoverChildProcess()) {
+    recovery::BeginRecovery();
+
+    // The channel should get a single disconnect message as the old child
+    // process is torn down.
+    channel::AllowDisconnect();
+
+    MOZ_RELEASE_ASSERT(!gWaitingOnTerminateChildProcess);
+    gWaitingOnTerminateChildProcess = true;
+
+    XRE_GetIOMessageLoop()->PostTask(NewRunnableFunction("TerminateChildProcess", TerminateChildProcess));
+
+    {
+      MonitorAutoLock lock(*gCommunicationMonitor);
+      while (gWaitingOnTerminateChildProcess) {
+        gCommunicationMonitor->Wait();
+      }
+    }
+
+    SpawnChildProcess();
+
+    channel::ConnectParent();
+    channel::SendMessage(*gIntroductionMessage);
+    channel::SendMessage(channel::InitializeMessage(/* aTakeSnapshots = */ true));
+  } else {
+    dom::ContentChild::GetSingleton()->SendRecordReplayFatalError(aWhy);
+    Thread::WaitForeverNoIdle();
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -395,6 +461,10 @@ MaybeRunReplayMessageTask()
 // interact with the child when it is paused.
 static bool gChildIsPaused;
 
+// How many seconds to wait after unpausing before considering the child in a
+// hung state.
+static const size_t ChildHangSeconds = 10;
+
 static void
 SetChildIsPaused(bool aPaused)
 {
@@ -416,9 +486,14 @@ WaitUntilChildIsPaused(bool aPokeChild = false)
   }
 
   while (!gChildIsPaused) {
+    TimeStamp deadline = gLastMessageTime + TimeDuration::FromSeconds(ChildHangSeconds);
+    if (TimeStamp::Now() >= deadline) {
+      nsAutoCString why("Child process non-responsive");
+      DeadChildProcess(why);
+    }
     MonitorAutoLock lock(*gCommunicationMonitor);
     if (!MaybeRunReplayMessageTask()) {
-      gCommunicationMonitor->Wait();
+      gCommunicationMonitor->WaitUntil(deadline);
     }
   }
 }
@@ -492,6 +567,7 @@ static void RecvHitSnapshot(const channel::HitSnapshotMessage& aMsg);
 static void RecvHitBreakpoint(const channel::HitBreakpointMessage& aMsg);
 static void RecvDebuggerResponse(const channel::DebuggerResponseMessage& aMsg);
 static void RecvFatalError(const channel::FatalErrorMessage& aMsg);
+static void RecvSaveRecording(const channel::SaveRecordingMessage& aMsg);
 
 // Main routine for the thread which receives messages from the child process.
 static void
@@ -499,6 +575,10 @@ ChannelThreadMain(void*)
 {
   while (true) {
     channel::Message* msg = channel::WaitForMessage();
+    gLastMessageTime = TimeStamp::Now();
+    if (!recovery::NoteIncomingMessage(*msg)) {
+      continue;
+    }
     switch (msg->mType) {
     case channel::MessageType::Paint:
       ReceiveChildMessageAsync(RecvPaint, msg);
@@ -515,22 +595,25 @@ ChannelThreadMain(void*)
     case channel::MessageType::FatalError:
       ReceiveChildMessageAsync(RecvFatalError, msg);
       break;
+    case channel::MessageType::SaveRecording:
+      ReceiveChildMessageAsync(RecvSaveRecording, msg);
+      break;
     default:
       MOZ_CRASH();
     }
   }
 }
 
+static void
+SendMessageNoteRecovery(const channel::Message& aMsg)
+{
+  recovery::NoteOutgoingMessage(aMsg);
+  channel::SendMessage(aMsg);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Graphics Parent IPC
 ///////////////////////////////////////////////////////////////////////////////
-
-static void
-TerminateChildProcess()
-{
-  WaitUntilChildIsPaused();
-  channel::SendMessage(channel::TerminateMessage());
-}
 
 static void
 UpdateTitle(dom::TabChild* aTabChild)
@@ -800,7 +883,27 @@ static void
 RecvFatalError(const channel::FatalErrorMessage& aMsg)
 {
   nsAutoCString str(aMsg.Error());
-  dom::ContentChild::GetSingleton()->SendRecordReplayFatalError(str);
+  DeadChildProcess(str);
+}
+
+static void
+RecvSaveRecording(const channel::SaveRecordingMessage& aMsg)
+{
+  if (gChildProcessFilename)
+    free(gChildProcessFilename);
+  gChildProcessFilename = strdup(aMsg.Filename());
+}
+
+static bool
+CanRecoverChildProcess()
+{
+  return !gChildProcessIsRecording
+      && strcmp(gChildProcessFilename, "*")
+      && !gChildIsPaused
+      && gTakeSnapshots
+      && gLastSnapshot
+      && !recovery::IsRecovering()
+      && !getenv("NO_RECOVERY");
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -835,7 +938,7 @@ HookDebuggerRequest(const JS::replay::CharBuffer& aBuffer, JS::replay::CharBuffe
 
   channel::DebuggerRequestMessage* msg =
     channel::DebuggerRequestMessage::New(aBuffer.begin(), aBuffer.length());
-  channel::SendMessage(*msg);
+  SendMessageNoteRecovery(*msg);
   free(msg);
 
   // Wait for the child to respond to the query.
@@ -850,7 +953,7 @@ HookSetBreakpoint(size_t aId, const JS::replay::ExecutionPosition& aPosition)
 {
   WaitUntilChildIsPaused(/* aPokeChild = */ true);
 
-  channel::SendMessage(channel::SetBreakpointMessage(aId, aPosition));
+  SendMessageNoteRecovery(channel::SetBreakpointMessage(aId, aPosition));
 }
 
 // Flags for the preferred direction of travel when execution unpauses,
@@ -884,7 +987,7 @@ HookResume(bool aForward, bool aHitOtherBreakpoints)
   }
 
   SetChildIsPaused(false);
-  channel::SendMessage(channel::ResumeMessage(aForward, aHitOtherBreakpoints));
+  SendMessageNoteRecovery(channel::ResumeMessage(aForward, aHitOtherBreakpoints));
 }
 
 static void

@@ -22,9 +22,10 @@ namespace parent {
 // The middleman process is a content process that manages communication with
 // the replaying process. It performs IPC with the chrome process in the normal
 // fashion for a content process, using the normal IPDL protocols.
-// Communication with the replaying process is done via the PReplay protocol,
-// with all the restrictions that entails (see PReplay.ipdl). This file is
-// responsible for managing communication with the replaying process.
+// Communication with a recording or replaying process is done via a special
+// IPC channel (see Channel.h), and communication with a recording process can
+// additionally be done via IPDL messages, usually by forwarding them from the
+// UI process.
 
 ///////////////////////////////////////////////////////////////////////////////
 // Public API
