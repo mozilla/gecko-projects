@@ -1130,6 +1130,39 @@ or run without that action (ie: --no-{action})"
                 )
         return revision.encode('ascii', 'replace') if revision else None
 
+    def _checkout_source(self):
+        """use vcs_checkout to grab source needed for build."""
+        # TODO make this method its own action
+        c = self.config
+        dirs = self.query_abs_dirs()
+        self.mkdir_p(os.path.dirname(dirs['abs_src_dir']))
+        repo = self._query_repo()
+        vcs_checkout_kwargs = {
+            'repo': repo,
+            'dest': dirs['abs_src_dir'],
+            'revision': self.query_revision(),
+            'env': self.query_build_env()
+        }
+        if c.get('clone_by_revision'):
+            vcs_checkout_kwargs['clone_by_revision'] = True
+
+        if c.get('clone_with_purge'):
+            vcs_checkout_kwargs['clone_with_purge'] = True
+        vcs_checkout_kwargs['clone_upstream_url'] = c.get('clone_upstream_url')
+        rev = self.vcs_checkout(**vcs_checkout_kwargs)
+        if c.get('is_automation'):
+            changes = self.buildbot_config['sourcestamp']['changes']
+            if changes:
+                comments = changes[0].get('comments', '')
+                self.set_buildbot_property('comments',
+                                           comments,
+                                           write_to_file=True)
+            else:
+                self.warning(ERROR_MSGS['comments_undetermined'])
+            self.set_buildbot_property('got_revision',
+                                       rev,
+                                       write_to_file=True)
+
     def _count_ctors(self):
         """count num of ctors and set testresults."""
         dirs = self.query_abs_dirs()
@@ -1258,6 +1291,9 @@ or run without that action (ie: --no-{action})"
         else:
             self.warning("mozbuild_path could not be determined. skipping "
                          "creating it.")
+
+    def checkout_sources(self):
+        self._checkout_source()
 
     def preflight_build(self):
         """set up machine state for a complete build."""
@@ -1426,6 +1462,30 @@ or run without that action (ie: --no-{action})"
             cwd=self.query_abs_dirs()['abs_src_dir'],
             env=env, output_timeout=self.config.get('max_build_output_timeout', 60 * 20),
             halt_on_failure=True,
+        )
+
+    def preflight_package_source(self):
+        self._get_mozconfig()
+
+    def package_source(self):
+        """generates source archives and uploads them"""
+        env = self.query_build_env()
+        env.update(self.query_mach_build_env())
+        dirs = self.query_abs_dirs()
+
+        self.run_command(
+            command=[sys.executable, 'mach', '--log-no-times', 'configure'],
+            cwd=dirs['abs_src_dir'],
+            env=env, output_timeout=60*3, halt_on_failure=True,
+        )
+        self.run_command(
+            command=[
+                'make', 'source-package', 'hg-bundle', 'source-upload',
+                'HG_BUNDLE_REVISION=%s' % self.query_revision(),
+                'UPLOAD_HG_BUNDLE=1',
+            ],
+            cwd=dirs['abs_obj_dir'],
+            env=env, output_timeout=60*45, halt_on_failure=True,
         )
 
     def check_test(self):

@@ -35,10 +35,12 @@ class FxDesktopBuild(BuildScript, TryToolsMixin, object):
             'all_actions': [
                 'get-secrets',
                 'clobber',
+                'checkout-sources',
                 'build',
                 'check-test',
                 'valgrind-test',
                 'multi-l10n',
+                'package-source',
                 'update',
             ],
             'require_config_file': True,
