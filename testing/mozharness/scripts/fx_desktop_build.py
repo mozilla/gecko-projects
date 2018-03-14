@@ -34,8 +34,8 @@ class FxDesktopBuild(BuildScript, TryToolsMixin, object):
             'config_options': BUILD_BASE_CONFIG_OPTIONS + copy.deepcopy(try_config_options),
             'all_actions': [
                 'get-secrets',
-                'checkout-sources',
                 'clobber',
+                'checkout-sources',
                 'build',
                 'check-test',
                 'valgrind-test',
