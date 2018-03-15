@@ -1444,7 +1444,7 @@ or run without that action (ie: --no-{action})"
         )
         self.run_command(
             command=[
-                'make', 'source-package',
+                'make', 'source-package', 'source-upload',
             ],
             cwd=dirs['abs_obj_dir'],
             env=env, output_timeout=60*45, halt_on_failure=True,
