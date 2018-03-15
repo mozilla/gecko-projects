@@ -244,7 +244,7 @@ struct SaveRecordingMessage : public Message
 
 struct DebuggerRequestMessage : public Message
 {
-  DebuggerRequestMessage(uint32_t aSize)
+  explicit DebuggerRequestMessage(uint32_t aSize)
     : Message(MessageType::DebuggerRequest, aSize)
   {}
 
