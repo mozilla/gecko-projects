@@ -1444,9 +1444,7 @@ or run without that action (ie: --no-{action})"
         )
         self.run_command(
             command=[
-                'make', 'source-package', 'hg-bundle', 'source-upload',
-                'HG_BUNDLE_REVISION=%s' % self.query_revision(),
-                'UPLOAD_HG_BUNDLE=1',
+                'make', 'source-package',
             ],
             cwd=dirs['abs_obj_dir'],
             env=env, output_timeout=60*45, halt_on_failure=True,
