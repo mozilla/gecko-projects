@@ -343,6 +343,7 @@ namespace recordreplay {
   MACRO(CTRunGetStringIndicesPtr)               \
   MACRO(CTRunGetStringRange)                    \
   MACRO(CTRunGetTypographicBounds)              \
+  MACRO(CUIDraw)                                \
   MACRO(FSCompareFSRefs)                        \
   MACRO(FSGetVolumeInfo)                        \
   MACRO(FSFindFolder)                           \
@@ -2402,6 +2403,7 @@ RR_CTRunGetTypographicBounds(CTRunRef aRun, CFRange aRange,
   return rval;
 }
 
+RRFunctionTypesVoid5(CUIDraw, void*, CGRect, CGContextRef, CFDictionaryRef, CFDictionaryRef*)
 RRFunction2(FSCompareFSRefs)
 
 static OSErr
