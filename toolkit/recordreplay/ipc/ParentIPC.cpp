@@ -1016,22 +1016,19 @@ RecvHitSnapshot(const channel::HitSnapshotMessage& aMsg)
 {
   MOZ_RELEASE_ASSERT(!gChildIsPaused);
 
-  if (!aMsg.mInterim) {
-    SetChildIsPaused(true);
-  }
-
   HandleUpdatesForSnapshot(aMsg.mSnapshotId, aMsg.mFinal);
 
-  // Interim snapshots always resume forward (these are generated when we
-  // rewound past the point of the last snapshot we were trying to get to).
+  // Interim snapshots do not pause the child process (these are generated when
+  // we rewound past the point of the last snapshot we were trying to get to).
   if (aMsg.mInterim) {
-    channel::SendMessage(channel::ResumeMessage(/* aForward = */ true, /* aHitOtherBreakpoints = */ false));
     return;
   }
 
-  // Otherwise, resume either forwards or backwards. Break the resume off into
-  // a separate runnable, to avoid starving any debugger code already on the
-  // stack and waiting for the process to pause.
+  SetChildIsPaused(true);
+
+  // Resume either forwards or backwards. Break the resume off into a separate
+  // runnable, to avoid starving any debugger code already on the stack and
+  //  waiting for the process to pause.
   if (!gResumeForwardOrBackward) {
     gResumeForwardOrBackward = true;
     gMainThreadMessageLoop->PostTask(NewRunnableFunction("ResumeForwardOrBackward",

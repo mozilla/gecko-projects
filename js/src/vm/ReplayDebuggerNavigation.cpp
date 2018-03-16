@@ -360,7 +360,6 @@ class FindLastHitPhase : public NavigationPhase
     }
 
     void afterSnapshot(size_t snapshot, bool final) override;
-    void resume(bool forward, bool hitOtherBreakpoints) override;
     void positionHit(const std::function<bool(const ExecutionPosition&)>& match) override;
 };
 
@@ -949,14 +948,6 @@ FindLastHitPhase::afterSnapshot(size_t snapshot, bool final)
 
     if (!mPoint.positions.empty())
         EnsurePositionHandler(mPoint.positions[0]);
-}
-
-void
-FindLastHitPhase::resume(bool forward, bool hitOtherBreakpoints)
-{
-    // The LastHitPhase will pause at interim snapshots.
-    MOZ_RELEASE_ASSERT(forward);
-    ResumeExecution();
 }
 
 void

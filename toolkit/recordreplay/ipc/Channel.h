@@ -99,7 +99,7 @@ void AllowDisconnect();
   Macro(Paint)                                                 \
                                                                \
   /* Notify the middleman that a snapshot or breakpoint was hit. The child will */ \
-  /* pause after sending these messages. */                    \
+  /* pause after sending these messages, except for interim HitSnapshot messages. */ \
   Macro(HitSnapshot)                                           \
   Macro(HitBreakpoint)                                         \
                                                                \
