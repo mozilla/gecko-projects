@@ -20,79 +20,35 @@ Assembler::Assembler()
   : mCursor(nullptr)
   , mCursorEnd(nullptr)
   , mCanAllocateStorage(true)
-  , mIpStart(nullptr)
-  , mIpEnd(nullptr)
 {}
 
 Assembler::Assembler(uint8_t* aStorage, size_t aSize)
   : mCursor(aStorage)
   , mCursorEnd(aStorage + aSize)
   , mCanAllocateStorage(false)
-  , mIpStart(nullptr)
-  , mIpEnd(nullptr)
 {}
 
 Assembler::~Assembler()
 {
-  MOZ_ASSERT(!mIpStart);
-  MOZ_ASSERT(!mIpEnd);
-  MOZ_ASSERT(mCopiedInstructions.empty());
-  MOZ_ASSERT(mInternalJumps.empty());
-}
+  // Patch each jump to the point where the jump's target was copied, if there
+  // is one.
+  for (auto pair : mJumps) {
+    uint8_t* source = pair.first;
+    uint8_t* target = pair.second;
 
-void
-Assembler::PrepareToCopyInstructions(uint8_t* aIp, uint8_t* aIpEnd)
-{
-  MOZ_ASSERT(!mIpStart);
-  MOZ_ASSERT(!mIpEnd);
-  MOZ_ASSERT(mCopiedInstructions.empty());
-  MOZ_ASSERT(mInternalJumps.empty());
-
-  mIpStart = aIp;
-  mIpEnd = aIpEnd;
+    for (auto copyPair : mCopiedInstructions) {
+      if (copyPair.first == target) {
+        PatchJump(source, copyPair.second);
+	break;
+      }
+    }
+  }
 }
 
 void
 Assembler::NoteOriginalInstruction(uint8_t* aIp)
 {
-  if (!mIpStart) {
-    return;
-  }
-  MOZ_ASSERT(aIp >= mIpStart);
-  MOZ_ASSERT(aIp < mIpEnd);
-
   mCopiedInstructions.emplaceBack(aIp, Current());
-}
-
-void
-Assembler::FinishCopyingInstructions()
-{
-  MOZ_ASSERT(mIpStart);
-  MOZ_ASSERT(mIpEnd);
-
-  // Patch each internal jump to the point where the jump's target was copied.
-  for (auto pair : mInternalJumps) {
-    uint8_t* source = pair.first;
-    uint8_t* target = pair.second;
-
-    MOZ_ASSERT(MemoryContains(mIpStart, mIpEnd - mIpStart, target));
-    uint8_t* newTarget = nullptr;
-    for (auto copyPair : mCopiedInstructions) {
-      if (copyPair.first == target) {
-	newTarget = copyPair.second;
-	break;
-      }
-    }
-    MOZ_RELEASE_ASSERT(newTarget);
-
-    PatchJump(source, newTarget);
-  }
-
-  mCopiedInstructions.clear();
-  mInternalJumps.clear();
-
-  mIpStart = nullptr;
-  mIpEnd = nullptr;
 }
 
 void
@@ -157,20 +113,21 @@ Assembler::PatchJump(uint8_t* aIp, void* aTarget)
 void
 Assembler::Jump(void* aTarget)
 {
-  if (mIpStart && MemoryContains(mIpStart, mIpEnd - mIpStart, aTarget)) {
-    mInternalJumps.emplaceBack(Current(), (uint8_t*) aTarget);
-  } else {
-    PatchJump(Current(), aTarget);
-  }
+  PatchJump(Current(), aTarget);
+  mJumps.emplaceBack(Current(), (uint8_t*) aTarget);
   Advance(JumpBytes);
 }
 
 static uint8_t
 OppositeJump(uint8_t aOpcode)
 {
-  // Get the opposite for a single byte conditional jump opcode. Opposite
-  // opcodes are adjacent, e.g. 0x7C -> jl and 0x7D -> jge.
-  MOZ_RELEASE_ASSERT(aOpcode >= 0x70 && aOpcode <= 0x7F);
+  // Get the opposite single byte jump opcode for a one or two byte conditional
+  // jump. Opposite opcodes are adjacent, e.g. 0x7C -> jl and 0x7D -> jge.
+  if (aOpcode >= 0x80 && aOpcode <= 0x8F) {
+    aOpcode -= 0x10;
+  } else {
+    MOZ_RELEASE_ASSERT(aOpcode >= 0x70 && aOpcode <= 0x7F);
+  }
   return (aOpcode & 1) ? aOpcode - 1 : aOpcode + 1;
 }
 
@@ -180,8 +137,8 @@ Assembler::ConditionalJump(uint8_t aCode, void* aTarget)
   uint8_t* ip = Current();
   ip[0] = OppositeJump(aCode);
   ip[1] = (uint8_t) JumpBytes;
-  PatchJump(ip + 2, aTarget);
-  Advance(2 + JumpBytes);
+  Advance(2);
+  Jump(aTarget);
 }
 
 void
@@ -283,7 +240,6 @@ Assembler::PatchMoveImmediateToRax(uint8_t* aIp, void* aValue)
 void
 Assembler::MoveImmediateToRax(void* aValue)
 {
-  MOZ_RELEASE_ASSERT(!mIpStart || (aValue < mIpStart) || (aValue >= mIpEnd));
   PatchMoveImmediateToRax(Current(), aValue);
   Advance(MoveImmediateBytes);
 }

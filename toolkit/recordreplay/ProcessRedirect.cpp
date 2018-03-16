@@ -46,6 +46,50 @@ namespace recordreplay {
 // code patch.
 static StaticInfallibleVector<std::pair<uint8_t*,uint8_t*>> gInternalJumps;
 
+// Jump to patch in at the end of redirecting. To avoid issues with calling
+// redirected functions before all redirections have been installed
+// (particularly due to locks being taken while checking for internal jump
+// targets), all modification of the original code is delayed until after no
+// further system calls are needed.
+struct JumpPatch
+{
+  uint8_t* mStart;
+  uint8_t* mTarget;
+  bool mShort;
+
+  JumpPatch(uint8_t* aStart, uint8_t* aTarget, bool aShort)
+    : mStart(aStart), mTarget(aTarget), mShort(aShort)
+  {}
+};
+static StaticInfallibleVector<JumpPatch> gJumpPatches;
+
+static void
+AddJumpPatch(uint8_t* aStart, uint8_t* aTarget, bool aShort)
+{
+  gInternalJumps.emplaceBack(aStart, aTarget);
+  gJumpPatches.emplaceBack(aStart, aTarget, aShort);
+}
+
+// A range of instructions to clobber at the end of redirecting.
+struct ClobberPatch
+{
+  uint8_t* mStart;
+  uint8_t* mEnd;
+
+  ClobberPatch(uint8_t* aStart, uint8_t* aEnd)
+    : mStart(aStart), mEnd(aEnd)
+  {}
+};
+static StaticInfallibleVector<ClobberPatch> gClobberPatches;
+
+static void
+AddClobberPatch(uint8_t* aStart, uint8_t* aEnd)
+{
+  if (aStart < aEnd) {
+    gClobberPatches.emplaceBack(aStart, aEnd);
+  }
+}
+
 static uint8_t*
 SymbolBase(uint8_t* aPtr)
 {
@@ -101,6 +145,19 @@ MaybeInternalJumpTarget(uint8_t* aIpStart, uint8_t* aIpEnd)
     }
   }
 
+  // Treat patched regions of code as if they had internal jumps.
+  for (auto patch : gJumpPatches) {
+    uint8_t* end = patch.mStart + (patch.mShort ? ShortJumpBytes : JumpBytesClobberRax);
+    if (MemoryIntersects(aIpStart, aIpEnd - aIpStart, patch.mStart, end - patch.mStart)) {
+      return end;
+    }
+  }
+  for (auto patch : gClobberPatches) {
+    if (MemoryIntersects(aIpStart, aIpEnd - aIpStart, patch.mStart, patch.mEnd - patch.mStart)) {
+      return patch.mEnd;
+    }
+  }
+
   if ((size_t)(aIpEnd - aIpStart) > ShortJumpBytes) {
     // Manually annotate functions which might have backedges that interfere
     // with redirecting the initial bytes of the function. Ideally we would
@@ -132,50 +189,6 @@ MaybeInternalJumpTarget(uint8_t* aIpStart, uint8_t* aIpEnd)
 #else // WIN32
 #error "Unknown platform"
 #endif
-}
-
-// Jump to patch in at the end of redirecting. To avoid issues with calling
-// redirected functions before all redirections have been installed
-// (particularly due to locks being taken while checking for internal jump
-// targets), all modification of the original code is delayed until after no
-// further system calls are needed.
-struct JumpPatch
-{
-  uint8_t* mStart;
-  uint8_t* mTarget;
-  bool mShort;
-
-  JumpPatch(uint8_t* aStart, uint8_t* aTarget, bool aShort)
-    : mStart(aStart), mTarget(aTarget), mShort(aShort)
-  {}
-};
-static StaticInfallibleVector<JumpPatch> gJumpPatches;
-
-static void
-AddJumpPatch(uint8_t* aStart, uint8_t* aTarget, bool aShort)
-{
-  gInternalJumps.emplaceBack(aStart, aTarget);
-  gJumpPatches.emplaceBack(aStart, aTarget, aShort);
-}
-
-// A range of instructions to clobber at the end of redirecting.
-struct ClobberPatch
-{
-  uint8_t* mStart;
-  uint8_t* mEnd;
-
-  ClobberPatch(uint8_t* aStart, uint8_t* aEnd)
-    : mStart(aStart), mEnd(aEnd)
-  {}
-};
-static StaticInfallibleVector<ClobberPatch> gClobberPatches;
-
-static void
-AddClobberPatch(uint8_t* aStart, uint8_t* aEnd)
-{
-  if (aStart < aEnd) {
-    gClobberPatches.emplaceBack(aStart, aEnd);
-  }
 }
 
 // Any reasons why redirection failed.
@@ -229,6 +242,7 @@ CopySpecialInstruction(uint8_t* aIp, ud_t* aUd, size_t aNbytes, Assembler& aAsse
       case 32: target += op->lval.sdword; break;
       default: return false;
       }
+      gInternalJumps.emplaceBack(nullptr, target);
       if (mnemonic == UD_Icall) {
         aAssembler.MoveImmediateToRax(target);
         aAssembler.CallRax();
@@ -395,15 +409,12 @@ static uint8_t*
 CopyInstructions(const char* aName, uint8_t* aIpStart, uint8_t* aIpEnd,
                  Assembler& aAssembler)
 {
-  MOZ_ASSERT(!MaybeInternalJumpTarget(aIpStart, aIpEnd));
-  aAssembler.PrepareToCopyInstructions(aIpStart, aIpEnd);
+  MOZ_RELEASE_ASSERT(!MaybeInternalJumpTarget(aIpStart, aIpEnd));
 
   uint8_t* ip = aIpStart;
   while (ip < aIpEnd) {
     ip += CopyInstruction(aName, ip, aAssembler);
   }
-
-  aAssembler.FinishCopyingInstructions();
   return ip;
 }
 
@@ -442,7 +453,7 @@ FunctionStartAddress(Redirection& aRedirection)
 // described in the Redirection structure. aCursor and aCursorEnd are used to
 // allocate executable memory for use in the redirection.
 static void
-Redirect(Redirection& aRedirection, Assembler& aAssembler)
+Redirect(Redirection& aRedirection, Assembler& aAssembler, bool aFirstPass)
 {
   // The patching we do here might fail: it isn't possible to redirect an
   // arbitrary instruction pointer within an arbitrary block of code. This code
@@ -453,7 +464,15 @@ Redirect(Redirection& aRedirection, Assembler& aAssembler)
   uint8_t* ro = functionStart;
 
   if (!functionStart) {
-    fprintf(stderr, "WARNING: Could not find symbol %s for redirecting.\n", aRedirection.mName);
+    if (aFirstPass) {
+      fprintf(stderr, "Note: Could not find symbol %s for redirecting.\n", aRedirection.mName);
+    }
+    return;
+  }
+
+  if (aRedirection.mOriginalFunction != aRedirection.mBaseFunction) {
+    // We already redirected this function.
+    MOZ_RELEASE_ASSERT(!aFirstPass);
     return;
   }
 
@@ -517,6 +536,12 @@ Redirect(Redirection& aRedirection, Assembler& aAssembler)
   // J2: jump to the new function
   // J3: jump to the point after J0
   // J4: jump to the point after J2
+
+  // Skip this during the first pass, we don't want to patch a jump in over the
+  // initial bytes of a function we haven't redirected yet.
+  if (aFirstPass) {
+    return;
+  }
 
   // The original symbol must have enough bytes to insert a short jump.
   MOZ_RELEASE_ASSERT(!MaybeInternalJumpTarget(ro, ro + ShortJumpBytes));
@@ -612,6 +637,18 @@ EarlyInitializeRedirections()
 
     redirection.mBaseFunction = FunctionStartAddress(redirection);
     redirection.mOriginalFunction = redirection.mBaseFunction;
+
+    if (redirection.mBaseFunction && IsRecordingOrReplaying()) {
+      // We will get confused if we try to redirect the same address in multiple places.
+      for (size_t j = 0; j < i; j++) {
+        if (gRedirections[j].mBaseFunction == redirection.mBaseFunction) {
+          fprintf(stderr, "Note: Redirection %s shares the same address as %s, skipping.\n",
+                  redirection.mName, gRedirections[j].mName);
+          redirection.mBaseFunction = nullptr;
+          break;
+        }
+      }
+    }
   }
 }
 
@@ -628,7 +665,15 @@ InitializeRedirections()
       if (!redirection.mName) {
         break;
       }
-      Redirect(redirection, assembler);
+      Redirect(redirection, assembler, /* aFirstPass = */ true);
+    }
+
+    for (size_t i = 0;; i++) {
+      Redirection& redirection = gRedirections[i];
+      if (!redirection.mName) {
+        break;
+      }
+      Redirect(redirection, assembler, /* aFirstPass = */ false);
     }
 
 #if defined(DEBUG) && defined(WIN32)

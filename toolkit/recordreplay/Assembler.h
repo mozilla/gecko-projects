@@ -30,16 +30,9 @@ public:
 
   ~Assembler();
 
-  // Specify an original range of instructions which we are about to copy.
-  // This must be followed by a call to FinishCopyingInstructions.
-  void PrepareToCopyInstructions(uint8_t* aIp, uint8_t* aIpEnd);
-
   // Mark the point at which we start copying an instruction in the original
   // range.
   void NoteOriginalInstruction(uint8_t* aIp);
-
-  // Mark the point where we are done copying the range of instructions.
-  void FinishCopyingInstructions();
 
   // Get the address where the next assembled instruction will be placed.
   uint8_t* Current();
@@ -159,19 +152,15 @@ private:
   uint8_t* mCursorEnd;
   bool mCanAllocateStorage;
 
-  // Optional range of instructions being copied.
-  uint8_t* mIpStart;
-  uint8_t* mIpEnd;
-
-  // For instructions in [mIpStart, mIpEnd] which we have copied or started
-  // copying, association between the instruction original and copy pointers.
+  // Association between the instruction original and copy pointers, for all
+  // instructions that have been copied.
   InfallibleVector<std::pair<uint8_t*,uint8_t*>> mCopiedInstructions;
 
-  // For jumps we have encountered into [mIpStart, mIpEnd], association between
-  // the source (in generated code) and target (in the above range) of the
-  // jump. These will be updated to refer to their copy in generated code by
-  // FinishCopyingInstructions.
-  InfallibleVector<std::pair<uint8_t*,uint8_t*>> mInternalJumps;
+  // For jumps we have copied, association between the source (in generated
+  // code) and target (in the original code) of the jump. These will be updated
+  // to refer to their copy (if there is one) in generated code in the
+  // assembler's destructor.
+  InfallibleVector<std::pair<uint8_t*,uint8_t*>> mJumps;
 };
 
 // The number of instruction bytes required for a short jump.
