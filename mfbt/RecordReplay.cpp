@@ -129,14 +129,14 @@ FOR_EACH_INTERFACE_VOID(INIT_SYMBOL_VOID)
 #define DEFINE_WRAPPER(aName, aReturnType, aFormals, aActuals)  \
   aReturnType aName aFormals                                    \
   {                                                             \
-    MOZ_ASSERT(IsRecordingOrReplaying());                       \
+    MOZ_ASSERT(IsRecordingOrReplaying() || IsMiddleman());      \
     return gPtr ##aName aActuals;                               \
   }
 
 #define DEFINE_WRAPPER_VOID(aName, aFormals, aActuals)          \
   void aName aFormals                                           \
   {                                                             \
-    MOZ_ASSERT(IsRecordingOrReplaying());                       \
+    MOZ_ASSERT(IsRecordingOrReplaying() || IsMiddleman());      \
     gPtr ##aName aActuals;                                      \
   }
 
