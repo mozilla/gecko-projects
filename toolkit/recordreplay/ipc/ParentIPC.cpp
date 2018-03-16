@@ -286,6 +286,9 @@ static channel::IntroductionMessage* gIntroductionMessage;
 // The last time we received a message from the child.
 static TimeStamp gLastMessageTime;
 
+// Whether we are allowed to recover crashed/hung child processes.
+static bool gRecoveryEnabled;
+
 void
 Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChildID,
            dom::ContentChild* aContentChild)
@@ -298,6 +301,8 @@ Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChild
     gChildProcessIsRecording
     ? strdup(getenv("MIDDLEMAN_RECORD"))
     : strdup(getenv("MIDDLEMAN_REPLAY"));
+
+  gRecoveryEnabled = !getenv("NO_RECOVERY");
 
   InitDebuggerHooks();
   channel::InitParent();
@@ -486,14 +491,18 @@ WaitUntilChildIsPaused(bool aPokeChild = false)
   }
 
   while (!gChildIsPaused) {
-    TimeStamp deadline = gLastMessageTime + TimeDuration::FromSeconds(ChildHangSeconds);
-    if (TimeStamp::Now() >= deadline) {
-      nsAutoCString why("Child process non-responsive");
-      DeadChildProcess(why);
-    }
     MonitorAutoLock lock(*gCommunicationMonitor);
     if (!MaybeRunReplayMessageTask()) {
-      gCommunicationMonitor->WaitUntil(deadline);
+      if (gRecoveryEnabled) {
+        TimeStamp deadline = gLastMessageTime + TimeDuration::FromSeconds(ChildHangSeconds);
+        if (TimeStamp::Now() >= deadline) {
+          nsAutoCString why("Child process non-responsive");
+          DeadChildProcess(why);
+        }
+        gCommunicationMonitor->WaitUntil(deadline);
+      } else {
+        gCommunicationMonitor->Wait();
+      }
     }
   }
 }
@@ -897,13 +906,13 @@ RecvSaveRecording(const channel::SaveRecordingMessage& aMsg)
 static bool
 CanRecoverChildProcess()
 {
-  return !gChildProcessIsRecording
+  return gRecoveryEnabled
+      && !gChildProcessIsRecording
       && strcmp(gChildProcessFilename, "*")
       && !gChildIsPaused
       && gTakeSnapshots
       && gLastSnapshot
-      && !recovery::IsRecovering()
-      && !getenv("NO_RECOVERY");
+      && !recovery::IsRecovering();
 }
 
 ///////////////////////////////////////////////////////////////////////////////

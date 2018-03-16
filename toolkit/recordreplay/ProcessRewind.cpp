@@ -250,6 +250,7 @@ TakeSnapshot(bool aFinal, bool aTemporary)
   } else {
     MOZ_RELEASE_ASSERT(!gRewindInfo->mRestoreTargetSnapshot);
     MOZ_RELEASE_ASSERT(!aTemporary);
+    gRewindInfo->mTakenSnapshot = true;
     gRewindInfo->mLastSnapshot = snapshot;
   }
 
