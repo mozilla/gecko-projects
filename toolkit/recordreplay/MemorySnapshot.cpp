@@ -1268,9 +1268,17 @@ EnsureMemoryDoesNotOverlapSystemThreadStack(void* aAddress, size_t aSize)
     return;
   }
   AutoSpinLock lock(gMemoryInfo->mSystemThreadStacksLock);
-  for (auto stack : gMemoryInfo->mSystemThreadStacks) {
-    MOZ_RELEASE_ASSERT(!MemoryIntersects(stack.mBase, stack.mSize, (uint8_t*)aAddress, aSize));
-  }
+  bool found;
+  do {
+    found = false;
+    for (auto& stack : gMemoryInfo->mSystemThreadStacks) {
+      if (MemoryIntersects(stack.mBase, stack.mSize, (uint8_t*)aAddress, aSize)) {
+        gMemoryInfo->mSystemThreadStacks.erase(&stack);
+        found = true;
+        break;
+      }
+    }
+  } while (found);
 }
 
 bool
