@@ -392,6 +392,8 @@ static bool CanRecoverChildProcess();
 static void
 DeadChildProcess(const nsCString& aWhy)
 {
+  PrintSpew("DeadChildProcess: %s\n", aWhy.get());
+
   if (CanRecoverChildProcess()) {
     recovery::BeginRecovery();
 
@@ -416,6 +418,8 @@ DeadChildProcess(const nsCString& aWhy)
     channel::ConnectParent();
     channel::SendMessage(*gIntroductionMessage);
     channel::SendMessage(channel::InitializeMessage(/* aTakeSnapshots = */ true));
+
+    gLastMessageTime = TimeStamp::Now();
   } else {
     dom::ContentChild::GetSingleton()->SendRecordReplayFatalError(aWhy);
     Thread::WaitForeverNoIdle();
@@ -468,7 +472,7 @@ static bool gChildIsPaused;
 
 // How many seconds to wait after unpausing before considering the child in a
 // hung state.
-static const size_t ChildHangSeconds = 10;
+static const size_t ChildHangSeconds = 5;
 
 static void
 SetChildIsPaused(bool aPaused)
@@ -496,6 +500,7 @@ WaitUntilChildIsPaused(bool aPokeChild = false)
       if (gRecoveryEnabled) {
         TimeStamp deadline = gLastMessageTime + TimeDuration::FromSeconds(ChildHangSeconds);
         if (TimeStamp::Now() >= deadline) {
+          MonitorAutoUnlock unlock(*gCommunicationMonitor);
           nsAutoCString why("Child process non-responsive");
           DeadChildProcess(why);
         }
@@ -997,6 +1002,12 @@ HookResume(bool aForward, bool aHitOtherBreakpoints)
 
   SetChildIsPaused(false);
   SendMessageNoteRecovery(channel::ResumeMessage(aForward, aHitOtherBreakpoints));
+
+  // Enter a wait so that we will detect whether the child process is
+  // non-responsive, even without further input from the debugger.
+  if (!gChildProcessIsRecording) {
+    WaitUntilChildIsPaused(false);
+  }
 }
 
 static void
@@ -1037,7 +1048,7 @@ RecvHitSnapshot(const channel::HitSnapshotMessage& aMsg)
 
   // Resume either forwards or backwards. Break the resume off into a separate
   // runnable, to avoid starving any debugger code already on the stack and
-  //  waiting for the process to pause.
+  // waiting for the process to pause.
   if (!gResumeForwardOrBackward) {
     gResumeForwardOrBackward = true;
     gMainThreadMessageLoop->PostTask(NewRunnableFunction("ResumeForwardOrBackward",
@@ -1051,15 +1062,16 @@ HitBreakpoint(size_t aBreakpointId)
 {
   AutoSafeJSContext cx;
 
+  MOZ_RELEASE_ASSERT(!gResumeForwardOrBackward);
+  gResumeForwardOrBackward = true;
+
   // FIXME what happens if this throws?
   (void) JS::replay::hooks.hitBreakpointMiddleman(cx, aBreakpointId);
 
   // If the child was not explicitly resumed by the breakpoint handler, resume
   // travel in whichever direction it was going previously. If there are other
   // breakpoints at the current source location, call them instead.
-  if (gChildIsPaused) {
-    MOZ_RELEASE_ASSERT(!gResumeForwardOrBackward);
-    gResumeForwardOrBackward = true;
+  if (gResumeForwardOrBackward) {
     ResumeForwardOrBackward(/* aHitOtherBreakpoints = */ true);
   }
 }
