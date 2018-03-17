@@ -89,8 +89,11 @@ NoteIncomingMessage(const Message& aMsg)
       if (nmsg.mSnapshotId == 0) {
         SendMessage(SetAllowIntentionalCrashesMessage(false));
       }
-      if (nmsg.mSnapshotId < gLastSnapshot) {
-        MOZ_RELEASE_ASSERT((gRecoveryStage == RecoveryStage::PlayingSnapshotMessages) == nmsg.mInterim);
+      if (nmsg.mInterim) {
+        MOZ_RELEASE_ASSERT(gRecoveryStage == RecoveryStage::PlayingSnapshotMessages);
+        MOZ_RELEASE_ASSERT(nmsg.mSnapshotId < gLastSnapshot);
+      } else if (nmsg.mSnapshotId < gLastSnapshot) {
+        MOZ_RELEASE_ASSERT(gRecoveryStage == RecoveryStage::ReachingSnapshot);
         SendMessage(ResumeMessage(/* forward = */ true, /* hitOtherBreakpoints = */ false));
       } else {
         MOZ_RELEASE_ASSERT(gRecoveryStage == RecoveryStage::ReachingSnapshot);
