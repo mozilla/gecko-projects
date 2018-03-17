@@ -171,9 +171,10 @@ MaybeInternalJumpTarget(uint8_t* aIpStart, uint8_t* aIpEnd)
         (strstr(startName, "CTRunGetStringIndices") &&
          !strstr(startName, "CTRunGetStringIndicesPtr")) ||
         strstr(startName, "CGColorSpaceCreateDeviceRGB") ||
-        // For this function, there is a syscall near the beginning which other
-        // system threads might be inside.
-        strstr(startName, "__workq_kernreturn")) {
+        // For these functions, there is a syscall near the beginning which
+        // other system threads might be inside.
+        strstr(startName, "__workq_kernreturn") ||
+        strstr(startName, "kevent64")) {
       return aIpEnd - 1;
     }
   }
