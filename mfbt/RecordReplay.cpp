@@ -32,8 +32,7 @@ namespace recordreplay {
         (const PLDHashTableOps* aOps), (aOps))                  \
   Macro(AllocateMemory, void*, (size_t aSize, AllocatedMemoryKind aKind), (aSize, aKind)) \
   Macro(InternalThingIndex, size_t, (void* aThing), (aThing))   \
-  Macro(InternalVirtualThingName, const char*, (void* aThing), (aThing)) \
-  Macro(CanRestoreSnapshots, bool, (), ())
+  Macro(InternalVirtualThingName, const char*, (void* aThing), (aThing))
 
 #define FOR_EACH_INTERFACE_VOID(Macro)                          \
   Macro(InternalBeginOrderedAtomicAccess, (), ())               \

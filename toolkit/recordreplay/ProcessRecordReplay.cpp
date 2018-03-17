@@ -67,7 +67,6 @@ ReadRecordingMetadata()
 static void DumpRecordingAssertions();
 
 bool gInitialized;
-bool gTakeSnapshots;
 
 // Whether to spew record/replay messages to stderr.
 static bool gSpewEnabled;

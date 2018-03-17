@@ -80,7 +80,7 @@ ChannelThreadMain(void*)
     }
     case channel::MessageType::Initialize: {
       channel::InitializeMessage* nmsg = (channel::InitializeMessage*) msg;
-      gTakeSnapshots = nmsg->mTakeSnapshots;
+      SetRecordSnapshots(nmsg->mRecordSnapshots);
       break;
     }
     case channel::MessageType::SetAllowIntentionalCrashes: {

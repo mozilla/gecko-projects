@@ -89,6 +89,9 @@ struct Hooks
     // Notify the middleman about a snapshot that was hit.
     void (*hitSnapshotReplay)(size_t id, bool final, bool interim);
 
+    // Return whether the middleman is able to rewind the replayed process.
+    bool (*canRewindMiddleman)();
+
     // Finish recovering from an unhandled divergence at a breakpoint, and send
     // a response to the middleman for the last request.
     void (*respondAfterRecoveringFromDivergence)();

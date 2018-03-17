@@ -68,13 +68,15 @@ InitializeRewindState()
   gMainThreadCallbackMonitor = new Monitor();
 }
 
-extern "C" {
+static bool gAllowRecordingSnapshots;
 
-MOZ_EXPORT bool
-RecordReplayInterface_CanRestoreSnapshots()
+void
+SetRecordSnapshots(bool aAllowed)
 {
-  return gTakeSnapshots;
+  gAllowRecordingSnapshots = aAllowed;
 }
+
+extern "C" {
 
 MOZ_EXPORT void
 RecordReplayInterface_RestoreSnapshotAndResume(size_t aSnapshot)
@@ -91,6 +93,12 @@ RecordReplayInterface_RestoreSnapshotAndResume(size_t aSnapshot)
   if (IsRecording()) {
     PrepareForFirstRecordingRewind();
   }
+
+  // This is a structural assert. If we are recording and snapshots are only
+  // enabled while replaying, then we will bust on this assert and the
+  // middleman will start up a replaying process to recover this state and
+  // then rewind.
+  MOZ_RELEASE_ASSERT(gAllowRecordingSnapshots);
 
   double start = CurrentTime();
 
@@ -153,7 +161,7 @@ static double SecondsBetweenSnapshots = 3.0;
 static bool
 ShouldRecordSnapshot(size_t aSnapshot)
 {
-  if (!gTakeSnapshots) {
+  if (!gAllowRecordingSnapshots) {
     return false;
   }
 
@@ -195,9 +203,9 @@ TakeSnapshot(bool aFinal, bool aTemporary)
     gHasTemporarySnapshot = true;
   }
 
-  if (!gTakeSnapshots) {
+  if (!gAllowRecordingSnapshots) {
     // Setup the dirty memory handler even if we aren't taking snapshots, for
-    // help in debugging SEGVs.
+    // reporting crashes to the middleman.
     AutoPassThroughThreadEvents pt;
     SetupDirtyMemoryHandler();
   }
@@ -327,7 +335,7 @@ EnsureNotDivergedFromRecording()
 bool
 HasTakenSnapshot()
 {
-  return gRewindInfo && gRewindInfo->mTakenSnapshot;
+  return gRewindInfo && gRewindInfo->mTakenSnapshot && gAllowRecordingSnapshots;
 }
 
 bool

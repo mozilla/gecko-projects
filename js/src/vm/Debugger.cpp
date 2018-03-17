@@ -5296,7 +5296,7 @@ Debugger::allDebuggersCanRewind(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     args.rval().setBoolean(mozilla::recordreplay::IsMiddleman() &&
-                           mozilla::recordreplay::CanRestoreSnapshots());
+                           JS::replay::hooks.canRewindMiddleman());
     return true;
 }
 

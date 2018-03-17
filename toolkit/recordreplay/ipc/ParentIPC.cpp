@@ -20,8 +20,9 @@
 #include "mozilla/layers/PTextureChild.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
 #include "mozilla/ipc/IOThreadChild.h"
-#include "Monitor.h"
 #include "InfallibleVector.h"
+#include "Monitor.h"
+#include "nsCocoaFeatures.h"
 #include "ParentRecovery.h"
 #include "ProcessRecordReplay.h"
 #include "ProcessRedirect.h"
@@ -37,6 +38,11 @@ namespace parent {
 ///////////////////////////////////////////////////////////////////////////////
 // Parent IPC
 ///////////////////////////////////////////////////////////////////////////////
+
+// Information about the child process.
+static ipc::GeckoChildProcessHost* gChildProcess;
+static bool gChildProcessIsRecording;
+static char* gChildProcessFilename;
 
 // Monitor used for synchronization between the forwarding message loop thread
 // and the main thread.
@@ -121,8 +127,12 @@ public:
   }
 
   static void ForwardMessageAsync(MiddlemanProtocol* aProtocol, Message* aMessage) {
-    if (!aProtocol->mChannel.Send(aMessage)) {
-      MOZ_CRASH();
+    if (gChildProcessIsRecording) {
+      if (!aProtocol->mChannel.Send(aMessage)) {
+        MOZ_CRASH();
+      }
+    } else {
+      delete aMessage;
     }
   }
 
@@ -159,6 +169,9 @@ public:
   virtual Result OnMessageReceived(const Message& aMessage, Message*& aReply) override {
     //fprintf(stderr, "SYNC_MSG %s\n", IPC::StringFromIPCMessageType(aMessage.type()));
 
+    MOZ_RELEASE_ASSERT(gChildProcessIsRecording);
+    MOZ_RELEASE_ASSERT(mSide == ipc::ParentSide);
+
     Message* nMessage = new Message();
     nMessage->CopyFrom(aMessage);
     mOppositeMessageLoop->PostTask(NewRunnableFunction("ForwardMessageSync", ForwardMessageSync,
@@ -174,8 +187,9 @@ public:
   static void ForwardCallMessage(MiddlemanProtocol* aProtocol, Message* aMessage, Message** aReply) {
     MOZ_RELEASE_ASSERT(!*aReply);
     Message* nReply = new Message();
-    if (!aProtocol->mChannel.Call(aMessage, nReply))
+    if (!aProtocol->mChannel.Call(aMessage, nReply)) {
       MOZ_CRASH();
+    }
 
     MonitorAutoLock lock(*gCommunicationMonitor);
     *aReply = nReply;
@@ -184,6 +198,9 @@ public:
 
   virtual Result OnCallReceived(const Message& aMessage, Message*& aReply) override {
     //fprintf(stderr, "SYNC_CALL %s\n", IPC::StringFromIPCMessageType(aMessage.type()));
+
+    MOZ_RELEASE_ASSERT(gChildProcessIsRecording);
+    MOZ_RELEASE_ASSERT(mSide == ipc::ParentSide);
 
     Message* nMessage = new Message();
     nMessage->CopyFrom(aMessage);
@@ -219,11 +236,6 @@ ChannelToUIProcess()
 {
   return gChildProtocol->GetIPCChannel();
 }
-
-// Information about the child process.
-static ipc::GeckoChildProcessHost* gChildProcess;
-static bool gChildProcessIsRecording;
-static char* gChildProcessFilename;
 
 // Message loop for forwarding messages between the parent process and a
 // recording process.
@@ -353,23 +365,48 @@ Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChild
   gLastMessageTime = TimeStamp::Now();
 }
 
+static bool gRecordSnapshotsEnabled, gReplaySnapshotsEnabled;
+
 static void
 SendInitializeMessage()
 {
   // The Initialize message is separate from the Introduction message because
   // we have not yet loaded prefs at the point where the latter is sent.
 
-  gTakeSnapshots = Preferences::GetBool(gChildProcessIsRecording
-                                        ? "devtools.recordreplay.enableRecordRewinding"
-                                        : "devtools.recordreplay.enableReplayRewinding",
-                                        true);
+  gRecordSnapshotsEnabled = Preferences::GetBool("devtools.recordreplay.enableRecordRewinding");
+  gReplaySnapshotsEnabled = Preferences::GetBool("devtools.recordreplay.enableReplayRewinding");
 
   // Force-disable snapshots with an env var for shell based testing.
   if (getenv("NO_SNAPSHOTS")) {
-    gTakeSnapshots = false;
+    gRecordSnapshotsEnabled = gReplaySnapshotsEnabled = false;
   }
 
-  channel::SendMessage(channel::InitializeMessage(gTakeSnapshots));
+  // Force-disable snapshots while recording on older versions of macOS.
+  // The memory protection used when recording snapshots interferes with GCD
+  // internals and the underlying cause has not been identified.
+  // See bug 1446521.
+  if (!nsCocoaFeatures::IsAtLeastVersion(12, 0)) {
+    gRecordSnapshotsEnabled = false;
+  }
+
+  // Because recording processes can transition into replaying processes, if
+  // recording snapshots are enabled then treat replaying snapshots as enabled
+  // as well.
+  if (gRecordSnapshotsEnabled) {
+    gReplaySnapshotsEnabled = true;
+  }
+
+  bool takeSnapshots = gChildProcessIsRecording ? gRecordSnapshotsEnabled : gReplaySnapshotsEnabled;
+  channel::SendMessage(channel::InitializeMessage(takeSnapshots));
+}
+
+static bool
+CanRewindHook()
+{
+  // If snapshots are disabled while recording but enabled while replaying, we
+  // can still rewind by spinning up a new replaying process. This is mainly
+  // helpful for OS releases where recording snapshots are disabled.
+  return gReplaySnapshotsEnabled;
 }
 
 // Whether the main thread is waiting on its child process to be terminated.
@@ -915,7 +952,7 @@ CanRecoverChildProcess()
       && !gChildProcessIsRecording
       && strcmp(gChildProcessFilename, "*")
       && !gChildIsPaused
-      && gTakeSnapshots
+      && gReplaySnapshotsEnabled
       && gLastSnapshot
       && !recovery::IsRecovering();
 }
@@ -1111,6 +1148,7 @@ InitDebuggerHooks()
   JS::replay::hooks.setBreakpointMiddleman = HookSetBreakpoint;
   JS::replay::hooks.resumeMiddleman = HookResume;
   JS::replay::hooks.pauseMiddleman = HookPause;
+  JS::replay::hooks.canRewindMiddleman = CanRewindHook;
 }
 
 } // namespace parent

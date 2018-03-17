@@ -201,11 +201,11 @@ struct IntroductionMessage : public Message
 
 struct InitializeMessage : public Message
 {
-  bool mTakeSnapshots;
+  bool mRecordSnapshots;
 
-  explicit InitializeMessage(bool aTakeSnapshots)
+  explicit InitializeMessage(bool aRecordSnapshots)
     : Message(MessageType::Initialize, sizeof(*this))
-    , mTakeSnapshots(aTakeSnapshots)
+    , mRecordSnapshots(aRecordSnapshots)
   {}
 };
 

@@ -84,8 +84,12 @@ namespace recordreplay {
 // Initialize state needed for rewinding.
 void InitializeRewindState();
 
-// Take a new snapshot. This increases the ID of the last encountered snapshot,
-// but the rewind mechanism is not required to actually record this snapshot.
+// Set whether this process should record any of its snapshots.
+void SetRecordSnapshots(bool aAllowed);
+
+// Mark a snapshot point. Non-temporary snapshots always occur at the same
+// point of execution. The rewind mechanism is not required to actually record
+// this snapshot.
 void TakeSnapshot(bool aFinal, bool aTemporary = false);
 
 // Return whether we are rewinding and the last snapshot was before the point

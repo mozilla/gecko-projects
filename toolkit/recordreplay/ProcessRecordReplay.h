@@ -85,10 +85,6 @@ extern bool gInitialized;
 // If we failed to initialize, any associated message.
 extern char* gInitializationFailureMessage;
 
-// Whether to take snapshots. This is set in the recording/replaying and
-// middleman processes.
-extern bool gTakeSnapshots;
-
 // Whether record/replay assertions should be performed.
 //#ifdef DEBUG
 #define INCLUDE_RECORD_REPLAY_ASSERTIONS 1

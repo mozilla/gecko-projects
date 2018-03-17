@@ -391,10 +391,6 @@ MFBT_API void SetSnapshotHooks(BeforeSnapshotHook aBeforeSnapshot,
 // execution.
 MFBT_API void ResumeExecution();
 
-// Return whether the process can restore earlier snapshots. This may be called
-// from either the recording/replaying process or the middleman process.
-MFBT_API bool CanRestoreSnapshots();
-
 // When paused at a breakpoint or at a snapshot, restore an earlier snapshot
 // and resume execution.
 MFBT_API void RestoreSnapshotAndResume(size_t aId);
