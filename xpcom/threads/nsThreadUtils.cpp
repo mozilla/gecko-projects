@@ -43,8 +43,6 @@ IdlePeriod::GetIdlePeriodHint(TimeStamp* aIdleDeadline)
 // NS_IMPL_NAMED_* relies on the mName field, which is not present on
 // release or beta. Instead, fall back to using "Runnable" for all
 // runnables.
-// FIXME
-/*
 #ifdef RELEASE_OR_BETA
 NS_IMPL_ISUPPORTS(Runnable, nsIRunnable, nsINamed)
 #else
@@ -52,32 +50,6 @@ NS_IMPL_NAMED_ADDREF(Runnable, mName)
 NS_IMPL_NAMED_RELEASE(Runnable, mName)
 NS_IMPL_QUERY_INTERFACE(Runnable, nsIRunnable, nsINamed)
 #endif
-*/
-
-NS_IMPL_QUERY_INTERFACE(Runnable, nsIRunnable, nsINamed)
-
-NS_IMETHODIMP_(MozExternalRefCountType) Runnable::AddRef()
-{
-  MOZ_ASSERT(int32_t(mRefCnt) >= 0, "illegal refcnt");
-  recordreplay::BeginOrderedAtomicAccess();
-  nsrefcnt count = ++mRefCnt;
-  recordreplay::EndOrderedAtomicAccess();
-  return count;
-}
-
-NS_IMETHODIMP_(MozExternalRefCountType) Runnable::Release()
-{
-  MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");
-  recordreplay::BeginOrderedAtomicAccess();
-  nsrefcnt count = --mRefCnt;
-  recordreplay::EndOrderedAtomicAccess();
-  if (count == 0) {
-    mRefCnt = 1; /* stabilize */
-    delete this;
-    return 0;
-  }
-  return count;
-}
 
 NS_IMETHODIMP
 Runnable::Run()
