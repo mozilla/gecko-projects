@@ -56,7 +56,7 @@ public:
   static already_AddRefed<AbstractThread>
   CreateEventTargetWrapper(nsIEventTarget* aEventTarget, bool aRequireTailDispatch);
 
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS_WITH_RECORDING(recordreplay::Behavior::Preserve)
 
   // We don't use NS_DECL_NSIEVENTTARGET so that we can remove the default
   // |flags| parameter from Dispatch. Otherwise, a single-argument Dispatch call
