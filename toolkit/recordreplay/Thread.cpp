@@ -53,9 +53,9 @@ Thread::BindToCurrent()
   size_t size;
   uint8_t* base;
 #if defined(XP_MACOSX)
-  pthread_t pthread = pthread_self();
-  size = pthread_get_stacksize_np(pthread);
-  base = (uint8_t*)pthread_get_stackaddr_np(pthread) - size;
+  mNativeId = pthread_self();
+  size = pthread_get_stacksize_np(mNativeId);
+  base = (uint8_t*)pthread_get_stackaddr_np(mNativeId) - size;
 #elif defined(WIN32)
   GetAllocatedRegionInfo(&size, &base, &size);
   MOZ_CRASH();
@@ -92,12 +92,11 @@ Thread::GetById(size_t aId)
 }
 
 /* static */ Thread*
-Thread::GetByVirtualId(size_t aId)
+Thread::GetByNativeId(NativeThreadId aNativeId)
 {
-  // Note: We're not doing any locking here, so be careful with this method.
   for (size_t id = MainThreadId; id <= MaxRecordedThreadId; id++) {
     Thread* thread = GetById(id);
-    if (thread->mVirtualId == aId) {
+    if (thread->mNativeId == aNativeId) {
       return thread;
     }
   }
@@ -183,10 +182,8 @@ Thread::ThreadMain(void* aArgument)
 
     MonitorAutoLock lock(*gMonitor);
 
-    // All references to the start routine are gone and the originally
-    // spawned thread is effectively dead. Clear the start routine so that the
-    // thread may be reused.
-    thread->mVirtualId = 0;
+    // Clear the start routine to indicate to other threads that this one has
+    // finished executing.
     thread->mStart = nullptr;
     thread->mStartArg = nullptr;
 
@@ -248,18 +245,8 @@ Thread::SpawnThread(Thread* aThread)
   WaitUntilInitialized(aThread);
 }
 
-// The number of virtual IDs that have been handed out. Note that virtual IDs
-// may not be consistent between recording and replay.
-static Atomic<size_t, SequentiallyConsistent, Behavior::DontPreserve> gNumVirtualIds;
-
-/* static */ bool
-Thread::IsValidVirtualId(size_t aVirtualId)
-{
-  return aVirtualId <= gNumVirtualIds;
-}
-
-/* static */ size_t
-Thread::StartThread(Callback aStart, void* aArgument)
+/* static */ NativeThreadId
+Thread::StartThread(Callback aStart, void* aArgument, bool aNeedsJoin)
 {
   MOZ_ASSERT(IsRecordingOrReplaying());
   MOZ_ASSERT(!AreThreadEventsPassedThrough());
@@ -270,13 +257,14 @@ Thread::StartThread(Callback aStart, void* aArgument)
 
   RecordReplayAssert("StartThread");
 
+  MonitorAutoLock lock(*gMonitor);
+
   size_t id = 0;
   if (IsRecording()) {
     // Look for an idle thread.
-    MonitorAutoLock lock(*gMonitor);
     for (id = MainThreadId + 1; id <= MaxRecordedThreadId; id++) {
       Thread* targetThread = Thread::GetById(id);
-      if (!targetThread->mStart) {
+      if (!targetThread->mStart && !targetThread->mNeedsJoin) {
         break;
       }
     }
@@ -290,36 +278,35 @@ Thread::StartThread(Callback aStart, void* aArgument)
 
   Thread* targetThread = GetById(id);
 
-  MonitorAutoLock lock(*gMonitor);
-
   // Block until the thread is ready for a new start routine.
   while (targetThread->mStart) {
     MOZ_RELEASE_ASSERT(IsReplaying());
     gMonitor->Wait();
   }
 
-  targetThread->mVirtualId = ++gNumVirtualIds;
   targetThread->mStart = aStart;
   targetThread->mStartArg = aArgument;
+  targetThread->mNeedsJoin = aNeedsJoin;
 
   // Notify the thread in case it is waiting for a start routine under
   // ThreadMain.
   Notify(id);
 
-  return targetThread->mVirtualId;
+  return targetThread->mNativeId;
 }
 
-/* static */ void
-Thread::JoinThread(size_t aVirtualId)
+void
+Thread::Join()
 {
   MOZ_ASSERT(!AreThreadEventsPassedThrough());
-  MOZ_RELEASE_ASSERT(IsValidVirtualId(aVirtualId));
 
   EnsureNotDivergedFromRecording();
 
   while (true) {
     MonitorAutoLock lock(*gMonitor);
-    if (!GetByVirtualId(aVirtualId)) {
+    if (!mStart) {
+      MOZ_RELEASE_ASSERT(mNeedsJoin);
+      mNeedsJoin = false;
       break;
     }
     gMonitor->Wait();

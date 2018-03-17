@@ -119,7 +119,6 @@ namespace recordreplay {
   MACRO(pthread_cond_signal)                    \
   MACRO(pthread_cond_broadcast)                 \
   MACRO(pthread_create)                         \
-  MACRO(pthread_equal)                          \
   MACRO(pthread_join)                           \
   MACRO(pthread_mutex_init)                     \
   MACRO(pthread_mutex_destroy)                  \
@@ -1218,29 +1217,13 @@ RR_pthread_create(pthread_t* aToken, const pthread_attr_t* aAttr,
     return OriginalCall(pthread_create, ssize_t, aToken, aAttr, aStart, aStartArg);
   }
 
-  size_t virtualId = Thread::StartThread((Thread::Callback) aStart, aStartArg);
-  *aToken = (pthread_t) virtualId;
-  return 0;
-}
+  int detachState;
+  int rv = pthread_attr_getdetachstate(aAttr, &detachState);
+  MOZ_RELEASE_ASSERT(rv == 0);
 
-static ssize_t
-RR_pthread_equal(pthread_t aFirst, pthread_t aSecond)
-{
-  if (!AreThreadEventsPassedThrough()) {
-    // This is a hacky workaround for code that compares its own thread ID with
-    // an ID previously obtained from pthread_create. Ideally we would have a
-    // clean separation between mozilla code that uses virtual IDs and system
-    // code that uses the correct pthread_t, but we don't redirect all pthread
-    // interfaces and if e.g. a pthread_self behaves incorrectly inside the
-    // pthreads library then it will work incorrectly for non-obvious reasons.
-    if ((size_t) aFirst == Thread::Current()->VirtualId()) {
-      aFirst = pthread_self();
-    }
-    if ((size_t) aSecond == Thread::Current()->VirtualId()) {
-      aSecond = pthread_self();
-    }
-  }
-  return OriginalCall(pthread_equal, ssize_t, aFirst, aSecond);
+  *aToken = Thread::StartThread((Thread::Callback) aStart, aStartArg,
+                                detachState == PTHREAD_CREATE_JOINABLE);
+  return 0;
 }
 
 static ssize_t
@@ -1250,7 +1233,8 @@ RR_pthread_join(pthread_t aToken, void** aPtr)
     return OriginalCall(pthread_join, int, aToken, aPtr);
   }
 
-  Thread::JoinThread((size_t) aToken);
+  Thread* thread = Thread::GetByNativeId(aToken);
+  thread->Join();
 
   *aPtr = nullptr;
   return 0;

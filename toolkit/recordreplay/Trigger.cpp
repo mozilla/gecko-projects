@@ -19,7 +19,7 @@ namespace recordreplay {
 // Information about each trigger.
 struct TriggerInfo
 {
-  // Virtual ID of the thread which registered this trigger.
+  // ID of the thread which registered this trigger.
   size_t mThreadId;
 
   // Callback to execute when the trigger is activated.
@@ -66,7 +66,7 @@ RecordReplayInterface_RegisterTrigger(void* aObj, const std::function<void()>& a
 
   MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
 
-  size_t threadId = Thread::Current()->VirtualId();
+  size_t threadId = Thread::Current()->Id();
 
   size_t id;
   {
@@ -128,7 +128,7 @@ InvokeTriggerCallback(size_t aId)
     obj = const_cast<void*>(gTriggers->GetValue(aId));
     TriggerInfoMap::iterator iter = gTriggerInfoMap->find(obj);
     MOZ_RELEASE_ASSERT(iter != gTriggerInfoMap->end());
-    MOZ_RELEASE_ASSERT(iter->second.mThreadId == Thread::Current()->VirtualId());
+    MOZ_RELEASE_ASSERT(iter->second.mThreadId == Thread::Current()->Id());
     MOZ_RELEASE_ASSERT(iter->second.mRegisterCount);
     MOZ_RELEASE_ASSERT(iter->second.mCallback);
     callback = iter->second.mCallback;
@@ -169,7 +169,7 @@ RecordReplayInterface_ExecuteTriggers()
     // Invoke the callbacks for any triggers waiting for execution, including
     // any whose callbacks are triggered by earlier callback invocations.
     while (true) {
-      Maybe<size_t> id = RemoveTriggerCallbackForThreadId(thread->VirtualId());
+      Maybe<size_t> id = RemoveTriggerCallbackForThreadId(thread->Id());
       if (id.isNothing()) {
         break;
       }

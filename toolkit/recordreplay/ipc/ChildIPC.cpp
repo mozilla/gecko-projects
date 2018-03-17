@@ -182,7 +182,7 @@ InitRecordingOrReplayingProcess(base::ProcessId aParentPid,
 
   DirectCreatePipe(&gSnapshotWriteFd, &gSnapshotReadFd);
 
-  Thread::StartThread(ListenForSnapshotThreadMain, nullptr);
+  Thread::StartThread(ListenForSnapshotThreadMain, nullptr, false);
 
   InitDebuggerHooks();
 

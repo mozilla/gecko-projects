@@ -72,6 +72,8 @@ static const size_t MaxNumNonRecordedThreads = 24;
 
 static const size_t MaxThreadId = MaxRecordedThreadId + MaxNumNonRecordedThreads;
 
+typedef pthread_t NativeThreadId;
+
 // Information about the execution state of a thread.
 class Thread
 {
@@ -109,14 +111,15 @@ private:
 
   // Start routine and argument which the thread is currently executing. This
   // is cleared after the routine finishes and another start routine may be
-  // assigned to the thread. This is protected by the thread monitor.
+  // assigned to the thread. mNeedsJoin specifies whether the thread must be
+  // joined before it is completely dead and can be reused. This is protected
+  // by the thread monitor.
   Callback mStart;
   void* mStartArg;
+  bool mNeedsJoin;
 
-  // ID used to refer to this thread outside of the current record/replay
-  // system. This ID is tied to the start routine/argument and may change over
-  // time as this thread is reused for different start routines.
-  size_t mVirtualId;
+  // ID for this thread used by the system.
+  NativeThreadId mNativeId;
 
   // Streams with events and assertions for the thread. These are only used by
   // the associated thread.
@@ -171,7 +174,7 @@ public:
 
   // Accessors for some members that never change.
   size_t Id() { return mId; }
-  size_t VirtualId() { return mVirtualId; }
+  NativeThreadId NativeId() { return mNativeId; }
   Stream& Events() { return *mEvents; }
   Stream& Asserts() { return *mAsserts; }
   uint8_t* StackBase() { return mStackBase; }
@@ -257,7 +260,7 @@ public:
 
   // Lookup a Thread by various methods.
   static Thread* GetById(size_t aId);
-  static Thread* GetByVirtualId(size_t aId);
+  static Thread* GetByNativeId(NativeThreadId aNativeId);
   static Thread* GetByStackPointer(void* aSp);
 
   // Spawn all non-main recorded threads used for recording/replaying.
@@ -274,14 +277,11 @@ public:
 
   // Start an existing thread, for use when the process has called a thread
   // creation system API when events were not passed through. The return value
-  // is the virtual ID of the result.
-  static size_t StartThread(Callback aStart, void* aArgument);
+  // is the native ID of the result.
+  static NativeThreadId StartThread(Callback aStart, void* aArgument, bool aNeedsJoin);
 
-  // Wait until a thread finishes executing its start routine.
-  static void JoinThread(size_t aVirtualId);
-
-  // Return whether a virtual id appears to be valid.
-  static bool IsValidVirtualId(size_t aVirtualId);
+  // Wait until this thread finishes executing its start routine.
+  void Join();
 
   // Note a weak pointer that needs to be fixed on this thread after it
   // restores its stack during a recording rewind.
