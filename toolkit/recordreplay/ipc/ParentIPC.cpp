@@ -385,7 +385,7 @@ SendInitializeMessage()
   // The memory protection used when recording snapshots interferes with GCD
   // internals and the underlying cause has not been identified.
   // See bug 1446521.
-  if (!nsCocoaFeatures::IsAtLeastVersion(12, 0)) {
+  if (!nsCocoaFeatures::IsAtLeastVersion(10, 12)) {
     gRecordSnapshotsEnabled = false;
   }
 
