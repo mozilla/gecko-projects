@@ -604,6 +604,10 @@ RR_mmap(void* aAddress, size_t aSize, int aProt, int aFlags, int aFd, off_t aOff
     // Get an anonymous mapping for the result.
     if (aFlags & MAP_FIXED) {
       // For fixed allocations, make sure this memory region is mapped and zero.
+      if (!HasTakenSnapshot()) {
+        // Make sure this memory region is writable.
+        OriginalCall(mprotect, int, aAddress, aSize, PROT_READ | PROT_WRITE | PROT_EXEC);
+      }
       memset(aAddress, 0, aSize);
       memory = aAddress;
     } else {
