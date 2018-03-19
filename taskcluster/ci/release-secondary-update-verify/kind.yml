@@ -24,7 +24,7 @@ job-defaults:
    worker:
       artifacts:
          - name: 'public/build/diff-summary.log'
-           path: '/home/worker/artifacts/diff-summary.log'
+           path: '/builds/worker/tools/release/updates/diff-summary.log'
            type: file
       implementation: docker-worker
       os: linux
