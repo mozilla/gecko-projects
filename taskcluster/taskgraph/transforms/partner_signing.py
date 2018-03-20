@@ -33,12 +33,6 @@ def define_upstream_artifacts(config, jobs):
                 for locale in cfg["locales"]:
                     repack_ids.append("{}-{}".format(partner, locale))
 
-        # Windows and Linux partner repacks have no internal signing to be done
-        if 'win' in build_platform or 'linux' in build_platform:
-            job['upstream-artifacts'] = []
-            yield job
-            continue
-
         artifacts_specifications = generate_specifications_of_artifacts_to_sign(
             build_platform,
             dep_job.attributes.get('nightly'),

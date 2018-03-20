@@ -51,14 +51,13 @@ def make_repackage_signing_description(config, jobs):
         repack_id = dep_job.task['extra']['repack_id']
         attributes = dep_job.attributes
 
-        treeherder = job.get('treeherder', {})
-        treeherder.setdefault('symbol', 'Prs({})'.format(repack_id))
-        dep_th_platform = dep_job.task.get('extra', {}).get(
-            'treeherder', {}).get('machine', {}).get('platform', '')
-        treeherder.setdefault('platform',
-                              "{}/opt".format(dep_th_platform))
-        treeherder.setdefault('tier', 1)
-        treeherder.setdefault('kind', 'build')
+        treeherder = None
+        if 'partner' not in config.kind:
+            treeherder = job.get('treeherder', {})
+            dep_th_platform = dep_job.task.get('extra', {}).get(
+                'treeherder', {}).get('machine', {}).get('platform', '')
+            treeherder.setdefault('platform',
+                                "{}/opt".format(dep_th_platform))
 
         label = dep_job.label.replace("repackage-", "repackage-signing-")
         description = (
@@ -112,10 +111,12 @@ def make_repackage_signing_description(config, jobs):
             'dependencies': dependencies,
             'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
-            'treeherder': treeherder,
             'extra': {
                 'repack_id': repack_id,
             }
         }
+
+        if treeherder:
+            task['treeherder'] = treeherder
 
         yield task

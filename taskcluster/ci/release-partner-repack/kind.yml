@@ -38,51 +38,26 @@ job-defaults:
 
 jobs:
    linux-nightly:
-      treeherder:
-         symbol: PR
-         platform: linux/opt
-         kind: test
-         tier: 1
       attributes:
          build_platform: linux-nightly
          build_type: opt
 
    linux64-nightly:
-      treeherder:
-         symbol: PR
-         platform: linux64/opt
-         kind: test
-         tier: 1
       attributes:
          build_platform: linux64-nightly
          build_type: opt
 
    macosx64-nightly:
-      treeherder:
-         symbol: PR
-         platform: macosx64/opt
-         kind: test
-         tier: 1
       attributes:
          build_platform: macosx64-nightly
          build_type: opt
 
    win32-nightly:
-      treeherder:
-         symbol: PR
-         platform: win32/opt
-         kind: test
-         tier: 1
       attributes:
          build_platform: win32-nightly
          build_type: opt
 
    win64-nightly:
-      treeherder:
-         symbol: PR
-         platform: win64/opt
-         kind: test
-         tier: 1
       attributes:
          build_platform: win64-nightly
          build_type: opt

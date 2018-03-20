@@ -138,13 +138,12 @@ def make_job_description(config, jobs):
         dependencies = {dep_job.attributes.get('kind'): dep_job.label}
         dependencies.update(dep_job.dependencies)
 
-        treeherder = job.get('treeherder', {})
-        treeherder.setdefault('symbol', 'Pr')
-        dep_th_platform = dep_job.task.get('extra', {}).get(
-            'treeherder', {}).get('machine', {}).get('platform', '')
-        treeherder.setdefault('platform', "{}/opt".format(dep_th_platform))
-        treeherder.setdefault('tier', 1)
-        treeherder.setdefault('kind', 'build')
+        treeherder = None
+        if 'partner' not in config.kind:
+            treeherder = job.get('treeherder')
+            dep_th_platform = dep_job.task.get("extra", {}).get(
+                "treeherder", {}).get("machine", {}).get("platform", "")
+            treeherder['platform'] = "{}/opt".format(dep_th_platform)
 
         signing_task = None
         for dependency in dependencies.keys():
@@ -183,8 +182,6 @@ def make_job_description(config, jobs):
         else:
             if build_platform.startswith('macosx'):
                 worker_type = 'aws-provisioner-v1/gecko-%s-b-macosx64' % level
-            elif build_platform.startswith('linux'):
-                worker_type = 'aws-provisioner-v1/gecko-%s-b-linux' % level
             else:
                 raise NotImplementedError(
                     'Unsupported build_platform: "{}"'.format(build_platform)
@@ -209,12 +206,13 @@ def make_job_description(config, jobs):
             'dependencies': dependencies,
             'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
-            'treeherder': job['treeherder'],
             'routes': job.get('routes', []),
             'extra': job.get('extra', {}),
             'worker': worker,
             'run': run,
         }
+        if treeherder:
+            task['treeherder'] = treeherder
 
         if build_platform.startswith('macosx'):
             task['toolchains'] = [
@@ -227,12 +225,9 @@ def make_job_description(config, jobs):
 def _generate_task_env(build_platform, signing_task_ref, partner):
     signed_prefix = get_taskcluster_artifact_prefix(signing_task_ref, locale=partner)
 
-    if build_platform.startswith('linux') or build_platform.startswith('macosx'):
-        tarball_extension = 'bz2' if build_platform.startswith('linux') else 'gz'
+    if build_platform.startswith('macosx'):
         return {
-            'SIGNED_INPUT': {'task-reference': '{}target.tar.{}'.format(
-                signed_prefix, tarball_extension
-            )}
+            'SIGNED_INPUT': {'task-reference': '{}target.tar.gz'.format(signed_prefix)},
         }
     elif build_platform.startswith('win'):
         task_env = {

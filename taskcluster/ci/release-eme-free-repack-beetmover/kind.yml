@@ -11,13 +11,16 @@ transforms:
    - taskgraph.transforms.task:transforms
 
 kind-dependencies:
-   - release-eme-free-repack
-   - release-eme-free-repack-repackage
-   - release-eme-free-repack-repackage-signing
+   - release-eme-free-repack-repackage  # Mac
+   - release-eme-free-repack-repackage-signing  # Windows
 
 only-for-build-platforms:
-   - linux-nightly/opt
-   - linux64-nightly/opt
    - macosx64-nightly/opt
    - win32-nightly/opt
    - win64-nightly/opt
+
+job-template:
+   treeherder:
+      symbol: BMR-EME
+      tier: 1
+      kind: build

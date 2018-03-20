@@ -24,7 +24,9 @@ only-for-build-platforms:
 
 job-template:
    treeherder:
-      symbol: Er
+      symbol: EME-Rpk
+      tier: 1
+      kind: build
    extra:
       repack_id: eme-free
    mozharness:

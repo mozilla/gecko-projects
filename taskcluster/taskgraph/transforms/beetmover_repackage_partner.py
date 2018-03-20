@@ -73,8 +73,11 @@ def skip_for_indirect_dependencies(config, jobs):
         if not build_platform:
             raise Exception("Cannot find build platform!")
 
-        # Skip any jobs that aren't the immediate upstream for a given platform.
-        # For Linux, the immediate upstream is the eme-free/partner repack build tasks.
+        # Partner and EME free beetmover tasks have multiple upstreams defined
+        # because some platforms don't run some parts of the sign -> repack ->
+        # repack sign chain. We only want to run beetmover for the last part of
+        # that chain that runs for any given platform.
+        # For Linux, it is the eme-free/partner repack build tasks.
         # For Mac, it is repackage.
         # For Windows, it is repackage-signing.
         if "win" in build_platform:
@@ -102,14 +105,14 @@ def make_task_description(config, jobs):
         if not build_platform:
             raise Exception("Cannot find build platform!")
 
-        treeherder = job.get('treeherder', {})
-        treeherder.setdefault('symbol', join_symbol('BMR-Pr', repack_id))
-        dep_th_platform = dep_job.task.get('extra', {}).get(
-            'treeherder', {}).get('machine', {}).get('platform', '')
-        treeherder.setdefault('platform',
-                              "{}/opt".format(dep_th_platform))
-        treeherder.setdefault('tier', 1)
-        treeherder.setdefault('kind', 'build')
+        treeherder = None
+        if 'partner' not in config.kind:
+            treeherder = job.get('treeherder', {})
+            dep_th_platform = dep_job.task.get('extra', {}).get(
+                'treeherder', {}).get('machine', {}).get('platform', '')
+            treeherder.setdefault('platform',
+                                "{}/opt".format(dep_th_platform))
+
         label = dep_job.label.replace("repackage-signing-", "beetmover-")
         label = label.replace("repackage-", "beetmover-")
         label = label.replace("chunking-dummy-", "beetmover-")
@@ -128,8 +131,6 @@ def make_task_description(config, jobs):
         if "eme" in repack_id:
             base_label = "release-eme-free-repack"
         dependencies["build"] = "{}-{}".format(base_label, build_platform)
-        if "macosx" in build_platform:
-            dependencies["signing"] = "{}-signing-{}".format(base_label, build_platform)
         if "macosx" in build_platform or "win" in build_platform:
             dependencies["repackage"] = "{}-repackage-{}-{}".format(
                 base_label, build_platform, repack_id
@@ -153,20 +154,20 @@ def make_task_description(config, jobs):
             'dependencies': dependencies,
             'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
-            'treeherder': treeherder,
             'shipping-phase': job.get('shipping-phase', phase),
             'shipping-product': job.get('shipping-product'),
             'extra': {
                 'repack_id': repack_id,
             },
         }
+        if treeherder:
+            task['treeherder'] = treeherder
 
         yield task
 
 
-def generate_upstream_artifacts(build_task_ref, build_signing_task_ref,
-                                repackage_task_ref, repackage_signing_task_ref,
-                                platform, repack_id):
+def generate_upstream_artifacts(build_task_ref, repackage_task_ref,
+                                repackage_signing_task_ref, platform, repack_id):
 
     upstream_artifacts = []
 
@@ -204,7 +205,6 @@ def make_task_worker(config, jobs):
         platform = job["attributes"]["build_platform"]
         repack_id = job["extra"]["repack_id"]
         build_task = None
-        build_signing_task = None
         repackage_task = None
         repackage_signing_task = None
 
@@ -213,14 +213,10 @@ def make_task_worker(config, jobs):
                 repackage_signing_task = dependency
             elif 'repackage' in dependency:
                 repackage_task = dependency
-            elif 'signing' in dependency:
-                # catches build-signing and nightly-l10n-signing
-                build_signing_task = dependency
             else:
                 build_task = "build"
 
         build_task_ref = "<" + str(build_task) + ">"
-        build_signing_task_ref = "<" + str(build_signing_task) + ">"
         repackage_task_ref = "<" + str(repackage_task) + ">"
         repackage_signing_task_ref = "<" + str(repackage_signing_task) + ">"
 
@@ -228,7 +224,7 @@ def make_task_worker(config, jobs):
             'implementation': 'beetmover',
             'release-properties': craft_release_properties(config, job),
             'upstream-artifacts': generate_upstream_artifacts(
-                build_task_ref, build_signing_task_ref, repackage_task_ref,
+                build_task_ref, repackage_task_ref,
                 repackage_signing_task_ref, platform, repack_id
             ),
         }

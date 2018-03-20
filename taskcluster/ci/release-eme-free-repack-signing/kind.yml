@@ -21,3 +21,8 @@ job-template:
    shipping-product: firefox
    shipping-phase: promote
    depname: release-eme-free-repack
+   treeherder:
+      symbol: EME-Sign
+      platform: macosx64/opt
+      kind: test
+      tier: 1

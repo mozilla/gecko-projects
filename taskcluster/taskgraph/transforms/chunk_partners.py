@@ -32,13 +32,4 @@ def chunk_partners(config, jobs):
                     partner_job['extra'] = {}
                 partner_job['extra']['repack_id'] = repack_id
 
-                treeherder = job.get('treeherder', {})
-                treeherder['symbol'] = 'REMOVEME-Rpk({})'.format(repack_id)
-                dep_th_platform = dep_job.task.get('extra', {}).get(
-                    'treeherder', {}).get('machine', {}).get('platform', '')
-                treeherder['platform'] = "{}/opt".format(dep_th_platform)
-                treeherder['tier'] = 1
-                treeherder['kind'] = 'build'
-                partner_job['treeherder'] = treeherder
-
                 yield partner_job
