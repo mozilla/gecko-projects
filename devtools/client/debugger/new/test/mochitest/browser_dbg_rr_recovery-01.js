@@ -21,10 +21,7 @@ function test() {
   waitForExplicitFinish();
 
   var tab = gBrowser.addTab(null, { recordExecution: "*" });
-
-  const ppmm = Cc["@mozilla.org/parentprocessmessagemanager;1"]
-        .getService(Ci.nsIMessageBroadcaster);
-  ppmm.addMessageListener("RecordingFinished", () => runTest(tab));
+  addRecordingFinishedListener(() => runTest(tab));
 
   gBrowser.selectedTab = tab;
   openUILinkIn(EXAMPLE_URL + "doc_rr_recovery.html", "current");

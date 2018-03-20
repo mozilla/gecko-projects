@@ -6,9 +6,7 @@
 function test() {
   waitForExplicitFinish();
 
-  const ppmm = Cc["@mozilla.org/parentprocessmessagemanager;1"]
-        .getService(Ci.nsIMessageBroadcaster);
-  ppmm.addMessageListener("RecordingFinished", function() {
+  addRecordingFinishedListener(() => {
     ok(true, "Finished");
     finish();
   });

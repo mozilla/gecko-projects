@@ -1098,6 +1098,18 @@ async function takeScreenshot(dbg) {
   dump(`[SCREENSHOT] ${canvas.toDataURL()}\n`);
 }
 
+// Specify a callback to be invoked the next time the 'RecordingFinished'
+// message is sent by a test file.
+function addRecordingFinishedListener(callback) {
+  const ppmm = Cc["@mozilla.org/parentprocessmessagemanager;1"]
+        .getService(Ci.nsIMessageBroadcaster);
+  ppmm.addMessageListener("RecordingFinished",
+                          function listener() {
+                            ppmm.removeMessageListener("RecordingFinished", listener);
+                            callback();
+                          });
+}
+
 // Attach a debugger to a tab, returning a promise that resolves with the
 // debugger's thread client.
 function attachDebugger(tab) {
