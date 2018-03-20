@@ -20,8 +20,7 @@ log = logging.getLogger(__name__)
 
 @transforms.add
 # We can disable the whole tree of partner jobs by skipping the repacking here
-# TODO - is this better implemented in a loader (which 'subclasses'
-# taskgraph.loader.transform) ??
+# TODO - is this better implemented in a loader (which 'subclasses' taskgraph.loader.transform) ??
 def filter_early_if_partners_disabled(config, tasks):
     if (config.params['release_enable_partners'] and config.kind == 'release-partner-repack') or \
             (config.params['release_enable_emefree'] and config.kind == 'release-eme-free-repack'):
