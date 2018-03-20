@@ -580,19 +580,10 @@ task_description_schema = Schema({
 
     }, {
         Required('implementation'): 'push-apk',
-
-        # list of artifact URLs for the artifacts that should be beetmoved
         Required('upstream-artifacts'): [{
-            # taskId of the task with the artifact
             Required('taskId'): taskref_or_string,
-
-            # type of signing task (for CoT)
             Required('taskType'): basestring,
-
-            # Paths to the artifacts to sign
             Required('paths'): [basestring],
-
-            # Artifact is optional to run the task
             Optional('optional', default=False): bool,
         }],
 
@@ -600,6 +591,13 @@ task_description_schema = Schema({
         Required('google-play-track'): Any('production', 'beta', 'alpha', 'rollout', 'invalid'),
         Required('commit'): bool,
         Optional('rollout-percentage'): Any(int, None),
+    }, {
+        Required('implementation'): 'push-snap',
+        Required('upstream-artifacts'): [{
+            Required('taskId'): taskref_or_string,
+            Required('taskType'): basestring,
+            Required('paths'): [basestring],
+        }],
     }, {
         Required('implementation'): 'shipit',
         Required('release-name'): basestring,
@@ -1150,6 +1148,14 @@ def build_push_apk_payload(config, task, task_def):
     if worker.get('rollout-percentage', None):
         task_def['payload']['rollout_percentage'] = worker['rollout-percentage']
 
+
+@payload_builder('push-snap')
+def build_push_apk_payload(config, task, task_def):
+    worker = task['worker']
+
+    task_def['payload'] = {
+        'upstreamArtifacts':  worker['upstream-artifacts'],
+    }
 
 @payload_builder('shipit')
 def build_ship_it_payload(config, task, task_def):
