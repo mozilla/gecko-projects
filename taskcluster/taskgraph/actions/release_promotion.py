@@ -320,9 +320,9 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     parameters['release_history'] = release_history
     parameters['release_type'] = promotion_config.get('release_type', '')
     parameters['release_eta'] = input.get('release_eta', '')
-    parameters['release_enable_partners'] = input('release_enable_partners')
+    parameters['release_enable_partners'] = input.get('release_enable_partners')
     parameters['release_partners'] = input.get('release_partners')
-    parameters['release_enable_emefree'] = input('relaese_enable_emefree')
+    parameters['release_enable_emefree'] = input.get('relaese_enable_emefree')
     if input['version']:
         parameters['version'] = input['version']
 
