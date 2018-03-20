@@ -50,7 +50,12 @@ let FrameActor = ActorClassWithSpec(frameSpec, {
   },
 
   getEnvironment: function () {
-    if (!this.frame.environment) {
+    try {
+      if (!this.frame.environment) {
+        return {};
+      }
+    } catch (e) {
+      // |this.frame| might not be live.
       return {};
     }
 
