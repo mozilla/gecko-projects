@@ -80,7 +80,9 @@ HandleMessageInMiddleman(const IPC::Message& aMessage)
 
   // Handle messages that should only be sent to the middleman.
   if (type == dom::PContent::Msg_InitRendering__ID ||
-      type == dom::PContent::Msg_SaveRecording__ID) {
+      type == dom::PContent::Msg_SaveRecording__ID ||
+      type == dom::PBrowser::Msg_Destroy__ID ||
+      type == dom::PContent::Msg_Shutdown__ID) {
     ipc::IProtocol::Result r = dom::ContentChild::GetSingleton()->PContentChild::OnMessageReceived(aMessage);
     if (r != ipc::IProtocol::MsgProcessed) {
       MOZ_CRASH();

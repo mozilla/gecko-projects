@@ -923,7 +923,8 @@ DirectMessageToMiddleman(const nsAString& aMessage)
   // FIXME surely there is a better way to do this.
   nsCString cmsg = NS_ConvertUTF16toUTF8(aMessage);
   const char* cstr = cmsg.get();
-  return strncmp(cstr, "debug:", 6) == 0;
+  return strncmp(cstr, "debug:", 6) == 0
+      || strcmp(cstr, "SessionStore:flush") == 0;
 }
 
 nsresult
