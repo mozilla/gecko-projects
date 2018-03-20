@@ -9,10 +9,13 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import resolve_keyed_by
-from taskgraph.util.scriptworker import get_release_config
+from taskgraph.util.partners import get_partner_config_by_url
 
 
 transforms = TransformSequence()
+
+import logging
+log = logging.getLogger(__name__)
 
 
 @transforms.add
@@ -20,7 +23,8 @@ transforms = TransformSequence()
 # TODO - is this better implemented in a loader (which 'subclasses'
 # taskgraph.loader.transform) ??
 def filter_early_if_partners_disabled(config, tasks):
-    if config.params['release_enable_partners']:
+    if (config.params['release_enable_partners'] and config.kind == 'release-partner-repack') or \
+            (config.params['release_enable_emefree'] and config.kind == 'release-eme-free-repack'):
         for task in tasks:
             yield task
 
@@ -43,9 +47,10 @@ def make_label(config, tasks):
 
 @transforms.add
 def add_command(config, tasks):
-    release_config = get_release_config(config)
-
     for task in tasks:
+        partner_config = get_partner_config_by_url(task['worker']['env']['REPACK_MANIFESTS_URL'],
+                                                   config.kind,
+                                                   config.params['release_partners'])
         build_task = None
         for dep in task.get("dependencies", {}).keys():
             if "build" in dep:
@@ -57,7 +62,7 @@ def add_command(config, tasks):
             task["worker"]["artifacts"] = []
 
         repack_ids = []
-        for partner, cfg in release_config["partner_config"].iteritems():
+        for partner, cfg in partner_config.iteritems():
             if task["attributes"]["build_platform"] not in cfg["platforms"]:
                 continue
             for locale in cfg["locales"]:

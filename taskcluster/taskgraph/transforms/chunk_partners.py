@@ -10,21 +10,21 @@ from __future__ import absolute_import, print_function, unicode_literals
 import copy
 
 from taskgraph.transforms.base import TransformSequence
-from taskgraph.util.scriptworker import get_release_config
+from taskgraph.util.partners import get_partner_config_by_kind
 
 transforms = TransformSequence()
 
 
 @transforms.add
 def chunk_partners(config, jobs):
-    release_config = get_release_config(config)
+    partner_config = get_partner_config_by_kind(config.kind)
 
     for job in jobs:
         dep_job = job['dependent-task']
-        for partner, config in release_config["partner_config"].iteritems():
-            if dep_job.attributes["build_platform"] not in config["platforms"]:
+        for partner, cfg in partner_config.iteritems():
+            if dep_job.attributes["build_platform"] not in cfg["platforms"]:
                 continue
-            for locale in config["locales"]:
+            for locale in cfg["locales"]:
                 repack_id = "{}-{}".format(partner, locale)
 
                 partner_job = copy.deepcopy(job)  # don't overwrite dict values here

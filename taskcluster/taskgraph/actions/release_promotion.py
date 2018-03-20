@@ -229,6 +229,18 @@ def is_release_promotion_available(parameters):
                 'default': False,
                 'description': ('Toggle for creating partner repacks'),
             },
+            'release_partners': {
+                'type': 'array',
+                'description': ('A list of partners to repack, or if null lookup the current full set'),
+                'items': {
+                    'type': 'string',
+                }
+            },
+            'release_enable_emefree': {
+                'type': 'boolean',
+                'default': False,
+                'description': ('Toggle for creating EME-free repacks'),
+            },
         },
         "required": ['release_promotion_flavor', 'build_number'],
     }
@@ -309,6 +321,8 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     parameters['release_type'] = promotion_config.get('release_type', '')
     parameters['release_eta'] = input.get('release_eta', '')
     parameters['release_enable_partners'] = input('release_enable_partners')
+    parameters['release_partners'] = input.get('release_partners')
+    parameters['release_enable_emefree'] = input('relaese_enable_emefree')
     if input['version']:
         parameters['version'] = input['version']
 

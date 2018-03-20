@@ -436,26 +436,6 @@ def get_release_config(config):
         if release_config['partial_versions'] == "{}":
             del release_config['partial_versions']
 
-    # no partner config unless we've explicitly enabled the repacks
-    if config.params['release_enable_partners']:
-        # don't leak partner config in non-partner jobs
-        if "partner" in config.kind or "eme-free" in config.kind:
-            # TODO: do we need to support platform specific locale exceptions?
-            release_config["partner_config"] = {
-                "partner1": {
-                    "platforms": ["linux-nightly", "linux64-nightly", "macosx64-nightly",
-                                  "win32-nightly", "win64-nightly"],
-                    "locales": ["de", "en-US"],
-                },
-                "partner2": {
-                    "platforms": ["macosx64-nightly", "win32-nightly", "win64-nightly"],
-                    "locales": ["en-US", "ru"],
-                },
-            }
-    # TODO duplicate with release_enable_eme-free ??
-    # TODO what controls the parameters ?
-
-
     release_config['version'] = str(config.params['version'])
     release_config['appVersion'] = str(config.params['app_version'])
 
