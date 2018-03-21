@@ -231,7 +231,8 @@ def is_release_promotion_available(parameters):
             },
             'release_partners': {
                 'type': 'array',
-                'description': ('A list of partners to repack, or if null lookup the current full set'),
+                'description': ('A list of partners to repack, or if null or empty then lookup '
+                                'the current full set'),
                 'items': {
                     'type': 'string',
                 }

@@ -38,13 +38,20 @@ MANIFEST_QUERY = """query {
 }
 """
 
-"""
+r"""
 Example response:
 {
   "data": {
     "repository": {
       "object": {
-        "text": "<?xml version=\"1.0\" ?>\n<manifest>\n  <remote fetch=\"git@github.com:mozilla-partners/\" name=\"mozilla-partners\"/>\n  <remote fetch=\"git@github.com:mozilla/\" name=\"mozilla\"/>\n\n  <project name=\"repack-scripts\" path=\"scripts\" remote=\"mozilla-partners\" revision=\"master\"/>\n  <project name=\"build-tools\" path=\"scripts/tools\" remote=\"mozilla\" revision=\"master\"/>\n  <project name=\"mozilla-EME-free\" path=\"partners/mozilla-EME-free\" remote=\"mozilla-partners\" revision=\"master\"/>\n</manifest>\n"
+        "text": "<?xml version=\"1.0\" ?>\n<manifest>\n  " +
+        "<remote fetch=\"git@github.com:mozilla-partners/\" name=\"mozilla-partners\"/>\n  " +
+        "<remote fetch=\"git@github.com:mozilla/\" name=\"mozilla\"/>\n\n  " +
+        "<project name=\"repack-scripts\" path=\"scripts\" remote=\"mozilla-partners\" " +
+        "revision=\"master\"/>\n  <project name=\"build-tools\" path=\"scripts/tools\" " +
+        "remote=\"mozilla\" revision=\"master\"/>\n  <project name=\"mozilla-EME-free\" " +
+        "path=\"partners/mozilla-EME-free\" remote=\"mozilla-partners\" " +
+        "revision=\"master\"/>\n</manifest>\n"
       }
     }
   }
@@ -76,7 +83,7 @@ REPACK_CFG_QUERY = """query{
   }
 }
 """
-"""
+r"""
 Example response:
 {
   "data": {
@@ -94,7 +101,12 @@ Example response:
                 {
                   "name": "repack.cfg",
                   "object": {
-                    "text": "aus=\"mozilla-EMEfree\"\ndist_id=\"mozilla-EMEfree\"\ndist_version=\"1.0\"\nlinux-i686=true\nlinux-x86_64=true\nlocales=\"ach af de en-US\"\nmac=true\nwin32=true\nwin64=true\noutput_dir=\"%(platform)s-EME-free/%(locale)s\"\n\n# Upload params\nbucket=\"net-mozaws-prod-delivery-firefox\"\nupload_to_candidates=true\n"
+                    "text": "aus=\"mozilla-EMEfree\"\ndist_id=\"mozilla-EMEfree\"\n" +
+                            "dist_version=\"1.0\"\nlinux-i686=true\nlinux-x86_64=true\n" +
+                            " locales=\"ach af de en-US\"\nmac=true\nwin32=true\nwin64=true\n" +
+                            "output_dir=\"%(platform)s-EME-free/%(locale)s\"\n\n" +
+                            "# Upload params\nbucket=\"net-mozaws-prod-delivery-firefox\"\n" +
+                            "upload_to_candidates=true\n"
                   }
                 }
               ]
@@ -116,23 +128,28 @@ TC_PLATFORM_PER_FTP = {
     'win64': 'win64-nightly',
 }
 
+TASKCLUSTER_PROXY_SECRET_ROOT = 'http://taskcluster/secrets/v1/secret/'
+
 # cache data at the module level
 partner_configs = {}
+
 
 # TODO - grant private repo access to P.A.T.
 # TODO - add level-3 as well, cleanup us of level
 def get_token():
     """ We use a Personal Access Token from Github to lookup partner config. No extra scopes are
     needed on the token to read public repositories, but need the 'repo' scope to see private
-    repositories. This is not fine grained and also grants r/w access, but is revoked at the repo level.
+    repositories. This is not fine grained and also grants r/w access, but is revoked at the repo
+    level.
     """
 
     # The 'usual' method - via taskClusterProxy for decision tasks
     try:
-        r = requests.get('http://taskcluster/secrets/v1/secret/project/releng/gecko/build/level-2/partner-github-api')
+        r = requests.get(TASKCLUSTER_PROXY_SECRET_ROOT +
+                         'project/releng/gecko/build/level-2/partner-github-api')
         j = r.json()
         return j['secret']['key']
-    except:
+    except (requests.ConnectionError, ValueError, KeyError):
         # for local development try for a environment variable
         if 'PARTNER_GITHUB_TOKEN' in os.environ:
             return os.environ['PARTNER_GITHUB_TOKEN']
