@@ -57,7 +57,7 @@ def make_repackage_signing_description(config, jobs):
             dep_th_platform = dep_job.task.get('extra', {}).get(
                 'treeherder', {}).get('machine', {}).get('platform', '')
             treeherder.setdefault('platform',
-                                "{}/opt".format(dep_th_platform))
+                                  "{}/opt".format(dep_th_platform))
 
         label = dep_job.label.replace("repackage-", "repackage-signing-")
         description = (

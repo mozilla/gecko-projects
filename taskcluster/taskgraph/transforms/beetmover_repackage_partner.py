@@ -14,7 +14,6 @@ from taskgraph.util.schema import validate_schema, Schema
 from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
                                          get_beetmover_action_scope,
                                          get_phase)
-from taskgraph.util.treeherder import join_symbol
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
 
@@ -111,7 +110,7 @@ def make_task_description(config, jobs):
             dep_th_platform = dep_job.task.get('extra', {}).get(
                 'treeherder', {}).get('machine', {}).get('platform', '')
             treeherder.setdefault('platform',
-                                "{}/opt".format(dep_th_platform))
+                                  "{}/opt".format(dep_th_platform))
 
         label = dep_job.label.replace("repackage-signing-", "beetmover-")
         label = label.replace("repackage-", "beetmover-")
