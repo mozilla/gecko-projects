@@ -50,6 +50,7 @@ def add_command(config, tasks):
         partner_config = get_partner_config_by_url(task['worker']['env']['REPACK_MANIFESTS_URL'],
                                                    config.kind,
                                                    config.params['release_partners'])
+        log.info(partner_config)
         build_task = None
         for dep in task.get("dependencies", {}).keys():
             if "build" in dep:

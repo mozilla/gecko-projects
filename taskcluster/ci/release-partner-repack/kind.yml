@@ -29,8 +29,9 @@ job-defaults:
       env:
          REPACK_MANIFESTS_URL:
             by-project:
-               mozilla-beta: "git@github.com:nthomas-mozilla/partner-manifest.git"
+               mozilla-beta: "git@github.com:mozilla-partners/repack-manifests.git"
                mozilla-release: "git@github.com:mozilla-partners/repack-manifests.git"
+               maple: "git@github.com:nthomas-mozilla/partner-manifest.git"
                default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
    run:
       using: run-task
