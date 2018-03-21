@@ -105,9 +105,10 @@ PARTIAL_UPDATES_FLAVORS = (
     'ship_devedition',
 )
 
-# TODO - add prod branches
+# TODO - add prod branches, and handle half-of-beta-cycle
 PARTNER_BRANCHES = ('maple', 'birch', 'jamun')
 EMEFREE_BRANCHES = ('maple', 'birch', 'jamun')
+
 
 def is_release_promotion_available(parameters):
     return parameters['project'] in RELEASE_PROMOTION_PROJECTS
