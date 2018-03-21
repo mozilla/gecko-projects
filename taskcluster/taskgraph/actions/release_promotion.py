@@ -292,10 +292,12 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
         'do_not_optimize', promotion_config.get('do_not_optimize', [])
     )
     release_enable_partners = input.get(
-        'release_enable_partners', parameters['project'] in PARTNER_BRANCHES
+        'release_enable_partners',
+        parameters['project'] in PARTNER_BRANCHES and product in ('firefox',)
     )
     release_enable_emefree = input.get(
-        'release_enable_emefree', parameters['project'] in EMEFREE_BRANCHES
+        'release_enable_emefree',
+        parameters['project'] in EMEFREE_BRANCHES and product in ('firefox',)
     )
 
     # make parameters read-write
