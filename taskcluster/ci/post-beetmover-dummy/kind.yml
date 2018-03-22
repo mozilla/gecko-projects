@@ -16,54 +16,72 @@ kind-dependencies:
    # also depend on vanilla beetmover.
    - beetmover
 
-jobs:
-   firefox-promote:
-      name: post-beetmover-dummy
-      description: Dummy task to deal with max_dependencies
-      run-on-projects: []
-      shipping-phase: promote
-      shipping-product: firefox
-      worker-type: aws-provisioner-v1/gecko-{level}-b-linux
-      worker:
-         implementation: docker-worker
-         os: linux
-         docker-image: "ubuntu:16.10"
-         max-run-time: 600
-         command:
-            - /bin/bash
-            - -c
-            - echo "Dummy task"
+job-defaults:
+   name: post-beetmover-dummy
+   description: Dummy task to deal with max_dependencies
+   run-on-projects: []
+   shipping-phase: promote
+   worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+   worker:
+      implementation: docker-worker
+      os: linux
+      docker-image: "ubuntu:16.10"
+      max-run-time: 600
+      command:
+         - /bin/bash
+         - -c
+         - echo "Dummy task"
 
-   devedition-promote:
-      name: post-beetmover-dummy
-      description: Dummy task to deal with max_dependencies
-      run-on-projects: []
-      shipping-phase: promote
+jobs:
+   firefox-linux:
+      attributes:
+         build_platform: linux-nightly
+      shipping-product: firefox
+
+   firefox-linux64:
+      attributes:
+         build_platform: linux64-nightly
+      shipping-product: firefox
+
+   firefox-macosx64:
+      attributes:
+         build_platform: macosx64-nightly
+      shipping-product: firefox
+
+   firefox-win32:
+      attributes:
+         build_platform: win32-nightly
+      shipping-product: firefox
+
+   firefox-win64:
+      attributes:
+         build_platform: win64-nightly
+      shipping-product: firefox
+
+   devedition-linux:
+      attributes:
+         build_platform: linux-devedition-nightly
       shipping-product: devedition
-      worker-type: aws-provisioner-v1/gecko-{level}-b-linux
-      worker:
-         implementation: docker-worker
-         os: linux
-         docker-image: "ubuntu:16.10"
-         max-run-time: 600
-         command:
-            - /bin/bash
-            - -c
-            - echo "Dummy task"
+
+   devedition-linux64:
+      attributes:
+         build_platform: linux64-devedition-nightly
+      shipping-product: devedition
+
+   devedition-macosx64:
+      attributes:
+         build_platform: macosx64-devedition-nightly
+      shipping-product: devedition
+
+   devedition-win32:
+      attributes:
+         build_platform: win32-devedition-nightly
+      shipping-product: devedition
+
+   devedition-win64:
+      attributes:
+         build_platform: win64-devedition-nightly
+      shipping-product: devedition
 
    fennec-promote:
-      name: post-beetmover-dummy
-      description: Dummy task to deal with max_dependencies
-      run-on-projects: []
-      shipping-phase: promote
       shipping-product: fennec
-      worker-type: aws-provisioner-v1/gecko-{level}-b-linux
-      worker:
-         implementation: docker-worker
-         os: linux
-         docker-image: "ubuntu:16.10"
-         max-run-time: 600
-         command:
-            - /bin/bash
-            - -c
-            - echo "Dummy task"
