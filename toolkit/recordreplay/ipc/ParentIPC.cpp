@@ -51,9 +51,39 @@ static Monitor* gCommunicationMonitor;
 static void TerminateChildProcess();
 static void SendInitializeMessage();
 
+// The routing IDs of all destroyed browsers in the parent process.
+static StaticInfallibleVector<int32_t> gDeadBrowsers;
+
+// Return whether a message from the child process to the UI process is being
+// sent to a target that is being destroyed, and should be suppressed.
 static bool
-HandleMessageInMiddleman(const IPC::Message& aMessage)
+MessageTargetIsDead(const IPC::Message& aMessage)
 {
+  // After the parent process destroys a browser, we handle the destroy in
+  // both the middleman and child processes. Both processes will respond to
+  // the destroy by sending additional messages to the UI process indicating
+  // the browser has been destroyed, but we need to ignore such messages from
+  // the child process (if it is still recording) to avoid confusing the UI
+  // process.
+  if (aMessage.type() >= dom::PBrowser::PBrowserStart && aMessage.type() <= dom::PBrowser::PBrowserEnd) {
+    for (int32_t id : gDeadBrowsers) {
+      if (id == aMessage.routing_id()) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+static bool
+HandleMessageInMiddleman(ipc::Side aSide, const IPC::Message& aMessage)
+{
+  // Ignore messages sent from the child to dead UI process targets.
+  if (aSide == ipc::ParentSide) {
+    MOZ_RELEASE_ASSERT(gChildProcessIsRecording);
+    return MessageTargetIsDead(aMessage);
+  }
+
   IPC::Message::msgid_t type = aMessage.type();
 
   // Handle messages that should be sent to both the middleman and the
@@ -66,7 +96,8 @@ HandleMessageInMiddleman(const IPC::Message& aMessage)
       type == dom::PBrowser::Msg_InitRendering__ID ||
       type == dom::PBrowser::Msg_RenderLayers__ID ||
       type == dom::PBrowser::Msg_LoadRemoteScript__ID ||
-      type == dom::PBrowser::Msg_AsyncMessage__ID) {
+      type == dom::PBrowser::Msg_AsyncMessage__ID ||
+      type == dom::PBrowser::Msg_Destroy__ID) {
     ipc::IProtocol::Result r = dom::ContentChild::GetSingleton()->PContentChild::OnMessageReceived(aMessage);
     if (r != ipc::IProtocol::MsgProcessed) {
       MOZ_CRASH();
@@ -75,13 +106,15 @@ HandleMessageInMiddleman(const IPC::Message& aMessage)
       // Preferences are initialized via the SetXPCOMProcessAttributes message.
       SendInitializeMessage();
     }
+    if (type == dom::PBrowser::Msg_Destroy__ID) {
+      gDeadBrowsers.append(aMessage.routing_id());
+    }
     return false;
   }
 
   // Handle messages that should only be sent to the middleman.
   if (type == dom::PContent::Msg_InitRendering__ID ||
       type == dom::PContent::Msg_SaveRecording__ID ||
-      type == dom::PBrowser::Msg_Destroy__ID ||
       type == dom::PContent::Msg_Shutdown__ID) {
     ipc::IProtocol::Result r = dom::ContentChild::GetSingleton()->PContentChild::OnMessageReceived(aMessage);
     if (r != ipc::IProtocol::MsgProcessed) {
@@ -146,7 +179,7 @@ public:
     Message* nMessage = new Message();
     nMessage->CopyFrom(aMessage);
 
-    if (mSide == ipc::ChildSide && HandleMessageInMiddleman(aMessage)) {
+    if (HandleMessageInMiddleman(mSide, aMessage)) {
       delete nMessage;
       return MsgProcessed;
     }
@@ -173,6 +206,7 @@ public:
 
     MOZ_RELEASE_ASSERT(gChildProcessIsRecording);
     MOZ_RELEASE_ASSERT(mSide == ipc::ParentSide);
+    MOZ_RELEASE_ASSERT(!MessageTargetIsDead(aMessage));
 
     Message* nMessage = new Message();
     nMessage->CopyFrom(aMessage);
@@ -203,6 +237,7 @@ public:
 
     MOZ_RELEASE_ASSERT(gChildProcessIsRecording);
     MOZ_RELEASE_ASSERT(mSide == ipc::ParentSide);
+    MOZ_RELEASE_ASSERT(!MessageTargetIsDead(aMessage));
 
     Message* nMessage = new Message();
     nMessage->CopyFrom(aMessage);
