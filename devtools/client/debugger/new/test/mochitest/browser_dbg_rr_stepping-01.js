@@ -15,7 +15,6 @@ async function runTest(tab) {
   await checkEvaluateInTopFrameThrows(client, "window.alert(3)");
   await stepOverToLine(client, 21);
   await checkEvaluateInTopFrame(client, "number", 10);
-  PromiseTestUtils.removeUncaughtRejections(/No such actor for ID/);
   finish();
 }
 

@@ -1200,3 +1200,6 @@ function checkEvaluateInTopFrameThrows(threadClient, text) {
     });
   });
 }
+
+// Several web replay mochitests are running into this rejection. See bug 1447411.
+PromiseTestUtils.whitelistRejectionsGlobally(/No such actor for ID/);

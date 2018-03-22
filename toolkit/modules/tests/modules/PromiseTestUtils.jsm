@@ -213,16 +213,6 @@ var PromiseTestUtils = {
   },
 
   /**
-   * Removes all uncaught rejections matching a regular expression.
-   *
-   * @param regExp
-   *        This should match the error message of the rejection.
-   */
-  removeUncaughtRejections(regExp) {
-    this._rejections = this._rejections.filter(rejection => !regExp.test(rejection.message));
-  },
-
-  /**
    * Fails the test if there are any uncaught rejections at this time that have
    * not been whitelisted using expectUncaughtRejection.
    *

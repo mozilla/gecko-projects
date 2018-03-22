@@ -16,7 +16,6 @@ async function runTest(tab) {
   await reverseStepOverToLine(client, 32);
   await reverseStepOutToLine(client, 26);
   await reverseStepOverToLine(client, 25);
-  PromiseTestUtils.removeUncaughtRejections(/No such actor for ID/);
   finish();
 }
 
