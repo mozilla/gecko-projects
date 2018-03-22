@@ -47,10 +47,9 @@ def make_label(config, tasks):
 @transforms.add
 def add_command(config, tasks):
     for task in tasks:
-        partner_config = get_partner_config_by_url(task['worker']['env']['REPACK_MANIFESTS_URL'],
-                                                   config.kind,
-                                                   config.params['release_partners'])
-        log.info(partner_config)
+        partner_configs = get_partner_config_by_url(task['worker']['env']['REPACK_MANIFESTS_URL'],
+                                                    config.kind,
+                                                    config.params['release_partners'])
         build_task = None
         for dep in task.get("dependencies", {}).keys():
             if "build" in dep:
@@ -62,11 +61,12 @@ def add_command(config, tasks):
             task["worker"]["artifacts"] = []
 
         repack_ids = []
-        for partner, cfg in partner_config.iteritems():
-            if task["attributes"]["build_platform"] not in cfg["platforms"]:
-                continue
-            for locale in cfg["locales"]:
-                repack_ids.append("{}-{}".format(partner, locale))
+        for partner, partner_config in partner_configs.iteritems():
+            for sub_partner, cfg in partner_config.iteritems():
+                if task["attributes"]["build_platform"] not in cfg["platforms"]:
+                    continue
+                for locale in cfg["locales"]:
+                    repack_ids.append("{}-{}".format(sub_partner, locale))
 
         if 'mac' in task['attributes']['build_platform']:
             download_cmd = "curl -L https://queue.taskcluster.net/v1/task/YfqwST9zRo2-QddTuetDQA"\

@@ -17,7 +17,7 @@ transforms = TransformSequence()
 
 @transforms.add
 def define_upstream_artifacts(config, jobs):
-    partner_config = get_partner_config_by_kind(config.kind)
+    partner_configs = get_partner_config_by_kind(config.kind)
 
     for job in jobs:
         dep_job = job['dependent-task']
@@ -27,11 +27,12 @@ def define_upstream_artifacts(config, jobs):
         if "eme" in config.kind:
             repack_ids.append("eme-free")
         else:
-            for partner, cfg in partner_config.iteritems():
-                if build_platform not in cfg["platforms"]:
-                    continue
-                for locale in cfg["locales"]:
-                    repack_ids.append("{}-{}".format(partner, locale))
+            for partner, partner_config in partner_configs.iteritems():
+                for sub_partner, cfg in partner_config.iteritems():
+                    if build_platform not in cfg["platforms"]:
+                        continue
+                    for locale in cfg["locales"]:
+                        repack_ids.append("{}-{}".format(sub_partner, locale))
 
         artifacts_specifications = generate_specifications_of_artifacts_to_sign(
             build_platform,

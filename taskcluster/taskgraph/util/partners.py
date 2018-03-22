@@ -205,7 +205,7 @@ def get_partners(manifestRepo, token):
     e = ET.fromstring(raw_manifest['data']['repository']['object']['text'])
 
     remotes = {}
-    partners = []
+    partners = {}
     for child in e:
         if child.tag == 'remote':
             name = child.attrib['name']
@@ -218,7 +218,7 @@ def get_partners(manifestRepo, token):
                 continue
             partner_url = "%s%s" % (remotes[child.attrib['remote']],
                                     child.attrib['name'])
-            partners.append(partner_url)
+            partners[child.attrib['name']] = partner_url
             log.debug("Added partner %s" % partner_url)
     return partners
 
@@ -280,9 +280,8 @@ def get_partner_config_by_url(manifest_url, kind, partner_subset=None):
         partners = get_partners(manifest_url, token)
 
         partner_configs[kind] = {}
-        for partner in partners:
-            # NB: if 2+ partners use the same name below desktop/ then we'll lose data here
-            partner_configs[kind].update(get_repack_configs(partner, token))
+        for partner, partner_url in partners.items():
+            partner_configs[kind][partner] = get_repack_configs(partner_url, token)
 
         # if we're only interested in a subset of partners we remove the rest
         if partner_subset:

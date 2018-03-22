@@ -17,19 +17,20 @@ transforms = TransformSequence()
 
 @transforms.add
 def chunk_partners(config, jobs):
-    partner_config = get_partner_config_by_kind(config.kind)
+    partner_configs = get_partner_config_by_kind(config.kind)
 
     for job in jobs:
         dep_job = job['dependent-task']
-        for partner, cfg in partner_config.iteritems():
-            if dep_job.attributes["build_platform"] not in cfg["platforms"]:
-                continue
-            for locale in cfg["locales"]:
-                repack_id = "{}-{}".format(partner, locale)
+        for partner, partner_config in partner_configs.iteritems():
+            for sub_partner, cfg in partner_config.iteritems():
+                if dep_job.attributes["build_platform"] not in cfg["platforms"]:
+                    continue
+                for locale in cfg["locales"]:
+                    repack_id = "{}-{}".format(partner, locale)
 
-                partner_job = copy.deepcopy(job)  # don't overwrite dict values here
-                if 'extra' not in partner_job:
-                    partner_job['extra'] = {}
-                partner_job['extra']['repack_id'] = repack_id
+                    partner_job = copy.deepcopy(job)  # don't overwrite dict values here
+                    if 'extra' not in partner_job:
+                        partner_job['extra'] = {}
+                    partner_job['extra']['repack_id'] = repack_id
 
-                yield partner_job
+                    yield partner_job
