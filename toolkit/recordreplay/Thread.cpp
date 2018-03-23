@@ -418,7 +418,7 @@ RecordReplayInterface_InternalEndCaptureEventStacks()
 static Atomic<bool, SequentiallyConsistent, Behavior::DontPreserve> gThreadsShouldIdle;
 
 // Whether all threads are considered to be idle.
-static bool gThreadsAreIdle;
+static Atomic<bool, SequentiallyConsistent, Behavior::DontPreserve> gThreadsAreIdle;
 
 // The number of call events which are currently executing and permitted to
 // write to tracked memory, including from non-recorded call event helper
@@ -428,6 +428,7 @@ static Atomic<size_t, SequentiallyConsistent, Behavior::DontPreserve> gNumActive
 static void
 AddActiveCallEvent()
 {
+  MOZ_RELEASE_ASSERT(!gThreadsAreIdle);
   ++gNumActiveCallEvents;
 }
 
@@ -436,6 +437,7 @@ ReleaseActiveCallEvent()
 {
   // The main thread may be blocked under WaitForIdleThreads if there are
   // active call events.
+  MOZ_RELEASE_ASSERT(gNumActiveCallEvents);
   if (--gNumActiveCallEvents == 0 && gThreadsShouldIdle) {
     Thread::Notify(MainThreadId);
   }
@@ -477,7 +479,7 @@ Thread::WaitForIdleThreads()
           // Releasing the global lock means that we need to start over
           // checking whether there are any idle threads. By marking this
           // thread as having been notified we have made progress, however.
-          done = true;
+          done = !gNumActiveCallEvents;
           i = MainThreadId;
         }
       }
