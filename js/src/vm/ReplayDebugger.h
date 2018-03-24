@@ -86,7 +86,7 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
     bool frameOffset(JSContext* cx, HandleObject obj, CallArgs& args);
     bool frameEnvironment(JSContext* cx, HandleObject obj, CallArgs& args);
     bool frameEvaluate(JSContext* cx, HandleObject obj, HandleString str,
-                       JSTrapStatus* pstatus, MutableHandleValue result);
+                       ResumeMode* presumeMode, MutableHandleValue result);
     static bool frameHasArguments(JSContext* cx, HandleObject obj, bool* rv);
     static bool frameNumActualArgs(JSContext* cx, HandleObject obj, size_t* rv);
     bool frameArgument(JSContext* cx, HandleObject obj, size_t index, MutableHandleValue rv);
@@ -123,7 +123,7 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
     bool objectOwnPropertyNames(JSContext* cx, HandleObject obj, CallArgs& args);
     bool objectOwnPropertySymbols(JSContext* cx, HandleObject obj, CallArgs& args);
     bool objectCall(JSContext* cx, HandleObject obj, HandleValue thisv, Handle<ValueVector> args,
-                    JSTrapStatus* pstatus, MutableHandleValue result);
+                    ResumeMode* presumeMode, MutableHandleValue result);
     bool objectUnsafeDereference(JSContext* cx, HandleObject obj, CallArgs& args);
     bool objectUnwrap(JSContext* cx, HandleObject obj, CallArgs& args);
 

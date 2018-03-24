@@ -3109,6 +3109,14 @@ nsGlobalWindowInner::GetOwnPropertyNames(JSContext* aCx, JS::AutoIdVector& aName
 
   JS::Rooted<JSObject*> wrapper(aCx, GetWrapper());
 
+  // FIXME there should be a more generic way to deal with this.
+  if (!wrapper) {
+    MOZ_ASSERT(recordreplay::IsReplaying() && recordreplay::HasDivergedFromRecording());
+    JS_ReportErrorASCII(aCx, "Missing wrapper while replaying");
+    aRv.NoteJSContextException(aCx);
+    return;
+  }
+
   // There are actually two ways we can get called here: For normal
   // enumeration or for Xray enumeration.  In the latter case, we want to
   // return all possible WebIDL names, because we don't really support

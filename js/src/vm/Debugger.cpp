@@ -2148,7 +2148,7 @@ Debugger::fireNewGlobalObject(JSContext* cx, Handle<GlobalObject*> global, Mutab
     MOZ_ASSERT(hook->isCallable());
 
     if (replayDebugger())
-        return JSTRAP_CONTINUE;
+        return ResumeMode::Continue;
 
     Maybe<AutoCompartment> ac;
     ac.emplace(cx, object);
@@ -8250,7 +8250,7 @@ DebuggerGenericEval(JSContext* cx, const mozilla::Range<const char16_t> chars,
         RootedString text(cx, JS_AtomizeUCStringN(cx, chars.begin().get(), chars.length()));
         if (!text)
             return false;
-        return dbg->replayDebugger()->frameEvaluate(cx, frameObj, text, &status, value);
+        return dbg->replayDebugger()->frameEvaluate(cx, frameObj, text, &resumeMode, value);
     }
 
     Maybe<AutoCompartment> ac;
@@ -8533,7 +8533,7 @@ DebuggerFrame_checkThis(JSContext* cx, const CallArgs& args, const char* fnname,
 // |frame| is null for replaying frames.
 #define THIS_ANY_FRAME(cx, argc, vp, fnname, dbg, args, thisobj, maybeIter, frame) \
     THIS_ANY_FRAME_THISOBJ(cx, argc, vp, fnname, dbg, args, thisobj);          \
-    AbstractFramePtr frame = nullptr;                                          \
+    AbstractFramePtr frame;                                                    \
     Maybe<FrameIter> maybeIter;                                                \
     if (!dbg->replayDebugger()) {                                              \
         maybeIter.emplace(*thisobj->frameIterData());                          \
@@ -9948,11 +9948,11 @@ DebuggerObject::callMethod(JSContext* cx, unsigned argc, Value* vp)
     }
 
     if (dbg->replayDebugger()) {
-        JSTrapStatus status;
+        ResumeMode resumeMode;
         RootedValue value(cx);
-        if (!dbg->replayDebugger()->objectCall(cx, object, thisv, args, &status, &value))
+        if (!dbg->replayDebugger()->objectCall(cx, object, thisv, args, &resumeMode, &value))
             return false;
-        return dbg->newCompletionValue(cx, status, value, callArgs.rval());
+        return dbg->newCompletionValue(cx, resumeMode, value, callArgs.rval());
     }
 
     return object->call(cx, object, thisv, args, callArgs.rval());
@@ -9985,11 +9985,11 @@ DebuggerObject::applyMethod(JSContext* cx, unsigned argc, Value* vp)
     }
 
     if (dbg->replayDebugger()) {
-        JSTrapStatus status;
+        ResumeMode resumeMode;
         RootedValue value(cx);
-        if (!dbg->replayDebugger()->objectCall(cx, object, thisv, args, &status, &value))
+        if (!dbg->replayDebugger()->objectCall(cx, object, thisv, args, &resumeMode, &value))
             return false;
-        return dbg->newCompletionValue(cx, status, value, callArgs.rval());
+        return dbg->newCompletionValue(cx, resumeMode, value, callArgs.rval());
     }
 
     return object->call(cx, object, thisv, args, callArgs.rval());

@@ -345,7 +345,9 @@ GeckoChildProcessHost::SyncLaunch(std::vector<std::string> aExtraOpts, int aTime
 }
 
 bool
-GeckoChildProcessHost::AsyncLaunch(std::vector<std::string> aExtraOpts)
+GeckoChildProcessHost::AsyncLaunch(std::vector<std::string> aExtraOpts,
+                                   RecordReplayKind aRecordReplayKind,
+                                   const nsAString& aRecordReplayFile)
 {
   PrepareLaunch();
 
@@ -356,7 +358,7 @@ GeckoChildProcessHost::AsyncLaunch(std::vector<std::string> aExtraOpts)
     "ipc::GeckoChildProcessHost::RunPerformAsyncLaunch",
     this,
     &GeckoChildProcessHost::RunPerformAsyncLaunch,
-    aExtraOpts, RecordReplayKind::None, nsString()));
+    aExtraOpts, aRecordReplayKind, aRecordReplayFile));
 
   // This may look like the sync launch wait, but we only delay as
   // long as it takes to create the channel.

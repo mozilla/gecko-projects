@@ -45,13 +45,6 @@ public:
 
   static uint32_t GetUniqueID();
 
-  // Block until the IPC channel for our subprocess is initialized,
-  // but no longer.  The child process may or may not have been
-  // created when this method returns.
-  bool AsyncLaunch(StringVector aExtraOpts=StringVector());
-
-  virtual bool WaitUntilConnected(int32_t aTimeoutMs = 0);
-
   enum class RecordReplayKind {
     None,
     MiddlemanRecord,
@@ -59,6 +52,15 @@ public:
     Record,
     Replay
   };
+
+  // Block until the IPC channel for our subprocess is initialized,
+  // but no longer.  The child process may or may not have been
+  // created when this method returns.
+  bool AsyncLaunch(StringVector aExtraOpts=StringVector(),
+                   RecordReplayKind aRecordReplayKind=RecordReplayKind::None,
+                   const nsAString& aRecordReplayFile=nsString());
+
+  virtual bool WaitUntilConnected(int32_t aTimeoutMs = 0);
 
   // Block until the IPC channel for our subprocess is initialized and
   // the OS process is created.  The subprocess may or may not have

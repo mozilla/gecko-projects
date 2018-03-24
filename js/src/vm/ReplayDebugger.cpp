@@ -969,7 +969,7 @@ ReplayDebugger::frameEnvironment(JSContext* cx, HandleObject obj, CallArgs& args
 
 bool
 ReplayDebugger::frameEvaluate(JSContext* cx, HandleObject obj, HandleString str,
-                              JSTrapStatus* pstatus, MutableHandleValue result)
+                              ResumeMode* presumeMode, MutableHandleValue result)
 {
     Activity a(cx);
 
@@ -986,7 +986,7 @@ ReplayDebugger::frameEvaluate(JSContext* cx, HandleObject obj, HandleString str,
 
     HandleObject response = a.sendRequest(request);
 
-    *pstatus = a.getBooleanProperty(response, "throwing") ? JSTRAP_THROW : JSTRAP_RETURN;
+    *presumeMode = a.getBooleanProperty(response, "throwing") ? ResumeMode::Throw : ResumeMode::Return;
     result.set(convertValueFromJSON(a, a.getObjectProperty(response, "result")));
     return a.success();
 }
@@ -1361,7 +1361,7 @@ ReplayDebugger::objectOwnPropertyKeys(JSContext* cx, HandleObject obj, unsigned 
 bool
 ReplayDebugger::objectCall(JSContext* cx, HandleObject obj, HandleValue thisv,
                            Handle<ValueVector> args,
-                           JSTrapStatus* pstatus, MutableHandleValue result)
+                           ResumeMode* presumeMode, MutableHandleValue result)
 {
     Activity a(cx);
     HandleObject data = a.getObjectData(obj);
@@ -1377,7 +1377,7 @@ ReplayDebugger::objectCall(JSContext* cx, HandleObject obj, HandleValue thisv,
     }
 
     HandleObject response = a.sendRequest(request);
-    *pstatus = a.getBooleanProperty(response, "throwing") ? JSTRAP_THROW : JSTRAP_RETURN;
+    *presumeMode = a.getBooleanProperty(response, "throwing") ? ResumeMode::Throw : ResumeMode::Return;
     result.set(convertValueFromJSON(a, a.getObjectProperty(response, "result")));
     return a.success();
 }
@@ -2007,9 +2007,9 @@ ReplayDebugger::hitBreakpoint(JSContext* cx, Breakpoint* breakpoint)
 
             RootedValue completion(cx);
             RootedValue value(cx);
-            JSTrapStatus status;
-            Debugger::resultToCompletion(cx, !throwing, result, &status, &value);
-            if (!debugger->newCompletionValue(cx, status, value, &completion))
+            ResumeMode resumeMode;
+            Debugger::resultToCompletion(cx, !throwing, result, &resumeMode, &value);
+            if (!debugger->newCompletionValue(cx, resumeMode, value, &completion))
                 return false;
             if (!Call(cx, handlerValue, frameValue, completion, &rv))
                 return false;

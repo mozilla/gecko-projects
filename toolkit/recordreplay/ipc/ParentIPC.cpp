@@ -756,7 +756,7 @@ RecvPaint(const channel::PaintMessage& aMsg)
   for (size_t i = 0; i < browsers.Length(); i++) {
     dom::TabChild* browser = static_cast<dom::TabChild*>(browsers[i]);
     if (browser->WebWidget()->IsVisible()) {
-      MOZ_RELEASE_ASSERT(!activeBrowser);
+      //MOZ_RELEASE_ASSERT(!activeBrowser);
       activeBrowser = browser;
     }
   }
@@ -802,6 +802,7 @@ RecvPaint(const channel::PaintMessage& aMsg)
   wr::MaybeExternalImageId externalImageId;
   layers::PTextureChild* texture =
     compositorChild->CreateTexture(surfaceDesc,
+                                   layers::ReadLockDescriptor(null_t()),
                                    layers::LayersBackend::LAYERS_BASIC,
                                    layers::TextureFlags::DISALLOW_BIGIMAGE |
                                    layers::TextureFlags::IMMEDIATE_UPLOAD,
@@ -870,8 +871,8 @@ RecvPaint(const channel::PaintMessage& aMsg)
   tiles.AppendElement(layers::TexturedTileDescriptor(nullptr, texture,
                                                      layers::MaybeTexture(null_t()),
                                                      gfx::IntRect(0, 0, width, height),
-                                                     layers::ReadLockDescriptor(null_t()),
-                                                     layers::ReadLockDescriptor(null_t()),
+                                                     /* readLocked = */ false,
+                                                     /* readLockedOnWhite = */ false,
                                                      /* wasPlaceholder = */ false));
 
   layers::SurfaceDescriptorTiles tileSurface(nsIntRegion(gfx::IntRect(0, 0, width, height)),

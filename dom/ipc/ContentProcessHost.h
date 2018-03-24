@@ -31,7 +31,9 @@ public:
   // Otherwise, true is returned, and either the OnProcessHandleReady method is
   // called when the process is created, or OnProcessLaunchError will be called
   // if the process could not be spawned due to an asynchronous error.
-  bool Launch(StringVector aExtraOpts);
+  bool Launch(StringVector aExtraOpts,
+              RecordReplayKind aRecordReplayKind,
+              const nsAString& aRecordReplayFile);
 
   // Called on the IO thread.
   void OnProcessHandleReady(ProcessHandle aProcessHandle) override;

@@ -26,12 +26,14 @@ ContentProcessHost::~ContentProcessHost()
 }
 
 bool
-ContentProcessHost::Launch(StringVector aExtraOpts)
+ContentProcessHost::Launch(StringVector aExtraOpts,
+                           RecordReplayKind aRecordReplayKind,
+                           const nsAString& aRecordReplayFile)
 {
   MOZ_ASSERT(!mHasLaunched);
   MOZ_ASSERT(mContentParent);
 
-  bool res = GeckoChildProcessHost::AsyncLaunch(aExtraOpts);
+  bool res = GeckoChildProcessHost::AsyncLaunch(aExtraOpts, aRecordReplayKind, aRecordReplayFile);
   MOZ_RELEASE_ASSERT(res);
   return true;
 }

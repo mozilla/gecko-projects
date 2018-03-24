@@ -3423,6 +3423,9 @@ jit::EnsureAsyncInterrupt(JSContext* cx)
         return;
     sTriedInstallAsyncInterrupt = true;
 
+    if (mozilla::recordreplay::IsRecordingOrReplaying())
+        return;
+
 #if defined(ANDROID) && !defined(__aarch64__)
     // Before Android 4.4 (SDK version 19), there is a bug
     //   https://android-review.googlesource.com/#/c/52333

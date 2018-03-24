@@ -3,10 +3,10 @@
 <div id="maindiv">Hello World!</div>
 </body>
 <script>
-const Cc = SpecialPowers.Cc;
-const Ci = SpecialPowers.Ci;
-const cpmm = Cc["@mozilla.org/childprocessmessagemanager;1"]
-             .getService(Ci.nsISyncMessageSender);
+// this line intentionally left blank
+// this line intentionally left blank
+// this line intentionally left blank
+const cpmm = SpecialPowers.Services.cpmm;
 var number = 0;
 function f() {
   updateNumber();

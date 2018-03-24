@@ -1164,8 +1164,7 @@ async function takeScreenshot(dbg) {
 // Specify a callback to be invoked the next time the 'RecordingFinished'
 // message is sent by a test file.
 function addRecordingFinishedListener(callback) {
-  const ppmm = Cc["@mozilla.org/parentprocessmessagemanager;1"]
-        .getService(Ci.nsIMessageBroadcaster);
+  const ppmm = Services.ppmm;
   ppmm.addMessageListener("RecordingFinished",
                           function listener() {
                             ppmm.removeMessageListener("RecordingFinished", listener);
@@ -1264,5 +1263,8 @@ function checkEvaluateInTopFrameThrows(threadClient, text) {
   });
 }
 
-// Several web replay mochitests are running into this rejection. See bug 1447411.
+// Several web replay mochitests are running into these rejections. See bug 1447411.
+ChromeUtils.import("resource://testing-common/PromiseTestUtils.jsm", this);
 PromiseTestUtils.whitelistRejectionsGlobally(/No such actor for ID/);
+PromiseTestUtils.whitelistRejectionsGlobally(/Component not initialized/);
+PromiseTestUtils.whitelistRejectionsGlobally(/this.worker is null/);

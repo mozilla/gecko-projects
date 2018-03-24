@@ -152,7 +152,7 @@ class HangMonitorChild
 
   // Allows us to ensure we NotifyActivity only once, allowing
   // either thread to do so.
-  Atomic<bool> mBHRMonitorActive;
+  Atomic<bool, SequentiallyConsistent, recordreplay::Behavior::DontPreserve> mBHRMonitorActive;
 };
 
 Atomic<HangMonitorChild*, SequentiallyConsistent,

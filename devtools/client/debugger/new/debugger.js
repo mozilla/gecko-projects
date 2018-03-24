@@ -24392,11 +24392,10 @@ class CommandBar extends _react.Component {
   renderPauseButton() {
     const { isPaused, breakOnNext, isWaitingOnBreak, canRewind } = this.props;
 
-    if (canRewind) {
-      return;
-    }
-
     if (isPaused) {
+      if (canRewind) {
+        return;
+      }
       return debugBtn(() => this.resume(), "resume", "active", L10N.getFormatStr("resumeButtonTooltip", formatKey("resume")));
     }
 
@@ -24449,7 +24448,7 @@ class CommandBar extends _react.Component {
 
     const isDisabled = !isPaused;
 
-    return [debugBtn(this.props.rewind, "rewind", "active", "Rewind Execution"), debugBtn(() => this.props.resume, "resume", "active", L10N.getFormatStr("resumeButtonTooltip", formatKey("resume"))), _react2.default.createElement("div", { className: "divider" }), debugBtn(this.props.reverseStepOver, "reverseStepOver", "active", "Reverse step over"), debugBtn(this.props.stepOver, "stepOver", "active", L10N.getFormatStr("stepOverTooltip", formatKey("stepOver")), isDisabled), _react2.default.createElement("div", { className: "divider" }), debugBtn(this.props.stepOut, "stepOut", "active", L10N.getFormatStr("stepOutTooltip", formatKey("stepOut")), isDisabled), debugBtn(this.props.stepIn, "stepIn", "active", L10N.getFormatStr("stepInTooltip", formatKey("stepIn")), isDisabled)];
+    return [debugBtn(this.props.rewind, "rewind", "active", "Rewind Execution"), debugBtn(this.props.resume, "resume", "active", L10N.getFormatStr("resumeButtonTooltip", formatKey("resume"))), _react2.default.createElement("div", { className: "divider" }), debugBtn(this.props.reverseStepOver, "reverseStepOver", "active", "Reverse step over"), debugBtn(this.props.stepOver, "stepOver", "active", L10N.getFormatStr("stepOverTooltip", formatKey("stepOver")), isDisabled), _react2.default.createElement("div", { className: "divider" }), debugBtn(this.props.stepOut, "stepOut", "active", L10N.getFormatStr("stepOutTooltip", formatKey("stepOut")), isDisabled), debugBtn(this.props.stepIn, "stepIn", "active", L10N.getFormatStr("stepInTooltip", formatKey("stepIn")), isDisabled)];
   }
 
   replayPreviousButton() {
