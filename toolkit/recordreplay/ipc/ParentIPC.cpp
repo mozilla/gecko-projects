@@ -569,6 +569,13 @@ SetChildIsPaused(bool aPaused)
   gChildIsPaused = aPaused;
 }
 
+static void
+SendMessageToChild(const channel::Message& aMessage)
+{
+  gLastMessageTime = TimeStamp::Now();
+  channel::SendMessage(aMessage);
+}
+
 // On the main thread, block until the child is paused, handling any incoming
 // tasks sent by the replay message loop thread. If aPokeChild is set, then if
 // the child process is recording it will be instructed to take a snapshot
@@ -579,7 +586,7 @@ WaitUntilChildIsPaused(bool aPokeChild = false)
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
   if (aPokeChild && gChildProcessIsRecording && !gChildIsPaused) {
-    channel::SendMessage(channel::TakeSnapshotMessage());
+    SendMessageToChild(channel::TakeSnapshotMessage());
   }
 
   while (!gChildIsPaused) {
@@ -710,7 +717,7 @@ static void
 SendMessageNoteRecovery(const channel::Message& aMsg)
 {
   recovery::NoteOutgoingMessage(aMsg);
-  channel::SendMessage(aMsg);
+  SendMessageToChild(aMsg);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1005,7 +1012,6 @@ CanRecoverChildProcess()
       && strcmp(gChildProcessFilename, "*")
       && !gChildIsPaused
       && gReplaySnapshotsEnabled
-      && gLastSnapshot
       && !recovery::IsRecovering();
 }
 
@@ -1181,7 +1187,7 @@ SaveRecordingInternal(channel::SaveRecordingMessage* aMsg)
 {
   WaitUntilChildIsPaused(/* aPokeChild = */ true);
 
-  channel::SendMessage(*aMsg);
+  SendMessageToChild(*aMsg);
   free(aMsg);
 }
 

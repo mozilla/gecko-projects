@@ -45,8 +45,10 @@ void
 BeginRecovery()
 {
   MOZ_RELEASE_ASSERT(!IsRecovering());
-  MOZ_RELEASE_ASSERT(!gSnapshotMessages.empty());
-  gRecoveryStage = RecoveryStage::ReachingSnapshot;
+  MOZ_RELEASE_ASSERT(!gSnapshotMessages.empty() || gLastSnapshot == 0);
+  gRecoveryStage = gSnapshotMessages.empty()
+                   ? RecoveryStage::PlayingSnapshotMessages
+                   : RecoveryStage::ReachingSnapshot;
 }
 
 void
@@ -72,7 +74,13 @@ NoteIncomingMessage(const Message& aMsg)
       gNumRecoveredSnapshotMessages == gSnapshotMessages.length())
   {
     switch (aMsg.mType) {
-    case MessageType::HitSnapshot:
+    case MessageType::HitSnapshot: {
+      const HitSnapshotMessage& nmsg = static_cast<const HitSnapshotMessage&>(aMsg);
+      if (nmsg.mInterim) {
+        break;
+      }
+      MOZ_FALLTHROUGH;
+    }
     case MessageType::HitBreakpoint:
     case MessageType::DebuggerResponse:
       gRecoveryStage = RecoveryStage::None;
@@ -106,6 +114,7 @@ NoteIncomingMessage(const Message& aMsg)
         }
 
         gRecoveryStage = RecoveryStage::PlayingSnapshotMessages;
+        MOZ_RELEASE_ASSERT(!gSnapshotMessages.empty());
         SendMessage(*gSnapshotMessages[0]);
         gNumRecoveredSnapshotMessages = 1;
       }

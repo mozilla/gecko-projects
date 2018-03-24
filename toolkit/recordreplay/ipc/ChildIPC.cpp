@@ -104,7 +104,8 @@ ChannelThreadMain(void*)
     case channel::MessageType::SaveRecording: {
       MOZ_RELEASE_ASSERT(MainThreadShouldPause());
       channel::SaveRecordingMessage* nmsg = (channel::SaveRecordingMessage*) msg;
-      PauseMainThreadAndInvokeCallback([=]() { SaveRecording(nmsg->Filename()); });
+      char* filename = strdup(nmsg->Filename());
+      PauseMainThreadAndInvokeCallback([=]() { SaveRecording(filename); free(filename); });
       break;
     }
     case channel::MessageType::DebuggerRequest: {
@@ -235,6 +236,8 @@ ParentProcessId()
   return gParentPid;
 }
 
+static int32_t gSentFatalErrorMessage;
+
 void
 ReportFatalError(const char* aFormat, ...)
 {
@@ -246,18 +249,21 @@ ReportFatalError(const char* aFormat, ...)
 
   Print("***** Fatal Record/Replay Error *****\n%s\n", buf);
 
-  // Construct a FatalErrorMessage on the stack, to avoid touching the heap.
-  char msgBuf[4096];
-  size_t header = sizeof(channel::FatalErrorMessage);
-  size_t len = std::min(strlen(buf) + 1, sizeof(msgBuf) - header);
-  channel::FatalErrorMessage* msg = new(msgBuf) channel::FatalErrorMessage(header + len);
-  memcpy(&msgBuf[header], buf, len);
-  msgBuf[sizeof(msgBuf) - 1] = 0;
+  // Only send one fatal error message per child process.
+  if (PR_ATOMIC_SET_NO_RECORD(&gSentFatalErrorMessage, 1) == 0) {
+    // Construct a FatalErrorMessage on the stack, to avoid touching the heap.
+    char msgBuf[4096];
+    size_t header = sizeof(channel::FatalErrorMessage);
+    size_t len = std::min(strlen(buf) + 1, sizeof(msgBuf) - header);
+    channel::FatalErrorMessage* msg = new(msgBuf) channel::FatalErrorMessage(header + len);
+    memcpy(&msgBuf[header], buf, len);
+    msgBuf[sizeof(msgBuf) - 1] = 0;
 
-  // Don't take the message lock when sending this, to avoid touching the heap.
-  channel::SendMessage(*msg, /* aTakeLock = */ false);
+    // Don't take the message lock when sending this, to avoid touching the heap.
+    channel::SendMessage(*msg, /* aTakeLock = */ false);
 
-  UnrecoverableSnapshotFailure();
+    UnrecoverableSnapshotFailure();
+  }
 
   // Block until we get a terminate message and die.
   Thread::WaitForeverNoIdle();
