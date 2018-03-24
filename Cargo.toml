@@ -58,5 +58,6 @@ codegen-units = 1
 
 [patch.crates-io]
 libudev-sys = { path = "dom/webauthn/libudev-sys" }
+crossbeam-deque = { path = "toolkit/recordreplay/crossbeam-deque" }
 rayon-core = { path = "toolkit/recordreplay/rayon-core" }
 serde_derive = { git = "https://github.com/gankro/serde", branch = "deserialize_from_enums4" }

@@ -693,21 +693,6 @@ RR_pread(int aFd, void* aBuf, size_t aCount, size_t aOffset)
 static ssize_t
 RR_write(int aFd, void* aBuf, size_t aCount)
 {
-  /*
-  if (!AreThreadEventsPassedThrough() &&
-      aFd == STDERR_FILENO &&
-      aCount >= 4 &&
-      memcmp(aBuf, "RUST", 4) == 0)
-  {
-    MOZ_RELEASE_ASSERT(aCount < 256);
-    char nbuf[256];
-    memcpy(nbuf, aBuf, aCount);
-    nbuf[aCount] = 0;
-    RecordReplayAssert(nbuf);
-    return 0;
-  }
-  */
-
   RecordReplayFunction(write, ssize_t, aFd, aBuf, aCount);
   RecordOrReplayHadErrorNegative(rrf);
   return rval;

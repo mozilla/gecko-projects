@@ -19,6 +19,10 @@ use std::usize;
 use unwind;
 use util::leak;
 
+extern {
+    fn RecordReplayRust_Assert(str: *const u8);
+}
+
 pub struct Registry {
     thread_infos: Vec<ThreadInfo>,
     state: Mutex<RegistryState>,
@@ -521,14 +525,13 @@ impl WorkerThread {
     /// bottom.
     #[inline]
     pub unsafe fn take_local_job(&self) -> Option<JobRef> {
-//        unsafe {
-//            extern crate libc;
-//            libc::write(libc::STDERR_FILENO, "RUST take_local_job #1".as_ptr() as *const libc::c_void, 22);
-//        }
+        RecordReplayRust_Assert("WorkerThread::take_local_job #1\0".as_ptr());
         if !self.breadth_first {
+            RecordReplayRust_Assert("WorkerThread::take_local_job #2\0".as_ptr());
             self.worker.pop()
         } else {
             loop {
+                RecordReplayRust_Assert("WorkerThread::take_local_job #3\0".as_ptr());
                 match self.worker.steal() {
                     Steal::Empty => return None,
                     Steal::Data(d) => return Some(d),
@@ -556,10 +559,7 @@ impl WorkerThread {
         // latch has been signaled, and that can lead to random memory
         // accesses, which would be *very bad*
         let abort_guard = unwind::AbortIfPanic;
-//    unsafe {
-//            extern crate libc;
-//            libc::write(libc::STDERR_FILENO, "RUST wait_until_cold #1".as_ptr() as *const libc::c_void, 23);
-//        }
+        RecordReplayRust_Assert("WorkerThread::wait_until_cold #1\0".as_ptr());
 
         let mut yields = 0;
         while !latch.probe() {
@@ -568,31 +568,19 @@ impl WorkerThread {
             // deques, and finally to injected jobs from the
             // outside. The idea is to finish what we started before
             // we take on something new.
-//    unsafe {
-//            extern crate libc;
-//            libc::write(libc::STDERR_FILENO, "RUST wait_until_cold #2".as_ptr() as *const libc::c_void, 23);
-//        }
+            RecordReplayRust_Assert("WorkerThread::wait_until_cold #2\0".as_ptr());
             if let Some(job) = self.take_local_job()
                                    .or_else(|| self.steal())
                                    .or_else(|| self.registry.pop_injected_job(self.index)) {
-//    unsafe {
-//            extern crate libc;
-//            libc::write(libc::STDERR_FILENO, "RUST wait_until_cold #3".as_ptr() as *const libc::c_void, 23);
-//        }
+                RecordReplayRust_Assert("WorkerThread::wait_until_cold #3\0".as_ptr());
                 yields = self.registry.sleep.work_found(self.index, yields);
                 self.execute(job);
             } else {
-//    unsafe {
-//            extern crate libc;
-//            libc::write(libc::STDERR_FILENO, "RUST wait_until_cold #4".as_ptr() as *const libc::c_void, 23);
-//        }
+                RecordReplayRust_Assert("WorkerThread::wait_until_cold #4\0".as_ptr());
                 yields = self.registry.sleep.no_work_found(self.index, yields);
             }
         }
-//    unsafe {
-//            extern crate libc;
-//            libc::write(libc::STDERR_FILENO, "RUST wait_until_cold #5".as_ptr() as *const libc::c_void, 23);
-//        }
+        RecordReplayRust_Assert("WorkerThread::wait_until_cold #5\0".as_ptr());
 
         // If we were sleepy, we are not anymore. We "found work" --
         // whatever the surrounding thread was doing before it had to
@@ -621,10 +609,7 @@ impl WorkerThread {
         // we only steal when we don't have any work to do locally
         debug_assert!(self.worker.pop().is_none());
 
-//        unsafe {
-//            extern crate libc;
-//            libc::write(libc::STDERR_FILENO, "RUST steal".as_ptr() as *const libc::c_void, 10);
-//        }
+        RecordReplayRust_Assert("WorkerThread::steal #1\0".as_ptr());
 
         // otherwise, try to steal
         let num_threads = self.registry.thread_infos.len();
@@ -646,10 +631,7 @@ impl WorkerThread {
             .chain(0 .. start)
             .filter(|&i| i != self.index)
             .filter_map(|victim_index| {
-//                unsafe {
-//                    extern crate libc;
-//                    libc::write(libc::STDERR_FILENO, format!("RUST {} steal", victim_index).as_ptr() as *const libc::c_void, 12);
-//                }
+                RecordReplayRust_Assert(format!("WorkerThread::steal #2 {}\0", victim_index).as_ptr());
                 let victim = &self.registry.thread_infos[victim_index];
                 loop {
                     match victim.stealer.steal() {
@@ -706,10 +688,7 @@ unsafe fn main_loop(worker: Deque<JobRef>,
 
     worker_thread.wait_until(&registry.terminate_latch);
 
-//    unsafe {
-//            extern crate libc;
-//            libc::write(libc::STDERR_FILENO, "RUST main_loop #1".as_ptr() as *const libc::c_void, 17);
-//        }
+    RecordReplayRust_Assert("WorkerThread main_loop #1\0".as_ptr());
 
     // Should not be any work left in our queue.
     debug_assert!(worker_thread.take_local_job().is_none());

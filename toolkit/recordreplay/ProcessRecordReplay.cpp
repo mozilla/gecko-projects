@@ -531,6 +531,24 @@ RecordReplayInterface_InternalRecordReplayAssertBytes(const void* aData, size_t 
 #endif // INCLUDE_RECORD_REPLAY_ASSERTIONS
 }
 
+MOZ_EXPORT void
+RecordReplayRust_Assert(const uint8_t* aBuffer)
+{
+  RecordReplayAssert("%s", (const char*) aBuffer);
+}
+
+MOZ_EXPORT void
+RecordReplayRust_BeginPassThroughThreadEvents()
+{
+  BeginPassThroughThreadEvents();
+}
+
+MOZ_EXPORT void
+RecordReplayRust_EndPassThroughThreadEvents()
+{
+  EndPassThroughThreadEvents();
+}
+
 } // extern "C"
 
 static void
