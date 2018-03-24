@@ -17,9 +17,10 @@
 "use strict";
 
 const TEST_URI = "https://example.com/browser/devtools/client/webconsole/" +
-  "new-console-output/test/mochitest/test-mixedcontent-securityerrors.html";
-const LEARN_MORE_URI =
-  "https://developer.mozilla.org/docs/Web/Security/Mixed_content" + DOCS_GA_PARAMS;
+                 "new-console-output/test/mochitest/" +
+                 "test-mixedcontent-securityerrors.html";
+const LEARN_MORE_URI = "https://developer.mozilla.org/docs/Web/Security/" +
+                       "Mixed_content" + DOCS_GA_PARAMS;
 
 const blockedActiveContentText = "Blocked loading mixed active content " +
   "\u201chttp://example.com/\u201d";
@@ -28,7 +29,8 @@ const blockedDisplayContentText = "Blocked loading mixed display content " +
 const activeContentText = "Loading mixed (insecure) active content " +
   "\u201chttp://example.com/\u201d on a secure page";
 const displayContentText = "Loading mixed (insecure) display content " +
-  "\u201chttp://example.com/tests/image/test/mochitest/blue.png\u201d on a secure page";
+  "\u201chttp://example.com/tests/image/test/mochitest/blue.png\u201d on a " +
+  "secure page";
 
 add_task(async function() {
   await pushPrefEnv();

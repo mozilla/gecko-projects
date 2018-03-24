@@ -10,15 +10,14 @@ use clip::{ClipStore};
 use clip_scroll_tree::{ClipScrollTree, ClipScrollNodeIndex};
 use device::{FrameId, Texture};
 use gpu_cache::{GpuCache};
-use gpu_types::{BlurDirection, BlurInstance, BrushFlags, BrushInstance, ClipChainRectIndex};
-use gpu_types::{ClipScrollNodeData, ClipScrollNodeIndex as GPUClipScrollNodeIndex};
-use gpu_types::{PrimitiveInstance};
+use gpu_types::{BlurDirection, BlurInstance};
+use gpu_types::{ClipScrollNodeData};
 use internal_types::{FastHashMap, SavedTargetIndex, SourceTexture};
-use picture::{PictureKind};
+use picture::PictureKind;
 use prim_store::{CachedGradient, PrimitiveIndex, PrimitiveKind, PrimitiveStore};
-use prim_store::{BrushKind, DeferredResolve, EdgeAaSegmentMask};
+use prim_store::{BrushKind, DeferredResolve};
 use profiler::FrameProfileCounters;
-use render_task::{BlitSource, RenderTaskAddress, RenderTaskId, RenderTaskKind};
+use render_task::{BlitSource, RenderTaskId, RenderTaskKind};
 use render_task::{BlurTask, ClearMode, RenderTaskLocation, RenderTaskTree};
 use resource_cache::ResourceCache;
 use std::{cmp, usize, f32, i32};
@@ -321,23 +320,31 @@ impl RenderTarget for ColorRenderTarget {
 
             match task.kind {
                 RenderTaskKind::Picture(ref pic_task) => {
-                    let pic_index = ctx.prim_store.cpu_metadata[pic_task.prim_index.0].cpu_prim_index;
-                    let pic = &ctx.prim_store.cpu_pictures[pic_index.0];
-                    let (target_rect, _) = task.get_target_rect();
+                    let brush_index = ctx.prim_store.cpu_metadata[pic_task.prim_index.0].cpu_prim_index;
+                    let brush = &ctx.prim_store.cpu_brushes[brush_index.0];
+                    match brush.kind {
+                        BrushKind::Picture { pic_index } => {
+                            let pic = &ctx.prim_store.pictures[pic_index.0];
+                            let (target_rect, _) = task.get_target_rect();
 
-                    let mut batch_builder = AlphaBatchBuilder::new(self.screen_size, target_rect);
+                            let mut batch_builder = AlphaBatchBuilder::new(self.screen_size, target_rect);
 
-                    batch_builder.add_pic_to_batch(
-                        pic,
-                        *task_id,
-                        ctx,
-                        gpu_cache,
-                        render_tasks,
-                        deferred_resolves,
-                    );
+                            batch_builder.add_pic_to_batch(
+                                pic,
+                                *task_id,
+                                ctx,
+                                gpu_cache,
+                                render_tasks,
+                                deferred_resolves,
+                            );
 
-                    if let Some(batch_container) = batch_builder.build(&mut merged_batches) {
-                        self.alpha_batch_containers.push(batch_container);
+                            if let Some(batch_container) = batch_builder.build(&mut merged_batches) {
+                                self.alpha_batch_containers.push(batch_container);
+                            }
+                        }
+                        _ => {
+                            unreachable!();
+                        }
                     }
                 }
                 _ => {
@@ -382,12 +389,13 @@ impl RenderTarget for ColorRenderTarget {
             RenderTaskKind::Picture(ref task_info) => {
                 let prim_metadata = ctx.prim_store.get_metadata(task_info.prim_index);
                 match prim_metadata.prim_kind {
-                    PrimitiveKind::Picture => {
-                        let prim = &ctx.prim_store.cpu_pictures[prim_metadata.cpu_prim_index.0];
+                    PrimitiveKind::Brush => {
+                        let brush = &ctx.prim_store.cpu_brushes[prim_metadata.cpu_prim_index.0];
+                        let pic = &ctx.prim_store.pictures[brush.get_picture_index().0];
 
                         self.alpha_tasks.push(task_id);
 
-                        if let PictureKind::Image { frame_output_pipeline_id, .. } = prim.kind {
+                        if let PictureKind::Image { frame_output_pipeline_id, .. } = pic.kind {
                             // If this pipeline is registered as a frame output
                             // store the information necessary to do the copy.
                             if let Some(pipeline_id) = frame_output_pipeline_id {
@@ -404,6 +412,7 @@ impl RenderTarget for ColorRenderTarget {
                     }
                 }
             }
+            RenderTaskKind::ClipRegion(..) |
             RenderTaskKind::CacheMask(..) => {
                 panic!("Should not be added to color target!");
             }
@@ -480,7 +489,6 @@ impl RenderTarget for ColorRenderTarget {
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct AlphaRenderTarget {
     pub clip_batcher: ClipBatcher,
-    pub brush_mask_rounded_rects: Vec<PrimitiveInstance>,
     // List of blur operations to apply for this render target.
     pub vertical_blurs: Vec<BlurInstance>,
     pub horizontal_blurs: Vec<BlurInstance>,
@@ -500,7 +508,6 @@ impl RenderTarget for AlphaRenderTarget {
     ) -> Self {
         AlphaRenderTarget {
             clip_batcher: ClipBatcher::new(),
-            brush_mask_rounded_rects: Vec::new(),
             vertical_blurs: Vec::new(),
             horizontal_blurs: Vec::new(),
             scalings: Vec::new(),
@@ -532,6 +539,7 @@ impl RenderTarget for AlphaRenderTarget {
 
         match task.kind {
             RenderTaskKind::Readback(..) |
+            RenderTaskKind::Picture(..) |
             RenderTaskKind::Blit(..) => {
                 panic!("BUG: should not be added to alpha target!");
             }
@@ -553,73 +561,6 @@ impl RenderTarget for AlphaRenderTarget {
                     render_tasks,
                 );
             }
-            RenderTaskKind::Picture(ref task_info) => {
-                let prim_metadata = ctx.prim_store.get_metadata(task_info.prim_index);
-
-                match prim_metadata.prim_kind {
-                    PrimitiveKind::Picture => {
-                        let prim = &ctx.prim_store.cpu_pictures[prim_metadata.cpu_prim_index.0];
-
-                        let task_index = render_tasks.get_task_address(task_id);
-
-                        for run in &prim.runs {
-                            for i in 0 .. run.count {
-                                let sub_prim_index = PrimitiveIndex(run.base_prim_index.0 + i);
-
-                                let sub_metadata = ctx.prim_store.get_metadata(sub_prim_index);
-                                let sub_prim_address =
-                                    gpu_cache.get_address(&sub_metadata.gpu_location);
-
-                                match sub_metadata.prim_kind {
-                                    PrimitiveKind::Brush => {
-                                        let instance = BrushInstance {
-                                            picture_address: task_index,
-                                            prim_address: sub_prim_address,
-                                            // TODO(gw): In the future, when brush
-                                            //           primitives on picture backed
-                                            //           tasks support clip masks and
-                                            //           transform primitives, these
-                                            //           will need to be filled out!
-                                            clip_chain_rect_index: ClipChainRectIndex(0),
-                                            scroll_id: GPUClipScrollNodeIndex(0),
-                                            clip_task_address: RenderTaskAddress(0),
-                                            z: 0,
-                                            segment_index: 0,
-                                            brush_flags: BrushFlags::PERSPECTIVE_INTERPOLATION,
-                                            edge_flags: EdgeAaSegmentMask::empty(),
-                                            user_data: [0; 3],
-                                        };
-                                        let brush = &ctx.prim_store.cpu_brushes[sub_metadata.cpu_prim_index.0];
-                                        let batch = match brush.kind {
-                                            BrushKind::Solid { .. } |
-                                            BrushKind::Clear |
-                                            BrushKind::Picture |
-                                            BrushKind::Line { .. } |
-                                            BrushKind::YuvImage { .. } |
-                                            BrushKind::RadialGradient { .. } |
-                                            BrushKind::LinearGradient { .. } |
-                                            BrushKind::Image { .. } => {
-                                                unreachable!("bug: unexpected brush here");
-                                            }
-                                            BrushKind::Mask { .. } => {
-                                                &mut self.brush_mask_rounded_rects
-                                            }
-                                        };
-                                        batch.push(PrimitiveInstance::from(instance));
-                                    }
-                                    _ => {
-                                        unreachable!("Unexpected sub primitive type");
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    _ => {
-                        // No other primitives make use of primitive caching yet!
-                        unreachable!()
-                    }
-                }
-            }
             RenderTaskKind::CacheMask(ref task_info) => {
                 let task_address = render_tasks.get_task_address(task_id);
                 self.clip_batcher.add(
@@ -629,6 +570,13 @@ impl RenderTarget for AlphaRenderTarget {
                     &ctx.resource_cache,
                     gpu_cache,
                     clip_store,
+                );
+            }
+            RenderTaskKind::ClipRegion(ref task) => {
+                let task_address = render_tasks.get_task_address(task_id);
+                self.clip_batcher.add_clip_region(
+                    task_address,
+                    task.clip_data_address,
                 );
             }
             RenderTaskKind::Scaling(..) => {
@@ -704,6 +652,7 @@ impl TextureCacheRenderTarget {
             }
             RenderTaskKind::VerticalBlur(..) |
             RenderTaskKind::Picture(..) |
+            RenderTaskKind::ClipRegion(..) |
             RenderTaskKind::CacheMask(..) |
             RenderTaskKind::Readback(..) |
             RenderTaskKind::Scaling(..) => {
@@ -801,10 +750,9 @@ impl RenderPass {
             }
             RenderPassKind::OffScreen { ref mut color, ref mut alpha, ref mut texture_cache } => {
                 let is_shared_alpha = self.tasks.iter().any(|&task_id| {
-                    match render_tasks[task_id].kind {
-                        RenderTaskKind::CacheMask(..) => true,
-                        _ => false,
-                    }
+                    let task = &render_tasks[task_id];
+                    task.is_shared() &&
+                        task.target_kind() == RenderTargetKind::Alpha
                 });
                 let saved_color = if self.tasks.iter().any(|&task_id| {
                     let t = &render_tasks[task_id];

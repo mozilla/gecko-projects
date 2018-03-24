@@ -11,9 +11,10 @@
 "use strict";
 
 const TEST_URI = "https://example.com/browser/devtools/client/webconsole/" +
-                 "new-console-output/test/mochitest/test-mixedcontent-securityerrors.html";
+                 "new-console-output/test/mochitest/" +
+                 "test-mixedcontent-securityerrors.html";
 
-add_task(async function () {
+add_task(async function() {
   let hud = await openNewTabAndConsole(TEST_URI);
   info("console opened");
 
@@ -25,6 +26,6 @@ add_task(async function () {
   let onTabOpen = BrowserTestUtils.waitForNewTab(gBrowser, null, true);
 
   locationNode.click();
-  let tab = await onTabOpen;
+  await onTabOpen;
   ok(true, "the view source tab was opened in response to clicking the location node");
 });

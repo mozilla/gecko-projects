@@ -11,8 +11,8 @@
 #include "mozilla/Atomics.h"
 #include "mozilla/EnumeratedArray.h"
 #include "mozilla/IntegerRange.h"
-#include "mozilla/Maybe.h"
 #include "mozilla/PodOperations.h"
+#include "mozilla/TimeStamp.h"
 
 #include "jspubtd.h"
 #include "NamespaceImports.h"
@@ -24,8 +24,6 @@
 #include "js/Vector.h"
 #include "vm/JSONPrinter.h"
 #include "vm/Time.h"
-
-using mozilla::Maybe;
 
 namespace js {
 

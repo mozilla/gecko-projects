@@ -2,6 +2,7 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Tests for stepping through Babel's compile output.
+requestLongerTimeout(4);
 
 async function breakpointSteps(dbg, fixture, { line, column }, steps) {
   const { selectors: { getBreakpoint, getBreakpoints }, getState } = dbg;
@@ -18,6 +19,7 @@ async function breakpointSteps(dbg, fixture, { line, column }, steps) {
   await addBreakpoint(dbg, source, line);
 
   is(getBreakpoints(getState()).size, 1, "One breakpoint exists");
+
   ok(
     getBreakpoint(getState(), { sourceId: source.id, line, column }),
     "Breakpoint has correct line"
@@ -78,12 +80,8 @@ async function runSteps(dbg, source, steps) {
   }
 }
 
-add_task(async function() {
-  requestLongerTimeout(4);
-
-  const dbg = await initDebugger("doc-babel.html");
-
-  await breakpointSteps(dbg, "step-over-for-of", { line: 4, column: 2 }, [
+function testStepOverForOf(dbg) {
+  return breakpointSteps(dbg, "step-over-for-of", { line: 4, column: 2 }, [
     ["stepOver", { line: 6, column: 2 }],
     ["stepOver", { line: 7, column: 4 }],
     ["stepOver", { line: 6, column: 2 }],
@@ -91,10 +89,12 @@ add_task(async function() {
     ["stepOver", { line: 6, column: 2 }],
     ["stepOver", { line: 10, column: 2 }]
   ]);
+}
 
-  // This codifies the current behavior, but stepping twice over the for
-  // header isn't ideal.
-  await breakpointSteps(dbg, "step-over-for-of-array", { line: 3, column: 2 }, [
+// This codifies the current behavior, but stepping twice over the for
+// header isn't ideal.
+function testStepOverForOfArray(dbg) {
+  return breakpointSteps(dbg, "step-over-for-of-array", { line: 3, column: 2 }, [
     ["stepOver", { line: 5, column: 2 }],
     ["stepOver", { line: 5, column: 7 }],
     ["stepOver", { line: 6, column: 4 }],
@@ -104,10 +104,12 @@ add_task(async function() {
     ["stepOver", { line: 5, column: 2 }],
     ["stepOver", { line: 9, column: 2 }]
   ]);
+}
 
-  // The closure means it isn't actually possible to step into the for body,
-  // and Babel doesn't map the _loop() call, so we step past it automatically.
-  await breakpointSteps(
+// The closure means it isn't actually possible to step into the for body,
+// and Babel doesn't map the _loop() call, so we step past it automatically.
+function testStepOveForOfClosure(dbg) {
+  return breakpointSteps(
     dbg,
     "step-over-for-of-closure",
     { line: 6, column: 2 },
@@ -116,11 +118,13 @@ add_task(async function() {
       ["stepOver", { line: 12, column: 2 }]
     ]
   );
+}
 
-  // Same as the previous, not possible to step into the body. The less
-  // complicated array logic makes it possible to step into the header at least,
-  // but this does end up double-visiting the for head.
-  await breakpointSteps(
+// Same as the previous, not possible to step into the body. The less
+// complicated array logic makes it possible to step into the header at least,
+// but this does end up double-visiting the for head.
+function testStepOverForOfArrayClosure(dbg) {
+  return breakpointSteps(
     dbg,
     "step-over-for-of-array-closure",
     { line: 3, column: 2 },
@@ -133,15 +137,19 @@ add_task(async function() {
       ["stepOver", { line: 9, column: 2 }]
     ]
   );
+}
 
-  await breakpointSteps(
+function testStepOverFunctionParams(dbg) {
+  return breakpointSteps(
     dbg,
     "step-over-function-params",
     { line: 6, column: 2 },
     [["stepOver", { line: 7, column: 2 }], ["stepIn", { line: 2, column: 2 }]]
   );
+}
 
-  await breakpointSteps(
+function testStepOverRegeneratorAwait(dbg) {
+  return breakpointSteps(
     dbg,
     "step-over-regenerator-await",
     { line: 2, column: 2 },
@@ -151,4 +159,15 @@ add_task(async function() {
       // ["stepOver", { line: 4, column: 2 }],
     ]
   );
+}
+
+add_task(async function() {
+  const dbg = await initDebugger("doc-babel.html");
+
+  await testStepOverForOf(dbg);
+  await testStepOverForOfArray(dbg);
+  await testStepOveForOfClosure(dbg);
+  await testStepOverForOfArrayClosure(dbg);
+  await testStepOverFunctionParams(dbg);
+  await testStepOverRegeneratorAwait(dbg);
 });

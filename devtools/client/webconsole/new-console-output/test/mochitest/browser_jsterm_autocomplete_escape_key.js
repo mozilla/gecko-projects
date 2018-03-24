@@ -22,14 +22,13 @@ const TEST_URI = `data:text/html;charset=utf-8,
 </head>
 <body>bug 585991 - autocomplete popup escape key usage test</body>`;
 
-add_task(async function () {
+add_task(async function() {
   let { jsterm } = await openNewTabAndConsole(TEST_URI);
   info("web console opened");
 
   const {
     autocompletePopup: popup,
     completeNode,
-    inputNode,
   } = jsterm;
 
   let onPopUpOpen = popup.once("popup-opened");

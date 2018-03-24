@@ -442,21 +442,46 @@ gfxWindowsPlatform::HandleDeviceReset()
   return true;
 }
 
+BackendPrefsData
+gfxWindowsPlatform::GetBackendPrefs()
+{
+  BackendPrefsData data;
+
+  data.mCanvasBitmask = BackendTypeBit(BackendType::CAIRO) |
+                        BackendTypeBit(BackendType::SKIA);
+  data.mContentBitmask = BackendTypeBit(BackendType::CAIRO) |
+                         BackendTypeBit(BackendType::SKIA);
+  data.mCanvasDefault = BackendType::SKIA;
+  data.mContentDefault = BackendType::SKIA;
+
+  if (gfxConfig::IsEnabled(Feature::DIRECT2D)) {
+    data.mCanvasBitmask |= BackendTypeBit(BackendType::DIRECT2D1_1);
+    data.mCanvasDefault = BackendType::DIRECT2D1_1;
+    // We do not use d2d for content when WebRender is used.
+    if (!gfxVars::UseWebRender()) {
+      data.mContentBitmask |= BackendTypeBit(BackendType::DIRECT2D1_1);
+      data.mContentDefault = BackendType::DIRECT2D1_1;
+    }
+  }
+  return mozilla::Move(data);
+}
+
 void
 gfxWindowsPlatform::UpdateBackendPrefs()
 {
-  uint32_t canvasMask = BackendTypeBit(BackendType::CAIRO) |
-                        BackendTypeBit(BackendType::SKIA);
-  uint32_t contentMask = BackendTypeBit(BackendType::CAIRO) |
-                         BackendTypeBit(BackendType::SKIA);
-  BackendType defaultBackend = BackendType::SKIA;
-  if (gfxConfig::IsEnabled(Feature::DIRECT2D) &&
-      Factory::HasD2D1Device() && !gfxVars::UseWebRender()) {
-    contentMask |= BackendTypeBit(BackendType::DIRECT2D1_1);
-    canvasMask |= BackendTypeBit(BackendType::DIRECT2D1_1);
-    defaultBackend = BackendType::DIRECT2D1_1;
+  BackendPrefsData data = GetBackendPrefs();
+  // Remove DIRECT2D1 preference if D2D1Device does not exist.
+  if (!Factory::HasD2D1Device()) {
+    data.mCanvasBitmask &= ~BackendTypeBit(BackendType::DIRECT2D1_1);
+    data.mContentBitmask &= ~BackendTypeBit(BackendType::DIRECT2D1_1);
+    if (data.mCanvasDefault == BackendType::DIRECT2D1_1) {
+      data.mCanvasDefault = BackendType::SKIA;
+    }
+    if (data.mContentDefault == BackendType::DIRECT2D1_1) {
+      data.mContentDefault = BackendType::SKIA;
+    }
   }
-  InitBackendPrefs(canvasMask, defaultBackend, contentMask, defaultBackend);
+  InitBackendPrefs(mozilla::Move(data));
 }
 
 bool
@@ -486,6 +511,13 @@ gfxWindowsPlatform::UpdateRenderMode()
       MOZ_CRASH("GFX: Failed to update reference draw target after device reset");
     }
   }
+}
+
+bool
+gfxWindowsPlatform::AllowOpenGLCanvas()
+{
+  // OpenGL canvas is not supported on windows
+  return false;
 }
 
 mozilla::gfx::BackendType

@@ -6359,7 +6359,28 @@ if (IsCSSPropertyPrefEnabled("layout.css.font-variations.enabled")) {
     unbalanced_values: [
       "'wdth\" 1", "\"wdth' 1" // mismatched quotes
     ]
+  };
+  gCSSProperties["font"].subproperties.push("font-variation-settings");
+  gCSSProperties["font-optical-sizing"] = {
+    domProp: "fontOpticalSizing",
+    inherited: true,
+    type: CSS_TYPE_LONGHAND,
+    applies_to_first_letter: true,
+    applies_to_first_line: true,
+    applies_to_placeholder: true,
+    initial_values: [ "auto" ],
+    other_values: [ "none" ],
+    invalid_values: [ "on" ]
+  };
+  gCSSProperties["font"].subproperties.push("font-optical-sizing");
+  if (SpecialPowers.DOMWindowUtils.isStyledByServo) {
+    gCSSProperties["font-variation-settings"].other_values
+      .push("'vert' calc(2.5)");
   }
+}
+
+if (SpecialPowers.DOMWindowUtils.isStyledByServo) {
+  gCSSProperties["font-feature-settings"].other_values.push("'vert' calc(2)");
 }
 
 if (IsCSSPropertyPrefEnabled("layout.css.frames-timing.enabled")) {

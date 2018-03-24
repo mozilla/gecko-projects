@@ -13,6 +13,7 @@
 #include "nsAccessibilityService.h"
 #endif
 #include "mozilla/BrowserElementParent.h"
+#include "mozilla/dom/ChromeMessageSender.h"
 #include "mozilla/dom/ContentBridgeParent.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/DataTransfer.h"
@@ -459,7 +460,7 @@ TabParent::ActorDestroy(ActorDestroyReason why)
     frameLoader->DestroyComplete();
 
     if (why == AbnormalShutdown && os) {
-      os->NotifyObservers(NS_ISUPPORTS_CAST(nsIFrameLoader*, frameLoader),
+      os->NotifyObservers(ToSupports(frameLoader),
                           "oop-frameloader-crashed", nullptr);
       nsCOMPtr<nsIFrameLoaderOwner> owner = do_QueryInterface(frameElement);
       if (owner) {
@@ -1179,8 +1180,7 @@ TabParent::QueryDropLinksForVerification()
     return false;
   }
 
-  nsCOMPtr<nsIDOMDataTransfer> initialDataTransfer;
-  dragSession->GetDataTransfer(getter_AddRefs(initialDataTransfer));
+  RefPtr<DataTransfer> initialDataTransfer = dragSession->GetDataTransfer();
   if (!initialDataTransfer) {
     NS_WARNING("No initialDataTransfer to query links for verification");
     return false;
@@ -2105,7 +2105,7 @@ TabParent::GetChildProcessOffset()
   }
 
   nsPresContext* presContext = targetFrame->PresContext();
-  nsIFrame* rootFrame = presContext->PresShell()->FrameManager()->GetRootFrame();
+  nsIFrame* rootFrame = presContext->PresShell()->GetRootFrame();
   nsView* rootView = rootFrame ? rootFrame->GetView() : nullptr;
   if (!rootView) {
     return offset;
@@ -2312,11 +2312,13 @@ TabParent::SendSelectionEvent(WidgetSelectionEvent& aEvent)
 bool
 TabParent::SendPasteTransferable(const IPCDataTransfer& aDataTransfer,
                                  const bool& aIsPrivateData,
-                                 const IPC::Principal& aRequestingPrincipal)
+                                 const IPC::Principal& aRequestingPrincipal,
+                                 const uint32_t& aContentPolicyType)
 {
   return PBrowserParent::SendPasteTransferable(aDataTransfer,
                                                aIsPrivateData,
-                                               aRequestingPrincipal);
+                                               aRequestingPrincipal,
+                                               aContentPolicyType);
 }
 
 /*static*/ TabParent*
@@ -2327,14 +2329,6 @@ TabParent::GetFrom(nsFrameLoader* aFrameLoader)
   }
   PBrowserParent* remoteBrowser = aFrameLoader->GetRemoteBrowser();
   return static_cast<TabParent*>(remoteBrowser);
-}
-
-/*static*/ TabParent*
-TabParent::GetFrom(nsIFrameLoader* aFrameLoader)
-{
-  if (!aFrameLoader)
-    return nullptr;
-  return GetFrom(static_cast<nsFrameLoader*>(aFrameLoader));
 }
 
 /*static*/ TabParent*

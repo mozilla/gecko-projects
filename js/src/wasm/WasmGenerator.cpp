@@ -23,7 +23,9 @@
 #include "mozilla/SHA1.h"
 
 #include <algorithm>
+#include <thread>
 
+#include "util/Text.h"
 #include "wasm/WasmBaselineCompile.h"
 #include "wasm/WasmCompile.h"
 #include "wasm/WasmIonCompile.h"
@@ -75,7 +77,7 @@ ModuleGenerator::ModuleGenerator(const CompileArgs& args, ModuleEnvironment* env
     taskState_(mutexid::WasmCompileTaskState),
     lifo_(GENERATOR_LIFO_DEFAULT_CHUNK_SIZE),
     masmAlloc_(&lifo_),
-    masm_(MacroAssembler::WasmToken(), masmAlloc_),
+    masm_(masmAlloc_),
     oldTrapCodeOffsets_(),
     debugTrapCodeOffset_(),
     lastPatchedCallSite_(0),
@@ -272,7 +274,7 @@ ModuleGenerator::init(Metadata* maybeAsmJSMetadata)
         if (global.isConstant())
             continue;
 
-        uint32_t width = SizeOf(global.type());
+        uint32_t width = global.isIndirect() ? sizeof(void*) : SizeOf(global.type());
 
         uint32_t globalDataOffset;
         if (!allocateGlobalBytes(width, width, &globalDataOffset))
@@ -547,10 +549,6 @@ ModuleGenerator::noteCodeRange(uint32_t codeRangeIndex, const CodeRange& codeRan
       case CodeRange::UnalignedExit:
         MOZ_ASSERT(!linkDataTier_->unalignedAccessOffset);
         linkDataTier_->unalignedAccessOffset = codeRange.begin();
-        break;
-      case CodeRange::Interrupt:
-        MOZ_ASSERT(!linkDataTier_->interruptOffset);
-        linkDataTier_->interruptOffset = codeRange.begin();
         break;
       case CodeRange::TrapExit:
         MOZ_ASSERT(!linkDataTier_->trapOffset);
@@ -1060,6 +1058,12 @@ ModuleGenerator::finishTier2(Module& module)
     auto tier2 = js::MakeUnique<CodeTier>(tier(), Move(metadataTier_), Move(moduleSegment));
     if (!tier2)
         return false;
+
+    if (MOZ_UNLIKELY(JitOptions.wasmDelayTier2)) {
+        // Introduce an artificial delay when testing wasmDelayTier2, since we
+        // want to exercise both tier1 and tier2 code in this case.
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
 
     return module.finishTier2(Move(linkDataTier_), Move(tier2), env_);
 }

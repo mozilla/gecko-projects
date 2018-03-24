@@ -112,17 +112,6 @@ static constexpr FloatRegister ScratchSimd128Reg = InvalidFloatReg;
 // accessed with a single instruction.
 static const int32_t WasmGlobalRegBias = 32768;
 
-// Registers used in the GenerateFFIIonExit Enable Activation block.
-static constexpr Register WasmIonExitRegCallee = t0;
-static constexpr Register WasmIonExitRegE0 = a0;
-static constexpr Register WasmIonExitRegE1 = a1;
-
-// Registers used in the GenerateFFIIonExit Disable Activation block.
-// None of these may be the second scratch register (t8).
-static constexpr Register WasmIonExitRegD0 = a0;
-static constexpr Register WasmIonExitRegD1 = a1;
-static constexpr Register WasmIonExitRegD2 = t0;
-
 // Registerd used in RegExpMatcher instruction (do not use JSReturnOperand).
 static constexpr Register RegExpMatcherRegExpReg = CallTempReg0;
 static constexpr Register RegExpMatcherStringReg = CallTempReg1;
@@ -767,9 +756,6 @@ class MIPSBufferWithExecutableCopy : public MIPSBuffer
 
 class AssemblerMIPSShared : public AssemblerShared
 {
-#ifdef JS_JITSPEW
-   Sprinter* printer;
-#endif
   public:
 
     enum Condition {
@@ -895,6 +881,10 @@ class AssemblerMIPSShared : public AssemblerShared
 
     MIPSBufferWithExecutableCopy m_buffer;
 
+#ifdef JS_JITSPEW
+   Sprinter* printer;
+#endif
+
   public:
     AssemblerMIPSShared()
       : m_buffer(),
@@ -919,6 +909,14 @@ class AssemblerMIPSShared : public AssemblerShared
                 embedsNurseryPointers_ = true;
             dataRelocations_.writeUnsigned(nextOffset().getOffset());
         }
+    }
+
+    void assertNoGCThings() const {
+#ifdef DEBUG
+        MOZ_ASSERT(dataRelocations_.length() == 0);
+        for (auto& j : jumps_)
+            MOZ_ASSERT(j.kind == Relocation::HARDCODED);
+#endif
     }
 
   public:

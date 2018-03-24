@@ -26,7 +26,7 @@ class Callbacks private constructor() {
         override fun onFullScreen(session: GeckoSession, fullScreen: Boolean) {
         }
 
-        override fun onContextMenu(session: GeckoSession, screenX: Int, screenY: Int, uri: String, elementSrc: String) {
+        override fun onContextMenu(session: GeckoSession, screenX: Int, screenY: Int, uri: String, elementType: Int, elementSrc: String) {
         }
     }
 
@@ -40,8 +40,8 @@ class Callbacks private constructor() {
         override fun onCanGoForward(session: GeckoSession, canGoForward: Boolean) {
         }
 
-        override fun onLoadUri(session: GeckoSession, uri: String, where: GeckoSession.NavigationDelegate.TargetWindow): Boolean {
-            return false;
+        override fun onLoadRequest(session: GeckoSession, uri: String, where: Int, response: GeckoSession.Response<Boolean>) {
+            response.respond(false)
         }
 
         override fun onNewSession(session: GeckoSession, uri: String, response: GeckoSession.Response<GeckoSession>) {

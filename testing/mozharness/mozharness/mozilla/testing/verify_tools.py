@@ -175,8 +175,8 @@ class VerifyToolsMixin(object):
         mozinfo.update({"e10s": e10s})
         headless = self.config.get('headless', False)
         mozinfo.update({"headless": headless})
-        stylo = self.config.get('enable_stylo', False)
-        mozinfo.update({'stylo': stylo})
+        # FIXME(emilio): Need to update test expectations.
+        mozinfo.update({'stylo': True})
         mozinfo.update({'verify': True})
         self.info("Verification using mozinfo: %s" % str(mozinfo.info))
 
@@ -217,7 +217,7 @@ class VerifyToolsMixin(object):
             # in verify mode, run nothing by default (unsupported suite or no files modified)
             args = []
             # otherwise, run once for each file in requested suite
-            references = re.compile(r"(-ref|-noref|-noref.)\.")
+            references = re.compile(r"(-ref|-notref|-noref|-noref.)\.")
             files = []
             jsreftest_extra_dir = os.path.join('js', 'src', 'tests')
             # For some suites, the test path needs to be updated before passing to

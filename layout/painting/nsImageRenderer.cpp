@@ -522,7 +522,7 @@ nsImageRenderer::Draw(nsPresContext*       aPresContext,
 
       nsCOMPtr<imgIContainer> image(ImageOps::CreateFromDrawable(drawable));
       result =
-        nsLayoutUtils::DrawImage(*ctx, mForFrame->StyleContext(),
+        nsLayoutUtils::DrawImage(*ctx, mForFrame->Style(),
                                  aPresContext, image,
                                  samplingFilter, aDest, aFill, aAnchor, aDirtyRect,
                                  ConvertImageRendererToDrawFlags(mFlags),
@@ -600,10 +600,13 @@ nsImageRenderer::BuildWebRenderDisplayItems(nsPresContext* aPresContext,
         containerFlags |= imgIContainer::FLAG_SYNC_DECODE;
       }
 
+      CSSIntSize imageSize(nsPresContext::AppUnitsToIntCSSPixels(mSize.width),
+                           nsPresContext::AppUnitsToIntCSSPixels(mSize.height));
+      Maybe<SVGImageContext> svgContext(Some(SVGImageContext(Some(imageSize))));
+
       const int32_t appUnitsPerDevPixel = mForFrame->PresContext()->AppUnitsPerDevPixel();
       LayoutDeviceRect destRect = LayoutDeviceRect::FromAppUnits(
           aDest, appUnitsPerDevPixel);
-      Maybe<SVGImageContext> svgContext;
       gfx::IntSize decodeSize =
         nsLayoutUtils::ComputeImageContainerDrawingParameters(mImageContainer, mForFrame, destRect,
                                                               aSc, containerFlags, svgContext);
@@ -619,7 +622,7 @@ nsImageRenderer::BuildWebRenderDisplayItems(nsPresContext* aPresContext,
                                                                           aResources, aSc, size, Nothing());
 
       if (key.isNothing()) {
-        return ImgDrawResult::BAD_IMAGE;
+        return ImgDrawResult::NOT_READY;
       }
 
       nsPoint firstTilePos = nsLayoutUtils::GetBackgroundFirstTilePos(aDest.TopLeft(),

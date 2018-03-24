@@ -39,9 +39,6 @@
 #include "nsIStyleSheetLinkingElement.h"
 #include "nsICSSLoaderObserver.h"
 #include "nsCSSParser.h"
-#ifdef MOZ_OLD_STYLE
-#include "mozilla/css/ImportRule.h"
-#endif
 #include "nsThreadUtils.h"
 #include "nsGkAtoms.h"
 #include "nsIThreadInternal.h"
@@ -170,6 +167,7 @@ SheetLoadData::SheetLoadData(Loader* aLoader,
   , mSheetAlreadyComplete(false)
   , mIsCrossOriginNoCORS(false)
   , mBlockResourceTiming(false)
+  , mLoadFailed(false)
   , mOwningElement(aOwningElement)
   , mObserver(aObserver)
   , mLoaderPrincipal(aLoaderPrincipal)
@@ -205,6 +203,7 @@ SheetLoadData::SheetLoadData(Loader* aLoader,
   , mSheetAlreadyComplete(false)
   , mIsCrossOriginNoCORS(false)
   , mBlockResourceTiming(false)
+  , mLoadFailed(false)
   , mOwningElement(nullptr)
   , mObserver(aObserver)
   , mLoaderPrincipal(aLoaderPrincipal)
@@ -250,6 +249,7 @@ SheetLoadData::SheetLoadData(Loader* aLoader,
   , mSheetAlreadyComplete(false)
   , mIsCrossOriginNoCORS(false)
   , mBlockResourceTiming(false)
+  , mLoadFailed(false)
   , mOwningElement(nullptr)
   , mObserver(aObserver)
   , mLoaderPrincipal(aLoaderPrincipal)
@@ -316,9 +316,9 @@ SheetLoadData::FireLoadEvent(nsIThreadInternal* aThread)
 
   nsContentUtils::DispatchTrustedEvent(node->OwnerDoc(),
                                        node,
-                                       NS_SUCCEEDED(mStatus) ?
-                                         NS_LITERAL_STRING("load") :
-                                         NS_LITERAL_STRING("error"),
+                                       mLoadFailed ?
+                                         NS_LITERAL_STRING("error") :
+                                         NS_LITERAL_STRING("load"),
                                        false, false);
 
   // And unblock onload
@@ -326,13 +326,11 @@ SheetLoadData::FireLoadEvent(nsIThreadInternal* aThread)
 }
 
 void
-SheetLoadData::ScheduleLoadEventIfNeeded(nsresult aStatus)
+SheetLoadData::ScheduleLoadEventIfNeeded()
 {
   if (!mOwningElement) {
     return;
   }
-
-  mStatus = aStatus;
 
   nsCOMPtr<nsIThread> thread = do_GetCurrentThread();
   nsCOMPtr<nsIThreadInternal> internalThread = do_QueryInterface(thread);
@@ -1117,11 +1115,7 @@ Loader::CreateSheet(nsIURI* aURI,
     }
 
     if (GetStyleBackendType() == StyleBackendType::Gecko) {
-#ifdef MOZ_OLD_STYLE
-      *aSheet = new CSSStyleSheet(aParsingMode, aCORSMode, aReferrerPolicy, sriMetadata);
-#else
       MOZ_CRASH("old style system disabled");
-#endif
     } else {
       *aSheet = new ServoStyleSheet(aParsingMode, aCORSMode, aReferrerPolicy, sriMetadata);
     }
@@ -1145,7 +1139,6 @@ Loader::PrepareSheet(StyleSheet* aSheet,
                      const nsAString& aTitle,
                      const nsAString& aMediaString,
                      MediaList* aMediaList,
-                     Element* aScopeElement,
                      bool aIsAlternate)
 {
   NS_PRECONDITION(aSheet, "Must have a sheet!");
@@ -1162,18 +1155,6 @@ Loader::PrepareSheet(StyleSheet* aSheet,
 
   aSheet->SetTitle(aTitle);
   aSheet->SetEnabled(!aIsAlternate);
-
-  if (aSheet->IsGecko()) {
-#ifdef MOZ_OLD_STYLE
-    aSheet->AsGecko()->SetScopeElement(aScopeElement);
-#else
-    MOZ_CRASH("old style system disabled");
-#endif
-  } else {
-    if (aScopeElement) {
-      NS_WARNING("stylo: scoped style sheets not supported");
-    }
-  }
 }
 
 /**
@@ -1282,11 +1263,7 @@ Loader::InsertChildSheet(StyleSheet* aSheet,
   // cloned off of top-level sheets which were disabled
   aSheet->SetEnabled(true);
   if (aGeckoParentRule) {
-#ifdef MOZ_OLD_STYLE
-    aGeckoParentRule->SetSheet(aSheet->AsGecko()); // This sets the ownerRule on the sheet
-#else
     MOZ_CRASH("old style system disabled");
-#endif
   }
   aParentSheet->PrependStyleSheet(aSheet);
 
@@ -1691,50 +1668,9 @@ Loader::ParseSheet(const nsAString& aUTF16,
   if (ServoStyleSheet* sheet = aLoadData->mSheet->GetAsServo()) {
     return DoParseSheetServo(sheet, aUTF16, aUTF8, aLoadData, aAllowAsync, aCompleted);
   }
-#ifdef MOZ_OLD_STYLE
-  return DoParseSheetGecko(aLoadData->mSheet->AsGecko(), aUTF16, aUTF8, aLoadData, aCompleted);
-#else
     MOZ_CRASH("old style system disabled");
-#endif
 }
 
-#ifdef MOZ_OLD_STYLE
-nsresult
-Loader::DoParseSheetGecko(CSSStyleSheet* aSheet,
-                          const nsAString& aUTF16,
-                          Span<const uint8_t> aUTF8,
-                          SheetLoadData* aLoadData,
-                          bool& aCompleted)
-{
-  aLoadData->mIsBeingParsed = true;
-  nsCSSParser parser(this, aSheet);
-  nsresult rv = parser.ParseSheet(aUTF16,
-                                  aSheet->GetSheetURI(),
-                                  aSheet->GetBaseURI(),
-                                  aSheet->Principal(),
-                                  aLoadData,
-                                  aLoadData->mLineNumber);
-  aLoadData->mIsBeingParsed = false;
-  if (NS_FAILED(rv)) {
-    LOG_ERROR(("  Low-level error in parser!"));
-    SheetComplete(aLoadData, rv);
-    return rv;
-  }
-
-  NS_ASSERTION(aLoadData->mPendingChildren == 0 || !aLoadData->mSyncLoad,
-               "Sync load has leftover pending children!");
-
-  if (aLoadData->mPendingChildren == 0) {
-    LOG(("  No pending kids from parse"));
-    aCompleted = true;
-    SheetComplete(aLoadData, NS_OK);
-  }
-  // Otherwise, the children are holding strong refs to the data and
-  // will call SheetComplete() on it when they complete.
-
-  return NS_OK;
-}
-#endif
 
 nsresult
 Loader::DoParseSheetServo(ServoStyleSheet* aSheet,
@@ -1815,13 +1751,21 @@ Loader::DoParseSheetServo(ServoStyleSheet* aSheet,
 void
 Loader::SheetComplete(SheetLoadData* aLoadData, nsresult aStatus)
 {
-  LOG(("css::Loader::SheetComplete"));
+  LOG(("css::Loader::SheetComplete, status: 0x%" PRIx32, static_cast<uint32_t>(aStatus)));
+
+  // If aStatus is a failure we need to mark this data failed.  We also need to
+  // mark any ancestors of a failing data as failed and any sibling of a
+  // failing data as failed.  Note that SheetComplete is never called on a
+  // SheetLoadData that is the mNext of some other SheetLoadData.
+  if (NS_FAILED(aStatus)) {
+    MarkLoadTreeFailed(aLoadData);
+  }
 
   // 8 is probably big enough for all our common cases.  It's not likely that
   // imports will nest more than 8 deep, and multiple sheets with the same URI
   // are rare.
   AutoTArray<RefPtr<SheetLoadData>, 8> datasToNotify;
-  DoSheetComplete(aLoadData, aStatus, datasToNotify);
+  DoSheetComplete(aLoadData, datasToNotify);
 
   // Now it's safe to go ahead and notify observers
   uint32_t count = datasToNotify.Length();
@@ -1855,15 +1799,12 @@ Loader::SheetComplete(SheetLoadData* aLoadData, nsresult aStatus)
 }
 
 void
-Loader::DoSheetComplete(SheetLoadData* aLoadData, nsresult aStatus,
-                        LoadDataArray& aDatasToNotify)
+Loader::DoSheetComplete(SheetLoadData* aLoadData, LoadDataArray& aDatasToNotify)
 {
   LOG(("css::Loader::DoSheetComplete"));
   NS_PRECONDITION(aLoadData, "Must have a load data!");
   NS_PRECONDITION(aLoadData->mSheet, "Must have a sheet");
   NS_ASSERTION(mSheets, "mLoadingDatas should be initialized by now.");
-
-  LOG(("Load completed, status: 0x%" PRIx32, static_cast<uint32_t>(aStatus)));
 
   // Twiddle the hashtables
   if (aLoadData->mURI) {
@@ -1897,7 +1838,7 @@ Loader::DoSheetComplete(SheetLoadData* aLoadData, nsresult aStatus,
       MOZ_ASSERT(!data->mSheet->HasForcedUniqueInner(),
                  "should not get a forced unique inner during parsing");
       data->mSheet->SetComplete();
-      data->ScheduleLoadEventIfNeeded(aStatus);
+      data->ScheduleLoadEventIfNeeded();
     }
     if (data->mMustNotify && (data->mObserver || !mObservers.IsEmpty())) {
       // Don't notify here so we don't trigger script.  Remember the
@@ -1920,17 +1861,17 @@ Loader::DoSheetComplete(SheetLoadData* aLoadData, nsresult aStatus,
     if (data->mParentData &&
         --(data->mParentData->mPendingChildren) == 0 &&
         !data->mParentData->mIsBeingParsed) {
-      DoSheetComplete(data->mParentData, aStatus, aDatasToNotify);
+      DoSheetComplete(data->mParentData, aDatasToNotify);
     }
 
     data = data->mNext;
   }
 
   // Now that it's marked complete, put the sheet in our cache.
-  // If we ever start doing this for failure aStatus, we'll need to
+  // If we ever start doing this for failed loads, we'll need to
   // adjust the PostLoadEvent code that thinks anything already
   // complete must have loaded succesfully.
-  if (NS_SUCCEEDED(aStatus) && aLoadData->mURI) {
+  if (!aLoadData->mLoadFailed && aLoadData->mURI) {
     // Pick our sheet to cache carefully.  Ideally, we want to cache
     // one of the sheets that will be kept alive by a document or
     // parent sheet anyway, so that if someone then accesses it via
@@ -1973,6 +1914,24 @@ Loader::DoSheetComplete(SheetLoadData* aLoadData, nsresult aStatus,
   NS_RELEASE(aLoadData);  // this will release parents and siblings and all that
 }
 
+void
+Loader::MarkLoadTreeFailed(SheetLoadData* aLoadData)
+{
+  if (aLoadData->mURI) {
+    LOG_URI("  Load failed: '%s'", aLoadData->mURI);
+  }
+
+  do {
+    aLoadData->mLoadFailed = true;
+
+    if (aLoadData->mParentData) {
+      MarkLoadTreeFailed(aLoadData->mParentData);
+    }
+
+    aLoadData = aLoadData->mNext;
+  } while (aLoadData);
+}
+
 nsresult
 Loader::LoadInlineStyle(nsIContent* aElement,
                         const nsAString& aBuffer,
@@ -1981,7 +1940,6 @@ Loader::LoadInlineStyle(nsIContent* aElement,
                         const nsAString& aTitle,
                         const nsAString& aMedia,
                         ReferrerPolicy aReferrerPolicy,
-                        Element* aScopeElement,
                         nsICSSLoaderObserver* aObserver,
                         bool* aCompleted,
                         bool* aIsAlternate)
@@ -2017,7 +1975,7 @@ Loader::LoadInlineStyle(nsIContent* aElement,
 
   LOG(("  Sheet is alternate: %d", *aIsAlternate));
 
-  PrepareSheet(sheet, aTitle, aMedia, nullptr, aScopeElement, *aIsAlternate);
+  PrepareSheet(sheet, aTitle, aMedia, nullptr, *aIsAlternate);
 
   if (aElement->HasFlag(NODE_IS_IN_SHADOW_TREE)) {
     ShadowRoot* containingShadow = aElement->GetContainingShadow();
@@ -2128,7 +2086,7 @@ Loader::LoadStyleLink(nsIContent* aElement,
 
   LOG(("  Sheet is alternate: %d", *aIsAlternate));
 
-  PrepareSheet(sheet, aTitle, aMedia, nullptr, nullptr, *aIsAlternate);
+  PrepareSheet(sheet, aTitle, aMedia, nullptr, *aIsAlternate);
 
   rv = InsertSheetInDoc(sheet, aElement, mDocument);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2249,7 +2207,12 @@ Loader::LoadChildSheet(StyleSheet* aParentSheet,
 
   nsIPrincipal* principal = aParentSheet->Principal();
   nsresult rv = CheckContentPolicy(loadingPrincipal, principal, aURL, context, false);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    if (aParentData) {
+      MarkLoadTreeFailed(aParentData);
+    }
+    return rv;
+  }
 
   nsCOMPtr<nsICSSLoaderObserver> observer;
 
@@ -2278,11 +2241,7 @@ Loader::LoadChildSheet(StyleSheet* aParentSheet,
   StyleSheetState state;
   if (aReusableSheets && aReusableSheets->FindReusableStyleSheet(aURL, sheet)) {
     if (aParentSheet->IsGecko()) {
-#ifdef MOZ_OLD_STYLE
-      aGeckoParentRule->SetSheet(sheet->AsGecko());
-#else
       MOZ_CRASH("old style system disabled");
-#endif
     }
     state = eSheetComplete;
   } else {
@@ -2297,7 +2256,7 @@ Loader::LoadChildSheet(StyleSheet* aParentSheet,
                      false, empty, state, &isAlternate, &sheet);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    PrepareSheet(sheet, empty, empty, aMedia, nullptr, isAlternate);
+    PrepareSheet(sheet, empty, empty, aMedia, isAlternate);
   }
 
   rv = InsertChildSheet(sheet, aParentSheet, aGeckoParentRule);
@@ -2453,7 +2412,7 @@ Loader::InternalLoadNonDocumentSheet(nsIURI* aURL,
                    false, empty, state, &isAlternate, &sheet);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  PrepareSheet(sheet, empty, empty, nullptr, nullptr, isAlternate);
+  PrepareSheet(sheet, empty, empty, nullptr, isAlternate);
 
   if (state == eSheetComplete) {
     LOG(("  Sheet already complete"));
@@ -2538,10 +2497,12 @@ Loader::PostLoadEvent(nsIURI* aURI,
     evt->mSheetAlreadyComplete = true;
 
     // If we get to this code, aSheet loaded correctly at some point, so
-    // we can just use NS_OK for the status.  Note that we do this here
-    // and not from inside our SheetComplete so that we don't end up
-    // running the load event async.
-    evt->ScheduleLoadEventIfNeeded(NS_OK);
+    // we can just schedule a load event and don't need to touch the
+    // data's mLoadFailed.  Note that we do this here and not from
+    // inside our SheetComplete so that we don't end up running the load
+    // event async.
+    MOZ_ASSERT(!evt->mLoadFailed, "Why are we marked as failed?");
+    evt->ScheduleLoadEventIfNeeded();
   }
 
   return rv;

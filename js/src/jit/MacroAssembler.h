@@ -241,21 +241,6 @@ class MacroAssembler : public MacroAssemblerSpecific
     }
 
   public:
-    class AutoRooter : public JS::AutoGCRooter
-    {
-        MacroAssembler* masm_;
-
-      public:
-        AutoRooter(JSContext* cx, MacroAssembler* masm)
-          : JS::AutoGCRooter(cx, IONMASM),
-            masm_(masm)
-        { }
-
-        MacroAssembler* masm() const {
-            return masm_;
-        }
-    };
-
     /*
      * Base class for creating a branch.
      */
@@ -327,7 +312,6 @@ class MacroAssembler : public MacroAssemblerSpecific
         void emit(MacroAssembler& masm);
     };
 
-    mozilla::Maybe<AutoRooter> autoRooter_;
     mozilla::Maybe<JitContext> jitContext_;
     mozilla::Maybe<AutoJitContextAlloc> alloc_;
 
@@ -335,70 +319,19 @@ class MacroAssembler : public MacroAssemblerSpecific
     // Labels for handling exceptions and failures.
     NonAssertingLabel failureLabel_;
 
-  public:
-    MacroAssembler()
-      : framePushed_(0),
-#ifdef DEBUG
-        inCall_(false),
-#endif
-        emitProfilingInstrumentation_(false)
-    {
-        JitContext* jcx = GetJitContext();
-        JSContext* cx = jcx->cx;
-        if (cx)
-            constructRoot(cx);
-
-        if (!jcx->temp) {
-            MOZ_ASSERT(cx);
-            alloc_.emplace(cx);
-        }
-
-        moveResolver_.setAllocator(*jcx->temp);
-
-#if defined(JS_CODEGEN_ARM)
-        initWithAllocator();
-        m_buffer.id = jcx->getNextAssemblerId();
-#elif defined(JS_CODEGEN_ARM64)
-        initWithAllocator();
-        armbuffer_.id = jcx->getNextAssemblerId();
-#endif
-    }
+  protected:
+    // Constructors are protected. Use one of the derived classes!
+    MacroAssembler();
 
     // This constructor should only be used when there is no JitContext active
     // (for example, Trampoline-$(ARCH).cpp and IonCaches.cpp).
-    explicit MacroAssembler(JSContext* cx, IonScript* ion = nullptr,
-                            JSScript* script = nullptr, jsbytecode* pc = nullptr);
+    explicit MacroAssembler(JSContext* cx);
 
     // wasm compilation handles its own JitContext-pushing
     struct WasmToken {};
-    explicit MacroAssembler(WasmToken, TempAllocator& alloc)
-      : framePushed_(0),
-#ifdef DEBUG
-        inCall_(false),
-#endif
-        emitProfilingInstrumentation_(false)
-    {
-        moveResolver_.setAllocator(alloc);
+    explicit MacroAssembler(WasmToken, TempAllocator& alloc);
 
-#if defined(JS_CODEGEN_ARM)
-        initWithAllocator();
-        m_buffer.id = 0;
-#elif defined(JS_CODEGEN_ARM64)
-        initWithAllocator();
-        armbuffer_.id = 0;
-#endif
-    }
-
-#ifdef DEBUG
-    bool isRooted() const {
-        return autoRooter_.isSome();
-    }
-#endif
-
-    void constructRoot(JSContext* cx) {
-        autoRooter_.emplace(cx, this);
-    }
-
+  public:
     MoveResolver& moveResolver() {
         return moveResolver_;
     }
@@ -485,7 +418,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     void Pop(FloatRegister t) PER_SHARED_ARCH;
     void Pop(const ValueOperand& val) PER_SHARED_ARCH;
     void PopFlags() DEFINED_ON(x86_shared);
-    void PopStackPtr() PER_SHARED_ARCH;
+    void PopStackPtr() DEFINED_ON(arm, mips_shared, x86_shared);
     void popRooted(VMFunction::RootType rootType, Register cellReg, const ValueOperand& valueReg);
 
     // Move the stack pointer based on the requested amount.
@@ -537,6 +470,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     void callAndPushReturnAddress(Register reg) DEFINED_ON(x86_shared);
     void callAndPushReturnAddress(Label* label) DEFINED_ON(x86_shared);
 
+    // These do not adjust framePushed().
     void pushReturnAddress() DEFINED_ON(mips_shared, arm, arm64);
     void popReturnAddress() DEFINED_ON(mips_shared, arm, arm64);
 
@@ -549,13 +483,6 @@ class MacroAssembler : public MacroAssemblerSpecific
     // simple CodeOffset instead of a CodeOffsetJump).
     CodeOffset farJumpWithPatch() PER_SHARED_ARCH;
     void patchFarJump(CodeOffset farJump, uint32_t targetOffset) PER_SHARED_ARCH;
-    static void repatchFarJump(uint8_t* code, uint32_t farJumpOffset, uint32_t targetOffset) PER_SHARED_ARCH;
-
-    // Emit a nop that can be patched to and from a nop and a jump with an int8
-    // relative displacement.
-    CodeOffset nopPatchableToNearJump() PER_SHARED_ARCH;
-    static void patchNopToNearJump(uint8_t* jump, uint8_t* target) PER_SHARED_ARCH;
-    static void patchNearJumpToNop(uint8_t* jump) PER_SHARED_ARCH;
 
     // Emit a nop that can be patched to and from a nop and a call with int32
     // relative displacement.
@@ -1177,18 +1104,52 @@ class MacroAssembler : public MacroAssemblerSpecific
     inline void branchIfObjectEmulatesUndefined(Register objReg, Register scratch, Label* slowCheck,
                                                 Label* label);
 
-    inline void branchTestObjClass(Condition cond, Register obj, Register scratch,
-                                   const js::Class* clasp, Label* label);
-    inline void branchTestObjClass(Condition cond, Register obj, Register scratch,
-                                   const Address& clasp, Label* label);
-    inline void branchTestObjShape(Condition cond, Register obj, const Shape* shape, Label* label);
-    inline void branchTestObjShape(Condition cond, Register obj, Register shape, Label* label);
+    // For all methods below: spectreRegToZero is a register that will be zeroed
+    // on speculatively executed code paths (when the branch should be taken but
+    // branch prediction speculates it isn't). Usually this will be the object
+    // register but the caller may pass a different register.
+
+    inline void branchTestObjClass(Condition cond, Register obj, const js::Class* clasp,
+                                   Register scratch, Register spectreRegToZero, Label* label);
+    inline void branchTestObjClassNoSpectreMitigations(Condition cond, Register obj,
+                                                       const js::Class* clasp, Register scratch,
+                                                       Label* label);
+
+    inline void branchTestObjClass(Condition cond, Register obj, const Address& clasp,
+                                   Register scratch, Register spectreRegToZero, Label* label);
+    inline void branchTestObjClassNoSpectreMitigations(Condition cond, Register obj,
+                                                       const Address& clasp, Register scratch,
+                                                       Label* label);
+
+    inline void branchTestObjShape(Condition cond, Register obj, const Shape* shape,
+                                   Register scratch, Register spectreRegToZero, Label* label);
+    inline void branchTestObjShapeNoSpectreMitigations(Condition cond, Register obj,
+                                                       const Shape* shape, Label* label);
+
+    inline void branchTestObjShape(Condition cond, Register obj, Register shape, Register scratch,
+                                   Register spectreRegToZero, Label* label);
+    inline void branchTestObjShapeNoSpectreMitigations(Condition cond, Register obj,
+                                                       Register shape, Label* label);
+
     inline void branchTestObjGroup(Condition cond, Register obj, const ObjectGroup* group,
-                                   Label* label);
-    inline void branchTestObjGroup(Condition cond, Register obj, Register group, Label* label);
+                                   Register scratch, Register spectreRegToZero, Label* label);
+    inline void branchTestObjGroupNoSpectreMitigations(Condition cond, Register obj,
+                                                       const ObjectGroup* group, Label* label);
+
+    inline void branchTestObjGroup(Condition cond, Register obj, Register group, Register scratch,
+                                   Register spectreRegToZero, Label* label);
+    inline void branchTestObjGroupNoSpectreMitigations(Condition cond, Register obj,
+                                                       Register group, Label* label);
 
     void branchTestObjGroup(Condition cond, Register obj, const Address& group, Register scratch,
-                            Label* label);
+                            Register spectreRegToZero, Label* label);
+    void branchTestObjGroupNoSpectreMitigations(Condition cond, Register obj, const Address& group,
+                                                Register scratch, Label* label);
+
+    // TODO: audit/fix callers to be Spectre safe.
+    inline void branchTestObjShapeUnsafe(Condition cond, Register obj, Register shape, Label* label);
+    inline void branchTestObjGroupUnsafe(Condition cond, Register obj, const ObjectGroup* group,
+                                         Label* label);
 
     void branchTestObjCompartment(Condition cond, Register obj, const Address& compartment,
                                   Register scratch, Label* label);
@@ -1395,12 +1356,16 @@ class MacroAssembler : public MacroAssemblerSpecific
     inline void spectreMovePtr(Condition cond, Register src, Register dest)
         DEFINED_ON(arm, arm64, mips_shared, x86, x64);
 
+    // Zeroes dest if the condition is true.
+    inline void spectreZeroRegister(Condition cond, Register scratch, Register dest)
+        DEFINED_ON(arm, arm64, mips_shared, x86_shared);
+
     // Performs a bounds check and zeroes the index register if out-of-bounds
     // (to mitigate Spectre).
-    inline void boundsCheck32ForLoad(Register index, Register length, Register scratch,
+    inline void spectreBoundsCheck32(Register index, Register length, Register scratch,
                                      Label* failure)
         DEFINED_ON(arm, arm64, mips_shared, x86_shared);
-    inline void boundsCheck32ForLoad(Register index, const Address& length, Register scratch,
+    inline void spectreBoundsCheck32(Register index, const Address& length, Register scratch,
                                      Label* failure)
         DEFINED_ON(arm, arm64, mips_shared, x86_shared);
 
@@ -1493,6 +1458,8 @@ class MacroAssembler : public MacroAssemblerSpecific
     CodeOffset wasmTrapInstruction() PER_SHARED_ARCH;
 
     void wasmTrap(wasm::Trap trap, wasm::BytecodeOffset bytecodeOffset);
+    void wasmInterruptCheck(Register tls, wasm::BytecodeOffset bytecodeOffset);
+    void wasmReserveStackChecked(uint32_t amount, wasm::BytecodeOffset trapOffset);
 
     // Emit a bounds check against the wasm heap limit, jumping to 'label' if
     // 'cond' holds. Required when WASM_HUGE_MEMORY is not defined. If
@@ -1628,6 +1595,11 @@ class MacroAssembler : public MacroAssemblerSpecific
     // bound. This should be called once per function after all other codegen,
     // including "normal" OutOfLineCode.
     void wasmEmitOldTrapOutOfLineCode();
+
+    // As enterFakeExitFrame(), but using register conventions appropriate for
+    // wasm stubs.
+    void enterFakeExitFrameForWasm(Register cxreg, Register scratch, ExitFrameType type)
+        PER_SHARED_ARCH;
 
   public:
     // ========================================================================
@@ -1957,6 +1929,32 @@ class MacroAssembler : public MacroAssemblerSpecific
                           Register offsetTemp, Register maskTemp)
         DEFINED_ON(mips_shared);
 
+    // ========================================================================
+    // Spectre Mitigations.
+    //
+    // Spectre attacks are side-channel attacks based on cache pollution or
+    // slow-execution of some instructions. We have multiple spectre mitigations
+    // possible:
+    //
+    //   - Stop speculative executions, with memory barriers. Memory barriers
+    //     force all branches depending on loads to be resolved, and thus
+    //     resolve all miss-speculated paths.
+    //
+    //   - Use conditional move instructions. Some CPUs have a branch predictor,
+    //     and not a flag predictor. In such cases, using a conditional move
+    //     instruction to zero some pointer/index is enough to add a
+    //     data-dependency which prevents any futher executions until the load is
+    //     resolved.
+
+    void spectreMaskIndex(Register index, Register length, Register output);
+    void spectreMaskIndex(Register index, const Address& length, Register output);
+
+    // The length must be a power of two. Performs a bounds check and Spectre index
+    // masking.
+    void boundsCheck32PowerOfTwo(Register index, uint32_t length, Label* failure);
+
+    void speculationBarrier() PER_SHARED_ARCH;
+
     //}}} check_macroassembler_decl_style
   public:
 
@@ -2140,13 +2138,6 @@ class MacroAssembler : public MacroAssemblerSpecific
         else
             store32(Imm32(key.constant()), dest);
     }
-
-    void spectreMaskIndex(Register index, Register length, Register output);
-    void spectreMaskIndex(Register index, const Address& length, Register output);
-
-    // The length must be a power of two. Performs a bounds check and Spectre index
-    // masking.
-    void boundsCheck32PowerOfTwo(Register index, uint32_t length, Label* failure);
 
     template <typename T>
     void guardedCallPreBarrier(const T& address, MIRType type) {
@@ -2635,6 +2626,45 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     Vector<JSObject*, 0, SystemAllocPolicy> pendingObjectReadBarriers_;
     Vector<ObjectGroup*, 0, SystemAllocPolicy> pendingObjectGroupReadBarriers_;
+};
+
+// StackMacroAssembler checks no GC will happen while it's on the stack.
+class MOZ_RAII StackMacroAssembler : public MacroAssembler
+{
+    JS::AutoCheckCannotGC nogc;
+
+  public:
+    StackMacroAssembler()
+      : MacroAssembler()
+    {}
+    explicit StackMacroAssembler(JSContext* cx)
+      : MacroAssembler(cx)
+    {}
+};
+
+// WasmMacroAssembler does not contain GC pointers, so it doesn't need the no-GC
+// checking StackMacroAssembler has.
+class MOZ_RAII WasmMacroAssembler : public MacroAssembler
+{
+  public:
+    explicit WasmMacroAssembler(TempAllocator& alloc)
+      : MacroAssembler(WasmToken(), alloc)
+    {}
+    ~WasmMacroAssembler() {
+        assertNoGCThings();
+    }
+};
+
+// Heap-allocated MacroAssembler used for Ion off-thread code generation.
+// GC cancels off-thread compilations.
+class IonHeapMacroAssembler : public MacroAssembler
+{
+  public:
+    IonHeapMacroAssembler()
+      : MacroAssembler()
+    {
+        MOZ_ASSERT(CurrentThreadIsIonCompiling());
+    }
 };
 
 //{{{ check_macroassembler_style

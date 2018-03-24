@@ -111,7 +111,6 @@ add_task(async function() {
   let doc = gBrowser.selectedBrowser.contentDocument;
 
   let showBtn = doc.getElementById("showUpdateHistory");
-  // eslint-disable-next-line mozilla/no-cpows-in-tests
   let dialogOverlay = content.gSubDialog._preloadDialog._overlay;
 
   // XXX: For unknown reasons, this mock cannot be loaded by
@@ -130,7 +129,7 @@ add_task(async function() {
 
   let dialogFrame = dialogOverlay.querySelector(".dialogFrame");
   let frameDoc = dialogFrame.contentDocument;
-  let updates = frameDoc.querySelectorAll("update");
+  let updates = frameDoc.querySelectorAll("richlistitem.update");
 
   // Test the update history numbers are correct
   is(updates.length, mockUpdateManager.updateCount, "The update count is incorrect.");

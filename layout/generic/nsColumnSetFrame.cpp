@@ -40,12 +40,6 @@ public:
       CalculateColumnRuleBounds(ToReferenceFrame());
   }
 
-  virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
-                                   LayerManager* aManager,
-                                   const ContainerLayerParameters& aParameters) override;
-  virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
-                                             LayerManager* aManager,
-                                             const ContainerLayerParameters& aContainerParameters) override;
   virtual bool CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
                                        mozilla::wr::IpcResourceUpdateQueue& aResources,
                                        const StackingContextHelper& aSc,
@@ -70,34 +64,6 @@ nsDisplayColumnRule::Paint(nsDisplayListBuilder* aBuilder,
   for (auto iter = mBorderRenderers.begin(); iter != mBorderRenderers.end(); iter++) {
     iter->DrawBorders();
   }
-}
-LayerState
-nsDisplayColumnRule::GetLayerState(nsDisplayListBuilder* aBuilder,
-                                   LayerManager* aManager,
-                                   const ContainerLayerParameters& aParameters)
-{
-  if (!gfxPrefs::LayersAllowColumnRuleLayers()) {
-    return LAYER_NONE;
-  }
-  RefPtr<gfxContext> screenRefCtx = gfxContext::CreateOrNull(
-    gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget().get());
-
-  static_cast<nsColumnSetFrame*>(mFrame)->
-    CreateBorderRenderers(mBorderRenderers, screenRefCtx, mVisibleRect, ToReferenceFrame());
-
-  if (mBorderRenderers.IsEmpty()) {
-    return LAYER_NONE;
-  }
-
-  return LAYER_ACTIVE;
-}
-
-already_AddRefed<nsDisplayItem::Layer>
-nsDisplayColumnRule::BuildLayer(nsDisplayListBuilder* aBuilder,
-                                LayerManager* aManager,
-                                const ContainerLayerParameters& aContainerParameters)
-{
-  return BuildDisplayItemLayer(aBuilder, aManager, aContainerParameters);
 }
 
 bool
@@ -133,17 +99,17 @@ nsDisplayColumnRule::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aB
  * XXX should we support CSS columns applied to table elements?
  */
 nsContainerFrame*
-NS_NewColumnSetFrame(nsIPresShell* aPresShell, nsStyleContext* aContext, nsFrameState aStateFlags)
+NS_NewColumnSetFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle, nsFrameState aStateFlags)
 {
-  nsColumnSetFrame* it = new (aPresShell) nsColumnSetFrame(aContext);
+  nsColumnSetFrame* it = new (aPresShell) nsColumnSetFrame(aStyle);
   it->AddStateBits(aStateFlags | NS_BLOCK_MARGIN_ROOT);
   return it;
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsColumnSetFrame)
 
-nsColumnSetFrame::nsColumnSetFrame(nsStyleContext* aContext)
-  : nsContainerFrame(aContext, kClassID)
+nsColumnSetFrame::nsColumnSetFrame(ComputedStyle* aStyle)
+  : nsContainerFrame(aStyle, kClassID)
   , mLastBalanceBSize(NS_INTRINSICSIZE)
 {
 }
@@ -284,7 +250,7 @@ nsColumnSetFrame::CreateBorderRenderers(nsTArray<nsCSSBorderRenderer>& aBorderRe
                         nsCSSRendering::CreateBorderRendererWithStyleBorder(presContext, dt,
                                                                             this, aDirtyRect,
                                                                             aLineRect, border,
-                                                                            StyleContext(),
+                                                                            Style(),
                                                                             &borderIsEmpty,
                                                                             skipSides);
                       if (br.isSome()) {
@@ -1300,7 +1266,7 @@ nsColumnSetFrame::AppendDirectlyOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult)
     return;
   }
 
-  MOZ_ASSERT(column->StyleContext()->GetPseudo() ==
+  MOZ_ASSERT(column->Style()->GetPseudo() ==
                nsCSSAnonBoxes::columnContent,
              "What sort of child is this?");
   aResult.AppendElement(OwnedAnonBox(column));

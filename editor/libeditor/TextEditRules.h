@@ -228,7 +228,9 @@ protected:
    *                        inserted.
    * @return                Returns created <br> element.
    */
-  already_AddRefed<Element> CreateBR(const EditorRawDOMPoint& aPointToInsert)
+  template<typename PT, typename CT>
+  already_AddRefed<Element>
+  CreateBR(const EditorDOMPointBase<PT, CT>& aPointToInsert)
   {
     return CreateBRInternal(aPointToInsert, false);
   }
@@ -240,7 +242,9 @@ protected:
    *                        inserted.
    * @return                Returns created moz-<br> element.
    */
-  already_AddRefed<Element> CreateMozBR(const EditorRawDOMPoint& aPointToInsert)
+  template<typename PT, typename CT>
+  already_AddRefed<Element>
+  CreateMozBR(const EditorDOMPointBase<PT, CT>& aPointToInsert)
   {
     return CreateBRInternal(aPointToInsert, true);
   }
@@ -262,8 +266,7 @@ protected:
   void UndefineCaretBidiLevel(Selection* aSelection);
 
   nsresult CheckBidiLevelForDeletion(Selection* aSelection,
-                                     nsINode* aSelNode,
-                                     int32_t aSelOffset,
+                                     const EditorRawDOMPoint& aSelectionPoint,
                                      nsIEditor::EDirection aAction,
                                      bool* aCancel);
 

@@ -7,7 +7,10 @@ const FAKE_BOOKMARK = {bookmarkGuid: "xi31", bookmarkTitle: "Foo", dateAdded: 12
 const TYPE_BOOKMARK = 0; // This is fake, for testing
 const SOURCES = {
   DEFAULT: 0,
-  IMPORT_REPLACE: 3
+  SYNC: 1,
+  IMPORT: 2,
+  RESTORE: 5,
+  RESTORE_ON_STARTUP: 6
 };
 
 const BLOCKED_EVENT = "newtab-linkBlocked"; // The event dispatched in NewTabUtils when a link is blocked;
@@ -354,11 +357,38 @@ describe("PlacesFeed", () => {
 
         assert.notCalled(dispatch);
       });
-      it("should not dispatch a PLACES_BOOKMARK_ADDED action - has IMPORT_REPLACE source", async () => {
+      it("should not dispatch a PLACES_BOOKMARK_ADDED action - has IMPORT source", async () => {
         // Yes, onItemAdded has at least 8 arguments. See function definition for docs.
         const args = [null, null, null, TYPE_BOOKMARK,
           {spec: FAKE_BOOKMARK.url, scheme: "http"}, FAKE_BOOKMARK.bookmarkTitle,
-          FAKE_BOOKMARK.dateAdded, FAKE_BOOKMARK.bookmarkGuid, "", SOURCES.IMPORT_REPLACE];
+          FAKE_BOOKMARK.dateAdded, FAKE_BOOKMARK.bookmarkGuid, "", SOURCES.IMPORT];
+        await observer.onItemAdded(...args);
+
+        assert.notCalled(dispatch);
+      });
+      it("should not dispatch a PLACES_BOOKMARK_ADDED action - has RESTORE source", async () => {
+        // Yes, onItemAdded has at least 8 arguments. See function definition for docs.
+        const args = [null, null, null, TYPE_BOOKMARK,
+          {spec: FAKE_BOOKMARK.url, scheme: "http"}, FAKE_BOOKMARK.bookmarkTitle,
+          FAKE_BOOKMARK.dateAdded, FAKE_BOOKMARK.bookmarkGuid, "", SOURCES.RESTORE];
+        await observer.onItemAdded(...args);
+
+        assert.notCalled(dispatch);
+      });
+      it("should not dispatch a PLACES_BOOKMARK_ADDED action - has RESTORE_ON_STARTUP source", async () => {
+        // Yes, onItemAdded has at least 8 arguments. See function definition for docs.
+        const args = [null, null, null, TYPE_BOOKMARK,
+          {spec: FAKE_BOOKMARK.url, scheme: "http"}, FAKE_BOOKMARK.bookmarkTitle,
+          FAKE_BOOKMARK.dateAdded, FAKE_BOOKMARK.bookmarkGuid, "", SOURCES.RESTORE_ON_STARTUP];
+        await observer.onItemAdded(...args);
+
+        assert.notCalled(dispatch);
+      });
+      it("should not dispatch a PLACES_BOOKMARK_ADDED action - has SYNC source", async () => {
+        // Yes, onItemAdded has at least 8 arguments. See function definition for docs.
+        const args = [null, null, null, TYPE_BOOKMARK,
+          {spec: FAKE_BOOKMARK.url, scheme: "http"}, FAKE_BOOKMARK.bookmarkTitle,
+          FAKE_BOOKMARK.dateAdded, FAKE_BOOKMARK.bookmarkGuid, "", SOURCES.SYNC];
         await observer.onItemAdded(...args);
 
         assert.notCalled(dispatch);
@@ -371,47 +401,36 @@ describe("PlacesFeed", () => {
     });
     describe("#onItemRemoved", () => {
       it("should ignore events that are not of TYPE_BOOKMARK", async () => {
-        await observer.onItemRemoved(null, null, null, "nottypebookmark", null, "123foo");
+        await observer.onItemRemoved(null, null, null, "nottypebookmark", null, "123foo", "", SOURCES.DEFAULT);
+        assert.notCalled(dispatch);
+      });
+      it("should not dispatch a PLACES_BOOKMARK_REMOVED action - has SYNC source", async () => {
+        const args = [null, null, null, TYPE_BOOKMARK, {spec: "foo.com"}, "123foo", "", SOURCES.SYNC];
+        await observer.onItemRemoved(...args);
+
+        assert.notCalled(dispatch);
+      });
+      it("should not dispatch a PLACES_BOOKMARK_REMOVED action - has IMPORT source", async () => {
+        const args = [null, null, null, TYPE_BOOKMARK, {spec: "foo.com"}, "123foo", "", SOURCES.IMPORT];
+        await observer.onItemRemoved(...args);
+
+        assert.notCalled(dispatch);
+      });
+      it("should not dispatch a PLACES_BOOKMARK_REMOVED action - has RESTORE source", async () => {
+        const args = [null, null, null, TYPE_BOOKMARK, {spec: "foo.com"}, "123foo", "", SOURCES.RESTORE];
+        await observer.onItemRemoved(...args);
+
+        assert.notCalled(dispatch);
+      });
+      it("should not dispatch a PLACES_BOOKMARK_REMOVED action - has RESTORE_ON_STARTUP source", async () => {
+        const args = [null, null, null, TYPE_BOOKMARK, {spec: "foo.com"}, "123foo", "", SOURCES.RESTORE_ON_STARTUP];
+        await observer.onItemRemoved(...args);
+
         assert.notCalled(dispatch);
       });
       it("should dispatch a PLACES_BOOKMARK_REMOVED action with the right URL and bookmarkGuid", () => {
-        observer.onItemRemoved(null, null, null, TYPE_BOOKMARK, {spec: "foo.com"}, "123foo");
+        observer.onItemRemoved(null, null, null, TYPE_BOOKMARK, {spec: "foo.com"}, "123foo", "", SOURCES.DEFAULT);
         assert.calledWith(dispatch, {type: at.PLACES_BOOKMARK_REMOVED, data: {bookmarkGuid: "123foo", url: "foo.com"}});
-      });
-    });
-    describe("#onItemChanged", () => {
-      beforeEach(() => {
-        sandbox.stub(global.NewTabUtils.activityStreamProvider, "getBookmark")
-          .withArgs(FAKE_BOOKMARK.guid).returns(Promise.resolve(FAKE_BOOKMARK));
-      });
-      it("has an empty function to keep xpconnect happy", async () => {
-        await observer.onItemChanged();
-      });
-      // Disabled in Issue 3203, see observer.onItemChanged for more information.
-      it.skip("should dispatch a PLACES_BOOKMARK_CHANGED action with the bookmark data", async () => {
-        const args = [null, "title", null, null, null, TYPE_BOOKMARK, null, FAKE_BOOKMARK.guid];
-        await observer.onItemChanged(...args);
-
-        assert.calledWith(dispatch, {type: at.PLACES_BOOKMARK_CHANGED, data: FAKE_BOOKMARK});
-      });
-      it.skip("should catch errors gracefully", async () => {
-        const e = new Error("test error");
-        global.NewTabUtils.activityStreamProvider.getBookmark.restore();
-        sandbox.stub(global.NewTabUtils.activityStreamProvider, "getBookmark")
-          .returns(Promise.reject(e));
-
-        const args = [null, "title", null, null, null, TYPE_BOOKMARK, null, FAKE_BOOKMARK.guid];
-        await observer.onItemChanged(...args);
-
-        assert.calledWith(global.Cu.reportError, e);
-      });
-      it.skip("should ignore events that are not of TYPE_BOOKMARK", async () => {
-        await observer.onItemChanged(null, "title", null, null, null, "nottypebookmark");
-        assert.notCalled(dispatch);
-      });
-      it.skip("should ignore events that are not changes to uri/title", async () => {
-        await observer.onItemChanged(null, "tags", null, null, null, TYPE_BOOKMARK);
-        assert.notCalled(dispatch);
       });
     });
     describe("Other empty methods (to keep code coverage happy)", () => {
@@ -420,6 +439,7 @@ describe("PlacesFeed", () => {
         observer.onEndUpdateBatch();
         observer.onItemVisited();
         observer.onItemMoved();
+        observer.onItemChanged();
       });
     });
   });

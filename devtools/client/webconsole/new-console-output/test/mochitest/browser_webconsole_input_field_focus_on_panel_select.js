@@ -3,6 +3,9 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
+// XXX Remove this when the file is migrated to the new frontend.
+/* eslint-disable no-undef */
+
 // Test that the JS input field is focused when the user switches back to the
 // web console from other tools, see bug 891581.
 
@@ -10,9 +13,9 @@
 
 const TEST_URI = "data:text/html;charset=utf8,<p>hello";
 
-add_task(function* () {
-  yield loadTab(TEST_URI);
-  let hud = yield openConsole();
+add_task(async function() {
+  await loadTab(TEST_URI);
+  let hud = await openConsole();
   hud.jsterm.clearOutput();
 
   is(hud.jsterm.inputNode.hasAttribute("focused"), true,
@@ -26,8 +29,8 @@ add_task(function* () {
   is(hud.jsterm.inputNode.hasAttribute("focused"), false,
      "inputNode shouldn't be focused");
 
-  yield openInspector();
-  hud = yield openConsole();
+  await openInspector();
+  hud = await openConsole();
 
   is(hud.jsterm.inputNode.hasAttribute("focused"), true,
      "inputNode should be focused");

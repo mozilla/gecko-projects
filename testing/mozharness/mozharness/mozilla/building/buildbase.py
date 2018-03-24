@@ -41,7 +41,6 @@ from mozharness.mozilla.buildbot import (
 )
 from mozharness.mozilla.purge import PurgeMixin
 from mozharness.mozilla.secrets import SecretsMixin
-from mozharness.mozilla.signing import SigningMixin
 from mozharness.mozilla.testing.errors import TinderBoxPrintRe
 from mozharness.mozilla.testing.unittest import tbox_print_summary
 from mozharness.mozilla.updates.balrog import BalrogMixin
@@ -669,7 +668,7 @@ def generate_build_UID():
 
 
 class BuildScript(BuildbotMixin, PurgeMixin, BalrogMixin,
-                  SigningMixin, VirtualenvMixin, MercurialScript,
+                  VirtualenvMixin, MercurialScript,
                   SecretsMixin, PerfherderResourceOptionsMixin):
     def __init__(self, **kwargs):
         # objdir is referenced in _query_abs_dirs() so let's make sure we
@@ -927,22 +926,6 @@ or run without that action (ie: --no-{action})"
         if self.config.get('pgo_build') or self._compile_against_pgo():
             env['MOZ_PGO'] = '1'
 
-        if c.get('enable_signing'):
-            if os.environ.get('MOZ_SIGNING_SERVERS'):
-                moz_sign_cmd = subprocess.list2cmdline(
-                    self.query_moz_sign_cmd(formats=None)
-                )
-                # windows fix. This is passed to mach build env and we call that
-                # with python, not with bash so we need to fix the slashes here
-                env['MOZ_SIGN_CMD'] = moz_sign_cmd.replace('\\', '\\\\\\\\')
-            else:
-                self.warning("signing disabled because MOZ_SIGNING_SERVERS is not set")
-        elif 'MOZ_SIGN_CMD' in env:
-            # Ensure that signing is truly disabled
-            # MOZ_SIGN_CMD may be defined by default in buildbot (see MozillaBuildFactory)
-            self.warning("Clearing MOZ_SIGN_CMD because we don't have config['enable_signing']")
-            del env['MOZ_SIGN_CMD']
-
         # to activate the right behaviour in mozonfigs while we transition
         if c.get('enable_release_promotion'):
             env['ENABLE_RELEASE_PROMOTION'] = "1"
@@ -951,8 +934,6 @@ or run without that action (ie: --no-{action})"
                       % (update_channel,))
             env["MOZ_UPDATE_CHANNEL"] = update_channel
 
-        # we can't make env an attribute of self because env can change on
-        # every call for reasons like MOZ_SIGN_CMD
         return env
 
     def query_mach_build_env(self, multiLocale=None):
@@ -1362,6 +1343,7 @@ or run without that action (ie: --no-{action})"
             'multi_locale/android-mozharness-build.json',
             '--pull-locale-source',
             '--add-locales',
+            '--android-assemble-app',
             '--package-multi',
             '--summary',
         ]
@@ -1426,6 +1408,28 @@ or run without that action (ie: --no-{action})"
             cwd=self.query_abs_dirs()['abs_src_dir'],
             env=env, output_timeout=self.config.get('max_build_output_timeout', 60 * 20),
             halt_on_failure=True,
+        )
+
+    def preflight_package_source(self):
+        self._get_mozconfig()
+
+    def package_source(self):
+        """generates source archives and uploads them"""
+        env = self.query_build_env()
+        env.update(self.query_mach_build_env())
+        dirs = self.query_abs_dirs()
+
+        self.run_command(
+            command=[sys.executable, 'mach', '--log-no-times', 'configure'],
+            cwd=dirs['abs_src_dir'],
+            env=env, output_timeout=60*3, halt_on_failure=True,
+        )
+        self.run_command(
+            command=[
+                'make', 'source-package', 'source-upload',
+            ],
+            cwd=dirs['abs_obj_dir'],
+            env=env, output_timeout=60*45, halt_on_failure=True,
         )
 
     def check_test(self):

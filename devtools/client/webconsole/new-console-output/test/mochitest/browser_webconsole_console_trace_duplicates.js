@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
- /* import-globals-from head.js */
-
 "use strict";
 
 const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
@@ -25,27 +23,27 @@ add_task(async function testTraceMessages() {
     variable: "console.trace()",
     repeats: 3,
     filename: "test-console-trace-duplicates.html",
-    line: 23,
+    line: 24,
     column: 3,
     stack: [{
       functionName: "foo3",
       filename: TEST_URI,
-      line: 23,
+      line: 24,
       column: 3
     }, {
       functionName: "foo2",
       filename: TEST_URI,
-      line: 19,
+      line: 20,
       column: 3
     }, {
       functionName: "foo1",
       filename: TEST_URI,
-      line: 11,
+      line: 12,
       column: 3
     }, {
       functionName: "<anonymous>",
       filename: TEST_URI,
-      line: 26,
+      line: 27,
       column: 1
     }]
   });

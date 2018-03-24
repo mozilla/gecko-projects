@@ -12,11 +12,11 @@
 
 #include <ctype.h>
 
-#include "jsarray.h"
 #include "jsnum.h"
 
+#include "builtin/Array.h"
+#include "util/StringBuffer.h"
 #include "vm/JSCompartment.h"
-#include "vm/StringBuffer.h"
 
 #include "vm/NativeObject-inl.h"
 

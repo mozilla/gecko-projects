@@ -164,14 +164,6 @@ public:
     return Children()->Length();
   }
 
-  /**
-   * Sets the IsElementInStyleScope flag on each element in the subtree rooted
-   * at this node, including any elements reachable through shadow trees.
-   *
-   * @param aInStyleScope The flag value to set.
-   */
-  void SetIsElementInStyleScopeFlagOnSubtree(bool aInStyleScope);
-
 public:
   /**
    * If there are listeners for DOMNodeInserted event, fires the event on all
@@ -215,8 +207,6 @@ public:
   static void RemoveBlackMarkedNode(nsINode* aNode);
   static void MarkNodeChildren(nsINode* aNode);
   static void InitCCCallbacks();
-  static void MarkUserData(void* aObject, nsAtom* aKey, void* aChild,
-                           void *aData);
 
   /**
    * Is the HTML local name a void element?
@@ -374,14 +364,6 @@ protected:
   {
     return static_cast<nsExtendedDOMSlots*>(GetExistingExtendedContentSlots());
   }
-
-  /**
-   * Calls SetIsElementInStyleScopeFlagOnSubtree for each shadow tree attached
-   * to this node, which is assumed to be an Element.
-   *
-   * @param aInStyleScope The IsElementInStyleScope flag value to set.
-   */
-  void SetIsElementInStyleScopeFlagOnShadowTree(bool aInStyleScope);
 
   friend class ::ContentUnbinder;
   /**

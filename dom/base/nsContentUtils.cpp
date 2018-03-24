@@ -52,6 +52,7 @@
 #include "mozilla/dom/HTMLSlotElement.h"
 #include "mozilla/dom/HTMLTemplateElement.h"
 #include "mozilla/dom/IDTracker.h"
+#include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/dom/KeyboardEventBinding.h"
 #include "mozilla/dom/IPCBlobUtils.h"
 #include "mozilla/dom/NodeBinding.h"
@@ -132,7 +133,6 @@
 #include "nsIDocumentEncoder.h"
 #include "nsIDOMChromeWindow.h"
 #include "nsIDOMDocument.h"
-#include "nsIDOMDocumentType.h"
 #include "nsIDOMElement.h"
 #include "nsIDOMNode.h"
 #include "nsIDOMNodeList.h"
@@ -300,7 +300,6 @@ bool nsContentUtils::sSendPerformanceTimingNotifications = false;
 bool nsContentUtils::sUseActivityCursor = false;
 bool nsContentUtils::sAnimationsAPICoreEnabled = false;
 bool nsContentUtils::sAnimationsAPIElementAnimateEnabled = false;
-bool nsContentUtils::sAnimationsAPIPendingMemberEnabled = false;
 bool nsContentUtils::sGetBoxQuadsEnabled = false;
 bool nsContentUtils::sSkipCursorMoveForSameValueSet = false;
 bool nsContentUtils::sRequestIdleCallbackEnabled = false;
@@ -311,7 +310,6 @@ bool nsContentUtils::sAutoFocusEnabled = true;
 #ifndef RELEASE_OR_BETA
 bool nsContentUtils::sBypassCSSOMOriginCheck = false;
 #endif
-bool nsContentUtils::sIsScopedStyleEnabled = false;
 
 bool nsContentUtils::sIsBytecodeCacheEnabled = false;
 int32_t nsContentUtils::sBytecodeCacheStrategy = 0;
@@ -576,6 +574,13 @@ nsContentUtils::Init()
   NS_ENSURE_TRUE(sNameSpaceManager, NS_ERROR_OUT_OF_MEMORY);
 
   sXPConnect = nsXPConnect::XPConnect();
+  // We hold a strong ref to sXPConnect to ensure that it does not go away until
+  // nsLayoutStatics::Shutdown is happening.  Otherwise ~nsXPConnect can be
+  // triggered by xpcModuleDtor late in shutdown and cause crashes due to
+  // various stuff already being torn down by then.  Note that this means that
+  // we are effectively making sure that if we leak nsLayoutStatics then we also
+  // leak nsXPConnect.
+  NS_ADDREF(sXPConnect);
 
   sSecurityManager = nsScriptSecurityManager::GetScriptSecurityManager();
   if(!sSecurityManager)
@@ -698,10 +703,6 @@ nsContentUtils::Init()
   Preferences::AddBoolVarCache(&sAnimationsAPIElementAnimateEnabled,
                                "dom.animations-api.element-animate.enabled", false);
 
-  Preferences::AddBoolVarCache(&sAnimationsAPIPendingMemberEnabled,
-                               "dom.animations-api.pending-member.enabled",
-                               false);
-
   Preferences::AddBoolVarCache(&sGetBoxQuadsEnabled,
                                "layout.css.getBoxQuads.enabled", false);
 
@@ -715,9 +716,6 @@ nsContentUtils::Init()
 #ifndef RELEASE_OR_BETA
   sBypassCSSOMOriginCheck = getenv("MOZ_BYPASS_CSSOM_ORIGIN_CHECK");
 #endif
-
-  Preferences::AddBoolVarCache(&sIsScopedStyleEnabled,
-                               "layout.css.scoped-style.enabled", false);
 
   Preferences::AddBoolVarCache(&sLowerNetworkPriority,
                                "privacy.trackingprotection.lower_network_priority", false);
@@ -2101,7 +2099,7 @@ nsContentUtils::Shutdown()
 
   NS_IF_RELEASE(sStringBundleService);
   NS_IF_RELEASE(sConsoleService);
-  sXPConnect = nullptr;
+  NS_IF_RELEASE(sXPConnect);
   NS_IF_RELEASE(sSecurityManager);
   NS_IF_RELEASE(sSystemPrincipal);
   NS_IF_RELEASE(sNullSubjectPrincipal);
@@ -3902,7 +3900,7 @@ nsContentUtils::ContentIsDraggable(nsIContent* aContent)
 {
   MOZ_ASSERT(aContent);
 
-  if (auto htmlElement = nsGenericHTMLElement::FromContent(aContent)) {
+  if (auto htmlElement = nsGenericHTMLElement::FromNode(aContent)) {
     if (htmlElement->Draggable()) {
       return true;
     }
@@ -4146,7 +4144,8 @@ nsresult nsContentUtils::FormatLocalizedString(
 
 /* static */ void
 nsContentUtils::LogSimpleConsoleError(const nsAString& aErrorText,
-                                      const char * classification)
+                                      const char * classification,
+                                      bool aFromPrivateWindow)
 {
   nsCOMPtr<nsIScriptError> scriptError =
     do_CreateInstance(NS_SCRIPTERROR_CONTRACTID);
@@ -4156,7 +4155,8 @@ nsContentUtils::LogSimpleConsoleError(const nsAString& aErrorText,
     if (console && NS_SUCCEEDED(scriptError->Init(aErrorText, EmptyString(),
                                                   EmptyString(), 0, 0,
                                                   nsIScriptError::errorFlag,
-                                                  classification))) {
+                                                  classification,
+                                                  aFromPrivateWindow))) {
       console->LogMessage(scriptError);
     }
   }
@@ -5807,9 +5807,7 @@ nsContentUtils::GetWindowProviderForContentProcess()
 already_AddRefed<nsPIDOMWindowOuter>
 nsContentUtils::GetMostRecentNonPBWindow()
 {
-  nsCOMPtr<nsIWindowMediator> windowMediator =
-    do_GetService(NS_WINDOWMEDIATOR_CONTRACTID);
-  nsCOMPtr<nsIWindowMediator_44> wm = do_QueryInterface(windowMediator);
+  nsCOMPtr<nsIWindowMediator> wm = do_GetService(NS_WINDOWMEDIATOR_CONTRACTID);
 
   nsCOMPtr<mozIDOMWindowProxy> window;
   wm->GetMostRecentNonPBWindow(u"navigator:browser",
@@ -5825,16 +5823,20 @@ void
 nsContentUtils::WarnScriptWasIgnored(nsIDocument* aDocument)
 {
   nsAutoString msg;
+  bool privateBrowsing = false;
+
   if (aDocument) {
     nsCOMPtr<nsIURI> uri = aDocument->GetDocumentURI();
     if (uri) {
       msg.Append(NS_ConvertUTF8toUTF16(uri->GetSpecOrDefault()));
       msg.AppendLiteral(" : ");
     }
+    privateBrowsing =
+      !!aDocument->NodePrincipal()->OriginAttributesRef().mPrivateBrowsingId;
   }
-  msg.AppendLiteral("Unable to run script because scripts are blocked internally.");
 
-  LogSimpleConsoleError(msg, "DOM");
+  msg.AppendLiteral("Unable to run script because scripts are blocked internally.");
+  LogSimpleConsoleError(msg, "DOM", privateBrowsing);
 }
 
 /* static */
@@ -5871,10 +5873,10 @@ nsContentUtils::RunInStableState(already_AddRefed<nsIRunnable> aRunnable)
 
 /* static */
 void
-nsContentUtils::RunInMetastableState(already_AddRefed<nsIRunnable> aRunnable)
+nsContentUtils::AddPendingIDBTransaction(already_AddRefed<nsIRunnable> aTransaction)
 {
   MOZ_ASSERT(CycleCollectedJSContext::Get(), "Must be on a script thread!");
-  CycleCollectedJSContext::Get()->RunInMetastableState(Move(aRunnable));
+  CycleCollectedJSContext::Get()->AddPendingIDBTransaction(Move(aTransaction));
 }
 
 /* static */
@@ -6035,15 +6037,9 @@ nsContentUtils::SetDataTransferInEvent(WidgetDragEvent* aDragEvent)
   nsCOMPtr<nsIDragSession> dragSession = GetDragSession();
   NS_ENSURE_TRUE(dragSession, NS_OK); // no drag in progress
 
-  nsCOMPtr<nsIDOMDataTransfer> dataTransfer;
-  nsCOMPtr<DataTransfer> initialDataTransfer;
-  dragSession->GetDataTransfer(getter_AddRefs(dataTransfer));
-  if (dataTransfer) {
-    initialDataTransfer = do_QueryInterface(dataTransfer);
-    if (!initialDataTransfer) {
-      return NS_ERROR_FAILURE;
-    }
-  } else {
+  RefPtr<DataTransfer> initialDataTransfer =
+    dragSession->GetDataTransfer();
+  if (!initialDataTransfer) {
     // A dataTransfer won't exist when a drag was started by some other
     // means, for instance calling the drag service directly, or a drag
     // from another application. In either case, a new dataTransfer should
@@ -6073,9 +6069,9 @@ nsContentUtils::SetDataTransferInEvent(WidgetDragEvent* aDragEvent)
   // from the drop action, which platform specific widget code sets before
   // the event is fired based on the keyboard state.
   if (aDragEvent->mMessage == eDragEnter || aDragEvent->mMessage == eDragOver) {
-    uint32_t action, effectAllowed;
+    uint32_t action;
     dragSession->GetDragAction(&action);
-    aDragEvent->mDataTransfer->GetEffectAllowedInt(&effectAllowed);
+    uint32_t effectAllowed = aDragEvent->mDataTransfer->EffectAllowedInt();
     aDragEvent->mDataTransfer->SetDropEffectInt(
                                  FilterDropEffect(action, effectAllowed));
   }
@@ -6085,9 +6081,8 @@ nsContentUtils::SetDataTransferInEvent(WidgetDragEvent* aDragEvent)
     // last value that the dropEffect had. This will have been set in
     // EventStateManager::PostHandleEvent for the last dragenter or
     // dragover event.
-    uint32_t dropEffect;
-    initialDataTransfer->GetDropEffectInt(&dropEffect);
-    aDragEvent->mDataTransfer->SetDropEffectInt(dropEffect);
+    aDragEvent->mDataTransfer->SetDropEffectInt(
+      initialDataTransfer->DropEffectInt());
   }
 
   return NS_OK;
@@ -6729,8 +6724,12 @@ nsContentUtils::DispatchXULCommand(nsIContent* aTarget,
   RefPtr<XULCommandEvent> xulCommand = new XULCommandEvent(doc, presContext,
                                                            nullptr);
   xulCommand->InitCommandEvent(NS_LITERAL_STRING("command"), true, true,
-                               doc->GetInnerWindow(), 0, aCtrl, aAlt, aShift,
-                               aMeta, aSourceEvent, aInputSource);
+                               nsGlobalWindowInner::Cast(doc->GetInnerWindow()),
+                               0, aCtrl, aAlt, aShift,
+                               aMeta,
+                               aSourceEvent ?
+                                 aSourceEvent->InternalDOMEvent() : nullptr,
+                               aInputSource, IgnoreErrors());
 
   if (aShell) {
     nsEventStatus status = nsEventStatus_eIgnore;
@@ -6933,9 +6932,16 @@ nsContentUtils::IsSubDocumentTabbable(nsIContent* aContent)
   contentViewer->GetPreviousViewer(getter_AddRefs(zombieViewer));
 
   // If there are 2 viewers for the current docshell, that
-  // means the current document is a zombie document.
-  // Only navigate into the subdocument if it's not a zombie.
-  return !zombieViewer;
+  // means the current document may be a zombie document.
+  // While load and pageshow events are dispatched, zombie viewer is the old,
+  // to be hidden document.
+  if (zombieViewer) {
+    bool inOnLoad = false;
+    docShell->GetIsExecutingOnLoadHandler(&inOnLoad);
+    return inOnLoad;
+  }
+
+  return true;
 }
 
 bool
@@ -7979,6 +7985,7 @@ nsresult
 nsContentUtils::IPCTransferableToTransferable(const IPCDataTransfer& aDataTransfer,
                                               const bool& aIsPrivateData,
                                               nsIPrincipal* aRequestingPrincipal,
+                                              const nsContentPolicyType& aContentPolicyType,
                                               nsITransferable* aTransferable,
                                               mozilla::dom::nsIContentParent* aContentParent,
                                               mozilla::dom::TabChild* aTabChild)
@@ -8044,6 +8051,7 @@ nsContentUtils::IPCTransferableToTransferable(const IPCDataTransfer& aDataTransf
 
   aTransferable->SetIsPrivateData(aIsPrivateData);
   aTransferable->SetRequestingPrincipal(aRequestingPrincipal);
+  aTransferable->SetContentPolicyType(aContentPolicyType);
   return NS_OK;
 }
 
@@ -8491,6 +8499,7 @@ GetSurfaceDataImpl(mozilla::gfx::DataSourceSurface* aSurface,
   mozilla::CheckedInt32 requiredBytes =
     mozilla::CheckedInt32(map.mStride) * mozilla::CheckedInt32(size.height);
   if (!requiredBytes.isValid()) {
+    aSurface->Unmap();
     return GetSurfaceDataContext::NullValue();
   }
 
@@ -8694,8 +8703,8 @@ nsContentUtils::SendMouseEvent(const nsCOMPtr<nsIPresShell>& aPresShell,
     return NS_ERROR_FAILURE;
   }
 
-  if (aInputSourceArg == nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN) {
-    aInputSourceArg = nsIDOMMouseEvent::MOZ_SOURCE_MOUSE;
+  if (aInputSourceArg == MouseEventBinding::MOZ_SOURCE_UNKNOWN) {
+    aInputSourceArg = MouseEventBinding::MOZ_SOURCE_MOUSE;
   }
 
   WidgetMouseEvent event(true, msg, widget,
@@ -8827,8 +8836,7 @@ bool
 nsContentUtils::IsUpgradableDisplayType(nsContentPolicyType aType)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  return sIsUpgradableDisplayContentPrefEnabled &&
-         (aType == nsIContentPolicy::TYPE_IMAGE ||
+  return (aType == nsIContentPolicy::TYPE_IMAGE ||
           aType == nsIContentPolicy::TYPE_MEDIA);
 }
 

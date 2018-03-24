@@ -19,6 +19,7 @@
 #include "imgIContainer.h"
 #include "Image.h"
 #include "GeckoProfiler.h"
+#include "mozilla/layers/WebRenderUserData.h"
 
 namespace mozilla {
 namespace css {
@@ -337,7 +338,8 @@ IsRenderNoImages(uint32_t aDisplayItemKey)
   return flags & TYPE_RENDERS_NO_IMAGES;
 }
 
-void InvalidateImages(nsIFrame* aFrame)
+static void
+InvalidateImages(nsIFrame* aFrame)
 {
   bool invalidateFrame = false;
   const SmallPointerArray<DisplayItemData>& array = aFrame->DisplayItemData();
@@ -357,7 +359,7 @@ void InvalidateImages(nsIFrame* aFrame)
     }
   }
   if (auto userDataTable =
-       aFrame->GetProperty(nsIFrame::WebRenderUserDataProperty())) {
+       aFrame->GetProperty(layers::WebRenderUserDataProperty::Key())) {
     for (auto iter = userDataTable->Iter(); !iter.Done(); iter.Next()) {
       RefPtr<layers::WebRenderUserData> data = iter.UserData();
       if (data->GetType() == layers::WebRenderAnimationData::UserDataType::eFallback &&

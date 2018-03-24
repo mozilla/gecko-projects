@@ -8,6 +8,7 @@
 
 #include "mozilla/Atomics.h"
 #include "mozilla/FloatingPoint.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/Move.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/Unused.h"
@@ -38,6 +39,8 @@
 #include "js/UniquePtr.h"
 #include "js/Vector.h"
 #include "js/Wrapper.h"
+#include "util/StringBuffer.h"
+#include "util/Text.h"
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
 #include "vm/Debugger.h"
@@ -49,7 +52,6 @@
 #include "vm/ProxyObject.h"
 #include "vm/SavedStacks.h"
 #include "vm/Stack.h"
-#include "vm/StringBuffer.h"
 #include "vm/TraceLogging.h"
 #include "wasm/AsmJS.h"
 #include "wasm/WasmBinaryToText.h"
@@ -68,6 +70,7 @@
 using namespace js;
 
 using mozilla::ArrayLength;
+using mozilla::Maybe;
 using mozilla::Move;
 
 // If fuzzingSafe is set, remove functionality that could cause problems with
@@ -771,6 +774,27 @@ WasmExtractCode(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     args.rval().set(result);
+    return true;
+}
+
+static bool
+WasmHasTier2CompilationCompleted(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    if (!args.get(0).isObject()) {
+        JS_ReportErrorASCII(cx, "argument is not an object");
+        return false;
+    }
+
+    JSObject* unwrapped = CheckedUnwrap(&args.get(0).toObject());
+    if (!unwrapped || !unwrapped->is<WasmModuleObject>()) {
+        JS_ReportErrorASCII(cx, "argument is not a WebAssembly.Module");
+        return false;
+    }
+
+    Rooted<WasmModuleObject*> module(cx, &unwrapped->as<WasmModuleObject>());
+    args.rval().set(BooleanValue(module->module().compilationComplete()));
     return true;
 }
 
@@ -4966,24 +4990,6 @@ SetTimeResolution(JSContext* cx, unsigned argc, Value* vp)
    return true;
 }
 
-static bool
-EnableExpressionClosures(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    JS::ContextOptionsRef(cx).setExpressionClosures(true);
-    args.rval().setUndefined();
-    return true;
-}
-
-static bool
-DisableExpressionClosures(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    JS::ContextOptionsRef(cx).setExpressionClosures(false);
-    args.rval().setUndefined();
-    return true;
-}
-
 JSScript*
 js::TestingFunctionArgumentToScript(JSContext* cx,
                                     HandleValue v,
@@ -5074,35 +5080,50 @@ BaselineCompile(JSContext* cx, unsigned argc, Value* vp)
         forceDebug = ToBoolean(args[1]);
     }
 
-    if (script->hasBaselineScript()) {
-        if (forceDebug && !script->baselineScript()->hasDebugInstrumentation()) {
-            // There isn't an easy way to do this for a script that might be on
-            // stack right now. See js::jit::RecompileOnStackBaselineScriptsForDebugMode.
-            ReportUsageErrorASCII(cx, callee,
-                                  "unsupported case: recompiling script for debug mode");
-            return false;
+    const char* returnedStr = nullptr;
+    do {
+        AutoCompartment ac(cx, script);
+        if (script->hasBaselineScript()) {
+            if (forceDebug && !script->baselineScript()->hasDebugInstrumentation()) {
+                // There isn't an easy way to do this for a script that might be on
+                // stack right now. See js::jit::RecompileOnStackBaselineScriptsForDebugMode.
+                ReportUsageErrorASCII(cx, callee,
+                                      "unsupported case: recompiling script for debug mode");
+                return false;
+            }
+
+            args.rval().setUndefined();
+            return true;
         }
 
-        args.rval().setUndefined();
-        return true;
-    }
+        if (!jit::IsBaselineEnabled(cx)) {
+            returnedStr = "baseline disabled";
+            break;
+        }
+        if (!script->canBaselineCompile()) {
+            returnedStr = "can't compile";
+            break;
+        }
+        if (!cx->compartment()->ensureJitCompartmentExists(cx))
+            return false;
 
-    if (!jit::IsBaselineEnabled(cx))
-        return ReturnStringCopy(cx, args, "baseline disabled");
-    if (!script->canBaselineCompile())
-        return ReturnStringCopy(cx, args, "can't compile");
+        jit::MethodStatus status = jit::BaselineCompile(cx, script, forceDebug);
+        switch (status) {
+          case jit::Method_Error:
+            return false;
+          case jit::Method_CantCompile:
+            returnedStr = "can't compile";
+            break;
+          case jit::Method_Skipped:
+            returnedStr = "skipped";
+            break;
+          case jit::Method_Compiled:
+            args.rval().setUndefined();
+        }
+    } while(false);
 
-    jit::MethodStatus status = jit::BaselineCompile(cx, script, forceDebug);
-    switch (status) {
-      case jit::Method_Error:
-        return false;
-      case jit::Method_CantCompile:
-        return ReturnStringCopy(cx, args, "can't compile");
-      case jit::Method_Skipped:
-        return ReturnStringCopy(cx, args, "skipped");
-      case jit::Method_Compiled:
-        args.rval().setUndefined();
-    }
+    if (returnedStr)
+        return ReturnStringCopy(cx, args, returnedStr);
 
     return true;
 }
@@ -5454,6 +5475,11 @@ gc::ZealModeHelpText),
 "  cannot be satisfied then null is returned.  If the request is 'ion' then block\n"
 "  until background compilation is complete."),
 
+    JS_FN_HELP("wasmHasTier2CompilationCompleted", WasmHasTier2CompilationCompleted, 1, 0,
+"wasmHasTier2CompilationCompleted(module)",
+"  Returns a boolean indicating whether a given module has finished compiled code for tier2. \n"
+"This will return true early if compilation isn't two-tiered. "),
+
     JS_FN_HELP("isLazyFunction", IsLazyFunction, 1, 0,
 "isLazyFunction(fun)",
 "  True if fun is a lazy JSFunction."),
@@ -5736,14 +5762,6 @@ gc::ZealModeHelpText),
 "setTimeResolution(resolution, jitter)",
 "  Enables time clamping and jittering. Specify a time resolution in\n"
 "  microseconds and whether or not to jitter\n"),
-
-    JS_FN_HELP("enableExpressionClosures", EnableExpressionClosures, 0, 0,
-"enableExpressionClosures()",
-"  Enables the deprecated, non-standard expression closures.\n"),
-
-    JS_FN_HELP("disableExpressionClosures", DisableExpressionClosures, 0, 0,
-"disableExpressionClosures()",
-"  Disables the deprecated, non-standard expression closures.\n"),
 
     JS_FN_HELP("baselineCompile", BaselineCompile, 2, 0,
 "baselineCompile([fun/code], forceDebugInstrumentation=false)",

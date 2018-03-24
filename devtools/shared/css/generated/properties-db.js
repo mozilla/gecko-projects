@@ -2963,6 +2963,7 @@ exports.CSS_PROPERTIES = {
       "font-feature-settings",
       "font-kerning",
       "font-language-override",
+      "font-optical-sizing",
       "font-size",
       "font-size-adjust",
       "-moz-font-smoothing-background-color",
@@ -5717,6 +5718,8 @@ exports.CSS_PROPERTIES = {
       "font-feature-settings",
       "font-language-override",
       "font-kerning",
+      "font-optical-sizing",
+      "font-variation-settings",
       "font-variant-alternates",
       "font-variant-caps",
       "font-variant-east-asian",
@@ -5861,6 +5864,20 @@ exports.CSS_PROPERTIES = {
       "inherit",
       "initial",
       "normal",
+      "unset"
+    ]
+  },
+  "font-optical-sizing": {
+    "isInherited": true,
+    "subproperties": [
+      "font-optical-sizing"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "inherit",
+      "initial",
+      "none",
       "unset"
     ]
   },
@@ -6111,6 +6128,18 @@ exports.CSS_PROPERTIES = {
       "normal",
       "sub",
       "super",
+      "unset"
+    ]
+  },
+  "font-variation-settings": {
+    "isInherited": true,
+    "subproperties": [
+      "font-variation-settings"
+    ],
+    "supports": [],
+    "values": [
+      "inherit",
+      "initial",
       "unset"
     ]
   },
@@ -9469,6 +9498,10 @@ exports.PREFERENCES = [
   [
     "contain",
     "layout.css.contain.enabled"
+  ],
+  [
+    "font-optical-sizing",
+    "layout.css.font-variations.enabled"
   ],
   [
     "font-variation-settings",

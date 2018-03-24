@@ -8,7 +8,7 @@ for (let [key, val] of Object.entries({
 
 // Don't manually modify this line, as it is automatically replaced on merge day
 // by the gecko_migration.py script.
-WEAVE_VERSION: "1.62.0",
+WEAVE_VERSION: "1.63.0",
 
 // Sync Server API version that the client supports.
 SYNC_API_VERSION:                      "1.5",
@@ -106,7 +106,6 @@ CREDENTIALS_CHANGED:                   "error.sync.reason.credentials_changed",
 ABORT_SYNC_COMMAND:                    "aborting sync, process commands said so",
 NO_SYNC_NODE_FOUND:                    "error.sync.reason.no_node_found",
 OVER_QUOTA:                            "error.sync.reason.over_quota",
-PROLONGED_SYNC_FAILURE:                "error.sync.prolonged_failure",
 SERVER_MAINTENANCE:                    "error.sync.reason.serverMaintenance",
 
 RESPONSE_OVER_QUOTA:                   "14",

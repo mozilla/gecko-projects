@@ -70,9 +70,9 @@ class JSFunction : public js::NativeObject
                                        function-statement) */
         SELF_HOSTED      = 0x0080,  /* function is self-hosted builtin and must not be
                                        decompilable nor constructible. */
-        HAS_COMPILE_TIME_NAME = 0x0100, /* function had no explicit name, but a
-                                           name was set by SetFunctionName
-                                           at compile time */
+        HAS_INFERRED_NAME = 0x0100, /* function had no explicit name, but a name was
+                                       set by SetFunctionName at compile time or
+                                       SetFunctionNameIfNoOwnName at runtime. */
         INTERPRETED_LAZY = 0x0200,  /* function is interpreted but doesn't have a script yet */
         RESOLVED_LENGTH  = 0x0400,  /* f.length has been resolved (see fun_resolve). */
         RESOLVED_NAME    = 0x0800,  /* f.name has been resolved (see fun_resolve). */
@@ -106,8 +106,7 @@ class JSFunction : public js::NativeObject
         INTERPRETED_GENERATOR_OR_ASYNC = INTERPRETED,
         NO_XDR_FLAGS = RESOLVED_LENGTH | RESOLVED_NAME,
 
-        STABLE_ACROSS_CLONES = CONSTRUCTOR | LAMBDA | SELF_HOSTED | HAS_COMPILE_TIME_NAME |
-                               FUNCTION_KIND_MASK
+        STABLE_ACROSS_CLONES = CONSTRUCTOR | LAMBDA | SELF_HOSTED | FUNCTION_KIND_MASK
     };
 
     static_assert((INTERPRETED | INTERPRETED_LAZY) == js::JS_FUNCTION_INTERPRETED_BITS,
@@ -129,6 +128,8 @@ class JSFunction : public js::NativeObject
                 const JSJitInfo* jitInfo_;
                 // asm.js function index, only used if isAsmJSNative().
                 size_t asmJSFuncIndex_;
+                // for wasm, a pointer to a fast jit->wasm table entry.
+                void** wasmJitEntry_;
             } extra;
         } native;
         struct {
@@ -139,11 +140,6 @@ class JSFunction : public js::NativeObject
                 js::LazyScript* lazy_; /* lazily compiled script, or nullptr */
             } s;
         } scripted;
-        class {
-            friend class JSFunction;
-            js::Native native_; // The native for interpreter wasm calls.
-            void** jitEntry_;   // A pointer to a fast jit->wasm table entry.
-        } wasm;
     } u;
     js::GCPtrAtom atom_; /* name for diagnostics and decompiling */
 
@@ -201,14 +197,14 @@ class JSFunction : public js::NativeObject
     bool isWasmOptimized()          const { return (flags() & WASM_OPTIMIZED); }
     bool isBuiltinNative()          const { return isNativeWithCppEntry() && !isAsmJSNative(); }
 
-    // May be called from the JIT with the jitEntry_ field.
+    // May be called from the JIT with the wasmJitEntry_ field.
     bool isNativeWithJitEntry()     const { return isNative() && isWasmOptimized(); }
     // Must be called from the JIT with the native_ field.
     bool isNativeWithCppEntry()     const { return isNative() && !isWasmOptimized(); }
 
     /* Possible attributes of an interpreted function: */
     bool isBoundFunction()          const { return flags() & BOUND_FUN; }
-    bool hasCompileTimeName()       const { return flags() & HAS_COMPILE_TIME_NAME; }
+    bool hasInferredName()          const { return flags() & HAS_INFERRED_NAME; }
     bool hasGuessedAtom()           const {
         static_assert(HAS_GUESSED_ATOM == HAS_BOUND_FUNCTION_NAME_PREFIX,
                       "HAS_GUESSED_ATOM is unused for bound functions");
@@ -262,7 +258,7 @@ class JSFunction : public js::NativeObject
     }
 
     bool isNamedLambda() const {
-        return isLambda() && displayAtom() && !hasCompileTimeName() && !hasGuessedAtom();
+        return isLambda() && displayAtom() && !hasInferredName() && !hasGuessedAtom();
     }
 
     bool hasLexicalThis() const {
@@ -345,13 +341,17 @@ class JSFunction : public js::NativeObject
     static bool getUnresolvedLength(JSContext* cx, js::HandleFunction fun,
                                     js::MutableHandleValue v);
 
+    JSAtom* infallibleGetUnresolvedName(JSContext* cx);
+
     static bool getUnresolvedName(JSContext* cx, js::HandleFunction fun,
-                                  js::MutableHandleAtom v);
+                                  js::MutableHandleString v);
+
+    static JSLinearString* getBoundFunctionName(JSContext* cx, js::HandleFunction fun);
 
     JSAtom* explicitName() const {
-        return (hasCompileTimeName() || hasGuessedAtom()) ? nullptr : atom_.get();
+        return (hasInferredName() || hasGuessedAtom()) ? nullptr : atom_.get();
     }
-    JSAtom* explicitOrCompileTimeName() const {
+    JSAtom* explicitOrInferredName() const {
         return hasGuessedAtom() ? nullptr : atom_.get();
     }
 
@@ -369,16 +369,21 @@ class JSFunction : public js::NativeObject
         return atom_;
     }
 
-    void setCompileTimeName(JSAtom* atom) {
+    void setInferredName(JSAtom* atom) {
         MOZ_ASSERT(!atom_);
         MOZ_ASSERT(atom);
         MOZ_ASSERT(!hasGuessedAtom());
-        MOZ_ASSERT(!isClassConstructor());
         setAtom(atom);
-        flags_ |= HAS_COMPILE_TIME_NAME;
+        flags_ |= HAS_INFERRED_NAME;
     }
-    JSAtom* compileTimeName() const {
-        MOZ_ASSERT(hasCompileTimeName());
+    void clearInferredName() {
+        MOZ_ASSERT(hasInferredName());
+        MOZ_ASSERT(atom_);
+        setAtom(nullptr);
+        flags_ &= ~HAS_INFERRED_NAME;
+    }
+    JSAtom* inferredName() const {
+        MOZ_ASSERT(hasInferredName());
         MOZ_ASSERT(atom_);
         return atom_;
     }
@@ -386,7 +391,7 @@ class JSFunction : public js::NativeObject
     void setGuessedAtom(JSAtom* atom) {
         MOZ_ASSERT(!atom_);
         MOZ_ASSERT(atom);
-        MOZ_ASSERT(!hasCompileTimeName());
+        MOZ_ASSERT(!hasInferredName());
         MOZ_ASSERT(!hasGuessedAtom());
         MOZ_ASSERT(!isBoundFunction());
         setAtom(atom);
@@ -614,19 +619,19 @@ class JSFunction : public js::NativeObject
     void initWasmNative(js::Native native) {
         MOZ_ASSERT(isNativeWithJitEntry());
         MOZ_ASSERT(native);
-        u.wasm.native_ = native;
-        u.wasm.jitEntry_ = nullptr;
+        u.native.func_ = native;
+        u.native.extra.wasmJitEntry_ = nullptr;
     }
     void setWasmJitEntry(void** entry) {
         MOZ_ASSERT(isNativeWithJitEntry());
         MOZ_ASSERT(entry);
-        MOZ_ASSERT(!u.wasm.jitEntry_);
-        u.wasm.jitEntry_ = entry;
+        MOZ_ASSERT(!u.native.extra.wasmJitEntry_);
+        u.native.extra.wasmJitEntry_ = entry;
     }
     void** wasmJitEntry() const {
         MOZ_ASSERT(isNativeWithJitEntry());
-        MOZ_ASSERT(u.wasm.jitEntry_);
-        return u.wasm.jitEntry_;
+        MOZ_ASSERT(u.native.extra.wasmJitEntry_);
+        return u.native.extra.wasmJitEntry_;
     }
 
     // AsmJS functions store the func index in the jitinfo slot, since these
@@ -635,8 +640,6 @@ class JSFunction : public js::NativeObject
         MOZ_ASSERT(isAsmJSNative());
         MOZ_ASSERT(!isWasmOptimized());
         MOZ_ASSERT(!u.native.extra.asmJSFuncIndex_);
-        static_assert(offsetof(U, native.extra.asmJSFuncIndex_) == offsetof(U, wasm.jitEntry_),
-                      "asm.js func index and wasm jit entry pointer must be at the same location");
         u.native.extra.asmJSFuncIndex_ = funcIndex;
     }
     uint32_t asmJSFuncIndex() const {
@@ -648,13 +651,11 @@ class JSFunction : public js::NativeObject
     bool isDerivedClassConstructor();
 
     static unsigned offsetOfNative() {
-        static_assert(offsetof(U, native.func_) == offsetof(U, wasm.native_),
-                      "native.func_ must be at the same offset as wasm.native_");
         return offsetof(JSFunction, u.native.func_);
     }
     static unsigned offsetOfScript() {
-        static_assert(offsetof(U, scripted.s.script_) == offsetof(U, wasm.jitEntry_),
-                      "scripted.s.script_ must be at the same offset as wasm.jitEntry_");
+        static_assert(offsetof(U, scripted.s.script_) == offsetof(U, native.extra.wasmJitEntry_),
+                      "scripted.s.script_ must be at the same offset as native.extra.wasmJitEntry_");
         return offsetof(JSFunction, u.scripted.s.script_);
     }
     static unsigned offsetOfNativeOrEnv() {
@@ -957,7 +958,7 @@ namespace js {
 JSString* FunctionToString(JSContext* cx, HandleFunction fun, bool isToSource);
 
 template<XDRMode mode>
-bool
+XDRResult
 XDRInterpretedFunction(XDRState<mode>* xdr, HandleScope enclosingScope,
                        HandleScriptSource sourceObject, MutableHandleFunction objp);
 

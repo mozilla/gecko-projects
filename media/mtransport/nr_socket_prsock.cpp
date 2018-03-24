@@ -233,7 +233,7 @@ public:
       // in-use -> idle -- no one forcing it to remain instantiated
       r_log(LOG_GENERIC,LOG_DEBUG,"Shutting down wrapped SingletonThread %p",
             mThread.get());
-      mThread->Shutdown();
+      mThread->AsyncShutdown();
       mThread = nullptr;
       // It'd be nice to use a timer instead...  But be careful of
       // xpcom-shutdown-threads in that case
@@ -1560,7 +1560,7 @@ void NrUdpSocketIpc::create_i(const nsACString &host, const uint16_t port) {
 #endif
   // XXX bug 1126232 - don't use null Principal!
   if (NS_FAILED(socket_child_->Bind(proxy, nullptr, host, port,
-                                    /* reuse = */ false,
+                                    /* addressReuse = */ false,
                                     /* loopback = */ false,
                                     /* recv buffer size */ minBuffSize,
                                     /* send buffer size */ minBuffSize,

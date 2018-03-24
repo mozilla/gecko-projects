@@ -268,7 +268,6 @@ var TPS = {
    * directly called via TPS.Sync()!
    */
   delayAutoSync: function TPS_delayAutoSync() {
-    Weave.Svc.Prefs.set("scheduler.eolInterval", 7200);
     Weave.Svc.Prefs.set("scheduler.immediateInterval", 7200);
     Weave.Svc.Prefs.set("scheduler.idleInterval", 7200);
     Weave.Svc.Prefs.set("scheduler.activeInterval", 7200);
@@ -324,9 +323,7 @@ var TPS = {
                      " on tab " + JSON.stringify(tab));
       switch (action) {
         case ACTION_ADD:
-          await new Promise(resolve => {
-            BrowserTabs.Add(tab.uri, resolve);
-          });
+          await BrowserTabs.Add(tab.uri);
           break;
         case ACTION_VERIFY:
           Logger.AssertTrue(typeof(tab.profile) != "undefined",
@@ -586,21 +583,21 @@ var TPS = {
         let addressOb = new Address(address);
         switch (action) {
           case ACTION_ADD:
-            addressOb.Create();
+            await addressOb.Create();
             break;
           case ACTION_MODIFY:
-            addressOb.Update();
+            await addressOb.Update();
             break;
           case ACTION_VERIFY:
-            Logger.AssertTrue(addressOb.Find(), "address not found");
+            Logger.AssertTrue(await addressOb.Find(), "address not found");
             break;
           case ACTION_VERIFY_NOT:
-            Logger.AssertTrue(!addressOb.Find(),
+            Logger.AssertTrue(!await addressOb.Find(),
               "address found, but it shouldn't exist");
             break;
           case ACTION_DELETE:
-            Logger.AssertTrue(addressOb.Find(), "address not found");
-            addressOb.Remove();
+            Logger.AssertTrue(await addressOb.Find(), "address not found");
+            await addressOb.Remove();
             break;
           default:
             Logger.AssertTrue(false, "invalid action: " + action);
@@ -609,7 +606,7 @@ var TPS = {
       Logger.logPass("executing action " + action.toUpperCase() +
                      " on addresses");
     } catch (e) {
-      DumpAddresses();
+      await DumpAddresses();
       throw (e);
     }
   },
@@ -622,21 +619,21 @@ var TPS = {
         let creditCardOb = new CreditCard(creditCard);
         switch (action) {
           case ACTION_ADD:
-            creditCardOb.Create();
+            await creditCardOb.Create();
             break;
           case ACTION_MODIFY:
-            creditCardOb.Update();
+            await creditCardOb.Update();
             break;
           case ACTION_VERIFY:
-            Logger.AssertTrue(creditCardOb.Find(), "creditCard not found");
+            Logger.AssertTrue(await creditCardOb.Find(), "creditCard not found");
             break;
           case ACTION_VERIFY_NOT:
-            Logger.AssertTrue(!creditCardOb.Find(),
+            Logger.AssertTrue(!await creditCardOb.Find(),
               "creditCard found, but it shouldn't exist");
             break;
           case ACTION_DELETE:
-            Logger.AssertTrue(creditCardOb.Find(), "creditCard not found");
-            creditCardOb.Remove();
+            Logger.AssertTrue(await creditCardOb.Find(), "creditCard not found");
+            await creditCardOb.Remove();
             break;
           default:
             Logger.AssertTrue(false, "invalid action: " + action);
@@ -645,7 +642,7 @@ var TPS = {
       Logger.logPass("executing action " + action.toUpperCase() +
                      " on creditCards");
     } catch (e) {
-      DumpCreditCards();
+      await DumpCreditCards();
       throw (e);
     }
   },

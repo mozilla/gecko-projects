@@ -14,11 +14,11 @@
 #include "builtin/SIMD.h"
 #include "gc/Marking.h"
 #include "js/Vector.h"
+#include "util/StringBuffer.h"
 #include "vm/GlobalObject.h"
 #include "vm/JSCompartment.h"
 #include "vm/JSFunction.h"
-#include "vm/String.h"
-#include "vm/StringBuffer.h"
+#include "vm/StringType.h"
 #include "vm/TypedArrayObject.h"
 
 #include "gc/Nursery-inl.h"
@@ -2184,7 +2184,7 @@ InlineTransparentTypedObject::getOrCreateBuffer(JSContext* cx)
     // (the first view is held strongly by the buffer) and is used by the
     // buffer marking code to detect whether its data pointer needs to be
     // relocated.
-    JS_ALWAYS_TRUE(buffer->addView(cx, this));
+    MOZ_ALWAYS_TRUE(buffer->addView(cx, this));
 
     buffer->setForInlineTypedObject();
     buffer->setHasTypedObjectViews();

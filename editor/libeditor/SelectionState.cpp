@@ -13,7 +13,6 @@
 #include "nsDebug.h"                    // for NS_ENSURE_TRUE, etc.
 #include "nsError.h"                    // for NS_OK, etc.
 #include "nsIContent.h"                 // for nsIContent
-#include "nsIDOMCharacterData.h"        // for nsIDOMCharacterData
 #include "nsIDOMNode.h"                 // for nsIDOMNode
 #include "nsISupportsImpl.h"            // for nsRange::Release
 #include "nsRange.h"                    // for nsRange
@@ -29,6 +28,16 @@ using namespace dom;
  * { {startnode, startoffset} , {endnode, endoffset} } tuples.  Can't store
  * ranges since dom gravity will possibly change the ranges.
  ******************************************************************************/
+
+template nsresult
+RangeUpdater::SelAdjCreateNode(const EditorDOMPoint& aPoint);
+template nsresult
+RangeUpdater::SelAdjCreateNode(const EditorRawDOMPoint& aPoint);
+template nsresult
+RangeUpdater::SelAdjInsertNode(const EditorDOMPoint& aPoint);
+template nsresult
+RangeUpdater::SelAdjInsertNode(const EditorRawDOMPoint& aPoint);
+
 SelectionState::SelectionState()
 {
 }
@@ -212,8 +221,9 @@ RangeUpdater::DropSelectionState(SelectionState& aSelState)
 
 // gravity methods:
 
+template<typename PT, typename CT>
 nsresult
-RangeUpdater::SelAdjCreateNode(const EditorRawDOMPoint& aPoint)
+RangeUpdater::SelAdjCreateNode(const EditorDOMPointBase<PT, CT>& aPoint)
 {
   if (mLock) {
     // lock set by Will/DidReplaceParent, etc...
@@ -244,8 +254,9 @@ RangeUpdater::SelAdjCreateNode(const EditorRawDOMPoint& aPoint)
   return NS_OK;
 }
 
+template<typename PT, typename CT>
 nsresult
-RangeUpdater::SelAdjInsertNode(const EditorRawDOMPoint& aPoint)
+RangeUpdater::SelAdjInsertNode(const EditorDOMPointBase<PT, CT>& aPoint)
 {
   return SelAdjCreateNode(aPoint);
 }
@@ -476,15 +487,6 @@ RangeUpdater::SelAdjDeleteText(nsIContent* aTextNode,
     }
   }
   return NS_OK;
-}
-
-nsresult
-RangeUpdater::SelAdjDeleteText(nsIDOMCharacterData* aTextNode,
-                               int32_t aOffset,
-                               int32_t aLength)
-{
-  nsCOMPtr<nsIContent> textNode = do_QueryInterface(aTextNode);
-  return SelAdjDeleteText(textNode, aOffset, aLength);
 }
 
 nsresult

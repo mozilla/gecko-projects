@@ -15,10 +15,7 @@ const SHA1_URL = "https://sha1ee.example.com" + TEST_URI_PATH;
 const SHA256_URL = "https://sha256ee.example.com" + TEST_URI_PATH;
 const TRIGGER_MSG = "If you haven't seen ssl warnings yet, you won't";
 
-const cache = Cc["@mozilla.org/netwerk/cache-storage-service;1"]
-  .getService(Ci.nsICacheStorageService);
-
-add_task(async function () {
+add_task(async function() {
   const hud = await openNewTabAndConsole(TEST_URI);
 
   info("Test SHA1 warnings");
@@ -41,5 +38,5 @@ add_task(async function () {
   ok(!textContent.includes("SSL 3.0"), "There is no warning message for SSL 3.0");
   ok(!textContent.includes("RC4"), "There is no warning message for RC4");
 
-  cache.clear();
+  Services.cache2.clear();
 });

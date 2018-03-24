@@ -1630,34 +1630,6 @@ MacroAssembler::patchFarJump(CodeOffset farJump, uint32_t targetOffset)
 }
 
 void
-MacroAssembler::repatchFarJump(uint8_t* code, uint32_t farJumpOffset, uint32_t targetOffset)
-{
-    uint32_t* u32 = reinterpret_cast<uint32_t*>(code + farJumpOffset);
-    *u32 = targetOffset - farJumpOffset;
-}
-
-CodeOffset
-MacroAssembler::nopPatchableToNearJump()
-{
-    CodeOffset offset(currentOffset());
-    as_nop();
-    as_nop();
-    return offset;
-}
-
-void
-MacroAssembler::patchNopToNearJump(uint8_t* jump, uint8_t* target)
-{
-    new (jump) InstImm(op_beq, zero, zero, BOffImm16(target - jump));
-}
-
-void
-MacroAssembler::patchNearJumpToNop(uint8_t* jump)
-{
-    new (jump) InstNOP();
-}
-
-void
 MacroAssembler::call(wasm::SymbolicAddress target)
 {
     movePtr(target, CallReg);
@@ -2199,6 +2171,12 @@ MacroAssemblerMIPSShared::wasmStoreImpl(const wasm::MemoryAccessDesc& access, An
     // Only the last emitted instruction is a memory access.
     asMasm().append(access, asMasm().size() - 4, asMasm().framePushed());
     asMasm().memoryBarrierAfter(access.sync());
+}
+
+void
+MacroAssembler::enterFakeExitFrameForWasm(Register cxreg, Register scratch, ExitFrameType type)
+{
+    enterFakeExitFrame(cxreg, scratch, type);
 }
 
 // ========================================================================
@@ -2846,3 +2824,11 @@ MacroAssembler::atomicEffectOpJS(Scalar::Type arrayType, const Synchronization& 
     atomicEffectOp(arrayType, sync, op, value, mem, valueTemp, offsetTemp, maskTemp);
 }
 
+// ========================================================================
+// Spectre Mitigations.
+
+void
+MacroAssembler::speculationBarrier()
+{
+    MOZ_CRASH();
+}

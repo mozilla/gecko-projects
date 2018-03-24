@@ -160,7 +160,7 @@ ChromeProfileMigrator.prototype.getSourceProfiles =
 
     let profiles = [];
     try {
-      let localState = await ChromeMigrationUtils.getLocalState();
+      let localState = await ChromeMigrationUtils.getLocalState(this._chromeUserDataPathSuffix);
       let info_cache = localState.profile.info_cache;
       for (let profileFolderName in info_cache) {
         profiles.push({
@@ -273,22 +273,20 @@ async function GetHistoryResource(aProfileFolder) {
 
         let rows =
           await MigrationUtils.getRowsFromDBWithoutLocks(historyPath, "Chrome history", query);
-        let places = [];
+        let pageInfos = [];
         for (let row of rows) {
           try {
             // if having typed_count, we changes transition type to typed.
-            let transType = PlacesUtils.history.TRANSITION_LINK;
+            let transition = PlacesUtils.history.TRANSITIONS.LINK;
             if (row.getResultByName("typed_count") > 0)
-              transType = PlacesUtils.history.TRANSITION_TYPED;
+              transition = PlacesUtils.history.TRANSITIONS.TYPED;
 
-            places.push({
-              uri: NetUtil.newURI(row.getResultByName("url")),
+            pageInfos.push({
               title: row.getResultByName("title"),
+              url: new URL(row.getResultByName("url")),
               visits: [{
-                transitionType: transType,
-                visitDate: chromeTimeToDate(
-                             row.getResultByName(
-                               "last_visit_time")) * 1000,
+                transition,
+                date: chromeTimeToDate(row.getResultByName("last_visit_time")),
               }],
             });
           } catch (e) {
@@ -296,20 +294,8 @@ async function GetHistoryResource(aProfileFolder) {
           }
         }
 
-        if (places.length > 0) {
-          await new Promise((resolve, reject) => {
-            MigrationUtils.insertVisitsWrapper(places, {
-              ignoreErrors: true,
-              ignoreResults: true,
-              handleCompletion(updatedCount) {
-                if (updatedCount > 0) {
-                  resolve();
-                } else {
-                  reject(new Error("Couldn't add visits"));
-                }
-              },
-            });
-          });
+        if (pageInfos.length > 0) {
+          await MigrationUtils.insertVisitsWrapper(pageInfos);
         }
       })().then(() => { aCallback(true); },
               ex => {
@@ -486,6 +472,29 @@ CanaryProfileMigrator.prototype.classID = Components.ID("{4bf85aa5-4e21-46ca-825
 
 if (AppConstants.platform == "win" || AppConstants.platform == "macosx") {
   componentsArray.push(CanaryProfileMigrator);
+}
+
+/**
+ * Chrome Dev / Unstable and Beta. Only separate from `regular` chrome on Linux
+ */
+if (AppConstants.platform != "win" && AppConstants.platform != "macosx") {
+  function ChromeDevMigrator() {
+    this._chromeUserDataPathSuffix = "Chrome Dev";
+  }
+  ChromeDevMigrator.prototype = Object.create(ChromeProfileMigrator.prototype);
+  ChromeDevMigrator.prototype.classDescription = "Chrome Dev Profile Migrator";
+  ChromeDevMigrator.prototype.contractID = "@mozilla.org/profile/migrator;1?app=browser&type=chrome-dev";
+  ChromeDevMigrator.prototype.classID = Components.ID("{7370a02a-4886-42c3-a4ec-d48c726ec30a}");
+
+  function ChromeBetaMigrator() {
+    this._chromeUserDataPathSuffix = "Chrome Beta";
+  }
+  ChromeBetaMigrator.prototype = Object.create(ChromeProfileMigrator.prototype);
+  ChromeBetaMigrator.prototype.classDescription = "Chrome Beta Profile Migrator";
+  ChromeBetaMigrator.prototype.contractID = "@mozilla.org/profile/migrator;1?app=browser&type=chrome-beta";
+  ChromeBetaMigrator.prototype.classID = Components.ID("{47f75963-840b-4950-a1f0-d9c1864f8b8e}");
+
+  componentsArray.push(ChromeDevMigrator, ChromeBetaMigrator);
 }
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory(componentsArray);

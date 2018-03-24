@@ -38,12 +38,6 @@ nsButtonFrameRenderer::nsButtonFrameRenderer()
 nsButtonFrameRenderer::~nsButtonFrameRenderer()
 {
   MOZ_COUNT_DTOR(nsButtonFrameRenderer);
-
-#ifdef DEBUG
-  if (mInnerFocusStyle) {
-    mInnerFocusStyle->FrameRelease();
-  }
-#endif
 }
 
 void
@@ -97,11 +91,6 @@ public:
     mozilla::layers::WebRenderLayerManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) override;
 
-  virtual already_AddRefed<Layer> BuildLayer(
-    nsDisplayListBuilder* aBuilder,
-    LayerManager* aManager,
-    const ContainerLayerParameters& aContainerParameters) override;
-
   bool CanBuildWebRenderDisplayItems();
 
   virtual void Paint(nsDisplayListBuilder* aBuilder,
@@ -147,15 +136,6 @@ nsDisplayButtonBoxShadowOuter::CanBuildWebRenderDisplayItems()
   }
 
   return true;
-}
-
-already_AddRefed<Layer>
-nsDisplayButtonBoxShadowOuter::BuildLayer(
-  nsDisplayListBuilder* aBuilder,
-  LayerManager* aManager,
-  const ContainerLayerParameters& aContainerParameters)
-{
-  return BuildDisplayItemLayer(aBuilder, aManager, aContainerParameters);
 }
 
 bool
@@ -260,9 +240,6 @@ public:
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
                                          nsRegion *aInvalidRegion) const override;
-  virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
-                                             LayerManager* aManager,
-                                             const ContainerLayerParameters& aContainerParameters) override;
   virtual bool CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
                                        mozilla::wr::IpcResourceUpdateQueue& aResources,
                                        const StackingContextHelper& aSc,
@@ -277,14 +254,6 @@ nsDisplayItemGeometry*
 nsDisplayButtonBorder::AllocateGeometry(nsDisplayListBuilder* aBuilder)
 {
   return new nsDisplayItemGenericImageGeometry(this, aBuilder);
-}
-
-already_AddRefed<Layer>
-nsDisplayButtonBorder::BuildLayer(nsDisplayListBuilder* aBuilder,
-                                  LayerManager* aManager,
-                                  const ContainerLayerParameters& aContainerParameters)
-{
-  return BuildDisplayItemLayer(aBuilder, aManager, aContainerParameters);
 }
 
 bool
@@ -312,7 +281,7 @@ nsDisplayButtonBorder::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& 
                                        mFrame,
                                        nsRect(),
                                        nsRect(ToReferenceFrame(), mFrame->GetSize()),
-                                       mFrame->StyleContext(),
+                                       mFrame->Style(),
                                        &borderIsEmpty,
                                        mFrame->GetSkipSides());
   if (!br) {
@@ -384,9 +353,6 @@ public:
                                  nsRegion *aInvalidRegion) const override;
   virtual void Paint(nsDisplayListBuilder* aBuilder,
                      gfxContext* aCtx) override;
-  virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
-                                             LayerManager* aManager,
-                                             const ContainerLayerParameters& aContainerParameters) override;
    virtual bool CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
                                         mozilla::wr::IpcResourceUpdateQueue& aResources,
                                         const StackingContextHelper& aSc,
@@ -435,14 +401,6 @@ void nsDisplayButtonForeground::Paint(nsDisplayListBuilder* aBuilder,
 
     nsDisplayItemGenericImageGeometry::UpdateDrawResult(this, result);
   }
-}
-
-already_AddRefed<mozilla::layers::Layer>
-nsDisplayButtonForeground::BuildLayer(nsDisplayListBuilder* aBuilder,
-                                      LayerManager* aManager,
-                                      const ContainerLayerParameters& aContainerParameters)
-{
-  return BuildDisplayItemLayer(aBuilder, aManager, aContainerParameters);
 }
 
 bool
@@ -577,7 +535,7 @@ nsButtonFrameRenderer::PaintBorder(
 {
   // get the button rect this is inside the focus and outline rects
   nsRect buttonRect = aRect;
-  nsStyleContext* context = mFrame->StyleContext();
+  ComputedStyle* context = mFrame->Style();
 
   PaintBorderFlags borderFlags = aBuilder->ShouldSyncDecodeImages()
                                ? PaintBorderFlags::SYNC_DECODE_IMAGES
@@ -600,30 +558,18 @@ void
 nsButtonFrameRenderer::ReResolveStyles(nsPresContext* aPresContext)
 {
   // get all the styles
-  nsStyleContext* context = mFrame->StyleContext();
+  ComputedStyle* context = mFrame->Style();
   StyleSetHandle styleSet = aPresContext->StyleSet();
-
-#ifdef DEBUG
-  if (mInnerFocusStyle) {
-    mInnerFocusStyle->FrameRelease();
-  }
-#endif
 
   // get styles assigned to -moz-inner-focus (ie dotted border on Windows)
   mInnerFocusStyle =
     styleSet->ProbePseudoElementStyle(mFrame->GetContent()->AsElement(),
                                       CSSPseudoElementType::mozFocusInner,
                                       context);
-
-#ifdef DEBUG
-  if (mInnerFocusStyle) {
-    mInnerFocusStyle->FrameAddRef();
-  }
-#endif
 }
 
-nsStyleContext*
-nsButtonFrameRenderer::GetStyleContext(int32_t aIndex) const
+ComputedStyle*
+nsButtonFrameRenderer::GetComputedStyle(int32_t aIndex) const
 {
   switch (aIndex) {
   case NS_BUTTON_RENDERER_FOCUS_INNER_CONTEXT_INDEX:
@@ -634,19 +580,11 @@ nsButtonFrameRenderer::GetStyleContext(int32_t aIndex) const
 }
 
 void
-nsButtonFrameRenderer::SetStyleContext(int32_t aIndex, nsStyleContext* aStyleContext)
+nsButtonFrameRenderer::SetComputedStyle(int32_t aIndex, ComputedStyle* aComputedStyle)
 {
   switch (aIndex) {
   case NS_BUTTON_RENDERER_FOCUS_INNER_CONTEXT_INDEX:
-#ifdef DEBUG
-    if (mInnerFocusStyle) {
-      mInnerFocusStyle->FrameRelease();
-    }
-#endif
-    mInnerFocusStyle = aStyleContext;
+    mInnerFocusStyle = aComputedStyle;
     break;
   }
-#ifdef DEBUG
-  aStyleContext->FrameAddRef();
-#endif
 }

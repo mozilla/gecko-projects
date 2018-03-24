@@ -24,8 +24,9 @@
 #include "gc/FreeOp.h"
 #include "jit/ExecutableAllocator.h"
 #include "jit/MacroAssembler.h"
+#include "util/StringBuffer.h"
+#include "util/Text.h"
 #include "vm/Debugger.h"
-#include "vm/StringBuffer.h"
 #include "wasm/WasmBinaryToText.h"
 #include "wasm/WasmInstance.h"
 #include "wasm/WasmValidate.h"
@@ -580,6 +581,8 @@ DebugState::getGlobal(Instance& instance, uint32_t globalIndex, MutableHandleVal
 
     uint8_t* globalData = instance.globalData();
     void* dataPtr = globalData + global.offset();
+    if (global.isIndirect())
+        dataPtr = *static_cast<void**>(dataPtr);
     switch (global.type()) {
       case ValType::I32: {
         vp.set(Int32Value(*static_cast<int32_t*>(dataPtr)));

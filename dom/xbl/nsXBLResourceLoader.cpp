@@ -4,11 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsCSSFrameConstructor.h"
 #include "nsTArray.h"
 #include "nsString.h"
-#ifdef MOZ_OLD_STYLE
-#include "nsIStyleRuleProcessor.h"
-#endif
 #include "nsIDocument.h"
 #include "nsIContent.h"
 #include "nsIPresShell.h"
@@ -19,22 +17,15 @@
 #include "nsIDocumentObserver.h"
 #include "imgILoader.h"
 #include "imgRequestProxy.h"
+#include "mozilla/ComputedStyle.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/StyleSheetInlines.h"
 #include "mozilla/css/Loader.h"
 #include "nsIURI.h"
 #include "nsNetUtil.h"
 #include "nsGkAtoms.h"
-#include "nsFrameManager.h"
-#include "nsStyleContext.h"
 #include "nsXBLPrototypeBinding.h"
-#ifdef MOZ_OLD_STYLE
-#include "nsCSSRuleProcessor.h"
-#endif
 #include "nsContentUtils.h"
-#ifdef MOZ_OLD_STYLE
-#include "nsStyleSet.h"
-#endif
 #include "nsIScriptSecurityManager.h"
 
 using namespace mozilla;
@@ -192,11 +183,7 @@ nsXBLResourceLoader::StyleSheetLoaded(StyleSheet* aSheet,
   if (mPendingSheets == 0) {
     // All stylesheets are loaded.
     if (aSheet->IsGecko()) {
-#ifdef MOZ_OLD_STYLE
-      mResources->GatherRuleProcessor();
-#else
       MOZ_CRASH("old style system disabled");
-#endif
     } else {
       mResources->ComputeServoStyles(
         *mBoundDocument->GetShell()->StyleSet()->AsServo());
@@ -271,11 +258,11 @@ nsXBLResourceLoader::NotifyBoundElements()
           nsIFrame* childFrame = content->GetPrimaryFrame();
           if (!childFrame) {
             // Check if it's in the display:none or display:contents maps.
-            nsStyleContext* sc =
-              shell->FrameManager()->GetDisplayNoneStyleFor(content);
+            ComputedStyle* sc =
+              shell->FrameConstructor()->GetDisplayNoneStyleFor(content);
 
             if (!sc) {
-              sc = shell->FrameManager()->GetDisplayContentsStyleFor(content);
+              sc = shell->FrameConstructor()->GetDisplayContentsStyleFor(content);
             }
 
             if (!sc) {

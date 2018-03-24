@@ -859,7 +859,7 @@ HTMLImageElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 }
 
 #ifdef DEBUG
-nsIDOMHTMLFormElement*
+HTMLFormElement*
 HTMLImageElement::GetForm() const
 {
   return mForm;
@@ -867,13 +867,13 @@ HTMLImageElement::GetForm() const
 #endif
 
 void
-HTMLImageElement::SetForm(nsIDOMHTMLFormElement* aForm)
+HTMLImageElement::SetForm(HTMLFormElement* aForm)
 {
   NS_PRECONDITION(aForm, "Don't pass null here");
   NS_ASSERTION(!mForm,
                "We don't support switching from one non-null form to another.");
 
-  mForm = static_cast<HTMLFormElement*>(aForm);
+  mForm = aForm;
 }
 
 void
@@ -1043,7 +1043,7 @@ HTMLImageElement::PictureSourceSrcsetChanged(nsIContent *aSourceNode,
     nsCOMPtr<nsIPrincipal> principal;
     if (aSourceNode == this) {
       principal = mSrcsetTriggeringPrincipal;
-    } else if (auto* source = HTMLSourceElement::FromContent(aSourceNode)) {
+    } else if (auto* source = HTMLSourceElement::FromNode(aSourceNode)) {
       principal = source->GetSrcsetTriggeringPrincipal();
     }
     mResponsiveSelector->SetCandidatesFromSourceSet(aNewValue, principal);
@@ -1239,7 +1239,7 @@ HTMLImageElement::TryCreateResponsiveSelector(Element* aSourceElement)
     if (!SourceElementMatches(aSourceElement)) {
       return false;
     }
-    auto* source = HTMLSourceElement::FromContent(aSourceElement);
+    auto* source = HTMLSourceElement::FromNode(aSourceElement);
     principal = source->GetSrcsetTriggeringPrincipal();
   } else if (aSourceElement->IsHTMLElement(nsGkAtoms::img)) {
     // Otherwise this is the <img> tag itself

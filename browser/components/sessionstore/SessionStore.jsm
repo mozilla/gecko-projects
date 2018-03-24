@@ -165,7 +165,7 @@ XPCOMUtils.defineLazyServiceGetters(this, {
 XPCOMUtils.defineLazyModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.jsm",
   AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
-  DevToolsShim: "chrome://devtools-shim/content/DevToolsShim.jsm",
+  DevToolsShim: "chrome://devtools-startup/content/DevToolsShim.jsm",
   GlobalState: "resource:///modules/sessionstore/GlobalState.jsm",
   PrivacyFilter: "resource:///modules/sessionstore/PrivacyFilter.jsm",
   PromiseUtils: "resource://gre/modules/PromiseUtils.jsm",
@@ -451,7 +451,7 @@ var SessionStoreInternal = {
   // they get restored).
   _crashedBrowsers: new WeakSet(),
 
-  // A map (xul:browser -> nsIFrameLoader) that maps a browser to the last
+  // A map (xul:browser -> FrameLoader) that maps a browser to the last
   // associated frameLoader we heard about.
   _lastKnownFrameLoader: new WeakMap(),
 
@@ -3547,7 +3547,7 @@ var SessionStoreInternal = {
    *        a tab to speculatively connect on mouse hover.
    */
   speculativeConnectOnTabHover(tab) {
-    if (this._restore_on_demand && !tab.__SS_connectionPrepared && tab.hasAttribute("pending")) {
+    if (tab.__SS_lazyData && !tab.__SS_connectionPrepared) {
       let url = this.getLazyTabValue(tab, "url");
       let prepared = this.prepareConnectionToHost(url);
       // This is used to test if a connection has been made beforehand.

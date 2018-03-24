@@ -27,8 +27,6 @@ ChromeUtils.defineModuleGetter(this, "AppConstants",
                                "resource://gre/modules/AppConstants.jsm");
 XPCOMUtils.defineLazyGetter(this, "CertUtils",
                             () => ChromeUtils.import("resource://gre/modules/CertUtils.jsm", {}));
-ChromeUtils.defineModuleGetter(this, "ChromeManifestParser",
-                               "resource://gre/modules/ChromeManifestParser.jsm");
 ChromeUtils.defineModuleGetter(this, "ExtensionData",
                                "resource://gre/modules/Extension.jsm");
 ChromeUtils.defineModuleGetter(this, "FileUtils",
@@ -62,13 +60,14 @@ ChromeUtils.defineModuleGetter(this, "XPIInternal",
 ChromeUtils.defineModuleGetter(this, "XPIProvider",
                                "resource://gre/modules/addons/XPIProvider.jsm");
 
-/* globals AddonInternal, BOOTSTRAP_REASONS, KEY_APP_SYSTEM_ADDONS, KEY_APP_SYSTEM_DEFAULTS, KEY_APP_TEMPORARY, TEMPORARY_ADDON_SUFFIX, TOOLKIT_ID, XPIDatabase, XPIStates, getExternalType, isTheme, isUsableAddon, isWebExtension, recordAddonTelemetry */
+/* globals AddonInternal, BOOTSTRAP_REASONS, KEY_APP_SYSTEM_ADDONS, KEY_APP_SYSTEM_DEFAULTS, KEY_APP_TEMPORARY, TEMPORARY_ADDON_SUFFIX, SIGNED_TYPES, TOOLKIT_ID, XPIDatabase, XPIStates, getExternalType, isTheme, isUsableAddon, isWebExtension, mustSign, recordAddonTelemetry */
 const XPI_INTERNAL_SYMBOLS = [
   "AddonInternal",
   "BOOTSTRAP_REASONS",
   "KEY_APP_SYSTEM_ADDONS",
   "KEY_APP_SYSTEM_DEFAULTS",
   "KEY_APP_TEMPORARY",
+  "SIGNED_TYPES",
   "TEMPORARY_ADDON_SUFFIX",
   "TOOLKIT_ID",
   "XPIDatabase",
@@ -77,6 +76,7 @@ const XPI_INTERNAL_SYMBOLS = [
   "isTheme",
   "isUsableAddon",
   "isWebExtension",
+  "mustSign",
   "recordAddonTelemetry",
 ];
 
@@ -116,7 +116,6 @@ function getFile(path, base = null) {
 const PREF_EM_UPDATE_BACKGROUND_URL   = "extensions.update.background.url";
 const PREF_EM_UPDATE_URL              = "extensions.update.url";
 const PREF_XPI_SIGNATURES_DEV_ROOT    = "xpinstall.signatures.dev-root";
-const PREF_XPI_UNPACK                 = "extensions.alwaysUnpack";
 const PREF_INSTALL_REQUIREBUILTINCERTS = "extensions.install.requireBuiltInCerts";
 const FILE_RDF_MANIFEST               = "install.rdf";
 const FILE_WEB_MANIFEST               = "manifest.json";
@@ -128,7 +127,7 @@ const PREFIX_NS_EM                    = "http://www.mozilla.org/2004/em-rdf#";
 
 // Properties that exist in the install manifest
 const PROP_METADATA      = ["id", "version", "type", "internalName", "updateURL",
-                            "updateKey", "optionsURL", "optionsType", "aboutURL",
+                            "optionsURL", "optionsType", "aboutURL",
                             "iconURL", "icon64URL"];
 const PROP_LOCALE_SINGLE = ["name", "description", "creator", "homepageURL"];
 const PROP_LOCALE_MULTI  = ["developers", "translators", "contributors"];
@@ -159,29 +158,12 @@ const RESTARTLESS_TYPES = new Set([
   "webextension-theme",
 ]);
 
-const SIGNED_TYPES = new Set([
-  "apiextension",
-  "extension",
-  "experiment",
-  "webextension",
-  "webextension-theme",
-]);
-
-
 // This is a random number array that can be used as "salt" when generating
 // an automatic ID based on the directory path of an add-on. It will prevent
 // someone from creating an ID for a permanent add-on that could be replaced
 // by a temporary add-on (because that would be confusing, I guess).
 const TEMP_INSTALL_ID_GEN_SESSION =
   new Uint8Array(Float64Array.of(Math.random()).buffer);
-
-// Whether add-on signing is required.
-function mustSign(aType) {
-  if (!SIGNED_TYPES.has(aType))
-    return false;
-
-  return AddonSettings.REQUIRE_SIGNING;
-}
 
 const MSG_JAR_FLUSH = "AddonJarFlush";
 const MSG_MESSAGE_MANAGER_CACHES_FLUSH = "AddonMessageManagerCachesFlush";
@@ -340,14 +322,10 @@ async function loadManifestFromWebManifest(aUri) {
   addon.version = manifest.version;
   addon.type = extension.type === "extension" ?
                "webextension" : `webextension-${extension.type}`;
-  addon.unpack = false;
   addon.strictCompatibility = true;
   addon.bootstrap = true;
-  addon.hasBinaryComponents = false;
-  addon.multiprocessCompatible = true;
   addon.internalName = null;
   addon.updateURL = bss.update_url;
-  addon.updateKey = null;
   addon.optionsBrowserStyle = true;
   addon.optionsURL = null;
   addon.optionsType = null;
@@ -542,7 +520,6 @@ async function loadManifestFromRDF(aUri, aStream) {
   for (let prop of PROP_METADATA) {
     addon[prop] = getRDFProperty(ds, root, prop);
   }
-  addon.unpack = getRDFProperty(ds, root, "unpack") == "true";
 
   if (!addon.type) {
     addon.type = addon.internalName ? "theme" : "extension";
@@ -573,10 +550,6 @@ async function loadManifestFromRDF(aUri, aStream) {
   // Only read these properties for extensions.
   if (addon.type == "extension") {
     addon.bootstrap = getRDFProperty(ds, root, "bootstrap") == "true";
-
-    let mpcValue = getRDFProperty(ds, root, "multiprocessCompatible");
-    addon.multiprocessCompatible = mpcValue == "true";
-    addon.mpcOptedOut = mpcValue == "false";
 
     addon.hasEmbeddedWebExtension = getRDFProperty(ds, root, "hasEmbeddedWebExtension") == "true";
 
@@ -705,7 +678,6 @@ async function loadManifestFromRDF(aUri, aStream) {
   if (addon.type == "experiment") {
     addon.applyBackgroundUpdates = AddonManager.AUTOUPDATE_DISABLE;
     addon.updateURL = null;
-    addon.updateKey = null;
   }
 
   // icons will be filled by the calling function
@@ -803,11 +775,6 @@ var loadManifestFromDir = async function(aDir, aInstallLocation) {
     if (icon64File.exists()) {
       addon.icons[64] = "icon64.png";
     }
-
-    let file = getFile("chrome.manifest", aDir);
-    let chromeManifest = ChromeManifestParser.parseSync(Services.io.newFileURI(file));
-    addon.hasBinaryComponents = ChromeManifestParser.hasType(chromeManifest,
-                                                             "binary-component");
     return addon;
   }
 
@@ -874,16 +841,6 @@ var loadManifestFromZipReader = async function(aZipReader, aInstallLocation) {
 
     if (aZipReader.hasEntry("icon64.png")) {
       addon.icons[64] = "icon64.png";
-    }
-
-    // Binary components can only be loaded from unpacked addons.
-    if (addon.unpack) {
-      let uri = buildJarURI(aZipReader.file, "chrome.manifest");
-      let chromeManifest = ChromeManifestParser.parseSync(uri);
-      addon.hasBinaryComponents = ChromeManifestParser.hasType(chromeManifest,
-                                                               "binary-component");
-    } else {
-      addon.hasBinaryComponents = false;
     }
 
     return addon;
@@ -1434,6 +1391,18 @@ class AddonInstall {
   }
 
   /**
+   * Called during XPIProvider shutdown so that we can do any necessary
+   * pre-shutdown cleanup.
+   */
+  onShutdown() {
+    switch (this.state) {
+    case AddonManager.STATE_POSTPONED:
+      this.removeTemporaryFile();
+      break;
+    }
+  }
+
+  /**
    * Cancels installation of this add-on.
    *
    * Note this method is overridden to handle additional state in
@@ -1718,6 +1687,7 @@ class AddonInstall {
     if (!AddonManagerPrivate.callInstallListeners("onInstallStarted",
                                                   this.listeners, this.wrapper)) {
       this.state = AddonManager.STATE_DOWNLOADED;
+      this.removeTemporaryFile();
       XPIProvider.removeActiveInstall(this);
       AddonManagerPrivate.callInstallListeners("onInstallCancelled",
                                                this.listeners, this.wrapper);
@@ -1747,8 +1717,6 @@ class AddonInstall {
     let stagedAddon = this.installLocation.getStagingDir();
 
     (async () => {
-      let installedUnpacked = 0;
-
       await this.installLocation.requestStagingDir();
 
       // remove any previously staged files
@@ -1756,7 +1724,7 @@ class AddonInstall {
 
       stagedAddon.append(`${this.addon.id}.xpi`);
 
-      installedUnpacked = await this.stageInstall(requiresRestart, stagedAddon, isUpgrade);
+      await this.stageInstall(requiresRestart, stagedAddon, isUpgrade);
 
       if (requiresRestart) {
         this.state = AddonManager.STATE_INSTALLED;
@@ -1860,7 +1828,6 @@ class AddonInstall {
             XPIProvider.unloadBootstrapScope(this.addon.id);
           }
         }
-        XPIProvider.setTelemetry(this.addon.id, "unpacked", installedUnpacked);
         recordAddonTelemetry(this.addon);
 
         // Notify providers that a new theme has been enabled.
@@ -1893,16 +1860,13 @@ class AddonInstall {
     let stagedJSON = stagedAddon.clone();
     stagedJSON.leafName = this.addon.id + ".json";
 
-    let installedUnpacked = 0;
-
     // First stage the file regardless of whether restarting is necessary
-    if (this.addon.unpack || Services.prefs.getBoolPref(PREF_XPI_UNPACK, false)) {
+    if (this.addon.unpack) {
       logger.debug("Addon " + this.addon.id + " will be installed as " +
                    "an unpacked directory");
       stagedAddon.leafName = this.addon.id;
       await OS.File.makeDir(stagedAddon.path);
       await ZipUtils.extractFilesAsync(this.file, stagedAddon);
-      installedUnpacked = 1;
     } else {
       logger.debug(`Addon ${this.addon.id} will be installed as a packed xpi`);
       stagedAddon.leafName = this.addon.id + ".xpi";
@@ -1923,8 +1887,6 @@ class AddonInstall {
         this.existingAddon.pendingUpgrade = this.addon;
       }
     }
-
-    return installedUnpacked;
   }
 
   /**
@@ -2691,8 +2653,7 @@ var UpdateChecker = function(aAddon, aListener, aReason, aAppVersion, aPlatformV
     aReason |= UPDATE_TYPE_NEWVERSION;
 
   let url = escapeAddonURI(aAddon, updateURL, aReason, aAppVersion);
-  this._parser = AddonUpdateChecker.checkForUpdates(aAddon.id, aAddon.updateKey,
-                                                    url, this);
+  this._parser = AddonUpdateChecker.checkForUpdates(aAddon.id, url, this);
 };
 
 UpdateChecker.prototype = {
@@ -2738,8 +2699,7 @@ UpdateChecker.prototype = {
       ignoreStrictCompat = true;
     } else if (this.addon.type in COMPATIBLE_BY_DEFAULT_TYPES &&
                !AddonManager.strictCompatibility &&
-               !this.addon.strictCompatibility &&
-               !this.addon.hasBinaryComponents) {
+               !this.addon.strictCompatibility) {
       ignoreMaxVersion = true;
     }
 

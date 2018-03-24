@@ -409,6 +409,11 @@ void Assembler::nop(Instruction* at) {
 }
 
 
+void Assembler::csdb(Instruction* at) {
+  hint(at, CSDB);
+}
+
+
 BufferOffset Assembler::Logical(const Register& rd, const Register& rn,
                                 const Operand operand, LogicalOp op)
 {
@@ -534,7 +539,7 @@ struct PoolHeader {
 	// "Natural" guards are part of the normal instruction stream,
 	// while "non-natural" guards are inserted for the sole purpose
 	// of skipping around a pool.
-        bool isNatural : 1;
+        uint32_t isNatural : 1;
         uint32_t ONES : 16;
       };
       uint32_t data;
@@ -549,12 +554,12 @@ struct PoolHeader {
     Header(uint32_t data)
       : data(data)
     {
-      JS_STATIC_ASSERT(sizeof(Header) == sizeof(uint32_t));
+      VIXL_STATIC_ASSERT(sizeof(Header) == sizeof(uint32_t));
       VIXL_ASSERT(ONES == 0xffff);
     }
 
     uint32_t raw() const {
-      JS_STATIC_ASSERT(sizeof(Header) == sizeof(uint32_t));
+      VIXL_STATIC_ASSERT(sizeof(Header) == sizeof(uint32_t));
       return data;
     }
   };

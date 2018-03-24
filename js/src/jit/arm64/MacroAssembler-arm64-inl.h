@@ -359,6 +359,7 @@ MacroAssembler::sub32FromStackPtrWithPatch(Register dest)
 {
     vixl::UseScratchRegisterScope temps(this);
     const ARMRegister scratch = temps.AcquireX();
+    AutoForbidPools afp(this, /* max number of instructions in scope = */ 3);
     CodeOffset offs = CodeOffset(currentOffset());
     movz(scratch, 0, 0);
     movk(scratch, 0, 16);
@@ -1867,7 +1868,14 @@ MacroAssembler::spectreMovePtr(Condition cond, Register src, Register dest)
 }
 
 void
-MacroAssembler::boundsCheck32ForLoad(Register index, Register length, Register scratch,
+MacroAssembler::spectreZeroRegister(Condition cond, Register, Register dest)
+{
+    Csel(ARMRegister(dest, 64), ARMRegister(dest, 64), vixl::xzr,
+         Assembler::InvertCondition(cond));
+}
+
+void
+MacroAssembler::spectreBoundsCheck32(Register index, Register length, Register scratch,
                                      Label* failure)
 {
     MOZ_ASSERT(index != length);
@@ -1881,7 +1889,7 @@ MacroAssembler::boundsCheck32ForLoad(Register index, Register length, Register s
 }
 
 void
-MacroAssembler::boundsCheck32ForLoad(Register index, const Address& length, Register scratch,
+MacroAssembler::spectreBoundsCheck32(Register index, const Address& length, Register scratch,
                                      Label* failure)
 {
     MOZ_ASSERT(index != length.base);

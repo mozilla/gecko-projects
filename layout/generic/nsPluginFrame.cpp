@@ -140,8 +140,8 @@ protected:
   nsPluginFrame* mFrame;
 };
 
-nsPluginFrame::nsPluginFrame(nsStyleContext* aContext)
-  : nsFrame(aContext, kClassID)
+nsPluginFrame::nsPluginFrame(ComputedStyle* aStyle)
+  : nsFrame(aStyle, kClassID)
   , mInstanceOwner(nullptr)
   , mOuterView(nullptr)
   , mInnerView(nullptr)
@@ -221,7 +221,7 @@ nsPluginFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestro
 }
 
 /* virtual */ void
-nsPluginFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
+nsPluginFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
 {
   if (HasView()) {
     nsView* view = GetView();
@@ -233,7 +233,7 @@ nsPluginFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
     }
   }
 
-  nsFrame::DidSetStyleContext(aOldStyleContext);
+  nsFrame::DidSetComputedStyle(aOldComputedStyle);
 }
 
 #ifdef DEBUG_FRAME_DUMP
@@ -280,7 +280,7 @@ nsPluginFrame::PrepForDrawing(nsIWidget *aWidget)
 
   if (mWidget) {
     // Disallow windowed plugins in popups
-    nsIFrame* rootFrame = rpc->PresShell()->FrameManager()->GetRootFrame();
+    nsIFrame* rootFrame = rpc->PresShell()->GetRootFrame();
     nsIWidget* parentWidget = rootFrame->GetNearestWidget();
     if (!parentWidget || nsLayoutUtils::GetDisplayRootFrame(this) != rootFrame) {
       return NS_ERROR_FAILURE;
@@ -632,7 +632,7 @@ nsPluginFrame::CallSetWindow(bool aCheckIsHidden)
   if (!rootPC)
     return NS_ERROR_FAILURE;
   int32_t appUnitsPerDevPixel = presContext->AppUnitsPerDevPixel();
-  nsIFrame* rootFrame = rootPC->PresShell()->FrameManager()->GetRootFrame();
+  nsIFrame* rootFrame = rootPC->PresShell()->GetRootFrame();
   nsRect bounds = GetContentRectRelativeToSelf() + GetOffsetToCrossDoc(rootFrame);
   nsIntRect intBounds = bounds.ToNearestPixels(appUnitsPerDevPixel);
 
@@ -1442,8 +1442,12 @@ nsPluginFrame::CreateWebRenderCommands(nsDisplayItem* aItem,
   }
   lm->AddDidCompositeObserver(mDidCompositeObserver.get());
 
+  // If the image container is empty, we don't want to fallback. Any other
+  // failure will be due to resource constraints and fallback is unlikely to
+  // help us. Hence we can ignore the return value from PushImage.
   LayoutDeviceRect dest(r.x, r.y, size.width, size.height);
-  return aManager->CommandBuilder().PushImage(aItem, container, aBuilder, aResources, aSc, dest);
+  aManager->CommandBuilder().PushImage(aItem, container, aBuilder, aResources, aSc, dest);
+  return true;
 }
 
 
@@ -1813,9 +1817,9 @@ nsPluginFrame::EndSwapDocShells(nsISupports* aSupports, void*)
 }
 
 nsIFrame*
-NS_NewObjectFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewObjectFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsPluginFrame(aContext);
+  return new (aPresShell) nsPluginFrame(aStyle);
 }
 
 bool

@@ -456,8 +456,7 @@ IonBuilder::canInlineTarget(JSFunction* target, CallInfo& callInfo)
         return DontInline(inlineScript, "Not constructing class constructor");
     }
 
-    AnalysisMode analysisMode = info().analysisMode();
-    if (!CanIonCompile(inlineScript, analysisMode)) {
+    if (!CanIonInlineScript(inlineScript)) {
         trackOptimizationOutcome(TrackedOutcome::CantInlineDisabledIon);
         return DontInline(inlineScript, "Disabled Ion compilation");
     }
@@ -6520,7 +6519,7 @@ IonBuilder::jsop_initprop(PropertyName* name)
             }
         }
     }
-    MInstruction* last = *current->rbegin();
+    MInstructionReverseIterator last = current->rbegin();
 
     if (useFastPath && !forceInlineCaches()) {
         // This is definitely initializing an 'own' property of the object, treat
@@ -6542,7 +6541,7 @@ IonBuilder::jsop_initprop(PropertyName* name)
     // and check the most recent resume point to see if it needs updating too.
     current->pop();
     current->push(obj);
-    for (MInstructionReverseIterator riter = current->rbegin(); *riter != last; riter++) {
+    for (MInstructionReverseIterator riter = current->rbegin(); riter != last; riter++) {
         if (MResumePoint* resumePoint = riter->resumePoint()) {
             MOZ_ASSERT(resumePoint->pc() == pc);
             if (resumePoint->mode() == MResumePoint::ResumeAfter) {
@@ -7894,8 +7893,7 @@ bool
 IonBuilder::checkTypedObjectIndexInBounds(uint32_t elemSize,
                                           MDefinition* index,
                                           TypedObjectPrediction objPrediction,
-                                          LinearSum* indexAsByteOffset,
-                                          BoundsCheckKind kind)
+                                          LinearSum* indexAsByteOffset)
 {
     // Ensure index is an integer.
     MInstruction* idInt32 = MToNumberInt32::New(alloc(), index);
@@ -7922,7 +7920,7 @@ IonBuilder::checkTypedObjectIndexInBounds(uint32_t elemSize,
         return false;
     }
 
-    index = addBoundsCheck(idInt32, length, kind);
+    index = addBoundsCheck(idInt32, length);
 
     return indexAsByteOffset->add(index, AssertedCast<int32_t>(elemSize));
 }
@@ -7942,11 +7940,8 @@ IonBuilder::getElemTryScalarElemOfTypedObject(bool* emitted,
     MOZ_ASSERT(elemSize == ScalarTypeDescr::alignment(elemType));
 
     LinearSum indexAsByteOffset(alloc());
-    if (!checkTypedObjectIndexInBounds(elemSize, index, objPrediction, &indexAsByteOffset,
-                                       BoundsCheckKind::IsLoad))
-    {
+    if (!checkTypedObjectIndexInBounds(elemSize, index, objPrediction, &indexAsByteOffset))
         return Ok();
-    }
 
     trackOptimizationSuccess();
     *emitted = true;
@@ -7967,11 +7962,8 @@ IonBuilder::getElemTryReferenceElemOfTypedObject(bool* emitted,
     uint32_t elemSize = ReferenceTypeDescr::size(elemType);
 
     LinearSum indexAsByteOffset(alloc());
-    if (!checkTypedObjectIndexInBounds(elemSize, index, objPrediction, &indexAsByteOffset,
-                                       BoundsCheckKind::IsLoad))
-    {
+    if (!checkTypedObjectIndexInBounds(elemSize, index, objPrediction, &indexAsByteOffset))
         return Ok();
-    }
 
     trackOptimizationSuccess();
     *emitted = true;
@@ -8091,11 +8083,8 @@ IonBuilder::getElemTryComplexElemOfTypedObject(bool* emitted,
     MDefinition* elemTypeObj = typeObjectForElementFromArrayStructType(type);
 
     LinearSum indexAsByteOffset(alloc());
-    if (!checkTypedObjectIndexInBounds(elemSize, index, objPrediction, &indexAsByteOffset,
-                                       BoundsCheckKind::IsLoad))
-    {
+    if (!checkTypedObjectIndexInBounds(elemSize, index, objPrediction, &indexAsByteOffset))
         return Ok();
-    }
 
     return pushDerivedTypedObject(emitted, obj, indexAsByteOffset,
                                   elemPrediction, elemTypeObj);
@@ -8386,7 +8375,7 @@ IonBuilder::getElemTryString(bool* emitted, MDefinition* obj, MDefinition* index
     MStringLength* length = MStringLength::New(alloc(), obj);
     current->add(length);
 
-    index = addBoundsCheck(index, length, BoundsCheckKind::IsLoad);
+    index = addBoundsCheck(index, length);
 
     MCharCodeAt* charCode = MCharCodeAt::New(alloc(), obj, index);
     current->add(charCode);
@@ -8428,7 +8417,7 @@ IonBuilder::getElemTryArguments(bool* emitted, MDefinition* obj, MDefinition* in
     index = idInt32;
 
     // Bailouts if we read more than the number of actual arguments.
-    index = addBoundsCheck(index, length, BoundsCheckKind::IsLoad);
+    index = addBoundsCheck(index, length);
 
     // Load the argument from the actual arguments.
     bool modifiesArgs = script()->baselineScript()->modifiesArguments();
@@ -8516,8 +8505,7 @@ IonBuilder::getElemTryArgumentsInlinedIndex(bool* emitted, MDefinition* obj, MDe
     // cannot re-enter because reading out of bounds arguments will disable the
     // lazy arguments optimization for this script, when this code would be
     // executed in Baseline. (see GetElemOptimizedArguments)
-    index = addBoundsCheck(index, constantInt(inlineCallInfo_->argc()),
-                           BoundsCheckKind::IsLoad);
+    index = addBoundsCheck(index, constantInt(inlineCallInfo_->argc()));
 
     // Get an instruction to represent the state of the argument vector.
     MInstruction* args = MArgumentState::New(alloc().fallible(), inlineCallInfo_->argv());
@@ -8710,7 +8698,7 @@ IonBuilder::jsop_getelem_dense(MDefinition* obj, MDefinition* index)
         // in-bounds elements, and the array is packed or its holes are not
         // read. This is the best case: we can separate the bounds check for
         // hoisting.
-        index = addBoundsCheck(index, initLength, BoundsCheckKind::IsLoad);
+        index = addBoundsCheck(index, initLength);
 
         load = MLoadElement::New(alloc(), elements, index, needsHoleCheck, loadDouble);
         current->add(load);
@@ -8749,8 +8737,7 @@ void
 IonBuilder::addTypedArrayLengthAndData(MDefinition* obj,
                                        BoundsChecking checking,
                                        MDefinition** index,
-                                       MInstruction** length, MInstruction** elements,
-                                       BoundsCheckKind boundsCheckKind)
+                                       MInstruction** length, MInstruction** elements)
 {
     MOZ_ASSERT((index != nullptr) == (elements != nullptr));
 
@@ -8784,7 +8771,7 @@ IonBuilder::addTypedArrayLengthAndData(MDefinition* obj,
 
                 if (index) {
                     if (checking == DoBoundsCheck)
-                        *index = addBoundsCheck(*index, *length, boundsCheckKind);
+                        *index = addBoundsCheck(*index, *length);
 
                     *elements = MConstantElements::New(alloc(), data);
                     current->add(*elements);
@@ -8799,7 +8786,7 @@ IonBuilder::addTypedArrayLengthAndData(MDefinition* obj,
 
     if (index) {
         if (checking == DoBoundsCheck)
-            *index = addBoundsCheck(*index, *length, boundsCheckKind);
+            *index = addBoundsCheck(*index, *length);
 
         *elements = MTypedArrayElements::New(alloc(), obj);
         current->add(*elements);
@@ -8881,8 +8868,7 @@ IonBuilder::jsop_getelem_typed(MDefinition* obj, MDefinition* index,
         // Get length, bounds-check, then get elements, and add all instructions.
         MInstruction* length;
         MInstruction* elements;
-        addTypedArrayLengthAndData(obj, DoBoundsCheck, &index, &length, &elements,
-                                   BoundsCheckKind::IsLoad);
+        addTypedArrayLengthAndData(obj, DoBoundsCheck, &index, &length, &elements);
 
         // Load the element.
         MLoadUnboxedScalar* load = MLoadUnboxedScalar::New(alloc(), elements, index, arrayType);
@@ -9067,11 +9053,8 @@ IonBuilder::setElemTryReferenceElemOfTypedObject(bool* emitted,
     uint32_t elemSize = ReferenceTypeDescr::size(elemType);
 
     LinearSum indexAsByteOffset(alloc());
-    if (!checkTypedObjectIndexInBounds(elemSize, index, objPrediction, &indexAsByteOffset,
-                                       BoundsCheckKind::IsStore))
-    {
+    if (!checkTypedObjectIndexInBounds(elemSize, index, objPrediction, &indexAsByteOffset))
         return Ok();
-    }
 
     return setPropTryReferenceTypedObjectValue(emitted, obj, indexAsByteOffset,
                                                elemType, value, nullptr);
@@ -9091,11 +9074,8 @@ IonBuilder::setElemTryScalarElemOfTypedObject(bool* emitted,
     MOZ_ASSERT(elemSize == ScalarTypeDescr::alignment(elemType));
 
     LinearSum indexAsByteOffset(alloc());
-    if (!checkTypedObjectIndexInBounds(elemSize, index, objPrediction, &indexAsByteOffset,
-                                       BoundsCheckKind::IsStore))
-    {
+    if (!checkTypedObjectIndexInBounds(elemSize, index, objPrediction, &indexAsByteOffset))
         return Ok();
-    }
 
     return setPropTryScalarTypedObjectValue(emitted, obj, indexAsByteOffset, elemType, value);
 }
@@ -9390,7 +9370,7 @@ IonBuilder::initOrSetElemDense(TemporaryTypeSet::DoubleConversion conversion,
     } else {
         MInstruction* initLength = initializedLength(elements);
 
-        id = addBoundsCheck(id, initLength, BoundsCheckKind::IsStore);
+        id = addBoundsCheck(id, initLength);
         bool needsHoleCheck = !packed && hasExtraIndexedProperty;
 
         MStoreElement* ins = MStoreElement::New(alloc(), elements, id, newValue, needsHoleCheck);
@@ -9438,8 +9418,7 @@ IonBuilder::jsop_setelem_typed(Scalar::Type arrayType,
     MInstruction* length;
     MInstruction* elements;
     BoundsChecking checking = expectOOB ? SkipBoundsCheck : DoBoundsCheck;
-    addTypedArrayLengthAndData(obj, checking, &id, &length, &elements,
-                               BoundsCheckKind::IsStore);
+    addTypedArrayLengthAndData(obj, checking, &id, &length, &elements);
 
     // Clamp value to [0, 255] for Uint8ClampedArray.
     MDefinition* toWrite = value;
@@ -10037,7 +10016,7 @@ IonBuilder::freezePropertiesForCommonPrototype(TemporaryTypeSet* types, Property
 
         while (true) {
             HeapTypeSetKey property = key->property(NameToId(name));
-            JS_ALWAYS_TRUE(!property.isOwnProperty(constraints(), allowEmptyTypesforGlobal));
+            MOZ_ALWAYS_TRUE(!property.isOwnProperty(constraints(), allowEmptyTypesforGlobal));
 
             // Don't mark the proto. It will be held down by the shape
             // guard. This allows us to use properties found on prototypes
@@ -12978,7 +12957,7 @@ IonBuilder::inTryDense(bool* emitted, MDefinition* obj, MDefinition* id)
 
     // If there are no holes, speculate the InArray check will not fail.
     if (!needsHoleCheck && !failedBoundsCheck_) {
-        addBoundsCheck(idInt32, initLength, BoundsCheckKind::UnusedIndex);
+        addBoundsCheck(idInt32, initLength);
         pushConstant(BooleanValue(true));
         return Ok();
     }
@@ -13323,7 +13302,7 @@ IonBuilder::addMaybeCopyElementsForWrite(MDefinition* object, bool checkNative)
 }
 
 MInstruction*
-IonBuilder::addBoundsCheck(MDefinition* index, MDefinition* length, BoundsCheckKind kind)
+IonBuilder::addBoundsCheck(MDefinition* index, MDefinition* length)
 {
     MInstruction* check = MBoundsCheck::New(alloc(), index, length);
     current->add(check);
@@ -13332,7 +13311,20 @@ IonBuilder::addBoundsCheck(MDefinition* index, MDefinition* length, BoundsCheckK
     if (failedBoundsCheck_)
         check->setNotMovable();
 
-    if (kind == BoundsCheckKind::IsLoad && JitOptions.spectreIndexMasking) {
+    if (JitOptions.spectreIndexMasking) {
+        // Use a separate MIR instruction for the index masking. Doing this as
+        // part of MBoundsCheck would be unsound because bounds checks can be
+        // optimized or eliminated completely. Consider this:
+        //
+        //   for (var i = 0; i < x; i++)
+        //        res = arr[i];
+        //
+        // If we can prove |x < arr.length|, we are able to eliminate the bounds
+        // check, but we should not get rid of the index masking because the
+        // |i < x| branch could still be mispredicted.
+        //
+        // Using a separate instruction lets us eliminate the bounds check
+        // without affecting the index masking.
         check = MSpectreMaskIndex::New(alloc(), check, length);
         current->add(check);
     }

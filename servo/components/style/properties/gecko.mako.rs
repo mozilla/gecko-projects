@@ -78,7 +78,7 @@ pub mod style_structs {
 pub type ComputedValuesInner = ::gecko_bindings::structs::ServoComputedData;
 
 #[repr(C)]
-pub struct ComputedValues(::gecko_bindings::structs::mozilla::ServoStyleContext);
+pub struct ComputedValues(::gecko_bindings::structs::mozilla::ComputedStyle);
 
 impl ComputedValues {
     pub fn new(
@@ -126,17 +126,17 @@ impl ComputedValues {
     pub fn pseudo(&self) -> Option<PseudoElement> {
         use string_cache::Atom;
 
-        let atom = (self.0)._base.mPseudoTag.mRawPtr;
+        let atom = (self.0).mPseudoTag.mRawPtr;
         if atom.is_null() {
             return None;
         }
 
-        let atom = Atom::from(atom);
+        let atom = unsafe { Atom::from_raw(atom) };
         PseudoElement::from_atom(&atom)
     }
 
     fn get_pseudo_type(&self) -> CSSPseudoElementType {
-        let bits = (self.0)._base.mBits;
+        let bits = (self.0).mBits;
         let our_type = bits >> NS_STYLE_CONTEXT_TYPE_SHIFT;
         unsafe { transmute(our_type as u8) }
     }
@@ -167,7 +167,7 @@ impl ComputedValues {
 impl Drop for ComputedValues {
     fn drop(&mut self) {
         unsafe {
-            bindings::Gecko_ServoStyleContext_Destroy(&mut self.0);
+            bindings::Gecko_ComputedStyle_Destroy(&mut self.0);
         }
     }
 }
@@ -197,7 +197,7 @@ impl Clone for ComputedValuesInner {
 }
 
 type PseudoInfo = (*mut structs::nsAtom, structs::CSSPseudoElementType);
-type ParentStyleContextInfo<'a> = Option< &'a ComputedValues>;
+type ParentComputedStyleInfo<'a> = Option< &'a ComputedValues>;
 
 impl ComputedValuesInner {
     pub fn new(custom_properties: Option<Arc<CustomPropertiesMap>>,
@@ -224,7 +224,7 @@ impl ComputedValuesInner {
     fn to_outer(
         self,
         pres_context: RawGeckoPresContextBorrowed,
-        parent: ParentStyleContextInfo,
+        parent: ParentComputedStyleInfo,
         info: Option<PseudoInfo>
     ) -> Arc<ComputedValues> {
         let (tag, ty) = if let Some(info) = info {
@@ -239,13 +239,13 @@ impl ComputedValuesInner {
     unsafe fn to_outer_helper(
         self,
         pres_context: bindings::RawGeckoPresContextBorrowed,
-        parent: ParentStyleContextInfo,
+        parent: ParentComputedStyleInfo,
         pseudo_ty: structs::CSSPseudoElementType,
         pseudo_tag: *mut structs::nsAtom
     ) -> Arc<ComputedValues> {
         let arc = {
             let arc: Arc<ComputedValues> = Arc::new(uninitialized());
-            bindings::Gecko_ServoStyleContext_Init(&arc.0 as *const _ as *mut _,
+            bindings::Gecko_ComputedStyle_Init(&arc.0 as *const _ as *mut _,
                                                    parent, pres_context,
                                                    &self, pseudo_ty, pseudo_tag);
             // We're simulating a move by having C++ do a memcpy and then forgetting
@@ -696,7 +696,7 @@ def set_gecko_property(ffi_name, expr):
             }
             SVGPaintKind::PaintServer(url) => {
                 unsafe {
-                    bindings::Gecko_nsStyleSVGPaint_SetURLValue(paint, url.for_ffi());
+                    bindings::Gecko_nsStyleSVGPaint_SetURLValue(paint, url.url_value.get());
                 }
             }
             SVGPaintKind::Color(color) => {
@@ -936,18 +936,9 @@ def set_gecko_property(ffi_name, expr):
 <%def name="impl_css_url(ident, gecko_ffi_name)">
     #[allow(non_snake_case)]
     pub fn set_${ident}(&mut self, v: longhands::${ident}::computed_value::T) {
-        use gecko_bindings::sugar::refptr::RefPtr;
         match v {
             Either::First(url) => {
-                let refptr = unsafe {
-                    let ptr = bindings::Gecko_NewURLValue(url.for_ffi());
-                    if ptr.is_null() {
-                        self.gecko.${gecko_ffi_name}.clear();
-                        return;
-                    }
-                    RefPtr::from_addrefed(ptr)
-                };
-                self.gecko.${gecko_ffi_name}.set_move(refptr)
+                self.gecko.${gecko_ffi_name}.set_move(url.url_value.clone())
             }
             Either::Second(_none) => {
                 unsafe {
@@ -3257,12 +3248,15 @@ fn static_assert() {
         use gecko_bindings::structs::nsCSSPropertyID::eCSSPropertyExtra_no_properties;
         use gecko_bindings::structs::nsCSSPropertyID::eCSSPropertyExtra_variable;
         use gecko_bindings::structs::nsCSSPropertyID::eCSSProperty_UNKNOWN;
+        use Atom;
 
         let property = self.gecko.mTransitions[index].mProperty;
         if property == eCSSProperty_UNKNOWN || property == eCSSPropertyExtra_variable {
             let atom = self.gecko.mTransitions[index].mUnknownProperty.mRawPtr;
             debug_assert!(!atom.is_null());
-            TransitionProperty::Unsupported(CustomIdent(atom.into()))
+            TransitionProperty::Unsupported(CustomIdent(unsafe{
+                Atom::from_raw(atom)
+            }))
         } else if property == eCSSPropertyExtra_no_properties {
             // Actually, we don't expect TransitionProperty::Unsupported also represents "none",
             // but if the caller wants to convert it, it is fine. Please use it carefully.
@@ -3352,13 +3346,13 @@ fn static_assert() {
     pub fn animation_name_at(&self, index: usize)
         -> longhands::animation_name::computed_value::SingleComputedValue {
         use properties::longhands::animation_name::single_value::SpecifiedValue as AnimationName;
+        use Atom;
 
         let atom = self.gecko.mAnimations[index].mName.mRawPtr;
         if atom == atom!("").as_ptr() {
-            AnimationName(None)
-        } else {
-            AnimationName(Some(KeyframesName::from_atom(atom.into())))
+            return AnimationName(None)
         }
+        AnimationName(Some(KeyframesName::from_atom(unsafe { Atom::from_raw(atom) })))
     }
     pub fn copy_animation_name_from(&mut self, other: &Self) {
         self.gecko.mAnimationNameCount = other.gecko.mAnimationNameCount;
@@ -3558,16 +3552,19 @@ fn static_assert() {
         use properties::longhands::will_change::computed_value::T;
         use gecko_bindings::structs::nsAtom;
         use values::CustomIdent;
+        use Atom;
 
         if self.gecko.mWillChange.len() == 0 {
-            T::Auto
-        } else {
-            let custom_idents: Vec<CustomIdent> = self.gecko.mWillChange.iter().map(|gecko_atom| {
-                CustomIdent((gecko_atom.mRawPtr as *mut nsAtom).into())
-            }).collect();
-
-            T::AnimateableFeatures(custom_idents.into_boxed_slice())
+            return T::Auto
         }
+
+        let custom_idents: Vec<CustomIdent> = self.gecko.mWillChange.iter().map(|gecko_atom| {
+            unsafe {
+                CustomIdent(Atom::from_raw(gecko_atom.mRawPtr as *mut nsAtom))
+            }
+        }).collect();
+
+        T::AnimateableFeatures(custom_idents.into_boxed_slice())
     }
 
     <% impl_shape_source("shape_outside", "mShapeOutside") %>
@@ -4072,8 +4069,7 @@ fn static_assert() {
             }
             longhands::list_style_image::computed_value::T(Either::First(ref url)) => {
                 unsafe {
-                    Gecko_SetListStyleImageImageValue(&mut self.gecko,
-                                                      url.image_value.clone().unwrap().get());
+                    Gecko_SetListStyleImageImageValue(&mut self.gecko, url.image_value.get());
                 }
                 // We don't need to record this struct as uncacheable, like when setting
                 // background-image to a url() value, since only properties in reset structs
@@ -4092,7 +4088,7 @@ fn static_assert() {
     }
 
     pub fn clone_list_style_image(&self) -> longhands::list_style_image::computed_value::T {
-        use values::specified::url::SpecifiedUrl;
+        use values::specified::url::SpecifiedImageUrl;
         use values::{Either, None_};
 
         longhands::list_style_image::computed_value::T(
@@ -4101,8 +4097,8 @@ fn static_assert() {
                 false => {
                     unsafe {
                         let ref gecko_image_request = *self.gecko.mListStyleImage.mRawPtr;
-                        Either::First(SpecifiedUrl::from_image_request(gecko_image_request)
-                                      .expect("mListStyleImage could not convert to SpecifiedUrl"))
+                        Either::First(SpecifiedImageUrl::from_image_request(gecko_image_request)
+                                      .expect("mListStyleImage could not convert to SpecifiedImageUrl"))
                     }
                 }
             }
@@ -4444,7 +4440,7 @@ fn static_assert() {
                 },
                 Url(ref url) => {
                     unsafe {
-                        bindings::Gecko_nsStyleFilter_SetURLValue(gecko_filter, url.for_ffi());
+                        bindings::Gecko_nsStyleFilter_SetURLValue(gecko_filter, url.url_value.get());
                     }
                 },
             }
@@ -4717,30 +4713,29 @@ fn static_assert() {
 
     ${impl_simple_type_with_conversion("text_emphasis_position")}
 
-    pub fn set_text_emphasis_style(&mut self, v: longhands::text_emphasis_style::computed_value::T) {
-        use properties::longhands::text_emphasis_style::computed_value::T;
-        use properties::longhands::text_emphasis_style::ShapeKeyword;
+    pub fn set_text_emphasis_style(&mut self, v: values::computed::TextEmphasisStyle) {
+        use values::computed::TextEmphasisStyle;
+        use values::specified::text::{TextEmphasisFillMode, TextEmphasisShapeKeyword};
 
         self.clear_text_emphasis_style_if_string();
         let (te, s) = match v {
-            T::None => (structs::NS_STYLE_TEXT_EMPHASIS_STYLE_NONE, ""),
-            T::Keyword(ref keyword) => {
-                let fill = if keyword.fill {
-                    structs::NS_STYLE_TEXT_EMPHASIS_STYLE_FILLED
-                } else {
-                    structs::NS_STYLE_TEXT_EMPHASIS_STYLE_OPEN
+            TextEmphasisStyle::None => (structs::NS_STYLE_TEXT_EMPHASIS_STYLE_NONE, ""),
+            TextEmphasisStyle::Keyword(ref keyword) => {
+                let fill = match keyword.fill {
+                    TextEmphasisFillMode::Filled => structs::NS_STYLE_TEXT_EMPHASIS_STYLE_FILLED,
+                    TextEmphasisFillMode::Open => structs::NS_STYLE_TEXT_EMPHASIS_STYLE_OPEN,
                 };
                 let shape = match keyword.shape {
-                    ShapeKeyword::Dot => structs::NS_STYLE_TEXT_EMPHASIS_STYLE_DOT,
-                    ShapeKeyword::Circle => structs::NS_STYLE_TEXT_EMPHASIS_STYLE_CIRCLE,
-                    ShapeKeyword::DoubleCircle => structs::NS_STYLE_TEXT_EMPHASIS_STYLE_DOUBLE_CIRCLE,
-                    ShapeKeyword::Triangle => structs::NS_STYLE_TEXT_EMPHASIS_STYLE_TRIANGLE,
-                    ShapeKeyword::Sesame => structs::NS_STYLE_TEXT_EMPHASIS_STYLE_SESAME,
+                    TextEmphasisShapeKeyword::Dot => structs::NS_STYLE_TEXT_EMPHASIS_STYLE_DOT,
+                    TextEmphasisShapeKeyword::Circle => structs::NS_STYLE_TEXT_EMPHASIS_STYLE_CIRCLE,
+                    TextEmphasisShapeKeyword::DoubleCircle => structs::NS_STYLE_TEXT_EMPHASIS_STYLE_DOUBLE_CIRCLE,
+                    TextEmphasisShapeKeyword::Triangle => structs::NS_STYLE_TEXT_EMPHASIS_STYLE_TRIANGLE,
+                    TextEmphasisShapeKeyword::Sesame => structs::NS_STYLE_TEXT_EMPHASIS_STYLE_SESAME,
                 };
 
                 (shape | fill, keyword.shape.char(keyword.fill))
             },
-            T::String(ref s) => {
+            TextEmphasisStyle::String(ref s) => {
                 (structs::NS_STYLE_TEXT_EMPHASIS_STYLE_STRING, &**s)
             },
         };
@@ -4761,31 +4756,35 @@ fn static_assert() {
         self.copy_text_emphasis_style_from(other)
     }
 
-    pub fn clone_text_emphasis_style(&self) -> longhands::text_emphasis_style::computed_value::T {
-        use properties::longhands::text_emphasis_style::computed_value::{T, KeywordValue};
-        use properties::longhands::text_emphasis_style::ShapeKeyword;
+    pub fn clone_text_emphasis_style(&self) -> values::computed::TextEmphasisStyle {
+        use values::computed::TextEmphasisStyle;
+        use values::computed::text::TextEmphasisKeywordValue;
+        use values::specified::text::{TextEmphasisFillMode, TextEmphasisShapeKeyword};
 
         if self.gecko.mTextEmphasisStyle == structs::NS_STYLE_TEXT_EMPHASIS_STYLE_NONE as u8 {
-            return T::None;
-        } else if self.gecko.mTextEmphasisStyle == structs::NS_STYLE_TEXT_EMPHASIS_STYLE_STRING as u8 {
-            return T::String(self.gecko.mTextEmphasisStyleString.to_string());
+            return TextEmphasisStyle::None;
         }
 
-        let fill = self.gecko.mTextEmphasisStyle & structs::NS_STYLE_TEXT_EMPHASIS_STYLE_OPEN as u8 == 0;
+        if self.gecko.mTextEmphasisStyle == structs::NS_STYLE_TEXT_EMPHASIS_STYLE_STRING as u8 {
+            return TextEmphasisStyle::String(self.gecko.mTextEmphasisStyleString.to_string());
+        }
+
+        let fill =
+            self.gecko.mTextEmphasisStyle & structs::NS_STYLE_TEXT_EMPHASIS_STYLE_OPEN as u8 == 0;
+
+        let fill = if fill { TextEmphasisFillMode::Filled } else { TextEmphasisFillMode::Open };
+
         let shape =
             match self.gecko.mTextEmphasisStyle as u32 & !structs::NS_STYLE_TEXT_EMPHASIS_STYLE_OPEN {
-                structs::NS_STYLE_TEXT_EMPHASIS_STYLE_DOT => ShapeKeyword::Dot,
-                structs::NS_STYLE_TEXT_EMPHASIS_STYLE_CIRCLE => ShapeKeyword::Circle,
-                structs::NS_STYLE_TEXT_EMPHASIS_STYLE_DOUBLE_CIRCLE => ShapeKeyword::DoubleCircle,
-                structs::NS_STYLE_TEXT_EMPHASIS_STYLE_TRIANGLE => ShapeKeyword::Triangle,
-                structs::NS_STYLE_TEXT_EMPHASIS_STYLE_SESAME => ShapeKeyword::Sesame,
+                structs::NS_STYLE_TEXT_EMPHASIS_STYLE_DOT => TextEmphasisShapeKeyword::Dot,
+                structs::NS_STYLE_TEXT_EMPHASIS_STYLE_CIRCLE => TextEmphasisShapeKeyword::Circle,
+                structs::NS_STYLE_TEXT_EMPHASIS_STYLE_DOUBLE_CIRCLE => TextEmphasisShapeKeyword::DoubleCircle,
+                structs::NS_STYLE_TEXT_EMPHASIS_STYLE_TRIANGLE => TextEmphasisShapeKeyword::Triangle,
+                structs::NS_STYLE_TEXT_EMPHASIS_STYLE_SESAME => TextEmphasisShapeKeyword::Sesame,
                 _ => panic!("Unexpected value in style struct for text-emphasis-style property")
             };
 
-        T::Keyword(KeywordValue {
-            fill: fill,
-            shape: shape
-        })
+        TextEmphasisStyle::Keyword(TextEmphasisKeywordValue { fill, shape })
     }
 
     ${impl_non_negative_length('_webkit_text_stroke_width',
@@ -4968,7 +4967,7 @@ fn static_assert() {
             % if ident == "clip_path":
             ShapeSource::ImageOrUrl(ref url) => {
                 unsafe {
-                    bindings::Gecko_StyleShapeSource_SetURLValue(${ident}, url.for_ffi())
+                    bindings::Gecko_StyleShapeSource_SetURLValue(${ident}, url.url_value.get())
                 }
             }
             % elif ident == "shape_outside":
@@ -5288,8 +5287,10 @@ clip-path
         }
         for i in 0..v.images.len() {
             unsafe {
-                Gecko_SetCursorImageValue(&mut self.gecko.mCursorImages[i],
-                                          v.images[i].url.clone().image_value.unwrap().get());
+                Gecko_SetCursorImageValue(
+                    &mut self.gecko.mCursorImages[i],
+                    v.images[i].url.image_value.get(),
+                );
             }
 
             // We don't need to record this struct as uncacheable, like when setting
@@ -5324,7 +5325,7 @@ clip-path
     pub fn clone_cursor(&self) -> longhands::cursor::computed_value::T {
         use values::computed::pointing::CursorImage;
         use style_traits::cursor::CursorKind;
-        use values::specified::url::SpecifiedUrl;
+        use values::specified::url::SpecifiedImageUrl;
 
         let keyword = match self.gecko.mCursor as u32 {
             structs::NS_STYLE_CURSOR_AUTO => CursorKind::Auto,
@@ -5369,8 +5370,8 @@ clip-path
         let images = self.gecko.mCursorImages.iter().map(|gecko_cursor_image| {
             let url = unsafe {
                 let gecko_image_request = gecko_cursor_image.mImage.mRawPtr.as_ref().unwrap();
-                SpecifiedUrl::from_image_request(&gecko_image_request)
-                    .expect("mCursorImages.mImage could not convert to SpecifiedUrl")
+                SpecifiedImageUrl::from_image_request(&gecko_image_request)
+                    .expect("mCursorImages.mImage could not convert to SpecifiedImageUrl")
             };
 
             let hotspot =
@@ -5548,8 +5549,10 @@ clip-path
                         }
                         ContentItem::Url(ref url) => {
                             unsafe {
-                                bindings::Gecko_SetContentDataImageValue(&mut self.gecko.mContents[i],
-                                    url.image_value.clone().unwrap().get())
+                                bindings::Gecko_SetContentDataImageValue(
+                                    &mut self.gecko.mContents[i],
+                                    url.image_value.get(),
+                                )
                             }
                         }
                     }
@@ -5576,7 +5579,7 @@ clip-path
         use values::computed::counters::{Content, ContentItem};
         use values::{CustomIdent, Either};
         use values::generics::CounterStyleOrNone;
-        use values::specified::url::SpecifiedUrl;
+        use values::specified::url::SpecifiedImageUrl;
         use values::specified::Attr;
 
         if self.gecko.mContents.is_empty() {
@@ -5639,8 +5642,8 @@ clip-path
                             let gecko_image_request =
                                 &**gecko_content.mContent.mImage.as_ref();
                             ContentItem::Url(
-                                SpecifiedUrl::from_image_request(gecko_image_request)
-                                    .expect("mContent could not convert to SpecifiedUrl")
+                                SpecifiedImageUrl::from_image_request(gecko_image_request)
+                                    .expect("mContent could not convert to SpecifiedImageUrl")
                             )
                         }
                     },

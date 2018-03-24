@@ -67,6 +67,13 @@ interface nsIXULWindow : nsISupports
   void addChildWindow(in nsIXULWindow aChild);
 
   /**
+   * Returns the difference between the inner window size (client size) and the
+   * outer window size, in CSS pixels.
+   */
+  [noscript,notxpcom] uint32_t getOuterToInnerHeightDifferenceInCSSPixels();
+  [noscript,notxpcom] uint32_t getOuterToInnerWidthDifferenceInCSSPixels();
+
+  /**
    * Tell this window that it has lost a child XUL window
    * @param aChild the child window being removed
    */
@@ -128,12 +135,14 @@ interface nsIXULWindow : nsISupports
   attribute nsIXULBrowserWindow XULBrowserWindow;
 
   /**
-   * Back-door method to force application of chrome flags at a particular
-   * time.  Do NOT call this unless you know what you're doing!  In particular,
+   * Back-door method to make sure some stuff is done when the document is
+   * ready for layout, that would cause expensive computation otherwise later.
+   *
+   * Do NOT call this unless you know what you're doing!  In particular,
    * calling this when this XUL window doesn't yet have a document in its
    * docshell could cause problems.
    */
-  [noscript] void applyChromeFlags();
+  [noscript] void beforeStartLayout();
 
   /**
    * Given the dimensions of some content area held within this

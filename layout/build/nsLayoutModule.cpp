@@ -33,16 +33,12 @@
 #include "nsNameSpaceManager.h"
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
-#include "nsIScriptNameSpaceManager.h"
 #include "nsIScriptError.h"
 #include "nsISelection.h"
 #include "nsCaret.h"
 #include "nsPlainTextSerializer.h"
 #include "nsXMLContentSerializer.h"
 #include "nsXHTMLContentSerializer.h"
-#ifdef MOZ_OLD_STYLE
-#include "nsRuleNode.h"
-#endif
 #include "nsContentAreaDragDrop.h"
 #include "nsBox.h"
 #include "nsIFrameTraversal.h"
@@ -71,7 +67,6 @@
 #include "nsGlobalWindowCommands.h"
 #include "nsIControllerCommandTable.h"
 #include "nsJSProtocolHandler.h"
-#include "nsScriptNameSpaceManager.h"
 #include "nsIControllerContext.h"
 #include "nsZipArchive.h"
 #include "mozilla/Attributes.h"
@@ -220,7 +215,8 @@ already_AddRefed<nsIPresentationService> NS_CreatePresentationService();
 // Factory Constructor
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(txNodeSetAdaptor, Init)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsDOMSerializer)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsHostObjectURI)
+typedef nsHostObjectURI::Mutator nsHostObjectURIMutator;
+NS_GENERIC_FACTORY_CONSTRUCTOR(nsHostObjectURIMutator)
 NS_GENERIC_FACTORY_CONSTRUCTOR(DOMParser)
 NS_GENERIC_FACTORY_CONSTRUCTOR(LocalStorageManager)
 NS_GENERIC_FACTORY_CONSTRUCTOR(SessionStorageManager)
@@ -265,8 +261,7 @@ static bool gInitialized = false;
 
 // Perform our one-time intialization for this module
 
-// static
-nsresult
+static nsresult
 Initialize()
 {
   if (gInitialized) {
@@ -435,7 +430,8 @@ MAKE_CTOR(CreateFocusManager,             nsIFocusManager,      NS_NewFocusManag
 
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsStyleSheetService, Init)
 
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsJSURI)
+typedef nsJSURI::Mutator nsJSURIMutator;
+NS_GENERIC_FACTORY_CONSTRUCTOR(nsJSURIMutator)
 
 // views are not refcounted, so this is the same as
 // NS_GENERIC_FACTORY_CONSTRUCTOR without the NS_ADDREF/NS_RELEASE
@@ -574,6 +570,7 @@ NS_DEFINE_NAMED_CID(NS_XULDOCUMENT_CID);
 NS_DEFINE_NAMED_CID(NS_CONTENT_DOCUMENT_LOADER_FACTORY_CID);
 NS_DEFINE_NAMED_CID(NS_JSPROTOCOLHANDLER_CID);
 NS_DEFINE_NAMED_CID(NS_JSURI_CID);
+NS_DEFINE_NAMED_CID(NS_JSURIMUTATOR_CID);
 NS_DEFINE_NAMED_CID(NS_WINDOWCOMMANDTABLE_CID);
 NS_DEFINE_NAMED_CID(NS_WINDOWCONTROLLER_CID);
 NS_DEFINE_NAMED_CID(NS_PLUGINDOCLOADERFACTORY_CID);
@@ -583,6 +580,7 @@ NS_DEFINE_NAMED_CID(NS_STYLESHEETSERVICE_CID);
 NS_DEFINE_NAMED_CID(TRANSFORMIIX_NODESET_CID);
 NS_DEFINE_NAMED_CID(NS_XMLSERIALIZER_CID);
 NS_DEFINE_NAMED_CID(NS_HOSTOBJECTURI_CID);
+NS_DEFINE_NAMED_CID(NS_HOSTOBJECTURIMUTATOR_CID);
 NS_DEFINE_NAMED_CID(NS_DOMPARSER_CID);
 NS_DEFINE_NAMED_CID(NS_DOMSESSIONSTORAGEMANAGER_CID);
 NS_DEFINE_NAMED_CID(NS_DOMLOCALSTORAGEMANAGER_CID);
@@ -820,7 +818,8 @@ static const mozilla::Module::CIDEntry kLayoutCIDs[] = {
 #endif
   { &kNS_CONTENT_DOCUMENT_LOADER_FACTORY_CID, false, nullptr, CreateContentDLF },
   { &kNS_JSPROTOCOLHANDLER_CID, false, nullptr, nsJSProtocolHandler::Create },
-  { &kNS_JSURI_CID, false, nullptr, nsJSURIConstructor },
+  { &kNS_JSURI_CID, false, nullptr, nsJSURIMutatorConstructor }, // do_CreateInstance returns mutator
+  { &kNS_JSURIMUTATOR_CID, false, nullptr, nsJSURIMutatorConstructor },
   { &kNS_WINDOWCOMMANDTABLE_CID, false, nullptr, CreateWindowCommandTableConstructor },
   { &kNS_WINDOWCONTROLLER_CID, false, nullptr, CreateWindowControllerWithSingletonCommandTable },
   { &kNS_PLUGINDOCLOADERFACTORY_CID, false, nullptr, CreateContentDLF },
@@ -829,7 +828,8 @@ static const mozilla::Module::CIDEntry kLayoutCIDs[] = {
   { &kNS_STYLESHEETSERVICE_CID, false, nullptr, nsStyleSheetServiceConstructor },
   { &kTRANSFORMIIX_NODESET_CID, false, nullptr, txNodeSetAdaptorConstructor },
   { &kNS_XMLSERIALIZER_CID, false, nullptr, nsDOMSerializerConstructor },
-  { &kNS_HOSTOBJECTURI_CID, false, nullptr, nsHostObjectURIConstructor },
+  { &kNS_HOSTOBJECTURI_CID, false, nullptr, nsHostObjectURIMutatorConstructor }, // do_CreateInstance returns mutator
+  { &kNS_HOSTOBJECTURIMUTATOR_CID, false, nullptr, nsHostObjectURIMutatorConstructor },
   { &kNS_DOMPARSER_CID, false, nullptr, DOMParserConstructor },
   { &kNS_DOMSESSIONSTORAGEMANAGER_CID, false, nullptr, SessionStorageManagerConstructor },
   { &kNS_DOMLOCALSTORAGEMANAGER_CID, false, nullptr, LocalStorageManagerConstructor },

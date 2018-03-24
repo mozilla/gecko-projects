@@ -61,9 +61,9 @@ GetActionType(nsIContent* aContent)
 }
 
 nsIFrame*
-NS_NewMathMLmactionFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewMathMLmactionFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsMathMLmactionFrame(aContext);
+  return new (aPresShell) nsMathMLmactionFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmactionFrame)
@@ -246,7 +246,7 @@ NS_IMPL_ISUPPORTS(nsMathMLmactionFrame::MouseListener,
 
 // helper to show a msg on the status bar
 // curled from nsPluginFrame.cpp ...
-void
+static void
 ShowStatus(nsPresContext* aPresContext, nsString& aStatusMsg)
 {
   nsCOMPtr<nsIDocShellTreeItem> docShellItem(aPresContext->GetDocShell());

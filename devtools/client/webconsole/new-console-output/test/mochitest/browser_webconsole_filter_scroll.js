@@ -14,7 +14,7 @@ const TEST_URI =
   }
   </script>
 `;
-add_task(async function () {
+add_task(async function() {
   const hud = await openNewTabAndConsole(TEST_URI);
   let {ui} = hud;
   const outputContainer = ui.outputNode.querySelector(".webconsole-output");
@@ -61,7 +61,6 @@ add_task(async function () {
   await onMessagesUnFiltered;
   is(outputContainer.scrollTop, 0,
     "The console is still scrolled to the top after clearing the filter");
-
 });
 
 function hasVerticalOverflow(container) {

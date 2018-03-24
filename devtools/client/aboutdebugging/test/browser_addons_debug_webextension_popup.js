@@ -2,6 +2,11 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 "use strict";
 
+// There are shutdown issues for which multiple rejections are left uncaught.
+// See bug 1018184 for resolving these issues.
+const { PromiseTestUtils } = scopedCuImport("resource://testing-common/PromiseTestUtils.jsm");
+PromiseTestUtils.whitelistRejectionsGlobally(/File closed/);
+
 // Avoid test timeouts that can occur while waiting for the "addon-console-works" message.
 requestLongerTimeout(2);
 
@@ -36,7 +41,7 @@ function makeWidgetId(id) {
   return id.replace(/[^a-z0-9_-]/g, "_");
 }
 
-add_task(function* testWebExtensionsToolboxSwitchToPopup() {
+add_task(async function testWebExtensionsToolboxSwitchToPopup() {
   let onReadyForOpenPopup;
   let onPopupCustomMessage;
 
@@ -73,13 +78,13 @@ add_task(function* testWebExtensionsToolboxSwitchToPopup() {
 
   let {
     tab, document, debugBtn,
-  } = yield setupTestAboutDebuggingWebExtension(ADDON_NAME, ADDON_MANIFEST_PATH);
+  } = await setupTestAboutDebuggingWebExtension(ADDON_NAME, ADDON_MANIFEST_PATH);
 
   // Be careful, this JS function is going to be executed in the addon toolbox,
   // which lives in another process. So do not try to use any scope variable!
   let env = Cc["@mozilla.org/process/environment;1"].getService(Ci.nsIEnvironment);
 
-  let testScript = function () {
+  let testScript = function() {
     /* eslint-disable no-undef */
 
     let jsterm;
@@ -92,7 +97,7 @@ add_task(function* testWebExtensionsToolboxSwitchToPopup() {
         dump(`Clicked the noautohide button\n`);
 
         popupFramePromise = new Promise(resolve => {
-          let listener = (event, data) => {
+          let listener = data => {
             if (data.frames.some(({url}) => url && url.endsWith("popup.html"))) {
               toolbox.target.off("frame-update", listener);
               resolve();
@@ -160,7 +165,7 @@ add_task(function* testWebExtensionsToolboxSwitchToPopup() {
 
   debugBtn.click();
 
-  yield onReadyForOpenPopup;
+  await onReadyForOpenPopup;
 
   let browserActionId = makeWidgetId(ADDON_ID) + "-browser-action";
   let browserActionEl = window.document.getElementById(browserActionId);
@@ -169,16 +174,16 @@ add_task(function* testWebExtensionsToolboxSwitchToPopup() {
   browserActionEl.click();
   info("Clicked on the browserAction button");
 
-  let args = yield onPopupCustomMessage;
+  let args = await onPopupCustomMessage;
   ok(true, "Received console message from the popup page function as expected");
   is(args[0], "popupPageFunctionCalled", "Got the expected console message");
   is(args[1] && args[1].name, ADDON_NAME,
      "Got the expected manifest from WebExtension API");
 
-  yield onToolboxClose;
+  await onToolboxClose;
 
   ok(true, "Addon toolbox closed");
 
-  yield uninstallAddon({document, id: ADDON_ID, name: ADDON_NAME});
-  yield closeAboutDebugging(tab);
+  await uninstallAddon({document, id: ADDON_ID, name: ADDON_NAME});
+  await closeAboutDebugging(tab);
 });

@@ -9,7 +9,7 @@
 
 const TEST_URI = "data:text/html;charset=utf8,<p>test code completion";
 
-add_task(async function () {
+add_task(async function() {
   let {jsterm} = await openNewTabAndConsole(TEST_URI);
   let input = jsterm.inputNode;
 
@@ -27,7 +27,8 @@ add_task(async function () {
 
   // Test typing 'window.Ob' and press tab.  Just 'window.O' is
   // ambiguous: could be window.Object, window.Option, etc.
-  await jstermSetValueAndComplete(jsterm, "window.Ob", undefined, jsterm.COMPLETE_FORWARD);
+  await jstermSetValueAndComplete(jsterm, "window.Ob", undefined,
+                                  jsterm.COMPLETE_FORWARD);
   is(input.value, "window.Object", "'window.Ob' tab completion");
 
   // Test typing 'document.getElem'.

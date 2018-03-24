@@ -198,6 +198,10 @@ class Tree extends Component {
       // Handle when item is activated with a keyboard (using Space or Enter)
       onActivate: PropTypes.func,
 
+      // Indicates if pressing ArrowRight key should only expand expandable node
+      // or if the selection should also move to the next node.
+      preventNavigationOnArrowRight: PropTypes.bool,
+
       // The depth to which we should automatically expand new items.
       autoExpandDepth: PropTypes.number,
 
@@ -228,6 +232,7 @@ class Tree extends Component {
   static get defaultProps() {
     return {
       autoExpandDepth: AUTO_EXPAND_DEPTH,
+      preventNavigationOnArrowRight: true,
     };
   }
 
@@ -238,6 +243,7 @@ class Tree extends Component {
       scroll: 0,
       height: window.innerHeight,
       seen: new Set(),
+      mouseDown: false
     };
 
     this._onExpand = oncePerAnimationFrame(this._onExpand).bind(this);
@@ -269,6 +275,15 @@ class Tree extends Component {
   componentWillReceiveProps(nextProps) {
     this._autoExpand();
     this._updateHeight();
+  }
+
+  shouldComponentUpdate(nextProps, nextState) {
+    let { scroll, height, seen, mouseDown } = this.state;
+
+    return scroll !== nextState.scroll ||
+           height !== nextState.height ||
+           seen !== nextState.seen ||
+           mouseDown === nextState.mouseDown;
   }
 
   componentWillUnmount() {
@@ -329,12 +344,7 @@ class Tree extends Component {
    * Updates the state's height based on clientHeight.
    */
   _updateHeight() {
-    if (this.refs.tree.clientHeight &&
-        this.refs.tree.clientHeight !== this.state.height) {
-      this.setState({
-        height: this.refs.tree.clientHeight
-      });
-    }
+    this.setState({ height: this.refs.tree.clientHeight });
   }
 
   /**
@@ -497,9 +507,10 @@ class Tree extends Component {
         break;
 
       case "ArrowRight":
-        if (!this.props.isExpanded(this.props.focused)) {
+        if (this.props.getChildren(this.props.focused).length &&
+            !this.props.isExpanded(this.props.focused)) {
           this._onExpand(this.props.focused);
-        } else {
+        } else if (!this.props.preventNavigationOnArrowRight) {
           this._focusNextNode();
         }
         break;
@@ -685,19 +696,17 @@ class Tree extends Component {
         onKeyPress: this._preventArrowKeyScrolling,
         onKeyUp: this._preventArrowKeyScrolling,
         onScroll: this._onScroll,
-        onFocus: ({nativeEvent}) => {
-          if (focused || !nativeEvent || !this.refs.tree) {
+        onMouseDown: () => this.setState({ mouseDown: true }),
+        onMouseUp: () => this.setState({ mouseDown: false }),
+        onFocus: () => {
+          if (focused || this.state.mouseDown) {
             return;
           }
 
-          let { explicitOriginalTarget } = nativeEvent;
-          // Only set default focus to the first tree node if the focus came
-          // from outside the tree (e.g. by tabbing to the tree from other
-          // external elements).
-          if (explicitOriginalTarget !== this.refs.tree &&
-              !this.refs.tree.contains(explicitOriginalTarget)) {
-            this._focus(begin, toRender[0].item);
-          }
+          // Only set default focus to the first tree node if focused node is
+          // not yet set and the focus event is not the result of a mouse
+          // interarction.
+          this._focus(begin, toRender[0].item);
         },
         onClick: () => {
           // Focus should always remain on the tree container itself.
@@ -844,7 +853,7 @@ const TreeNode = createFactory(TreeNodeClass);
 function oncePerAnimationFrame(fn) {
   let animationId = null;
   let argsToPass = null;
-  return function (...args) {
+  return function(...args) {
     argsToPass = args;
     if (animationId !== null) {
       return;

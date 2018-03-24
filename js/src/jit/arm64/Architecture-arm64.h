@@ -285,7 +285,7 @@ class FloatRegisters
         float s;
         double d;
     };
-    enum Kind {
+    enum Kind : uint8_t {
         Double,
         Single
     };
@@ -366,10 +366,10 @@ struct FloatRegister
     bool volatile_() const {
         return !!((SetType(1) << code()) & FloatRegisters::VolatileMask);
     }
-    bool operator!=(FloatRegister other) const {
+    constexpr bool operator!=(FloatRegister other) const {
         return other.code_ != code_ || other.k_ != k_;
     }
-    bool operator==(FloatRegister other) const {
+    constexpr bool operator==(FloatRegister other) const {
         return other.code_ == code_ && other.k_ == k_;
     }
     bool aliases(FloatRegister other) const {
@@ -453,8 +453,8 @@ struct FloatRegister
     uint32_t getRegisterDumpOffsetInBytes();
 
   public:
-    Code code_ : 8;
-    FloatRegisters::Kind k_ : 1;
+    Code code_;
+    FloatRegisters::Kind k_;
 };
 
 template <> inline FloatRegister::SetType

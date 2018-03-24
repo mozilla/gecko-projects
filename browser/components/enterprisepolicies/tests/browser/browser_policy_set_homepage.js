@@ -2,36 +2,12 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 "use strict";
 
-// Prefs that will be touched by the test and need to be reset when the test
-// cleans up.
-const TOUCHED_PREFS = {
-  "browser.startup.homepage": "String",
-  "browser.startup.page": "Int",
-  "pref.browser.homepage.disable_button.current_page": "Bool",
-  "pref.browser.homepage.disable_button.bookmark_page": "Bool",
-  "pref.browser.homepage.disable_button.restore_default": "Bool",
-  "browser.policies.runOncePerModification.setHomepage": "String",
-};
-let ORIGINAL_PREF_VALUE = {};
-
-add_task(function read_original_pref_values() {
-  for (let pref in TOUCHED_PREFS) {
-    let prefType = TOUCHED_PREFS[pref];
-    ORIGINAL_PREF_VALUE[pref] =
-      Services.prefs[`get${prefType}Pref`](pref, undefined);
-  }
-});
 registerCleanupFunction(function restore_pref_values() {
-  let defaults = Services.prefs.getDefaultBranch("");
-  for (let pref in TOUCHED_PREFS) {
-    Services.prefs.unlockPref(pref);
-    Services.prefs.clearUserPref(pref);
-    let originalValue = ORIGINAL_PREF_VALUE[pref];
-    let prefType = TOUCHED_PREFS[pref];
-    if (originalValue !== undefined) {
-      defaults[`set${prefType}Pref`](pref, originalValue);
-    }
-  }
+  // These two prefs are set as user prefs in case the "Locked"
+  // option from this policy was not used. In this case, it won't
+  // be tracked nor restored by the PoliciesPrefTracker.
+  Services.prefs.clearUserPref("browser.startup.homepage");
+  Services.prefs.clearUserPref("browser.startup.page");
 });
 
 add_task(async function homepage_test_simple() {
@@ -157,14 +133,19 @@ add_task(async function homepage_test_locked() {
   await ContentTask.spawn(tab.linkedBrowser, null, async function() {
     is(content.document.getElementById("browserStartupPage").disabled, true,
        "When homepage is locked, the startup page choice controls should be locked");
-    is(content.document.getElementById("browserHomePage").disabled, true,
-       "Homepage input should be disabled");
-    is(content.document.getElementById("useCurrent").disabled, true,
+  });
+  await BrowserTestUtils.loadURI(tab.linkedBrowser, "about:preferences#home");
+  await ContentTask.spawn(tab.linkedBrowser, null, async function() {
+    is(content.document.getElementById("homeMode").disabled, true,
+       "Homepage menulist should be disabled");
+    is(content.document.getElementById("homePageUrl").disabled, true,
+       "Homepage custom input should be disabled");
+    is(content.document.getElementById("useCurrentBtn").disabled, true,
        "\"Use Current Page\" button should be disabled");
-    is(content.document.getElementById("useBookmark").disabled, true,
+    is(content.document.getElementById("useBookmarkBtn").disabled, true,
        "\"Use Bookmark...\" button should be disabled");
-    is(content.document.getElementById("restoreDefaultHomePage").disabled, true,
+    is(content.document.getElementById("restoreDefaultHomePageBtn").disabled, true,
        "\"Restore to Default\" button should be disabled");
   });
-  await BrowserTestUtils.removeTab(tab);
+  BrowserTestUtils.removeTab(tab);
 });

@@ -5,7 +5,8 @@ import {SectionsFeed, SectionsManager} from "lib/SectionsManager.jsm";
 
 const FAKE_ID = "FAKE_ID";
 const FAKE_OPTIONS = {icon: "FAKE_ICON", title: "FAKE_TITLE"};
-const FAKE_ROWS = [{url: "1.example.com"}, {url: "2.example.com"}, {"url": "3.example.com"}];
+const FAKE_ROWS = [{url: "1.example.com", type: "bookmark"}, {url: "2.example.com", type: "pocket"}, {url: "3.example.com", type: "history"}];
+const FAKE_TRENDING_ROWS =  [{url: "bar", type: "trending"}];
 const FAKE_URL = "2.example.com";
 const FAKE_CARD_OPTIONS = {title: "Some fake title"};
 
@@ -175,6 +176,65 @@ describe("SectionsManager", () => {
       assert.calledOnce(SectionsManager.updateSections);
     });
   });
+  describe("#_addCardTypeLinkMenuOptions", () => {
+    const addCardTypeLinkMenuOptionsOrig = SectionsManager._addCardTypeLinkMenuOptions;
+    const contextMenuOptionsOrig = SectionsManager.CONTEXT_MENU_OPTIONS_FOR_HIGHLIGHT_TYPES;
+    beforeEach(() => {
+      // Add a topstories section and a highlights section, with types for each card
+      SectionsManager.addSection("topstories", {FAKE_TRENDING_ROWS});
+      SectionsManager.addSection("highlights", {FAKE_ROWS});
+    });
+    it("should only call _addCardTypeLinkMenuOptions if the section update is for highlights", () => {
+      SectionsManager._addCardTypeLinkMenuOptions = sinon.spy();
+      SectionsManager.updateSection("topstories", {rows: FAKE_ROWS}, false);
+      assert.notCalled(SectionsManager._addCardTypeLinkMenuOptions);
+
+      SectionsManager.updateSection("highlights", {rows: FAKE_ROWS}, false);
+      assert.calledWith(SectionsManager._addCardTypeLinkMenuOptions, FAKE_ROWS);
+    });
+    it("should only call _addCardTypeLinkMenuOptions if the section update has rows", () => {
+      SectionsManager._addCardTypeLinkMenuOptions = sinon.spy();
+      SectionsManager.updateSection("highlights", {}, false);
+      assert.notCalled(SectionsManager._addCardTypeLinkMenuOptions);
+    });
+    it("should assign the correct context menu options based on the type of highlight", () => {
+      SectionsManager._addCardTypeLinkMenuOptions = addCardTypeLinkMenuOptionsOrig;
+
+      SectionsManager.updateSection("highlights", {rows: FAKE_ROWS}, false);
+      const highlights = SectionsManager.sections.get("highlights").FAKE_ROWS;
+
+      // FAKE_ROWS was added in the following order: bookmark, pocket, history
+      assert.deepEqual(highlights[0].contextMenuOptions, SectionsManager.CONTEXT_MENU_OPTIONS_FOR_HIGHLIGHT_TYPES.bookmark);
+      assert.deepEqual(highlights[1].contextMenuOptions, SectionsManager.CONTEXT_MENU_OPTIONS_FOR_HIGHLIGHT_TYPES.pocket);
+      assert.deepEqual(highlights[2].contextMenuOptions, SectionsManager.CONTEXT_MENU_OPTIONS_FOR_HIGHLIGHT_TYPES.history);
+    });
+    it("should throw an error if you are assigning a context menu to a non-existant highlight type", () => {
+      globals.sandbox.spy(global.Cu, "reportError");
+      SectionsManager.updateSection("highlights", {rows: [{url: "foo", type: "badtype"}]}, false);
+      const highlights = SectionsManager.sections.get("highlights").rows;
+      assert.calledOnce(Cu.reportError);
+      assert.equal(highlights[0].contextMenuOptions, undefined);
+    });
+    it("should filter out context menu options that are in CONTEXT_MENU_PREFS", () => {
+      const services = {prefs: {getBoolPref: o => SectionsManager.CONTEXT_MENU_PREFS[o] !== "RemoveMe", addObserver() {}, removeObserver() {}}};
+      globals.set("Services", services);
+      SectionsManager.CONTEXT_MENU_PREFS = {"RemoveMe": "RemoveMe"};
+      SectionsManager.CONTEXT_MENU_OPTIONS_FOR_HIGHLIGHT_TYPES = {
+        "bookmark": ["KeepMe", "RemoveMe"],
+        "pocket": ["KeepMe", "RemoveMe"],
+        "history": ["KeepMe", "RemoveMe"]
+      };
+      SectionsManager.updateSection("highlights", {rows: FAKE_ROWS}, false);
+      const highlights = SectionsManager.sections.get("highlights").FAKE_ROWS;
+
+      // Only keep context menu options that were not supposed to be removed based on CONTEXT_MENU_PREFS
+      assert.deepEqual(highlights[0].contextMenuOptions, ["KeepMe"]);
+      assert.deepEqual(highlights[1].contextMenuOptions, ["KeepMe"]);
+      assert.deepEqual(highlights[2].contextMenuOptions, ["KeepMe"]);
+      SectionsManager.CONTEXT_MENU_OPTIONS_FOR_HIGHLIGHT_TYPES = contextMenuOptionsOrig;
+      globals.restore();
+    });
+  });
   describe("#onceInitialized", () => {
     it("should call the callback immediately if SectionsManager is initialised", () => {
       SectionsManager.initialized = true;
@@ -236,7 +296,8 @@ describe("SectionsManager", () => {
         url: "bar",
         title: "title",
         description: "description",
-        image: "image"
+        image: "image",
+        type: "trending"
       }];
       SectionsManager.addSection("topstories", {rows});
       // Simulate 2 sections.
@@ -244,7 +305,8 @@ describe("SectionsManager", () => {
         url: "foo",
         title: "title",
         description: "description",
-        image: "image"
+        image: "image",
+        type: "bookmark"
       }];
       SectionsManager.addSection("highlights", {rows});
     });
@@ -286,6 +348,19 @@ describe("SectionsFeed", () => {
     SectionsManager.initialized = false;
     feed = new SectionsFeed();
     feed.store = {dispatch: sinon.spy()};
+    feed.store = {
+      dispatch: sinon.spy(),
+      getState() { return this.state; },
+      state: {
+        Prefs: {
+          values: {
+            sectionOrder: "topsites,topstories,highlights",
+            showTopSites: true
+          }
+        },
+        Sections: [{initialized: false}]
+      }
+    };
   });
   afterEach(() => {
     feed.uninit();
@@ -352,6 +427,15 @@ describe("SectionsFeed", () => {
       assert.deepEqual(action.data, Object.assign({id: FAKE_ID}, FAKE_OPTIONS));
       assert.equal(action.meta.from, MAIN_MESSAGE_TYPE);
       assert.equal(action.meta.to, CONTENT_MESSAGE_TYPE);
+    });
+    it("should prepend id to sectionOrder pref if not already included", () => {
+      feed.store.state.Sections = [{id: "topstories", enabled: true}, {id: "highlights", enabled: true}];
+      feed.onAddSection(null, FAKE_ID, FAKE_OPTIONS);
+      assert.calledWith(feed.store.dispatch, {
+        data: {name: "sectionOrder", value: `${FAKE_ID},topsites,topstories,highlights`},
+        meta: {from: "ActivityStream:Content", to: "ActivityStream:Main"},
+        type: "SET_PREF"
+      });
     });
   });
   describe("#onRemoveSection", () => {
@@ -492,6 +576,71 @@ describe("SectionsFeed", () => {
 
       assert.calledOnce(stub);
       assert.calledWith(stub, "Foo", "bar.com");
+    });
+    it("should call the feed's moveSection on SECTION_MOVE", () => {
+      sinon.stub(feed, "moveSection");
+      const id = "topsites";
+      const direction = +1;
+      feed.onAction({type: "SECTION_MOVE", data: {id, direction}});
+
+      assert.calledOnce(feed.moveSection);
+      assert.calledWith(feed.moveSection, id, direction);
+    });
+  });
+  describe("#moveSection", () => {
+    it("should Move Down correctly", () => {
+      feed.store.state.Sections = [{id: "topstories", enabled: true}, {id: "highlights", enabled: true}];
+      feed.moveSection("topsites", +1);
+      assert.calledOnce(feed.store.dispatch);
+      assert.calledWith(feed.store.dispatch, {
+        data: {name: "sectionOrder", value: "topstories,topsites,highlights"},
+        meta: {from: "ActivityStream:Content", to: "ActivityStream:Main"},
+        type: "SET_PREF"
+      });
+      feed.store.dispatch.reset();
+      feed.moveSection("topstories", +1);
+      assert.calledOnce(feed.store.dispatch);
+      assert.calledWith(feed.store.dispatch, {
+        data: {name: "sectionOrder", value: "topsites,highlights,topstories"},
+        meta: {from: "ActivityStream:Content", to: "ActivityStream:Main"},
+        type: "SET_PREF"
+      });
+    });
+    it("should Move Up correctly", () => {
+      feed.store.state.Sections = [{id: "topstories", enabled: true}, {id: "highlights", enabled: true}];
+      feed.moveSection("topstories", -1);
+      assert.calledOnce(feed.store.dispatch);
+      assert.calledWith(feed.store.dispatch, {
+        data: {name: "sectionOrder", value: "topstories,topsites,highlights"},
+        meta: {from: "ActivityStream:Content", to: "ActivityStream:Main"},
+        type: "SET_PREF"
+      });
+      feed.store.dispatch.reset();
+      feed.moveSection("highlights", -1);
+      assert.calledOnce(feed.store.dispatch);
+      assert.calledWith(feed.store.dispatch, {
+        data: {name: "sectionOrder", value: "topsites,highlights,topstories"},
+        meta: {from: "ActivityStream:Content", to: "ActivityStream:Main"},
+        type: "SET_PREF"
+      });
+    });
+    it("should skip over sections that aren't enabled", () => {
+      feed.store.state.Sections = [{id: "topstories", enabled: false}, {id: "highlights", enabled: true}];
+      feed.moveSection("highlights", -1);
+      assert.calledOnce(feed.store.dispatch);
+      assert.calledWith(feed.store.dispatch, {
+        data: {name: "sectionOrder", value: "highlights,topsites,topstories"},
+        meta: {from: "ActivityStream:Content", to: "ActivityStream:Main"},
+        type: "SET_PREF"
+      });
+      feed.store.dispatch.reset();
+      feed.moveSection("topsites", +1);
+      assert.calledOnce(feed.store.dispatch);
+      assert.calledWith(feed.store.dispatch, {
+        data: {name: "sectionOrder", value: "topstories,highlights,topsites"},
+        meta: {from: "ActivityStream:Content", to: "ActivityStream:Main"},
+        type: "SET_PREF"
+      });
     });
   });
 });

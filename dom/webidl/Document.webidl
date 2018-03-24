@@ -5,6 +5,13 @@
  *
  * https://dom.spec.whatwg.org/#interface-document
  * https://html.spec.whatwg.org/multipage/dom.html#the-document-object
+ * https://html.spec.whatwg.org/multipage/obsolete.html#other-elements%2C-attributes-and-apis
+ * https://fullscreen.spec.whatwg.org/#api
+ * https://w3c.github.io/pointerlock/#extensions-to-the-document-interface
+ * https://w3c.github.io/pointerlock/#extensions-to-the-documentorshadowroot-mixin
+ * https://w3c.github.io/page-visibility/#extensions-to-the-document-interface
+ * https://drafts.csswg.org/cssom/#extensions-to-the-document-interface
+ * https://drafts.csswg.org/cssom-view/#extensions-to-the-document-interface
  */
 
 interface WindowProxy;
@@ -123,13 +130,14 @@ partial interface Document {
            attribute DOMString dir;
   [CEReactions, Pure, SetterThrows]
            attribute HTMLElement? body;
-  //(HTML only)readonly attribute HTMLHeadElement? head;
-  //(HTML only)readonly attribute HTMLCollection images;
-  //(HTML only)readonly attribute HTMLCollection embeds;
-  //(HTML only)readonly attribute HTMLCollection plugins;
-  //(HTML only)readonly attribute HTMLCollection links;
-  //(HTML only)readonly attribute HTMLCollection forms;
-  //(HTML only)readonly attribute HTMLCollection scripts;
+  [Pure]
+  readonly attribute HTMLHeadElement? head;
+  [SameObject] readonly attribute HTMLCollection images;
+  [SameObject] readonly attribute HTMLCollection embeds;
+  [SameObject] readonly attribute HTMLCollection plugins;
+  [SameObject] readonly attribute HTMLCollection links;
+  [SameObject] readonly attribute HTMLCollection forms;
+  [SameObject] readonly attribute HTMLCollection scripts;
   [Pure]
   NodeList getElementsByName(DOMString elementName);
   //(Not implemented)readonly attribute DOMElementMap cssElementMap;
@@ -230,11 +238,29 @@ partial interface Document {
 
 };
 
+// https://html.spec.whatwg.org/multipage/obsolete.html#other-elements%2C-attributes-and-apis
+partial interface Document {
+  //(HTML only)[CEReactions] attribute [TreatNullAs=EmptyString] DOMString fgColor;
+  //(HTML only)[CEReactions] attribute [TreatNullAs=EmptyString] DOMString linkColor;
+  //(HTML only)[CEReactions] attribute [TreatNullAs=EmptyString] DOMString vlinkColor;
+  //(HTML only)[CEReactions] attribute [TreatNullAs=EmptyString] DOMString alinkColor;
+  //(HTML only)[CEReactions] attribute [TreatNullAs=EmptyString] DOMString bgColor;
+
+  [SameObject] readonly attribute HTMLCollection anchors;
+  [SameObject] readonly attribute HTMLCollection applets;
+
+  //(HTML only)void clear();
+  //(HTML only)void captureEvents();
+  //(HTML only)void releaseEvents();
+
+  //(HTML only)[SameObject] readonly attribute HTMLAllCollection all;
+};
+
 // https://fullscreen.spec.whatwg.org/#api
 partial interface Document {
   // Note: Per spec the 'S' in these two is lowercase, but the "Moz"
   // versions have it uppercase.
-  [LenientSetter, Func="nsDocument::IsUnprefixedFullscreenEnabled"]
+  [LenientSetter, Unscopable, Func="nsDocument::IsUnprefixedFullscreenEnabled"]
   readonly attribute boolean fullscreen;
   [BinaryName="fullscreen"]
   readonly attribute boolean mozFullScreen;
@@ -265,7 +291,6 @@ partial interface Document {
   attribute EventHandler onpointerlockerror;
 };
 
-// http://dvcs.w3.org/hg/webperf/raw-file/tip/specs/PageVisibility/Overview.html#sec-document-interface
 // https://w3c.github.io/page-visibility/#extensions-to-the-document-interface
 partial interface Document {
   readonly attribute boolean hidden;
@@ -273,7 +298,7 @@ partial interface Document {
            attribute EventHandler onvisibilitychange;
 };
 
-// http://dev.w3.org/csswg/cssom/#extensions-to-the-document-interface
+// https://drafts.csswg.org/cssom/#extensions-to-the-document-interface
 partial interface Document {
     attribute DOMString? selectedStyleSheetSet;
     readonly attribute DOMString? lastStyleSheetSet;
@@ -283,7 +308,7 @@ partial interface Document {
     void enableStyleSheetsForSet (DOMString? name);
 };
 
-// http://dev.w3.org/csswg/cssom-view/#extensions-to-the-document-interface
+// https://drafts.csswg.org/cssom-view/#extensions-to-the-document-interface
 partial interface Document {
     CaretPosition? caretPositionFromPoint (float x, float y);
 
@@ -475,6 +500,11 @@ enum FlashClassification {
 partial interface Document {
   [ChromeOnly]
   readonly attribute FlashClassification documentFlashClassification;
+};
+
+// Allows about: pages to query aboutCapabilities
+partial interface Document {
+  [Throws, Func="nsDocument::CallerIsTrustedAboutPage"] readonly attribute AboutCapabilities aboutCapabilities;
 };
 
 Document implements XPathEvaluator;

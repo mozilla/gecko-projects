@@ -8,6 +8,7 @@
 
 #include "mozilla/PresShell.h"
 
+#include "mozilla/dom/FontFaceSet.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/StyleSheetInlines.h"
@@ -94,6 +95,9 @@
 #include "nsDisplayList.h"
 #include "nsRegion.h"
 #include "nsAutoLayoutPhase.h"
+#ifdef MOZ_GECKO_PROFILER
+#include "AutoProfilerStyleMarker.h"
+#endif
 #ifdef MOZ_REFLOW_PERF
 #include "nsFontMetrics.h"
 #endif
@@ -179,9 +183,6 @@
 #include "nsLayoutStylesheetCache.h"
 #include "mozilla/layers/InputAPZContext.h"
 #include "mozilla/layers/FocusTarget.h"
-#ifdef MOZ_OLD_STYLE
-#include "nsStyleSet.h"
-#endif
 #include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSetHandleInlines.h"
 #include "mozilla/StyleSheet.h"
@@ -189,6 +190,8 @@
 #include "mozilla/dom/ImageTracker.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsBindingManager.h"
+#include "nsClassHashtable.h"
+#include "nsHashKeys.h"
 
 #ifdef MOZ_TASK_TRACER
 #include "GeckoTaskTracer.h"
@@ -369,8 +372,6 @@ public:
 
   FILE * GetOutFile() { return mFD; }
 
-  PLHashTable * GetIndiFrameHT() { return mIndiFrameCounts; }
-
   void SetPresContext(nsPresContext * aPresContext) { mPresContext = aPresContext; } // weak reference
   void SetPresShell(nsIPresShell* aPresShell) { mPresShell= aPresShell; } // weak reference
 
@@ -384,29 +385,14 @@ protected:
   void DisplayTotals(uint32_t aTotal, uint32_t * aDupArray, char * aTitle);
   void DisplayHTMLTotals(uint32_t aTotal, uint32_t * aDupArray, char * aTitle);
 
-  static int RemoveItems(PLHashEntry *he, int i, void *arg);
-  static int RemoveIndiItems(PLHashEntry *he, int i, void *arg);
-  void CleanUp();
-
-  // stdout Output Methods
-  static int DoSingleTotal(PLHashEntry *he, int i, void *arg);
-  static int DoSingleIndi(PLHashEntry *he, int i, void *arg);
-
   void DoGrandTotals();
   void DoIndiTotalsTree();
 
   // HTML Output Methods
-  static int DoSingleHTMLTotal(PLHashEntry *he, int i, void *arg);
   void DoGrandHTMLTotals();
 
-  // Zero Out the Totals
-  static int DoClearTotals(PLHashEntry *he, int i, void *arg);
-
-  // Displays the Diff Totals
-  static int DoDisplayDiffTotals(PLHashEntry *he, int i, void *arg);
-
-  PLHashTable * mCounts;
-  PLHashTable * mIndiFrameCounts;
+  nsClassHashtable<nsCharPtrHashKey, ReflowCounter> mCounts;
+  nsClassHashtable<nsCharPtrHashKey, IndiReflowCounter> mIndiFrameCounts;
   FILE * mFD;
 
   bool mDumpFrameCounts;
@@ -443,10 +429,25 @@ struct nsCallbackEventRequest
 };
 
 // ----------------------------------------------------------------------------
+//
+// NOTE(emilio): It'd be nice for this to assert that our document isn't in the
+// bfcache, but font pref changes don't care about that, and maybe / probably
+// shouldn't.
+#ifdef DEBUG
 #define ASSERT_REFLOW_SCHEDULED_STATE()                                       \
-  NS_ASSERTION(ObservingLayoutFlushes() ==                                    \
-                 GetPresContext()->RefreshDriver()->                          \
-                   IsLayoutFlushObserver(this), "Unexpected state")
+{                                                                             \
+  if (ObservingLayoutFlushes()) {                                             \
+    MOZ_ASSERT(mDocument->GetBFCacheEntry() ||                                \
+               mPresContext->RefreshDriver()->IsLayoutFlushObserver(this),    \
+               "Unexpected state");                                           \
+  } else {                                                                    \
+    MOZ_ASSERT(!mPresContext->RefreshDriver()->IsLayoutFlushObserver(this),   \
+               "Unexpected state");                                           \
+  }                                                                           \
+}
+#else
+#define ASSERT_REFLOW_SCHEDULED_STATE() /* nothing */
+#endif
 
 class nsAutoCauseReflowNotifier
 {
@@ -608,12 +609,7 @@ VerifyStyleTree(nsPresContext* aPresContext, nsFrameManager* aFrameManager)
       NS_ERROR("stylo: cannot verify style tree with a ServoRestyleManager");
       return;
     }
-#ifdef MOZ_OLD_STYLE
-    nsIFrame* rootFrame = aFrameManager->GetRootFrame();
-    aPresContext->RestyleManager()->AsGecko()->DebugVerifyStyleTree(rootFrame);
-#else
     MOZ_CRASH("old style system disabled");
-#endif
   }
 }
 #define VERIFY_STYLE_TREE ::VerifyStyleTree(mPresContext, mFrameConstructor)
@@ -808,6 +804,7 @@ nsIPresShell::nsIPresShell()
     , mNeedStyleFlush(true)
     , mObservingStyleFlushes(false)
     , mObservingLayoutFlushes(false)
+    , mResizeEventPending(false)
     , mNeedThrottledAnimationFlush(true)
     , mPresShellId(0)
     , mFontSizeInflationEmPerLine(0)
@@ -845,7 +842,6 @@ PresShell::PresShell()
   , mNoDelayedMouseEvents(false)
   , mNoDelayedKeyEvents(false)
   , mShouldUnsuppressPainting(false)
-  , mResizeEventPending(false)
   , mApproximateFrameVisibilityVisited(false)
   , mNextPaintCompressed(false)
   , mHasCSSBackgroundColor(false)
@@ -1345,11 +1341,11 @@ PresShell::Destroy()
   //   (b) before the mPresContext->DetachShell() below, so
   //       that when we clear the ArenaRefPtrs they'll still be able to
   //       get back to this PresShell to deregister themselves (e.g. note
-  //       how nsStyleContext::Arena returns the PresShell got from its
+  //       how ComputedStyle::Arena returns the PresShell got from its
   //       rule node's nsPresContext, which would return null if we'd already
   //       called mPresContext->DetachShell()), and
   //   (c) before the mStyleSet->BeginShutdown() call just below, so that
-  //       the nsStyleContexts don't complain they're being destroyed later
+  //       the ComputedStyles don't complain they're being destroyed later
   //       than the rule tree is.
   mFrameArena.ClearArenaRefPtrs();
 
@@ -1379,10 +1375,7 @@ PresShell::Destroy()
   // Revoke any pending events.  We need to do this and cancel pending reflows
   // before we destroy the frame manager, since apparently frame destruction
   // sometimes spins the event queue when plug-ins are involved(!).
-  if (mResizeEventPending) {
-    rd->RemoveResizeEventFlushObserver(this);
-  }
-  rd->RemoveLayoutFlushObserver(this);
+  StopObservingRefreshDriver();
 
   if (rd->GetPresContext() == GetPresContext()) {
     rd->RevokeViewManagerFlush();
@@ -1423,6 +1416,36 @@ PresShell::Destroy()
   mHaveShutDown = true;
 
   mTouchManager.Destroy();
+}
+
+void
+nsIPresShell::StopObservingRefreshDriver()
+{
+  nsRefreshDriver* rd = mPresContext->RefreshDriver();
+  if (mResizeEventPending) {
+    rd->RemoveResizeEventFlushObserver(this);
+  }
+  if (mObservingLayoutFlushes) {
+    rd->RemoveLayoutFlushObserver(this);
+  }
+  if (mObservingStyleFlushes) {
+    rd->RemoveStyleFlushObserver(this);
+  }
+}
+
+void
+nsIPresShell::StartObservingRefreshDriver()
+{
+  nsRefreshDriver* rd = mPresContext->RefreshDriver();
+  if (mResizeEventPending) {
+    rd->AddResizeEventFlushObserver(this);
+  }
+  if (mObservingLayoutFlushes) {
+    rd->AddLayoutFlushObserver(this);
+  }
+  if (mObservingStyleFlushes) {
+    rd->AddStyleFlushObserver(this);
+  }
 }
 
 nsRefreshDriver*
@@ -2066,7 +2089,9 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight,
 
   if (!mIsDestroying && !mResizeEventPending) {
     mResizeEventPending = true;
-    GetPresContext()->RefreshDriver()->AddResizeEventFlushObserver(this);
+    if (MOZ_LIKELY(!mDocument->GetBFCacheEntry())) {
+      mPresContext->RefreshDriver()->AddResizeEventFlushObserver(this);
+    }
   }
 
   return NS_OK; //XXX this needs to be real. MMP
@@ -2706,8 +2731,7 @@ PresShell::FrameNeedsReflow(nsIFrame *aFrame, IntrinsicDirty aIntrinsicDirty,
   subtrees.AppendElement(aFrame);
 
   do {
-    nsIFrame *subtreeRoot = subtrees.ElementAt(subtrees.Length() - 1);
-    subtrees.RemoveElementAt(subtrees.Length() - 1);
+    nsIFrame *subtreeRoot = subtrees.PopLastElement();
 
     // Grab |wasDirty| now so we can go ahead and update the bits on
     // subtreeRoot.
@@ -2757,8 +2781,7 @@ PresShell::FrameNeedsReflow(nsIFrame *aFrame, IntrinsicDirty aIntrinsicDirty,
       stack.AppendElement(subtreeRoot);
 
       do {
-        nsIFrame *f = stack.ElementAt(stack.Length() - 1);
-        stack.RemoveElementAt(stack.Length() - 1);
+        nsIFrame *f = stack.PopLastElement();
 
         if (f->IsPlaceholderFrame()) {
           nsIFrame *oof = nsPlaceholderFrame::GetRealFrameForPlaceholder(f);
@@ -3084,23 +3107,15 @@ PresShell::GoToAnchor(const nsAString& aAnchorName, bool aScroll,
   // Search for an anchor element with a matching "name" attribute
   if (!content && mDocument->IsHTMLDocument()) {
     // Find a matching list of named nodes
-    nsCOMPtr<nsIDOMNodeList> list = mDocument->GetElementsByName(aAnchorName);
+    nsCOMPtr<nsINodeList> list = mDocument->GetElementsByName(aAnchorName);
     if (list) {
-      uint32_t i;
       // Loop through the named nodes looking for the first anchor
-      for (i = 0; true; i++) {
-        nsCOMPtr<nsIDOMNode> node;
-        rv = list->Item(i, getter_AddRefs(node));
-        if (!node) {  // End of list
+      uint32_t length = list->Length();
+      for (uint32_t i = 0; i < length; i++) {
+        nsIContent* node = list->Item(i);
+        if (node->IsHTMLElement(nsGkAtoms::a)) {
+          content = node;
           break;
-        }
-        // Ensure it's an anchor element
-        content = do_QueryInterface(node);
-        if (content) {
-          if (content->IsHTMLElement(nsGkAtoms::a)) {
-            break;
-          }
-          content = nullptr;
         }
       }
     }
@@ -3747,7 +3762,7 @@ PresShell::ScheduleViewManagerFlush(PaintType aType)
   SetNeedLayoutFlush();
 }
 
-bool
+static bool
 FlushLayoutRecursive(nsIDocument* aDocument,
                      void* aData = nullptr)
 {
@@ -4071,6 +4086,13 @@ nsIPresShell::IsSafeToFlush() const
   return true;
 }
 
+void
+nsIPresShell::NotifyFontFaceSetOnRefresh()
+{
+  if (FontFaceSet* set = mDocument->GetFonts()) {
+    set->DidRefresh();
+  }
+}
 
 void
 PresShell::DoFlushPendingNotifications(FlushType aType)
@@ -4078,6 +4100,34 @@ PresShell::DoFlushPendingNotifications(FlushType aType)
   // by default, flush animations if aType >= FlushType::Style
   mozilla::ChangesToFlush flush(aType, aType >= FlushType::Style);
   FlushPendingNotifications(flush);
+}
+
+#ifdef DEBUG
+static void
+AssertFrameSubtreeIsSane(const nsIFrame& aRoot)
+{
+  if (const nsIContent* content = aRoot.GetContent()) {
+    MOZ_ASSERT(content->GetFlattenedTreeParentNodeForStyle(),
+               "Node not in the flattened tree still has a frame?");
+  }
+
+  nsIFrame::ChildListIterator childLists(&aRoot);
+  for (; !childLists.IsDone(); childLists.Next()) {
+    for (const nsIFrame* child : childLists.CurrentList()) {
+      AssertFrameSubtreeIsSane(*child);
+    }
+  }
+}
+#endif
+
+static inline void
+AssertFrameTreeIsSane(const nsIPresShell& aShell)
+{
+#ifdef DEBUG
+  if (const nsIFrame* root = aShell.GetRootFrame()) {
+    AssertFrameSubtreeIsSane(*root);
+  }
+#endif
 }
 
 void
@@ -4203,9 +4253,7 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
       if (!mIsDestroying) {
         nsAutoScriptBlocker scriptBlocker;
 #ifdef MOZ_GECKO_PROFILER
-        AutoProfilerTracing tracingStyleFlush("Paint", "Styles",
-                                              Move(mStyleCause));
-        mStyleCause = nullptr;
+        AutoProfilerStyleMarker tracingStyleFlush(Move(mStyleCause));
 #endif
 
         mPresContext->RestyleManager()->ProcessPendingRestyles();
@@ -4229,16 +4277,18 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
     if (!mIsDestroying) {
       nsAutoScriptBlocker scriptBlocker;
 #ifdef MOZ_GECKO_PROFILER
-      AutoProfilerTracing tracingStyleFlush("Paint", "Styles",
-                                            Move(mStyleCause));
-      mStyleCause = nullptr;
+      AutoProfilerStyleMarker tracingStyleFlush(Move(mStyleCause));
 #endif
 
       mPresContext->RestyleManager()->ProcessPendingRestyles();
+      // Clear mNeedStyleFlush here agagin to make this flag work properly for
+      // optimization since the flag might have set in ProcessPendingRestyles().
+      mNeedStyleFlush = false;
     }
 
-    didStyleFlush = true;
+    AssertFrameTreeIsSane(*this);
 
+    didStyleFlush = true;
 
     // There might be more pending constructors now, but we're not going to
     // worry about them.  They can't be triggered during reflow, so we should
@@ -4330,21 +4380,7 @@ PresShell::DocumentStatesChanged(nsIDocument* aDocument, EventStates aStateMask)
     if (mStyleSet->IsServo()) {
       mStyleSet->AsServo()->InvalidateStyleForDocumentStateChanges(aStateMask);
     } else {
-#ifdef MOZ_OLD_STYLE
-      if (Element* rootElement = aDocument->GetRootElement()) {
-        const bool needRestyle =
-          mStyleSet->AsGecko()->HasDocumentStateDependentStyle(
-            rootElement, aStateMask);
-        if (needRestyle) {
-          mPresContext->RestyleManager()->PostRestyleEvent(rootElement,
-                                                           eRestyle_Subtree,
-                                                           nsChangeHint(0));
-          VERIFY_STYLE_TREE;
-        }
-      }
-#else
       MOZ_CRASH("old style system disabled");
-#endif
     }
   }
 
@@ -5327,7 +5363,7 @@ void PresShell::UpdateCanvasBackground()
   // cache of that color.
   nsIFrame* rootStyleFrame = FrameConstructor()->GetRootElementStyleFrame();
   if (rootStyleFrame) {
-    nsStyleContext* bgStyle =
+    ComputedStyle* bgStyle =
       nsCSSRendering::FindRootFrameBackground(rootStyleFrame);
     // XXX We should really be passing the canvasframe, not the root element
     // style frame but we don't have access to the canvasframe here. It isn't
@@ -5692,65 +5728,13 @@ PresShell::ProcessSynthMouseMoveEvent(bool aFromScroll)
   }
 }
 
-static void
-AddFrameToVisibleRegions(nsIFrame* aFrame,
-                         nsViewManager* aViewManager,
-                         Maybe<VisibleRegions>& aVisibleRegions)
-{
-  if (!aVisibleRegions) {
-    return;
-  }
-
-  MOZ_ASSERT(aFrame);
-  MOZ_ASSERT(aViewManager);
-
-  // Retrieve the view ID for this frame (which we obtain from the enclosing
-  // scrollable frame).
-  nsIScrollableFrame* scrollableFrame =
-    nsLayoutUtils::GetNearestScrollableFrame(aFrame,
-                                             nsLayoutUtils::SCROLLABLE_ONLY_ASYNC_SCROLLABLE |
-                                             nsLayoutUtils::SCROLLABLE_ALWAYS_MATCH_ROOT);
-  if (!scrollableFrame) {
-    return;
-  }
-
-  nsIFrame* scrollableFrameAsFrame = do_QueryFrame(scrollableFrame);
-  MOZ_ASSERT(scrollableFrameAsFrame);
-
-  nsIContent* scrollableFrameContent = scrollableFrameAsFrame->GetContent();
-  if (!scrollableFrameContent) {
-    return;
-  }
-
-  ViewID viewID;
-  if (!nsLayoutUtils::FindIDFor(scrollableFrameContent, &viewID)) {
-    return ;
-  }
-
-  // Update the visible region for the appropriate view ID.
-  nsRect frameRectInScrolledFrameSpace = aFrame->GetVisualOverflowRect();
-  nsLayoutUtils::TransformResult result =
-    nsLayoutUtils::TransformRect(aFrame,
-                                 scrollableFrame->GetScrolledFrame(),
-                                 frameRectInScrolledFrameSpace);
-  if (result != nsLayoutUtils::TransformResult::TRANSFORM_SUCCEEDED) {
-    return;
-  }
-
-  CSSIntRegion* regionForView = aVisibleRegions->LookupOrAdd(viewID);
-  MOZ_ASSERT(regionForView);
-
-  regionForView->OrWith(CSSPixel::FromAppUnitsRounded(frameRectInScrolledFrameSpace));
-}
-
 /* static */ void
-PresShell::MarkFramesInListApproximatelyVisible(const nsDisplayList& aList,
-                                                Maybe<VisibleRegions>& aVisibleRegions)
+PresShell::MarkFramesInListApproximatelyVisible(const nsDisplayList& aList)
 {
   for (nsDisplayItem* item = aList.GetBottom(); item; item = item->GetAbove()) {
     nsDisplayList* sublist = item->GetChildren();
     if (sublist) {
-      MarkFramesInListApproximatelyVisible(*sublist, aVisibleRegions);
+      MarkFramesInListApproximatelyVisible(*sublist);
       continue;
     }
 
@@ -5768,58 +5752,6 @@ PresShell::MarkFramesInListApproximatelyVisible(const nsDisplayList& aList,
       // The frame was added to mApproximatelyVisibleFrames, so increment its visible count.
       frame->IncApproximateVisibleCount();
     }
-
-    AddFrameToVisibleRegions(frame, presShell->mViewManager, aVisibleRegions);
-  }
-}
-
-static void
-NotifyCompositorOfVisibleRegionsChange(PresShell* aPresShell,
-                                       const Maybe<VisibleRegions>& aRegions)
-{
-  if (!aRegions) {
-    return;
-  }
-
-  MOZ_ASSERT(aPresShell);
-
-  // Retrieve the layers ID and pres shell ID.
-  TabChild* tabChild = TabChild::GetFrom(aPresShell);
-  if (!tabChild) {
-    return;
-  }
-
-  const uint64_t layersId = tabChild->LayersId();
-  const uint32_t presShellId = aPresShell->GetPresShellId();
-
-  // Retrieve the CompositorBridgeChild.
-  LayerManager* layerManager = aPresShell->GetLayerManager();
-  if (!layerManager) {
-    return;
-  }
-
-  ClientLayerManager* clientLayerManager = layerManager->AsClientLayerManager();
-  if (!clientLayerManager) {
-    return;
-  }
-
-  CompositorBridgeChild* compositorChild = clientLayerManager->GetCompositorBridgeChild();
-  if (!compositorChild) {
-    return;
-  }
-
-  // Clear the old approximately visible regions associated with this document.
-  compositorChild->SendClearApproximatelyVisibleRegions(layersId, presShellId);
-
-  // Send the new approximately visible regions to the compositor.
-  for (auto iter = aRegions->ConstIter(); !iter.Done(); iter.Next()) {
-    const ViewID viewId = iter.Key();
-    const CSSIntRegion* region = iter.UserData();
-    MOZ_ASSERT(region);
-
-    const ScrollableLayerGuid guid(layersId, presShellId, viewId);
-
-    compositorChild->SendNotifyApproximatelyVisibleRegion(guid, *region);
   }
 }
 
@@ -5850,20 +5782,9 @@ PresShell::RebuildApproximateFrameVisibilityDisplayList(const nsDisplayList& aLi
   VisibleFrames oldApproximatelyVisibleFrames;
   mApproximatelyVisibleFrames.SwapElements(oldApproximatelyVisibleFrames);
 
-  // If we're visualizing visible regions, create a VisibleRegions object to
-  // store information about them. The functions we call will populate this
-  // object and send it to the compositor only if it's Some(), so we don't
-  // need to check the prefs everywhere.
-  Maybe<VisibleRegions> visibleRegions;
-  if (gfxPrefs::APZMinimap() && gfxPrefs::APZMinimapVisibilityEnabled()) {
-    visibleRegions.emplace();
-  }
-
-  MarkFramesInListApproximatelyVisible(aList, visibleRegions);
+  MarkFramesInListApproximatelyVisible(aList);
 
   DecApproximateVisibleCount(oldApproximatelyVisibleFrames);
-
-  NotifyCompositorOfVisibleRegionsChange(this, visibleRegions);
 }
 
 /* static */ void
@@ -5893,7 +5814,6 @@ PresShell::ClearApproximatelyVisibleFramesList(const Maybe<OnNonvisible>& aNonvi
 void
 PresShell::MarkFramesInSubtreeApproximatelyVisible(nsIFrame* aFrame,
                                                    const nsRect& aRect,
-                                                   Maybe<VisibleRegions>& aVisibleRegions,
                                                    bool aRemoveOnly /* = false */)
 {
   MOZ_ASSERT(aFrame->PresShell() == this, "wrong presshell");
@@ -5906,8 +5826,6 @@ PresShell::MarkFramesInSubtreeApproximatelyVisible(nsIFrame* aFrame,
       // The frame was added to mApproximatelyVisibleFrames, so increment its visible count.
       aFrame->IncApproximateVisibleCount();
     }
-
-    AddFrameToVisibleRegions(aFrame, mViewManager, aVisibleRegions);
   }
 
   nsSubDocumentFrame* subdocFrame = do_QueryFrame(aFrame);
@@ -5996,7 +5914,7 @@ PresShell::MarkFramesInSubtreeApproximatelyVisible(nsIFrame* aFrame,
           }
         }
       }
-      MarkFramesInSubtreeApproximatelyVisible(child, r, aVisibleRegions);
+      MarkFramesInSubtreeApproximatelyVisible(child, r);
     }
   }
 }
@@ -6018,25 +5936,14 @@ PresShell::RebuildApproximateFrameVisibility(nsRect* aRect,
   VisibleFrames oldApproximatelyVisibleFrames;
   mApproximatelyVisibleFrames.SwapElements(oldApproximatelyVisibleFrames);
 
-  // If we're visualizing visible regions, create a VisibleRegions object to
-  // store information about them. The functions we call will populate this
-  // object and send it to the compositor only if it's Some(), so we don't
-  // need to check the prefs everywhere.
-  Maybe<VisibleRegions> visibleRegions;
-  if (gfxPrefs::APZMinimap() && gfxPrefs::APZMinimapVisibilityEnabled()) {
-    visibleRegions.emplace();
-  }
-
   nsRect vis(nsPoint(0, 0), rootFrame->GetSize());
   if (aRect) {
     vis = *aRect;
   }
 
-  MarkFramesInSubtreeApproximatelyVisible(rootFrame, vis, visibleRegions, aRemoveOnly);
+  MarkFramesInSubtreeApproximatelyVisible(rootFrame, vis, aRemoveOnly);
 
   DecApproximateVisibleCount(oldApproximatelyVisibleFrames);
-
-  NotifyCompositorOfVisibleRegionsChange(this, visibleRegions);
 }
 
 void
@@ -6738,7 +6645,8 @@ PresShell::RecordMouseLocation(WidgetGUIEvent* aEvent)
   }
 }
 
-nsIFrame* GetNearestFrameContainingPresShell(nsIPresShell* aPresShell)
+static nsIFrame*
+GetNearestFrameContainingPresShell(nsIPresShell* aPresShell)
 {
   nsView* view = aPresShell->GetViewManager()->GetRootView();
   while (view && !view->GetFrame()) {
@@ -7135,22 +7043,21 @@ PresShell::HandleEvent(nsIFrame* aFrame,
     }
 
     // Only capture mouse events and pointer events.
-    nsIContent* pointerCapturingContent =
+    nsCOMPtr<nsIContent> pointerCapturingContent =
       PointerEventHandler::GetPointerCapturingContent(aEvent);
 
     if (pointerCapturingContent) {
-      nsIFrame* pointerCapturingFrame =
-        pointerCapturingContent->GetPrimaryFrame();
+      frame = pointerCapturingContent->GetPrimaryFrame();
 
-      if (!pointerCapturingFrame) {
+      if (!frame) {
         // Dispatch events to the capturing content even it's frame is
         // destroyed.
         PointerEventHandler::DispatchPointerFromMouseOrTouch(
-          this, nullptr, pointerCapturingContent, aEvent, false, aEventStatus,
-          nullptr);
+          this, nullptr, pointerCapturingContent, aEvent, false,
+          aEventStatus, nullptr);
 
-        PresShell* shell = GetShellForEventTarget(nullptr,
-                                                  pointerCapturingContent);
+        RefPtr<PresShell> shell =
+          GetShellForEventTarget(nullptr, pointerCapturingContent);
 
         if (!shell) {
           // The capturing element could be changed when dispatch pointer
@@ -7160,8 +7067,6 @@ PresShell::HandleEvent(nsIFrame* aFrame,
         return shell->HandleEventWithTarget(aEvent, nullptr,
                                             pointerCapturingContent,
                                             aEventStatus, true);
-      } else {
-        frame = pointerCapturingFrame;
       }
     }
 
@@ -7236,7 +7141,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
       return NS_OK;
     }
 
-    PresShell* shell = static_cast<PresShell*>(frame->PresShell());
+    RefPtr<PresShell> shell = static_cast<PresShell*>(frame->PresShell());
     // Check if we have an active EventStateManager which isn't the
     // EventStateManager of the current PresContext.
     // If that is the case, and mouse is over some ancestor document,
@@ -7339,7 +7244,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
                 touchEvent)) {
           frame = newFrame;
           frame->GetContentForEvent(aEvent, getter_AddRefs(targetElement));
-          shell = static_cast<PresShell*>(frame->PresContext()->PresShell());
+          shell = static_cast<PresShell*>(frame->PresShell());
         }
       } else if (PresShell* newShell = GetShellForTouchEvent(aEvent)) {
         // Touch events (except touchstart) are dispatching to the captured
@@ -7348,8 +7253,6 @@ PresShell::HandleEvent(nsIFrame* aFrame,
       }
     }
 
-    // Prevent deletion until we're done with event handling (bug 336582)
-    nsCOMPtr<nsIPresShell> kungFuDeathGrip(shell);
     nsresult rv;
 
     // Handle the event in the correct shell.
@@ -8335,8 +8238,7 @@ PresShell::GetCurrentItemAndPositionForElement(nsIDOMElement *aCurrentEl,
     int32_t currentIndex;
     multiSelect->GetCurrentIndex(&currentIndex);
     if (currentIndex >= 0) {
-      RefPtr<nsXULElement> xulElement =
-        nsXULElement::FromContent(focusedContent);
+      RefPtr<nsXULElement> xulElement = nsXULElement::FromNode(focusedContent);
       if (xulElement) {
         nsCOMPtr<nsIBoxObject> box = xulElement->GetBoxObject(IgnoreErrors());
         nsCOMPtr<nsITreeBoxObject> treeBox(do_QueryInterface(box));
@@ -8351,7 +8253,7 @@ PresShell::GetCurrentItemAndPositionForElement(nsIDOMElement *aCurrentEl,
           treeBox->GetFirstVisibleRow(&firstVisibleRow);
           treeBox->GetRowHeight(&rowHeight);
 
-          extraTreeY += presContext->CSSPixelsToAppUnits(
+          extraTreeY += nsPresContext::CSSPixelsToAppUnits(
                           (currentIndex - firstVisibleRow + 1) * rowHeight);
           istree = true;
 
@@ -8756,7 +8658,7 @@ PresShell::WillDoReflow()
 
   mPresContext->FlushFontFeatureValues();
 
-  mLastReflowStart = GetPerformanceNow();
+  mLastReflowStart = GetPerformanceNowUnclamped();
 }
 
 void
@@ -8766,7 +8668,7 @@ PresShell::DidDoReflow(bool aInterruptible)
 
   nsCOMPtr<nsIDocShell> docShell = mPresContext->GetDocShell();
   if (docShell) {
-    DOMHighResTimeStamp now = GetPerformanceNow();
+    DOMHighResTimeStamp now = GetPerformanceNowUnclamped();
     docShell->NotifyReflowObservers(aInterruptible, mLastReflowStart, now);
   }
 
@@ -8778,7 +8680,7 @@ PresShell::DidDoReflow(bool aInterruptible)
 }
 
 DOMHighResTimeStamp
-PresShell::GetPerformanceNow()
+PresShell::GetPerformanceNowUnclamped()
 {
   DOMHighResTimeStamp now = 0;
 
@@ -8786,7 +8688,7 @@ PresShell::GetPerformanceNow()
     Performance* perf = window->GetPerformance();
 
     if (perf) {
-      now = perf->Now();
+      now = perf->NowUnclamped();
     }
   }
 
@@ -9178,7 +9080,7 @@ PresShell::WindowSizeMoveDone()
 
 #ifdef MOZ_XUL
 /*
- * It's better to add stuff to the |DidSetStyleContext| method of the
+ * It's better to add stuff to the |DidSetComputedStyle| method of the
  * relevant frames than adding it here.  These methods should (ideally,
  * anyway) go away.
  */
@@ -9351,16 +9253,22 @@ void
 nsIPresShell::DoObserveStyleFlushes()
 {
   MOZ_ASSERT(!ObservingStyleFlushes());
-  mObservingStyleFlushes =
+  mObservingStyleFlushes = true;
+
+  if (MOZ_LIKELY(!mDocument->GetBFCacheEntry())) {
     mPresContext->RefreshDriver()->AddStyleFlushObserver(this);
+  }
 }
 
 void
 nsIPresShell::DoObserveLayoutFlushes()
 {
   MOZ_ASSERT(!ObservingLayoutFlushes());
-  mObservingLayoutFlushes =
+  mObservingLayoutFlushes = true;
+
+  if (MOZ_LIKELY(!mDocument->GetBFCacheEntry())) {
     mPresContext->RefreshDriver()->AddLayoutFlushObserver(this);
+  }
 }
 
 //------------------------------------------------------
@@ -9680,15 +9588,6 @@ CopySheetsIntoClone(StyleSetHandle aSet, StyleSetHandle aClone)
   }
 }
 
-#ifdef MOZ_OLD_STYLE
-nsStyleSet*
-PresShell::CloneStyleSet(nsStyleSet* aSet)
-{
-  nsStyleSet* clone = new nsStyleSet();
-  CopySheetsIntoClone(aSet, clone);
-  return clone;
-}
-#endif
 
 ServoStyleSet*
 PresShell::CloneStyleSet(ServoStyleSet* aSet)
@@ -9748,27 +9647,16 @@ PresShell::VerifyIncrementalReflow()
 
   // Create a new presentation shell to view the document. Use the
   // exact same style information that this document has.
-#ifdef MOZ_OLD_STYLE
-  nsAutoPtr<nsStyleSet> newGeckoSet;
-#endif
   nsAutoPtr<ServoStyleSet> newServoSet;
   StyleSetHandle newSet;
   if (mStyleSet->IsServo()) {
     newServoSet = CloneStyleSet(mStyleSet->AsServo());
     newSet = newServoSet;
   } else {
-#ifdef MOZ_OLD_STYLE
-    newGeckoSet = CloneStyleSet(mStyleSet->AsGecko());
-    newSet = newGeckoSet;
-#else
     MOZ_CRASH("old style system disabled");
-#endif
   }
   nsCOMPtr<nsIPresShell> sh = mDocument->CreateShell(cx, vm, newSet);
   NS_ENSURE_TRUE(sh, false);
-#ifdef MOZ_OLD_STYLE
-  newGeckoSet.forget();
-#endif
   newServoSet.forget();
   // Note that after we create the shell, we must make sure to destroy it
   sh->SetVerifyReflowEnable(false); // turn off verify reflow while we're reflowing the test frame tree
@@ -9829,11 +9717,11 @@ PresShell::VerifyIncrementalReflow()
 
 // Layout debugging hooks
 void
-PresShell::ListStyleContexts(FILE *out, int32_t aIndent)
+PresShell::ListComputedStyles(FILE *out, int32_t aIndent)
 {
   nsIFrame* rootFrame = GetRootFrame();
   if (rootFrame) {
-    rootFrame->StyleContext()->List(out, aIndent);
+    rootFrame->Style()->List(out, aIndent);
   }
 
   // The root element's frame's style context is the root of a separate tree.
@@ -9841,7 +9729,7 @@ PresShell::ListStyleContexts(FILE *out, int32_t aIndent)
   if (rootElement) {
     nsIFrame* rootElementFrame = rootElement->GetPrimaryFrame();
     if (rootElementFrame) {
-      rootElementFrame->StyleContext()->List(out, aIndent);
+      rootElementFrame->Style()->List(out, aIndent);
     }
   }
 }
@@ -10026,11 +9914,9 @@ void ReflowCounter::DisplayHTMLTotals(uint32_t aTotal, const char * aTitle)
 #define KEY_BUF_SIZE_FOR_PTR  24 // adequate char[] buffer to sprintf a pointer
 
 ReflowCountMgr::ReflowCountMgr()
+  : mCounts(10)
+  , mIndiFrameCounts(10)
 {
-  mCounts = PL_NewHashTable(10, PL_HashString, PL_CompareStrings,
-                                PL_CompareValues, nullptr, nullptr);
-  mIndiFrameCounts = PL_NewHashTable(10, PL_HashString, PL_CompareStrings,
-                                     PL_CompareValues, nullptr, nullptr);
   mCycledOnce              = false;
   mDumpFrameCounts         = false;
   mDumpFrameByFrameCounts  = false;
@@ -10040,18 +9926,12 @@ ReflowCountMgr::ReflowCountMgr()
 //------------------------------------------------------------------
 ReflowCountMgr::~ReflowCountMgr()
 {
-  CleanUp();
 }
 
 //------------------------------------------------------------------
 ReflowCounter * ReflowCountMgr::LookUp(const char * aName)
 {
-  if (nullptr != mCounts) {
-    ReflowCounter * counter = (ReflowCounter *)PL_HashTableLookup(mCounts, aName);
-    return counter;
-  }
-  return nullptr;
-
+  return mCounts.Get(aName);
 }
 
 //------------------------------------------------------------------
@@ -10059,29 +9939,24 @@ void ReflowCountMgr::Add(const char * aName, nsIFrame * aFrame)
 {
   NS_ASSERTION(aName != nullptr, "Name shouldn't be null!");
 
-  if (mDumpFrameCounts && nullptr != mCounts) {
-    ReflowCounter * counter = (ReflowCounter *)PL_HashTableLookup(mCounts, aName);
-    if (counter == nullptr) {
-      counter = new ReflowCounter(this);
-      char * name = NS_strdup(aName);
-      NS_ASSERTION(name != nullptr, "null ptr");
-      PL_HashTableAdd(mCounts, name, counter);
-    }
+  if (mDumpFrameCounts) {
+    ReflowCounter * counter = mCounts.LookupForAdd(aName).OrInsert([this]() {
+      return new ReflowCounter(this);
+    });
     counter->Add();
   }
 
   if ((mDumpFrameByFrameCounts || mPaintFrameByFrameCounts) &&
-      nullptr != mIndiFrameCounts &&
       aFrame != nullptr) {
     char key[KEY_BUF_SIZE_FOR_PTR];
     SprintfLiteral(key, "%p", (void*)aFrame);
-    IndiReflowCounter * counter = (IndiReflowCounter *)PL_HashTableLookup(mIndiFrameCounts, key);
-    if (counter == nullptr) {
-      counter = new IndiReflowCounter(this);
-      counter->mFrame = aFrame;
-      counter->mName.AssignASCII(aName);
-      PL_HashTableAdd(mIndiFrameCounts, NS_strdup(key), counter);
-    }
+    IndiReflowCounter * counter =
+      mIndiFrameCounts.LookupForAdd(key).OrInsert([&aName, &aFrame, this]() {
+        auto counter = new IndiReflowCounter(this);
+        counter->mFrame = aFrame;
+        counter->mName.AssignASCII(aName);
+        return counter;
+      });
     // this eliminates extra counts from super classes
     if (counter != nullptr && counter->mName.EqualsASCII(aName)) {
       counter->mCount++;
@@ -10099,12 +9974,10 @@ void ReflowCountMgr::PaintCount(const char*     aName,
                                 uint32_t        aColor)
 {
   if (mPaintFrameByFrameCounts &&
-      nullptr != mIndiFrameCounts &&
       aFrame != nullptr) {
     char key[KEY_BUF_SIZE_FOR_PTR];
     SprintfLiteral(key, "%p", (void*)aFrame);
-    IndiReflowCounter * counter =
-      (IndiReflowCounter *)PL_HashTableLookup(mIndiFrameCounts, key);
+    IndiReflowCounter * counter = mIndiFrameCounts.Get(key);
     if (counter != nullptr && counter->mName.EqualsASCII(aName)) {
       DrawTarget* drawTarget = aRenderingContext->GetDrawTarget();
       int32_t appUnitsPerDevPixel = aPresContext->AppUnitsPerDevPixel();
@@ -10167,77 +10040,28 @@ void ReflowCountMgr::PaintCount(const char*     aName,
 }
 
 //------------------------------------------------------------------
-int ReflowCountMgr::RemoveItems(PLHashEntry *he, int i, void *arg)
-{
-  char *str = (char *)he->key;
-  ReflowCounter * counter = (ReflowCounter *)he->value;
-  delete counter;
-  free(str);
-
-  return HT_ENUMERATE_REMOVE;
-}
-
-//------------------------------------------------------------------
-int ReflowCountMgr::RemoveIndiItems(PLHashEntry *he, int i, void *arg)
-{
-  char *str = (char *)he->key;
-  IndiReflowCounter * counter = (IndiReflowCounter *)he->value;
-  delete counter;
-  free(str);
-
-  return HT_ENUMERATE_REMOVE;
-}
-
-//------------------------------------------------------------------
-void ReflowCountMgr::CleanUp()
-{
-  if (nullptr != mCounts) {
-    PL_HashTableEnumerateEntries(mCounts, RemoveItems, nullptr);
-    PL_HashTableDestroy(mCounts);
-    mCounts = nullptr;
-  }
-
-  if (nullptr != mIndiFrameCounts) {
-    PL_HashTableEnumerateEntries(mIndiFrameCounts, RemoveIndiItems, nullptr);
-    PL_HashTableDestroy(mIndiFrameCounts);
-    mIndiFrameCounts = nullptr;
-  }
-}
-
-//------------------------------------------------------------------
-int ReflowCountMgr::DoSingleTotal(PLHashEntry *he, int i, void *arg)
-{
-  char *str = (char *)he->key;
-  ReflowCounter * counter = (ReflowCounter *)he->value;
-
-  counter->DisplayTotals(str);
-
-  return HT_ENUMERATE_NEXT;
-}
-
-//------------------------------------------------------------------
 void ReflowCountMgr::DoGrandTotals()
 {
-  if (nullptr != mCounts) {
-    ReflowCounter * gTots = (ReflowCounter *)PL_HashTableLookup(mCounts, kGrandTotalsStr);
-    if (gTots == nullptr) {
-      gTots = new ReflowCounter(this);
-      PL_HashTableAdd(mCounts, NS_strdup(kGrandTotalsStr), gTots);
-    } else {
-      gTots->ClearTotals();
-    }
+  auto entry = mCounts.LookupForAdd(kGrandTotalsStr);
+  if (!entry) {
+    entry.OrInsert([this]() { return new ReflowCounter(this); });
+  } else {
+    entry.Data()->ClearTotals();
+  }
 
-    printf("\t\t\t\tTotal\n");
-    for (uint32_t i=0;i<78;i++) {
-      printf("-");
-    }
-    printf("\n");
-    PL_HashTableEnumerateEntries(mCounts, DoSingleTotal, this);
+  printf("\t\t\t\tTotal\n");
+  for (uint32_t i=0;i<78;i++) {
+    printf("-");
+  }
+  printf("\n");
+  for (auto iter = mCounts.Iter(); !iter.Done(); iter.Next()) {
+    iter.Data()->DisplayTotals(iter.Key());
   }
 }
 
 static void RecurseIndiTotals(nsPresContext* aPresContext,
-                              PLHashTable *   aHT,
+                              nsClassHashtable<nsCharPtrHashKey,
+                                               IndiReflowCounter>& aHT,
                               nsIFrame *      aParentFrame,
                               int32_t         aLevel)
 {
@@ -10247,7 +10071,7 @@ static void RecurseIndiTotals(nsPresContext* aPresContext,
 
   char key[KEY_BUF_SIZE_FOR_PTR];
   SprintfLiteral(key, "%p", (void*)aParentFrame);
-  IndiReflowCounter * counter = (IndiReflowCounter *)PL_HashTableLookup(aHT, key);
+  IndiReflowCounter * counter = aHT.Get(key);
   if (counter) {
     counter->mHasBeenOutput = true;
     char * name = ToNewCString(counter->mName);
@@ -10265,68 +10089,50 @@ static void RecurseIndiTotals(nsPresContext* aPresContext,
 }
 
 //------------------------------------------------------------------
-int ReflowCountMgr::DoSingleIndi(PLHashEntry *he, int i, void *arg)
-{
-  IndiReflowCounter * counter = (IndiReflowCounter *)he->value;
-  if (counter && !counter->mHasBeenOutput) {
-    char * name = ToNewCString(counter->mName);
-    printf("%s - %p   [%d][", name, (void*)counter->mFrame, counter->mCount);
-    printf("%d", counter->mCounter.GetTotal());
-    printf("]\n");
-    free(name);
-  }
-  return HT_ENUMERATE_NEXT;
-}
-
-//------------------------------------------------------------------
 void ReflowCountMgr::DoIndiTotalsTree()
 {
-  if (nullptr != mCounts) {
-    printf("\n------------------------------------------------\n");
-    printf("-- Individual Frame Counts\n");
-    printf("------------------------------------------------\n");
+  printf("\n------------------------------------------------\n");
+  printf("-- Individual Frame Counts\n");
+  printf("------------------------------------------------\n");
 
-    if (mPresShell) {
-      nsIFrame * rootFrame = mPresShell->FrameManager()->GetRootFrame();
-      RecurseIndiTotals(mPresContext, mIndiFrameCounts, rootFrame, 0);
-      printf("------------------------------------------------\n");
-      printf("-- Individual Counts of Frames not in Root Tree\n");
-      printf("------------------------------------------------\n");
-      PL_HashTableEnumerateEntries(mIndiFrameCounts, DoSingleIndi, this);
+  if (mPresShell) {
+    nsIFrame* rootFrame = mPresShell->GetRootFrame();
+    RecurseIndiTotals(mPresContext, mIndiFrameCounts, rootFrame, 0);
+    printf("------------------------------------------------\n");
+    printf("-- Individual Counts of Frames not in Root Tree\n");
+    printf("------------------------------------------------\n");
+    for (auto iter = mIndiFrameCounts.Iter(); !iter.Done(); iter.Next()) {
+      IndiReflowCounter* counter = iter.Data();
+      if (!counter->mHasBeenOutput) {
+        char * name = ToNewCString(counter->mName);
+        printf("%s - %p   [%d][", name, (void*)counter->mFrame, counter->mCount);
+        printf("%d", counter->mCounter.GetTotal());
+        printf("]\n");
+        free(name);
+      }
     }
   }
-}
-
-//------------------------------------------------------------------
-int ReflowCountMgr::DoSingleHTMLTotal(PLHashEntry *he, int i, void *arg)
-{
-  char *str = (char *)he->key;
-  ReflowCounter * counter = (ReflowCounter *)he->value;
-
-  counter->DisplayHTMLTotals(str);
-
-  return HT_ENUMERATE_NEXT;
 }
 
 //------------------------------------------------------------------
 void ReflowCountMgr::DoGrandHTMLTotals()
 {
-  if (nullptr != mCounts) {
-    ReflowCounter * gTots = (ReflowCounter *)PL_HashTableLookup(mCounts, kGrandTotalsStr);
-    if (gTots == nullptr) {
-      gTots = new ReflowCounter(this);
-      PL_HashTableAdd(mCounts, NS_strdup(kGrandTotalsStr), gTots);
-    } else {
-      gTots->ClearTotals();
-    }
+  auto entry = mCounts.LookupForAdd(kGrandTotalsStr);
+  if (!entry) {
+    entry.OrInsert([this]() { return new ReflowCounter(this); });
+  } else {
+    entry.Data()->ClearTotals();
+  }
 
-    static const char * title[] = {"Class", "Reflows"};
-    fprintf(mFD, "<tr>");
-    for (uint32_t i=0; i < ArrayLength(title); i++) {
-      fprintf(mFD, "<td><center><b>%s<b></center></td>", title[i]);
-    }
-    fprintf(mFD, "</tr>\n");
-    PL_HashTableEnumerateEntries(mCounts, DoSingleHTMLTotal, this);
+  static const char * title[] = {"Class", "Reflows"};
+  fprintf(mFD, "<tr>");
+  for (uint32_t i=0; i < ArrayLength(title); i++) {
+    fprintf(mFD, "<td><center><b>%s<b></center></td>", title[i]);
+  }
+  fprintf(mFD, "</tr>\n");
+
+  for (auto iter = mCounts.Iter(); !iter.Done(); iter.Next()) {
+    iter.Data()->DisplayHTMLTotals(iter.Key());
   }
 }
 
@@ -10375,50 +10181,23 @@ void ReflowCountMgr::DisplayHTMLTotals(const char * aStr)
 }
 
 //------------------------------------------------------------------
-int ReflowCountMgr::DoClearTotals(PLHashEntry *he, int i, void *arg)
-{
-  ReflowCounter * counter = (ReflowCounter *)he->value;
-  counter->ClearTotals();
-
-  return HT_ENUMERATE_NEXT;
-}
-
-//------------------------------------------------------------------
 void ReflowCountMgr::ClearTotals()
 {
-  PL_HashTableEnumerateEntries(mCounts, DoClearTotals, this);
+  for (auto iter = mCounts.Iter(); !iter.Done(); iter.Next()) {
+    iter.Data()->ClearTotals();
+  }
 }
 
 //------------------------------------------------------------------
 void ReflowCountMgr::ClearGrandTotals()
 {
-  if (nullptr != mCounts) {
-    ReflowCounter * gTots = (ReflowCounter *)PL_HashTableLookup(mCounts, kGrandTotalsStr);
-    if (gTots == nullptr) {
-      gTots = new ReflowCounter(this);
-      PL_HashTableAdd(mCounts, NS_strdup(kGrandTotalsStr), gTots);
-    } else {
-      gTots->ClearTotals();
-      gTots->SetTotalsCache();
-    }
+  auto entry = mCounts.LookupForAdd(kGrandTotalsStr);
+  if (!entry) {
+    entry.OrInsert([this]() { return new ReflowCounter(this); });
+  } else {
+    entry.Data()->ClearTotals();
+    entry.Data()->SetTotalsCache();
   }
-}
-
-//------------------------------------------------------------------
-int ReflowCountMgr::DoDisplayDiffTotals(PLHashEntry *he, int i, void *arg)
-{
-  bool cycledOnce = (arg != 0);
-
-  char *str = (char *)he->key;
-  ReflowCounter * counter = (ReflowCounter *)he->value;
-
-  if (cycledOnce) {
-    counter->CalcDiffInTotals();
-    counter->DisplayDiffTotals(str);
-  }
-  counter->SetTotalsCache();
-
-  return HT_ENUMERATE_NEXT;
 }
 
 //------------------------------------------------------------------
@@ -10432,7 +10211,14 @@ void ReflowCountMgr::DisplayDiffsInTotals()
     printf("\n");
     ClearGrandTotals();
   }
-  PL_HashTableEnumerateEntries(mCounts, DoDisplayDiffTotals, (void *)mCycledOnce);
+
+  for (auto iter = mCounts.Iter(); !iter.Done(); iter.Next()) {
+    if (mCycledOnce) {
+      iter.Data()->CalcDiffInTotals();
+      iter.Data()->DisplayDiffTotals(iter.Key());
+    }
+    iter.Data()->SetTotalsCache();
+  }
 
   mCycledOnce = true;
 }
@@ -10600,11 +10386,7 @@ PresShell::AddSizeOfIncludingThis(nsWindowSizes& aSizes) const
     mFramesToDirty.ShallowSizeOfExcludingThis(mallocSizeOf);
 
   if (StyleSet()->IsGecko()) {
-#ifdef MOZ_OLD_STYLE
-    StyleSet()->AsGecko()->AddSizeOfIncludingThis(aSizes);
-#else
     MOZ_CRASH("old style system disabled");
-#endif
   } else {
     StyleSet()->AsServo()->AddSizeOfIncludingThis(aSizes);
   }
@@ -10805,14 +10587,7 @@ nsIPresShell::HasRuleProcessorUsedByMultipleStyleSets(uint32_t aSheetType,
 {
   *aRetVal = false;
   if (mStyleSet->IsGecko()) {
-#ifdef MOZ_OLD_STYLE
-    nsStyleSet* styleSet = mStyleSet->AsGecko();
-    // ServoStyleSets do not have rule processors.
-    SheetType type = ToSheetType(aSheetType);
-    *aRetVal = styleSet->HasRuleProcessorUsedByMultipleStyleSets(type);
-#else
     MOZ_CRASH("old style system disabled");
-#endif
   }
   return NS_OK;
 }

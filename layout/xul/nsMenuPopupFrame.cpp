@@ -9,7 +9,7 @@
 #include "nsIContent.h"
 #include "nsAtom.h"
 #include "nsPresContext.h"
-#include "nsStyleContext.h"
+#include "mozilla/ComputedStyle.h"
 #include "nsCSSRendering.h"
 #include "nsNameSpaceManager.h"
 #include "nsViewManager.h"
@@ -82,9 +82,9 @@ const char* kPrefIncrementalSearchTimeout =
 // Wrapper for creating a new menu popup container
 //
 nsIFrame*
-NS_NewMenuPopupFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewMenuPopupFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsMenuPopupFrame(aContext);
+  return new (aPresShell) nsMenuPopupFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMenuPopupFrame)
@@ -96,8 +96,8 @@ NS_QUERYFRAME_TAIL_INHERITING(nsBoxFrame)
 //
 // nsMenuPopupFrame ctor
 //
-nsMenuPopupFrame::nsMenuPopupFrame(nsStyleContext* aContext)
-  : nsBoxFrame(aContext, kClassID)
+nsMenuPopupFrame::nsMenuPopupFrame(ComputedStyle* aStyle)
+  : nsBoxFrame(aStyle, kClassID)
   , mCurrentMenu(nullptr)
   , mView(nullptr)
   , mPrefSize(-1, -1)
@@ -1383,7 +1383,7 @@ nsRect
 nsMenuPopupFrame::ComputeAnchorRect(nsPresContext* aRootPresContext, nsIFrame* aAnchorFrame)
 {
   // Get the root frame for a reference
-  nsIFrame* rootFrame = aRootPresContext->FrameManager()->GetRootFrame();
+  nsIFrame* rootFrame = aRootPresContext->PresShell()->GetRootFrame();
 
   // The dimensions of the anchor
   nsRect anchorRect = aAnchorFrame->GetRectRelativeToSelf();
@@ -1413,7 +1413,7 @@ nsMenuPopupFrame::SetPopupPosition(nsIFrame* aAnchorFrame, bool aIsMove, bool aS
   }
 
   nsPresContext* presContext = PresContext();
-  nsIFrame* rootFrame = presContext->PresShell()->FrameManager()->GetRootFrame();
+  nsIFrame* rootFrame = presContext->PresShell()->GetRootFrame();
   NS_ASSERTION(rootFrame->GetView() && GetView() &&
                rootFrame->GetView() == GetView()->GetParent(),
                "rootFrame's view is not our view's parent???");
@@ -1438,7 +1438,7 @@ nsMenuPopupFrame::SetPopupPosition(nsIFrame* aAnchorFrame, bool aIsMove, bool aS
     // If anchored to a rectangle, use that rectangle. Otherwise, determine the
     // rectangle from the anchor.
     if (mAnchorType == MenuPopupAnchorType_Rect) {
-      anchorRect = ToAppUnits(mScreenRect, presContext->AppUnitsPerCSSPixel());
+      anchorRect = ToAppUnits(mScreenRect, nsPresContext::AppUnitsPerCSSPixel());
     }
     else {
       // if the frame is not specified, use the anchor node passed to OpenPopup. If
@@ -1520,7 +1520,7 @@ nsMenuPopupFrame::SetPopupPosition(nsIFrame* aAnchorFrame, bool aIsMove, bool aS
     // mXPos and mYPos specify an additonal offset passed to OpenPopup that
     // should be added to the position.  We also add the offset to the anchor
     // pos so a later flip/resize takes the offset into account.
-    nscoord anchorXOffset = presContext->CSSPixelsToAppUnits(mXPos);
+    nscoord anchorXOffset = nsPresContext::CSSPixelsToAppUnits(mXPos);
     if (IsDirectionRTL()) {
       screenPoint.x -= anchorXOffset;
       anchorRect.x -= anchorXOffset;
@@ -1528,7 +1528,7 @@ nsMenuPopupFrame::SetPopupPosition(nsIFrame* aAnchorFrame, bool aIsMove, bool aS
       screenPoint.x += anchorXOffset;
       anchorRect.x += anchorXOffset;
     }
-    nscoord anchorYOffset = presContext->CSSPixelsToAppUnits(mYPos);
+    nscoord anchorYOffset = nsPresContext::CSSPixelsToAppUnits(mYPos);
     screenPoint.y += anchorYOffset;
     anchorRect.y += anchorYOffset;
 
@@ -1542,8 +1542,8 @@ nsMenuPopupFrame::SetPopupPosition(nsIFrame* aAnchorFrame, bool aIsMove, bool aS
       // Account for the margin that will end up being added to the screen coordinate
       // the next time SetPopupPosition is called.
       mAnchorType = MenuPopupAnchorType_Point;
-      mScreenRect.x = presContext->AppUnitsToIntCSSPixels(screenPoint.x - margin.left);
-      mScreenRect.y = presContext->AppUnitsToIntCSSPixels(screenPoint.y - margin.top);
+      mScreenRect.x = nsPresContext::AppUnitsToIntCSSPixels(screenPoint.x - margin.left);
+      mScreenRect.y = nsPresContext::AppUnitsToIntCSSPixels(screenPoint.y - margin.top);
     }
   }
   else {
@@ -2411,10 +2411,9 @@ nsMenuPopupFrame::MoveTo(const CSSIntPoint& aPos, bool aUpdateAttrs)
                      LookAndFeel::eIntID_ContextMenuOffsetVertical));
   }
 
-  nsPresContext* presContext = PresContext();
   mAnchorType = MenuPopupAnchorType_Point;
-  mScreenRect.x = aPos.x - presContext->AppUnitsToIntCSSPixels(margin.left);
-  mScreenRect.y = aPos.y - presContext->AppUnitsToIntCSSPixels(margin.top);
+  mScreenRect.x = aPos.x - nsPresContext::AppUnitsToIntCSSPixels(margin.left);
+  mScreenRect.y = aPos.y - nsPresContext::AppUnitsToIntCSSPixels(margin.top);
 
   SetPopupPosition(nullptr, true, false, true);
 

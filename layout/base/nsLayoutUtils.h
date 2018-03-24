@@ -24,9 +24,6 @@
 #include "nsStyleCoord.h"
 #include "nsStyleConsts.h"
 #include "nsGkAtoms.h"
-#ifdef MOZ_OLD_STYLE
-#include "nsRuleNode.h"
-#endif
 #include "imgIContainer.h"
 #include "mozilla/gfx/2D.h"
 #include "Units.h"
@@ -54,7 +51,6 @@ class nsDisplayItem;
 class nsFontMetrics;
 class nsFontFaceList;
 class nsIImageLoadingContent;
-class nsStyleContext;
 class nsBlockFrame;
 class nsContainerFrame;
 class nsView;
@@ -69,6 +65,7 @@ struct nsStyleImageOrientation;
 struct nsOverflowAreas;
 
 namespace mozilla {
+class ComputedStyle;
 enum class CSSPseudoElementType : uint8_t;
 class EventListenerManager;
 enum class LayoutFrameType : uint8_t;
@@ -143,6 +140,7 @@ MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(DrawStringFlags)
  */
 class nsLayoutUtils
 {
+  typedef mozilla::ComputedStyle ComputedStyle;
   typedef mozilla::dom::DOMRectList DOMRectList;
   typedef mozilla::layers::Layer Layer;
   typedef mozilla::layers::StackingContextHelper StackingContextHelper;
@@ -675,19 +673,19 @@ public:
 
   /**
    * HasPseudoStyle returns true if aContent (whose primary style
-   * context is aStyleContext) has the aPseudoElement pseudo-style
+   * context is aComputedStyle) has the aPseudoElement pseudo-style
    * attached to it; returns false otherwise.
    *
    * @param aContent the content node we're looking at
-   * @param aStyleContext aContent's style context
+   * @param aComputedStyle aContent's style context
    * @param aPseudoElement the id of the pseudo style we care about
    * @param aPresContext the presentation context
    * @return whether aContent has aPseudoElement style attached to it
    */
   static bool HasPseudoStyle(nsIContent* aContent,
-                               nsStyleContext* aStyleContext,
-                               mozilla::CSSPseudoElementType aPseudoElement,
-                               nsPresContext* aPresContext);
+                             ComputedStyle* aComputedStyle,
+                             mozilla::CSSPseudoElementType aPseudoElement,
+                             nsPresContext* aPresContext);
 
   /**
    * If this frame is a placeholder for a float, then return the float,
@@ -1300,24 +1298,26 @@ public:
 
   /**
    * Get the font metrics corresponding to the given style data.
-   * @param aStyleContext the style data
+   * @param aComputedStyle the style data
    * @param aSizeInflation number to multiply font size by
    */
-  static already_AddRefed<nsFontMetrics> GetFontMetricsForStyleContext(
-      nsStyleContext* aStyleContext, float aSizeInflation = 1.0f,
+  static already_AddRefed<nsFontMetrics> GetFontMetricsForComputedStyle(
+      ComputedStyle* aComputedStyle,
+      float aSizeInflation = 1.0f,
       uint8_t aVariantWidth = NS_FONT_VARIANT_WIDTH_NORMAL);
 
   /**
    * Get the font metrics of emphasis marks corresponding to the given
-   * style data. The result is same as GetFontMetricsForStyleContext
+   * style data. The result is same as GetFontMetricsForComputedStyle
    * except that the font size is scaled down to 50%.
-   * @param aStyleContext the style data
+   * @param aComputedStyle the style data
    * @param aInflation number to multiple font size by
    */
   static already_AddRefed<nsFontMetrics> GetFontMetricsOfEmphasisMarks(
-      nsStyleContext* aStyleContext, float aInflation)
+      ComputedStyle* aComputedStyle,
+      float aInflation)
   {
-    return GetFontMetricsForStyleContext(aStyleContext, aInflation * 0.5f);
+    return GetFontMetricsForComputedStyle(aComputedStyle, aInflation * 0.5f);
   }
 
   /**
@@ -1632,14 +1632,14 @@ public:
                                                  nsFontMetrics& aFontMetrics,
                                                  DrawTarget* aDrawTarget);
 
-  static void DrawString(const nsIFrame*     aFrame,
-                         nsFontMetrics&      aFontMetrics,
-                         gfxContext*         aContext,
-                         const char16_t*     aString,
-                         int32_t             aLength,
-                         nsPoint             aPoint,
-                         nsStyleContext*     aStyleContext = nullptr,
-                         DrawStringFlags     aFlags = DrawStringFlags::eDefault);
+  static void DrawString(const nsIFrame*         aFrame,
+                         nsFontMetrics&          aFontMetrics,
+                         gfxContext*             aContext,
+                         const char16_t*         aString,
+                         int32_t                 aLength,
+                         nsPoint                 aPoint,
+                         ComputedStyle* aComputedStyle = nullptr,
+                         DrawStringFlags         aFlags = DrawStringFlags::eDefault);
 
   static nsPoint GetBackgroundFirstTilePos(const nsPoint& aDest,
                                            const nsPoint& aFill,
@@ -1835,7 +1835,7 @@ public:
    *   @param aRenderingContext Where to draw the image, set up with an
    *                            appropriate scale and transform for drawing in
    *                            app units.
-   *   @param aStyleContext     The style context of the nsIFrame (or
+   *   @param aComputedStyle     The style context of the nsIFrame (or
    *                            pseudo-element) for which this image is being
    *                            drawn.
    *   @param aImage            The image.
@@ -1848,16 +1848,16 @@ public:
    *   @param aImageFlags       Image flags of the imgIContainer::FLAG_* variety
    */
   static ImgDrawResult DrawImage(gfxContext&         aContext,
-                              nsStyleContext*     aStyleContext,
-                              nsPresContext*      aPresContext,
-                              imgIContainer*      aImage,
-                              const SamplingFilter aSamplingFilter,
-                              const nsRect&       aDest,
-                              const nsRect&       aFill,
-                              const nsPoint&      aAnchor,
-                              const nsRect&       aDirty,
-                              uint32_t            aImageFlags,
-                              float               aOpacity = 1.0);
+                                 ComputedStyle*      aComputedStyle,
+                                 nsPresContext*      aPresContext,
+                                 imgIContainer*      aImage,
+                                 const SamplingFilter aSamplingFilter,
+                                 const nsRect&       aDest,
+                                 const nsRect&       aFill,
+                                 const nsPoint&      aAnchor,
+                                 const nsRect&       aDirty,
+                                 uint32_t            aImageFlags,
+                                 float               aOpacity = 1.0);
 
   /**
    * Draw a whole image without scaling or tiling.
@@ -2056,7 +2056,7 @@ public:
    * and prefs indicate we should be optimizing for speed over quality
    */
   static mozilla::gfx::ShapedTextFlags
-  GetTextRunFlagsForStyle(nsStyleContext* aStyleContext,
+  GetTextRunFlagsForStyle(ComputedStyle* aComputedStyle,
                           const nsStyleFont* aStyleFont,
                           const nsStyleText* aStyleText,
                           nscoord aLetterSpacing);
@@ -2065,7 +2065,7 @@ public:
    * Get orientation flags for textrun construction.
    */
   static mozilla::gfx::ShapedTextFlags
-  GetTextRunOrientFlagsForStyle(nsStyleContext* aStyleContext);
+  GetTextRunOrientFlagsForStyle(ComputedStyle* aComputedStyle);
 
   /**
    * Takes two rectangles whose origins must be the same, and computes
@@ -2524,50 +2524,6 @@ public:
     return sTextCombineUprightDigitsEnabled;
   }
 
-  // Stylo (the Servo backend for Gecko's style system) is generally enabled
-  // or disabled at compile-time. However, we provide the additional capability
-  // to disable it dynamically in stylo-enabled builds via a pref.
-  static bool StyloEnabled() {
-#if defined(MOZ_STYLO) && defined(MOZ_OLD_STYLE)
-    return sStyloEnabled && StyloSupportedInCurrentProcess();
-#elif defined(MOZ_STYLO)
-    return true;
-#else
-    return false;
-#endif
-  }
-
-  // Whether Stylo should be allowed to be enabled in this process.
-  static bool StyloSupportedInCurrentProcess() {
-#ifdef MOZ_STYLO
-    // FIXME
-    if (mozilla::recordreplay::IsRecordingOrReplaying()) {
-      return false;
-    }
-    if (XRE_IsContentProcess()) {
-      return true;
-    }
-    if (XRE_IsParentProcess()) {
-      // If Stylo is enabled for chrome document, we use it in all
-      // parent processes, regardless of whether it's e10s parent.
-      if (StyloChromeEnabled()) {
-        return true;
-      }
-      // Otherwise we only use stylo on non-e10s parent.
-      return !XRE_IsE10sParentProcess();
-    }
-#endif
-    // Stylo is not enabled for any other process.
-    MOZ_DIAGNOSTIC_ASSERT(false, "We should not be creating any document "
-                          "in processes other than content and parent");
-    return false;
-  }
-
-#ifdef MOZ_STYLO
-  // Whether Stylo should be used on chrome documents.
-  static bool StyloChromeEnabled();
-#endif
-
   static uint32_t IdlePeriodDeadlineLimit() {
     return sIdlePeriodDeadlineLimit;
   }
@@ -2595,17 +2551,6 @@ public:
 
   static void Initialize();
   static void Shutdown();
-
-#ifdef MOZ_STYLO
-  /**
-   * Return whether stylo should be used for a given document principal.
-   */
-  static bool ShouldUseStylo(nsIPrincipal* aPrincipal);
-#else
-  static bool ShouldUseStylo(nsIPrincipal* aPrincipal) {
-    return false;
-  }
-#endif
 
   /**
    * Register an imgIRequest object with a refresh driver.
@@ -3124,9 +3069,6 @@ private:
   static bool sInterruptibleReflowEnabled;
   static bool sSVGTransformBoxEnabled;
   static bool sTextCombineUprightDigitsEnabled;
-#ifdef MOZ_STYLO
-  static bool sStyloEnabled;
-#endif
   static uint32_t sIdlePeriodDeadlineLimit;
   static uint32_t sQuiescentFramesBeforeIdlePeriod;
 

@@ -23,25 +23,25 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#include "jsarray.h"
-#include "jsbool.h"
 #include "jsdate.h"
 #include "jsexn.h"
 #include "jsfriendapi.h"
 #include "jsmath.h"
 #include "jsnum.h"
-#include "jsstr.h"
 #include "jstypes.h"
 #include "jsutil.h"
 
+#include "builtin/Array.h"
 #include "builtin/AtomicsObject.h"
+#include "builtin/Boolean.h"
 #include "builtin/Eval.h"
 #include "builtin/JSON.h"
 #include "builtin/MapObject.h"
 #include "builtin/Promise.h"
 #include "builtin/RegExp.h"
 #include "builtin/Stream.h"
-#include "builtin/SymbolObject.h"
+#include "builtin/String.h"
+#include "builtin/Symbol.h"
 #ifdef ENABLE_SIMD
 # include "builtin/SIMD.h"
 #endif
@@ -66,6 +66,8 @@
 #include "js/StructuredClone.h"
 #include "js/Utility.h"
 #include "js/Wrapper.h"
+#include "util/StringBuffer.h"
+#include "util/Text.h"
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
 #include "vm/DateObject.h"
@@ -85,9 +87,8 @@
 #include "vm/SavedStacks.h"
 #include "vm/SelfHosting.h"
 #include "vm/Shape.h"
-#include "vm/String.h"
-#include "vm/StringBuffer.h"
-#include "vm/Symbol.h"
+#include "vm/StringType.h"
+#include "vm/SymbolType.h"
 #include "vm/WrapperObject.h"
 #include "vm/Xdr.h"
 #include "wasm/AsmJS.h"
@@ -100,7 +101,7 @@
 #include "vm/JSScript-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/SavedStacks-inl.h"
-#include "vm/String-inl.h"
+#include "vm/StringType-inl.h"
 
 using namespace js;
 using namespace js::gc;
@@ -778,24 +779,6 @@ JS_PUBLIC_API(void)
 JS_MarkCrossZoneIdValue(JSContext* cx, const Value& value)
 {
     cx->markAtomValue(value);
-}
-
-JS_PUBLIC_API(JSAddonId*)
-JS::NewAddonId(JSContext* cx, HandleString str)
-{
-    return static_cast<JSAddonId*>(JS_AtomizeAndPinJSString(cx, str));
-}
-
-JS_PUBLIC_API(JSString*)
-JS::StringOfAddonId(JSAddonId* id)
-{
-    return id;
-}
-
-JS_PUBLIC_API(JSAddonId*)
-JS::AddonIdOfObject(JSObject* obj)
-{
-    return obj->compartment()->creationOptions().addonIdOrNull();
 }
 
 JS_PUBLIC_API(void)
@@ -3983,7 +3966,6 @@ JS::TransitiveCompileOptions::copyPODTransitiveOptions(const TransitiveCompileOp
     canLazilyParse = rhs.canLazilyParse;
     strictOption = rhs.strictOption;
     extraWarningsOption = rhs.extraWarningsOption;
-    expressionClosuresOption = rhs.expressionClosuresOption;
     werrorOption = rhs.werrorOption;
     asmJSOption = rhs.asmJSOption;
     throwOnAsmJSValidationFailureOption = rhs.throwOnAsmJSValidationFailureOption;
@@ -3993,7 +3975,7 @@ JS::TransitiveCompileOptions::copyPODTransitiveOptions(const TransitiveCompileOp
     introductionLineno = rhs.introductionLineno;
     introductionOffset = rhs.introductionOffset;
     hasIntroductionInfo = rhs.hasIntroductionInfo;
-    isProbablySystemOrAddonCode = rhs.isProbablySystemOrAddonCode;
+    isProbablySystemCode = rhs.isProbablySystemCode;
     hideScriptFromDebugger = rhs.hideScriptFromDebugger;
 };
 
@@ -4106,8 +4088,7 @@ JS::CompileOptions::CompileOptions(JSContext* cx)
 {
     strictOption = cx->options().strictMode();
     extraWarningsOption = cx->compartment()->behaviors().extraWarnings(cx);
-    expressionClosuresOption = cx->options().expressionClosures();
-    isProbablySystemOrAddonCode = cx->compartment()->isProbablySystemOrAddonCode();
+    isProbablySystemCode = cx->compartment()->isProbablySystemCode();
     werrorOption = cx->options().werror();
     if (!cx->options().asmJS())
         asmJSOption = AsmJSOption::Disabled;
@@ -5817,7 +5798,7 @@ JS_StringHasBeenPinned(JSContext* cx, JSString* str)
     if (!str->isAtom())
         return false;
 
-    return AtomIsPinned(cx, &str->asAtom());
+    return str->asAtom().isPinned();
 }
 
 JS_PUBLIC_API(jsid)
@@ -5883,6 +5864,14 @@ JS_NewUCString(JSContext* cx, char16_t* chars, size_t length)
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     return NewString<CanGC>(cx, chars, length);
+}
+
+JS_PUBLIC_API(JSString*)
+JS_NewUCStringDontDeflate(JSContext* cx, char16_t* chars, size_t length)
+{
+    AssertHeapIsIdle();
+    CHECK_REQUEST(cx);
+    return NewStringDontDeflate<CanGC>(cx, chars, length);
 }
 
 JS_PUBLIC_API(JSString*)
@@ -7276,14 +7265,14 @@ JS_SetGlobalJitCompilerOption(JSContext* cx, JSJitCompilerOption opt, uint32_t v
         }
         jit::JitOptions.jumpThreshold = value;
         break;
-      case JSJITCOMPILER_SIMULATOR_ALWAYS_INTERRUPT:
-        jit::JitOptions.simulatorAlwaysInterrupt = !!value;
-        break;
       case JSJITCOMPILER_SPECTRE_INDEX_MASKING:
         jit::JitOptions.spectreIndexMasking = !!value;
         break;
       case JSJITCOMPILER_SPECTRE_OBJECT_MITIGATIONS_BARRIERS:
         jit::JitOptions.spectreObjectMitigationsBarriers = !!value;
+        break;
+      case JSJITCOMPILER_SPECTRE_OBJECT_MITIGATIONS_MISC:
+        jit::JitOptions.spectreObjectMitigationsMisc = !!value;
         break;
       case JSJITCOMPILER_SPECTRE_STRING_MITIGATIONS:
         jit::JitOptions.spectreStringMitigations = !!value;
@@ -7291,11 +7280,17 @@ JS_SetGlobalJitCompilerOption(JSContext* cx, JSJitCompilerOption opt, uint32_t v
       case JSJITCOMPILER_SPECTRE_VALUE_MASKING:
         jit::JitOptions.spectreValueMasking = !!value;
         break;
+      case JSJITCOMPILER_SPECTRE_JIT_TO_CXX_CALLS:
+        jit::JitOptions.spectreJitToCxxCalls = !!value;
+        break;
       case JSJITCOMPILER_ASMJS_ATOMICS_ENABLE:
         jit::JitOptions.asmJSAtomicsEnable = !!value;
         break;
       case JSJITCOMPILER_WASM_FOLD_OFFSETS:
         jit::JitOptions.wasmFoldOffsets = !!value;
+        break;
+      case JSJITCOMPILER_WASM_DELAY_TIER2:
+        jit::JitOptions.wasmDelayTier2 = !!value;
         break;
       case JSJITCOMPILER_ION_INTERRUPT_WITHOUT_SIGNAL:
         jit::JitOptions.ionInterruptWithoutSignals = !!value;
@@ -7612,10 +7607,13 @@ JS::EncodeScript(JSContext* cx, TranscodeBuffer& buffer, HandleScript scriptArg)
 {
     XDREncoder encoder(cx, buffer, buffer.length());
     RootedScript script(cx, scriptArg);
-    if (!encoder.codeScript(&script))
+    XDRResult res = encoder.codeScript(&script);
+    if (res.isErr()) {
         buffer.clearAndFree();
-    MOZ_ASSERT(!buffer.empty() == (encoder.resultCode() == TranscodeResult_Ok));
-    return encoder.resultCode();
+        return res.unwrapErr();
+    }
+    MOZ_ASSERT(!buffer.empty());
+    return JS::TranscodeResult_Ok;
 }
 
 JS_PUBLIC_API(JS::TranscodeResult)
@@ -7623,10 +7621,13 @@ JS::EncodeInterpretedFunction(JSContext* cx, TranscodeBuffer& buffer, HandleObje
 {
     XDREncoder encoder(cx, buffer, buffer.length());
     RootedFunction funobj(cx, &funobjArg->as<JSFunction>());
-    if (!encoder.codeFunction(&funobj))
+    XDRResult res = encoder.codeFunction(&funobj);
+    if (res.isErr()) {
         buffer.clearAndFree();
-    MOZ_ASSERT(!buffer.empty() == (encoder.resultCode() == TranscodeResult_Ok));
-    return encoder.resultCode();
+        return res.unwrapErr();
+    }
+    MOZ_ASSERT(!buffer.empty());
+    return JS::TranscodeResult_Ok;
 }
 
 JS_PUBLIC_API(JS::TranscodeResult)
@@ -7634,18 +7635,22 @@ JS::DecodeScript(JSContext* cx, TranscodeBuffer& buffer, JS::MutableHandleScript
                  size_t cursorIndex)
 {
     XDRDecoder decoder(cx, buffer, cursorIndex);
-    decoder.codeScript(scriptp);
-    MOZ_ASSERT(bool(scriptp) == (decoder.resultCode() == TranscodeResult_Ok));
-    return decoder.resultCode();
+    XDRResult res = decoder.codeScript(scriptp);
+    MOZ_ASSERT(bool(scriptp) == res.isOk());
+    if (res.isErr())
+        return res.unwrapErr();
+    return JS::TranscodeResult_Ok;
 }
 
 JS_PUBLIC_API(JS::TranscodeResult)
 JS::DecodeScript(JSContext* cx, const TranscodeRange& range, JS::MutableHandleScript scriptp)
 {
     XDRDecoder decoder(cx, range);
-    decoder.codeScript(scriptp);
-    MOZ_ASSERT(bool(scriptp) == (decoder.resultCode() == TranscodeResult_Ok));
-    return decoder.resultCode();
+    XDRResult res = decoder.codeScript(scriptp);
+    MOZ_ASSERT(bool(scriptp) == res.isOk());
+    if (res.isErr())
+        return res.unwrapErr();
+    return JS::TranscodeResult_Ok;
 }
 
 JS_PUBLIC_API(JS::TranscodeResult)
@@ -7654,9 +7659,11 @@ JS::DecodeInterpretedFunction(JSContext* cx, TranscodeBuffer& buffer,
                               size_t cursorIndex)
 {
     XDRDecoder decoder(cx, buffer, cursorIndex);
-    decoder.codeFunction(funp);
-    MOZ_ASSERT(bool(funp) == (decoder.resultCode() == TranscodeResult_Ok));
-    return decoder.resultCode();
+    XDRResult res = decoder.codeFunction(funp);
+    MOZ_ASSERT(bool(funp) == res.isOk());
+    if (res.isErr())
+        return res.unwrapErr();
+    return JS::TranscodeResult_Ok;
 }
 
 JS_PUBLIC_API(bool)
@@ -7759,7 +7766,7 @@ JS::CaptureCurrentStack(JSContext* cx, JS::MutableHandleObject stackp,
 JS_PUBLIC_API(bool)
 JS::CopyAsyncStack(JSContext* cx, JS::HandleObject asyncStack,
                    JS::HandleString asyncCause, JS::MutableHandleObject stackp,
-                   unsigned maxFrameCount)
+                   const Maybe<size_t>& maxFrameCount)
 {
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);

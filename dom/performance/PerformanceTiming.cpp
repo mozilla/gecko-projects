@@ -81,7 +81,10 @@ PerformanceTiming::PerformanceTiming(Performance* aPerformance,
   MOZ_ASSERT(aPerformance, "Parent performance object should be provided");
 
   mTimingData.reset(new PerformanceTimingData(aChannel, aHttpChannel,
-                                              aZeroTime));
+    aPerformance->IsSystemPrincipal()
+    ? aZeroTime
+    : nsRFPService::ReduceTimePrecisionAsMSecs(aZeroTime,
+        aPerformance->GetRandomTimelineSeed())));
 
   // Non-null aHttpChannel implies that this PerformanceTiming object is being
   // used for subresources, which is irrelevant to this probe.
@@ -112,8 +115,8 @@ PerformanceTimingData::PerformanceTimingData(nsITimedChannel* aChannel,
   , mInitialized(false)
 {
   mInitialized = !!aChannel;
+  mZeroTime = aZeroTime;
 
-  mZeroTime = nsRFPService::ReduceTimePrecisionAsMSecs(aZeroTime);
   if (!nsContentUtils::IsPerformanceTimingEnabled() ||
       nsContentUtils::ShouldResistFingerprinting()) {
     mZeroTime = 0;
@@ -252,7 +255,11 @@ PerformanceTimingData::FetchStartHighRes(Performance* aPerformance)
       }
     }
   }
-  return nsRFPService::ReduceTimePrecisionAsMSecs(mFetchStart);
+  if (aPerformance->IsSystemPrincipal()) {
+    return mFetchStart;
+  }
+  return nsRFPService::ReduceTimePrecisionAsMSecs(mFetchStart,
+    aPerformance->GetRandomTimelineSeed());
 }
 
 DOMTimeMilliSec
@@ -327,8 +334,12 @@ PerformanceTimingData::AsyncOpenHighRes(Performance* aPerformance)
       nsContentUtils::ShouldResistFingerprinting() || mAsyncOpen.IsNull()) {
     return mZeroTime;
   }
-  return nsRFPService::ReduceTimePrecisionAsMSecs(
-           TimeStampToDOMHighRes(aPerformance, mAsyncOpen));
+  DOMHighResTimeStamp rawValue = TimeStampToDOMHighRes(aPerformance, mAsyncOpen);
+  if (aPerformance->IsSystemPrincipal()) {
+    return rawValue;
+  }
+  return nsRFPService::ReduceTimePrecisionAsMSecs(rawValue,
+    aPerformance->GetRandomTimelineSeed());
 }
 
 DOMHighResTimeStamp
@@ -340,8 +351,12 @@ PerformanceTimingData::WorkerStartHighRes(Performance* aPerformance)
       nsContentUtils::ShouldResistFingerprinting() || mWorkerStart.IsNull()) {
     return mZeroTime;
   }
-  return nsRFPService::ReduceTimePrecisionAsMSecs(
-           TimeStampToDOMHighRes(aPerformance, mWorkerStart));
+  DOMHighResTimeStamp rawValue = TimeStampToDOMHighRes(aPerformance, mWorkerStart);
+  if (aPerformance->IsSystemPrincipal()) {
+    return rawValue;
+  }
+  return nsRFPService::ReduceTimePrecisionAsMSecs(rawValue,
+    aPerformance->GetRandomTimelineSeed());
 }
 
 /**
@@ -447,10 +462,15 @@ PerformanceTimingData::DomainLookupEndHighRes(Performance* aPerformance)
     return mZeroTime;
   }
   // Bug 1155008 - nsHttpTransaction is racy. Return DomainLookupStart when null
-  return mDomainLookupEnd.IsNull()
-          ? DomainLookupStartHighRes(aPerformance)
-          : nsRFPService::ReduceTimePrecisionAsMSecs(
-              TimeStampToDOMHighRes(aPerformance, mDomainLookupEnd));
+  if (mDomainLookupEnd.IsNull()) {
+    return DomainLookupStartHighRes(aPerformance);
+  }
+  DOMHighResTimeStamp rawValue = TimeStampToDOMHighRes(aPerformance, mDomainLookupEnd);
+  if (aPerformance->IsSystemPrincipal()) {
+    return rawValue;
+  }
+  return nsRFPService::ReduceTimePrecisionAsMSecs(rawValue,
+    aPerformance->GetRandomTimelineSeed());
 }
 
 DOMTimeMilliSec
@@ -468,10 +488,15 @@ PerformanceTimingData::ConnectStartHighRes(Performance* aPerformance)
       nsContentUtils::ShouldResistFingerprinting()) {
     return mZeroTime;
   }
-  return mConnectStart.IsNull()
-           ? DomainLookupEndHighRes(aPerformance)
-           : nsRFPService::ReduceTimePrecisionAsMSecs(
-               TimeStampToDOMHighRes(aPerformance, mConnectStart));
+  if (mConnectStart.IsNull()) {
+    return DomainLookupEndHighRes(aPerformance);
+  }
+  DOMHighResTimeStamp rawValue = TimeStampToDOMHighRes(aPerformance, mConnectStart);
+  if (aPerformance->IsSystemPrincipal()) {
+    return rawValue;
+  }
+  return nsRFPService::ReduceTimePrecisionAsMSecs(rawValue,
+    aPerformance->GetRandomTimelineSeed());
 }
 
 DOMTimeMilliSec
@@ -489,13 +514,19 @@ PerformanceTimingData::SecureConnectionStartHighRes(Performance* aPerformance)
       nsContentUtils::ShouldResistFingerprinting()) {
     return mZeroTime;
   }
-  return !mSecureConnection
-    ? 0 // We use 0 here, because mZeroTime is sometimes set to the navigation
+  if (!mSecureConnection) {
+    return 0; // We use 0 here, because mZeroTime is sometimes set to the navigation
         // start time.
-    : (mSecureConnectionStart.IsNull()
-        ? mZeroTime
-        : nsRFPService::ReduceTimePrecisionAsMSecs(
-            TimeStampToDOMHighRes(aPerformance, mSecureConnectionStart)));
+  }
+  if (mSecureConnectionStart.IsNull()) {
+    return mZeroTime;
+  }
+  DOMHighResTimeStamp rawValue = TimeStampToDOMHighRes(aPerformance, mSecureConnectionStart);
+  if (aPerformance->IsSystemPrincipal()) {
+    return rawValue;
+  }
+  return nsRFPService::ReduceTimePrecisionAsMSecs(rawValue,
+    aPerformance->GetRandomTimelineSeed());
 }
 
 DOMTimeMilliSec
@@ -514,10 +545,15 @@ PerformanceTimingData::ConnectEndHighRes(Performance* aPerformance)
     return mZeroTime;
   }
   // Bug 1155008 - nsHttpTransaction is racy. Return ConnectStart when null
-  return mConnectEnd.IsNull()
-           ? ConnectStartHighRes(aPerformance)
-           : nsRFPService::ReduceTimePrecisionAsMSecs(
-               TimeStampToDOMHighRes(aPerformance, mConnectEnd));
+  if (mConnectEnd.IsNull()) {
+    return ConnectStartHighRes(aPerformance);
+  }
+  DOMHighResTimeStamp rawValue = TimeStampToDOMHighRes(aPerformance, mConnectEnd);
+  if (aPerformance->IsSystemPrincipal()) {
+    return rawValue;
+  }
+  return nsRFPService::ReduceTimePrecisionAsMSecs(rawValue,
+    aPerformance->GetRandomTimelineSeed());
 }
 
 DOMTimeMilliSec
@@ -593,10 +629,15 @@ PerformanceTimingData::ResponseEndHighRes(Performance* aPerformance)
     mResponseEnd = mWorkerResponseEnd;
   }
   // Bug 1155008 - nsHttpTransaction is racy. Return ResponseStart when null
-  return mResponseEnd.IsNull()
-           ? ResponseStartHighRes(aPerformance)
-           : nsRFPService::ReduceTimePrecisionAsMSecs(
-               TimeStampToDOMHighRes(aPerformance, mResponseEnd));
+  if (mResponseEnd.IsNull()) {
+    return ResponseStartHighRes(aPerformance);
+  }
+  DOMHighResTimeStamp rawValue = TimeStampToDOMHighRes(aPerformance, mResponseEnd);
+  if (aPerformance->IsSystemPrincipal()) {
+    return rawValue;
+  }
+  return nsRFPService::ReduceTimePrecisionAsMSecs(rawValue,
+    aPerformance->GetRandomTimelineSeed());
 }
 
 DOMTimeMilliSec

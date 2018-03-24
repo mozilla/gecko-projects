@@ -14,6 +14,7 @@
 #include "mozilla/SystemGroup.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/IDBFactoryBinding.h"
+#include "mozilla/dom/quota/QuotaManager.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/BackgroundUtils.h"
@@ -454,6 +455,14 @@ IDBFactory::Open(JSContext* aCx,
   if (!IsChrome() &&
       aOptions.mStorage.WasPassed()) {
 
+    if (mWindow && mWindow->GetExtantDoc()) {
+      mWindow->GetExtantDoc()->WarnOnceAbout(nsIDocument::eIDBOpenDBOptions_StorageType);
+    } else if (!NS_IsMainThread()) {
+      // The method below reports on the main thread too, so we need to make sure we're on a worker.
+      // Workers don't have a WarnOnceAbout mechanism, so this will be reported every time.
+      WorkerPrivate::ReportErrorToConsole("IDBOpenDBOptions_StorageType");
+    }
+
     bool ignore = false;
     // Ignore internal usage on about: pages.
     if (NS_IsMainThread()) {
@@ -678,8 +687,14 @@ IDBFactory::OpenInternal(JSContext* aCx,
 
   PersistenceType persistenceType;
 
-  if (principalInfo.type() == PrincipalInfo::TSystemPrincipalInfo) {
-    // Chrome privilege always gets persistent storage.
+  bool isInternal = principalInfo.type() == PrincipalInfo::TSystemPrincipalInfo;
+  if (!isInternal && principalInfo.type() == PrincipalInfo::TContentPrincipalInfo) {
+    nsCString origin = principalInfo.get_ContentPrincipalInfo().originNoSuffix();
+    isInternal = QuotaManager::IsOriginInternal(origin);
+  }
+
+  if (isInternal) {
+    // Chrome privilege and internal origins always get persistent storage.
     persistenceType = PERSISTENCE_TYPE_PERSISTENT;
   } else {
     persistenceType = PersistenceTypeFromStorage(aStorageType);

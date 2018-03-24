@@ -200,7 +200,6 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["browser.cache.offline.enable", {what: RECORD_PREF_VALUE}],
   ["browser.formfill.enable", {what: RECORD_PREF_VALUE}],
   ["browser.newtabpage.enabled", {what: RECORD_PREF_VALUE}],
-  ["browser.newtabpage.enhanced", {what: RECORD_PREF_VALUE}],
   ["browser.shell.checkDefaultBrowser", {what: RECORD_PREF_VALUE}],
   ["browser.search.ignoredJAREngines", {what: RECORD_DEFAULTPREF_VALUE}],
   ["browser.search.region", {what: RECORD_PREF_VALUE}],
@@ -218,7 +217,6 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["dom.ipc.processCount", {what: RECORD_PREF_VALUE}],
   ["dom.max_script_run_time", {what: RECORD_PREF_VALUE}],
   ["experiments.manifest.uri", {what: RECORD_PREF_VALUE}],
-  ["extensions.allow-non-mpc-extensions", {what: RECORD_PREF_VALUE}],
   ["extensions.autoDisableScopes", {what: RECORD_PREF_VALUE}],
   ["extensions.enabledScopes", {what: RECORD_PREF_VALUE}],
   ["extensions.blocklist.enabled", {what: RECORD_PREF_VALUE}],
@@ -247,7 +245,7 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["layers.prefer-d3d9", {what: RECORD_PREF_VALUE}],
   ["layers.prefer-opengl", {what: RECORD_PREF_VALUE}],
   ["layout.css.devPixelsPerPx", {what: RECORD_PREF_VALUE}],
-  ["layout.css.servo.enabled", {what: RECORD_PREF_VALUE}],
+  ["marionette.enabled", {what: RECORD_PREF_VALUE}],
   ["network.proxy.autoconfig_url", {what: RECORD_PREF_STATE}],
   ["network.proxy.http", {what: RECORD_PREF_STATE}],
   ["network.proxy.ssl", {what: RECORD_PREF_STATE}],
@@ -284,6 +282,7 @@ const SEARCH_ENGINE_MODIFIED_TOPIC = "browser-search-engine-modified";
 const SEARCH_SERVICE_TOPIC = "browser-search-service";
 const SESSIONSTORE_WINDOWS_RESTORED_TOPIC = "sessionstore-windows-restored";
 const PREF_CHANGED_TOPIC = "nsPref:changed";
+const BLOCKLIST_LOADED_TOPIC = "blocklist-loaded";
 
 /**
  * Enforces the parameter to a boolean value.
@@ -490,6 +489,10 @@ function EnvironmentAddonBuilder(environment) {
   // or a change load.
   this._pendingTask = null;
 
+  // Have we added an observer to listen for blocklist changes that still needs to be
+  // removed:
+  this._blocklistObserverAdded = false;
+
   // Set to true once initial load is complete and we're watching for changes.
   this._loaded = false;
 }
@@ -571,7 +574,21 @@ EnvironmentAddonBuilder.prototype = {
   // nsIObserver
   observe(aSubject, aTopic, aData) {
     this._environment._log.trace("observe - Topic " + aTopic);
-    this._checkForChanges("experiment-changed");
+    if (aTopic == "experiment-changed") {
+      this._checkForChanges("experiment-changed");
+    } else if (aTopic == BLOCKLIST_LOADED_TOPIC) {
+      Services.obs.removeObserver(this, BLOCKLIST_LOADED_TOPIC);
+      this._blocklistObserverAdded = false;
+      let plugins = this._getActivePlugins();
+      let gmpPluginsPromise = this._getActiveGMPlugins();
+      gmpPluginsPromise.then(gmpPlugins => {
+        let {addons} = this._environment._currentEnvironment;
+        addons.activePlugins = plugins;
+        addons.activeGMPlugins = gmpPlugins;
+      }, err => {
+        this._environment._log.error("blocklist observe: Error collecting plugins", err);
+      });
+    }
   },
 
   _checkForChanges(changeReason) {
@@ -597,6 +614,9 @@ EnvironmentAddonBuilder.prototype = {
     if (this._loaded) {
       AddonManager.removeAddonListener(this);
       Services.obs.removeObserver(this, EXPERIMENTS_CHANGED_TOPIC);
+      if (this._blocklistObserverAdded) {
+        Services.obs.removeObserver(this, BLOCKLIST_LOADED_TOPIC);
+      }
     }
 
     // At startup, _pendingTask is set to a Promise that does not resolve
@@ -672,7 +692,7 @@ EnvironmentAddonBuilder.prototype = {
           updateDay: Utils.millisecondsToDays(updateDate.getTime()),
           isSystem: addon.isSystem,
           isWebExtension: addon.isWebExtension,
-          multiprocessCompatible: Boolean(addon.multiprocessCompatible),
+          multiprocessCompatible: true,
         };
 
         // getActiveAddons() gives limited data during startup and full
@@ -686,7 +706,7 @@ EnvironmentAddonBuilder.prototype = {
             userDisabled: enforceBoolean(addon.userDisabled),
             appDisabled: addon.appDisabled,
             foreignInstall: enforceBoolean(addon.foreignInstall),
-            hasBinaryComponents: addon.hasBinaryComponents,
+            hasBinaryComponents: false,
             installDay: Utils.millisecondsToDays(installDate.getTime()),
             signedState: addon.signedState,
           });
@@ -726,7 +746,7 @@ EnvironmentAddonBuilder.prototype = {
         version: limitStringToLength(theme.version, MAX_ADDON_STRING_LENGTH),
         scope: theme.scope,
         foreignInstall: enforceBoolean(theme.foreignInstall),
-        hasBinaryComponents: theme.hasBinaryComponents,
+        hasBinaryComponents: false,
         installDay: Utils.millisecondsToDays(installDate.getTime()),
         updateDay: Utils.millisecondsToDays(updateDate.getTime()),
       };
@@ -740,6 +760,20 @@ EnvironmentAddonBuilder.prototype = {
    * @return Object containing the plugins data.
    */
   _getActivePlugins() {
+    // If we haven't yet loaded the blocklist, pass back dummy data for now,
+    // and add an observer to update this data as soon as we get it.
+    if (!Services.blocklist.isLoaded) {
+      if (!this._blocklistObserverAdded) {
+        Services.obs.addObserver(this, BLOCKLIST_LOADED_TOPIC);
+        this._blocklistObserverAdded = true;
+      }
+      return [{
+        name: "dummy", version: "0.1", description: "Blocklist unavailable",
+        blocklisted: false, disabled: true, clicktoplay: false,
+        mimeTypes: ["text/there.is.only.blocklist"],
+        updateDay: Utils.millisecondsToDays(Date.now()),
+      }];
+    }
     let pluginTags =
       Cc["@mozilla.org/plugin/host;1"].getService(Ci.nsIPluginHost).getPluginTags({});
 
@@ -781,6 +815,17 @@ EnvironmentAddonBuilder.prototype = {
    * running this during addon manager shutdown.
    */
   async _getActiveGMPlugins() {
+    // If we haven't yet loaded the blocklist, pass back dummy data for now,
+    // and add an observer to update this data as soon as we get it.
+    if (!Services.blocklist.isLoaded) {
+      if (!this._blocklistObserverAdded) {
+        Services.obs.addObserver(this, BLOCKLIST_LOADED_TOPIC);
+        this._blocklistObserverAdded = true;
+      }
+      return {
+        "dummy-gmp": {version: "0.1", userDisabled: false, applyBackgroundUpdates: true}
+      };
+    }
     // Request plugins, asynchronously.
     let allPlugins = await AddonManager.getAddonsByTypes(["plugin"]);
 
@@ -811,21 +856,7 @@ EnvironmentAddonBuilder.prototype = {
    * @return Object containing the active experiment data.
    */
   _getActiveExperiment() {
-    let experimentInfo = {};
-    try {
-      let scope = {};
-      ChromeUtils.import("resource:///modules/experiments/Experiments.jsm", scope);
-      let experiments = scope.Experiments.instance();
-      let activeExperiment = experiments.getActiveExperimentID();
-      if (activeExperiment) {
-        experimentInfo.id = activeExperiment;
-        experimentInfo.branch = experiments.getActiveExperimentBranch();
-      }
-    } catch (e) {
-      // If this is not Firefox, the import will fail.
-    }
-
-    return experimentInfo;
+    return {};
   },
 };
 

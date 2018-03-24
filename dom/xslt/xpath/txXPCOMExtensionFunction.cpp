@@ -323,7 +323,7 @@ public:
     void trace(JSTracer* trc) {
         for (uint8_t i = 0; i < mCount; ++i) {
             if (mArray[i].type == nsXPTType::T_JSVAL) {
-                JS::UnsafeTraceRoot(trc, &mArray[i].val.j, "txParam value");
+                JS::UnsafeTraceRoot(trc, &mArray[i].val.j.asValueRef(), "txParam value");
             }
         }
     }
@@ -610,11 +610,9 @@ txXPCOMExtensionFunctionCall::isSensitiveTo(ContextSensitivity aContext)
 }
 
 #ifdef TX_TO_STRING
-nsresult
-txXPCOMExtensionFunctionCall::getNameAtom(nsAtom** aAtom)
+void
+txXPCOMExtensionFunctionCall::appendName(nsAString& aDest)
 {
-    NS_ADDREF(*aAtom = mName);
-
-    return NS_OK;
+    aDest.Append(mName->GetUTF16String());
 }
 #endif

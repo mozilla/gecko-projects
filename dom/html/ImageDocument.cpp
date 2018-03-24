@@ -5,9 +5,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ImageDocument.h"
+#include "mozilla/ComputedStyle.h"
 #include "mozilla/dom/DOMPrefs.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/dom/ImageDocumentBinding.h"
 #include "mozilla/dom/HTMLImageElement.h"
+#include "mozilla/dom/MouseEvent.h"
 #include "nsRect.h"
 #include "nsIImageLoadingContent.h"
 #include "nsGenericHTMLElement.h"
@@ -15,7 +18,6 @@
 #include "nsIDocumentInlines.h"
 #include "nsDOMTokenList.h"
 #include "nsIDOMEvent.h"
-#include "nsIDOMMouseEvent.h"
 #include "nsIDOMEventListener.h"
 #include "nsIFrame.h"
 #include "nsGkAtoms.h"
@@ -25,7 +27,6 @@
 #include "imgINotificationObserver.h"
 #include "nsIPresShell.h"
 #include "nsPresContext.h"
-#include "nsStyleContext.h"
 #include "nsIChannel.h"
 #include "nsIContentPolicy.h"
 #include "nsContentPolicyUtils.h"
@@ -38,7 +39,6 @@
 #include "nsThreadUtils.h"
 #include "nsIScrollableFrame.h"
 #include "nsContentUtils.h"
-#include "mozilla/dom/Element.h"
 #include "mozilla/Preferences.h"
 #include <algorithm>
 
@@ -155,6 +155,9 @@ ImageDocument::ImageDocument()
   , mFirstResize(false)
   , mObservingImageLoader(false)
   , mOriginalZoomLevel(1.0)
+#if defined(MOZ_WIDGET_ANDROID)
+  , mOriginalResolution(1.0)
+#endif
 {
 }
 
@@ -210,6 +213,9 @@ ImageDocument::StartDocumentLoad(const char*         aCommand,
   }
 
   mOriginalZoomLevel = IsSiteSpecific() ? 1.0 : GetZoomLevel();
+#if defined(MOZ_WIDGET_ANDROID)
+  mOriginalResolution = GetResolution();
+#endif
 
   NS_ASSERTION(aDocListener, "null aDocListener");
   *aDocListener = new ImageListener(this);
@@ -294,6 +300,9 @@ ImageDocument::OnPageShow(bool aPersisted,
 {
   if (aPersisted) {
     mOriginalZoomLevel = IsSiteSpecific() ? 1.0 : GetZoomLevel();
+#if defined(MOZ_WIDGET_ANDROID)
+    mOriginalResolution = GetResolution();
+#endif
   }
   RefPtr<ImageDocument> kungFuDeathGrip(this);
   UpdateSizeFromLayout();
@@ -352,7 +361,7 @@ ImageDocument::ShrinkToFit()
     // displayed image height by getting .height on the HTMLImageElement.
     //
     // Hold strong ref, because Height() can run script.
-    RefPtr<HTMLImageElement> img = HTMLImageElement::FromContent(mImageContent);
+    RefPtr<HTMLImageElement> img = HTMLImageElement::FromNode(mImageContent);
     uint32_t imageHeight = img->Height();
     nsDOMTokenList* classList = img->ClassList();
     ErrorResult ignored;
@@ -364,19 +373,19 @@ ImageDocument::ShrinkToFit()
     ignored.SuppressException();
     return;
   }
+#if defined(MOZ_WIDGET_ANDROID)
+  if (GetResolution() != mOriginalResolution && mImageIsResized) {
+    // Don't resize if resolution has changed, e.g., through pinch-zooming on
+    // Android.
+    return;
+  }
+#endif
+
+  // Keep image content alive while changing the attributes.
+  RefPtr<HTMLImageElement> image = HTMLImageElement::FromNode(mImageContent);
 
   uint32_t newWidth = std::max(1, NSToCoordFloor(GetRatio() * mImageWidth));
   uint32_t newHeight = std::max(1, NSToCoordFloor(GetRatio() * mImageHeight));
-
-  // Keep image content alive while changing the attributes.
-  RefPtr<HTMLImageElement> image = HTMLImageElement::FromContent(mImageContent);
-
-  if (mImageIsResized &&
-      newWidth == image->Width() && newHeight == image->Height()) {
-    // Image has already been resized.
-    return;
-  }
-
   image->SetWidth(newWidth, IgnoreErrors());
   image->SetHeight(newHeight, IgnoreErrors());
 
@@ -627,14 +636,12 @@ ImageDocument::HandleEvent(nsIDOMEvent* aEvent)
     mShouldResize = true;
     if (mImageIsResized) {
       int32_t x = 0, y = 0;
-      nsCOMPtr<nsIDOMMouseEvent> event(do_QueryInterface(aEvent));
+      MouseEvent* event = aEvent->InternalDOMEvent()->AsMouseEvent();
       if (event) {
-        event->GetClientX(&x);
-        event->GetClientY(&y);
         RefPtr<HTMLImageElement> img =
-          HTMLImageElement::FromContent(mImageContent);
-        x -= img->OffsetLeft();
-        y -= img->OffsetTop();
+          HTMLImageElement::FromNode(mImageContent);
+        x = event->ClientX() - img->OffsetLeft();
+        y = event->ClientY() - img->OffsetTop();
       }
       mShouldResize = false;
       RestoreImageTo(x, y);
@@ -861,6 +868,19 @@ ImageDocument::GetZoomLevel()
   }
   return zoomLevel;
 }
+
+#if defined(MOZ_WIDGET_ANDROID)
+float
+ImageDocument::GetResolution()
+{
+  float resolution = mOriginalResolution;
+  nsCOMPtr<nsIPresShell> shell = GetShell();
+  if (shell) {
+    resolution = shell->GetResolution();
+  }
+  return resolution;
+}
+#endif
 
 } // namespace dom
 } // namespace mozilla

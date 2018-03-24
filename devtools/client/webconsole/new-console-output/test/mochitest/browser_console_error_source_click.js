@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Check that JS errors and CSS warnings open view source when their source link
 // is clicked in the Browser Console.
 
@@ -14,7 +12,7 @@ const TEST_URI = "data:text/html;charset=utf8,<p>hello world" +
                  "<button onclick='foobar.explode()' " +
                  "style='test-color: green-please'>click!</button>";
 
-add_task(async function () {
+add_task(async function() {
   await addTab(TEST_URI);
   let hud = await HUDService.toggleBrowserConsole();
   ok(hud, "browser console opened");
@@ -54,5 +52,5 @@ async function waitForMessageAndViewSource(hud, message) {
   locationNode.click();
   let newTab = await onTabOpen;
   ok(true, "The view source tab was opened in response to clicking the link");
-  await BrowserTestUtils.removeTab(newTab);
+  BrowserTestUtils.removeTab(newTab);
 }

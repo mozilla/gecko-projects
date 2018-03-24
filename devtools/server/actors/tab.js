@@ -1539,7 +1539,7 @@ DebuggerProgressListener.prototype = {
     });
   },
 
-  onWindowCreated: DevToolsUtils.makeInfallible(function (evt) {
+  onWindowCreated: DevToolsUtils.makeInfallible(function(evt) {
     if (!this._tabActor.attached) {
       return;
     }
@@ -1569,7 +1569,7 @@ DebuggerProgressListener.prototype = {
     this._knownWindowIDs.set(innerID, window);
   }, "DebuggerProgressListener.prototype.onWindowCreated"),
 
-  onWindowHidden: DevToolsUtils.makeInfallible(function (evt) {
+  onWindowHidden: DevToolsUtils.makeInfallible(function(evt) {
     if (!this._tabActor.attached) {
       return;
     }
@@ -1593,7 +1593,7 @@ DebuggerProgressListener.prototype = {
     this._knownWindowIDs.delete(getWindowID(window));
   }, "DebuggerProgressListener.prototype.onWindowHidden"),
 
-  observe: DevToolsUtils.makeInfallible(function (subject, topic) {
+  observe: DevToolsUtils.makeInfallible(function(subject, topic) {
     if (!this._tabActor.attached) {
       return;
     }
@@ -1610,7 +1610,7 @@ DebuggerProgressListener.prototype = {
   }, "DebuggerProgressListener.prototype.observe"),
 
   onStateChange:
-  DevToolsUtils.makeInfallible(function (progress, request, flag, status) {
+  DevToolsUtils.makeInfallible(function(progress, request, flag, status) {
     if (!this._tabActor.attached) {
       return;
     }

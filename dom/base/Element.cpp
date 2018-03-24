@@ -19,8 +19,9 @@
 #include "mozilla/dom/Flex.h"
 #include "mozilla/dom/Grid.h"
 #include "mozilla/gfx/Matrix.h"
-#include "nsDOMAttributeMap.h"
 #include "nsAtom.h"
+#include "nsCSSFrameConstructor.h"
+#include "nsDOMAttributeMap.h"
 #include "nsIContentInlines.h"
 #include "mozilla/dom/NodeInfo.h"
 #include "nsIDocumentInlines.h"
@@ -30,7 +31,6 @@
 #include "nsIContentIterator.h"
 #include "nsFlexContainerFrame.h"
 #include "nsFocusManager.h"
-#include "nsFrameManager.h"
 #include "nsILinkHandler.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIURL.h"
@@ -106,18 +106,12 @@
 
 #include "nsNodeInfoManager.h"
 #include "nsICategoryManager.h"
-#include "nsIDOMDocumentType.h"
 #include "nsGenericHTMLElement.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsIControllers.h"
 #include "nsView.h"
 #include "nsViewManager.h"
 #include "nsIScrollableFrame.h"
-#ifdef MOZ_OLD_STYLE
-#include "mozilla/css/StyleRule.h" /* For nsCSSSelectorList */
-#include "nsCSSRuleProcessor.h"
-#include "nsRuleProcessorData.h"
-#endif
 #include "nsTextNode.h"
 
 #include "nsCycleCollectionParticipant.h"
@@ -143,10 +137,11 @@
 #include "nsISupportsImpl.h"
 #include "mozilla/dom/CSSPseudoElement.h"
 #include "mozilla/dom/DocumentFragment.h"
+#include "mozilla/dom/ElementBinding.h"
 #include "mozilla/dom/KeyframeEffect.h"
 #include "mozilla/dom/KeyframeEffectBinding.h"
+#include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/dom/WindowBinding.h"
-#include "mozilla/dom/ElementBinding.h"
 #include "mozilla/dom/VRDisplay.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Preferences.h"
@@ -214,6 +209,12 @@ Element::GetSVGAnimatedClass() const
 NS_IMETHODIMP
 Element::QueryInterface(REFNSIID aIID, void** aInstancePtr)
 {
+  if (aIID.Equals(NS_GET_IID(Element))) {
+    NS_ADDREF_THIS();
+    *aInstancePtr = this;
+    return NS_OK;
+  }
+
   NS_ASSERTION(aInstancePtr,
                "QueryInterface requires a non-NULL destination!");
   nsresult rv = FragmentOrElement::QueryInterface(aIID, aInstancePtr);
@@ -543,8 +544,8 @@ Element::GetBindingURL(nsIDocument *aDocument, css::URLValue **aResult)
   }
 
   // Get the computed -moz-binding directly from the style context
-  RefPtr<nsStyleContext> sc =
-    nsComputedDOMStyle::GetStyleContextNoFlush(this, nullptr);
+  RefPtr<ComputedStyle> sc =
+    nsComputedDOMStyle::GetComputedStyleNoFlush(this, nullptr);
   NS_ENSURE_TRUE(sc, false);
 
   NS_IF_ADDREF(*aResult = sc->StyleDisplay()->mBinding);
@@ -559,8 +560,7 @@ Element::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
     return nullptr;
   }
 
-  nsIDocument* doc =
-    HasFlag(NODE_FORCE_XBL_BINDINGS) ? OwnerDoc() : GetComposedDoc();
+  nsIDocument* doc = GetComposedDoc();
   if (!doc) {
     // There's no baseclass that cares about this call so we just
     // return here.
@@ -1249,7 +1249,7 @@ Element::AttachShadowInternal(ShadowRootMode aMode, ErrorResult& aError)
   if (nsIDocument* doc = GetComposedDoc()) {
     if (nsIPresShell* shell = doc->GetShell()) {
       shell->DestroyFramesForAndRestyle(this);
-      MOZ_ASSERT(!shell->FrameManager()->GetDisplayContentsStyleFor(this));
+      MOZ_ASSERT(!shell->FrameConstructor()->GetDisplayContentsStyleFor(this));
     }
   }
   MOZ_ASSERT(!GetPrimaryFrame());
@@ -1505,8 +1505,8 @@ Element::GetElementsWithGrid(nsTArray<RefPtr<Element>>& aElements)
   // generate a nsGridContainerFrame during layout.
   auto IsDisplayGrid = [](Element* aElement) -> bool
   {
-    RefPtr<nsStyleContext> styleContext =
-      nsComputedDOMStyle::GetStyleContext(aElement, nullptr);
+    RefPtr<ComputedStyle> styleContext =
+      nsComputedDOMStyle::GetComputedStyle(aElement, nullptr);
     if (styleContext) {
       const nsStyleDisplay* display = styleContext->StyleDisplay();
       return (display->mDisplay == StyleDisplay::Grid ||
@@ -1537,7 +1537,7 @@ Element::GetElementsByMatching(nsElementMatchFunc aFunc,
 static uint32_t
 EditableInclusiveDescendantCount(nsIContent* aContent)
 {
-  auto htmlElem = nsGenericHTMLElement::FromContent(aContent);
+  auto htmlElem = nsGenericHTMLElement::FromNode(aContent);
   if (htmlElem) {
     return htmlElem->EditableInclusiveDescendantCount();
   }
@@ -1565,9 +1565,6 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                   (!aBindingParent && aParent &&
                    aParent->GetBindingParent() == GetBindingParent()),
                   "Already have a binding parent.  Unbind first!");
-  NS_PRECONDITION(!aParent || !aDocument ||
-                  !aParent->HasFlag(NODE_FORCE_XBL_BINDINGS),
-                  "Parent in document but flagged as forcing XBL");
   NS_PRECONDITION(aBindingParent != this,
                   "Content must not be its own binding parent");
   NS_PRECONDITION(!IsRootOfNativeAnonymousSubtree() ||
@@ -1580,7 +1577,7 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
 
 #ifdef MOZ_XUL
   // First set the binding parent
-  nsXULElement* xulElem = nsXULElement::FromContent(this);
+  nsXULElement* xulElem = nsXULElement::FromNode(this);
   if (xulElem) {
     xulElem->SetXULBindingParent(aBindingParent);
   }
@@ -1618,20 +1615,14 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     }
   }
 
-  bool hadForceXBL = HasFlag(NODE_FORCE_XBL_BINDINGS);
-
   bool hadParent = !!GetParentNode();
 
-  // Now set the parent and set the "Force attach xbl" flag if needed.
+  // Now set the parent.
   if (aParent) {
     if (!GetParent()) {
       NS_ADDREF(aParent);
     }
     mParent = aParent;
-
-    if (aParent->HasFlag(NODE_FORCE_XBL_BINDINGS)) {
-      SetFlags(NODE_FORCE_XBL_BINDINGS);
-    }
   }
   else {
     mParent = aDocument;
@@ -1658,10 +1649,8 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     // Being added to a document.
     SetIsInDocument();
 
-    // Unset this flag since we now really are in a document.
-    UnsetFlags(NODE_FORCE_XBL_BINDINGS |
-               // And clear the lazy frame construction bits.
-               NODE_NEEDS_FRAME | NODE_DESCENDANTS_NEED_FRAMES |
+    // Clear the lazy frame construction bits.
+    UnsetFlags(NODE_NEEDS_FRAME | NODE_DESCENDANTS_NEED_FRAMES |
                // And the restyle bits. These shouldn't even get set if we came
                // from a Servo-styled document, but they may be set if the
                // element comes from a Gecko-backed document, see bug 1394586.
@@ -1678,8 +1667,8 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     // inserted into a document.
     //
     // See the comment about the restyle bits above, it also applies.
-    UnsetFlags(NODE_FORCE_XBL_BINDINGS | NODE_NEEDS_FRAME |
-               NODE_DESCENDANTS_NEED_FRAMES | ELEMENT_ALL_RESTYLE_FLAGS);
+    UnsetFlags(NODE_NEEDS_FRAME | NODE_DESCENDANTS_NEED_FRAMES |
+               ELEMENT_ALL_RESTYLE_FLAGS);
   } else {
     // If we're not in the doc and not in a shadow tree,
     // update our subtree pointer.
@@ -1706,11 +1695,6 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     if (ShadowRoot* shadowRootParent = ShadowRoot::FromNode(parent)) {
       parent = shadowRootParent->GetHost();
     }
-
-    bool inStyleScope = parent->IsElementInStyleScope();
-
-    SetIsElementInStyleScope(inStyleScope);
-    SetIsElementInStyleScopeFlagOnShadowTree(inStyleScope);
   }
 
   // This has to be here, rather than in nsGenericHTMLElement::BindToTree,
@@ -1724,11 +1708,10 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
 
   UpdateEditableState(false);
 
-  // If NODE_FORCE_XBL_BINDINGS was set, or we had a pre-existing XBL binding,
+  // If we had a pre-existing XBL binding,
   // we might have anonymous children that also need to be told that they are
   // moving.
-  if (hadForceXBL ||
-      (HasFlag(NODE_MAY_BE_IN_BINDING_MNGR) && !GetShadowRoot())) {
+  if (HasFlag(NODE_MAY_BE_IN_BINDING_MNGR) && !GetShadowRoot()) {
     nsXBLBinding* binding =
       OwnerDoc()->BindingManager()->GetBindingWithContent(this);
 
@@ -1760,10 +1743,12 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     if (!hadParent) {
       uint32_t editableDescendantChange = EditableInclusiveDescendantCount(this);
       if (editableDescendantChange != 0) {
-      // If we are binding a subtree root to the document, we need to update
-      // the editable descendant count of all the ancestors.
+        // If we are binding a subtree root to the document, we need to update
+        // the editable descendant count of all the ancestors.
+        // But we don't cross Shadow DOM boundary.
+        // (The expected behavior with Shadow DOM is unclear)
         nsIContent* parent = GetParent();
-        while (parent) {
+        while (parent && parent->IsElement()) {
           parent->ChangeEditableDescendantCount(editableDescendantChange);
           parent = parent->GetParent();
         }
@@ -1887,8 +1872,7 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
   RemoveFromIdTable();
 
   // Make sure to unbind this node before doing the kids
-  nsIDocument* document =
-    HasFlag(NODE_FORCE_XBL_BINDINGS) ? OwnerDoc() : GetComposedDoc();
+  nsIDocument* document = GetComposedDoc();
 
   if (HasPointerLock()) {
     nsIDocument::UnlockPointer();
@@ -1992,12 +1976,10 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
     SetSubtreeRootPointer(aNullParent ? this : mParent->SubtreeRoot());
   }
 
-  // Unset this since that's what the old code effectively did.
-  UnsetFlags(NODE_FORCE_XBL_BINDINGS);
   bool clearBindingParent = true;
 
 #ifdef MOZ_XUL
-  if (nsXULElement* xulElem = nsXULElement::FromContent(this)) {;
+  if (nsXULElement* xulElem = nsXULElement::FromNode(this)) {;
     xulElem->SetXULBindingParent(nullptr);
     clearBindingParent = false;
   }
@@ -2312,7 +2294,7 @@ Element::DispatchClickEvent(nsPresContext* aPresContext,
     inputSource = sourceMouseEvent->inputSource;
   } else if (aSourceEvent->mClass == eKeyboardEventClass) {
     event.mFlags.mIsPositionless = true;
-    inputSource = nsIDOMMouseEvent::MOZ_SOURCE_KEYBOARD;
+    inputSource = MouseEventBinding::MOZ_SOURCE_KEYBOARD;
   }
   event.pressure = pressure;
   event.mClickCount = clickCount;
@@ -2700,7 +2682,7 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
     oldValue = aOldValue;
   }
 
-  if (aComposedDocument || HasFlag(NODE_FORCE_XBL_BINDINGS)) {
+  if (aComposedDocument) {
     RefPtr<nsXBLBinding> binding = GetXBLBinding();
     if (binding) {
       binding->AttributeChanged(aName, aNamespaceID, false, aNotify);
@@ -3007,7 +2989,7 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsAtom* aName,
 
   PostIdMaybeChange(aNameSpaceID, aName, nullptr);
 
-  if (document || HasFlag(NODE_FORCE_XBL_BINDINGS)) {
+  if (document) {
     RefPtr<nsXBLBinding> binding = GetXBLBinding();
     if (binding) {
       binding->AttributeChanged(aName, aNameSpaceID, true, aNotify);
@@ -3155,21 +3137,17 @@ Element::List(FILE* out, int32_t aIndent,
   // Note: not listing nsIAnonymousContentCreator-created content...
 
   nsBindingManager* bindingManager = document->BindingManager();
-  nsCOMPtr<nsIDOMNodeList> anonymousChildren;
-  bindingManager->GetAnonymousNodesFor(nonConstThis,
-                                       getter_AddRefs(anonymousChildren));
+  nsINodeList* anonymousChildren =
+    bindingManager->GetAnonymousNodesFor(nonConstThis);
 
   if (anonymousChildren) {
-    uint32_t length = 0;
-    anonymousChildren->GetLength(&length);
+    uint32_t length = anonymousChildren->Length();
 
     for (indent = aIndent; --indent >= 0; ) fputs("  ", out);
     fputs("anonymous-children<\n", out);
 
     for (uint32_t i = 0; i < length; ++i) {
-      nsCOMPtr<nsIDOMNode> node;
-      anonymousChildren->Item(i, getter_AddRefs(node));
-      nsCOMPtr<nsIContent> child = do_QueryInterface(node);
+      nsIContent* child = anonymousChildren->Item(i);
       child->List(out, aIndent + 1);
     }
 
@@ -3511,30 +3489,7 @@ Element::Closest(const nsAString& aSelector, ErrorResult& aResult)
       return const_cast<Element*>(Servo_SelectorList_Closest(this, aList));
     },
     [&](nsCSSSelectorList* aList) -> Element* {
-#ifdef MOZ_OLD_STYLE
-      if (!aList) {
-        // Either we failed (and aError already has the exception), or this
-        // is a pseudo-element-only selector that matches nothing.
-        return nullptr;
-      }
-      TreeMatchContext matchingContext(false,
-                                       nsRuleWalker::eRelevantLinkUnvisited,
-                                       OwnerDoc(),
-                                       TreeMatchContext::eNeverMatchVisited);
-      matchingContext.SetHasSpecifiedScope();
-      matchingContext.AddScopeElement(this);
-      for (nsINode* node = this; node; node = node->GetParentNode()) {
-        if (node->IsElement() &&
-            nsCSSRuleProcessor::SelectorListMatches(node->AsElement(),
-                                                    matchingContext,
-                                                    aList)) {
-          return node->AsElement();
-        }
-      }
-      return nullptr;
-#else
       MOZ_CRASH("old style system disabled");
-#endif
     }
   );
 }
@@ -3552,23 +3507,7 @@ Element::Matches(const nsAString& aSelector, ErrorResult& aError)
       return Servo_SelectorList_Matches(this, aList);
     },
     [&](nsCSSSelectorList* aList) {
-#ifdef MOZ_OLD_STYLE
-      if (!aList) {
-        // Either we failed (and aError already has the exception), or this
-        // is a pseudo-element-only selector that matches nothing.
-        return false;
-      }
-      TreeMatchContext matchingContext(false,
-                                       nsRuleWalker::eRelevantLinkUnvisited,
-                                       OwnerDoc(),
-                                       TreeMatchContext::eNeverMatchVisited);
-      matchingContext.SetHasSpecifiedScope();
-      matchingContext.AddScopeElement(this);
-      return nsCSSRuleProcessor::SelectorListMatches(this, matchingContext,
-                                                     aList);
-#else
       MOZ_CRASH("old style system disabled");
-#endif
     }
   );
 }
@@ -3820,7 +3759,12 @@ Element::GetAnimations(const AnimationFilter& filter,
 {
   nsIDocument* doc = GetComposedDoc();
   if (doc) {
-    doc->FlushPendingNotifications(FlushType::Style);
+    // We don't need to explicitly flush throttled animations here, since
+    // updating the animation style of elements will never affect the set of
+    // running animations and it's only the set of running animations that is
+    // important here.
+    doc->FlushPendingNotifications(
+      ChangesToFlush(FlushType::Style, false /* flush animations */));
   }
 
   Element* elem = this;
@@ -4364,7 +4308,6 @@ void
 Element::ClearServoData(nsIDocument* aDoc) {
   MOZ_ASSERT(IsStyledByServo());
   MOZ_ASSERT(aDoc);
-#ifdef MOZ_STYLO
   if (HasServoData()) {
     Servo_Element_ClearData(this);
   } else {
@@ -4378,9 +4321,6 @@ Element::ClearServoData(nsIDocument* aDoc) {
   if (aDoc->GetServoRestyleRoot() == this) {
     aDoc->ClearServoRestyleRoot();
   }
-#else
-  MOZ_CRASH("Accessing servo node data in non-stylo build");
-#endif
 }
 
 void
@@ -4445,7 +4385,7 @@ Element::AddSizeOfExcludingThis(nsWindowSizes& aSizes, size_t* aNodeSize) const
 
     // Now measure just the ComputedValues (and style structs) under
     // mServoData. This counts towards the relevant fields in |aSizes|.
-    RefPtr<ServoStyleContext> sc;
+    RefPtr<ComputedStyle> sc;
     if (Servo_Element_HasPrimaryComputedValues(this)) {
       sc = Servo_Element_GetPrimaryComputedValues(this).Consume();
       if (!aSizes.mState.HaveSeenPtr(sc.get())) {

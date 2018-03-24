@@ -116,13 +116,6 @@ AnimationCollection<AnimationType>::GetOrCreateAnimationCollection(
   return collection;
 }
 
-template <class AnimationType>
-void
-AnimationCollection<AnimationType>::UpdateCheckGeneration(
-  nsPresContext* aPresContext)
-{
-  mCheckGeneration = aPresContext->RestyleManager()->GetAnimationGeneration();
-}
 
 template<class AnimationType>
 /*static*/ nsAtom*

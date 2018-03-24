@@ -49,7 +49,7 @@ function devtools_page() {
     const harLog = await browser.devtools.network.getHAR();
     browser.test.sendMessage("getHAR-result", harLog);
 
-    if (harLogCount === 2) {
+    if (harLogCount === 3) {
       harLogCount = 0;
       browser.test.onMessage.removeListener(harListener);
     }
@@ -143,7 +143,7 @@ add_task(async function test_devtools_network_on_navigated() {
 
   await extension.unload();
 
-  await BrowserTestUtils.removeTab(tab);
+  BrowserTestUtils.removeTab(tab);
 });
 
 /**
@@ -166,10 +166,17 @@ add_task(async function test_devtools_network_get_har() {
   const getHAREmptyPromise = extension.awaitMessage("getHAR-result");
   extension.sendMessage("getHAR");
   const getHAREmptyResult = await getHAREmptyPromise;
-  is(getHAREmptyResult.log.entries.length, 0, "HAR log should be empty");
+  is(getHAREmptyResult.entries.length, 0, "HAR log should be empty");
 
   // Select the Net panel.
   await toolbox.selectTool("netmonitor");
+
+  // Get HAR again, it should be empty because the Panel is selected
+  // but no data collected yet.
+  const getHAREmptyPromiseWithPanel = extension.awaitMessage("getHAR-result");
+  extension.sendMessage("getHAR");
+  const emptyResultWithPanel = await getHAREmptyPromiseWithPanel;
+  is(emptyResultWithPanel.entries.length, 0, "HAR log should be empty");
 
   // Reload the page to collect some HTTP requests.
   extension.sendMessage("navigate");
@@ -180,6 +187,8 @@ add_task(async function test_devtools_network_get_har() {
     extension.awaitMessage("tabUpdated"),
     extension.awaitMessage("onNavigatedFired"),
     extension.awaitMessage("onRequestFinished"),
+    extension.awaitMessage("onRequestFinished-callbackExecuted"),
+    extension.awaitMessage("onRequestFinished-promiseResolved"),
     waitForRequestAdded(toolbox),
   ]);
 
@@ -187,7 +196,7 @@ add_task(async function test_devtools_network_get_har() {
   const getHARPromise = extension.awaitMessage("getHAR-result");
   extension.sendMessage("getHAR");
   const getHARResult = await getHARPromise;
-  is(getHARResult.log.entries.length, 1, "HAR log should not be empty");
+  is(getHARResult.entries.length, 1, "HAR log should not be empty");
 
   // Shutdown
   await gDevTools.closeToolbox(target);
@@ -196,7 +205,7 @@ add_task(async function test_devtools_network_get_har() {
 
   await extension.unload();
 
-  await BrowserTestUtils.removeTab(tab);
+  BrowserTestUtils.removeTab(tab);
 });
 
 /**
@@ -249,5 +258,5 @@ add_task(async function test_devtools_network_on_request_finished() {
 
   await extension.unload();
 
-  await BrowserTestUtils.removeTab(tab);
+  BrowserTestUtils.removeTab(tab);
 });

@@ -3,6 +3,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* import-globals-from ../PlacesUIUtils.jsm */
+/* import-globals-from ../../../../toolkit/content/globalOverlay.js */
+/* import-globals-from ../../../../toolkit/components/places/PlacesUtils.jsm */
+/* import-globals-from ../../../../toolkit/components/places/PlacesTransactions.jsm */
+
 /**
  * Represents an insertion point within a container where we can insert
  * items.
@@ -218,12 +223,13 @@ PlacesController.prototype = {
       this.remove("Remove Selection").catch(Cu.reportError);
       break;
     case "placesCmd_deleteDataHost":
-      var host;
+      let host;
       if (PlacesUtils.nodeIsHost(this._view.selectedNode)) {
-        var queries = this._view.selectedNode.getQueries();
-        host = queries[0].domain;
-      } else
+        host = this._view.selectedNode.query.domain;
+      } else {
         host = Services.io.newURI(this._view.selectedNode.uri).host;
+      }
+      let {ForgetAboutSite} = ChromeUtils.import("resource://gre/modules/ForgetAboutSite.jsm", {});
       ForgetAboutSite.removeDataFromDomain(host)
                      .catch(Cu.reportError);
       break;
@@ -661,15 +667,6 @@ PlacesController.prototype = {
   },
 
   /**
-   * This method can be run on a URI parameter to ensure that it didn't
-   * receive a string instead of an nsIURI object.
-   */
-  _assertURINotString: function PC__assertURINotString(value) {
-    NS_ASSERT((typeof(value) == "object") && !(value instanceof String),
-           "This method should be passed a URI as a nsIURI object, not as a string.");
-  },
-
-  /**
    * Reloads the selected livemark if any.
    */
   reloadSelectedLivemark: function PC_reloadSelectedLivemark() {
@@ -710,23 +707,14 @@ PlacesController.prototype = {
     if (!ip)
       throw Cr.NS_ERROR_NOT_AVAILABLE;
 
-    let performed =
+    let bookmarkGuid =
       PlacesUIUtils.showBookmarkDialog({ action: "add",
                                          type: aType,
                                          defaultInsertionPoint: ip,
                                          hiddenRows: [ "folderPicker" ]
                                        }, window.top);
-    if (performed) {
-      // Select the new item.
-      // TODO (Bug 1425555): When we remove places transactions, we might be
-      // able to improve showBookmarkDialog to return the guid direct, and
-      // avoid the fetch.
-      let insertedNode = await PlacesUtils.bookmarks.fetch({
-        parentGuid: ip.guid,
-        index: await ip.getIndex()
-      });
-
-      this._view.selectItems([insertedNode.guid], false);
+    if (bookmarkGuid) {
+      this._view.selectItems([bookmarkGuid], false);
     }
   },
 
@@ -801,7 +789,8 @@ PlacesController.prototype = {
    * @return {Integer} The total number of items affected.
    */
   async _removeRange(range, transactions, removedFolders) {
-    NS_ASSERT(transactions instanceof Array, "Must pass a transactions array");
+    if (!(transactions instanceof Array))
+      throw new Error("Must pass a transactions array");
     if (!removedFolders)
       removedFolders = [];
 
@@ -869,12 +858,7 @@ PlacesController.prototype = {
     return totalItems;
   },
 
-  /**
-   * Removes the set of selected ranges from bookmarks.
-   * @param   txnName
-   *          See |remove|.
-   */
-  async _removeRowsFromBookmarks(txnName) {
+  async _removeRowsFromBookmarks() {
     let ranges = this._view.removableSelectionRanges;
     let transactions = [];
     let removedFolders = [];
@@ -926,11 +910,11 @@ PlacesController.prototype = {
       PlacesUtils.history.removePagesFromHost(aContainerNode.title, true);
     } else if (PlacesUtils.nodeIsDay(aContainerNode)) {
       // Day container.
-      let query = aContainerNode.getQueries()[0];
+      let query = aContainerNode.query;
       let beginTime = query.beginTime;
       let endTime = query.endTime;
-      NS_ASSERT(query && beginTime && endTime,
-                "A valid date container query should exist!");
+      if (!query || !beginTime || !endTime)
+        throw new Error("A valid date container query should exist!");
       // We want to exclude beginTime from the removal because
       // removePagesByTimeframe includes both extremes, while date containers
       // exclude the lower extreme.  So, if we would not exclude it, we would
@@ -941,31 +925,26 @@ PlacesController.prototype = {
 
   /**
    * Removes the selection
-   * @param   aTxnName
-   *          A name for the transaction if this is being performed
-   *          as part of another operation.
    */
-  async remove(aTxnName) {
+  async remove() {
     if (!this._hasRemovableSelection())
       return;
-
-    NS_ASSERT(aTxnName !== undefined, "Must supply Transaction Name");
 
     var root = this._view.result.root;
 
     if (PlacesUtils.nodeIsFolder(root)) {
-      await this._removeRowsFromBookmarks(aTxnName);
+      await this._removeRowsFromBookmarks();
     } else if (PlacesUtils.nodeIsQuery(root)) {
       var queryType = PlacesUtils.asQuery(root).queryOptions.queryType;
       if (queryType == Ci.nsINavHistoryQueryOptions.QUERY_TYPE_BOOKMARKS) {
-        await this._removeRowsFromBookmarks(aTxnName);
+        await this._removeRowsFromBookmarks();
       } else if (queryType == Ci.nsINavHistoryQueryOptions.QUERY_TYPE_HISTORY) {
         this._removeRowsFromHistory();
       } else {
-        NS_ASSERT(false, "implement support for QUERY_TYPE_UNIFIED");
+        throw new Error("implement support for QUERY_TYPE_UNIFIED");
       }
     } else
-      NS_ASSERT(false, "unexpected root");
+      throw new Error("unexpected root");
   },
 
   /**
@@ -1261,7 +1240,8 @@ PlacesController.prototype = {
    *          The container were we are want to drop
    */
   disallowInsertion(container) {
-    NS_ASSERT(container, "empty container");
+    if (!container)
+      throw new Error("empty container");
     // Allow dropping into Tag containers and editable folders.
     return !PlacesUtils.nodeIsTagQuery(container) &&
            (!PlacesUtils.nodeIsFolder(container) ||

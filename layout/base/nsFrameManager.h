@@ -9,37 +9,20 @@
 #ifndef _nsFrameManager_h_
 #define _nsFrameManager_h_
 
-#include "nsFrameManagerBase.h"
-
+#include "nsDebug.h"
+#include "mozilla/Attributes.h"
 #include "nsFrameList.h"
-#include "nsIContent.h"
-#include "nsStyleContext.h"
 
 class nsContainerFrame;
+class nsIFrame;
+class nsILayoutHistoryState;
+class nsIPresShell;
 class nsPlaceholderFrame;
 class nsWindowSizes;
-
 namespace mozilla {
-/**
- * Node in a linked list, containing the style for an element that
- * does not have a frame but whose parent does have a frame.
- */
-struct UndisplayedNode : public LinkedListElement<UndisplayedNode>
-{
-  UndisplayedNode(nsIContent* aContent, nsStyleContext* aStyle)
-    : mContent(aContent)
-    , mStyle(aStyle)
-  {
-    MOZ_COUNT_CTOR(mozilla::UndisplayedNode);
-  }
-
-  ~UndisplayedNode() { MOZ_COUNT_DTOR(mozilla::UndisplayedNode); }
-
-  nsCOMPtr<nsIContent> mContent;
-  RefPtr<nsStyleContext> mStyle;
-};
-
-} // namespace mozilla
+class ComputedStyle;
+struct UndisplayedNode;
+}
 
 /**
  * Frame manager interface. The frame manager serves one purpose:
@@ -47,21 +30,40 @@ struct UndisplayedNode : public LinkedListElement<UndisplayedNode>
  * lock can be acquired, then the changes are processed immediately; otherwise,
  * they're queued and processed later.
  *
- * Do not add virtual methods (a vtable pointer) or members to this class, or
- * else you'll break the validity of the reinterpret_cast in nsIPresShell's
- * FrameManager() method.
+ * FIXME(emilio): The comment above doesn't make any sense, there's no "frame
+ * model lock" of any sort afaict.
  */
-class nsFrameManager : public nsFrameManagerBase
+class nsFrameManager
 {
+  typedef mozilla::ComputedStyle ComputedStyle;
   typedef mozilla::layout::FrameChildListID ChildListID;
   typedef mozilla::UndisplayedNode UndisplayedNode;
 
 public:
-  explicit nsFrameManager(nsIPresShell* aPresShell) {
-    mPresShell = aPresShell;
+  explicit nsFrameManager(nsIPresShell* aPresShell)
+    : mPresShell(aPresShell)
+    , mRootFrame(nullptr)
+    , mDisplayNoneMap(nullptr)
+    , mDisplayContentsMap(nullptr)
+    , mIsDestroyingFrames(false)
+  {
     MOZ_ASSERT(mPresShell, "need a pres shell");
   }
   ~nsFrameManager();
+
+  bool IsDestroyingFrames() const { return mIsDestroyingFrames; }
+
+  /*
+   * Gets and sets the root frame (typically the viewport). The lifetime of the
+   * root frame is controlled by the frame manager. When the frame manager is
+   * destroyed, it destroys the entire frame hierarchy.
+   */
+  nsIFrame* GetRootFrame() const { return mRootFrame; }
+  void SetRootFrame(nsIFrame* aRootFrame)
+  {
+    NS_ASSERTION(!mRootFrame, "already have a root frame");
+    mRootFrame = aRootFrame;
+  }
 
   /*
    * After Destroy is called, it is an error to call any FrameManager methods.
@@ -72,72 +74,73 @@ public:
 
 
   // display:none and display:contents content does not get an nsIFrame.  To
-  // enable the style context for such content to be obtained we store the
-  // contexts in a couple of hash tables.  The following methods provide the
-  // API that's used to set, reset, obtain and clear these style contexts.
+  // enable the style for such content to be obtained we store them in a
+  // couple of hash tables.  The following methods provide the API that's used
+  // to set, reset, obtain and clear these styles.
+  //
+  // FIXME(stylo-everywhere): This should go away now.
 
   /**
-   * Register the style context for the display:none content, aContent.
+   * Register the style for the display:none content, aContent.
    */
   void RegisterDisplayNoneStyleFor(nsIContent* aContent,
-                                   nsStyleContext* aStyleContext);
+                                   ComputedStyle* aComputedStyle);
 
   /**
-   * Register the style context for the display:contents content, aContent.
+   * Register the style for the display:contents content, aContent.
    */
   void RegisterDisplayContentsStyleFor(nsIContent* aContent,
-                                       nsStyleContext* aStyleContext);
+                                       ComputedStyle* aComputedStyle);
 
   /**
-   * Change the style context for the display:none content, aContent.
+   * Change the style for the display:none content, aContent.
    */
   void ChangeRegisteredDisplayNoneStyleFor(nsIContent* aContent,
-                                           nsStyleContext* aStyleContext)
+                                           ComputedStyle* aComputedStyle)
   {
-    ChangeStyleContextInMap(mDisplayNoneMap, aContent, aStyleContext);
+    ChangeComputedStyleInMap(mDisplayNoneMap, aContent, aComputedStyle);
   }
 
   /**
-   * Change the style context for the display:contents content, aContent.
+   * Change the style for the display:contents content, aContent.
    */
   void ChangeRegisteredDisplayContentsStyleFor(nsIContent* aContent,
-                                               nsStyleContext* aStyleContext)
+                                               ComputedStyle* aComputedStyle)
   {
-    ChangeStyleContextInMap(mDisplayContentsMap, aContent, aStyleContext);
+    ChangeComputedStyleInMap(mDisplayContentsMap, aContent, aComputedStyle);
   }
 
   /**
-   * Get the style context for the display:none content, aContent, if any.
+   * Get the style for the display:none content, aContent, if any.
    */
-  nsStyleContext* GetDisplayNoneStyleFor(const nsIContent* aContent)
+  ComputedStyle* GetDisplayNoneStyleFor(const nsIContent* aContent)
   {
     if (!mDisplayNoneMap) {
       return nullptr;
     }
-    return GetStyleContextInMap(mDisplayNoneMap, aContent);
+    return GetComputedStyleInMap(mDisplayNoneMap, aContent);
   }
 
   /**
-   * Get the style context for the display:contents content, aContent, if any.
+   * Get the style for the display:contents content, aContent, if any.
    */
-  nsStyleContext* GetDisplayContentsStyleFor(const nsIContent* aContent)
+  ComputedStyle* GetDisplayContentsStyleFor(const nsIContent* aContent)
   {
     if (!mDisplayContentsMap) {
       return nullptr;
     }
-    return GetStyleContextInMap(mDisplayContentsMap, aContent);
+    return GetComputedStyleInMap(mDisplayContentsMap, aContent);
   }
 
   /**
-   * Return the linked list of UndisplayedNodes that contain the style contexts
-   * that have been registered for the display:none children of
-   * aParentContent.
+   * Return the linked list of UndisplayedNodes that contain the styles that
+   * been registered for the display:none children of aParentContent.
    */
   UndisplayedNode*
   GetAllRegisteredDisplayNoneStylesIn(nsIContent* aParentContent);
 
   /**
-   * Return the linked list of UndisplayedNodes that contain the style contexts
+   * Return the linked list of UndisplayedNodes that contain the styles
    * that have been registered for the display:contents children of
    * aParentContent.
    */
@@ -145,17 +148,17 @@ public:
   GetAllRegisteredDisplayContentsStylesIn(nsIContent* aParentContent);
 
   /**
-   * Unregister the style context for the display:none content, aContent,
-   * if any.  If found, then this method also unregisters the style contexts
-   * for any display:contents and display:none descendants of aContent.
+   * Unregister the style for the display:none content, aContent, if
+   * any.  If found, then this method also unregisters the styles for any
+   * display:contents and display:none descendants of aContent.
    */
   void UnregisterDisplayNoneStyleFor(nsIContent* aContent,
                                      nsIContent* aParentContent);
 
   /**
-   * Unregister the style context for the display:contents content, aContent,
-   * if any.  If found, then this method also unregisters the style contexts
-   * for any display:contents and display:none descendants of aContent.
+   * Unregister the style for the display:contents content, aContent, if any.
+   * If found, then this method also unregisters the style for any
+   * display:contents and display:none descendants of aContent.
    */
   void UnregisterDisplayContentsStyleFor(nsIContent* aContent,
                                          nsIContent* aParentContent);
@@ -204,24 +207,34 @@ public:
   void AddSizeOfIncludingThis(nsWindowSizes& aSizes) const;
 
 protected:
+  class UndisplayedMap;
+
   static nsIContent* ParentForUndisplayedMap(const nsIContent* aContent);
 
   void ClearAllMapsFor(nsIContent* aParentContent);
 
-  static nsStyleContext* GetStyleContextInMap(UndisplayedMap* aMap,
+  static ComputedStyle* GetComputedStyleInMap(UndisplayedMap* aMap,
                                               const nsIContent* aContent);
-  static mozilla::UndisplayedNode*
-    GetUndisplayedNodeInMapFor(UndisplayedMap* aMap,
-                               const nsIContent* aContent);
-  static mozilla::UndisplayedNode*
-    GetAllUndisplayedNodesInMapFor(UndisplayedMap* aMap,
-                                   nsIContent* aParentContent);
-  static void SetStyleContextInMap(UndisplayedMap* aMap,
-                                   nsIContent* aContent,
-                                   nsStyleContext* aStyleContext);
-  static void ChangeStyleContextInMap(UndisplayedMap* aMap,
-                                      nsIContent* aContent,
-                                      nsStyleContext* aStyleContext);
+  static UndisplayedNode* GetUndisplayedNodeInMapFor(UndisplayedMap* aMap,
+                                                     const nsIContent* aContent);
+  static UndisplayedNode* GetAllUndisplayedNodesInMapFor(UndisplayedMap* aMap,
+                                                         nsIContent* aParentContent);
+  static void SetComputedStyleInMap(
+      UndisplayedMap* aMap,
+      nsIContent* aContent,
+      ComputedStyle* aComputedStyle);
+
+  static void ChangeComputedStyleInMap(
+      UndisplayedMap* aMap,
+      nsIContent* aContent,
+      ComputedStyle* aComputedStyle);
+
+  // weak link, because the pres shell owns us
+  nsIPresShell* MOZ_NON_OWNING_REF mPresShell;
+  nsIFrame* mRootFrame;
+  UndisplayedMap* mDisplayNoneMap;
+  UndisplayedMap* mDisplayContentsMap;
+  bool mIsDestroyingFrames;  // The frame manager is destroying some frame(s).
 };
 
 #endif

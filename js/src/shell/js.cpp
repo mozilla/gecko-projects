@@ -51,7 +51,6 @@
 #endif
 
 #include "jsapi.h"
-#include "jsarray.h"
 #include "jsfriendapi.h"
 #include "jstypes.h"
 #include "jsutil.h"
@@ -61,6 +60,7 @@
 #endif
 #include "shellmoduleloader.out.h"
 
+#include "builtin/Array.h"
 #include "builtin/ModuleObject.h"
 #include "builtin/RegExp.h"
 #include "builtin/TestingFunctions.h"
@@ -90,6 +90,8 @@
 #include "threading/ExclusiveData.h"
 #include "threading/LockGuard.h"
 #include "threading/Thread.h"
+#include "util/StringBuffer.h"
+#include "util/Text.h"
 #include "util/Windows.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/Compression.h"
@@ -105,7 +107,6 @@
 #include "vm/Printer.h"
 #include "vm/Shape.h"
 #include "vm/SharedArrayObject.h"
-#include "vm/StringBuffer.h"
 #include "vm/Time.h"
 #include "vm/TypedArrayObject.h"
 #include "vm/WrapperObject.h"
@@ -136,12 +137,25 @@ using mozilla::TimeStamp;
 
 // Avoid an unnecessary NSPR dependency on Linux and OS X just for the shell.
 #ifdef JS_POSIX_NSPR
+
+enum PRLibSpecType { PR_LibSpec_Pathname };
+
+struct PRLibSpec {
+    PRLibSpecType type;
+    union {
+        const char *pathname;
+    } value;
+};
+
 typedef void PRLibrary;
 
-static PRLibrary*
-PR_LoadLibrary(const char* path)
+#define PR_LD_NOW    RTLD_NOW
+#define PR_LD_GLOBAL RTLD_GLOBAL
+
+static PRLibrary *
+PR_LoadLibraryWithFlags(PRLibSpec libSpec, int flags)
 {
-    return dlopen(path, RTLD_LAZY | RTLD_GLOBAL);
+    return dlopen(libSpec.value.pathname, flags);
 }
 
 static void
@@ -572,8 +586,8 @@ ShellPrincipals ShellPrincipals::fullyTrusted(-1, 1);
 
 #ifdef EDITLINE
 extern "C" {
-extern JS_EXPORT_API(char*) readline(const char* prompt);
-extern JS_EXPORT_API(void)   add_history(char* line);
+extern MOZ_EXPORT char* readline(const char* prompt);
+extern MOZ_EXPORT void add_history(char* line);
 } // extern "C"
 #endif
 
@@ -921,6 +935,22 @@ RunModule(JSContext* cx, const char* filename, FILE* file, bool compileOnly)
 }
 
 static bool
+EnqueueJob(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    if (!IsCallable(args.get(0))) {
+        JS_ReportErrorASCII(cx, "EnqueueJob's first argument must be callable");
+        return false;
+    }
+
+    args.rval().setUndefined();
+
+    RootedObject job(cx, &args[0].toObject());
+    return js::EnqueueJob(cx, job);
+}
+
+static bool
 DrainJobQueue(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -979,6 +1009,81 @@ SetPromiseRejectionTrackerCallback(JSContext* cx, unsigned argc, Value* vp)
     JS::SetPromiseRejectionTrackerCallback(cx, ForwardingPromiseRejectionTrackerCallback);
 
     args.rval().setUndefined();
+    return true;
+}
+
+static bool
+BoundToAsyncStack(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    RootedFunction function(cx, (&GetFunctionNativeReserved(&args.callee(), 0)
+                                 .toObject().as<JSFunction>()));
+    RootedObject options(cx, &GetFunctionNativeReserved(&args.callee(), 1).toObject());
+
+    RootedSavedFrame stack(cx, nullptr);
+    JSAutoByteString cause;
+    bool isExplicit;
+
+    RootedValue v(cx);
+
+    if (!JS_GetProperty(cx, options, "stack", &v))
+        return false;
+    if (!v.isObject() || !v.toObject().is<SavedFrame>()) {
+        JS_ReportErrorASCII(cx, "The 'stack' property must be a SavedFrame object.");
+        return false;
+    }
+    stack = &v.toObject().as<SavedFrame>();
+
+    if (!JS_GetProperty(cx, options, "cause", &v))
+        return false;
+    RootedString causeString(cx, ToString(cx, v));
+    if (!causeString || !cause.encodeUtf8(cx, causeString)) {
+        MOZ_ASSERT(cx->isExceptionPending());
+        return false;
+    }
+
+    if (!JS_GetProperty(cx, options, "explicit", &v))
+        return false;
+    isExplicit = v.isUndefined() ? true : ToBoolean(v);
+
+    auto kind = (isExplicit
+                 ? JS::AutoSetAsyncStackForNewCalls::AsyncCallKind::EXPLICIT
+                 : JS::AutoSetAsyncStackForNewCalls::AsyncCallKind::IMPLICIT);
+
+    JS::AutoSetAsyncStackForNewCalls asasfnckthxbye(cx, stack, cause.ptr(), kind);
+    return Call(cx, UndefinedHandleValue, function,
+                JS::HandleValueArray::empty(), args.rval());
+}
+
+static bool
+BindToAsyncStack(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    if (args.length() != 2) {
+        JS_ReportErrorASCII(cx, "bindToAsyncStack takes exactly two arguments.");
+        return false;
+    }
+
+    if (!args[0].isObject() || !IsCallable(args[0])) {
+        JS_ReportErrorASCII(cx, "bindToAsyncStack's first argument should be a function.");
+        return false;
+    }
+
+    if (!args[1].isObject()) {
+        JS_ReportErrorASCII(cx, "bindToAsyncStack's second argument should be an object.");
+        return false;
+    }
+
+    RootedFunction bound(cx, NewFunctionWithReserved(cx, BoundToAsyncStack, 0, 0,
+                                                     "bindToAsyncStack thunk"));
+    if (!bound)
+        return false;
+    SetFunctionNativeReserved(bound, 0, args[0]);
+    SetFunctionNativeReserved(bound, 1, args[1]);
+
+    args.rval().setObject(*bound);
     return true;
 }
 
@@ -7193,6 +7298,10 @@ JS_FN_HELP("parseBin", BinParse, 1, 0,
 "string 'eval:FILENAME' if the code was invoked by 'eval' or something\n"
 "similar.\n"),
 
+    JS_FN_HELP("enqueueJob", EnqueueJob, 1, 0,
+"enqueueJob(fn)",
+"  Enqueue 'fn' on the shell's job queue."),
+
     JS_FN_HELP("drainJobQueue", DrainJobQueue, 0, 0,
 "drainJobQueue()",
 "Take jobs from the shell's job queue in FIFO order and run them until the\n"
@@ -7202,6 +7311,26 @@ JS_FN_HELP("parseBin", BinParse, 1, 0,
 "setPromiseRejectionTrackerCallback()",
 "Sets the callback to be invoked whenever a Promise rejection is unhandled\n"
 "or a previously-unhandled rejection becomes handled."),
+
+    JS_FN_HELP("bindToAsyncStack", BindToAsyncStack, 2, 0,
+"bindToAsyncStack(fn, { stack, cause, explicit })",
+"  Returns a new function that calls 'fn' with no arguments, passing\n"
+"  'undefined' as the 'this' value, and supplies an async stack for the\n"
+"  call as described by the second argument, an object with the following\n"
+"  properties (which are not optional, unless specified otherwise):\n"
+"\n"
+"  stack:    A SavedFrame object, like that returned by 'saveStack'. Stacks\n"
+"            captured during calls to the returned function capture this as\n"
+"            their async stack parent, accessible via a SavedFrame's\n"
+"            'asyncParent' property.\n"
+"\n"
+"  cause:    A string, supplied as the async cause on the top frame of\n"
+"            captured async stacks.\n"
+"\n"
+"  explicit: A boolean value, indicating whether the given 'stack' should\n"
+"            always supplant the returned function's true callers (true),\n"
+"            or only when there are no other JavaScript frames on the stack\n"
+"            below it (false). If omitted, this is treated as 'true'."),
 
 #ifdef ENABLE_INTL_API
     JS_FN_HELP("addIntlExtras", AddIntlExtras, 1, 0,
@@ -7325,6 +7454,14 @@ TestAssertRecoveredOnBailout,
 "  Set the delay time (between calls to StreamConsumer::consumeChunk) and chunk\n"
 "  size (in bytes)."),
 
+    JS_FS_HELP_END
+};
+
+static const JSFunctionSpecWithHelp performance_functions[] = {
+    JS_FN_HELP("now", Now, 0, 0,
+"now()",
+"  Return the current time with sub-ms precision.\n"
+"  This function is an alias of the dateNow() function."),
     JS_FS_HELP_END
 };
 
@@ -8256,6 +8393,8 @@ NewGlobalObject(JSContext* cx, JS::CompartmentOptions& options,
         RootedObject performanceObj(cx, JS_NewObject(cx, nullptr));
         if (!performanceObj)
             return nullptr;
+        if (!JS_DefineFunctionsWithHelp(cx, performanceObj, performance_functions))
+            return nullptr;
         RootedObject mozMemoryObj(cx, JS_NewObject(cx, nullptr));
         if (!mozMemoryObj)
             return nullptr;
@@ -8470,13 +8609,17 @@ SetContextOptions(JSContext* cx, const OptionParser& op)
         if (strcmp(str, "on") == 0) {
             jit::JitOptions.spectreIndexMasking = true;
             jit::JitOptions.spectreObjectMitigationsBarriers = true;
+            jit::JitOptions.spectreObjectMitigationsMisc = true;
             jit::JitOptions.spectreStringMitigations = true;
             jit::JitOptions.spectreValueMasking = true;
+            jit::JitOptions.spectreJitToCxxCalls = true;
         } else if (strcmp(str, "off") == 0) {
             jit::JitOptions.spectreIndexMasking = false;
             jit::JitOptions.spectreObjectMitigationsBarriers = false;
+            jit::JitOptions.spectreObjectMitigationsMisc = false;
             jit::JitOptions.spectreStringMitigations = false;
             jit::JitOptions.spectreValueMasking = false;
+            jit::JitOptions.spectreJitToCxxCalls = false;
         } else {
             return OptionFailure("spectre-mitigations", str);
         }

@@ -10,14 +10,14 @@
 const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
                  "new-console-output/test/mochitest/test-console-api-iframe.html";
 
-add_task(async function () {
+add_task(async function() {
   const hud = await openNewTabAndConsole(TEST_URI);
   const loggedString = "iframe added";
   // Wait for the initial message to be displayed.
   await waitFor(() => findMessage(hud, loggedString));
   ok(true, "The initial message is displayed in the console");
   // Create a promise for the message logged after the reload.
-  const onMessage = waitForMessage(hud, loggedString)
+  const onMessage = waitForMessage(hud, loggedString);
   BrowserReload();
   await onMessage;
   ok(true, "The message is also displayed after a page reload");

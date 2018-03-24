@@ -792,6 +792,11 @@ ImageBitmap::TransferAsImage()
 UniquePtr<ImageBitmapCloneData>
 ImageBitmap::ToCloneData() const
 {
+  if (!mData) {
+    // A closed image cannot be cloned.
+    return nullptr;
+  }
+
   UniquePtr<ImageBitmapCloneData> result(new ImageBitmapCloneData());
   result->mPictureRect = mPictureRect;
   result->mAlphaType = mAlphaType;
@@ -1498,6 +1503,11 @@ ImageBitmap::ReadStructuredClone(JSContext* aCx,
   // while destructors are running.
   JS::Rooted<JS::Value> value(aCx);
   {
+#ifdef FUZZING
+    if (aIndex >= aClonedSurfaces.Length()) {
+      return nullptr;
+    }
+#endif
     RefPtr<layers::Image> img = CreateImageFromSurface(aClonedSurfaces[aIndex]);
     RefPtr<ImageBitmap> imageBitmap = new ImageBitmap(aParent, img, alphaType);
 

@@ -79,28 +79,6 @@ var snapshotFormatters = {
       $("contentprocesses-row").hidden = true;
     }
 
-    function getReasonStringName(resultValue, defaultValue) {
-      if (resultValue != defaultValue) {
-        return resultValue ? "enabledByUser" : "disabledByUser";
-      }
-      return resultValue ? "enabledByDefault" : "disabledByDefault";
-    }
-    let styloReason;
-    let styloChromeReason;
-    if (!data.styloBuild) {
-      styloReason = "disabledByBuild";
-      styloChromeReason = "disabledByBuild";
-    } else {
-      styloReason = getReasonStringName(data.styloResult, data.styloDefault);
-      styloChromeReason = getReasonStringName(data.styloChromeResult,
-                                              data.styloChromeDefault);
-    }
-    styloReason = strings.GetStringFromName(styloReason);
-    styloChromeReason = strings.GetStringFromName(styloChromeReason);
-    $("stylo-box").textContent =
-      `content = ${data.styloResult} (${styloReason}), ` +
-      `chrome = ${data.styloChromeResult} (${styloChromeReason})`;
-
     if (Services.policies) {
       let policiesText = "";
       switch (data.policiesStatus) {
@@ -1206,6 +1184,10 @@ function populateActionBox() {
   if (!Services.appinfo.inSafeMode && AppConstants.platform !== "android") {
     $("safe-mode-box").style.display = "block";
     $("action-box").style.display = "block";
+
+    if (Services.policies && !Services.policies.isAllowed("safeMode")) {
+      $("restart-in-safe-mode-button").setAttribute("disabled", "true");
+    }
   }
 }
 

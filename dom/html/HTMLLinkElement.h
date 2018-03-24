@@ -31,7 +31,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(HTMLLinkElement,
                                            nsGenericHTMLElement)
 
-  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLLinkElement, link);
+  NS_IMPL_FROMNODE_HTML_WITH_TAG(HTMLLinkElement, link);
   NS_DECL_ADDSIZEOFEXCLUDINGTHIS
 
   void LinkAdded();
@@ -207,12 +207,13 @@ protected:
   virtual ~HTMLLinkElement();
 
   // nsStyleLinkElement
-  virtual already_AddRefed<nsIURI> GetStyleSheetURL(bool* aIsInline, nsIPrincipal** aTriggeringPrincipal) override;
-  virtual void GetStyleSheetInfo(nsAString& aTitle,
-                                 nsAString& aType,
-                                 nsAString& aMedia,
-                                 bool* aIsScoped,
-                                 bool* aIsAlternate) override;
+  already_AddRefed<nsIURI>
+    GetStyleSheetURL(bool* aIsInline, nsIPrincipal** aTriggeringPrincipal) final;
+
+  void GetStyleSheetInfo(nsAString& aTitle,
+                         nsAString& aType,
+                         nsAString& aMedia,
+                         bool* aIsAlternate) final;
 protected:
   RefPtr<nsDOMTokenList> mRelList;
 };

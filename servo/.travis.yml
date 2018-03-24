@@ -7,6 +7,7 @@ matrix:
       script:
          - ./mach test-tidy --no-progress --all
          - ./mach test-tidy --no-progress --self-test
+         - python ./etc/memory_reports_over_time.py --test
          - bash etc/ci/check_no_panic.sh
          - bash etc/ci/manifest_changed.sh
       cache: false
@@ -44,7 +45,6 @@ matrix:
         apt:
           packages:
             - cmake
-            - freeglut3-dev
             - gperf
             - libosmesa6-dev
             - libgles2-mesa-dev

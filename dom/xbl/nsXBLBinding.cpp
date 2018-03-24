@@ -825,18 +825,6 @@ nsXBLBinding::InheritsStyle() const
   return true;
 }
 
-#ifdef MOZ_OLD_STYLE
-void
-nsXBLBinding::WalkRules(nsIStyleRuleProcessor::EnumFunc aFunc, void* aData)
-{
-  if (mNextBinding)
-    mNextBinding->WalkRules(aFunc, aData);
-
-  nsIStyleRuleProcessor *rules = mPrototypeBinding->GetRuleProcessor();
-  if (rules)
-    (*aFunc)(rules, aData);
-}
-#endif
 
 const RawServoAuthorStyles*
 nsXBLBinding::GetServoStyles() const
@@ -1116,7 +1104,6 @@ nsXBLBinding::LookupMember(JSContext* aCx, JS::Handle<jsid> aId,
   // add-on scopes here.
   JS::Rooted<JSObject*> boundScope(aCx,
     js::GetGlobalForObjectCrossCompartment(mBoundElement->GetWrapper()));
-  MOZ_RELEASE_ASSERT(!xpc::IsInAddonScope(boundScope));
   MOZ_RELEASE_ASSERT(!xpc::IsInContentXBLScope(boundScope));
   JS::Rooted<JSObject*> xblScope(aCx, xpc::GetXBLScope(aCx, boundScope));
   NS_ENSURE_TRUE(xblScope, false);

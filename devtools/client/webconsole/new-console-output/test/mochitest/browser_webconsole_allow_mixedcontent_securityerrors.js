@@ -14,11 +14,12 @@
 "use strict";
 
 const TEST_URI = "https://example.com/browser/devtools/client/webconsole/" +
-  "new-console-output/test/mochitest/test-mixedcontent-securityerrors.html";
-const LEARN_MORE_URI =
-  "https://developer.mozilla.org/docs/Web/Security/Mixed_content" + DOCS_GA_PARAMS;
+                 "new-console-output/test/mochitest/" +
+                 "test-mixedcontent-securityerrors.html";
+const LEARN_MORE_URI = "https://developer.mozilla.org/docs/Web/Security/" +
+                       "Mixed_content" + DOCS_GA_PARAMS;
 
-add_task(async function () {
+add_task(async function() {
   await Promise.all([
     pushPref("security.mixed_content.block_active_content", false),
     pushPref("security.mixed_content.block_display_content", false),
@@ -47,7 +48,7 @@ add_task(async function () {
   const checkLink = ({ link, where, expectedLink, expectedTab }) => {
     is(link, expectedLink, `Clicking the provided link opens ${link}`);
     is(where, expectedTab, `Clicking the provided link opens in expected tab`);
-  }
+  };
 
   info("Clicking on the Learn More link");
   const learnMoreLink = mixedActiveContentMessage.querySelector(".learn-more-link");

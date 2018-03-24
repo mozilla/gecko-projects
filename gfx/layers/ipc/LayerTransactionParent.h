@@ -43,7 +43,6 @@ class LayerTransactionParent final : public PLayerTransactionParent,
   typedef InfallibleTArray<Edit> EditArray;
   typedef InfallibleTArray<OpDestroy> OpDestroyArray;
   typedef InfallibleTArray<PluginWindowData> PluginsArray;
-  typedef InfallibleTArray<ReadLockInit> ReadLockArray;
 
 public:
   LayerTransactionParent(HostLayerManager* aManager,
@@ -109,7 +108,6 @@ protected:
   mozilla::ipc::IPCResult RecvPaintTime(const uint64_t& aTransactionId,
                                         const TimeDuration& aPaintTime) override;
 
-  mozilla::ipc::IPCResult RecvInitReadLocks(ReadLockArray&& aReadLocks) override;
   mozilla::ipc::IPCResult RecvUpdate(const TransactionInfo& aInfo) override;
 
   mozilla::ipc::IPCResult RecvSetLayerObserverEpoch(const uint64_t& aLayerObserverEpoch) override;
@@ -187,10 +185,6 @@ private:
   // Mapping from LayerHandles to Layers.
   nsRefPtrHashtable<nsUint64HashKey, Layer> mLayerMap;
 
-  // When this is nonzero, it refers to a layer tree owned by the
-  // compositor thread.  It is always true that
-  //   mId != 0 => mRoot == null
-  // because the "real tree" is owned by the compositor.
   uint64_t mId;
 
   // These fields keep track of the latest epoch values in the child and the

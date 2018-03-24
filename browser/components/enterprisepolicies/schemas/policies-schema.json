@@ -54,7 +54,7 @@
           },
 
           "Favicon": {
-            "type": "URL"
+            "type": "URLorEmpty"
           },
 
           "Placement": {
@@ -66,7 +66,7 @@
             "type": "string"
           }
         },
-        "required": ["title", "URL"]
+        "required": ["Title", "URL"]
       }
     },
 
@@ -96,8 +96,7 @@
       "description": "If false, removes access to create a master password.",
       "first_available": "60.0",
 
-      "type": "boolean",
-      "enum": [false]
+      "type": "boolean"
     },
 
     "DisableAppUpdate": {
@@ -108,8 +107,29 @@
       "type": "boolean"
     },
 
+    "DisableBuiltinPDFViewer": {
+      "description": "Disables PDF.js, which displays PDFs within Firefox.",
+      "first_available": "60.0",
+
+      "type": "boolean"
+    },
+
     "DisableDeveloperTools": {
       "description": "Prevents access to developer tools.",
+      "first_available": "60.0",
+
+      "type": "boolean"
+    },
+
+    "DisableFeedbackCommands": {
+      "description": "Prevents ability to send feedback from the help menu (\"Submit Feedback\" and \"Report Deceptive Site\").",
+      "first_available": "60.0",
+
+      "type": "boolean"
+    },
+
+    "DisableFirefoxAccounts": {
+      "description": "Disables Firefox Account based services, including Sync.",
       "first_available": "60.0",
 
       "type": "boolean"
@@ -147,8 +167,22 @@
       "description": "Disables private browsing.",
       "first_available": "60.0",
 
-      "type": "boolean",
-      "enum": [true]
+      "type": "boolean"
+    },
+
+    "DisableSafeMode": {
+      "description": "Prevents ability to restart in safe mode.",
+      "first_available": "60.0",
+
+      "type": "boolean"
+    },
+
+    "DisableSysAddonUpdate": {
+      "description": "Prevent the browser from installing and updating system addons.",
+      "first_available": "60.0",
+      "enterprise_only": true,
+
+      "type": "boolean"
     },
 
     "DisplayBookmarksToolbar": {
@@ -170,6 +204,22 @@
       "first_available": "60.0",
 
       "type": "boolean"
+    },
+
+    "EnableTrackingProtection": {
+      "description": "Enables or disables tracking protection and optionally locks it.",
+      "first_available": "60.0",
+
+      "type": "object",
+      "properties": {
+        "Value": {
+          "type": "boolean"
+        },
+        "Locked": {
+          "type": "boolean"
+        }
+      },
+      "required": ["Value"]
     },
 
     "FlashPlugin": {
@@ -232,6 +282,13 @@
       }
     },
 
+    "NoDefaultBookmarks": {
+      "description": "Don't create the default bookmarks bundled with Firefox, nor the Smart Bookmarks (Most Visited, Recent Tags). Note: this policy is only effective if used before the first run of the profile.",
+      "first_available": "60.0",
+
+      "type": "boolean"
+    },
+
     "Popups": {
       "description": "Allow or deny popup usage.",
       "first_available": "60.0",
@@ -243,6 +300,64 @@
           "items": {
             "type": "origin"
           }
+        }
+      }
+    },
+
+    "Proxy": {
+      "description": "Configure Proxy settings.",
+      "first_available": "60.0",
+
+      "type": "object",
+      "properties": {
+        "Mode": {
+          "type": "string",
+          "enum": ["none", "system", "manual", "autoDetect", "autoConfig"]
+        },
+
+        "Locked": {
+          "type": "boolean"
+        },
+
+        "AutoConfigURL": {
+          "type": "URLorEmpty"
+        },
+
+        "FTPProxy": {
+          "type": "string"
+        },
+
+        "HTTPProxy": {
+          "type": "string"
+        },
+
+        "SSLProxy": {
+          "type": "string"
+        },
+
+        "SOCKSProxy": {
+          "type": "string"
+        },
+
+        "SOCKSVersion": {
+          "type": "number",
+          "enum": [4, 5]
+        },
+
+        "UseHTTPProxyForAllProtocols": {
+          "type": "boolean"
+        },
+
+        "Passthrough": {
+          "type": "string"
+        },
+
+        "UseProxyForDNS": {
+          "type": "boolean"
+        },
+
+        "AutoLogin": {
+          "type": "boolean"
         }
       }
     },

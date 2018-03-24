@@ -9,21 +9,22 @@
 
 #include <unordered_map>                          // for std::unordered_map
 
+#include "FocusState.h"                 // for FocusState
 #include "gfxPoint.h"                   // for gfxPoint
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2
 #include "mozilla/gfx/CompositorHitTestInfo.h"
 #include "mozilla/gfx/Logging.h"        // for gfx::TreeLog
 #include "mozilla/gfx/Matrix.h"         // for Matrix4x4
+#include "mozilla/layers/APZInputBridge.h" // for APZInputBridge
 #include "mozilla/layers/APZTestData.h" // for APZTestData
-#include "mozilla/layers/FocusState.h"  // for FocusState
 #include "mozilla/layers/IAPZCTreeManager.h" // for IAPZCTreeManager
 #include "mozilla/layers/KeyboardMap.h" // for KeyboardMap
-#include "mozilla/layers/TouchCounter.h"// for TouchCounter
 #include "mozilla/RecursiveMutex.h"     // for RecursiveMutex
 #include "mozilla/RefPtr.h"             // for RefPtr
 #include "mozilla/TimeStamp.h"          // for mozilla::TimeStamp
 #include "mozilla/UniquePtr.h"          // for UniquePtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
+#include "TouchCounter.h"               // for TouchCounter
 
 #if defined(MOZ_WIDGET_ANDROID)
 #include "mozilla/layers/AndroidDynamicToolbarAnimator.h"
@@ -55,6 +56,7 @@ class GeckoContentController;
 class HitTestingTreeNode;
 class WebRenderScrollData;
 struct AncestorTransform;
+struct ScrollThumbData;
 
 /**
  * ****************** NOTE ON LOCK ORDERING IN APZ **************************
@@ -98,7 +100,8 @@ struct AncestorTransform;
  *
  * Behaviour of APZ is controlled by a number of preferences shown \ref APZCPrefs "here".
  */
-class APZCTreeManager : public IAPZCTreeManager {
+class APZCTreeManager : public IAPZCTreeManager
+                      , public APZInputBridge {
 
   typedef mozilla::layers::AllowedTouchBehavior AllowedTouchBehavior;
   typedef mozilla::layers::AsyncDragMetrics AsyncDragMetrics;
@@ -111,14 +114,6 @@ class APZCTreeManager : public IAPZCTreeManager {
 
 public:
   explicit APZCTreeManager(uint64_t aRootLayersId);
-
-  /**
-   * Initializes the global state used in AsyncPanZoomController.
-   * This is normally called when it is first needed in the constructor
-   * of APZCTreeManager, but can be called manually to force it to be
-   * initialized earlier.
-   */
-  static void InitializeGlobalState();
 
   /**
    * Notifies this APZCTreeManager that the associated compositor is now
@@ -347,24 +342,16 @@ public:
   bool HitTestAPZC(const ScreenIntPoint& aPoint);
 
   /**
-   * See AsyncPanZoomController::CalculatePendingDisplayPort. This
-   * function simply delegates to that one, so that non-layers code
-   * never needs to include AsyncPanZoomController.h
+   * Sets the dpi value used by all AsyncPanZoomControllers attached to this
+   * tree manager.
+   * DPI defaults to 160 if not set using SetDPI() at any point.
    */
-  static const ScreenMargin CalculatePendingDisplayPort(
-    const FrameMetrics& aFrameMetrics,
-    const ParentLayerPoint& aVelocity);
-
-  /**
-   * Sets the dpi value used by all AsyncPanZoomControllers.
-   * DPI defaults to 72 if not set using SetDPI() at any point.
-   */
-  void SetDPI(float aDpiValue) override { sDPI = aDpiValue; }
+  void SetDPI(float aDpiValue) override;
 
   /**
    * Returns the current dpi value in use.
    */
-  static float GetDPI() { return sDPI; }
+  float GetDPI() const;
 
   /**
    * Find the hit testing node for the scrollbar thumb that matches these
@@ -488,6 +475,8 @@ public:
    */
   void SetLongTapEnabled(bool aTapGestureEnabled) override;
 
+  APZInputBridge* InputBridge() override { return this; }
+
   // Methods to help process WidgetInputEvents (or manage conversion to/from InputData)
 
   void ProcessUnhandledEvent(
@@ -500,6 +489,38 @@ public:
       EventMessage aEventMessage) override;
 
   bool GetAPZTestData(uint64_t aLayersId, APZTestData* aOutData);
+
+  /**
+   * Compute the updated shadow transform for a scroll thumb layer that
+   * reflects async scrolling of the associated scroll frame.
+   *
+   * @param aCurrentTransform The current shadow transform on the scroll thumb
+   *    layer, as returned by Layer::GetLocalTransform() or similar.
+   * @param aScrollableContentTransform The current content transform on the
+   *    scrollable content, as returned by Layer::GetTransform().
+   * @param aApzc The APZC that scrolls the scroll frame.
+   * @param aMetrics The metrics associated with the scroll frame, reflecting
+   *    the last paint of the associated content. Note: this metrics should
+   *    NOT reflect async scrolling, i.e. they should be the layer tree's
+   *    copy of the metrics, or APZC's last-content-paint metrics.
+   * @param aThumbData The scroll thumb data for the the scroll thumb layer.
+   * @param aScrollbarIsDescendant True iff. the scroll thumb layer is a
+   *    descendant of the layer bearing the scroll frame's metrics.
+   * @param aOutClipTransform If not null, and |aScrollbarIsDescendant| is true,
+   *    this will be populated with a transform that should be applied to the
+   *    clip rects of all layers between the scroll thumb layer and the ancestor
+   *    layer for the scrollable content.
+   * @return The new shadow transform for the scroll thumb layer, including
+   *    any pre- or post-scales.
+   */
+  static LayerToParentLayerMatrix4x4 ComputeTransformForScrollThumb(
+      const LayerToParentLayerMatrix4x4& aCurrentTransform,
+      const gfx::Matrix4x4& aScrollableContentTransform,
+      AsyncPanZoomController* aApzc,
+      const FrameMetrics& aMetrics,
+      const ScrollThumbData& aThumbData,
+      bool aScrollbarIsDescendant,
+      AsyncTransformComponentMatrix* aOutClipTransform);
 
 protected:
   // Protected destructor, to discourage deletion outside of Release():
@@ -535,7 +556,7 @@ public:
    * is occurring such as when the toolbar is being hidden/shown in Fennec.
    * This function can be called to have the y axis' velocity queue updated.
    */
-  void ProcessTouchVelocity(uint32_t aTimestampMs, float aSpeedY) override;
+  void ProcessTouchVelocity(uint32_t aTimestampMs, float aSpeedY);
 private:
   typedef bool (*GuidComparator)(const ScrollableLayerGuid&, const ScrollableLayerGuid&);
 
@@ -674,15 +695,17 @@ private:
    * isolation (that is, if its tree pointers are not being accessed or mutated). The
    * lock also needs to be held when accessing the mRootNode instance variable, as that
    * is considered part of the APZC tree management state.
-   * Finally, the lock needs to be held when accessing mZoomConstraints.
    * IMPORTANT: See the note about lock ordering at the top of this file. */
   mutable mozilla::RecursiveMutex mTreeLock;
   RefPtr<HitTestingTreeNode> mRootNode;
+
   /* Holds the zoom constraints for scrollable layers, as determined by the
-   * the main-thread gecko code. */
+   * the main-thread gecko code. This can only be accessed on the sampler
+   * thread. */
   std::unordered_map<ScrollableLayerGuid, ZoomConstraints, ScrollableLayerGuidHash> mZoomConstraints;
   /* A list of keyboard shortcuts to use for translating keyboard inputs into
    * keyboard actions. This is gathered on the main thread from XBL bindings.
+   * This must only be accessed on the controller thread.
    */
   KeyboardMap mKeyboardMap;
   /* This tracks the focus targets of chrome and content and whether we have
@@ -730,11 +753,11 @@ private:
   std::unordered_map<uint64_t, UniquePtr<APZTestData>> mTestData;
   mutable mozilla::Mutex mTestDataLock;
 
-  static float sDPI;
+  // This must only be touched on the controller thread.
+  float mDPI;
 
 #if defined(MOZ_WIDGET_ANDROID)
 public:
-  void InitializeDynamicToolbarAnimator(const int64_t& aRootLayerTreeId);
   AndroidDynamicToolbarAnimator* GetAndroidDynamicToolbarAnimator();
 
 private:

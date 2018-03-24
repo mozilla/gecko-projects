@@ -45,6 +45,75 @@ HistoryEngine.prototype = {
 
   syncPriority: 7,
 
+  _migratedSyncMetadata: false,
+  async _migrateSyncMetadata() {
+    if (this._migratedSyncMetadata) {
+      return;
+    }
+    // Migrate the history sync ID and last sync time from prefs, to avoid
+    // triggering a full sync on upgrade. This can be removed in bug 1443021.
+    let existingSyncID = await super.getSyncID();
+    if (existingSyncID) {
+      this._log.debug("Migrating existing sync ID ${existingSyncID} from prefs",
+                      { existingSyncID });
+      await PlacesSyncUtils.history.ensureCurrentSyncId(existingSyncID);
+    }
+    let existingLastSync = await super.getLastSync();
+    if (existingLastSync) {
+      this._log.debug("Migrating existing last sync time ${existingLastSync} " +
+                      "from prefs", { existingLastSync });
+      await PlacesSyncUtils.history.setLastSync(existingLastSync);
+    }
+    this._migratedSyncMetadata = true;
+  },
+
+  async getSyncID() {
+    return PlacesSyncUtils.history.getSyncId();
+  },
+
+  async ensureCurrentSyncID(newSyncID) {
+    this._log.debug("Checking if server sync ID ${newSyncID} matches existing",
+                    { newSyncID });
+    await PlacesSyncUtils.history.ensureCurrentSyncId(newSyncID);
+    super.setSyncIDPref(newSyncID); // Remove in bug 1443021.
+    return newSyncID;
+  },
+
+  async resetSyncID() {
+    // First, delete the collection on the server. It's fine if we're
+    // interrupted here: on the next sync, we'll detect that our old sync ID is
+    // now stale, and start over as a first sync.
+    await this._deleteServerCollection();
+    // Then, reset our local sync ID.
+    return this.resetLocalSyncID();
+  },
+
+  async resetLocalSyncID() {
+    let newSyncID = await PlacesSyncUtils.history.resetSyncId();
+    this._log.debug("Assigned new sync ID ${newSyncID}", { newSyncID });
+    await super.setSyncIDPref(newSyncID); // Remove in bug 1443021.
+    return newSyncID;
+  },
+
+  setSyncIDPref(syncID) {
+    throw new Error("Use ensureCurrentSyncID or resetLocalSyncID");
+  },
+
+  async getLastSync() {
+    let lastSync = await PlacesSyncUtils.history.getLastSync();
+    return lastSync;
+  },
+
+  async setLastSync(lastSync) {
+    await PlacesSyncUtils.history.setLastSync(lastSync);
+    await super.setLastSync(lastSync); // Remove in bug 1443021.
+  },
+
+  async _syncStartup() {
+    await this._migrateSyncMetadata();
+    await super._syncStartup();
+  },
+
   async _processIncoming(newitems) {
     // We want to notify history observers that a batch operation is underway
     // so they don't do lots of work for each incoming record.
@@ -79,47 +148,22 @@ HistoryEngine.prototype = {
     await this._tracker.removeChangedID(...guidsToRemove);
     return changedIDs;
   },
+
+  async _resetClient() {
+    await super._resetClient();
+    await PlacesSyncUtils.history.reset();
+  },
 };
 
 function HistoryStore(name, engine) {
   Store.call(this, name, engine);
-
-  // Explicitly nullify our references to our cached services so we don't leak
-  Svc.Obs.add("places-shutdown", function() {
-    for (let query in this._stmts) {
-      let stmt = this._stmts[query];
-      stmt.finalize();
-    }
-    this._stmts = {};
-  }, this);
 }
+
 HistoryStore.prototype = {
   __proto__: Store.prototype,
 
-  __asyncHistory: null,
-
   // We try and only update this many visits at one time.
   MAX_VISITS_PER_INSERT: 500,
-
-  get _asyncHistory() {
-    if (!this.__asyncHistory) {
-      this.__asyncHistory = Cc["@mozilla.org/browser/history;1"]
-                              .getService(Ci.mozIAsyncHistory);
-    }
-    return this.__asyncHistory;
-  },
-
-  _stmts: {},
-  _getStmt(query) {
-    if (query in this._stmts) {
-      return this._stmts[query];
-    }
-
-    this._log.trace("Creating SQL statement: " + query);
-    let db = PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase)
-                        .DBConnection;
-    return this._stmts[query] = db.createAsyncStatement(query);
-  },
 
   // Some helper functions to handle GUIDs
   async setGUID(uri, guid) {
@@ -423,7 +467,7 @@ HistoryStore.prototype = {
   },
 
   async wipe() {
-    return PlacesUtils.history.clear();
+    return PlacesSyncUtils.history.wipe();
   }
 };
 

@@ -20,10 +20,10 @@ const BUILT_IN_SECTIONS = {
     id: "topstories",
     pref: {
       titleString: {id: "header_recommended_by", values: {provider: options.provider_name}},
-      descString: {id: options.provider_description || "pocket_description"},
+      descString: {id: options.provider_description || "prefs_topstories_description"},
       nestedPrefs: options.show_spocs ? [{
         name: "showSponsored",
-        titleString: {id: "settings_pane_topstories_options_sponsored"},
+        titleString: {id: "prefs_topstories_show_sponsored_label", values: {provider: options.provider_name}},
         icon: "icon-info"
       }] : []
     },
@@ -48,33 +48,35 @@ const BUILT_IN_SECTIONS = {
       icon: "check"
     },
     shouldSendImpressionStats: true,
-    order: 0,
     dedupeFrom: ["highlights"]
   }),
   "feeds.section.highlights": options => ({
     id: "highlights",
     pref: {
       titleString: {id: "settings_pane_highlights_header"},
-      descString: {id: "settings_pane_highlights_body2"}
+      descString: {id: "prefs_highlights_description"}
     },
     shouldHidePref:  false,
     eventSource: "HIGHLIGHTS",
     icon: "highlights",
     title: {id: "header_highlights"},
     maxRows: 3,
-    availableLinkMenuOptions: ["CheckBookmarkOrArchive", "CheckSavedToPocket", "Separator", "OpenInNewWindow", "OpenInPrivateWindow", "Separator", "BlockUrl", "CheckDeleteHistoryOrEmpty"],
     emptyState: {
       message: {id: "highlights_empty_state"},
       icon: "highlights"
     },
-    shouldSendImpressionStats: false,
-    order: 1
+    shouldSendImpressionStats: false
   })
 };
 
 const SectionsManager = {
   ACTIONS_TO_PROXY: ["WEBEXT_CLICK", "WEBEXT_DISMISS"],
-  CONTEXT_MENU_PREFS: {"SaveToPocket": "extensions.pocket.enabled"},
+  CONTEXT_MENU_PREFS: {"CheckSavedToPocket": "extensions.pocket.enabled"},
+  CONTEXT_MENU_OPTIONS_FOR_HIGHLIGHT_TYPES: {
+    history: ["CheckBookmark", "CheckSavedToPocket", "Separator", "OpenInNewWindow", "OpenInPrivateWindow", "Separator", "BlockUrl", "DeleteUrl"],
+    bookmark: ["CheckBookmark", "CheckSavedToPocket", "Separator", "OpenInNewWindow", "OpenInPrivateWindow", "Separator", "BlockUrl", "DeleteUrl"],
+    pocket: ["ArchiveFromPocket", "CheckSavedToPocket", "Separator", "OpenInNewWindow", "OpenInPrivateWindow", "Separator", "BlockUrl"]
+  },
   initialized: false,
   sections: new Map(),
   init(prefs = {}) {
@@ -116,14 +118,14 @@ const SectionsManager = {
       options = JSON.parse(optionsPrefValue);
     } catch (e) {
       options = {};
-      Cu.reportError("Problem parsing options pref", e);
+      Cu.reportError(`Problem parsing options pref for ${feedPrefName}`);
     }
     const section = BUILT_IN_SECTIONS[feedPrefName](options);
     section.pref.feed = feedPrefName;
     this.addSection(section.id, Object.assign(section, {options}));
   },
   addSection(id, options) {
-    this.updateLinkMenuOptions(options);
+    this.updateLinkMenuOptions(options, id);
     this.sections.set(id, options);
     this.emit(this.ADD_SECTION, id, options);
   },
@@ -143,7 +145,7 @@ const SectionsManager = {
     this.sections.forEach((section, id) => this.updateSection(id, section, true));
   },
   updateSection(id, options, shouldBroadcast) {
-    this.updateLinkMenuOptions(options);
+    this.updateLinkMenuOptions(options, id);
     if (this.sections.has(id)) {
       const optionsWithDedupe = Object.assign({}, options, {dedupeConfigurations: this._dedupeConfiguration});
       this.sections.set(id, Object.assign(this.sections.get(id), options));
@@ -187,11 +189,41 @@ const SectionsManager = {
    * to false.
    *
    * @param options section options
+   * @param id      section ID
    */
-  updateLinkMenuOptions(options) {
+  updateLinkMenuOptions(options, id) {
     if (options.availableLinkMenuOptions) {
       options.contextMenuOptions = options.availableLinkMenuOptions.filter(
         o => !this.CONTEXT_MENU_PREFS[o] || Services.prefs.getBoolPref(this.CONTEXT_MENU_PREFS[o]));
+    }
+
+    // Once we have rows, we can give each card it's own context menu based on it's type.
+    // We only want to do this for highlights because those have different data types.
+    // All other sections (built by the web extension API) will have the same context menu per section
+    if (options.rows && id === "highlights") {
+      this._addCardTypeLinkMenuOptions(options.rows);
+    }
+  },
+
+  /**
+   * Sets each card in highlights' context menu options based on the card's type.
+   * (See types.js for a list of types)
+   *
+   * @param rows section rows containing a type for each card
+   */
+  _addCardTypeLinkMenuOptions(rows) {
+    for (let card of rows) {
+      if (!this.CONTEXT_MENU_OPTIONS_FOR_HIGHLIGHT_TYPES[card.type]) {
+        Cu.reportError(`No context menu for highlight type ${card.type} is configured`);
+      } else {
+        card.contextMenuOptions = this.CONTEXT_MENU_OPTIONS_FOR_HIGHLIGHT_TYPES[card.type];
+
+        // Remove any options that shouldn't be there based on CONTEXT_MENU_PREFS.
+        // For example: If the Pocket extension is disabled, we should remove the CheckSavedToPocket option
+        // for each card that has it
+        card.contextMenuOptions = card.contextMenuOptions.filter(
+          o => !this.CONTEXT_MENU_PREFS[o] || Services.prefs.getBoolPref(this.CONTEXT_MENU_PREFS[o]));
+      }
     }
   },
 
@@ -282,6 +314,13 @@ class SectionsFeed {
   onAddSection(event, id, options) {
     if (options) {
       this.store.dispatch(ac.BroadcastToContent({type: at.SECTION_REGISTER, data: Object.assign({id}, options)}));
+
+      // Make sure the section is in sectionOrder pref. Otherwise, prepend it.
+      const orderedSections = this.orderedSectionIds;
+      if (!orderedSections.includes(id)) {
+        orderedSections.unshift(id);
+        this.store.dispatch(ac.SetPref("sectionOrder", orderedSections.join(",")));
+      }
     }
   }
 
@@ -301,6 +340,49 @@ class SectionsFeed {
       const action = {type: at.SECTION_UPDATE_CARD, data: {id, url, options}};
       this.store.dispatch(shouldBroadcast ? ac.BroadcastToContent(action) : ac.AlsoToPreloaded(action));
     }
+  }
+
+  get orderedSectionIds() {
+    return this.store.getState().Prefs.values.sectionOrder.split(",");
+  }
+
+  get enabledSectionIds() {
+    let sections = this.store.getState().Sections.filter(section => section.enabled).map(s => s.id);
+    // Top Sites is a special case. Append if show pref is on.
+    if (this.store.getState().Prefs.values.showTopSites) {
+      sections.push("topsites");
+    }
+    return sections;
+  }
+
+  moveSection(id, direction) {
+    const orderedSections = this.orderedSectionIds;
+    const enabledSections = this.enabledSectionIds;
+    let index = orderedSections.indexOf(id);
+    orderedSections.splice(index, 1);
+    if (direction > 0) {
+      // "Move Down"
+      while (index < orderedSections.length) {
+        // If the section at the index is enabled/visible, insert moved section after.
+        // Otherwise, move on to the next spot and check it.
+        if (enabledSections.includes(orderedSections[index++])) {
+          break;
+        }
+      }
+    } else {
+      // "Move Up"
+      while (index > 0) {
+        // If the section at the previous index is enabled/visible, insert moved section there.
+        // Otherwise, move on to the previous spot and check it.
+        index--;
+        if (enabledSections.includes(orderedSections[index])) {
+          break;
+        }
+      }
+    }
+
+    orderedSections.splice(index, 0, id);
+    this.store.dispatch(ac.SetPref("sectionOrder", orderedSections.join(",")));
   }
 
   onAction(action) {
@@ -335,6 +417,9 @@ class SectionsFeed {
         break;
       case at.SECTION_ENABLE:
         SectionsManager.enableSection(action.data);
+        break;
+      case at.SECTION_MOVE:
+        this.moveSection(action.data.id, action.data.direction);
         break;
       case at.UNINIT:
         this.uninit();

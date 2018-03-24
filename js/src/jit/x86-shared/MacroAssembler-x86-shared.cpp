@@ -593,30 +593,6 @@ MacroAssembler::patchFarJump(CodeOffset farJump, uint32_t targetOffset)
     Assembler::patchFarJump(farJump, targetOffset);
 }
 
-void
-MacroAssembler::repatchFarJump(uint8_t* code, uint32_t farJumpOffset, uint32_t targetOffset)
-{
-    Assembler::repatchFarJump(code, farJumpOffset, targetOffset);
-}
-
-CodeOffset
-MacroAssembler::nopPatchableToNearJump()
-{
-    return Assembler::twoByteNop();
-}
-
-void
-MacroAssembler::patchNopToNearJump(uint8_t* jump, uint8_t* target)
-{
-    Assembler::patchTwoByteNopToJump(jump, target);
-}
-
-void
-MacroAssembler::patchNearJumpToNop(uint8_t* jump)
-{
-    Assembler::patchJumpToTwoByteNop(jump);
-}
-
 CodeOffset
 MacroAssembler::nopPatchableToCall(const wasm::CallSiteDesc& desc)
 {
@@ -937,6 +913,12 @@ MacroAssembler::oolWasmTruncateCheckF32ToI64(FloatRegister input, Register64 out
     loadConstantFloat32(float(int64_t(INT64_MIN)), ScratchFloat32Reg);
     branchFloat(Assembler::DoubleNotEqual, input, ScratchFloat32Reg, &traps.intOverflow);
     jump(rejoin);
+}
+
+void
+MacroAssembler::enterFakeExitFrameForWasm(Register cxreg, Register scratch, ExitFrameType type)
+{
+    enterFakeExitFrame(cxreg, scratch, type);
 }
 
 // ========================================================================
@@ -1416,6 +1398,18 @@ MacroAssembler::atomicFetchOpJS(Scalar::Type arrayType, const Synchronization& s
                                 AnyRegister output)
 {
     AtomicFetchOpJS(*this, arrayType, sync, op, value, mem, temp1, temp2, output);
+}
+
+// ========================================================================
+// Spectre Mitigations.
+
+void
+MacroAssembler::speculationBarrier()
+{
+    // Spectre mitigation recommended by Intel and AMD suggest to use lfence as
+    // a way to force all speculative execution of instructions to end.
+    MOZ_ASSERT(HasSSE2());
+    masm.lfence();
 }
 
 //}}} check_macroassembler_style

@@ -7,9 +7,6 @@
 #ifndef mozilla_RestyleManagerInlines_h
 #define mozilla_RestyleManagerInlines_h
 
-#ifdef MOZ_OLD_STYLE
-#include "mozilla/GeckoRestyleManager.h"
-#endif
 #include "mozilla/ServoRestyleManager.h"
 #include "mozilla/ServoUtils.h"
 
@@ -76,9 +73,9 @@ RestyleManager::AttributeChanged(dom::Element* aElement,
 }
 
 nsresult
-RestyleManager::ReparentStyleContext(nsIFrame* aFrame)
+RestyleManager::ReparentComputedStyle(nsIFrame* aFrame)
 {
-  MOZ_STYLO_FORWARD(ReparentStyleContext, (aFrame));
+  MOZ_STYLO_FORWARD(ReparentComputedStyle, (aFrame));
 }
 
 void

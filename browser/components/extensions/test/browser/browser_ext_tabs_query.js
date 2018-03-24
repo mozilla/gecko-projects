@@ -40,6 +40,11 @@ add_task(async function() {
 
         browser.test.assertEq(tabs[0].title, "Gort! Klaatu barada nikto!", "tab 0 title correct");
 
+        browser.test.assertThrows(
+          () => browser.tabs.query({index: -1}),
+          /-1 is too small \(must be at least 0\)/,
+          "tab indices must be non-negative");
+
         browser.test.notifyPass("tabs.query");
       });
     },
@@ -49,8 +54,8 @@ add_task(async function() {
   await extension.awaitFinish("tabs.query");
   await extension.unload();
 
-  await BrowserTestUtils.removeTab(tab1);
-  await BrowserTestUtils.removeTab(tab2);
+  BrowserTestUtils.removeTab(tab1);
+  BrowserTestUtils.removeTab(tab2);
 
   tab1 = await BrowserTestUtils.openNewForegroundTab(gBrowser, "http://example.com/");
   tab2 = await BrowserTestUtils.openNewForegroundTab(gBrowser, "http://example.net/");
@@ -233,9 +238,9 @@ add_task(async function() {
 
   await extension.unload();
 
-  await BrowserTestUtils.removeTab(tab1);
-  await BrowserTestUtils.removeTab(tab2);
-  await BrowserTestUtils.removeTab(tab3);
+  BrowserTestUtils.removeTab(tab1);
+  BrowserTestUtils.removeTab(tab2);
+  BrowserTestUtils.removeTab(tab3);
   SpecialPowers.clearUserPref(RESOLUTION_PREF);
 });
 

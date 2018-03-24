@@ -11,6 +11,7 @@
 #include "AccessibleCaretLogger.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/dom/NodeFilterBinding.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/TreeWalker.h"
@@ -191,7 +192,7 @@ AccessibleCaretManager::OnSelectionChanged(nsIDOMDocument* aDoc,
 
   // For mouse input we don't want to show the carets.
   if (sHideCaretsForMouseInput &&
-      mLastInputSource == nsIDOMMouseEvent::MOZ_SOURCE_MOUSE) {
+      mLastInputSource == MouseEventBinding::MOZ_SOURCE_MOUSE) {
     HideCarets();
     return NS_OK;
   }
@@ -199,7 +200,7 @@ AccessibleCaretManager::OnSelectionChanged(nsIDOMDocument* aDoc,
   // When we want to hide the carets for mouse input, hide them for select
   // all action fired by keyboard as well.
   if (sHideCaretsForMouseInput &&
-      mLastInputSource == nsIDOMMouseEvent::MOZ_SOURCE_KEYBOARD &&
+      mLastInputSource == MouseEventBinding::MOZ_SOURCE_KEYBOARD &&
       (aReason & nsISelectionListener::SELECTALL_REASON)) {
     HideCarets();
     return NS_OK;
@@ -548,18 +549,14 @@ AccessibleCaretManager::TapCaret(const nsPoint& aPoint)
 nsresult
 AccessibleCaretManager::SelectWordOrShortcut(const nsPoint& aPoint)
 {
-  auto UpdateCaretsWithHapticFeedback = [this] {
-    UpdateCarets();
-    ProvideHapticFeedback();
-  };
-
   // If the long-tap is landing on a pre-existing selection, don't replace
   // it with a new one. Instead just return and let the context menu pop up
   // on the pre-existing selection.
   if (GetCaretMode() == CaretMode::Selection &&
       GetSelection()->ContainsPoint(aPoint)) {
     AC_LOG("%s: UpdateCarets() for current selection", __FUNCTION__);
-    UpdateCaretsWithHapticFeedback();
+    UpdateCarets();
+    ProvideHapticFeedback();
     return NS_OK;
   }
 
@@ -607,7 +604,8 @@ AccessibleCaretManager::SelectWordOrShortcut(const nsPoint& aPoint)
     }
     // We need to update carets to get correct information before dispatching
     // CaretStateChangedEvent.
-    UpdateCaretsWithHapticFeedback();
+    UpdateCarets();
+    ProvideHapticFeedback();
     DispatchCaretStateChangedEvent(CaretChangedReason::Longpressonemptycontent);
     return NS_OK;
   }
@@ -641,7 +639,8 @@ AccessibleCaretManager::SelectWordOrShortcut(const nsPoint& aPoint)
 
   // Then try select a word under point.
   nsresult rv = SelectWord(ptFrame, ptInFrame);
-  UpdateCaretsWithHapticFeedback();
+  UpdateCarets();
+  ProvideHapticFeedback();
 
   return rv;
 }
@@ -694,7 +693,7 @@ AccessibleCaretManager::OnScrollEnd()
 
   // For mouse input we don't want to show the carets.
   if (sHideCaretsForMouseInput &&
-      mLastInputSource == nsIDOMMouseEvent::MOZ_SOURCE_MOUSE) {
+      mLastInputSource == MouseEventBinding::MOZ_SOURCE_MOUSE) {
     AC_LOG("%s: HideCarets()", __FUNCTION__);
     HideCarets();
     return;

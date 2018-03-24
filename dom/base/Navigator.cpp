@@ -75,8 +75,6 @@
 #include "nsIDOMGlobalPropertyInitializer.h"
 #include "nsJSUtils.h"
 
-#include "nsScriptNameSpaceManager.h"
-
 #include "mozilla/dom/NavigatorBinding.h"
 #include "mozilla/dom/Promise.h"
 
@@ -1515,7 +1513,7 @@ Navigator::ServiceWorker()
   MOZ_ASSERT(mWindow);
 
   if (!mServiceWorkerContainer) {
-    mServiceWorkerContainer = new ServiceWorkerContainer(mWindow);
+    mServiceWorkerContainer = ServiceWorkerContainer::Create(mWindow->AsGlobal());
   }
 
   RefPtr<ServiceWorkerContainer> ref = mServiceWorkerContainer;

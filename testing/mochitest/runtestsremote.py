@@ -31,6 +31,9 @@ class MochiRemote(MochitestDesktop):
     def __init__(self, automation, devmgr, options):
         MochitestDesktop.__init__(self, options.flavor, vars(options))
 
+        if hasattr(options, 'log'):
+            delattr(options, 'log')
+
         self._automation = automation
         self._dm = devmgr
         self.chromePushed = False
@@ -193,20 +196,6 @@ class MochiRemote(MochitestDesktop):
 
         restoreRemotePaths()
         options.profilePath = self.remoteProfile
-        return manifest
-
-    def addChromeToProfile(self, options):
-        manifest = MochitestDesktop.addChromeToProfile(self, options)
-
-        # Support Firefox (browser), SeaMonkey (navigator), and Webapp Runtime (webapp).
-        if options.flavor == 'chrome':
-            # append overlay to chrome.manifest
-            chrome = ("overlay chrome://browser/content/browser.xul "
-                      "chrome://mochikit/content/browser-test-overlay.xul")
-            path = os.path.join(options.profilePath, 'extensions', 'staged',
-                                'mochikit@mozilla.org', 'chrome.manifest')
-            with open(path, "a") as f:
-                f.write(chrome)
         return manifest
 
     def buildURLOptions(self, options, env):

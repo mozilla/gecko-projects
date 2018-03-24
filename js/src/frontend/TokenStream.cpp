@@ -26,12 +26,12 @@
 #include "frontend/ReservedWords.h"
 #include "js/CharacterEncoding.h"
 #include "js/UniquePtr.h"
+#include "util/StringBuffer.h"
+#include "util/Unicode.h"
 #include "vm/HelperThreads.h"
 #include "vm/JSAtom.h"
 #include "vm/JSCompartment.h"
 #include "vm/JSContext.h"
-#include "vm/StringBuffer.h"
-#include "vm/Unicode.h"
 
 using mozilla::ArrayLength;
 using mozilla::MakeScopeExit;
@@ -397,11 +397,6 @@ TokenStreamAnyChars::SourceCoords::lineNumAndColumnIndex(uint32_t offset, uint32
     *column = lineIndexAndOffsetToColumn(lineIndex, offset);
 }
 
-#ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable:4351)
-#endif
-
 TokenStreamAnyChars::TokenStreamAnyChars(JSContext* cx, const ReadOnlyCompileOptions& options,
                                          StrictModeGetter* smg)
   : srcCoords(cx, options.lineno, options.column, options.scriptSourceOffset),
@@ -447,10 +442,6 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::TokenStreamSpecific(JSContext* cx,
                                                                 const CharT* base, size_t length)
   : TokenStreamChars<CharT, AnyCharsAccess>(cx, base, length, options.scriptSourceOffset)
 {}
-
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif
 
 bool
 TokenStreamAnyChars::checkOptions()

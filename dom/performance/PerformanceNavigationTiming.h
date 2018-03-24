@@ -39,7 +39,12 @@ public:
 
   DOMHighResTimeStamp Duration() const override
   {
-    return nsRFPService::ReduceTimePrecisionAsMSecs(LoadEventEnd() - StartTime());
+    DOMHighResTimeStamp rawDuration = LoadEventEnd() - StartTime();
+    if (mPerformance->IsSystemPrincipal()) {
+      return rawDuration;
+    }
+    return nsRFPService::ReduceTimePrecisionAsMSecs(rawDuration,
+      mPerformance->GetRandomTimelineSeed());
   }
 
   DOMHighResTimeStamp StartTime() const override

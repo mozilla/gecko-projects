@@ -810,9 +810,8 @@ Assembler::GetPointer(uint8_t* instPtr)
     return ret;
 }
 
-template<class Iter>
 const uint32_t*
-Assembler::GetPtr32Target(Iter start, Register* dest, RelocStyle* style)
+Assembler::GetPtr32Target(InstructionIterator start, Register* dest, RelocStyle* style)
 {
     Instruction* load1 = start.cur();
     Instruction* load2 = start.next();
@@ -877,9 +876,8 @@ Assembler::TraceJumpRelocations(JSTracer* trc, JitCode* code, CompactBufferReade
     }
 }
 
-template <class Iter>
 static void
-TraceOneDataRelocation(JSTracer* trc, Iter iter)
+TraceOneDataRelocation(JSTracer* trc, InstructionIterator iter)
 {
     Register dest;
     Assembler::RelocStyle rs;
@@ -901,30 +899,14 @@ TraceOneDataRelocation(JSTracer* trc, Iter iter)
     }
 }
 
-static void
-TraceDataRelocations(JSTracer* trc, uint8_t* buffer, CompactBufferReader& reader)
+/* static */ void
+Assembler::TraceDataRelocations(JSTracer* trc, JitCode* code, CompactBufferReader& reader)
 {
     while (reader.more()) {
         size_t offset = reader.readUnsigned();
-        InstructionIterator iter((Instruction*)(buffer + offset));
+        InstructionIterator iter((Instruction*)(code->raw() + offset));
         TraceOneDataRelocation(trc, iter);
     }
-}
-
-static void
-TraceDataRelocations(JSTracer* trc, ARMBuffer* buffer, CompactBufferReader& reader)
-{
-    while (reader.more()) {
-        BufferOffset offset(reader.readUnsigned());
-        BufferInstructionIterator iter(offset, buffer);
-        TraceOneDataRelocation(trc, iter);
-    }
-}
-
-void
-Assembler::TraceDataRelocations(JSTracer* trc, JitCode* code, CompactBufferReader& reader)
-{
-    ::TraceDataRelocations(trc, code->raw(), reader);
 }
 
 void
@@ -939,24 +921,6 @@ Assembler::copyDataRelocationTable(uint8_t* dest)
 {
     if (dataRelocations_.length())
         memcpy(dest, dataRelocations_.buffer(), dataRelocations_.length());
-}
-
-void
-Assembler::trace(JSTracer* trc)
-{
-    for (size_t i = 0; i < jumps_.length(); i++) {
-        RelativePatch& rp = jumps_[i];
-        if (rp.kind() == Relocation::JITCODE) {
-            JitCode* code = JitCode::FromExecutable((uint8_t*)rp.target());
-            TraceManuallyBarrieredEdge(trc, &code, "masmrel32");
-            MOZ_ASSERT(code == JitCode::FromExecutable((uint8_t*)rp.target()));
-        }
-    }
-
-    if (dataRelocations_.length()) {
-        CompactBufferReader reader(dataRelocations_);
-        ::TraceDataRelocations(trc, &m_buffer, reader);
-    }
 }
 
 void
@@ -1783,7 +1747,7 @@ class PoolHintData
   private:
     uint32_t   index_    : 16;
     uint32_t   cond_     : 4;
-    LoadType   loadType_ : 2;
+    uint32_t   loadType_ : 2;
     uint32_t   destReg_  : 5;
     uint32_t   destType_ : 1;
     uint32_t   ONES     : 4;
@@ -1839,7 +1803,7 @@ class PoolHintData
         // want to lie about it so everyone knows it *used* to be a branch.
         if (ONES != ExpectedOnes)
             return PoolHintData::PoolBranch;
-        return loadType_;
+        return static_cast<LoadType>(loadType_);
     }
 
     bool isValidPoolHint() const {
@@ -2161,6 +2125,16 @@ Assembler::as_isb_trap()
     // Flagged as "legacy" starting with ARMv8, may be disabled on chip, see
     // ARMv8 manual E2.7.3 and G3.18.16.
     return writeInst(0xee070f94);
+}
+
+BufferOffset
+Assembler::as_csdb()
+{
+    // NOP (see as_nop) on architectures where this instruction is not defined.
+    //
+    // https://developer.arm.com/-/media/developer/pdf/Cache_Speculation_Side-channels_22Feb18.pdf
+    // CSDB A32: 1110_0011_0010_0000_1111_0000_0001_0100
+    return writeInst(0xe320f000 | 0x14);
 }
 
 // Control flow stuff:
@@ -2860,7 +2834,7 @@ struct PoolHeader : Instruction
         // The size should take into account the pool header.
         // The size is in units of Instruction (4 bytes), not byte.
         uint32_t size : 15;
-        bool isNatural : 1;
+        uint32_t isNatural : 1;
         uint32_t ONES : 16;
 
         Header(int size_, bool isNatural_)

@@ -154,12 +154,6 @@ WebRenderLayerManager::GetCompositorBridgeChild()
   return WrBridge()->GetCompositorBridgeChild();
 }
 
-int32_t
-WebRenderLayerManager::GetMaxTextureSize() const
-{
-  return WrBridge()->GetMaxTextureSize();
-}
-
 bool
 WebRenderLayerManager::BeginTransactionWithTarget(gfxContext* aTarget)
 {
@@ -216,8 +210,6 @@ WebRenderLayerManager::EndEmptyTransaction(EndTransactionFlags aFlags)
   WrBridge()->BeginTransaction();
 
   mWebRenderCommandBuilder.EmptyTransaction();
-
-  WrBridge()->ClearReadLocks();
 
   mLatestTransactionId = mTransactionIdAllocator->GetTransactionId(/*aThrottle*/ true);
   TimeStamp transactionStart = mTransactionIdAllocator->GetTransactionStart();
@@ -289,8 +281,6 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
   mWidget->AddWindowOverlayWebRenderCommands(WrBridge(), builder, resourceUpdates);
   mWindowOverlayChanged = false;
 
-  WrBridge()->ClearReadLocks();
-
   if (AsyncPanZoomEnabled()) {
     mScrollData.SetFocusTarget(mFocusTarget);
     mFocusTarget = FocusTarget();
@@ -336,8 +326,6 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
 
   MakeSnapshotIfRequired(size);
   mNeedsComposite = false;
-
-  ClearDisplayItemLayers();
 }
 
 void

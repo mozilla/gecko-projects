@@ -1016,7 +1016,7 @@ MacroAssembler::test32MovePtr(Condition cond, const Address& addr, Imm32 mask, R
 }
 
 void
-MacroAssembler::boundsCheck32ForLoad(Register index, Register length, Register scratch,
+MacroAssembler::spectreBoundsCheck32(Register index, Register length, Register scratch,
                                      Label* failure)
 {
     MOZ_RELEASE_ASSERT(!JitOptions.spectreIndexMasking);
@@ -1024,7 +1024,7 @@ MacroAssembler::boundsCheck32ForLoad(Register index, Register length, Register s
 }
 
 void
-MacroAssembler::boundsCheck32ForLoad(Register index, const Address& length, Register scratch,
+MacroAssembler::spectreBoundsCheck32(Register index, const Address& length, Register scratch,
                                      Label* failure)
 {
     MOZ_RELEASE_ASSERT(!JitOptions.spectreIndexMasking);
@@ -1033,6 +1033,12 @@ MacroAssembler::boundsCheck32ForLoad(Register index, const Address& length, Regi
 
 void
 MacroAssembler::spectreMovePtr(Condition cond, Register src, Register dest)
+{
+    MOZ_CRASH();
+}
+
+void
+MacroAssembler::spectreZeroRegister(Condition cond, Register scratch, Register dest)
 {
     MOZ_CRASH();
 }

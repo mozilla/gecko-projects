@@ -19,15 +19,32 @@ pref-page =
 # This is used to determine the width of the search field in about:preferences,
 # in order to make the entire placeholder string visible
 #
+# Please keep the placeholder string short to avoid truncation.
+#
 # Notice: The value of the `.style` attribute is a CSS string, and the `width`
 # is the name of the CSS property. It is intended only to adjust the element's width.
 # Do not translate.
-search-input =
+search-input-box =
     .style = width: 15.4em
+    .placeholder =
+        { PLATFORM() ->
+            [windows] Find in Options
+           *[other] Find in Preferences
+        }
+
+policies-notice =
+    { PLATFORM() ->
+        [windows] Your organization has disabled the ability to change some options.
+       *[other] Your organization has disabled the ability to change some preferences.
+    }
 
 pane-general-title = General
 category-general =
     .tooltiptext = { pane-general-title }
+
+pane-home-title = Home
+category-home =
+    .tooltiptext = { pane-home-title }
 
 pane-search-title = Search
 category-search =
@@ -58,6 +75,19 @@ should-restart-title = Restart { -brand-short-name }
 should-restart-ok = Restart { -brand-short-name } now
 cancel-no-restart-button = Cancel
 restart-later = Restart Later
+
+## Preferences UI Search Results
+
+search-results-header = Search Results
+
+# `<span></span>` will be replaced by the search term.
+search-results-sorry-message =
+    { PLATFORM() ->
+        [windows] Sorry! There are no results in Options for “<span></span>”.
+       *[other] Sorry! There are no results in Preferences for “<span></span>”.
+    }
+
+search-results-need-help = Need help? Visit <a>{ -brand-short-name } Support</a>
 
 ## General Section
 
@@ -94,28 +124,6 @@ startup-prev-session =
 
 disable-extension =
     .label = Disable Extension
-
-home-page-header = Home page
-
-# This string has a special case for '1' and [other] (default). If necessary for
-# your language, you can add {$tabCount} to your translations and use the
-# standard CLDR forms, or only use the form for [other] if both strings should
-# be identical.
-use-current-pages =
-    .label =
-        { $tabCount ->
-            [1] Use Current Page
-           *[other] Use Current Pages
-        }
-    .accesskey = C
-
-choose-bookmark =
-    .label = Use Bookmark…
-    .accesskey = B
-
-restore-default =
-    .label = Restore to Default
-    .accesskey = R
 
 tabs-group-header = Tabs
 
@@ -347,3 +355,118 @@ network-proxy-connection-learn-more = Learn More
 network-proxy-connection-settings =
     .label = Settings…
     .accesskey = e
+
+## Home Section
+
+home-new-windows-tabs-header = New Windows and Tabs
+
+home-new-windows-tabs-description = Choose what you see when you open your homepage, new windows, and new tabs
+
+## Home Section - Home Page Customization
+
+home-homepage-mode-label = Homepage and new windows
+
+home-newtabs-mode-label = New tabs
+
+home-restore-defaults =
+    .label = Restore Defaults
+    .accesskey = R
+
+# "Firefox" should be treated as a brand and kept in English,
+# while "Home" and "(Default)" can be localized.
+home-mode-choice-default =
+    .label = Firefox Home (Default)
+
+home-mode-choice-custom =
+    .label = Custom URLs…
+
+home-mode-choice-blank =
+    .label = Blank Page
+
+home-homepage-custom-url =
+    .placeholder = Paste a URL…
+
+# This string has a special case for '1' and [other] (default). If necessary for
+# your language, you can add {$tabCount} to your translations and use the
+# standard CLDR forms, or only use the form for [other] if both strings should
+# be identical.
+use-current-pages =
+    .label =
+        { $tabCount ->
+            [1] Use Current Page
+           *[other] Use Current Pages
+        }
+    .accesskey = C
+
+choose-bookmark =
+    .label = Use Bookmark…
+    .accesskey = B
+
+## Search Section
+
+search-bar-header = Search Bar
+search-bar-hidden =
+    .label = Use the address bar for search and navigation
+search-bar-shown =
+    .label = Add search bar in toolbar
+
+search-engine-default-header = Default Search Engine
+search-engine-default-desc = Choose the default search engine to use in the address bar and search bar.
+
+search-suggestions-option =
+    .label = Provide search suggestions
+    .accesskey = s
+
+search-show-suggestions-url-bar-option =
+    .label = Show search suggestions in address bar results
+    .accesskey = l
+
+# This string describes what the user will observe when the system
+# prioritizes search suggestions over browsing history in the results
+# that extend down from the address bar. In the original English string,
+# "ahead" refers to location (appearing most proximate to), not time
+# (appearing before).
+search-show-suggestions-above-history-option =
+    .label = Show search suggestions ahead of browsing history in address bar results
+
+search-suggestions-cant-show = Search suggestions will not be shown in location bar results because you have configured { -brand-short-name } to never remember history.
+
+search-one-click-header = One-Click Search Engines
+
+search-one-click-desc = Choose the alternative search engines that appear below the address bar and search bar when you start to enter a keyword.
+
+search-choose-engine-column =
+    .label = Search Engine
+search-choose-keyword-column =
+    .label = Keyword
+
+search-restore-default =
+    .label = Restore Default Search Engines
+    .accesskey = D
+
+search-remove-engine =
+    .label = Remove
+    .accesskey = R
+
+search-find-more-link = Find more search engines
+
+# This warning is displayed when the chosen keyword is already in use
+# ('Duplicate' is an adjective)
+search-keyword-warning-title = Duplicate Keyword
+# Variables:
+#   $name (String) - Name of a search engine.
+search-keyword-warning-engine = You have chosen a keyword that is currently in use by “{ $name }”. Please select another.
+search-keyword-warning-bookmark = You have chosen a keyword that is currently in use by a bookmark. Please select another.
+
+## Containers Section
+
+containers-back-link = « Go Back
+containers-header = Container Tabs
+containers-add-button =
+    .label = Add New Container
+    .accesskey = A
+
+containers-preferences-button =
+    .label = Preferences
+containers-remove-button =
+    .label = Remove

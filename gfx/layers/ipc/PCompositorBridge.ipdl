@@ -27,7 +27,6 @@ using mozilla::layers::FrameMetrics::ViewID from "FrameMetrics.h";
 using mozilla::layers::MaybeZoomConstraints from "FrameMetrics.h";
 using struct mozilla::layers::ScrollableLayerGuid from "FrameMetrics.h";
 using mozilla::layers::LayersBackend from "mozilla/layers/LayersTypes.h";
-using mozilla::layers::TouchBehaviorFlags from "mozilla/layers/APZUtils.h";
 using mozilla::CrossProcessMutexHandle from "mozilla/ipc/CrossProcessMutex.h";
 using mozilla::ipc::SharedMemoryBasic::Handle from "mozilla/ipc/SharedMemoryBasic.h";
 using mozilla::CSSIntRegion from "Units.h";
@@ -231,22 +230,12 @@ parent:
    */
   async RequestNotifyAfterRemotePaint();
 
-  // The child clears the 'approximately visible' regions associated with the
-  // provided layers ID and pres shell ID (i.e., the regions for all view IDs
-  // associated with those IDs).
-  async ClearApproximatelyVisibleRegions(uint64_t layersId, uint32_t presShellId);
-
-  // The child sends a region containing rects associated with the provided
-  // scrollable layer GUID that the child considers 'approximately visible'.
-  // We visualize this information in the APZ minimap.
-  async NotifyApproximatelyVisibleRegion(ScrollableLayerGuid guid, CSSIntRegion region);
-
   /**
    * Sent when the child has finished CaptureAllPlugins.
    */
   async AllPluginsCaptured();
 
-  async PTexture(SurfaceDescriptor aSharedData, LayersBackend aBackend, TextureFlags aTextureFlags, uint64_t id, uint64_t aSerial, MaybeExternalImageId aExternalImageId);
+  async PTexture(SurfaceDescriptor aSharedData, ReadLockDescriptor aReadLock, LayersBackend aBackend, TextureFlags aTextureFlags, uint64_t id, uint64_t aSerial, MaybeExternalImageId aExternalImageId);
 
   sync SyncWithCompositor();
 

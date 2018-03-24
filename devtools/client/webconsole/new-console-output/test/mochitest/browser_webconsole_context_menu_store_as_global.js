@@ -57,7 +57,8 @@ add_task(async function() {
     content.console.log("foo", obj);
   });
   let msgInvisible = (await onMessageInvisible).node;
-  await storeAsVariable(hud, msgInvisible, "object", varIdx++, "window.invisibleToDebugger");
+  await storeAsVariable(hud, msgInvisible, "object", varIdx++,
+                        "window.invisibleToDebugger");
 });
 
 async function storeAsVariable(hud, msg, type, varIdx, equalTo) {

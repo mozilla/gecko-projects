@@ -49,7 +49,6 @@
 #include "nsIScriptTimeoutHandler.h"
 #include "nsITimeoutHandler.h"
 #include "nsIController.h"
-#include "nsScriptNameSpaceManager.h"
 #include "nsISlowScriptDebug.h"
 #include "nsWindowMemoryReporter.h"
 #include "nsWindowSizes.h"
@@ -67,7 +66,6 @@
 #include "js/Wrapper.h"
 #include "nsCharSeparatedTokenizer.h"
 #include "nsReadableUtils.h"
-#include "nsDOMClassInfo.h"
 #include "nsJSEnvironment.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/Preferences.h"
@@ -144,7 +142,6 @@
 #include "nsQueryObject.h"
 #include "nsContentUtils.h"
 #include "nsCSSProps.h"
-#include "nsIDOMFileList.h"
 #include "nsIURIFixup.h"
 #include "nsIURIMutator.h"
 #ifndef DEBUG
@@ -215,7 +212,6 @@
 #include "nsRefreshDriver.h"
 #include "Layers.h"
 
-#include "mozilla/AddonPathService.h"
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/Services.h"
 #include "mozilla/Telemetry.h"
@@ -642,7 +638,7 @@ nsOuterWindowProxy::get(JSContext *cx, JS::Handle<JSObject*> proxy,
                         JS::Handle<jsid> id,
                         JS::MutableHandle<JS::Value> vp) const
 {
-  if (id == nsDOMClassInfo::sWrappedJSObject_id &&
+  if (id == GetJSIDByIndex(cx, XPCJSContext::IDX_WRAPPED_JSOBJECT) &&
       xpc::AccessCheck::isChrome(js::GetContextCompartment(cx))) {
     vp.set(JS::ObjectValue(*proxy));
     return true;
@@ -1639,13 +1635,6 @@ CreateNativeGlobalForInner(JSContext* aCx,
 
   SelectZoneGroup(aNewInner, options.creationOptions());
 
-  // Sometimes add-ons load their own XUL windows, either as separate top-level
-  // windows or inside a browser element. In such cases we want to tag the
-  // window's compartment with the add-on ID. See bug 1092156.
-  if (nsContentUtils::IsSystemPrincipal(aPrincipal)) {
-    options.creationOptions().setAddonId(MapURIToAddonID(aURI));
-  }
-
   options.creationOptions().setSecureContext(aIsSecureContext);
 
   xpc::InitGlobalObjectOptions(options, aPrincipal);
@@ -1862,6 +1851,7 @@ nsGlobalWindowOuter::SetNewDocument(nsIDocument* aDocument,
         if (currentInner->mPerformance) {
           newInnerWindow->mPerformance =
             Performance::CreateForMainThread(newInnerWindow->AsInner(),
+                                             aDocument->NodePrincipal(),
                                              currentInner->mPerformance->GetDOMTiming(),
                                              currentInner->mPerformance->GetChannel());
         }
@@ -5826,7 +5816,8 @@ nsGlobalWindowOuter::PostMessageMozOuter(JSContext* aCx, JS::Handle<JS::Value> a
             R"(origin "%s" from a system principal scope with mismatched )"
             R"(origin "%s".)",
             targetURL.get(), targetOrigin.get(), sourceOrigin.get())),
-          "DOM");
+          "DOM",
+          !!principal->PrivateBrowsingId());
 
         attrs = principal->OriginAttributesRef();
       }
@@ -6155,7 +6146,7 @@ nsGlobalWindowOuter::EnterModalState()
         nsContentUtils::ContentIsCrossDocDescendantOf(mDoc, activeShell->GetDocument()))) {
       EventStateManager::ClearGlobalActiveContent(activeESM);
 
-      activeShell->SetCapturingContent(nullptr, 0);
+      nsIPresShell::SetCapturingContent(nullptr, 0);
 
       if (activeShell) {
         RefPtr<nsFrameSelection> frameSelection = activeShell->FrameSelection();
@@ -7879,3 +7870,4 @@ nsAutoPopupStatePusherInternal::~nsAutoPopupStatePusherInternal()
 {
   nsContentUtils::PopPopupControlState(mOldState);
 }
+

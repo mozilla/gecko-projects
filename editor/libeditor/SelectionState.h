@@ -14,7 +14,6 @@
 #include "nscore.h"
 
 class nsCycleCollectionTraversalCallback;
-class nsIDOMCharacterData;
 class nsRange;
 namespace mozilla {
 class RangeUpdater;
@@ -109,8 +108,10 @@ public:
   // if you move a node, that corresponds to deleting it and reinserting it.
   // DOM Range gravity will promote the selection out of the node on deletion,
   // which is not what you want if you know you are reinserting it.
-  nsresult SelAdjCreateNode(const EditorRawDOMPoint& aPoint);
-  nsresult SelAdjInsertNode(const EditorRawDOMPoint& aPoint);
+  template<typename PT, typename CT>
+  nsresult SelAdjCreateNode(const EditorDOMPointBase<PT, CT>& aPoint);
+  template<typename PT, typename CT>
+  nsresult SelAdjInsertNode(const EditorDOMPointBase<PT, CT>& aPoint);
   void SelAdjDeleteNode(nsINode* aNode);
   nsresult SelAdjSplitNode(nsIContent& aRightNode, nsIContent* aNewLeftNode);
   nsresult SelAdjJoinNodes(nsINode& aLeftNode,
@@ -122,8 +123,6 @@ public:
                         const nsAString &aString);
   nsresult SelAdjDeleteText(nsIContent* aTextNode, int32_t aOffset,
                             int32_t aLength);
-  nsresult SelAdjDeleteText(nsIDOMCharacterData* aTextNode,
-                            int32_t aOffset, int32_t aLength);
   // the following gravity routines need will/did sandwiches, because the other
   // gravity routines will be called inside of these sandwiches, but should be
   // ignored.

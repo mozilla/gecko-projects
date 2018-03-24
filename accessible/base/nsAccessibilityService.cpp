@@ -1245,12 +1245,6 @@ nsAccessibilityService::CreateAccessible(nsINode* aNode,
     }
 #endif
 
-    // XBL bindings may use @role attribute to point the accessible type
-    // they belong to.
-    if (!newAcc) {
-      newAcc = CreateAccessibleByType(content, document);
-    }
-
     // Any XUL box can be used as tabpanel, make sure we create a proper
     // accessible for it.
     if (!newAcc && aContext->IsXULTabpanels() &&
@@ -1464,36 +1458,6 @@ nsAccessibilityService::Shutdown()
     static const char16_t kShutdownIndicator[] = { '0', 0 };
     observerService->NotifyObservers(nullptr, "a11y-init-or-shutdown", kShutdownIndicator);
   }
-}
-
-already_AddRefed<Accessible>
-nsAccessibilityService::CreateAccessibleByType(nsIContent* aContent,
-                                               DocAccessible* aDoc)
-{
-  nsAutoString role;
-  nsCoreUtils::XBLBindingRole(aContent, role);
-  if (role.IsEmpty())
-    return nullptr;
-
-  RefPtr<Accessible> accessible;
-#ifdef MOZ_XUL
-  // XUL controls
-  if (role.EqualsLiteral("xul:colorpicker")) {
-    accessible = new XULColorPickerAccessible(aContent, aDoc);
-
-  } else if (role.EqualsLiteral("xul:colorpickertile")) {
-    accessible = new XULColorPickerTileAccessible(aContent, aDoc);
-
-  } else if (role.EqualsLiteral("xul:link")) {
-    accessible = new XULLinkAccessible(aContent, aDoc);
-
-  } else if (role.EqualsLiteral("xul:text")) {
-    accessible = new XULLabelAccessible(aContent, aDoc);
-
-  }
-#endif // MOZ_XUL
-
-  return accessible.forget();
 }
 
 already_AddRefed<Accessible>
@@ -1723,13 +1687,15 @@ nsAccessibilityService::HasAccessible(nsIDOMNode* aDOMNode)
 // nsAccessibilityService private (DON'T put methods here)
 
 void
-nsAccessibilityService::SetConsumers(uint32_t aConsumers) {
+nsAccessibilityService::SetConsumers(uint32_t aConsumers, bool aNotify) {
   if (gConsumers & aConsumers) {
     return;
   }
 
   gConsumers |= aConsumers;
-  NotifyOfConsumersChange();
+  if (aNotify) {
+    NotifyOfConsumersChange();
+  }
 }
 
 void
@@ -1799,14 +1765,20 @@ MaybeShutdownAccService(uint32_t aFormerConsumer)
   nsAccessibilityService* accService =
     nsAccessibilityService::gAccessibilityService;
 
-  if (!accService || accService->IsShutdown()) {
+  if (!accService || nsAccessibilityService::IsShutdown()) {
     return;
   }
 
+  // Still used by XPCOM
   if (nsCoreUtils::AccEventObserversExist() ||
       xpcAccessibilityService::IsInUse() ||
       accService->HasXPCDocuments()) {
-    // Still used by XPCOM
+    // In case the XPCOM flag was unset (possibly because of the shutdown
+    // timer in the xpcAccessibilityService) ensure it is still present. Note:
+    // this should be fixed when all the consumer logic is taken out as a
+    // separate class.
+    accService->SetConsumers(nsAccessibilityService::eXPCOM, false);
+
     if (aFormerConsumer != nsAccessibilityService::eXPCOM) {
       // Only unset non-XPCOM consumers.
       accService->UnsetConsumers(aFormerConsumer);
@@ -1891,7 +1863,7 @@ PrefChanged(const char* aPref, void* aClosure)
   if (ReadPlatformDisabledState() == ePlatformIsDisabled) {
     // Force shut down accessibility.
     nsAccessibilityService* accService = nsAccessibilityService::gAccessibilityService;
-    if (accService && !accService->IsShutdown()) {
+    if (accService && !nsAccessibilityService::IsShutdown()) {
       accService->Shutdown();
     }
   }

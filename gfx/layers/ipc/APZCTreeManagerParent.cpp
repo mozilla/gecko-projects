@@ -6,7 +6,7 @@
 
 #include "mozilla/layers/APZCTreeManagerParent.h"
 
-#include "mozilla/layers/APZCTreeManager.h"
+#include "apz/src/APZCTreeManager.h"
 #include "mozilla/layers/APZThreadUtils.h"
 
 namespace mozilla {
@@ -31,142 +31,13 @@ APZCTreeManagerParent::ChildAdopted(RefPtr<APZCTreeManager> aAPZCTreeManager)
 }
 
 mozilla::ipc::IPCResult
-APZCTreeManagerParent::RecvReceiveMultiTouchInputEvent(
-    const MultiTouchInput& aEvent,
-    nsEventStatus* aOutStatus,
-    MultiTouchInput* aOutEvent,
-    ScrollableLayerGuid* aOutTargetGuid,
-    uint64_t* aOutInputBlockId)
-{
-  MultiTouchInput event = aEvent;
-
-  *aOutStatus = mTreeManager->ReceiveInputEvent(
-    event,
-    aOutTargetGuid,
-    aOutInputBlockId);
-  *aOutEvent = event;
-
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-APZCTreeManagerParent::RecvReceiveMouseInputEvent(
-    const MouseInput& aEvent,
-    nsEventStatus* aOutStatus,
-    MouseInput* aOutEvent,
-    ScrollableLayerGuid* aOutTargetGuid,
-    uint64_t* aOutInputBlockId)
-{
-  MouseInput event = aEvent;
-
-  *aOutStatus = mTreeManager->ReceiveInputEvent(
-    event,
-    aOutTargetGuid,
-    aOutInputBlockId);
-  *aOutEvent = event;
-
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-APZCTreeManagerParent::RecvReceivePanGestureInputEvent(
-    const PanGestureInput& aEvent,
-    nsEventStatus* aOutStatus,
-    PanGestureInput* aOutEvent,
-    ScrollableLayerGuid* aOutTargetGuid,
-    uint64_t* aOutInputBlockId)
-{
-  PanGestureInput event = aEvent;
-
-  *aOutStatus = mTreeManager->ReceiveInputEvent(
-    event,
-    aOutTargetGuid,
-    aOutInputBlockId);
-  *aOutEvent = event;
-
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-APZCTreeManagerParent::RecvReceivePinchGestureInputEvent(
-    const PinchGestureInput& aEvent,
-    nsEventStatus* aOutStatus,
-    PinchGestureInput* aOutEvent,
-    ScrollableLayerGuid* aOutTargetGuid,
-    uint64_t* aOutInputBlockId)
-{
-  PinchGestureInput event = aEvent;
-
-  *aOutStatus = mTreeManager->ReceiveInputEvent(
-    event,
-    aOutTargetGuid,
-    aOutInputBlockId);
-  *aOutEvent = event;
-
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-APZCTreeManagerParent::RecvReceiveTapGestureInputEvent(
-    const TapGestureInput& aEvent,
-    nsEventStatus* aOutStatus,
-    TapGestureInput* aOutEvent,
-    ScrollableLayerGuid* aOutTargetGuid,
-    uint64_t* aOutInputBlockId)
-{
-  TapGestureInput event = aEvent;
-
-  *aOutStatus = mTreeManager->ReceiveInputEvent(
-    event,
-    aOutTargetGuid,
-    aOutInputBlockId);
-  *aOutEvent = event;
-
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-APZCTreeManagerParent::RecvReceiveScrollWheelInputEvent(
-    const ScrollWheelInput& aEvent,
-    nsEventStatus* aOutStatus,
-    ScrollWheelInput* aOutEvent,
-    ScrollableLayerGuid* aOutTargetGuid,
-    uint64_t* aOutInputBlockId)
-{
-  ScrollWheelInput event = aEvent;
-
-  *aOutStatus = mTreeManager->ReceiveInputEvent(
-    event,
-    aOutTargetGuid,
-    aOutInputBlockId);
-  *aOutEvent = event;
-
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-APZCTreeManagerParent::RecvReceiveKeyboardInputEvent(
-        const KeyboardInput& aEvent,
-        nsEventStatus* aOutStatus,
-        KeyboardInput* aOutEvent,
-        ScrollableLayerGuid* aOutTargetGuid,
-        uint64_t* aOutInputBlockId)
-{
-  KeyboardInput event = aEvent;
-
-  *aOutStatus = mTreeManager->ReceiveInputEvent(
-    event,
-    aOutTargetGuid,
-    aOutInputBlockId);
-  *aOutEvent = event;
-
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
 APZCTreeManagerParent::RecvSetKeyboardMap(const KeyboardMap& aKeyboardMap)
 {
-  mTreeManager->SetKeyboardMap(aKeyboardMap);
+  APZThreadUtils::RunOnControllerThread(NewRunnableMethod<KeyboardMap>(
+    "layers::IAPZCTreeManager::SetKeyboardMap",
+    mTreeManager,
+    &IAPZCTreeManager::SetKeyboardMap,
+    aKeyboardMap));
 
   return IPC_OK();
 }
@@ -183,7 +54,12 @@ APZCTreeManagerParent::RecvZoomToRect(
     return IPC_FAIL_NO_REASON(this);
   }
 
-  mTreeManager->ZoomToRect(aGuid, aRect, aFlags);
+  APZThreadUtils::RunOnControllerThread(
+    NewRunnableMethod<ScrollableLayerGuid, CSSRect, uint32_t>(
+      "layers::IAPZCTreeManager::ZoomToRect",
+      mTreeManager,
+      &IAPZCTreeManager::ZoomToRect,
+      aGuid, aRect, aFlags));
   return IPC_OK();
 }
 
@@ -244,7 +120,11 @@ APZCTreeManagerParent::RecvUpdateZoomConstraints(
 mozilla::ipc::IPCResult
 APZCTreeManagerParent::RecvSetDPI(const float& aDpiValue)
 {
-  mTreeManager->SetDPI(aDpiValue);
+  APZThreadUtils::RunOnControllerThread(NewRunnableMethod<float>(
+    "layers::IAPZCTreeManager::SetDPI",
+    mTreeManager,
+    &IAPZCTreeManager::SetDPI,
+    aDpiValue));
   return IPC_OK();
 }
 
@@ -328,38 +208,6 @@ mozilla::ipc::IPCResult
 APZCTreeManagerParent::RecvSetLongTapEnabled(const bool& aTapGestureEnabled)
 {
   mTreeManager->SetLongTapEnabled(aTapGestureEnabled);
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-APZCTreeManagerParent::RecvProcessTouchVelocity(
-  const uint32_t& aTimestampMs,
-  const float& aSpeedY)
-{
-  mTreeManager->ProcessTouchVelocity(aTimestampMs, aSpeedY);
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-APZCTreeManagerParent::RecvUpdateWheelTransaction(
-        const LayoutDeviceIntPoint& aRefPoint,
-        const EventMessage& aEventMessage)
-{
-  mTreeManager->UpdateWheelTransaction(aRefPoint, aEventMessage);
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-APZCTreeManagerParent::RecvProcessUnhandledEvent(
-        const LayoutDeviceIntPoint& aRefPoint,
-        LayoutDeviceIntPoint* aOutRefPoint,
-        ScrollableLayerGuid*  aOutTargetGuid,
-        uint64_t*             aOutFocusSequenceNumber)
-{
-  LayoutDeviceIntPoint refPoint = aRefPoint;
-  mTreeManager->ProcessUnhandledEvent(&refPoint, aOutTargetGuid, aOutFocusSequenceNumber);
-  *aOutRefPoint = refPoint;
-
   return IPC_OK();
 }
 

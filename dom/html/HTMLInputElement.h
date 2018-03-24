@@ -145,7 +145,7 @@ public:
                    mozilla::dom::FromParser aFromParser,
                    FromClone aFromClone = FromClone::no);
 
-  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLInputElement, input)
+  NS_IMPL_FROMNODE_HTML_WITH_TAG(HTMLInputElement, input)
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
@@ -274,7 +274,7 @@ public:
 
   void SetFilesOrDirectories(const nsTArray<OwningFileOrDirectory>& aFilesOrDirectories,
                              bool aSetValueChanged);
-  void SetFiles(nsIDOMFileList* aFiles, bool aSetValueChanged);
+  void SetFiles(FileList* aFiles, bool aSetValueChanged);
 
   // This method is used for test only. Onces the data is set, a 'change' event
   // is dispatched.

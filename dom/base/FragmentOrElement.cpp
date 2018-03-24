@@ -64,6 +64,7 @@
 #include "nsNodeUtils.h"
 #include "nsDocument.h"
 #include "nsAttrValueOrString.h"
+#include "nsQueryObject.h"
 #ifdef MOZ_XUL
 #include "nsXULElement.h"
 #endif /* MOZ_XUL */
@@ -73,6 +74,7 @@
 #endif
 
 #include "nsBindingManager.h"
+#include "nsFrameLoader.h"
 #include "nsXBLBinding.h"
 #include "nsPIDOMWindow.h"
 #include "nsPIBoxObject.h"
@@ -97,10 +99,6 @@
 #include "nsViewManager.h"
 #include "nsIScrollableFrame.h"
 #include "ChildIterator.h"
-#ifdef MOZ_OLD_STYLE
-#include "mozilla/css/StyleRule.h" /* For nsCSSSelectorList */
-#include "nsRuleProcessorData.h"
-#endif
 #include "nsTextNode.h"
 #include "mozilla/dom/NodeListBinding.h"
 
@@ -481,25 +479,10 @@ nsAttrChildContentList::WrapObject(JSContext *cx,
   return NodeListBinding::Wrap(cx, this, aGivenProto);
 }
 
-NS_IMETHODIMP
-nsAttrChildContentList::GetLength(uint32_t* aLength)
+uint32_t
+nsAttrChildContentList::Length()
 {
-  *aLength = mNode ? mNode->GetChildCount() : 0;
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsAttrChildContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
-{
-  nsINode* node = Item(aIndex);
-  if (!node) {
-    *aReturn = nullptr;
-
-    return NS_OK;
-  }
-
-  return CallQueryInterface(node, aReturn);
+  return mNode ? mNode->GetChildCount() : 0;
 }
 
 nsIContent*
@@ -523,30 +506,16 @@ nsAttrChildContentList::IndexOf(nsIContent* aContent)
 }
 
 //----------------------------------------------------------------------
-NS_IMETHODIMP
-nsParentNodeChildContentList::GetLength(uint32_t* aLength)
+uint32_t
+nsParentNodeChildContentList::Length()
 {
   if (!mIsCacheValid && !ValidateCache()) {
-    *aLength = 0;
-    return NS_OK;
+    return 0;
   }
 
   MOZ_ASSERT(mIsCacheValid);
 
-  *aLength = mCachedChildArray.Length();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsParentNodeChildContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
-{
-  nsINode* node = Item(aIndex);
-  if (!node) {
-    *aReturn = nullptr;
-    return NS_OK;
-  }
-
-  return CallQueryInterface(node, aReturn);
+  return mCachedChildArray.Length();
 }
 
 nsIContent*
@@ -779,9 +748,9 @@ FragmentOrElement::nsExtendedDOMSlots::nsExtendedDOMSlots() = default;
 
 FragmentOrElement::nsExtendedDOMSlots::~nsExtendedDOMSlots()
 {
-  nsCOMPtr<nsIFrameLoader> frameLoader = do_QueryInterface(mFrameLoaderOrOpener);
+  RefPtr<nsFrameLoader> frameLoader = do_QueryObject(mFrameLoaderOrOpener);
   if (frameLoader) {
-    static_cast<nsFrameLoader*>(frameLoader.get())->Destroy();
+    frameLoader->Destroy();
   }
 }
 
@@ -800,10 +769,9 @@ FragmentOrElement::nsExtendedDOMSlots::Unlink()
     mCustomElementData->Unlink();
     mCustomElementData = nullptr;
   }
-  nsCOMPtr<nsIFrameLoader> frameLoader =
-    do_QueryInterface(mFrameLoaderOrOpener);
+  RefPtr<nsFrameLoader> frameLoader = do_QueryObject(mFrameLoaderOrOpener);
   if (frameLoader) {
-    static_cast<nsFrameLoader*>(frameLoader.get())->Destroy();
+    frameLoader->Destroy();
   }
   mFrameLoaderOrOpener = nullptr;
 }
@@ -1523,14 +1491,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(FragmentOrElement)
 
 void
-FragmentOrElement::MarkUserData(void* aObject, nsAtom* aKey, void* aChild,
-                               void* aData)
-{
-  uint32_t* gen = static_cast<uint32_t*>(aData);
-  xpc_MarkInCCGeneration(static_cast<nsISupports*>(aChild), *gen);
-}
-
-void
 FragmentOrElement::MarkNodeChildren(nsINode* aNode)
 {
   JSObject* o = GetJSObjectChild(aNode);
@@ -1541,13 +1501,6 @@ FragmentOrElement::MarkNodeChildren(nsINode* aNode)
   EventListenerManager* elm = aNode->GetExistingListenerManager();
   if (elm) {
     elm->MarkForCC();
-  }
-
-  if (aNode->HasProperties()) {
-    nsIDocument* ownerDoc = aNode->OwnerDoc();
-    ownerDoc->PropertyTable(DOM_USER_DATA)->
-      Enumerate(aNode, FragmentOrElement::MarkUserData,
-                &nsCCUncollectableMarker::sGeneration);
   }
 }
 
@@ -2093,7 +2046,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_INTERFACE_MAP_BEGIN(FragmentOrElement)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRIES_CYCLE_COLLECTION(FragmentOrElement)
-  NS_INTERFACE_MAP_ENTRY(Element)
   NS_INTERFACE_MAP_ENTRY(nsIContent)
   NS_INTERFACE_MAP_ENTRY(nsINode)
   NS_INTERFACE_MAP_ENTRY(nsIDOMEventTarget)
@@ -2467,42 +2419,5 @@ FragmentOrElement::AddSizeOfExcludingThis(nsWindowSizes& aSizes,
   nsDOMSlots* slots = GetExistingDOMSlots();
   if (slots) {
     *aNodeSize += slots->SizeOfIncludingThis(aSizes.mState.mMallocSizeOf);
-  }
-}
-
-void
-FragmentOrElement::SetIsElementInStyleScopeFlagOnSubtree(bool aInStyleScope)
-{
-  if (aInStyleScope && IsElementInStyleScope()) {
-    return;
-  }
-
-  if (IsElement()) {
-    SetIsElementInStyleScope(aInStyleScope);
-    SetIsElementInStyleScopeFlagOnShadowTree(aInStyleScope);
-  }
-
-  nsIContent* n = GetNextNode(this);
-  while (n) {
-    if (n->IsElementInStyleScope()) {
-      n = n->GetNextNonChildNode(this);
-    } else {
-      if (n->IsElement()) {
-        n->SetIsElementInStyleScope(aInStyleScope);
-        n->AsElement()->SetIsElementInStyleScopeFlagOnShadowTree(aInStyleScope);
-      }
-      n = n->GetNextNode(this);
-    }
-  }
-}
-
-void
-FragmentOrElement::SetIsElementInStyleScopeFlagOnShadowTree(bool aInStyleScope)
-{
-  NS_ASSERTION(IsElement(), "calling SetIsElementInStyleScopeFlagOnShadowTree "
-                            "on a non-Element is useless");
-  ShadowRoot* shadowRoot = GetShadowRoot();
-  if (shadowRoot) {
-    shadowRoot->SetIsElementInStyleScopeFlagOnSubtree(aInStyleScope);
   }
 }

@@ -16,7 +16,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   AddonRepository: "resource://gre/modules/addons/AddonRepository.jsm",
   AddonSettings: "resource://gre/modules/addons/AddonSettings.jsm",
   AppConstants: "resource://gre/modules/AppConstants.jsm",
-  ChromeManifestParser: "resource://gre/modules/ChromeManifestParser.jsm",
   Extension: "resource://gre/modules/Extension.jsm",
   Langpack: "resource://gre/modules/Extension.jsm",
   LightweightThemeManager: "resource://gre/modules/LightweightThemeManager.jsm",
@@ -45,10 +44,7 @@ const {nsIBlocklistService} = Ci;
 
 XPCOMUtils.defineLazyServiceGetters(this, {
   Blocklist: ["@mozilla.org/extensions/blocklist;1", "nsIBlocklistService"],
-  ChromeRegistry: ["@mozilla.org/chrome/chrome-registry;1", "nsIChromeRegistry"],
-  ResProtocolHandler: ["@mozilla.org/network/protocol;1?name=resource", "nsIResProtocolHandler"],
   AddonPolicyService: ["@mozilla.org/addons/policy-service;1", "nsIAddonPolicyService"],
-  AddonPathService: ["@mozilla.org/addon-path-service;1", "amIAddonPathService"],
   aomStartup: ["@mozilla.org/addons/addon-manager-startup;1", "amIAddonManagerStartup"],
 });
 
@@ -80,15 +76,15 @@ const PREF_XPI_FILE_WHITELISTED       = "xpinstall.whitelist.fileRequest";
 // xpinstall.signatures.required only supported in dev builds
 const PREF_XPI_SIGNATURES_REQUIRED    = "xpinstall.signatures.required";
 const PREF_XPI_SIGNATURES_DEV_ROOT    = "xpinstall.signatures.dev-root";
+const PREF_LANGPACK_SIGNATURES        = "extensions.langpacks.signatures.required";
 const PREF_XPI_PERMISSIONS_BRANCH     = "xpinstall.";
 const PREF_INSTALL_REQUIRESECUREORIGIN = "extensions.install.requireSecureOrigin";
 const PREF_INSTALL_DISTRO_ADDONS      = "extensions.installDistroAddons";
 const PREF_BRANCH_INSTALLED_ADDON     = "extensions.installedDistroAddon.";
-const PREF_INTERPOSITION_ENABLED      = "extensions.interposition.enabled";
+const PREF_DISTRO_ADDONS_PERMS        = "extensions.distroAddons.promptForPermissions";
 const PREF_SYSTEM_ADDON_SET           = "extensions.systemAddonSet";
 const PREF_SYSTEM_ADDON_UPDATE_URL    = "extensions.systemAddon.update.url";
 const PREF_ALLOW_LEGACY               = "extensions.legacy.enabled";
-const PREF_ALLOW_NON_MPC              = "extensions.allow-non-mpc-extensions";
 
 const PREF_EM_MIN_COMPAT_APP_VERSION      = "extensions.minCompatibleAppVersion";
 const PREF_EM_MIN_COMPAT_PLATFORM_VERSION = "extensions.minCompatiblePlatformVersion";
@@ -150,8 +146,6 @@ const TOOLKIT_ID                      = "toolkit@mozilla.org";
 const XPI_SIGNATURE_CHECK_PERIOD      = 24 * 60 * 60;
 
 XPCOMUtils.defineConstant(this, "DB_SCHEMA", 24);
-
-XPCOMUtils.defineLazyPreferenceGetter(this, "ALLOW_NON_MPC", PREF_ALLOW_NON_MPC);
 
 const NOTIFICATION_TOOLBOX_CONNECTION_CHANGE      = "toolbox-connection-change";
 
@@ -218,6 +212,7 @@ const SIGNED_TYPES = new Set([
   "extension",
   "experiment",
   "webextension",
+  "webextension-langpack",
   "webextension-theme",
 ]);
 
@@ -239,6 +234,10 @@ const ALL_EXTERNAL_TYPES = new Set([
 function mustSign(aType) {
   if (!SIGNED_TYPES.has(aType))
     return false;
+
+  if (aType == "webextension-langpack") {
+    return AddonSettings.LANGPACKS_REQUIRE_SIGNING;
+  }
 
   return AddonSettings.REQUIRE_SIGNING;
 }
@@ -849,12 +848,6 @@ function isUsableAddon(aAddon) {
     return false;
   }
 
-  if (!ALLOW_NON_MPC && aAddon.type == "extension" &&
-      aAddon.multiprocessCompatible !== true) {
-    logger.warn(`disabling ${aAddon.id} since it is not multiprocess compatible`);
-    return false;
-  }
-
   if (AddonManager.checkCompatibility) {
     if (!aAddon.isCompatible) {
       logger.warn(`Add-on ${aAddon.id} is not compatible with application version.`);
@@ -1114,7 +1107,6 @@ const JSON_FIELDS = Object.freeze([
   "changed",
   "dependencies",
   "enabled",
-  "enableShims",
   "file",
   "hasEmbeddedWebExtension",
   "lastModifiedTime",
@@ -1141,7 +1133,6 @@ class XPIState {
     // Set default values.
     this.type = "extension";
     this.bootstrapped = false;
-    this.enableShims = false;
 
     for (let prop of JSON_FIELDS) {
       if (prop in saved) {
@@ -1152,10 +1143,6 @@ class XPIState {
     if (saved.currentModifiedTime && saved.currentModifiedTime != this.lastModifiedTime) {
       this.lastModifiedTime = saved.currentModifiedTime;
       this.changed = true;
-    }
-
-    if (this.enabled) {
-      XPIProvider._addURIMapping(id, this.file);
     }
   }
 
@@ -1179,13 +1166,11 @@ class XPIState {
       path: descriptorToPath(saved.d, location.dir),
       lastModifiedTime: saved.mt || saved.st,
       version: saved.v,
-      enableShims: false,
     };
 
     if (bootstrapped) {
       data.bootstrapped = true;
       data.enabled = true;
-      data.enableShims = !bootstrapped.multiprocessCompatible;
       data.path = descriptorToPath(bootstrapped.descriptor, location.dir);
 
       for (let field of BOOTSTRAPPED_FIELDS) {
@@ -1204,9 +1189,6 @@ class XPIState {
   }
   get active() {
     return this.enabled;
-  }
-  get multiprocessCompatible() {
-    return !this.enableShims;
   }
 
 
@@ -1250,9 +1232,6 @@ class XPIState {
     };
     if (this.type != "extension") {
       json.type = this.type;
-    }
-    if (this.enableShims) {
-      json.enableShims = true;
     }
     if (this.bootstrapped) {
       json.bootstrapped = true;
@@ -1314,7 +1293,6 @@ class XPIState {
 
     this.version = aDBAddon.version;
     this.type = aDBAddon.type;
-    this.enableShims = this.type == "extension" && !aDBAddon.multiprocessCompatible;
     this.startupData = aDBAddon.startupData;
 
     this.bootstrapped = !!aDBAddon.bootstrap;
@@ -1814,12 +1792,12 @@ var XPIProvider = {
   // True if all of the add-ons found during startup were installed in the
   // application install location
   allAppGlobal: true,
+  // New distribution addons awaiting permissions approval
+  newDistroAddons: null,
   // Keep track of startup phases for telemetry
   runPhase: XPI_STARTING,
   // Per-addon telemetry information
   _telemetryDetails: {},
-  // A Map from an add-on install to its ID
-  _addonFileMap: new Map(),
   // Have we started shutting down bootstrap add-ons?
   _closing: false,
 
@@ -1928,80 +1906,6 @@ var XPIProvider = {
   },
 
   /**
-   * Adds or updates a URI mapping for an Addon.id.
-   *
-   * Mappings should not be removed at any point. This is so that the mappings
-   * will be still valid after an add-on gets disabled or uninstalled, as
-   * consumers may still have URIs of (leaked) resources they want to map.
-   */
-  _addURIMapping(aID, aFile) {
-    logger.info("Mapping " + aID + " to " + aFile.path);
-    this._addonFileMap.set(aID, aFile.path);
-
-    AddonPathService.insertPath(aFile.path, aID);
-  },
-
-  /**
-   * Resolve a URI back to physical file.
-   *
-   * Of course, this works only for URIs pointing to local resources.
-   *
-   * @param  aURI
-   *         URI to resolve
-   * @return
-   *         resolved nsIFileURL
-   */
-  _resolveURIToFile(aURI) {
-    switch (aURI.scheme) {
-      case "jar":
-      case "file":
-        if (aURI instanceof Ci.nsIJARURI) {
-          return this._resolveURIToFile(aURI.JARFile);
-        }
-        return aURI;
-
-      case "chrome":
-        aURI = ChromeRegistry.convertChromeURL(aURI);
-        return this._resolveURIToFile(aURI);
-
-      case "resource":
-        aURI = Services.io.newURI(ResProtocolHandler.resolveURI(aURI));
-        return this._resolveURIToFile(aURI);
-
-      case "view-source":
-        aURI = Services.io.newURI(aURI.pathQueryRef);
-        return this._resolveURIToFile(aURI);
-
-      case "about":
-        if (aURI.spec == "about:blank") {
-          // Do not attempt to map about:blank
-          return null;
-        }
-
-        let chan;
-        try {
-          chan = NetUtil.newChannel({
-            uri: aURI,
-            loadUsingSystemPrincipal: true
-          });
-        } catch (ex) {
-          return null;
-        }
-        // Avoid looping
-        if (chan.URI.equals(aURI)) {
-          return null;
-        }
-        // We want to clone the channel URI to avoid accidentially keeping
-        // unnecessary references to the channel or implementation details
-        // around.
-        return this._resolveURIToFile(chan.URI.clone());
-
-      default:
-        return null;
-    }
-  },
-
-  /**
    * Starts the XPI provider initializes the install locations and prefs.
    *
    * @param  aAppChanged
@@ -2040,8 +1944,13 @@ var XPIProvider = {
     }
 
     function addBuiltInInstallLocation(name, key, paths, scope) {
+      let dir;
       try {
-        let dir = FileUtils.getDir(key, paths);
+        dir = FileUtils.getDir(key, paths);
+      } catch (e) {
+        return;
+      }
+      try {
         let location = new BuiltInInstallLocation(name, dir, scope);
 
         XPIProvider.installLocations.push(location);
@@ -2167,8 +2076,8 @@ var XPIProvider = {
       Services.prefs.addObserver(PREF_EM_MIN_COMPAT_PLATFORM_VERSION, this);
       if (!AppConstants.MOZ_REQUIRE_SIGNING || Cu.isInAutomation)
         Services.prefs.addObserver(PREF_XPI_SIGNATURES_REQUIRED, this);
+      Services.prefs.addObserver(PREF_LANGPACK_SIGNATURES, this);
       Services.prefs.addObserver(PREF_ALLOW_LEGACY, this);
-      Services.prefs.addObserver(PREF_ALLOW_NON_MPC, this);
       Services.obs.addObserver(this, NOTIFICATION_FLUSH_PERMISSIONS);
       Services.obs.addObserver(this, NOTIFICATION_TOOLBOX_CONNECTION_CHANGE);
 
@@ -2354,6 +2263,12 @@ var XPIProvider = {
     this.activeAddons.clear();
     this.allAppGlobal = true;
 
+    for (let install of this.installs) {
+      if (install.onShutdown()) {
+        install.onShutdown();
+      }
+    }
+
     // If there are pending operations then we must update the list of active
     // add-ons
     if (Services.prefs.getBoolPref(PREF_PENDING_OPERATIONS, false)) {
@@ -2375,7 +2290,6 @@ var XPIProvider = {
 
     // This is needed to allow xpcshell tests to simulate a restart
     this.extensionsActive = false;
-    this._addonFileMap.clear();
 
     await XPIDatabase.shutdown();
   },
@@ -3105,6 +3019,14 @@ var XPIProvider = {
       // Install the add-on
       try {
         addon._sourceBundle = profileLocation.installAddon({ id, source: entry, action: "copy" });
+        if (Services.prefs.getBoolPref(PREF_DISTRO_ADDONS_PERMS, false)) {
+          addon.userDisabled = true;
+          if (!this.newDistroAddons) {
+            this.newDistroAddons = new Set();
+          }
+          this.newDistroAddons.add(id);
+        }
+
         XPIStates.addAddon(addon);
         logger.debug("Installed distribution add-on " + id);
 
@@ -3125,6 +3047,12 @@ var XPIProvider = {
     entries.close();
 
     return changed;
+  },
+
+  getNewDistroAddons() {
+    let addons = this.newDistroAddons;
+    this.newDistroAddons = null;
+    return addons;
   },
 
   /**
@@ -3606,7 +3534,6 @@ var XPIProvider = {
 
     let file = addon._sourceBundle;
 
-    XPIProvider._addURIMapping(addon.id, file);
     let method = callUpdate ? "update" : "install";
     XPIProvider.callBootstrapMethod(addon, file, method, installReason, extraParams);
     addon.state = AddonManager.STATE_INSTALLED;
@@ -3753,7 +3680,6 @@ var XPIProvider = {
         scope,
         isSystem,
         isWebExtension: isWebExtension(addon),
-        multiprocessCompatible: addon.multiprocessCompatible,
       });
     }
 
@@ -3815,24 +3741,6 @@ var XPIProvider = {
     }
 
     aCallback(results.map(install => install.wrapper));
-  },
-
-  /**
-   * Synchronously map a URI to the corresponding Addon ID.
-   *
-   * Mappable URIs are limited to in-application resources belonging to the
-   * add-on, such as Javascript compartments, XUL windows, XBL bindings, etc.
-   * but do not include URIs from meta data, such as the add-on homepage.
-   *
-   * @param  aURI
-   *         nsIURI to map or null
-   * @return string containing the Addon ID
-   * @see    AddonManager.mapURIToAddonID
-   * @see    amIAddonManager.mapURIToAddonID
-   */
-  mapURIToAddonID(aURI) {
-    // Returns `null` instead of empty string if the URI can't be mapped.
-    return AddonPathService.mapURIToAddonId(aURI) || null;
   },
 
   /**
@@ -4013,8 +3921,8 @@ var XPIProvider = {
         this.updateAddonAppDisabledStates();
         break;
       case PREF_XPI_SIGNATURES_REQUIRED:
+      case PREF_LANGPACK_SIGNATURES:
       case PREF_ALLOW_LEGACY:
-      case PREF_ALLOW_NON_MPC:
         this.updateAddonAppDisabledStates();
         break;
       }
@@ -4185,8 +4093,6 @@ var XPIProvider = {
    *         The add-on's version
    * @param  aType
    *         The type for the add-on
-   * @param  aMultiprocessCompatible
-   *         Boolean indicating whether the add-on is compatible with electrolysis.
    * @param  aRunInSafeMode
    *         Boolean indicating whether the add-on can run in safe mode.
    * @param  aDependencies
@@ -4195,9 +4101,8 @@ var XPIProvider = {
    *         Boolean indicating whether the add-on has an embedded webextension.
    * @return a JavaScript scope
    */
-  loadBootstrapScope(aId, aFile, aVersion, aType,
-                               aMultiprocessCompatible, aRunInSafeMode,
-                               aDependencies, hasEmbeddedWebExtension) {
+  loadBootstrapScope(aId, aFile, aVersion, aType, aRunInSafeMode, aDependencies,
+                     hasEmbeddedWebExtension) {
     this.activeAddons.set(aId, {
       bootstrapScope: null,
       // a Symbol passed to this add-on, which it can use to identify itself
@@ -4214,14 +4119,6 @@ var XPIProvider = {
 
     let principal = Cc["@mozilla.org/systemprincipal;1"].
                     createInstance(Ci.nsIPrincipal);
-    if (!aMultiprocessCompatible) {
-      if (Services.prefs.getBoolPref(PREF_INTERPOSITION_ENABLED, false)) {
-        let interposition = Cc["@mozilla.org/addons/multiprocess-shims;1"].
-          getService(Ci.nsIAddonInterposition);
-        Cu.setAddonInterposition(aId, interposition);
-      }
-      Cu.allowCPOWsInAddon(aId, true);
-    }
 
     if (!aFile.exists()) {
       activeAddon.bootstrapScope =
@@ -4283,11 +4180,6 @@ var XPIProvider = {
    *         The add-on's ID
    */
   unloadBootstrapScope(aId) {
-    // In case the add-on was not multiprocess-compatible, deregister
-    // any interpositions for it.
-    Cu.setAddonInterposition(aId, null);
-    Cu.allowCPOWsInAddon(aId, false);
-
     this.activeAddons.delete(aId);
     this.addAddonsToCrashReporter();
 
@@ -4332,7 +4224,6 @@ var XPIProvider = {
       let activeAddon = this.activeAddons.get(aAddon.id);
       if (!activeAddon) {
         this.loadBootstrapScope(aAddon.id, aFile, aAddon.version, aAddon.type,
-                                aAddon.multiprocessCompatible || false,
                                 runInSafeMode, aAddon.dependencies,
                                 aAddon.hasEmbeddedWebExtension || false);
         activeAddon = this.activeAddons.get(aAddon.id);
@@ -4369,13 +4260,14 @@ var XPIProvider = {
         }
       }
 
+      let installLocation = aAddon._installLocation || null;
       let params = {
         id: aAddon.id,
         version: aAddon.version,
         installPath: aFile.clone(),
         resourceURI: getURIForResourceInFile(aFile, ""),
         signedState: aAddon.signedState,
-        temporarilyInstalled: aAddon._installLocation == TemporaryInstallLocation,
+        temporarilyInstalled: installLocation == TemporaryInstallLocation,
       };
 
       if (aMethod == "startup" && aAddon.startupData) {
@@ -4431,13 +4323,6 @@ var XPIProvider = {
       if (CHROME_TYPES.has(aAddon.type) && aMethod == "shutdown" && aReason != BOOTSTRAP_REASONS.APP_SHUTDOWN) {
         logger.debug("Removing manifest for " + aFile.path);
         Components.manager.removeBootstrappedManifestLocation(aFile);
-
-        let manifest = getURIForResourceInFile(aFile, "chrome.manifest");
-        for (let line of ChromeManifestParser.parseSync(manifest)) {
-          if (line.type == "resource") {
-            ResProtocolHandler.setSubstitution(line.args[0], null);
-          }
-        }
       }
       this.setTelemetry(aAddon.id, aMethod + "_MS", new Date() - timeStart);
     }
@@ -4891,8 +4776,7 @@ AddonInternal.prototype = {
   },
 
   get providesUpdatesSecurely() {
-    return !!(this.updateKey || !this.updateURL ||
-              this.updateURL.substring(0, 6) == "https:");
+    return !this.updateURL || this.updateURL.startsWith("https:");
   },
 
   get isCorrectlySigned() {
@@ -4919,6 +4803,10 @@ AddonInternal.prototype = {
     if (this.signedState === AddonManager.SIGNEDSTATE_NOT_REQUIRED)
       return true;
     return this.signedState > AddonManager.SIGNEDSTATE_MISSING;
+  },
+
+  get unpack() {
+    return this.type === "dictionary";
   },
 
   get isCompatible() {
@@ -4993,8 +4881,7 @@ AddonInternal.prototype = {
     // Only extensions and dictionaries can be compatible by default; themes
     // and language packs always use strict compatibility checking.
     if (this.type in COMPATIBLE_BY_DEFAULT_TYPES &&
-        !AddonManager.strictCompatibility && !this.strictCompatibility &&
-        !this.hasBinaryComponents) {
+        !AddonManager.strictCompatibility && !this.strictCompatibility) {
 
       // The repository can specify compatibility overrides.
       // Note: For now, only blacklisting is supported by overrides.
@@ -5105,8 +4992,6 @@ AddonInternal.prototype = {
         }
       }
     }
-    if (aUpdate.multiprocessCompatible !== undefined)
-      this.multiprocessCompatible = aUpdate.multiprocessCompatible;
     this.appDisabled = !isUsableAddon(this);
   },
 
@@ -5744,9 +5629,9 @@ function defineAddonWrapperProperty(name, getter) {
 
 ["id", "syncGUID", "version", "isCompatible", "isPlatformCompatible",
  "providesUpdatesSecurely", "blocklistState", "blocklistURL", "appDisabled",
- "softDisabled", "skinnable", "size", "foreignInstall", "hasBinaryComponents",
+ "softDisabled", "skinnable", "size", "foreignInstall",
  "strictCompatibility", "updateURL", "dependencies",
- "getDataDirectory", "multiprocessCompatible", "signedState", "mpcOptedOut",
+ "getDataDirectory", "signedState",
  "isCorrectlySigned"].forEach(function(aProp) {
    defineAddonWrapperProperty(aProp, function() {
      let addon = addonFor(this);
@@ -6010,7 +5895,6 @@ class DirectoryInstallLocation {
       }
 
       this._IDToFileMap[id] = entry;
-      XPIProvider._addURIMapping(id, entry);
     }
   }
 
@@ -6292,7 +6176,6 @@ class MutableDirectoryInstallLocation extends DirectoryInstallLocation {
       logger.warn("failed to set lastModifiedTime on " + newFile.path, e);
     }
     this._IDToFileMap[id] = newFile;
-    XPIProvider._addURIMapping(id, newFile);
 
     if (existingAddonID && existingAddonID != id &&
         existingAddonID in this._IDToFileMap) {
@@ -6394,7 +6277,6 @@ class BuiltInInstallLocation extends DirectoryInstallLocation {
       }
 
       this._IDToFileMap[id] = file;
-      XPIProvider._addURIMapping(id, file);
     }
   }
 }
@@ -6533,18 +6415,8 @@ class SystemAddonInstallLocation extends MutableDirectoryInstallLocation {
       return false;
     }
 
-    if (aAddon.unpack) {
-      logger.warn(`System add-on ${aAddon.id} isn't a packed add-on.`);
-      return false;
-    }
-
     if (!aAddon.bootstrap) {
       logger.warn(`System add-on ${aAddon.id} isn't restartless.`);
-      return false;
-    }
-
-    if (!aAddon.multiprocessCompatible) {
-      logger.warn(`System add-on ${aAddon.id} isn't multiprocess compatible.`);
       return false;
     }
 
@@ -6851,7 +6723,6 @@ class SystemAddonInstallLocation extends MutableDirectoryInstallLocation {
       logger.warn("failed to set lastModifiedTime on " + newFile.path, e);
     }
     this._IDToFileMap[id] = newFile;
-    XPIProvider._addURIMapping(id, newFile);
 
     return newFile;
   }
@@ -6952,7 +6823,6 @@ class WinRegInstallLocation extends DirectoryInstallLocation {
       }
 
       this._IDToFileMap[id] = file;
-      XPIProvider._addURIMapping(id, file);
     }
   }
 
@@ -6977,6 +6847,7 @@ var XPIInternal = {
   KEY_APP_SYSTEM_ADDONS,
   KEY_APP_SYSTEM_DEFAULTS,
   KEY_APP_TEMPORARY,
+  SIGNED_TYPES,
   TEMPORARY_ADDON_SUFFIX,
   TOOLKIT_ID,
   XPIStates,
@@ -6984,6 +6855,7 @@ var XPIInternal = {
   isTheme,
   isUsableAddon,
   isWebExtension,
+  mustSign,
   recordAddonTelemetry,
 
   get XPIDatabase() { return gGlobalScope.XPIDatabase; },

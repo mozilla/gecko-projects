@@ -102,6 +102,38 @@ def enum(*names):
     return Foo()
 
 
+# List with constant time index() and contains() methods.
+class IndexedList(object):
+    def __init__(self, iterable):
+        self._list = []
+        self._index_map = {}
+        for i in iterable:
+            self.append(i)
+
+    def sort(self):
+        self._list.sort()
+        self._index_map = {val: i for i, val in enumerate(self._list)}
+
+    def append(self, val):
+        self._index_map[val] = len(self._list)
+        self._list.append(val)
+
+    def index(self, what):
+        return self._index_map[what]
+
+    def __contains__(self, what):
+        return what in self._index_map
+
+    def __iter__(self):
+        return iter(self._list)
+
+    def __getitem__(self, index):
+        return self._list[index]
+
+    def __len__(self):
+        return len(self._list)
+
+
 # Descriptor types as described in the spec
 class Type(object):
     """
@@ -1085,6 +1117,23 @@ class Interface(object):
                                             self._namespace_offset,
                                             self._descriptor_offset))
 
+    def encodeflags(self):
+        """
+        Encode the flags of this Interface object, return a byte
+        suitable for writing to a typelib file.
+
+        """
+        flags = 0
+        if self.scriptable:
+            flags |= 0x80
+        if self.function:
+            flags |= 0x40
+        if self.builtinclass:
+            flags |= 0x20
+        if self.main_process_scriptable_only:
+            flags |= 0x10
+        return flags
+
     def write(self, typelib, file, data_pool_offset):
         """
         Write an InterfaceDescriptor to |file|, which is assumed
@@ -1105,16 +1154,7 @@ class Interface(object):
         file.write(struct.pack(">H", len(self.constants)))
         for c in self.constants:
             c.write(typelib, file)
-        flags = 0
-        if self.scriptable:
-            flags |= 0x80
-        if self.function:
-            flags |= 0x40
-        if self.builtinclass:
-            flags |= 0x20
-        if self.main_process_scriptable_only:
-            flags |= 0x10
-        file.write(struct.pack(">B", flags))
+        file.write(struct.pack(">B", self.encodeflags()))
 
     def write_names(self, string_writer):
         """
@@ -1150,7 +1190,7 @@ class Typelib(object):
 
         """
         self.version = version
-        self.interfaces = list(interfaces)
+        self.interfaces = IndexedList(interfaces)
         self.annotations = list(annotations)
         self.filename = None
 

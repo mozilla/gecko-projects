@@ -23,8 +23,7 @@ namespace layers {
 using namespace mozilla::gfx;
 
 WebRenderBridgeChild::WebRenderBridgeChild(const wr::PipelineId& aPipelineId)
-  : mReadLockSequenceNumber(0)
-  , mIsInTransaction(false)
+  : mIsInTransaction(false)
   , mIsInClearCachedResources(false)
   , mIdNamespace{0}
   , mResourceId(0)
@@ -102,23 +101,6 @@ WebRenderBridgeChild::BeginTransaction()
 
   UpdateFwdTransactionId();
   mIsInTransaction = true;
-  mReadLockSequenceNumber = 0;
-  mReadLocks.AppendElement();
-}
-
-void
-WebRenderBridgeChild::ClearReadLocks()
-{
-  for (nsTArray<ReadLockInit>& locks : mReadLocks) {
-    if (locks.Length()) {
-      if (!SendInitReadLocks(locks)) {
-        NS_WARNING("WARNING: sending read locks failed!");
-        return;
-      }
-    }
-  }
-
-  mReadLocks.Clear();
 }
 
 void
@@ -138,7 +120,7 @@ WebRenderBridgeChild::UpdateResources(wr::IpcResourceUpdateQueue& aResources)
   nsTArray<ipc::Shmem> largeShmems;
   aResources.Flush(resourceUpdates, smallShmems, largeShmems);
 
-  this->SendUpdateResources(resourceUpdates, Move(smallShmems), Move(largeShmems));
+  this->SendUpdateResources(resourceUpdates, Move(smallShmems), largeShmems);
 }
 
 void
@@ -170,7 +152,7 @@ WebRenderBridgeChild::EndTransaction(const wr::LayoutSize& aContentSize,
   this->SendSetDisplayList(aSize, mParentCommands, mDestroyedActors,
                            GetFwdTransactionId(), aTransactionId,
                            aContentSize, dlData, aDL.dl_desc, aScrollData,
-                           Move(resourceUpdates), Move(smallShmems), Move(largeShmems),
+                           Move(resourceUpdates), Move(smallShmems), largeShmems,
                            mIdNamespace, aTxnStartTime, fwdTime);
 
   mParentCommands.Clear();
@@ -539,19 +521,12 @@ WebRenderBridgeChild::UseTextures(CompositableClient* aCompositable,
     MOZ_ASSERT(t.mTextureClient);
     MOZ_ASSERT(t.mTextureClient->GetIPDLActor());
     MOZ_RELEASE_ASSERT(t.mTextureClient->GetIPDLActor()->GetIPCChannel() == GetIPCChannel());
-    ReadLockDescriptor readLock;
-    ReadLockHandle readLockHandle;
-    if (t.mTextureClient->SerializeReadLock(readLock)) {
-      readLockHandle = ReadLockHandle(++mReadLockSequenceNumber);
-      if (mReadLocks.LastElement().Length() >= GetMaxFileDescriptorsPerMessage()) {
-        mReadLocks.AppendElement();
-      }
-      mReadLocks.LastElement().AppendElement(ReadLockInit(readLock, readLockHandle));
-    }
+    bool readLocked = t.mTextureClient->OnForwardedToHost();
+
     textures.AppendElement(TimedTexture(nullptr, t.mTextureClient->GetIPDLActor(),
-                                        readLockHandle,
                                         t.mTimeStamp, t.mPictureRect,
-                                        t.mFrameID, t.mProducerID));
+                                        t.mFrameID, t.mProducerID,
+                                        readLocked));
     GetCompositorBridgeChild()->HoldUntilCompositableRefReleasedIfNecessary(t.mTextureClient);
   }
   AddWebRenderParentCommand(CompositableOperation(aCompositable->GetIPCHandle(),

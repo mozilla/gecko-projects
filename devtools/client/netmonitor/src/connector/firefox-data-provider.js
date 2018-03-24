@@ -22,6 +22,7 @@ class FirefoxDataProvider {
     // Options
     this.webConsoleClient = webConsoleClient;
     this.actions = actions;
+    this.actionsEnabled = true;
 
     // Internal properties
     this.payloadQueue = new Map();
@@ -36,6 +37,15 @@ class FirefoxDataProvider {
     // Event handlers
     this.onNetworkEvent = this.onNetworkEvent.bind(this);
     this.onNetworkEventUpdate = this.onNetworkEventUpdate.bind(this);
+  }
+
+  /**
+   * Enable/disable firing redux actions (enabled by default).
+   *
+   * @param {boolean} enable Set to true to fire actions.
+   */
+  enableActions(enable) {
+    this.actionsEnabled = enable;
   }
 
   /**
@@ -55,7 +65,7 @@ class FirefoxDataProvider {
       fromServiceWorker,
     } = data;
 
-    if (this.actions.addRequest) {
+    if (this.actionsEnabled && this.actions.addRequest) {
       await this.actions.addRequest(id, {
         // Convert the received date/time string to a unix timestamp.
         startedMillis: Date.parse(startedDateTime),
@@ -120,7 +130,7 @@ class FirefoxDataProvider {
       responseCookiesObj
     );
 
-    if (this.actions.updateRequest) {
+    if (this.actionsEnabled && this.actions.updateRequest) {
       await this.actions.updateRequest(id, payload, true);
     }
 
@@ -174,8 +184,10 @@ class FirefoxDataProvider {
       }, 0);
 
       requestPostData.postData.text = postData;
-      payload.requestPostData = Object.assign({}, requestPostData);
-      payload.requestHeadersFromUploadStream = { headers, headersSize };
+      payload.requestPostData = {
+        ...requestPostData,
+        uploadHeaders: { headers, headersSize }
+      };
     }
     return payload;
   }
@@ -377,7 +389,7 @@ class FirefoxDataProvider {
 
     this.payloadQueue.delete(actor);
 
-    if (this.actions.updateRequest) {
+    if (this.actionsEnabled && this.actions.updateRequest) {
       await this.actions.updateRequest(actor, payload, true);
     }
 
@@ -414,7 +426,7 @@ class FirefoxDataProvider {
       // data again.
       this.lazyRequestData.delete(key);
 
-      if (this.actions.updateRequest) {
+      if (this.actionsEnabled && this.actions.updateRequest) {
         await this.actions.updateRequest(actor, {
           ...payload,
           // Lockdown *Available property once we fetch data from back-end.
@@ -530,7 +542,7 @@ class FirefoxDataProvider {
       requestPostData: response
     });
     emit(EVENTS.RECEIVED_REQUEST_POST_DATA, response.from);
-    return payload;
+    return payload.requestPostData;
   }
 
   /**

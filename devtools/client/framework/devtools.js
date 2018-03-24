@@ -7,7 +7,7 @@
 const {Cu} = require("chrome");
 const Services = require("Services");
 
-const {DevToolsShim} = require("chrome://devtools-shim/content/DevToolsShim.jsm");
+const {DevToolsShim} = require("chrome://devtools-startup/content/DevToolsShim.jsm");
 
 // Load gDevToolsBrowser toolbox lazily as they need gDevTools to be fully initialized
 loader.lazyRequireGetter(this, "TargetFactory", "devtools/client/framework/target", true);
@@ -24,8 +24,7 @@ loader.lazyRequireGetter(this, "WebExtensionInspectedWindowFront",
 
 const {defaultTools: DefaultTools, defaultThemes: DefaultThemes} =
   require("devtools/client/definitions");
-const EventEmitter = require("devtools/shared/old-event-emitter");
-const {Task} = require("devtools/shared/task");
+const EventEmitter = require("devtools/shared/event-emitter");
 const {getTheme, setTheme, addThemeObserver, removeThemeObserver} =
   require("devtools/client/shared/theme");
 
@@ -54,9 +53,8 @@ function DevTools() {
   // related events.
   this.registerDefaults();
 
-  // Register this new DevTools instance to Firefox. DevToolsShim is part of Firefox,
-  // integrating with all Firefox codebase and making the glue between code from
-  // mozilla-central and DevTools add-on on github
+  // Register this DevTools instance on the DevToolsShim, which is used by non-devtools
+  // code to interact with DevTools.
   DevToolsShim.register(this);
 }
 
@@ -396,7 +394,7 @@ DevTools.prototype = {
    * @param {Object} state
    *                 A SessionStore state object that gets modified by reference
    */
-  saveDevToolsSession: function (state) {
+  saveDevToolsSession: function(state) {
     state.browserConsole = HUDService.getBrowserConsoleSessionState();
     state.browserToolbox = BrowserToolboxProcess.getBrowserToolboxSessionState();
 
@@ -410,7 +408,7 @@ DevTools.prototype = {
   /**
    * Restore the devtools session state as provided by SessionStore.
    */
-  restoreDevToolsSession: function ({scratchpads, browserConsole, browserToolbox}) {
+  restoreDevToolsSession: function({scratchpads, browserConsole, browserToolbox}) {
     if (scratchpads) {
       ScratchpadManager.restoreSession(scratchpads);
     }
@@ -453,15 +451,15 @@ DevTools.prototype = {
    * @return {Toolbox} toolbox
    *        The toolbox that was opened
    */
-  showToolbox: Task.async(function* (target, toolId, hostType, hostOptions, startTime) {
+  async showToolbox(target, toolId, hostType, hostOptions, startTime) {
     let toolbox = this._toolboxes.get(target);
     if (toolbox) {
       if (hostType != null && toolbox.hostType != hostType) {
-        yield toolbox.switchHost(hostType);
+        await toolbox.switchHost(hostType);
       }
 
       if (toolId != null && toolbox.currentToolId != toolId) {
-        yield toolbox.selectTool(toolId);
+        await toolbox.selectTool(toolId);
       }
 
       toolbox.raise();
@@ -471,11 +469,11 @@ DevTools.prototype = {
       // actually trying to create a new one.
       let promise = this._creatingToolboxes.get(target);
       if (promise) {
-        return yield promise;
+        return promise;
       }
       let toolboxPromise = this.createToolbox(target, toolId, hostType, hostOptions);
       this._creatingToolboxes.set(target, toolboxPromise);
-      toolbox = yield toolboxPromise;
+      toolbox = await toolboxPromise;
       this._creatingToolboxes.delete(target);
 
       if (startTime) {
@@ -484,7 +482,7 @@ DevTools.prototype = {
       this._firstShowToolbox = false;
     }
     return toolbox;
-  }),
+  },
 
   /**
    * Log telemetry related to toolbox opening.
@@ -508,10 +506,10 @@ DevTools.prototype = {
     histogram.add(toolId, delay);
   },
 
-  createToolbox: Task.async(function* (target, toolId, hostType, hostOptions) {
+  async createToolbox(target, toolId, hostType, hostOptions) {
     let manager = new ToolboxHostManager(target, hostType, hostOptions);
 
-    let toolbox = yield manager.create(toolId);
+    let toolbox = await manager.create(toolId);
 
     this._toolboxes.set(target, toolbox);
 
@@ -526,11 +524,11 @@ DevTools.prototype = {
       this.emit("toolbox-destroyed", target);
     });
 
-    yield toolbox.open();
+    await toolbox.open();
     this.emit("toolbox-ready", toolbox);
 
     return toolbox;
-  }),
+  },
 
   /**
    * Return the toolbox for a given target.
@@ -553,17 +551,17 @@ DevTools.prototype = {
    *         associated to the target. true, if the toolbox was successfully
    *         closed.
    */
-  closeToolbox: Task.async(function* (target) {
-    let toolbox = yield this._creatingToolboxes.get(target);
+  async closeToolbox(target) {
+    let toolbox = await this._creatingToolboxes.get(target);
     if (!toolbox) {
       toolbox = this._toolboxes.get(target);
     }
     if (!toolbox) {
       return false;
     }
-    yield toolbox.destroy();
+    await toolbox.destroy();
     return true;
-  }),
+  },
 
   /**
    * Wrapper on TargetFactory.forTab, constructs a Target for the provided tab.
@@ -573,7 +571,7 @@ DevTools.prototype = {
    *
    * @return {TabTarget} A target object
    */
-  getTargetForTab: function (tab) {
+  getTargetForTab: function(tab) {
     return TargetFactory.forTab(tab);
   },
 
@@ -584,7 +582,7 @@ DevTools.prototype = {
    * web-extensions need to use dedicated instances of TabTarget and cannot reuse the
    * cached instances managed by DevTools target factory.
    */
-  createTargetForTab: function (tab) {
+  createTargetForTab: function(tab) {
     return new TabTarget(tab);
   },
 
@@ -592,7 +590,7 @@ DevTools.prototype = {
    * Compatibility layer for web-extensions. Used by DevToolsShim for
    * browser/components/extensions/ext-devtools-inspectedWindow.js
    */
-  createWebExtensionInspectedWindowFront: function (tabTarget) {
+  createWebExtensionInspectedWindowFront: function(tabTarget) {
     return new WebExtensionInspectedWindowFront(tabTarget.client, tabTarget.form);
   },
 
@@ -600,7 +598,7 @@ DevTools.prototype = {
    * Compatibility layer for web-extensions. Used by DevToolsShim for
    * toolkit/components/extensions/ext-c-toolkit.js
    */
-  openBrowserConsole: function () {
+  openBrowserConsole: function() {
     let {HUDService} = require("devtools/client/webconsole/hudservice");
     HUDService.openBrowserConsoleOrFocus();
   },
@@ -656,8 +654,7 @@ DevTools.prototype = {
   },
 
   /**
-   * Either the SDK Loader has been destroyed by the add-on contribution
-   * workflow, or firefox is shutting down.
+   * Either the DevTools Loader has been destroyed or firefox is shutting down.
 
    * @param {boolean} shuttingDown
    *        True if firefox is currently shutting down. We may prevent doing
@@ -665,8 +662,7 @@ DevTools.prototype = {
    *        cleaned up in order to be able to load devtools again.
    */
   destroy({ shuttingDown }) {
-    // Do not cleanup everything during firefox shutdown, but only when
-    // devtools are reloaded via the add-on contribution workflow.
+    // Do not cleanup everything during firefox shutdown.
     if (!shuttingDown) {
       for (let [, toolbox] of this._toolboxes) {
         toolbox.destroy();
@@ -686,7 +682,7 @@ DevTools.prototype = {
     // manager state on shutdown.
     if (!shuttingDown) {
       // Notify the DevToolsShim that DevTools are no longer available, particularly if
-      // the destroy was caused by disabling/removing the DevTools add-on.
+      // the destroy was caused by disabling/removing DevTools.
       DevToolsShim.unregister();
     }
 

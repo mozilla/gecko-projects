@@ -10,6 +10,7 @@
 #include "mozilla/dom/WorkerCommon.h"
 #include "mozilla/CondVar.h"
 #include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/RelativeTimeline.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsIEventTarget.h"
 #include "nsTObserverArray.h"
@@ -19,6 +20,7 @@
 #include "mozilla/dom/WorkerLoadInfo.h"
 #include "mozilla/dom/workerinternals/JSSettings.h"
 #include "mozilla/dom/workerinternals/Queue.h"
+#include "mozilla/PerformanceCounter.h"
 
 class nsIConsoleReportCollector;
 class nsIThreadInternal;
@@ -101,6 +103,7 @@ public:
 };
 
 class WorkerPrivate
+  : public RelativeTimeline
 {
 public:
   struct LocationInfo
@@ -261,10 +264,10 @@ public:
   IsOnCurrentThread();
 
   bool
-  CloseInternal(JSContext* aCx)
+  CloseInternal()
   {
     AssertIsOnWorkerThread();
-    return NotifyInternal(aCx, Closing);
+    return NotifyInternal(Closing);
   }
 
   bool
@@ -320,7 +323,7 @@ public:
                         const nsAString& aMessage);
 
   bool
-  NotifyInternal(JSContext* aCx, WorkerStatus aStatus);
+  NotifyInternal(WorkerStatus aStatus);
 
   void
   ReportError(JSContext* aCx, JS::ConstUTF8CharsZ aToStringResult,
@@ -420,6 +423,9 @@ public:
 
   void
   SetThread(WorkerThread* aThread);
+
+  bool
+  IsOnWorkerThread() const;
 
   void
   AssertIsOnWorkerThread() const
@@ -555,6 +561,9 @@ public:
   bool
   EnsureClientSource();
 
+  void
+  EnsurePerformanceStorage();
+
   const ClientInfo&
   GetClientInfo() const;
 
@@ -572,6 +581,11 @@ public:
 
   PerformanceStorage*
   GetPerformanceStorage();
+
+#ifndef RELEASE_OR_BETA
+  PerformanceCounter*
+  GetPerformanceCounter();
+#endif
 
   bool
   IsAcceptingEvents()
@@ -1292,7 +1306,7 @@ private:
   RunCurrentSyncLoop();
 
   bool
-  DestroySyncLoop(uint32_t aLoopIndex, nsIThreadInternal* aThread = nullptr);
+  DestroySyncLoop(uint32_t aLoopIndex);
 
   void
   InitializeGCTimers();
@@ -1317,7 +1331,7 @@ private:
   RemoveHolder(WorkerHolder* aHolder);
 
   void
-  NotifyHolders(JSContext* aCx, WorkerStatus aStatus);
+  NotifyHolders(WorkerStatus aStatus);
 
   bool
   HasActiveHolders()
@@ -1489,6 +1503,10 @@ private:
   // mIsInAutomation is true when we're running in test automation.
   // We expose some extra testing functions in that case.
   bool mIsInAutomation;
+
+#ifndef RELEASE_OR_BETA
+  RefPtr<mozilla::PerformanceCounter> mPerformanceCounter;
+#endif
 };
 
 class AutoSyncLoopHolder

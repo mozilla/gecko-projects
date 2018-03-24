@@ -1711,7 +1711,7 @@ MacroAssembler::loadStringChar(Register str, Register index, Register output, Re
 
     // Check if the index is contained in the leftChild.
     // Todo: Handle index in the rightChild.
-    boundsCheck32ForLoad(index, Address(output, JSString::offsetOfLength()), scratch, fail);
+    spectreBoundsCheck32(index, Address(output, JSString::offsetOfLength()), scratch, fail);
 
     // If the left side is another rope, give up.
     branchIfRope(output, fail);
@@ -2803,15 +2803,13 @@ MacroAssembler::alignJitStackBasedOnNArgs(uint32_t nargs)
 
 // ===============================================================
 
-MacroAssembler::MacroAssembler(JSContext* cx, IonScript* ion,
-                               JSScript* script, jsbytecode* pc)
+MacroAssembler::MacroAssembler(JSContext* cx)
   : framePushed_(0),
 #ifdef DEBUG
     inCall_(false),
 #endif
     emitProfilingInstrumentation_(false)
 {
-    constructRoot(cx);
     jitContext_.emplace(cx, (js::jit::TempAllocator*)nullptr);
     alloc_.emplace(cx);
     moveResolver_.setAllocator(*jitContext_->temp);
@@ -2822,11 +2820,53 @@ MacroAssembler::MacroAssembler(JSContext* cx, IonScript* ion,
     initWithAllocator();
     armbuffer_.id = GetJitContext()->getNextAssemblerId();
 #endif
-    if (ion) {
-        setFramePushed(ion->frameSize());
-        if (pc && cx->runtime()->geckoProfiler().enabled())
-            enableProfilingInstrumentation();
+}
+
+MacroAssembler::MacroAssembler()
+  : framePushed_(0),
+#ifdef DEBUG
+    inCall_(false),
+#endif
+    emitProfilingInstrumentation_(false)
+{
+    JitContext* jcx = GetJitContext();
+
+    if (!jcx->temp) {
+        JSContext* cx = jcx->cx;
+        MOZ_ASSERT(cx);
+        alloc_.emplace(cx);
     }
+
+    moveResolver_.setAllocator(*jcx->temp);
+
+#if defined(JS_CODEGEN_ARM)
+    initWithAllocator();
+    m_buffer.id = jcx->getNextAssemblerId();
+#elif defined(JS_CODEGEN_ARM64)
+    initWithAllocator();
+    armbuffer_.id = jcx->getNextAssemblerId();
+#endif
+}
+
+MacroAssembler::MacroAssembler(WasmToken, TempAllocator& alloc)
+  : framePushed_(0),
+#ifdef DEBUG
+    inCall_(false),
+#endif
+    emitProfilingInstrumentation_(false)
+{
+    moveResolver_.setAllocator(alloc);
+
+#if defined(JS_CODEGEN_ARM)
+    initWithAllocator();
+    m_buffer.id = 0;
+#elif defined(JS_CODEGEN_ARM64)
+    initWithAllocator();
+    // Stubs + builtins + the baseline compiler all require the native SP,
+    // not the PSP.
+    SetStackPointer64(sp);
+    armbuffer_.id = 0;
+#endif
 }
 
 bool
@@ -3201,13 +3241,32 @@ MacroAssembler::branchIfNotInterpretedConstructor(Register fun, Register scratch
 }
 
 void
-MacroAssembler::branchTestObjGroup(Condition cond, Register obj, const Address& group,
-                                   Register scratch, Label* label)
+MacroAssembler::branchTestObjGroupNoSpectreMitigations(Condition cond, Register obj,
+                                                       const Address& group, Register scratch,
+                                                       Label* label)
 {
     // Note: obj and scratch registers may alias.
+    MOZ_ASSERT(group.base != scratch);
+    MOZ_ASSERT(group.base != obj);
 
     loadPtr(Address(obj, JSObject::offsetOfGroup()), scratch);
     branchPtr(cond, group, scratch, label);
+}
+
+void
+MacroAssembler::branchTestObjGroup(Condition cond, Register obj, const Address& group,
+                                   Register scratch, Register spectreRegToZero, Label* label)
+{
+    // Note: obj and scratch registers may alias.
+    MOZ_ASSERT(group.base != scratch);
+    MOZ_ASSERT(group.base != obj);
+    MOZ_ASSERT(scratch != spectreRegToZero);
+
+    loadPtr(Address(obj, JSObject::offsetOfGroup()), scratch);
+    branchPtr(cond, group, scratch, label);
+
+    if (JitOptions.spectreObjectMitigationsMisc)
+        spectreZeroRegister(cond, scratch, spectreRegToZero);
 }
 
 void
@@ -3357,7 +3416,50 @@ MacroAssembler::maybeBranchTestType(MIRType type, MDefinition* maybeDef, Registe
 void
 MacroAssembler::wasmTrap(wasm::Trap trap, wasm::BytecodeOffset bytecodeOffset)
 {
-    append(trap, wasm::TrapSite(wasmTrapInstruction().offset(), bytecodeOffset));
+    uint32_t trapOffset = wasmTrapInstruction().offset();
+    MOZ_ASSERT_IF(!oom(), currentOffset() - trapOffset == WasmTrapInstructionLength);
+
+    append(trap, wasm::TrapSite(trapOffset, bytecodeOffset));
+}
+
+void
+MacroAssembler::wasmInterruptCheck(Register tls, wasm::BytecodeOffset bytecodeOffset)
+{
+    Label ok;
+    branch32(Assembler::Equal, Address(tls, offsetof(wasm::TlsData, interrupt)), Imm32(0), &ok);
+    wasmTrap(wasm::Trap::CheckInterrupt, bytecodeOffset);
+    bind(&ok);
+}
+
+void
+MacroAssembler::wasmReserveStackChecked(uint32_t amount, wasm::BytecodeOffset trapOffset)
+{
+    if (!amount)
+        return;
+
+    // If the frame is large, don't bump sp until after the stack limit check so
+    // that the trap handler isn't called with a wild sp.
+
+    if (amount > MAX_UNCHECKED_LEAF_FRAME_SIZE) {
+        Label ok;
+        Register scratch = ABINonArgReg0;
+        moveStackPtrTo(scratch);
+        subPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, stackLimit)), scratch);
+        branchPtr(Assembler::GreaterThan, scratch, Imm32(amount), &ok);
+        wasmTrap(wasm::Trap::StackOverflow, trapOffset);
+        bind(&ok);
+    }
+
+    reserveStack(amount);
+
+    if (amount <= MAX_UNCHECKED_LEAF_FRAME_SIZE) {
+        Label ok;
+        branchStackPtrRhs(Assembler::Below,
+                          Address(WasmTlsReg, offsetof(wasm::TlsData, stackLimit)),
+                          &ok);
+        wasmTrap(wasm::Trap::StackOverflow, trapOffset);
+        bind(&ok);
+    }
 }
 
 void
@@ -3656,6 +3758,44 @@ MacroAssembler::emitPreBarrierFastPath(JSRuntime* rt, MIRType type, Register tem
     branchTestPtr(Assembler::NonZero, temp2, temp1, noBarrier);
 }
 
+// ========================================================================
+// Spectre Mitigations.
+
+void
+MacroAssembler::spectreMaskIndex(Register index, Register length, Register output)
+{
+    MOZ_ASSERT(JitOptions.spectreIndexMasking);
+    MOZ_ASSERT(length != output);
+    MOZ_ASSERT(index != output);
+
+    move32(Imm32(0), output);
+    cmp32Move32(Assembler::Below, index, length, index, output);
+}
+
+void
+MacroAssembler::spectreMaskIndex(Register index, const Address& length, Register output)
+{
+    MOZ_ASSERT(JitOptions.spectreIndexMasking);
+    MOZ_ASSERT(index != length.base);
+    MOZ_ASSERT(length.base != output);
+    MOZ_ASSERT(index != output);
+
+    move32(Imm32(0), output);
+    cmp32Move32(Assembler::Below, index, length, index, output);
+}
+
+void
+MacroAssembler::boundsCheck32PowerOfTwo(Register index, uint32_t length, Label* failure)
+{
+    MOZ_ASSERT(mozilla::IsPowerOfTwo(length));
+    branch32(Assembler::AboveOrEqual, index, Imm32(length), failure);
+
+    // Note: it's fine to clobber the input register, as this is a no-op: it
+    // only affects speculative execution.
+    if (JitOptions.spectreIndexMasking)
+        and32(Imm32(length - 1), index);
+}
+
 //}}} check_macroassembler_style
 
 void
@@ -3705,41 +3845,6 @@ MacroAssembler::debugAssertObjHasFixedSlots(Register obj, Register scratch)
     assumeUnreachable("Expected a fixed slot");
     bind(&hasFixedSlots);
 #endif
-}
-
-void
-MacroAssembler::spectreMaskIndex(Register index, Register length, Register output)
-{
-    MOZ_ASSERT(JitOptions.spectreIndexMasking);
-    MOZ_ASSERT(length != output);
-    MOZ_ASSERT(index != output);
-
-    move32(Imm32(0), output);
-    cmp32Move32(Assembler::Below, index, length, index, output);
-}
-
-void
-MacroAssembler::spectreMaskIndex(Register index, const Address& length, Register output)
-{
-    MOZ_ASSERT(JitOptions.spectreIndexMasking);
-    MOZ_ASSERT(index != length.base);
-    MOZ_ASSERT(length.base != output);
-    MOZ_ASSERT(index != output);
-
-    move32(Imm32(0), output);
-    cmp32Move32(Assembler::Below, index, length, index, output);
-}
-
-void
-MacroAssembler::boundsCheck32PowerOfTwo(Register index, uint32_t length, Label* failure)
-{
-    MOZ_ASSERT(mozilla::IsPowerOfTwo(length));
-    branch32(Assembler::AboveOrEqual, index, Imm32(length), failure);
-
-    // Note: it's fine to clobber the input register, as this is a no-op: it
-    // only affects speculative execution.
-    if (JitOptions.spectreIndexMasking)
-        and32(Imm32(length - 1), index);
 }
 
 template <typename T, size_t N, typename P>

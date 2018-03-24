@@ -159,7 +159,6 @@ enum {
     JS_TELEMETRY_GC_NURSERY_BYTES,
     JS_TELEMETRY_GC_PRETENURE_COUNT,
     JS_TELEMETRY_DEPRECATED_LANGUAGE_EXTENSIONS_IN_CONTENT,
-    JS_TELEMETRY_ADDON_EXCEPTIONS,
     JS_TELEMETRY_PRIVILEGED_PARSER_COMPILE_LAZY_AFTER_MS,
     JS_TELEMETRY_WEB_PARSER_COMPILE_LAZY_AFTER_MS,
     JS_TELEMETRY_END
@@ -443,6 +442,15 @@ ForgetSourceHook(JSContext* cx);
  */
 extern JS_FRIEND_API(bool)
 UseInternalJobQueues(JSContext* cx, bool cooperative = false);
+
+/**
+ * Enqueue |job| on the internal job queue.
+ *
+ * This is useful in tests for creating situations where a call occurs with no
+ * other JavaScript on the stack.
+ */
+extern JS_FRIEND_API(bool)
+EnqueueJob(JSContext* cx, JS::HandleObject job);
 
 /**
  * Instruct the runtime to stop draining the internal job queue.
@@ -3141,6 +3149,28 @@ SetCooperativeYieldCallback(JSContext* cx, YieldCallback callback);
 // are using it now).
 extern JS_FRIEND_API(bool)
 SystemZoneAvailable(JSContext* cx);
+
+typedef void
+(* LogCtorDtor)(void* self, const char* type, uint32_t sz);
+
+/**
+ * Set global function used to monitor a few internal classes to highlight
+ * leaks, and to hint at the origin of the leaks.
+ */
+extern JS_FRIEND_API(void)
+SetLogCtorDtorFunctions(LogCtorDtor ctor, LogCtorDtor dtor);
+
+extern JS_FRIEND_API(void)
+LogCtor(void* self, const char* type, uint32_t sz);
+
+extern JS_FRIEND_API(void)
+LogDtor(void* self, const char* type, uint32_t sz);
+
+#define JS_COUNT_CTOR(Class)                            \
+    LogCtor((void*) this, #Class, sizeof(Class))
+
+#define JS_COUNT_DTOR(Class)                            \
+    LogDtor((void*) this, #Class, sizeof(Class))
 
 } /* namespace js */
 

@@ -62,6 +62,15 @@ class ADBError(Exception):
     pass
 
 
+class ADBProcessError(ADBError):
+    """ADBProcessError is raised when an associated ADBProcess is
+    available and relevant.
+    """
+    def __init__(self, adb_process):
+        ADBError.__init__(self, str(adb_process))
+        self.adb_process = adb_process
+
+
 class ADBListDevicesError(ADBError):
     """ADBListDevicesError is raised when errors are found listing the
     devices, typically not any permissions.
@@ -280,7 +289,7 @@ class ADBCommand(object):
             if adb_process.timedout:
                 raise ADBTimeoutError("%s" % adb_process)
             elif adb_process.exitcode:
-                raise ADBError("%s" % adb_process)
+                raise ADBProcessError(adb_process)
             output = adb_process.stdout_file.read().rstrip()
             if self._verbose:
                 self._logger.debug('command_output: %s, '
@@ -1138,7 +1147,7 @@ class ADBDevice(ADBCommand):
             if adb_process.timedout:
                 raise ADBTimeoutError("%s" % adb_process)
             elif adb_process.exitcode:
-                raise ADBError("%s" % adb_process)
+                raise ADBProcessError(adb_process)
             output = adb_process.stdout_file.read().rstrip()
             if self._verbose:
                 self._logger.debug('shell_output: %s, '
@@ -1808,6 +1817,36 @@ class ADBDevice(ADBCommand):
                 dir_util.copy_tree(local, original_local)
                 shutil.rmtree(temp_parent)
 
+    def get_file(self, remote, offset=None, length=None, timeout=None):
+        """Pull file from device and return the file's content
+
+        :param str remote: The path of the remote file.
+        :param offset: If specified, return only content beyond this offset.
+        :param length: If specified, limit content length accordingly.
+        :param timeout: The maximum time in
+            seconds for any spawned adb process to complete before
+            throwing an ADBTimeoutError.
+            This timeout is per adb call. The total time spent
+            may exceed this value. If it is not specified, the value
+            set in the ADBDevice constructor is used.
+        :type timeout: integer or None
+        :raises: * ADBTimeoutError
+                 * ADBError
+        """
+        with tempfile.NamedTemporaryFile() as tf:
+            self.pull(remote, tf.name, timeout=timeout)
+            with open(tf.name) as tf2:
+                # ADB pull does not support offset and length, but we can
+                # instead read only the requested portion of the local file
+                if offset is not None and length is not None:
+                    tf2.seek(offset)
+                    return tf2.read(length)
+                elif offset is not None:
+                    tf2.seek(offset)
+                    return tf2.read()
+                else:
+                    return tf2.read()
+
     def rm(self, path, recursive=False, force=False, timeout=None, root=False):
         """Delete files or directories on the device.
 
@@ -1886,7 +1925,7 @@ class ADBDevice(ADBCommand):
             if adb_process.timedout:
                 raise ADBTimeoutError("%s" % adb_process)
             elif adb_process.exitcode:
-                raise ADBError("%s" % adb_process)
+                raise ADBProcessError(adb_process)
             # first line is the headers
             header = adb_process.stdout_file.readline()
             pid_i = -1

@@ -203,7 +203,7 @@ public:
    * Returns |this| if it is not chrome-only/native anonymous, otherwise
    * first non chrome-only/native anonymous ancestor.
    */
-  virtual nsIContent* FindFirstNonChromeOnlyAccessContent() const;
+  nsIContent* FindFirstNonChromeOnlyAccessContent() const;
 
   /**
    * Returns true if and only if this node has a parent, but is not in
@@ -264,7 +264,7 @@ public:
   /**
    * Returns true if in a chrome document
    */
-  virtual bool IsInChromeDocument() const;
+  inline bool IsInChromeDocument() const;
 
   /**
    * Get the namespace that this element's tag is defined in
@@ -1008,31 +1008,41 @@ inline nsIContent* nsINode::AsContent()
   return static_cast<nsIContent*>(this);
 }
 
-#define NS_IMPL_FROMCONTENT_HELPER(_class, _check)                             \
-  static _class* FromContent(nsIContent* aContent)                             \
-  {                                                                            \
-    return aContent->_check ? static_cast<_class*>(aContent) : nullptr;        \
-  }                                                                            \
-  static const _class* FromContent(const nsIContent* aContent)                 \
-  {                                                                            \
-    return aContent->_check ? static_cast<const _class*>(aContent) : nullptr;  \
-  }                                                                            \
-  static _class* FromContentOrNull(nsIContent* aContent)                       \
-  {                                                                            \
-    return aContent ? FromContent(aContent) : nullptr;                         \
-  }                                                                            \
-  static const _class* FromContentOrNull(const nsIContent* aContent)           \
-  {                                                                            \
-    return aContent ? FromContent(aContent) : nullptr;                         \
+// Some checks are faster to do on nsIContent or Element than on
+// nsINode, so spit out FromNode versions taking those types too.
+#define NS_IMPL_FROMNODE_HELPER(_class, _check)                         \
+  template<typename ArgType>                                            \
+  static _class* FromNode(ArgType&& aNode)                              \
+  {                                                                     \
+    /* We need the double-cast in case aNode is a smartptr.  Those */   \
+    /* can cast to superclasses of the type they're templated on, */    \
+    /* but not directly to subclasses.  */                              \
+    return aNode->_check ?                                              \
+      static_cast<_class*>(static_cast<nsINode*>(aNode)) : nullptr;     \
+  }                                                                     \
+  template<typename ArgType>                                            \
+  static _class* FromNodeOrNull(ArgType&& aNode)                        \
+  {                                                                     \
+    return aNode ? FromNode(aNode) : nullptr;                           \
+  }                                                                     \
+  template<typename ArgType>                                            \
+  static const _class* FromNode(const ArgType* aNode)                   \
+  {                                                                     \
+    return aNode->_check ? static_cast<const _class*>(aNode) : nullptr; \
+  }                                                                     \
+  template<typename ArgType>                                            \
+  static const _class* FromNodeOrNull(const ArgType* aNode)             \
+  {                                                                     \
+    return aNode ? FromNode(aNode) : nullptr;                           \
   }
 
-#define NS_IMPL_FROMCONTENT(_class, _nsid)                                     \
-  NS_IMPL_FROMCONTENT_HELPER(_class, IsInNamespace(_nsid))
+#define NS_IMPL_FROMNODE(_class, _nsid)                                     \
+  NS_IMPL_FROMNODE_HELPER(_class, IsInNamespace(_nsid))
 
-#define NS_IMPL_FROMCONTENT_WITH_TAG(_class, _nsid, _tag)                      \
-  NS_IMPL_FROMCONTENT_HELPER(_class, NodeInfo()->Equals(nsGkAtoms::_tag, _nsid))
+#define NS_IMPL_FROMNODE_WITH_TAG(_class, _nsid, _tag)                      \
+  NS_IMPL_FROMNODE_HELPER(_class, NodeInfo()->Equals(nsGkAtoms::_tag, _nsid))
 
-#define NS_IMPL_FROMCONTENT_HTML_WITH_TAG(_class, _tag)                        \
-  NS_IMPL_FROMCONTENT_WITH_TAG(_class, kNameSpaceID_XHTML, _tag)
+#define NS_IMPL_FROMNODE_HTML_WITH_TAG(_class, _tag)                        \
+  NS_IMPL_FROMNODE_WITH_TAG(_class, kNameSpaceID_XHTML, _tag)
 
 #endif /* nsIContent_h___ */

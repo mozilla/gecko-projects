@@ -12,6 +12,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/FloatingPoint.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/RangedPtr.h"
 
 #ifdef HAVE_LOCALECONV
@@ -20,26 +21,27 @@
 #include <math.h>
 #include <string.h>
 
-#include "jsstr.h"
 #include "jstypes.h"
 
+#include "builtin/String.h"
 #include "double-conversion/double-conversion.h"
 #include "js/Conversions.h"
 #include "util/DoubleToString.h"
+#include "util/StringBuffer.h"
 #include "vm/GlobalObject.h"
 #include "vm/JSAtom.h"
 #include "vm/JSContext.h"
 #include "vm/JSObject.h"
-#include "vm/StringBuffer.h"
 
 #include "vm/NativeObject-inl.h"
 #include "vm/NumberObject-inl.h"
-#include "vm/String-inl.h"
+#include "vm/StringType-inl.h"
 
 using namespace js;
 
 using mozilla::Abs;
 using mozilla::ArrayLength;
+using mozilla::Maybe;
 using mozilla::MinNumberValue;
 using mozilla::NegativeInfinity;
 using mozilla::PositiveInfinity;
@@ -1303,7 +1305,7 @@ FracNumberToCString(JSContext* cx, ToCStringBuf* cbuf, double d, int base = 10)
          */
         const double_conversion::DoubleToStringConverter& converter
             = double_conversion::DoubleToStringConverter::EcmaScriptConverter();
-        double_conversion::StringBuilder builder(cbuf->sbuf, cbuf->sbufSize);
+        double_conversion::StringBuilder builder(cbuf->sbuf, js::ToCStringBuf::sbufSize);
         converter.ToShortest(d, &builder);
         numStr = builder.Finalize();
     } else {

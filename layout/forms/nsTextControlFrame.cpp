@@ -32,7 +32,6 @@
 #include "nsINode.h"
 #include "nsPIDOMWindow.h" //needed for notify selection changed to update the menus ect.
 
-#include "nsIDOMText.h" //for multiline getselection
 #include "nsFocusManager.h"
 #include "nsPresState.h"
 #include "nsAttrValueInlines.h"
@@ -45,6 +44,7 @@
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/HTMLTextAreaElement.h"
 #include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/dom/Text.h"
 #include "mozilla/MathAlgorithms.h"
 #include "nsFrameSelection.h"
 
@@ -54,9 +54,9 @@ using namespace mozilla;
 using namespace mozilla::dom;
 
 nsIFrame*
-NS_NewTextControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewTextControlFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsTextControlFrame(aContext);
+  return new (aPresShell) nsTextControlFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsTextControlFrame)
@@ -117,8 +117,8 @@ private:
   nsTextControlFrame& mFrame;
 };
 
-nsTextControlFrame::nsTextControlFrame(nsStyleContext* aContext)
-  : nsContainerFrame(aContext, kClassID)
+nsTextControlFrame::nsTextControlFrame(ComputedStyle* aStyle)
+  : nsContainerFrame(aStyle, kClassID)
   , mFirstBaseline(NS_INTRINSIC_WIDTH_UNKNOWN)
   , mEditorHasBeenInitialized(false)
   , mIsProcessing(false)
@@ -176,7 +176,7 @@ nsTextControlFrame::CalcIntrinsicSize(gfxContext* aRenderingContext,
     nsLayoutUtils::GetFontMetricsForFrame(this, aFontSizeInflation);
 
   lineHeight =
-    ReflowInput::CalcLineHeight(GetContent(), StyleContext(),
+    ReflowInput::CalcLineHeight(GetContent(), Style(),
                                       NS_AUTOHEIGHT, aFontSizeInflation);
   charWidth = fontMet->AveCharWidth();
   charMaxAdvance = fontMet->MaxAdvance();
@@ -421,7 +421,7 @@ nsTextControlFrame::ShouldInitializeEagerly() const
   }
 
   // So do input text controls with spellcheck=true
-  if (auto* htmlElement = nsGenericHTMLElement::FromContent(mContent)) {
+  if (auto* htmlElement = nsGenericHTMLElement::FromNode(mContent)) {
     if (htmlElement->Spellcheck()) {
       return true;
     }
@@ -634,7 +634,7 @@ nsTextControlFrame::Reflow(nsPresContext*   aPresContext,
   nscoord lineHeight = aReflowInput.ComputedBSize();
   float inflation = nsLayoutUtils::FontSizeInflationFor(this);
   if (!IsSingleLineTextControl()) {
-    lineHeight = ReflowInput::CalcLineHeight(GetContent(), StyleContext(),
+    lineHeight = ReflowInput::CalcLineHeight(GetContent(), Style(),
                                              NS_AUTOHEIGHT, inflation);
   }
   RefPtr<nsFontMetrics> fontMet =
@@ -1049,26 +1049,25 @@ nsTextControlFrame::OffsetToDOMPoint(uint32_t aOffset,
   NS_ASSERTION(length <= 2, "We should have one text node and one mozBR at most");
 
   nsCOMPtr<nsINode> firstNode = nodeList->Item(0);
-  nsCOMPtr<nsIDOMText> textNode = do_QueryInterface(firstNode);
+  Text* textNode = firstNode ? firstNode->GetAsText() : nullptr;
 
   if (length == 0) {
     NS_IF_ADDREF(*aResult = rootNode);
     *aPosition = 0;
   } else if (textNode) {
-    uint32_t textLength = 0;
-    textNode->GetLength(&textLength);
+    uint32_t textLength = textNode->Length();
     if (length == 2 && aOffset == textLength) {
       // If we're at the end of the text node and we have a trailing BR node,
       // set the selection on the BR node.
-      NS_IF_ADDREF(*aResult = rootNode);
+      rootNode.forget(aResult);
       *aPosition = 1;
     } else {
       // Otherwise, set the selection on the textnode itself.
-      NS_IF_ADDREF(*aResult = firstNode);
+      firstNode.forget(aResult);
       *aPosition = std::min(aOffset, textLength);
     }
   } else {
-    NS_IF_ADDREF(*aResult = rootNode);
+    rootNode.forget(aResult);
     *aPosition = 0;
   }
 
@@ -1169,7 +1168,7 @@ nsTextControlFrame::GetText(nsString& aText)
     // There will be no line breaks so we can ignore the wrap property.
     txtCtrl->GetTextEditorValue(aText, true);
   } else {
-    HTMLTextAreaElement* textArea = HTMLTextAreaElement::FromContent(mContent);
+    HTMLTextAreaElement* textArea = HTMLTextAreaElement::FromNode(mContent);
     if (textArea) {
       textArea->GetValue(aText);
     }
@@ -1185,7 +1184,7 @@ nsTextControlFrame::GetMaxLength(int32_t* aSize)
 {
   *aSize = -1;
 
-  nsGenericHTMLElement *content = nsGenericHTMLElement::FromContent(mContent);
+  nsGenericHTMLElement *content = nsGenericHTMLElement::FromNode(mContent);
   if (content) {
     const nsAttrValue* attr = content->GetParsedAttr(nsGkAtoms::maxlength);
     if (attr && attr->Type() == nsAttrValue::eInteger) {

@@ -107,6 +107,7 @@
 #include "nsIFrame.h"
 #include "nsDisplayList.h"
 #include "SVGObserverUtils.h"
+#include "nsMimeTypes.h"
 
 #ifdef MOZ_ANDROID_HLS_SUPPORT
 #include "HLSDecoder.h"
@@ -2403,7 +2404,7 @@ void HTMLMediaElement::LoadFromSourceChildren()
         return;
       }
     }
-    HTMLSourceElement *childSrc = HTMLSourceElement::FromContent(child);
+    HTMLSourceElement *childSrc = HTMLSourceElement::FromNode(child);
     LOG(LogLevel::Debug, ("%p Trying load from <source>=%s type=%s", this,
       NS_ConvertUTF16toUTF8(src).get(), NS_ConvertUTF16toUTF8(type).get()));
 
@@ -2977,6 +2978,10 @@ HTMLMediaElement::SetVolume(double aVolume, ErrorResult& aRv)
   SetVolumeInternal();
 
   DispatchAsyncEvent(NS_LITERAL_STRING("volumechange"));
+
+  // We allow inaudible autoplay. But changing our volume may make this
+  // media audible. So pause if we are no longer supposed to be autoplaying.
+  PauseIfShouldNotBePlaying();
 }
 
 void
@@ -3026,6 +3031,18 @@ HTMLMediaElement::SetMutedInternal(uint32_t aMuted)
 }
 
 void
+HTMLMediaElement::PauseIfShouldNotBePlaying()
+{
+  if (GetPaused()) {
+    return;
+  }
+  if (!AutoplayPolicy::IsMediaElementAllowedToPlay(WrapNotNull(this))) {
+    ErrorResult rv;
+    Pause(rv);
+  }
+}
+
+void
 HTMLMediaElement::SetVolumeInternal()
 {
   float effectiveVolume = ComputedVolume();
@@ -3057,6 +3074,10 @@ HTMLMediaElement::SetMuted(bool aMuted)
   }
 
   DispatchAsyncEvent(NS_LITERAL_STRING("volumechange"));
+
+  // We allow inaudible autoplay. But changing our mute status may make this
+  // media audible. So pause if we are no longer supposed to be autoplaying.
+  PauseIfShouldNotBePlaying();
 }
 
 class HTMLMediaElement::StreamCaptureTrackSource :
@@ -3829,66 +3850,14 @@ private:
 NS_IMPL_ISUPPORTS(HTMLMediaElement::ShutdownObserver, nsIObserver)
 
 HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
-  : nsGenericHTMLElement(aNodeInfo),
-    mMainThreadEventTarget(OwnerDoc()->EventTargetFor(TaskCategory::Other)),
-    mAbstractMainThread(OwnerDoc()->AbstractMainThreadFor(TaskCategory::Other)),
-    mSrcStreamTracksAvailable(false),
-    mSrcStreamPausedCurrentTime(-1),
-    mShutdownObserver(new ShutdownObserver),
-    mSourcePointer(nullptr),
-    mNetworkState(NETWORK_EMPTY),
-    mReadyState(HAVE_NOTHING),
-    mCurrentLoadID(0),
-    mLoadWaitStatus(NOT_WAITING),
-    mVolume(1.0),
-    mIsAudioTrackAudible(false),
-    mMuted(0),
-    mPreloadAction(PRELOAD_UNDEFINED),
-    mLastCurrentTime(0.0),
-    mFragmentStart(-1.0),
-    mFragmentEnd(-1.0),
-    mDefaultPlaybackRate(1.0),
-    mPlaybackRate(1.0),
-    mPreservesPitch(true),
-    mPlayed(new TimeRanges(ToSupports(OwnerDoc()))),
-    mAttachingMediaKey(false),
-    mCurrentPlayRangeStart(-1.0),
-    mLoadedDataFired(false),
-    mAutoplaying(true),
-    mPaused(true, *this),
-    mStatsShowing(false),
-    mAllowCasting(false),
-    mIsCasting(false),
-    mAudioCaptured(false),
-    mPlayingBeforeSeek(false),
-    mPausedForInactiveDocumentOrChannel(false),
-    mEventDeliveryPaused(false),
-    mIsRunningLoadMethod(false),
-    mIsDoingExplicitLoad(false),
-    mIsLoadingFromSourceChildren(false),
-    mDelayingLoadEvent(false),
-    mIsRunningSelectResource(false),
-    mHaveQueuedSelectResource(false),
-    mSuspendedAfterFirstFrame(false),
-    mAllowSuspendAfterFirstFrame(true),
-    mHasPlayedOrSeeked(false),
-    mHasSelfReference(false),
-    mShuttingDown(false),
-    mSuspendedForPreloadNone(false),
-    mSrcStreamIsPlaying(false),
-    mMediaSecurityVerified(false),
-    mCORSMode(CORS_NONE),
-    mIsEncrypted(false),
-    mWaitingForKey(NOT_WAITING_FOR_KEY),
-    mDisableVideo(false),
-    mFirstFrameLoaded(false),
-    mDefaultPlaybackStartPosition(0.0),
-    mHasSuspendTaint(false),
-    mForcedHidden(false),
-    mMediaTracksConstructed(false),
-    mVisibilityState(Visibility::UNTRACKED),
-    mErrorSink(new ErrorSink(this)),
-    mAudioChannelWrapper(new AudioChannelAgentCallback(this))
+  : nsGenericHTMLElement(aNodeInfo)
+  , mMainThreadEventTarget(OwnerDoc()->EventTargetFor(TaskCategory::Other))
+  , mAbstractMainThread(OwnerDoc()->AbstractMainThreadFor(TaskCategory::Other))
+  , mShutdownObserver(new ShutdownObserver)
+  , mPlayed(new TimeRanges(ToSupports(OwnerDoc())))
+  , mPaused(true, *this)
+  , mErrorSink(new ErrorSink(this))
+  , mAudioChannelWrapper(new AudioChannelAgentCallback(this))
 {
   MOZ_ASSERT(mMainThreadEventTarget);
   MOZ_ASSERT(mAbstractMainThread);
@@ -4549,7 +4518,7 @@ HTMLMediaElement::ReportTelemetry()
 
   FrameStatisticsData data;
 
-  if (HTMLVideoElement* vid = HTMLVideoElement::FromContentOrNull(this)) {
+  if (HTMLVideoElement* vid = HTMLVideoElement::FromNodeOrNull(this)) {
     FrameStatistics* stats = vid->GetFrameStatistics();
     if (stats) {
       data = stats->GetFrameStatisticsData();
@@ -4912,9 +4881,6 @@ nsresult
 HTMLMediaElement::FinishDecoderSetup(MediaDecoder* aDecoder)
 {
   ChangeNetworkState(NETWORK_LOADING);
-
-  // Force a same-origin check before allowing events for this media resource.
-  mMediaSecurityVerified = false;
 
   // Set mDecoder now so if methods like GetCurrentSrc get called between
   // here and Load(), they work.
@@ -7824,9 +7790,9 @@ HTMLMediaElement::ReportCanPlayTelemetry()
         MOZ_ASSERT(hr == S_OK);
 #endif
         bool aac = MP4Decoder::IsSupportedType(
-          MediaContainerType(MEDIAMIMETYPE("audio/mp4")), nullptr);
+          MediaContainerType(MEDIAMIMETYPE(AUDIO_MP4)), nullptr);
         bool h264 = MP4Decoder::IsSupportedType(
-          MediaContainerType(MEDIAMIMETYPE("video/mp4")), nullptr);
+          MediaContainerType(MEDIAMIMETYPE(VIDEO_MP4)), nullptr);
 #if XP_WIN
         CoUninitialize();
 #endif

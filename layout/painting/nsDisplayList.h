@@ -50,6 +50,7 @@
 
 #include <stdlib.h>
 #include <algorithm>
+#include <unordered_set>
 
 class gfxContext;
 class nsIContent;
@@ -2104,7 +2105,6 @@ public:
     , mForceNotVisible(false)
     , mDisableSubpixelAA(false)
     , mReusedItem(false)
-    , mMergedItem(false)
     , mBackfaceHidden(mFrame->In3DContextAndBackfaceIsHidden())
 #ifdef MOZ_DUMP_PAINTING
     , mPainted(false)
@@ -2178,7 +2178,6 @@ public:
     , mForceNotVisible(aOther.mForceNotVisible)
     , mDisableSubpixelAA(aOther.mDisableSubpixelAA)
     , mReusedItem(false)
-    , mMergedItem(false)
     , mBackfaceHidden(mFrame->In3DContextAndBackfaceIsHidden())
 #ifdef MOZ_DUMP_PAINTING
     , mPainted(false)
@@ -2551,14 +2550,6 @@ public:
   { return false; }
 
   /**
-   * Builds a DisplayItemLayer and sets the display item to this.
-   */
-  already_AddRefed<Layer>
-  BuildDisplayItemLayer(nsDisplayListBuilder* aBuilder,
-                        LayerManager* aManager,
-                        const ContainerLayerParameters& aContainerParameters);
-
-  /**
    * On entry, aVisibleRegion contains the region (relative to ReferenceFrame())
    * which may be visible. If the display item opaquely covers an area, it
    * can remove that area from aVisibleRegion before returning.
@@ -2826,16 +2817,6 @@ public:
     mReusedItem = aReused;
   }
 
-  bool IsMerged() const
-  {
-    return mMergedItem;
-  }
-
-  void SetMerged()
-  {
-    mMergedItem = true;
-  }
-
   virtual bool CanBeReused() const { return true; }
 
   virtual nsIFrame* GetDependentFrame()
@@ -2880,7 +2861,6 @@ protected:
   bool      mForceNotVisible;
   bool      mDisableSubpixelAA;
   bool      mReusedItem;
-  bool      mMergedItem;
   bool      mBackfaceHidden;
 #ifdef MOZ_DUMP_PAINTING
   // True if this frame has been painted.
@@ -3548,12 +3528,6 @@ public:
   virtual void Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) override;
   NS_DISPLAY_DECL_NAME("Caret", TYPE_CARET)
 
-  virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
-                                   LayerManager* aManager,
-                                   const ContainerLayerParameters& aParameters) override;
-  virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
-                                             LayerManager* aManager,
-                                             const ContainerLayerParameters& aContainerParameters) override;
   virtual bool CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
                                        mozilla::wr::IpcResourceUpdateQueue& aResources,
                                        const StackingContextHelper& aSc,
@@ -3900,7 +3874,7 @@ public:
                                          const nsRect& aBackgroundRect,
                                          nsDisplayList* aList,
                                          bool aAllowWillPaintBorderOptimization = true,
-                                         nsStyleContext* aStyleContext = nullptr,
+                                         mozilla::ComputedStyle* aComputedStyle = nullptr,
                                          const nsRect& aBackgroundOriginRect = nsRect(),
                                          nsIFrame* aSecondaryReferenceFrame = nullptr);
 
@@ -4010,8 +3984,7 @@ protected:
   typedef class mozilla::layers::ImageContainer ImageContainer;
   typedef class mozilla::layers::ImageLayer ImageLayer;
 
-  bool CanBuildWebRenderDisplayItems(LayerManager* aManager);
-  bool TryOptimizeToImageLayer(LayerManager* aManager, nsDisplayListBuilder* aBuilder);
+  bool CanBuildWebRenderDisplayItems(LayerManager* aManager, nsDisplayListBuilder* aBuilder);
   nsRect GetBoundsInternal(nsDisplayListBuilder* aBuilder,
                            nsIFrame* aFrameForBounds = nullptr);
 
@@ -4442,10 +4415,6 @@ public:
     return new nsDisplayBoxShadowOuterGeometry(this, aBuilder, mOpacity);
   }
 
-  virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
-                                             LayerManager* aManager,
-                                             const ContainerLayerParameters& aContainerParameters) override;
-
   bool CanBuildWebRenderDisplayItems();
   virtual bool CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
                                        mozilla::wr::IpcResourceUpdateQueue& aResources,
@@ -4512,9 +4481,6 @@ public:
                                                     nsRegion& aVisibleRegion,
                                                     nsIFrame* aFrame,
                                                     const nsRect aBorderRect);
-  virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
-                                             LayerManager* aManager,
-                                             const ContainerLayerParameters& aContainerParameters) override;
   virtual bool CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
                                        mozilla::wr::IpcResourceUpdateQueue& aResources,
                                        const StackingContextHelper& aSc,
@@ -4540,12 +4506,6 @@ public:
   }
 #endif
 
-  virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
-                                   LayerManager* aManager,
-                                   const ContainerLayerParameters& aParameters) override;
-  virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
-                                             LayerManager* aManager,
-                                             const ContainerLayerParameters& aContainerParameters) override;
   virtual bool CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
                                        mozilla::wr::IpcResourceUpdateQueue& aResources,
                                        const StackingContextHelper& aSc,
@@ -4555,8 +4515,6 @@ public:
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) const override;
   virtual void Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) override;
   NS_DISPLAY_DECL_NAME("Outline", TYPE_OUTLINE)
-
-  mozilla::Maybe<nsCSSBorderRenderer> mBorderRenderer;
 };
 
 /**
@@ -6797,8 +6755,7 @@ private:
     while (AtEndOfNestedList() || ShouldFlattenNextItem()) {
       if (AtEndOfNestedList()) {
         // Pop the last item off the stack.
-        mNext = mStack.LastElement();
-        mStack.RemoveElementAt(mStack.Length() - 1);
+        mNext = mStack.PopLastElement();
         // We stored the item that was flattened, so advance to the next.
         mNext = mNext->GetAbove();
       } else {

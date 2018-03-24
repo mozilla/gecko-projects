@@ -4,7 +4,8 @@
 "use strict";
 
 const TEST_FILE = "test-network-request.html";
-const TEST_PATH = "http://example.com/browser/devtools/client/webconsole/new-console-output/test/mochitest/";
+const TEST_PATH = "http://example.com/browser/devtools/client/webconsole/" +
+                  "new-console-output/test/mochitest/";
 const TEST_URI = TEST_PATH + TEST_FILE;
 
 add_task(async function task() {
@@ -20,7 +21,7 @@ add_task(async function task() {
   let netReady = monitor.panelWin.once("NetMonitor:PayloadReady");
 
   // Fire an XHR POST request.
-  await ContentTask.spawn(gBrowser.selectedBrowser, null, function () {
+  await ContentTask.spawn(gBrowser.selectedBrowser, null, function() {
     content.wrappedJSObject.testXhrGet();
   });
 

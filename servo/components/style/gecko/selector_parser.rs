@@ -66,7 +66,7 @@ apply_non_ts_list!(pseudo_class_name);
 impl ToCss for NonTSPseudoClass {
     fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
         use cssparser::CssStringWriter;
-        use fmt::Write;
+        use std::fmt::Write;
         macro_rules! pseudo_class_serialize {
             (bare: [$(($css:expr, $name:ident, $gecko_type:tt, $state:tt, $flags:tt),)*],
              string: [$(($s_css:expr, $s_name:ident, $s_gecko_type:tt, $s_state:tt, $s_flags:tt),)*]) => {
@@ -274,6 +274,20 @@ impl NonTSPseudoClass {
     }
 }
 
+impl ::selectors::parser::NonTSPseudoClass for NonTSPseudoClass {
+    type Impl = SelectorImpl;
+
+    #[inline]
+    fn is_active_or_hover(&self) -> bool {
+        matches!(*self, NonTSPseudoClass::Active | NonTSPseudoClass::Hover)
+    }
+
+    #[inline]
+    fn is_host(&self) -> bool {
+        false // TODO(emilio)
+    }
+}
+
 /// The dummy struct we use to implement our selector parsing.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SelectorImpl;
@@ -291,12 +305,6 @@ impl ::selectors::SelectorImpl for SelectorImpl {
 
     type PseudoElement = PseudoElement;
     type NonTSPseudoClass = NonTSPseudoClass;
-
-    #[inline]
-    fn is_active_or_hover(pseudo_class: &Self::NonTSPseudoClass) -> bool {
-        matches!(*pseudo_class, NonTSPseudoClass::Active |
-                                NonTSPseudoClass::Hover)
-    }
 }
 
 impl<'a> SelectorParser<'a> {

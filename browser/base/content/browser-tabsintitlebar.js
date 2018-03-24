@@ -8,9 +8,6 @@
 
 var TabsInTitlebar = {
   init() {
-    if (this._initialized) {
-      return;
-    }
     this._readPref();
     Services.prefs.addObserver(this._prefName, this);
 
@@ -45,13 +42,9 @@ var TabsInTitlebar = {
 
     addEventListener("resolutionchange", this, false);
 
-    this._initialized = true;
-    if (this._updateOnInit) {
-      // We don't need to call this with 'true', even if original calls
-      // (before init()) did, because this will be the first call and so
-      // we will update anyway.
-      this._update();
-    }
+    gDragSpaceObserver.init();
+
+    this._update(true, true);
   },
 
   allowedBy(condition, allow) {
@@ -85,6 +78,11 @@ var TabsInTitlebar = {
     }
   },
 
+  onDOMContentLoaded() {
+    this._domLoaded = true;
+    this._update(true);
+  },
+
   _onMenuMutate(aMutations) {
     for (let mutation of aMutations) {
       if (mutation.attributeName == "inactive" ||
@@ -95,18 +93,17 @@ var TabsInTitlebar = {
     }
   },
 
-  _initialized: false,
-  _updateOnInit: false,
   _disallowed: {},
   _prefName: "browser.tabs.drawInTitlebar",
   _lastSizeMode: null,
+  _domLoaded: false,
 
   _readPref() {
     this.allowedBy("pref",
                    Services.prefs.getBoolPref(this._prefName));
   },
 
-  _update(aForce = false) {
+  _update(aForce = false, aFromInit = false) {
     let $ = id => document.getElementById(id);
     let rect = ele => ele.getBoundingClientRect();
     let verticalMargins = cstyle => parseFloat(cstyle.marginBottom) + parseFloat(cstyle.marginTop);
@@ -114,10 +111,11 @@ var TabsInTitlebar = {
     if (window.fullScreen)
       return;
 
-    // In some edgecases it is possible for this to fire before we've initialized.
-    // Don't run now, but don't forget to run it when we do initialize.
-    if (!this._initialized) {
-      this._updateOnInit = true;
+    // We want to do this from initialization anyway, so that the
+    // "chromemargin" attributes are all correctly setup, but we don't want to
+    // do this before the DOM loads again, to prevent spurious reflows that
+    // will be superseded by the one on onDOMContentLoaded.
+    if (!this._domLoaded && !aFromInit) {
       return;
     }
 
@@ -277,11 +275,11 @@ var TabsInTitlebar = {
   },
 
   uninit() {
-    this._initialized = false;
     removeEventListener("resolutionchange", this);
     Services.prefs.removeObserver(this._prefName, this);
     this._menuObserver.disconnect();
     CustomizableUI.removeListener(this);
+    gDragSpaceObserver.uninit();
   }
 };
 
@@ -308,3 +306,35 @@ function onTitlebarMaxClick() {
   else
     window.maximize();
 }
+
+// Adds additional drag space to the window by listening to
+// the corresponding preference.
+var gDragSpaceObserver = {
+  pref: "browser.tabs.extraDragSpace",
+
+  init() {
+    this.update();
+    Services.prefs.addObserver(this.pref, this);
+  },
+
+  uninit() {
+    Services.prefs.removeObserver(this.pref, this);
+  },
+
+  observe(aSubject, aTopic, aPrefName) {
+    if (aTopic != "nsPref:changed" || aPrefName != this.pref) {
+      return;
+    }
+
+    this.update();
+  },
+
+  update() {
+    if (Services.prefs.getBoolPref(this.pref)) {
+      document.documentElement.setAttribute("extradragspace", "true");
+    } else {
+      document.documentElement.removeAttribute("extradragspace");
+    }
+    TabsInTitlebar.updateAppearance(true);
+  },
+};

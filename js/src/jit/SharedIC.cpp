@@ -25,6 +25,7 @@
 #endif
 #include "jit/VMFunctions.h"
 #include "vm/Interpreter.h"
+#include "vm/StringType.h"
 
 #include "jit/MacroAssembler-inl.h"
 #include "jit/SharedICHelpers-inl.h"
@@ -503,7 +504,7 @@ ICStubCompiler::getStubCode()
 
     // Compile new stubcode.
     JitContext jctx(cx, nullptr);
-    MacroAssembler masm;
+    StackMacroAssembler masm;
 #ifndef JS_USE_LINK_REGISTER
     // The first value contains the return addres,
     // which we pull into ICTailCallReg for tail calls.
@@ -2412,24 +2413,18 @@ DoTypeMonitorFallback(JSContext* cx, BaselineFrame* frame, ICTypeMonitor_Fallbac
         return true;
     }
 
-    // Note: ideally we would merge this if-else statement with the one below,
-    // but that triggers an MSVC 2015 compiler bug. See bug 1363054.
     StackTypeSet* types;
     uint32_t argument;
-    if (stub->monitorsArgument(&argument))
-        types = TypeScript::ArgTypes(script, argument);
-    else if (stub->monitorsThis())
-        types = TypeScript::ThisTypes(script);
-    else
-        types = TypeScript::BytecodeTypes(script, pc);
-
     if (stub->monitorsArgument(&argument)) {
         MOZ_ASSERT(pc == script->code());
+        types = TypeScript::ArgTypes(script, argument);
         TypeScript::SetArgument(cx, script, argument, value);
     } else if (stub->monitorsThis()) {
         MOZ_ASSERT(pc == script->code());
+        types = TypeScript::ThisTypes(script);
         TypeScript::SetThis(cx, script, value);
     } else {
+        types = TypeScript::BytecodeTypes(script, pc);
         TypeScript::Monitor(cx, script, pc, types, value);
     }
 
@@ -2538,11 +2533,13 @@ ICTypeMonitor_ObjectGroup::Compiler::generateStubCode(MacroAssembler& masm)
     masm.branchTestObject(Assembler::NotEqual, R0, &failure);
     MaybeWorkAroundAmdBug(masm);
 
-    // Guard on the object's ObjectGroup.
+    // Guard on the object's ObjectGroup. No Spectre mitigations are needed
+    // here: we're just recording type information for Ion compilation and
+    // it's safe to speculatively return.
     Register obj = masm.extractObject(R0, ExtractTemp0);
     Address expectedGroup(ICStubReg, ICTypeMonitor_ObjectGroup::offsetOfGroup());
-    masm.branchTestObjGroup(Assembler::NotEqual, obj, expectedGroup, R1.scratchReg(),
-                            &failure);
+    masm.branchTestObjGroupNoSpectreMitigations(Assembler::NotEqual, obj, expectedGroup,
+                                                R1.scratchReg(), &failure);
     MaybeWorkAroundAmdBug(masm);
 
     EmitReturnFromIC(masm);
@@ -2756,7 +2753,7 @@ static JitCode*
 GenerateNewObjectWithTemplateCode(JSContext* cx, JSObject* templateObject)
 {
     JitContext jctx(cx, nullptr);
-    MacroAssembler masm;
+    StackMacroAssembler masm;
 #ifdef JS_CODEGEN_ARM
     masm.setSecondScratchReg(BaselineSecondScratchReg);
 #endif

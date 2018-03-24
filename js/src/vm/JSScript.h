@@ -598,7 +598,7 @@ class ScriptSource
 
     // XDR handling
     template <XDRMode mode>
-    MOZ_MUST_USE bool performXDR(XDRState<mode>* xdr);
+    MOZ_MUST_USE XDRResult performXDR(XDRState<mode>* xdr);
 
     MOZ_MUST_USE bool setFilename(JSContext* cx, const char* filename);
     const char* introducerFilename() const {
@@ -766,12 +766,12 @@ enum class FunctionAsyncKind : bool { SyncFunction, AsyncFunction };
  * CallNewScriptHook.
  */
 template<XDRMode mode>
-bool
+XDRResult
 XDRScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScriptSource sourceObject,
           HandleFunction fun, MutableHandleScript scriptp);
 
 template<XDRMode mode>
-bool
+XDRResult
 XDRLazyScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScriptSource sourceObject,
               HandleFunction fun, MutableHandle<LazyScript*> lazy);
 
@@ -779,7 +779,7 @@ XDRLazyScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScriptSourc
  * Code any constant value.
  */
 template<XDRMode mode>
-bool
+XDRResult
 XDRScriptConst(XDRState<mode>* xdr, MutableHandleValue vp);
 
 /*
@@ -892,7 +892,7 @@ class JSScript : public js::gc::TenuredCell
 {
     template <js::XDRMode mode>
     friend
-    bool
+    js::XDRResult
     js::XDRScript(js::XDRState<mode>* xdr, js::HandleScope enclosingScope,
                   js::HandleScriptSource sourceObject, js::HandleFunction fun,
                   js::MutableHandleScript scriptp);

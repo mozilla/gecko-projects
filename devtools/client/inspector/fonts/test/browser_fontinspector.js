@@ -10,52 +10,39 @@ const FONTS = [{
   name: "Ostrich Sans Medium",
   remote: true,
   url: URL_ROOT + "ostrich-regular.ttf",
-  format: "truetype",
   cssName: "bar"
 }, {
   name: "Ostrich Sans Black",
   remote: true,
   url: URL_ROOT + "ostrich-black.ttf",
-  format: "",
   cssName: "bar"
 }, {
   name: "Ostrich Sans Black",
   remote: true,
   url: URL_ROOT + "ostrich-black.ttf",
-  format: "",
   cssName: "bar"
 }, {
   name: "Ostrich Sans Medium",
   remote: true,
   url: URL_ROOT + "ostrich-regular.ttf",
-  format: "",
   cssName: "barnormal"
 }];
 
-add_task(function* () {
-  let { inspector, view } = yield openFontInspectorForURL(TEST_URI);
+add_task(async function() {
+  let { inspector, view } = await openFontInspectorForURL(TEST_URI);
   ok(!!view, "Font inspector document is alive.");
 
   let viewDoc = view.document;
 
-  yield testBodyFonts(inspector, viewDoc);
-  yield testDivFonts(inspector, viewDoc);
+  await testBodyFonts(inspector, viewDoc);
+  await testDivFonts(inspector, viewDoc);
 });
 
 function isRemote(fontLi) {
-  return fontLi.querySelectorAll(".font-format-url a").length === 1;
+  return fontLi.querySelector(".font-origin").classList.contains("remote");
 }
 
-function getFormat(fontLi) {
-  let link = fontLi.querySelector(".font-format-url a");
-  if (!link) {
-    return null;
-  }
-
-  return link.textContent;
-}
-
-function* testBodyFonts(inspector, viewDoc) {
+function testBodyFonts(inspector, viewDoc) {
   let lis = getUsedFontsEls(viewDoc);
   is(lis.length, 5, "Found 5 fonts");
 
@@ -63,10 +50,9 @@ function* testBodyFonts(inspector, viewDoc) {
     let li = lis[i];
     let font = FONTS[i];
 
-    is(getName(li), font.name, "font " + i + " right font name");
-    is(isRemote(li), font.remote, "font " + i + " remote value correct");
-    is(li.querySelector(".font-url").href, font.url, "font " + i + " url correct");
-    is(getFormat(li), font.format, "font " + i + " format correct");
+    is(getName(li), font.name, `font ${i} right font name`);
+    is(isRemote(li), font.remote, `font ${i} remote value correct`);
+    is(li.querySelector(".font-origin").textContent, font.url, `font ${i} url correct`);
   }
 
   // test that the bold and regular fonts have different previews
@@ -84,10 +70,10 @@ function* testBodyFonts(inspector, viewDoc) {
   ok(!isRemote(lis[4]), "local font is local");
 }
 
-function* testDivFonts(inspector, viewDoc) {
+async function testDivFonts(inspector, viewDoc) {
   let updated = inspector.once("fontinspector-updated");
-  yield selectNode("div", inspector);
-  yield updated;
+  await selectNode("div", inspector);
+  await updated;
 
   let lis = getUsedFontsEls(viewDoc);
   is(lis.length, 1, "Found 1 font on DIV");

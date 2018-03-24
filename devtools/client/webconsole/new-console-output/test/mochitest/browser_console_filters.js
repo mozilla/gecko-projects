@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Check that the Browser Console does not use the same filter prefs as the Web
 // Console.
 
@@ -12,7 +10,7 @@
 
 const TEST_URI = "data:text/html;charset=utf8,<p>browser console filters";
 
-add_task(async function () {
+add_task(async function() {
   let hud = await openNewTabAndConsole(TEST_URI);
   ok(hud, "web console opened");
 

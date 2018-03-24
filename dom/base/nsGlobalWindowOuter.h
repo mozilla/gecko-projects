@@ -37,11 +37,11 @@
 #include "mozilla/FlushType.h"
 #include "prclist.h"
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/ChromeMessageBroadcaster.h"
 #include "mozilla/dom/StorageEvent.h"
 #include "mozilla/dom/StorageEventBinding.h"
 #include "mozilla/dom/UnionTypes.h"
 #include "mozilla/ErrorResult.h"
-#include "nsFrameMessageManager.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/GuardObjects.h"
 #include "mozilla/LinkedList.h"
@@ -161,17 +161,18 @@ extern const js::Class OuterWindowProxyClass;
 // inner windows belonging to the same outer window, but that's an unimportant
 // side effect of inheriting PRCList).
 
-class nsGlobalWindowOuter : public mozilla::dom::EventTarget,
-                            public nsPIDOMWindowOuter,
-                            private nsIDOMWindow,
-                            // NOTE: This interface is private, as it's only
-                            // implemented on chrome windows.
-                            private nsIDOMChromeWindow,
-                            public nsIScriptGlobalObject,
-                            public nsIScriptObjectPrincipal,
-                            public nsSupportsWeakReference,
-                            public nsIInterfaceRequestor,
-                            public PRCListStr
+class nsGlobalWindowOuter final
+  : public mozilla::dom::EventTarget
+  , public nsPIDOMWindowOuter
+  , private nsIDOMWindow
+    // NOTE: This interface is private, as it's only
+    // implemented on chrome windows.
+  , private nsIDOMChromeWindow
+  , public nsIScriptGlobalObject
+  , public nsIScriptObjectPrincipal
+  , public nsSupportsWeakReference
+  , public nsIInterfaceRequestor
+  , public PRCListStr
 {
 public:
   typedef nsDataHashtable<nsUint64HashKey, nsGlobalWindowOuter*> OuterWindowByIdTable;

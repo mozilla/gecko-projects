@@ -19,6 +19,7 @@
 #include "nsPlaceholderFrame.h"
 #include "nsStyleChangeList.h"
 #include "nsStyleUtil.h"
+#include "nsTransitionManager.h"
 #include "StickyScrollContainer.h"
 #include "mozilla/EffectSet.h"
 #include "mozilla/IntegerRange.h"
@@ -624,154 +625,6 @@ static bool gInApplyRenderingChangeToTree = false;
 #endif
 
 #ifdef DEBUG
-#ifdef MOZ_OLD_STYLE
-static void
-DumpContext(nsIFrame* aFrame, nsStyleContext* aContext)
-{
-  if (aFrame) {
-    fputs("frame: ", stdout);
-    nsAutoString name;
-    aFrame->GetFrameName(name);
-    fputs(NS_LossyConvertUTF16toASCII(name).get(), stdout);
-    fprintf(stdout, " (%p)", static_cast<void*>(aFrame));
-  }
-  if (aContext) {
-    fprintf(stdout, " style: %p ", static_cast<void*>(aContext));
-
-    nsAtom* pseudoTag = aContext->GetPseudo();
-    if (pseudoTag) {
-      nsAutoString buffer;
-      pseudoTag->ToString(buffer);
-      fputs(NS_LossyConvertUTF16toASCII(buffer).get(), stdout);
-      fputs(" ", stdout);
-    }
-    fputs("{}\n", stdout);
-  }
-}
-
-static void
-VerifySameTree(GeckoStyleContext* aContext1, GeckoStyleContext* aContext2)
-{
-  GeckoStyleContext* top1 = aContext1;
-  GeckoStyleContext* top2 = aContext2;
-  GeckoStyleContext* parent;
-  for (;;) {
-    parent = top1->GetParent();
-    if (!parent)
-      break;
-    top1 = parent;
-  }
-  for (;;) {
-    parent = top2->GetParent();
-    if (!parent)
-      break;
-    top2 = parent;
-  }
-  NS_ASSERTION(top1 == top2,
-               "Style contexts are not in the same style context tree");
-}
-
-static void
-VerifyContextParent(nsIFrame* aFrame, GeckoStyleContext* aContext,
-                    GeckoStyleContext* aParentContext)
-{
-  // get the contexts not provided
-  if (!aContext) {
-    aContext = aFrame->StyleContext()->AsGecko();
-  }
-
-  if (!aParentContext) {
-    nsIFrame* providerFrame;
-    nsStyleContext* parent = aFrame->GetParentStyleContext(&providerFrame);
-    aParentContext = parent ? parent->AsGecko() : nullptr;
-    // aParentContext could still be null
-  }
-
-  NS_ASSERTION(aContext, "Failure to get required contexts");
-  GeckoStyleContext* actualParentContext = aContext->GetParent();
-
-  if (aParentContext) {
-    if (aParentContext != actualParentContext) {
-      DumpContext(aFrame, aContext);
-      if (aContext == aParentContext) {
-        NS_ERROR("Using parent's style context");
-      } else {
-        NS_ERROR("Wrong parent style context");
-        fputs("Wrong parent style context: ", stdout);
-        DumpContext(nullptr, actualParentContext);
-        fputs("should be using: ", stdout);
-        DumpContext(nullptr, aParentContext);
-        VerifySameTree(actualParentContext, aParentContext);
-        fputs("\n", stdout);
-      }
-    }
-
-  } else {
-    if (actualParentContext) {
-      NS_ERROR("Have parent context and shouldn't");
-      DumpContext(aFrame, aContext);
-      fputs("Has parent context: ", stdout);
-      DumpContext(nullptr, actualParentContext);
-      fputs("Should be null\n\n", stdout);
-    }
-  }
-
-  GeckoStyleContext* childStyleIfVisited = aContext->GetStyleIfVisited();
-  // Either childStyleIfVisited has aContext->GetParent()->GetStyleIfVisited()
-  // as the parent or it has a different rulenode from aContext _and_ has
-  // aContext->GetParent() as the parent.
-  if (childStyleIfVisited &&
-      !((childStyleIfVisited->RuleNode() != aContext->RuleNode() &&
-         childStyleIfVisited->GetParent() == aContext->GetParent()) ||
-        childStyleIfVisited->GetParent() ==
-          aContext->GetParent()->GetStyleIfVisited())) {
-    NS_ERROR("Visited style has wrong parent");
-    DumpContext(aFrame, aContext);
-    fputs("\n", stdout);
-  }
-}
-
-static void
-VerifyStyleTree(nsIFrame* aFrame)
-{
-  GeckoStyleContext* context = aFrame->StyleContext()->AsGecko();
-  VerifyContextParent(aFrame, context, nullptr);
-
-  nsIFrame::ChildListIterator lists(aFrame);
-  for (; !lists.IsDone(); lists.Next()) {
-    for (nsIFrame* child : lists.CurrentList()) {
-      if (!(child->GetStateBits() & NS_FRAME_OUT_OF_FLOW)) {
-        // only do frames that are in flow
-        if (child->IsPlaceholderFrame()) {
-          // placeholder: first recurse and verify the out of flow frame,
-          // then verify the placeholder's context
-          nsIFrame* outOfFlowFrame =
-            nsPlaceholderFrame::GetRealFrameForPlaceholder(child);
-
-          // recurse to out of flow frame, letting the parent context get resolved
-          do {
-            VerifyStyleTree(outOfFlowFrame);
-          } while ((outOfFlowFrame = outOfFlowFrame->GetNextContinuation()));
-
-          // verify placeholder using the parent frame's context as
-          // parent context
-          VerifyContextParent(child, nullptr, nullptr);
-        } else { // regular frame
-          VerifyStyleTree(child);
-        }
-      }
-    }
-  }
-
-  // do additional contexts
-  int32_t contextIndex = 0;
-  for (nsStyleContext* extraContext;
-       (extraContext = aFrame->GetAdditionalStyleContext(contextIndex));
-       ++contextIndex) {
-    VerifyContextParent(aFrame, extraContext->AsGecko(), context);
-  }
-}
-#endif
 
 void
 RestyleManager::DebugVerifyStyleTree(nsIFrame* aFrame)
@@ -782,13 +635,7 @@ RestyleManager::DebugVerifyStyleTree(nsIFrame* aFrame)
     // we work out what we want to assert (bug 1322570).
     return;
   }
-#ifdef MOZ_OLD_STYLE
-  if (aFrame) {
-    VerifyStyleTree(aFrame);
-  }
-#else
   MOZ_CRASH("old style system disabled");
-#endif
 }
 
 #endif // DEBUG
@@ -850,7 +697,7 @@ GetFrameForChildrenOnlyTransformHint(nsIFrame* aFrame)
 // Returns true if this function managed to successfully move a frame, and
 // false if it could not process the position change, and a reflow should
 // be performed instead.
-bool
+static bool
 RecomputePosition(nsIFrame* aFrame)
 {
   // Don't process position changes on table frames, since we already handle
@@ -1299,7 +1146,7 @@ ApplyRenderingChangeToTree(nsIPresShell* aPresShell,
   if (aChange & nsChangeHint_RepaintFrame) {
     // If the frame's background is propagated to an ancestor, walk up to
     // that ancestor and apply the RepaintFrame change hint to it.
-    nsStyleContext* bgSC;
+    ComputedStyle* bgSC;
     nsIFrame* propagatedFrame = aFrame;
     while (!nsCSSRendering::FindBackground(propagatedFrame, &bgSC)) {
       propagatedFrame = propagatedFrame->GetParent();
@@ -1904,13 +1751,7 @@ RestyleManager::IncrementAnimationGeneration()
   // ProcessPendingRestyles so we should ignore any subsequent (redundant)
   // calls that occur while we are still processing restyles.
   if (IsGecko()) {
-#ifdef MOZ_OLD_STYLE
-    if (AsGecko()->IsProcessingRestyles()) {
-      return;
-    }
-#else
     MOZ_CRASH("old style system disabled");
-#endif
   } else {
     if (mInStyleRefresh) {
       return;
@@ -1941,8 +1782,8 @@ RestyleManager::AddLayerChangesForAnimation(nsIFrame* aFrame,
       // If we have a transform layer but don't have any transform style, we
       // probably just removed the transform but haven't destroyed the layer
       // yet. In this case we will add the appropriate change hint
-      // (nsChangeHint_UpdateContainingBlock) when we compare style contexts
-      // so we can skip adding any change hint here. (If we *were* to add
+      // (nsChangeHint_UpdateContainingBlock) when we compare styles so we can
+      // skip adding any change hint here. (If we *were* to add
       // nsChangeHint_UpdateTransformLayer, ApplyRenderingChangeToTree would
       // complain that we're updating a transform layer without a transform).
       if (layerInfo.mLayerType == DisplayItemType::TYPE_TRANSFORM &&

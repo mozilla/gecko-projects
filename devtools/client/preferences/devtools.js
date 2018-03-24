@@ -74,6 +74,8 @@ pref("devtools.eventsview.enabled", false);
 pref("devtools.flexboxinspector.enabled", false);
 // Enable the new Animation Inspector
 pref("devtools.new-animationinspector.enabled", false);
+// Enable the Variable Fonts editor
+pref("devtools.inspector.fonteditor.enabled", false);
 
 // Grid highlighter preferences
 pref("devtools.gridinspector.gridOutlineMaxColumns", 50);
@@ -82,8 +84,6 @@ pref("devtools.gridinspector.showGridAreas", false);
 pref("devtools.gridinspector.showGridLineNumbers", false);
 pref("devtools.gridinspector.showInfiniteLines", false);
 
-// Whether or not the box model panel is opened in the computed view
-pref("devtools.computed.boxmodel.opened", true);
 // Whether or not the box model panel is opened in the layout view
 pref("devtools.layout.boxmodel.opened", true);
 // Whether or not the flexbox panel is opened in the layout view
@@ -164,6 +164,9 @@ pref("devtools.netmonitor.filters", "[\"all\"]");
 pref("devtools.netmonitor.visibleColumns",
   "[\"status\",\"method\",\"file\",\"domain\",\"cause\",\"type\",\"transferred\",\"contentSize\",\"waterfall\"]"
 );
+
+// Save request/response bodies yes/no.
+pref("devtools.netmonitor.saveRequestAndResponseBodies", true);
 
 // The default Network monitor HAR export setting
 pref("devtools.netmonitor.har.defaultLogDir", "");
@@ -316,7 +319,11 @@ pref("devtools.webconsole.autoMultiline", true);
 pref("devtools.webconsole.new-frontend-enabled", true);
 
 // Enable the new webconsole frontend in the browser console
+#if defined(NIGHTLY_BUILD)
+pref("devtools.browserconsole.new-frontend-enabled", true);
+#else
 pref("devtools.browserconsole.new-frontend-enabled", false);
+#endif
 
 // Enable the webconsole sidebar toggle
 pref("devtools.webconsole.sidebarToggle", false);

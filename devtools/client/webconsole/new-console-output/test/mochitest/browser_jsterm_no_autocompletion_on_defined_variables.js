@@ -8,9 +8,9 @@
 "use strict";
 
 const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
-                 "test/test-console.html";
+                 "new-console-output/test/mochitest/test-console.html";
 
-add_task(async function () {
+add_task(async function() {
   let hud = await openNewTabAndConsole(TEST_URI);
   testCompletion(hud);
 });

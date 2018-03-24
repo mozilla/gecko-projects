@@ -41,6 +41,7 @@
 #include "mozilla/TextEditor.h"
 #include "mozilla/dom/KeyboardEvent.h"
 #include "mozilla/dom/KeyboardEventBinding.h"
+#include "mozilla/dom/MouseEvent.h"
 #include "mozilla/dom/Selection.h"
 #include "mozInlineSpellWordUtil.h"
 #include "mozISpellI18NManager.h"
@@ -50,7 +51,6 @@
 #include "nsIDOMNode.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMElement.h"
-#include "nsIDOMMouseEvent.h"
 #include "nsIDOMNode.h"
 #include "nsIDOMNodeList.h"
 #include "nsIDOMEvent.h"
@@ -430,8 +430,8 @@ mozInlineSpellStatus::FillNoCheckRangeFromAnchor(
 //    Returns the nsIDOMDocument object for the document for the
 //    current spellchecker.
 
-already_AddRefed<nsIDocument>
-mozInlineSpellStatus::GetDocument()
+nsIDocument*
+mozInlineSpellStatus::GetDocument() const
 {
   if (!mSpellChecker->mTextEditor) {
     return nullptr;
@@ -1398,8 +1398,9 @@ nsresult mozInlineSpellChecker::DoSpellCheck(mozInlineSpellWordUtil& aWordUtil,
     // Now check that we're still looking at a range that's under
     // aWordUtil.GetRootNode()
     nsINode* rootNode = aWordUtil.GetRootNode();
-    if (!nsContentUtils::ContentIsDescendantOf(beginNode, rootNode) ||
-        !nsContentUtils::ContentIsDescendantOf(endNode, rootNode)) {
+    if (!beginNode->IsInComposedDoc() || !endNode->IsInComposedDoc() ||
+        !nsContentUtils::ContentIsShadowIncludingDescendantOf(beginNode, rootNode) ||
+        !nsContentUtils::ContentIsShadowIncludingDescendantOf(endNode, rootNode)) {
       // Just bail out and don't try to spell-check this
       return NS_OK;
     }
@@ -1496,7 +1497,7 @@ nsresult mozInlineSpellChecker::DoSpellCheck(mozInlineSpellWordUtil& aWordUtil,
 
     // check spelling and add to selection if misspelled
     bool isMisspelled;
-    aWordUtil.NormalizeWord(wordText);
+    mozInlineSpellWordUtil::NormalizeWord(wordText);
     nsresult rv = mSpellCheck->CheckCurrentWordNoSuggest(wordText,
                                                          &isMisspelled);
     if (NS_FAILED(rv))
@@ -1853,14 +1854,12 @@ mozInlineSpellChecker::OnBlur(nsIDOMEvent* aEvent)
 nsresult
 mozInlineSpellChecker::OnMouseClick(nsIDOMEvent *aMouseEvent)
 {
-  nsCOMPtr<nsIDOMMouseEvent>mouseEvent = do_QueryInterface(aMouseEvent);
+  MouseEvent* mouseEvent = aMouseEvent->InternalDOMEvent()->AsMouseEvent();
   NS_ENSURE_TRUE(mouseEvent, NS_OK);
 
   // ignore any errors from HandleNavigationEvent as we don't want to prevent
   // anyone else from seeing this event.
-  int16_t button;
-  mouseEvent->GetButton(&button);
-  HandleNavigationEvent(button != 0);
+  HandleNavigationEvent(mouseEvent->Button() != 0);
   return NS_OK;
 }
 

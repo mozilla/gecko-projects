@@ -24,6 +24,7 @@
 #include "mozilla/docshell/OfflineCacheUpdateChild.h"
 #include "mozilla/dom/ClientManager.h"
 #include "mozilla/dom/ClientOpenWindowOpActors.h"
+#include "mozilla/dom/ChildProcessMessageManager.h"
 #include "mozilla/dom/ContentBridgeChild.h"
 #include "mozilla/dom/ContentBridgeParent.h"
 #include "mozilla/dom/DOMPrefs.h"
@@ -43,6 +44,8 @@
 #include "mozilla/dom/TabGroup.h"
 #include "mozilla/dom/nsIContentChild.h"
 #include "mozilla/dom/URLClassifierChild.h"
+#include "mozilla/dom/WorkerDebugger.h"
+#include "mozilla/dom/WorkerDebuggerManager.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/Logging.h"
 #include "mozilla/psm/PSMContentListener.h"
@@ -79,6 +82,9 @@
 #include "imgLoader.h"
 #include "GMPServiceChild.h"
 #include "NullPrincipal.h"
+#include "nsIPerformanceMetrics.h"
+#include "nsISimpleEnumerator.h"
+#include "nsIWorkerDebuggerManager.h"
 
 #if !defined(XP_WIN)
 #include "mozilla/Omnijar.h"
@@ -95,6 +101,7 @@
 #elif defined(XP_LINUX)
 #include "mozilla/Sandbox.h"
 #include "mozilla/SandboxInfo.h"
+#include "CubebUtils.h"
 #elif defined(XP_MACOSX)
 #include "mozilla/Sandbox.h"
 #endif
@@ -433,6 +440,7 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage)
     nsAutoString msg, sourceName, sourceLine;
     nsCString category;
     uint32_t lineNum, colNum, flags;
+    bool fromPrivateWindow;
 
     nsresult rv = scriptError->GetErrorMessage(msg);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -452,9 +460,44 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage)
     NS_ENSURE_SUCCESS(rv, rv);
     rv = scriptError->GetFlags(&flags);
     NS_ENSURE_SUCCESS(rv, rv);
+    rv = scriptError->GetIsFromPrivateWindow(&fromPrivateWindow);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    {
+      AutoJSAPI jsapi;
+      jsapi.Init();
+      JSContext* cx = jsapi.cx();
+
+      JS::RootedValue stack(cx);
+      rv = scriptError->GetStack(&stack);
+      NS_ENSURE_SUCCESS(rv, rv);
+
+      if (stack.isObject()) {
+        JSAutoCompartment ac(cx, &stack.toObject());
+
+        StructuredCloneData data;
+        ErrorResult err;
+        data.Write(cx, stack, err);
+        if (err.Failed()) {
+          return err.StealNSResult();
+        }
+
+        ClonedMessageData cloned;
+        if (!data.BuildClonedMessageDataForChild(mChild, cloned)) {
+          return NS_ERROR_FAILURE;
+        }
+
+        mChild->SendScriptErrorWithStack(msg, sourceName, sourceLine,
+                                         lineNum, colNum, flags, category,
+                                         fromPrivateWindow, cloned);
+        return NS_OK;
+      }
+    }
+
 
     mChild->SendScriptError(msg, sourceName, sourceLine,
-                            lineNum, colNum, flags, category);
+                            lineNum, colNum, flags, category,
+                            fromPrivateWindow);
     return NS_OK;
   }
 
@@ -502,6 +545,7 @@ ContentChild::ContentChild()
 #endif
  , mIsAlive(true)
  , mShuttingDown(false)
+ , mShutdownTimeout(0)
 {
   // This process is a content process, so it's clearly running in
   // multiprocess mode!
@@ -516,6 +560,12 @@ ContentChild::ContentChild()
     sShutdownCanary = new ShutdownCanary();
     ClearOnShutdown(&sShutdownCanary, ShutdownPhase::Shutdown);
   }
+  // If a shutdown message is received from within a nested event loop, we set
+  // the timeout for the nested event loop to half the ForceKillTimer timeout
+  // (in ms) to leave enough time to send the FinishShutdown message to the
+  // parent.
+  mShutdownTimeout =
+    Preferences::GetInt("dom.ipc.tabs.shutdownTimeoutSecs", 5) * 1000 / 2;
 }
 
 #ifdef _MSC_VER
@@ -1149,8 +1199,6 @@ void
 ContentChild::InitXPCOM(const XPCOMInitData& aXPCOMInit,
                         const mozilla::dom::ipc::StructuredCloneData& aInitialData)
 {
-  Preferences::SetLatePreferences(&aXPCOMInit.prefs());
-
   // Do this as early as possible to get the parent process to initialize the
   // background thread since we'll likely need database information very soon.
   BackgroundChild::Startup();
@@ -1355,6 +1403,38 @@ ContentChild::GetResultForRenderingInitFailure(base::ProcessId aOtherPid)
   // the next ContentChild::RecvReinitRendering call.
   gfxCriticalNote << "Could not initialize rendering with GPU process";
   return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentChild::RecvRequestPerformanceMetrics()
+{
+#ifndef RELEASE_OR_BETA
+  // iterate on all WorkerDebugger
+  RefPtr<WorkerDebuggerManager> wdm = WorkerDebuggerManager::GetOrCreate();
+  if (NS_WARN_IF(!wdm)) {
+    return IPC_OK();
+  }
+
+  for (uint32_t index = 0; index < wdm->GetDebuggersLength(); index++) {
+    WorkerDebugger* debugger = wdm->GetDebuggerAt(index);
+    MOZ_ASSERT(debugger);
+    SendAddPerformanceMetrics(debugger->ReportPerformanceInfo());
+  }
+
+  // iterate on all DocGroup
+  nsTArray<RefPtr<TabChild>> tabs = TabChild::GetAll();
+  for (const auto& tabChild : tabs) {
+    TabGroup* tabGroup = tabChild->TabGroup();
+    for (auto iter = tabGroup->Iter(); !iter.Done(); iter.Next()) {
+        RefPtr<DocGroup> docGroup = iter.Get()->mDocGroup;
+        SendAddPerformanceMetrics(docGroup->ReportPerformanceInfo());
+    }
+  }
+  return IPC_OK();
+#endif
+#ifdef RELEASE_OR_BETA
+  return IPC_OK();
+#endif
 }
 
 mozilla::ipc::IPCResult
@@ -1692,6 +1772,11 @@ ContentChild::RecvSetProcessSandbox(const MaybeFileDesc& aBroker)
   // On Linux, we have to support systems that can't use any sandboxing.
   if (!SandboxInfo::Get().CanSandboxContent()) {
     sandboxEnabled = false;
+  } else {
+    // Pre-start audio before sandboxing; see bug 1443612.
+    if (!Preferences::GetBool("media.cubeb.sandbox")) {
+      Unused << CubebUtils::GetCubebContext();
+    }
   }
 
   if (sandboxEnabled) {
@@ -2980,28 +3065,32 @@ ContentChild::RecvShutdown()
 void
 ContentChild::ShutdownInternal()
 {
-  // If we receive the shutdown message from within a nested event loop, we want
-  // to wait for that event loop to finish. Otherwise we could prematurely
-  // terminate an "unload" or "pagehide" event handler (which might be doing a
-  // sync XHR, for example).
   CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("IPCShutdownState"),
                                      NS_LITERAL_CSTRING("RecvShutdown"));
 
-  MOZ_ASSERT(NS_IsMainThread());
-  RefPtr<nsThread> mainThread = nsThreadManager::get().GetCurrentThread();
+  // If we receive the shutdown message from within a nested event loop, we want
+  // to wait for that event loop to finish. Otherwise we could prematurely
+  // terminate an "unload" or "pagehide" event handler (which might be doing a
+  // sync XHR, for example). However, we need to strike a balance and shut down
+  // within a reasonable amount of time (mShutdownTimeout) or the ForceKillTimer
+  // in the parent will execute and kill us hard.
   // Note that we only have to check the recursion count for the current
   // cooperative thread. Since the Shutdown message is not labeled with a
   // SchedulerGroup, there can be no other cooperative threads doing work while
   // we're running.
-  if (mainThread && mainThread->RecursionDepth() > 1) {
+  MOZ_ASSERT(NS_IsMainThread());
+  RefPtr<nsThread> mainThread = nsThreadManager::get().GetCurrentThread();
+  if (mainThread && mainThread->RecursionDepth() > 1 && mShutdownTimeout > 0) {
     // We're in a nested event loop. Let's delay for an arbitrary period of
     // time (100ms) in the hopes that the event loop will have finished by
     // then.
+    int32_t delay = 100;
     MessageLoop::current()->PostDelayedTask(
       NewRunnableMethod(
         "dom::ContentChild::RecvShutdown", this,
         &ContentChild::ShutdownInternal),
-      100);
+      delay);
+    mShutdownTimeout -= delay;
     return;
   }
 

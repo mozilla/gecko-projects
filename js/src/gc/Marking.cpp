@@ -27,7 +27,7 @@
 #include "vm/RegExpShared.h"
 #include "vm/Scope.h"
 #include "vm/Shape.h"
-#include "vm/Symbol.h"
+#include "vm/SymbolType.h"
 #include "vm/TypedArrayObject.h"
 #include "vm/UnboxedObject.h"
 #include "wasm/WasmJS.h"
@@ -37,7 +37,7 @@
 #include "gc/PrivateIterators-inl.h"
 #include "vm/JSCompartment-inl.h"
 #include "vm/NativeObject-inl.h"
-#include "vm/String-inl.h"
+#include "vm/StringType-inl.h"
 #include "vm/UnboxedObject-inl.h"
 
 using namespace js;
@@ -131,6 +131,8 @@ IsThingPoisoned(T* thing)
         JS_MOVED_TENURED_PATTERN,
         JS_SWEPT_TENURED_PATTERN,
         JS_ALLOCATED_TENURED_PATTERN,
+        JS_FREED_HEAP_PTR_PATTERN,
+        JS_SWEPT_TI_PATTERN,
         JS_SWEPT_CODE_PATTERN
     };
     const int numPoisonBytes = sizeof(poisonBytes) / sizeof(poisonBytes[0]);
@@ -2845,13 +2847,14 @@ TraceBufferedCells(TenuringTracer& mover, Arena* arena, ArenaCellSet* cells)
 }
 
 void
-js::gc::StoreBuffer::traceWholeCells(TenuringTracer& mover)
+js::gc::StoreBuffer::WholeCellBuffer::trace(StoreBuffer* owner, TenuringTracer& mover)
 {
-    for (ArenaCellSet* cells = bufferWholeCell; cells; cells = cells->next) {
-        Arena* arena = cells->arena;
-        MOZ_ASSERT(IsCellPointerValid(arena));
+    MOZ_ASSERT(owner->isEnabled());
 
-        MOZ_ASSERT(arena->bufferedCells() == cells);
+    for (ArenaCellSet* cells = head_; cells; cells = cells->next) {
+        cells->check();
+
+        Arena* arena = cells->arena;
         arena->bufferedCells() = &ArenaCellSet::Empty;
 
         JS::TraceKind kind = MapAllocToTraceKind(arena->getAllocKind());
@@ -2873,7 +2876,7 @@ js::gc::StoreBuffer::traceWholeCells(TenuringTracer& mover)
         }
     }
 
-    bufferWholeCell = nullptr;
+    head_ = nullptr;
 }
 
 void

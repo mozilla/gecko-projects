@@ -101,10 +101,6 @@ var gWasDebuggerAttached = false;
 XPCOMUtils.defineLazyServiceGetters(this, {
   Telemetry: ["@mozilla.org/base/telemetry;1", "nsITelemetry"],
   idleService: ["@mozilla.org/widget/idleservice;1", "nsIIdleService"],
-  cpmm: ["@mozilla.org/childprocessmessagemanager;1", "nsIMessageSender"],
-  cpml: ["@mozilla.org/childprocessmessagemanager;1", "nsIMessageListenerManager"],
-  ppmm: ["@mozilla.org/parentprocessmessagemanager;1", "nsIMessageBroadcaster"],
-  ppml: ["@mozilla.org/parentprocessmessagemanager;1", "nsIMessageListenerManager"],
 });
 
 function generateUUID() {
@@ -657,7 +653,6 @@ var TelemetrySession = Object.freeze({
 });
 
 var Impl = {
-  _histograms: {},
   _initialized: false,
   _logger: null,
   _prevValues: {},
@@ -1101,7 +1096,9 @@ var Impl = {
     }
 
     b("MEMORY_VSIZE", "vsize");
-    b("MEMORY_VSIZE_MAX_CONTIGUOUS", "vsizeMaxContiguous");
+    if (!Services.appinfo.is64Bit || AppConstants.platform !== "win") {
+      b("MEMORY_VSIZE_MAX_CONTIGUOUS", "vsizeMaxContiguous");
+    }
     b("MEMORY_RESIDENT_FAST", "residentFast");
     b("MEMORY_UNIQUE", "residentUnique");
     p("MEMORY_HEAP_OVERHEAD_FRACTION", "heapOverheadFraction");
@@ -1127,7 +1124,7 @@ var Impl = {
       // Only the chrome process should gather total memory
       // total = parent RSS + sum(child USS)
       this._totalMemory = mgr.residentFast;
-      if (ppmm.childCount > 1) {
+      if (Services.ppmm.childCount > 1) {
         // Do not report If we time out waiting for the children to call
         this._totalMemoryTimeout = setTimeout(
           () => {
@@ -1137,8 +1134,8 @@ var Impl = {
           TOTAL_MEMORY_COLLECTOR_TIMEOUT);
         this._USSFromChildProcesses = [];
         this._childrenToHearFrom = new Set();
-        for (let i = 1; i < ppmm.childCount; i++) {
-          let child = ppmm.getChildAt(i);
+        for (let i = 1; i < Services.ppmm.childCount; i++) {
+          let child = Services.ppmm.getChildAt(i);
           try {
             child.sendAsyncMessage(MESSAGE_TELEMETRY_GET_CHILD_USS, {id: this._nextTotalMemoryId});
             this._childrenToHearFrom.add(this._nextTotalMemoryId);
@@ -1188,21 +1185,12 @@ var Impl = {
       return;
     }
 
-    let h = this._histograms[id];
-    if (!h) {
-      if (key) {
-        h = Telemetry.getKeyedHistogramById(id);
-      } else {
-        h = Telemetry.getHistogramById(id);
-      }
-      this._histograms[id] = h;
+    if (key) {
+      Telemetry.getKeyedHistogramById(id).add(key, val);
+      return;
     }
 
-    if (key) {
-      h.add(key, val);
-    } else {
-      h.add(val);
-    }
+    Telemetry.getHistogramById(id).add(val);
   },
 
   getChildPayloads: function getChildPayloads() {
@@ -1241,7 +1229,7 @@ var Impl = {
     // Add extended set measurements common to chrome & content processes
     if (Telemetry.canRecordExtended) {
       payloadObj.chromeHangs = protect(() => Telemetry.chromeHangs);
-      payloadObj.log = protect(() => TelemetryLog.entries());
+      payloadObj.log = [];
       payloadObj.webrtc = protect(() => Telemetry.webrtcStats);
     }
 
@@ -1327,10 +1315,6 @@ var Impl = {
       if (stacks && ("captures" in stacks) && (stacks.captures.length > 0)) {
         payloadObj.processes.parent.capturedStacks = stacks;
       }
-    }
-
-    if (this._childTelemetry.length) {
-      payloadObj.childPayloads = protect(() => this.getChildPayloads());
     }
 
     return payloadObj;
@@ -1467,8 +1451,8 @@ var Impl = {
 
     this.attachEarlyObservers();
 
-    ppml.addMessageListener(MESSAGE_TELEMETRY_PAYLOAD, this);
-    ppml.addMessageListener(MESSAGE_TELEMETRY_USS, this);
+    Services.ppmm.addMessageListener(MESSAGE_TELEMETRY_PAYLOAD, this);
+    Services.ppmm.addMessageListener(MESSAGE_TELEMETRY_USS, this);
   },
 
   /**
@@ -1554,7 +1538,7 @@ var Impl = {
     }
 
     this.addObserver("content-child-shutdown");
-    cpml.addMessageListener(MESSAGE_TELEMETRY_GET_CHILD_USS, this);
+    Services.cpmm.addMessageListener(MESSAGE_TELEMETRY_GET_CHILD_USS, this);
 
     let delayedTask = new DeferredTask(() => {
       this._initialized = true;
@@ -1679,7 +1663,7 @@ var Impl = {
       return;
     }
 
-    cpmm.sendAsyncMessage(
+    Services.cpmm.sendAsyncMessage(
       MESSAGE_TELEMETRY_USS,
       {bytes: mgr.residentUnique, id: aMessageId}
     );
@@ -1690,7 +1674,7 @@ var Impl = {
     const isSubsession = !this._isClassicReason(reason);
     let payload = this.getSessionPayload(reason, isSubsession);
     payload.childUUID = this._processUUID;
-    cpmm.sendAsyncMessage(MESSAGE_TELEMETRY_PAYLOAD, payload);
+    Services.cpmm.sendAsyncMessage(MESSAGE_TELEMETRY_PAYLOAD, payload);
   },
 
    /**

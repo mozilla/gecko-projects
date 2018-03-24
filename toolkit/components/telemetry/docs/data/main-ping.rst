@@ -56,7 +56,6 @@ Structure:
       },
 
       processes: {...},
-      childPayloads: [...], // only present with e10s; reduced payloads from content processes, null on failure
       simpleMeasurements: {...},
 
       // The following properties may all be null if we fail to collect them.
@@ -65,7 +64,7 @@ Structure:
       chromeHangs: {...},
       threadHangStats: [...], // obsolete in firefox 57, use the 'bhr' ping
       capturedStacks: {...},
-      log: [...],
+      log: [...], // obsolete in firefox 61, use Event Telemetry or Scalars
       webrtc: {...},
       gc: {...},
       fileIOReports: {...},
@@ -146,14 +145,6 @@ events
 This section contains the :ref:`eventtelemetry` that are recorded for the current subsession. Events are not always recorded, recording has to be enabled first for the Firefox session.
 
 The recorded events are defined in the `Events.yaml <https://dxr.mozilla.org/mozilla-central/source/toolkit/components/telemetry/Events.yaml>`_. The ``info.revision`` field indicates the revision of the file that describes the reported events.
-
-childPayloads
--------------
-The Telemetry payloads sent by child processes, recorded on child process shutdown (event ``content-child-shutdown`` observed). They are reduced session payloads, only available with e10s. Among some other things, they don't contain histograms, keyed histograms, add-on details, or UI Telemetry.
-
-Note: Child payloads are not collected and cleared with subsession splits, they are currently only meaningful when analysed from ``saved-session`` or ``main`` pings with ``reason`` set to ``shutdown``.
-
-Note: Before Firefox 51 and bug 1218576, content process histograms and keyedHistograms were in the individual child payloads instead of being aggregated into ``processes.content``.
 
 simpleMeasurements
 ------------------
@@ -403,6 +394,8 @@ Structure:
 
 log
 ---
+As of Firefox 61 this section is no longer present, use :ref:`eventtelemetry` or :doc:`../collection/scalars`.
+
 This section contains a log of important or unusual events reported through Telemetry.
 
 Structure:
@@ -645,7 +638,7 @@ See the ``UITelemetry data format`` documentation.
 
 slowSQL
 -------
-This section contains the informations about the slow SQL queries for both the main and other threads. The execution of an SQL statement is considered slow if it takes 50ms or more on the main thread or 100ms or more on other threads. Slow SQL statements will be automatically trimmed to 1000 characters. This limit doesn't include the ellipsis and database name, that are appended at the end of the stored statement.
+This section contains the information about the slow SQL queries for both the main and other threads. The execution of an SQL statement is considered slow if it takes 50ms or more on the main thread or 100ms or more on other threads. Slow SQL statements will be automatically trimmed to 1000 characters. This limit doesn't include the ellipsis and database name, that are appended at the end of the stored statement.
 
 Structure:
 

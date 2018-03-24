@@ -21,7 +21,7 @@ use atomic_refcell::{AtomicRefCell, AtomicRefMut};
 use author_styles::AuthorStyles;
 use context::{QuirksMode, SharedStyleContext, PostAnimationTasks, UpdateAnimationsTasks};
 use data::ElementData;
-use dom::{LayoutIterator, NodeInfo, OpaqueNode, TElement, TDocument, TNode};
+use dom::{LayoutIterator, NodeInfo, OpaqueNode, TElement, TDocument, TNode, TShadowRoot};
 use element_state::{ElementState, DocumentState};
 use font_metrics::{FontMetrics, FontMetricsProvider, FontMetricsQueryResult};
 use gecko::data::GeckoStyleSheet;
@@ -131,6 +131,56 @@ impl<'ld> TDocument for GeckoDocument<'ld> {
     }
 }
 
+/// A simple wrapper over `ShadowRoot`.
+#[derive(Clone, Copy)]
+pub struct GeckoShadowRoot<'lr>(pub &'lr structs::ShadowRoot);
+
+impl<'lr> PartialEq for GeckoShadowRoot<'lr> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.0 as *const _ == other.0 as *const _
+    }
+}
+
+impl<'lr> TShadowRoot for GeckoShadowRoot<'lr> {
+    type ConcreteNode = GeckoNode<'lr>;
+
+    #[inline]
+    fn as_node(&self) -> Self::ConcreteNode {
+        GeckoNode(&self.0._base._base._base._base)
+    }
+
+    #[inline]
+    fn host(&self) -> GeckoElement<'lr> {
+        GeckoElement(unsafe { &*self.0._base.mHost.mRawPtr })
+    }
+
+    #[inline]
+    fn style_data<'a>(&self) -> &'a CascadeData
+    where
+        Self: 'a,
+    {
+        debug_assert!(!self.0.mServoStyles.mPtr.is_null());
+
+        let author_styles = unsafe {
+            &*(self.0.mServoStyles.mPtr
+                as *const structs::RawServoAuthorStyles
+                as *const bindings::RawServoAuthorStyles)
+        };
+
+        let author_styles =
+            AuthorStyles::<GeckoStyleSheet>::from_ffi(author_styles);
+
+        debug_assert!(!author_styles.stylesheets.dirty());
+        debug_assert!(
+            author_styles.quirks_mode == self.as_node().owner_doc().quirks_mode() ||
+            author_styles.stylesheets.is_empty()
+        );
+
+        &author_styles.data
+    }
+}
+
 /// A simple wrapper over a non-null Gecko node (`nsINode`) pointer.
 ///
 /// Important: We don't currently refcount the DOM, because the wrapper lifetime
@@ -152,14 +202,22 @@ impl<'ln> PartialEq for GeckoNode<'ln> {
 impl<'ln> fmt::Debug for GeckoNode<'ln> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(el) = self.as_element() {
-            el.fmt(f)
-        } else {
-            if self.is_text_node() {
-                write!(f, "<text node> ({:#x})", self.opaque().0)
-            } else {
-                write!(f, "<non-text node> ({:#x})", self.opaque().0)
-            }
+            return el.fmt(f)
         }
+
+        if self.is_text_node() {
+            return write!(f, "<text node> ({:#x})", self.opaque().0)
+        }
+
+        if self.is_document() {
+            return write!(f, "<document> ({:#x})", self.opaque().0)
+        }
+
+        if self.is_shadow_root() {
+            return write!(f, "<shadow-root> ({:#x})", self.opaque().0)
+        }
+
+        write!(f, "<non-text node> ({:#x})", self.opaque().0)
     }
 }
 
@@ -169,6 +227,11 @@ impl<'ln> GeckoNode<'ln> {
         // This is a DOM constant that isn't going to change.
         const DOCUMENT_NODE: u16 = 9;
         self.node_info().mInner.mNodeType == DOCUMENT_NODE
+    }
+
+    #[inline]
+    fn is_shadow_root(&self) -> bool {
+        self.is_in_shadow_tree() && self.parent_node().is_none()
     }
 
     #[inline]
@@ -203,6 +266,13 @@ impl<'ln> GeckoNode<'ln> {
     #[inline]
     fn get_bool_flag(&self, flag: nsINode_BooleanFlag) -> bool {
         self.bool_flags() & (1u32 << flag as u32) != 0
+    }
+
+    /// This logic is duplicate in Gecko's nsINode::IsInShadowTree().
+    #[inline]
+    fn is_in_shadow_tree(&self) -> bool {
+        use gecko_bindings::structs::NODE_IS_IN_SHADOW_TREE;
+        self.flags() & (NODE_IS_IN_SHADOW_TREE as u32) != 0
     }
 
     /// WARNING: This logic is duplicated in Gecko's FlattenedTreeParentIsParent.
@@ -275,6 +345,7 @@ impl<'ln> NodeInfo for GeckoNode<'ln> {
 
 impl<'ln> TNode for GeckoNode<'ln> {
     type ConcreteDocument = GeckoDocument<'ln>;
+    type ConcreteShadowRoot = GeckoShadowRoot<'ln>;
     type ConcreteElement = GeckoElement<'ln>;
 
     #[inline]
@@ -329,20 +400,34 @@ impl<'ln> TNode for GeckoNode<'ln> {
 
     #[inline]
     fn as_element(&self) -> Option<GeckoElement<'ln>> {
-        if self.is_element() {
-            unsafe { Some(GeckoElement(&*(self.0 as *const _ as *const RawGeckoElement))) }
-        } else {
-            None
+        if !self.is_element() {
+            return None;
         }
+
+        Some(GeckoElement(unsafe {
+            &*(self.0 as *const _ as *const RawGeckoElement)
+        }))
     }
 
     #[inline]
     fn as_document(&self) -> Option<Self::ConcreteDocument> {
-        if self.is_document() {
-            Some(self.owner_doc())
-        } else {
-            None
+        if !self.is_document() {
+            return None;
         }
+
+        debug_assert_eq!(self.owner_doc().as_node(), *self, "How?");
+        Some(self.owner_doc())
+    }
+
+    #[inline]
+    fn as_shadow_root(&self) -> Option<Self::ConcreteShadowRoot> {
+        if !self.is_shadow_root() {
+            return None;
+        }
+
+        Some(GeckoShadowRoot(unsafe {
+            &*(self.0 as *const _ as *const structs::ShadowRoot)
+        }))
     }
 }
 
@@ -488,11 +573,7 @@ impl<'le> GeckoElement<'le> {
 
     #[inline]
     fn flags(&self) -> u32 {
-        self.raw_node()._base._base_1.mFlags
-    }
-
-    fn raw_node(&self) -> &RawGeckoNode {
-        &(self.0)._base._base._base
+        self.as_node().flags()
     }
 
     // FIXME: We can implement this without OOL calls, but we can't easily given
@@ -515,13 +596,6 @@ impl<'le> GeckoElement<'le> {
     /// Returns true if this element needs lazy frame construction.
     pub fn needs_frame(&self) -> bool {
         self.flags() & (NODE_NEEDS_FRAME as u32) != 0
-    }
-
-    /// Returns true if this element has a shadow root.
-    #[inline]
-    fn shadow_root(&self) -> Option<&structs::ShadowRoot> {
-        let slots = self.extended_slots()?;
-        unsafe { slots.mShadowRoot.mRawPtr.as_ref() }
     }
 
     /// Returns a reference to the DOM slots for this Element, if they exist.
@@ -550,7 +624,8 @@ impl<'le> GeckoElement<'le> {
             return None;
         }
 
-        unsafe { bindings::Gecko_GetXBLBinding(self.0).map(GeckoXBLBinding) }
+        let slots = self.extended_slots()?;
+        unsafe { slots.mXBLBinding.mRawPtr.as_ref().map(GeckoXBLBinding) }
     }
 
     #[inline]
@@ -732,18 +807,11 @@ impl<'le> GeckoElement<'le> {
         self.flags() & (NODE_IS_IN_NATIVE_ANONYMOUS_SUBTREE as u32) != 0
     }
 
-    /// This logic is duplicate in Gecko's nsIContent::IsInShadowTree().
-    #[inline]
-    fn is_in_shadow_tree(&self) -> bool {
-        use gecko_bindings::structs::NODE_IS_IN_SHADOW_TREE;
-        self.flags() & (NODE_IS_IN_SHADOW_TREE as u32) != 0
-    }
-
     /// This logic is duplicated in Gecko's nsIContent::IsInAnonymousSubtree.
     #[inline]
     fn is_in_anonymous_subtree(&self) -> bool {
         self.is_in_native_anonymous_subtree() ||
-        (!self.is_in_shadow_tree() && self.has_xbl_binding_parent())
+        (!self.as_node().is_in_shadow_tree() && self.has_xbl_binding_parent())
     }
 
     fn css_transitions_info(&self) -> FnvHashMap<LonghandId, Arc<AnimationValue>> {
@@ -980,29 +1048,6 @@ impl<'le> TElement for GeckoElement<'le> {
         self.before_or_after_pseudo(/* is_before = */ false)
     }
 
-    /// Ensure this accurately represents the rules that an element may ever
-    /// match, even in the native anonymous content case.
-    fn style_scope(&self) -> Self::ConcreteNode {
-        if self.implemented_pseudo_element().is_some() {
-            return self.closest_non_native_anonymous_ancestor().unwrap().style_scope();
-        }
-
-        if self.is_in_native_anonymous_subtree() {
-            return self.as_node().owner_doc().as_node();
-        }
-
-        if self.xbl_binding().is_some() || self.shadow_root().is_some() {
-            return self.as_node();
-        }
-
-        if let Some(parent) = self.xbl_binding_parent() {
-            return parent.as_node();
-        }
-
-        self.as_node().owner_doc().as_node()
-    }
-
-
     #[inline]
     fn is_html_element(&self) -> bool {
         self.namespace_id() == (structs::root::kNameSpaceID_XHTML as i32)
@@ -1011,7 +1056,7 @@ impl<'le> TElement for GeckoElement<'le> {
     /// Return the list of slotted nodes of this node.
     #[inline]
     fn slotted_nodes(&self) -> &[Self::ConcreteNode] {
-        if !self.is_html_slot_element() || !self.is_in_shadow_tree() {
+        if !self.is_html_slot_element() || !self.as_node().is_in_shadow_tree() {
             return &[];
         }
 
@@ -1036,8 +1081,28 @@ impl<'le> TElement for GeckoElement<'le> {
         unsafe { mem::transmute(assigned_nodes) }
     }
 
-    /// Execute `f` for each anonymous content child element (apart from
-    /// ::before and ::after) whose originating element is `self`.
+    #[inline]
+    fn shadow_root(&self) -> Option<GeckoShadowRoot<'le>> {
+        let slots = self.extended_slots()?;
+        unsafe { slots.mShadowRoot.mRawPtr.as_ref().map(GeckoShadowRoot) }
+    }
+
+    #[inline]
+    fn containing_shadow(&self) -> Option<GeckoShadowRoot<'le>> {
+        let slots = self.extended_slots()?;
+        unsafe { slots._base.mContainingShadow.mRawPtr.as_ref().map(GeckoShadowRoot) }
+    }
+
+    fn has_same_xbl_proto_binding_as(&self, other: Self) -> bool {
+        match (self.xbl_binding(), other.xbl_binding()) {
+            (None, None) => true,
+            (Some(a), Some(b)) => {
+                a.0.mPrototypeBinding == b.0.mPrototypeBinding
+            }
+            _ => false,
+        }
+    }
+
     fn each_anonymous_content_child<F>(&self, mut f: F)
     where
         F: FnMut(Self),
@@ -1410,26 +1475,6 @@ impl<'le> TElement for GeckoElement<'le> {
         // rule_hash_target, that is, our originating element.
         let mut current = Some(self.rule_hash_target());
         while let Some(element) = current {
-            // TODO(emilio): Deal with Shadow DOM separately than with XBL
-            // (right now we still rely on get_xbl_binding_parent()).
-            //
-            // That will allow to clean up a bunch in
-            // push_applicable_declarations.
-            if let Some(shadow) = element.shadow_root() {
-                debug_assert!(!shadow.mServoStyles.mPtr.is_null());
-                let author_styles = unsafe {
-                    &*(shadow.mServoStyles.mPtr
-                        as *const structs::RawServoAuthorStyles
-                        as *const bindings::RawServoAuthorStyles)
-                };
-
-                let author_styles: &'a _ = AuthorStyles::<GeckoStyleSheet>::from_ffi(author_styles);
-                f(&author_styles.data, author_styles.quirks_mode);
-                if element != *self {
-                    break;
-                }
-            }
-
             if let Some(binding) = element.xbl_binding() {
                 binding.each_xbl_cascade_data(&mut f);
 
@@ -1778,10 +1823,19 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
 
     #[inline]
     fn parent_element(&self) -> Option<Self> {
-        // FIXME(emilio): This will need to jump across if the parent node is a
-        // shadow root to get the shadow host.
         let parent_node = self.as_node().parent_node();
         parent_node.and_then(|n| n.as_element())
+    }
+
+    #[inline]
+    fn parent_node_is_shadow_root(&self) -> bool {
+        self.as_node().parent_node().map_or(false, |p| p.is_shadow_root())
+    }
+
+    #[inline]
+    fn containing_shadow_host(&self) -> Option<Self> {
+        let shadow = self.containing_shadow()?;
+        Some(shadow.host())
     }
 
     #[inline]

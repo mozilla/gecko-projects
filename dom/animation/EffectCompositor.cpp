@@ -17,10 +17,8 @@
 #include "mozilla/AnimationTarget.h"
 #include "mozilla/AnimationUtils.h"
 #include "mozilla/AutoRestore.h"
+#include "mozilla/ComputedStyleInlines.h"
 #include "mozilla/EffectSet.h"
-#ifdef MOZ_OLD_STYLE
-#include "mozilla/GeckoStyleContext.h"
-#endif
 #include "mozilla/LayerAnimationInfo.h"
 #include "mozilla/RestyleManager.h"
 #include "mozilla/RestyleManagerInlines.h"
@@ -36,11 +34,6 @@
 #include "nsIPresShell.h"
 #include "nsIPresShellInlines.h"
 #include "nsLayoutUtils.h"
-#ifdef MOZ_OLD_STYLE
-#include "nsRuleNode.h" // For nsRuleNode::ComputePropertiesOverridingAnimation
-#include "nsRuleProcessorData.h" // For ElementRuleProcessorData etc.
-#endif
-#include "nsStyleContextInlines.h"
 #include "nsTArray.h"
 #include "PendingAnimationTracker.h"
 
@@ -174,14 +167,11 @@ FindAnimationsForCompositor(const nsIFrame* aFrame,
   Maybe<NonOwningAnimationTarget> pseudoElement =
     EffectCompositor::GetAnimationElementAndPseudoForFrame(aFrame);
   if (pseudoElement) {
-    StyleBackendType backend =
-      aFrame->StyleContext()->IsServo()
-      ? StyleBackendType::Servo
-      : StyleBackendType::Gecko;
+    StyleBackendType backend = StyleBackendType::Servo;
     EffectCompositor::MaybeUpdateCascadeResults(backend,
                                                 pseudoElement->mElement,
                                                 pseudoElement->mPseudoType,
-                                                aFrame->StyleContext());
+                                                aFrame->Style());
   }
 
   if (!nsLayoutUtils::AreAsyncAnimationsEnabled()) {
@@ -415,81 +405,6 @@ EffectCompositor::UpdateEffectProperties(StyleType* aStyleType,
   }
 }
 
-#ifdef MOZ_OLD_STYLE
-void
-EffectCompositor::MaybeUpdateAnimationRule(dom::Element* aElement,
-                                           CSSPseudoElementType aPseudoType,
-                                           CascadeLevel aCascadeLevel,
-                                           nsStyleContext* aStyleContext)
-{
-  // First update cascade results since that may cause some elements to
-  // be marked as needing a restyle.
-  MaybeUpdateCascadeResults(StyleBackendType::Gecko,
-                            aElement, aPseudoType,
-                            aStyleContext);
-
-  auto& elementsToRestyle = mElementsToRestyle[aCascadeLevel];
-  PseudoElementHashEntry::KeyType key = { aElement, aPseudoType };
-
-  if (!elementsToRestyle.Contains(key)) {
-    return;
-  }
-
-  ComposeAnimationRule(aElement, aPseudoType, aCascadeLevel);
-
-  elementsToRestyle.Remove(key);
-}
-
-nsIStyleRule*
-EffectCompositor::GetAnimationRule(dom::Element* aElement,
-                                   CSSPseudoElementType aPseudoType,
-                                   CascadeLevel aCascadeLevel,
-                                   nsStyleContext* aStyleContext)
-{
-  // NOTE: We need to be careful about early returns in this method where
-  // we *don't* update mElementsToRestyle. When we get a call to
-  // RequestRestyle that results in a call to PostRestyleForAnimation, we
-  // will set a bool flag in mElementsToRestyle indicating that we've
-  // called PostRestyleForAnimation so we don't need to call it again
-  // until that restyle happens. During that restyle, if we arrive here
-  // and *don't* update mElementsToRestyle we'll continue to skip calling
-  // PostRestyleForAnimation from RequestRestyle.
-
-  if (!mPresContext || !mPresContext->IsDynamic()) {
-    // For print or print preview, ignore animations.
-    return nullptr;
-  }
-
-  MOZ_ASSERT(mPresContext->RestyleManager()->IsGecko(),
-             "stylo: Servo-backed style system should not be using "
-             "EffectCompositor");
-  if (mPresContext->RestyleManager()->AsGecko()->SkipAnimationRules()) {
-    // We don't need to worry about updating mElementsToRestyle in this case
-    // since this is not the animation restyle we requested when we called
-    // PostRestyleForAnimation (see comment at start of this method).
-    return nullptr;
-  }
-
-  MaybeUpdateAnimationRule(aElement, aPseudoType, aCascadeLevel, aStyleContext);
-
-#ifdef DEBUG
-  {
-    auto& elementsToRestyle = mElementsToRestyle[aCascadeLevel];
-    PseudoElementHashEntry::KeyType key = { aElement, aPseudoType };
-    MOZ_ASSERT(!elementsToRestyle.Contains(key),
-               "Element should no longer require a restyle after its "
-               "animation rule has been updated");
-  }
-#endif
-
-  EffectSet* effectSet = EffectSet::GetEffectSet(aElement, aPseudoType);
-  if (!effectSet) {
-    return nullptr;
-  }
-
-  return effectSet->AnimationRule(aCascadeLevel);
-}
-#endif
 
 namespace {
   class EffectCompositeOrderComparator {
@@ -590,73 +505,6 @@ EffectCompositor::HasPendingStyleUpdates() const
   return false;
 }
 
-bool
-EffectCompositor::HasThrottledStyleUpdates() const
-{
-  for (auto& elementSet : mElementsToRestyle) {
-    for (auto iter = elementSet.ConstIter(); !iter.Done(); iter.Next()) {
-      if (!iter.Data()) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-#ifdef MOZ_OLD_STYLE
-void
-EffectCompositor::AddStyleUpdatesTo(RestyleTracker& aTracker)
-{
-  if (!mPresContext) {
-    return;
-  }
-
-  for (size_t i = 0; i < kCascadeLevelCount; i++) {
-    CascadeLevel cascadeLevel = CascadeLevel(i);
-    auto& elementSet = mElementsToRestyle[cascadeLevel];
-
-    // Copy the list of elements to restyle to a separate array that we can
-    // iterate over. This is because we need to call MaybeUpdateCascadeResults
-    // on each element, but doing that can mutate elementSet. In this case
-    // it will only mutate the bool value associated with each element in the
-    // set but even doing that will cause assertions in PLDHashTable to fail
-    // if we are iterating over the hashtable at the same time.
-    nsTArray<PseudoElementHashEntry::KeyType> elementsToRestyle(
-      elementSet.Count());
-    for (auto iter = elementSet.Iter(); !iter.Done(); iter.Next()) {
-      // Skip animations on elements that have been orphaned since they
-      // requested a restyle.
-      if (iter.Key().mElement->IsInComposedDoc()) {
-        elementsToRestyle.AppendElement(iter.Key());
-      }
-    }
-
-    for (auto& pseudoElem : elementsToRestyle) {
-      MaybeUpdateCascadeResults(StyleBackendType::Gecko,
-                                pseudoElem.mElement,
-                                pseudoElem.mPseudoType,
-                                nullptr);
-
-      ComposeAnimationRule(pseudoElem.mElement,
-                           pseudoElem.mPseudoType,
-                           cascadeLevel);
-
-      dom::Element* elementToRestyle =
-        GetElementToRestyle(pseudoElem.mElement, pseudoElem.mPseudoType);
-      if (elementToRestyle) {
-        nsRestyleHint rshint = cascadeLevel == CascadeLevel::Transitions ?
-                               eRestyle_CSSTransitions :
-                               eRestyle_CSSAnimations;
-        aTracker.AddPendingRestyle(elementToRestyle, rshint, nsChangeHint(0));
-      }
-    }
-
-    elementSet.Clear();
-    // Note: mElement pointers in elementsToRestyle might now dangle
-  }
-}
-#endif
 
 /* static */ bool
 EffectCompositor::HasAnimationsForCompositor(const nsIFrame* aFrame,
@@ -699,7 +547,7 @@ EffectCompositor::ClearIsRunningOnCompositor(const nsIFrame *aFrame,
 EffectCompositor::MaybeUpdateCascadeResults(StyleBackendType aBackendType,
                                             Element* aElement,
                                             CSSPseudoElementType aPseudoType,
-                                            nsStyleContext* aStyleContext)
+                                            ComputedStyle* aComputedStyle)
 {
   EffectSet* effects = EffectSet::GetEffectSet(aElement, aPseudoType);
   if (!effects || !effects->CascadeNeedsUpdate()) {
@@ -707,7 +555,7 @@ EffectCompositor::MaybeUpdateCascadeResults(StyleBackendType aBackendType,
   }
 
   UpdateCascadeResults(aBackendType, *effects, aElement, aPseudoType,
-                       aStyleContext);
+                       aComputedStyle);
 
   MOZ_ASSERT(!effects->CascadeNeedsUpdate(), "Failed to update cascade state");
 }
@@ -719,7 +567,7 @@ EffectCompositor::GetAnimationElementAndPseudoForFrame(const nsIFrame* aFrame)
   Maybe<NonOwningAnimationTarget> result;
 
   CSSPseudoElementType pseudoType =
-    aFrame->StyleContext()->GetPseudoType();
+    aFrame->Style()->GetPseudoType();
 
   if (pseudoType != CSSPseudoElementType::NotPseudo &&
       pseudoType != CSSPseudoElementType::before &&
@@ -749,54 +597,13 @@ EffectCompositor::GetAnimationElementAndPseudoForFrame(const nsIFrame* aFrame)
   return result;
 }
 
-#ifdef MOZ_OLD_STYLE
-/* static */ void
-EffectCompositor::ComposeAnimationRule(dom::Element* aElement,
-                                       CSSPseudoElementType aPseudoType,
-                                       CascadeLevel aCascadeLevel)
-{
-  EffectSet* effects = EffectSet::GetEffectSet(aElement, aPseudoType);
-  if (!effects) {
-    return;
-  }
-
-  // The caller is responsible for calling MaybeUpdateCascadeResults first.
-  MOZ_ASSERT(!effects->CascadeNeedsUpdate(),
-             "Animation cascade out of date when composing animation rule");
-
-  // Get a list of effects sorted by composite order.
-  nsTArray<KeyframeEffectReadOnly*> sortedEffectList(effects->Count());
-  for (KeyframeEffectReadOnly* effect : *effects) {
-    sortedEffectList.AppendElement(effect);
-  }
-  sortedEffectList.Sort(EffectCompositeOrderComparator());
-
-  RefPtr<AnimValuesStyleRule>& animRule = effects->AnimationRule(aCascadeLevel);
-  animRule = nullptr;
-
-  // If multiple animations affect the same property, animations with higher
-  // composite order (priority) override or add or animations with lower
-  // priority except properties in propertiesToSkip.
-  const nsCSSPropertyIDSet& propertiesToSkip =
-    aCascadeLevel == CascadeLevel::Animations
-    ? effects->PropertiesForAnimationsLevel().Inverse()
-    : effects->PropertiesForAnimationsLevel();
-  for (KeyframeEffectReadOnly* effect : sortedEffectList) {
-    effect->GetAnimation()->WillComposeStyle();
-    effect->GetAnimation()->ComposeStyle(animRule, propertiesToSkip);
-  }
-
-  MOZ_ASSERT(effects == EffectSet::GetEffectSet(aElement, aPseudoType),
-             "EffectSet should not change while composing style");
-}
-#endif
 
 /* static */ nsCSSPropertyIDSet
 EffectCompositor::GetOverriddenProperties(StyleBackendType aBackendType,
                                           EffectSet& aEffectSet,
                                           Element* aElement,
                                           CSSPseudoElementType aPseudoType,
-                                          nsStyleContext* aStyleContext)
+                                          ComputedStyle* aComputedStyle)
 {
   MOZ_ASSERT(aBackendType != StyleBackendType::Servo || aElement,
              "Should have an element to get style data from if we are using"
@@ -805,21 +612,8 @@ EffectCompositor::GetOverriddenProperties(StyleBackendType aBackendType,
   nsCSSPropertyIDSet result;
 
   Element* elementToRestyle = GetElementToRestyle(aElement, aPseudoType);
-  if (aBackendType == StyleBackendType::Gecko && !aStyleContext) {
-#ifdef MOZ_OLD_STYLE
-    if (elementToRestyle) {
-      nsIFrame* frame = elementToRestyle->GetPrimaryFrame();
-      if (frame) {
-        aStyleContext = frame->StyleContext();
-      }
-    }
-
-    if (!aStyleContext) {
-      return result;
-    }
-#else
+  if (aBackendType == StyleBackendType::Gecko && !aComputedStyle) {
     MOZ_CRASH("old style system disabled");
-#endif
   } else if (aBackendType == StyleBackendType::Servo && !elementToRestyle) {
     return result;
   }
@@ -855,13 +649,7 @@ EffectCompositor::GetOverriddenProperties(StyleBackendType aBackendType,
                                                &result);
       break;
     case StyleBackendType::Gecko:
-#ifdef MOZ_OLD_STYLE
-      nsRuleNode::ComputePropertiesOverridingAnimation(propertiesToTrack,
-                                                       aStyleContext->AsGecko(),
-                                                       result);
-#else
       MOZ_CRASH("old style system disabled");
-#endif
       break;
 
     default:
@@ -876,7 +664,7 @@ EffectCompositor::UpdateCascadeResults(StyleBackendType aBackendType,
                                        EffectSet& aEffectSet,
                                        Element* aElement,
                                        CSSPseudoElementType aPseudoType,
-                                       nsStyleContext* aStyleContext)
+                                       ComputedStyle* aComputedStyle)
 {
   MOZ_ASSERT(EffectSet::GetEffectSet(aElement, aPseudoType) == &aEffectSet,
              "Effect set should correspond to the specified (pseudo-)element");
@@ -901,7 +689,7 @@ EffectCompositor::UpdateCascadeResults(StyleBackendType aBackendType,
     GetOverriddenProperties(aBackendType,
                             aEffectSet,
                             aElement, aPseudoType,
-                            aStyleContext);
+                            aComputedStyle);
 
   // Returns a bitset the represents which properties from
   // LayerAnimationInfo::sRecords are present in |aPropertySet|.
@@ -1237,127 +1025,11 @@ EffectCompositor::PreTraverse(dom::Element* aElement,
   return found;
 }
 
-#ifdef MOZ_OLD_STYLE
-// ---------------------------------------------------------
-//
-// Nested class: AnimationStyleRuleProcessor
-//
-// ---------------------------------------------------------
-
-NS_IMPL_ISUPPORTS(EffectCompositor::AnimationStyleRuleProcessor,
-                  nsIStyleRuleProcessor)
-
-nsRestyleHint
-EffectCompositor::AnimationStyleRuleProcessor::HasStateDependentStyle(
-  StateRuleProcessorData* aData)
-{
-  return nsRestyleHint(0);
-}
-
-nsRestyleHint
-EffectCompositor::AnimationStyleRuleProcessor::HasStateDependentStyle(
-  PseudoElementStateRuleProcessorData* aData)
-{
-  return nsRestyleHint(0);
-}
-
-bool
-EffectCompositor::AnimationStyleRuleProcessor::HasDocumentStateDependentStyle(
-  StateRuleProcessorData* aData)
-{
-  return false;
-}
-
-nsRestyleHint
-EffectCompositor::AnimationStyleRuleProcessor::HasAttributeDependentStyle(
-                        AttributeRuleProcessorData* aData,
-                        RestyleHintData& aRestyleHintDataResult)
-{
-  return nsRestyleHint(0);
-}
-
-bool
-EffectCompositor::AnimationStyleRuleProcessor::MediumFeaturesChanged(
-  nsPresContext* aPresContext)
-{
-  return false;
-}
-
-void
-EffectCompositor::AnimationStyleRuleProcessor::RulesMatching(
-  ElementRuleProcessorData* aData)
-{
-  nsIStyleRule *rule =
-    mCompositor->GetAnimationRule(aData->mElement,
-                                  CSSPseudoElementType::NotPseudo,
-                                  mCascadeLevel,
-                                  nullptr);
-  if (rule) {
-    aData->mRuleWalker->Forward(rule);
-    aData->mRuleWalker->CurrentNode()->SetIsAnimationRule();
-  }
-}
-
-void
-EffectCompositor::AnimationStyleRuleProcessor::RulesMatching(
-  PseudoElementRuleProcessorData* aData)
-{
-  if (aData->mPseudoType != CSSPseudoElementType::before &&
-      aData->mPseudoType != CSSPseudoElementType::after) {
-    return;
-  }
-
-  nsIStyleRule *rule =
-    mCompositor->GetAnimationRule(aData->mElement,
-                                  aData->mPseudoType,
-                                  mCascadeLevel,
-                                  nullptr);
-  if (rule) {
-    aData->mRuleWalker->Forward(rule);
-    aData->mRuleWalker->CurrentNode()->SetIsAnimationRule();
-  }
-}
-
-void
-EffectCompositor::AnimationStyleRuleProcessor::RulesMatching(
-  AnonBoxRuleProcessorData* aData)
-{
-}
-
-#ifdef MOZ_XUL
-void
-EffectCompositor::AnimationStyleRuleProcessor::RulesMatching(
-  XULTreeRuleProcessorData* aData)
-{
-}
-#endif
-
-size_t
-EffectCompositor::AnimationStyleRuleProcessor::SizeOfExcludingThis(
-  MallocSizeOf aMallocSizeOf) const
-{
-  return 0;
-}
-
-size_t
-EffectCompositor::AnimationStyleRuleProcessor::SizeOfIncludingThis(
-  MallocSizeOf aMallocSizeOf) const
-{
-  return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
-}
 
 template
 void
 EffectCompositor::UpdateEffectProperties(
-  GeckoStyleContext* aStyleContext,
-  Element* aElement,
-  CSSPseudoElementType aPseudoType);
-#endif
-
-template
-void
-EffectCompositor::UpdateEffectProperties(
-  const ServoStyleContext* aStyleContext,
+  const ComputedStyle* aComputedStyle,
   Element* aElement,
   CSSPseudoElementType aPseudoType);
 

@@ -5,10 +5,11 @@
 
 "use strict";
 
-const TEST_URI = "http://example.com/browser/devtools/client/webconsole/new-console-output/test/mochitest/test-console.html";
+const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
+                 "new-console-output/test/mochitest/test-console.html";
 
-add_task(function* () {
-  let toolbox = yield openNewTabAndToolbox(TEST_URI, "webconsole");
+add_task(async function() {
+  let toolbox = await openNewTabAndToolbox(TEST_URI, "webconsole");
   let hud = toolbox.getCurrentPanel().hud;
   let {ui} = hud;
 
@@ -22,11 +23,11 @@ add_task(function* () {
     ]
   });
 
-  yield ContentTask.spawn(gBrowser.selectedBrowser, {}, function () {
+  await ContentTask.spawn(gBrowser.selectedBrowser, {}, function() {
     content.wrappedJSObject.doLogs(20);
   });
 
-  yield receievedMessages;
+  await receievedMessages;
 
   const outputContainer = ui.outputNode.querySelector(".webconsole-output");
   is(outputContainer.querySelectorAll(".message.console-api").length, 20,

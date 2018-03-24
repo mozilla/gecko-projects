@@ -800,6 +800,16 @@ pub enum LonghandId {
     % endfor
 }
 
+impl ToCss for LonghandId {
+    #[inline]
+    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
+    where
+        W: Write,
+    {
+        dest.write_str(self.name())
+    }
+}
+
 impl fmt::Debug for LonghandId {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         formatter.write_str(self.name())
@@ -1130,12 +1140,22 @@ where
 }
 
 /// An identifier for a given shorthand property.
-#[derive(Clone, Copy, Debug, Eq, Hash, MallocSizeOf, PartialEq, ToCss)]
+#[derive(Clone, Copy, Debug, Eq, Hash, MallocSizeOf, PartialEq)]
 pub enum ShorthandId {
     % for property in data.shorthands:
         /// ${property.name}
         ${property.camel_case},
     % endfor
+}
+
+impl ToCss for ShorthandId {
+    #[inline]
+    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
+    where
+        W: Write,
+    {
+        dest.write_str(self.name())
+    }
 }
 
 impl ShorthandId {
@@ -1303,7 +1323,7 @@ pub enum DeclaredValue<'a, T: 'a> {
 /// extra discriminant word) and synthesize dependent DeclaredValues for
 /// PropertyDeclaration instances as needed.
 #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, ToCss)]
 pub enum DeclaredValueOwned<T> {
     /// A known specified value from the stylesheet.
     Value(T),
@@ -1338,6 +1358,19 @@ pub struct UnparsedValue {
     url_data: UrlExtraData,
     /// The shorthand this came from.
     from_shorthand: Option<ShorthandId>,
+}
+
+impl ToCss for UnparsedValue {
+    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
+    where
+        W: Write,
+    {
+        // https://drafts.csswg.org/css-variables/#variables-in-shorthands
+        if self.from_shorthand.is_none() {
+            dest.write_str(&*self.css)?;
+        }
+        Ok(())
+    }
 }
 
 impl UnparsedValue {
@@ -1402,25 +1435,6 @@ impl UnparsedValue {
                 keyword,
         })
         })
-    }
-}
-
-impl<'a, T: ToCss> ToCss for DeclaredValue<'a, T> {
-    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
-    where
-        W: Write,
-    {
-        match *self {
-            DeclaredValue::Value(ref inner) => inner.to_css(dest),
-            DeclaredValue::WithVariables(ref with_variables) => {
-                // https://drafts.csswg.org/css-variables/#variables-in-shorthands
-                if with_variables.from_shorthand.is_none() {
-                    dest.write_str(&*with_variables.css)?
-                }
-                Ok(())
-            },
-            DeclaredValue::CSSWideKeyword(ref keyword) => keyword.to_css(dest),
-        }
     }
 }
 
@@ -1631,6 +1645,12 @@ impl PropertyId {
         }
     }
 
+    /// Returns true if the property is a shorthand or shorthand alias.
+    #[inline]
+    pub fn is_shorthand(&self) -> bool {
+        self.as_shorthand().is_ok()
+    }
+
     /// Given this property id, get it either as a shorthand or as a
     /// `PropertyDeclarationId`.
     pub fn as_shorthand(&self) -> Result<ShorthandId, PropertyDeclarationId> {
@@ -1693,64 +1713,33 @@ impl PropertyId {
 
 /// A declaration using a CSS-wide keyword.
 #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, ToCss)]
 pub struct WideKeywordDeclaration {
+    #[css(skip)]
     id: LonghandId,
     keyword: CSSWideKeyword,
 }
 
-impl ToCss for WideKeywordDeclaration {
-    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
-    where
-        W: fmt::Write,
-    {
-        self.keyword.to_css(dest)
-    }
-}
-
 /// An unparsed declaration that contains `var()` functions.
 #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, ToCss)]
 pub struct VariableDeclaration {
+    #[css(skip)]
     id: LonghandId,
     #[cfg_attr(feature = "gecko", ignore_malloc_size_of = "XXX: how to handle this?")]
     value: Arc<UnparsedValue>,
 }
 
-impl ToCss for VariableDeclaration {
-    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
-    where
-        W: fmt::Write,
-    {
-        // https://drafts.csswg.org/css-variables/#variables-in-shorthands
-        match self.value.from_shorthand {
-            None => {
-                dest.write_str(&*self.value.css)?
-            }
-            Some(..) => {},
-        }
-        Ok(())
-    }
-}
-
 /// A custom property declaration with the property name and the declared value.
 #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, ToCss)]
 pub struct CustomDeclaration {
     /// The name of the custom property.
+    #[css(skip)]
     pub name: ::custom_properties::Name,
     /// The value of the custom property.
     #[cfg_attr(feature = "gecko", ignore_malloc_size_of = "XXX: how to handle this?")]
     pub value: DeclaredValueOwned<Arc<::custom_properties::SpecifiedValue>>,
-}
-
-impl ToCss for CustomDeclaration {
-    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
-    where
-        W: fmt::Write,
-    {
-        self.value.borrow().to_css(dest)
-    }
 }
 
 impl fmt::Debug for PropertyDeclaration {
@@ -2433,10 +2422,11 @@ pub struct ComputedValuesInner {
 pub struct ComputedValues {
     /// The actual computed values
     ///
-    /// In Gecko the outer ComputedValues is actually a style context,
-    /// whereas ComputedValuesInner is the core set of computed values.
+    /// In Gecko the outer ComputedValues is actually a ComputedStyle, whereas
+    /// ComputedValuesInner is the core set of computed values.
     ///
-    /// We maintain this distinction in servo to reduce the amount of special casing.
+    /// We maintain this distinction in servo to reduce the amount of special
+    /// casing.
     inner: ComputedValuesInner,
 }
 

@@ -16,7 +16,7 @@ const LEARN_MORE_URI = "https://developer.mozilla.org/Firefox/Privacy/" +
 
 const {UrlClassifierTestUtils} = ChromeUtils.import("resource://testing-common/UrlClassifierTestUtils.jsm", {});
 
-registerCleanupFunction(function () {
+registerCleanupFunction(function() {
   UrlClassifierTestUtils.cleanupTestTrackers();
 });
 

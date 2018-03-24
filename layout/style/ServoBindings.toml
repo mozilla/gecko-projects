@@ -2,7 +2,7 @@
 args = [
     "-x", "c++", "-std=c++14", "-fno-sized-deallocation",
     "-DTRACING=1", "-DIMPL_LIBXUL", "-DMOZ_STYLO_BINDINGS=1",
-    "-DMOZILLA_INTERNAL_API", "-DRUST_BINDGEN", "-DMOZ_STYLO"
+    "-DMOZILLA_INTERNAL_API", "-DRUST_BINDGEN"
 ]
 "family=unix" = ["-DOS_POSIX=1"]
 "os=solaris" = ["-DOS_SOLARIS=1"]
@@ -74,8 +74,9 @@ headers = [
     "mozilla/StylePrefs.h",
     "mozilla/ServoBindings.h",
     "mozilla/ServoMediaList.h",
-    "mozilla/ServoStyleContext.h",
+    "mozilla/ComputedStyle.h",
     "mozilla/ServoDeclarationBlock.h",
+    "mozilla/ServoTraversalStatistics.h",
     "mozilla/SizeOfState.h",
     "nsCSSCounterStyleRule.h",
     "nsCSSFontFaceRule.h",
@@ -98,11 +99,13 @@ hide-types = [
     "nsString",
     ".*char_traits",
     ".*incompatible_char_type",
-    # JS::Value uses alignas(8) which bindgen can't represent correctly on Linux
-    # 32-bit.  See https://github.com/rust-lang-nursery/rust-bindgen/issues/917.
+    # JS::Value and JS::UninitializedValue use alignas(8) which bindgen
+    # can't represent correctly on Linux 32-bit.  See
+    # https://github.com/rust-lang-nursery/rust-bindgen/issues/917.
     # It's also not used by Stylo.  The following types are also hidden for
     # making use of it and being similarly unused by Stylo.
     "JS::Value",
+    "JS::UninitializedValue",
     "mozilla::binding_danger::TErrorResult.*",
     "mozilla::ErrorResult.*", # Causes JSWhyMagic to be included & handled incorrectly.
     "mozilla::dom::CallbackFunction",
@@ -224,10 +227,11 @@ whitelist-types = [
     "mozilla::ComputedTimingFunction::BeforeFlag",
     "mozilla::SeenPtrs",
     "mozilla::ServoElementSnapshot.*",
-    "mozilla::ServoStyleContext",
+    "mozilla::ComputedStyle",
     "mozilla::ServoStyleSheet",
     "mozilla::ServoStyleSheetInner",
     "mozilla::ServoStyleSetSizes",
+    "mozilla::ServoTraversalStatistics",
     "mozilla::CSSPseudoClassType",
     "mozilla::css::ErrorReporter",
     "mozilla::css::LoaderReusableStyleSheets",
@@ -318,7 +322,7 @@ whitelist-types = [
     "nsStyleColumn",
     "nsStyleContent",
     "nsStyleContentData",
-    "nsStyleContext",
+    "ComputedStyle",
     "nsStyleCoord",
     "nsStyleCounterData",
     "nsStyleDisplay",
@@ -359,9 +363,9 @@ whitelist-types = [
     "ServoComputedData",
     "ServoComputedDataBorrowed",
     "ServoElementSnapshot",
-    "ServoStyleContextStrong",
-    "ServoStyleContextBorrowed",
-    "ServoStyleContextBorrowedOrNull",
+    "ComputedStyleStrong",
+    "ComputedStyleBorrowed",
+    "ComputedStyleBorrowedOrNull",
     "SheetParsingMode",
     "StaticRefPtr",
     "StyleAnimation",
@@ -437,7 +441,7 @@ mapped-generic-types = [
     { generic = false, gecko = "mozilla::ServoVisitedStyle", servo = "Option<::servo_arc::RawOffsetArc<::properties::ComputedValues>>" },
     { generic = false, gecko = "mozilla::ServoComputedValueFlags", servo = "::properties::computed_value_flags::ComputedValueFlags" },
     { generic = true, gecko = "mozilla::ServoRawOffsetArc", servo = "::servo_arc::RawOffsetArc" },
-    { generic = false, gecko = "ServoStyleContextStrong", servo = "::gecko_bindings::sugar::ownership::Strong<::properties::ComputedValues>" },
+    { generic = false, gecko = "ComputedStyleStrong", servo = "::gecko_bindings::sugar::ownership::Strong<::properties::ComputedValues>" },
 ]
 fixups = [
     { pat = "\\broot\\s*::\\s*nsString\\b", rep = "::nsstring::nsStringRepr" },
@@ -449,8 +453,8 @@ headers = ["mozilla/ServoBindings.h"]
 hide-types = [
     "nsACString_internal",
     "nsAString_internal",
-    "ServoStyleContextBorrowed",
-    "ServoStyleContextBorrowedOrNull",
+    "ComputedStyleBorrowed",
+    "ComputedStyleBorrowedOrNull",
 ]
 raw-lines = [
     "pub use nsstring::{nsACString, nsAString, nsString, nsStringRepr};",
@@ -458,8 +462,8 @@ raw-lines = [
     "use gecko_bindings::structs::nsTArray;",
     "type nsACString_internal = nsACString;",
     "type nsAString_internal = nsAString;",
-    "pub type ServoStyleContextBorrowed<'a> = &'a ::properties::ComputedValues;",
-    "pub type ServoStyleContextBorrowedOrNull<'a> = Option<&'a ::properties::ComputedValues>;",
+    "pub type ComputedStyleBorrowed<'a> = &'a ::properties::ComputedValues;",
+    "pub type ComputedStyleBorrowedOrNull<'a> = Option<&'a ::properties::ComputedValues>;",
     "pub type ServoComputedDataBorrowed<'a> = &'a ServoComputedData;",
     "pub type RawServoAnimationValueTableBorrowed<'a> = &'a ();"
 ]
@@ -558,7 +562,7 @@ structs-types = [
     "nsStyleContentData",
     "nsStyleContentData_CounterFunction",
     "nsStyleContentType",
-    "nsStyleContext",
+    "ComputedStyle",
     "nsStyleCoord",
     "nsStyleCoord_Calc",
     "nsStyleCoord_CalcValue",
@@ -604,8 +608,7 @@ structs-types = [
     "SheetLoadData",
     "ServoStyleSheet",
     "ServoComputedData",
-    "ServoStyleContext",
-    "ServoStyleContextStrong",
+    "ComputedStyleStrong",
     "EffectCompositor_CascadeLevel",
     "UpdateAnimationsTasks",
     "ParsingMode",

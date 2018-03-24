@@ -48,9 +48,9 @@ use dom::windowproxy::WindowProxy;
 use dom::worklet::Worklet;
 use dom::workletglobalscope::WorkletGlobalScopeType;
 use dom_struct::dom_struct;
-use euclid::{Point2D, Vector2D, Rect, Size2D};
+use euclid::{Point2D, Vector2D, Rect, Size2D, TypedPoint2D, TypedScale, TypedSize2D};
 use fetch;
-use ipc_channel::ipc::{self, IpcSender};
+use ipc_channel::ipc::IpcSender;
 use ipc_channel::router::ROUTER;
 use js::jsapi::{HandleValue, JSAutoCompartment, JSContext};
 use js::jsapi::{JS_GC, JS_GetRuntime};
@@ -63,6 +63,7 @@ use net_traits::image_cache::{ImageCache, ImageResponder, ImageResponse};
 use net_traits::image_cache::{PendingImageId, PendingImageResponse};
 use net_traits::storage_thread::StorageType;
 use num_traits::ToPrimitive;
+use profile_traits::ipc as ProfiledIpc;
 use profile_traits::mem::ProfilerChan as MemProfilerChan;
 use profile_traits::time::ProfilerChan as TimeProfilerChan;
 use script_layout_interface::{TrustedNodeAddress, PendingImageState};
@@ -102,7 +103,7 @@ use style::properties::{ComputedValues, PropertyId};
 use style::selector_parser::PseudoElement;
 use style::str::HTML_SPACE_CHARACTERS;
 use style::stylesheets::CssRuleType;
-use style_traits::ParsingMode;
+use style_traits::{CSSPixel, DevicePixel, ParsingMode};
 use task::TaskCanceller;
 use task_source::dom_manipulation::DOMManipulationTaskSource;
 use task_source::file_reading::FileReadingTaskSource;
@@ -116,7 +117,7 @@ use timers::{IsInterval, TimerCallback};
 use tinyfiledialogs::{self, MessageBoxIcon};
 use url::Position;
 use webdriver_handlers::jsval_to_webdriver;
-use webrender_api::{ExternalScrollId, DocumentId};
+use webrender_api::{ExternalScrollId, DeviceIntPoint, DeviceUintSize, DocumentId};
 use webvr_traits::WebVRMsg;
 
 /// Current state of the window object
@@ -257,9 +258,9 @@ pub struct Window {
 
     test_runner: MutNullableDom<TestRunner>,
 
-    /// A handle for communicating messages to the webvr thread, if available.
+    /// A handle for communicating messages to the WebGL thread, if available.
     #[ignore_malloc_size_of = "channels are hard"]
-    webgl_chan: WebGLChan,
+    webgl_chan: Option<WebGLChan>,
 
     /// A handle for communicating messages to the webvr thread, if available.
     #[ignore_malloc_size_of = "channels are hard"]
@@ -402,7 +403,7 @@ impl Window {
         self.current_viewport.clone().get()
     }
 
-    pub fn webgl_chan(&self) -> WebGLChan {
+    pub fn webgl_chan(&self) -> Option<WebGLChan> {
         self.webgl_chan.clone()
     }
 
@@ -540,7 +541,7 @@ impl WindowMethods for Window {
             stderr.flush().unwrap();
         }
 
-        let (sender, receiver) = ipc::channel().unwrap();
+        let (sender, receiver) = ProfiledIpc::channel(self.global().time_profiler_chan().clone()).unwrap();
         self.send_to_constellation(ScriptMsg::Alert(s.to_string(), sender));
 
         let should_display_alert_dialog = receiver.recv().unwrap();
@@ -930,11 +931,12 @@ impl WindowMethods for Window {
     }
 
     // https://drafts.csswg.org/cssom-view/#dom-window-resizeto
-    fn ResizeTo(&self, x: i32, y: i32) {
+    fn ResizeTo(&self, width: i32, height: i32) {
         // Step 1
         //TODO determine if this operation is allowed
-        let size = Size2D::new(x.to_u32().unwrap_or(1), y.to_u32().unwrap_or(1));
-        self.send_to_constellation(ScriptMsg::ResizeTo(size));
+        let dpr = self.device_pixel_ratio();
+        let size = TypedSize2D::new(width, height).to_f32() * dpr;
+        self.send_to_constellation(ScriptMsg::ResizeTo(size.to_u32()));
     }
 
     // https://drafts.csswg.org/cssom-view/#dom-window-resizeby
@@ -948,8 +950,9 @@ impl WindowMethods for Window {
     fn MoveTo(&self, x: i32, y: i32) {
         // Step 1
         //TODO determine if this operation is allowed
-        let point = Point2D::new(x, y);
-        self.send_to_constellation(ScriptMsg::MoveTo(point));
+        let dpr = self.device_pixel_ratio();
+        let point = TypedPoint2D::new(x, y).to_f32() * dpr;
+        self.send_to_constellation(ScriptMsg::MoveTo(point.to_i32()));
     }
 
     // https://drafts.csswg.org/cssom-view/#dom-window-moveby
@@ -985,8 +988,7 @@ impl WindowMethods for Window {
 
     // https://drafts.csswg.org/cssom-view/#dom-window-devicepixelratio
     fn DevicePixelRatio(&self) -> Finite<f64> {
-        let dpr = self.window_size.get().map_or(1.0f32, |data| data.device_pixel_ratio.get());
-        Finite::wrap(dpr as f64)
+        Finite::wrap(self.device_pixel_ratio().get() as f64)
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-window-status
@@ -1174,10 +1176,18 @@ impl Window {
         self.current_viewport.set(new_viewport)
     }
 
-    pub fn client_window(&self) -> (Size2D<u32>, Point2D<i32>) {
-        let (send, recv) = ipc::channel::<(Size2D<u32>, Point2D<i32>)>().unwrap();
+    pub fn device_pixel_ratio(&self) -> TypedScale<f32, CSSPixel, DevicePixel> {
+        self.window_size.get().map_or(TypedScale::new(1.0), |data| data.device_pixel_ratio)
+    }
+
+    fn client_window(&self) -> (TypedSize2D<u32, CSSPixel>, TypedPoint2D<i32, CSSPixel>) {
+        let timer_profile_chan = self.global().time_profiler_chan().clone();
+        let (send, recv) =
+            ProfiledIpc::channel::<(DeviceUintSize, DeviceIntPoint)>(timer_profile_chan).unwrap();
         self.send_to_constellation(ScriptMsg::GetClientWindow(send));
-        recv.recv().unwrap_or((Size2D::zero(), Point2D::zero()))
+        let (size, point) = recv.recv().unwrap_or((TypedSize2D::zero(), TypedPoint2D::zero()));
+        let dpr = self.device_pixel_ratio();
+        ((size.to_f32() / dpr).to_u32(), (point.to_f32() / dpr).to_i32())
     }
 
     /// Advances the layout animation clock by `delta` milliseconds, and then
@@ -1293,7 +1303,8 @@ impl Window {
             let mut images = self.pending_layout_images.borrow_mut();
             let nodes = images.entry(id).or_insert(vec![]);
             if nodes.iter().find(|n| &***n as *const _ == &*node as *const _).is_none() {
-                let (responder, responder_listener) = ipc::channel().unwrap();
+                let (responder, responder_listener) =
+                    ProfiledIpc::channel(self.global().time_profiler_chan().clone()).unwrap();
                 let pipeline = self.upcast::<GlobalScope>().pipeline_id();
                 let image_cache_chan = self.image_cache_chan.clone();
                 ROUTER.add_route(responder_listener.to_opaque(), Box::new(move |message| {
@@ -1756,7 +1767,7 @@ impl Window {
         origin: MutableOrigin,
         navigation_start: u64,
         navigation_start_precise: u64,
-        webgl_chan: WebGLChan,
+        webgl_chan: Option<WebGLChan>,
         webvr_chan: Option<IpcSender<WebVRMsg>>,
         microtask_queue: Rc<MicrotaskQueue>,
         webrender_document: DocumentId,

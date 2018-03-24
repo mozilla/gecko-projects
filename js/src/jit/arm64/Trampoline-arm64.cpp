@@ -702,6 +702,11 @@ JitRuntime::generateVMWrapper(JSContext* cx, MacroAssembler& masm, const VMFunct
         break;
     }
 
+    // Until C++ code is instrumented against Spectre, prevent speculative
+    // execution from returning any private data.
+    if (f.returnsData() && JitOptions.spectreJitToCxxCalls)
+        masm.speculationBarrier();
+
     masm.leaveExitFrame();
     masm.retn(Imm32(sizeof(ExitFrameLayout) +
               f.explicitStackSlots() * sizeof(void*) +
@@ -766,7 +771,7 @@ static const VMFunction HandleDebugTrapInfo =
 JitCode*
 JitRuntime::generateDebugTrapHandler(JSContext* cx)
 {
-    MacroAssembler masm(cx);
+    StackMacroAssembler masm(cx);
 #ifndef JS_USE_LINK_REGISTER
     // The first value contains the return addres,
     // which we pull into ICTailCallReg for tail calls.

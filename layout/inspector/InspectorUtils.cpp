@@ -11,7 +11,6 @@
 
 #include "nsArray.h"
 #include "nsAutoPtr.h"
-#include "nsGenericDOMDataNode.h"
 #include "nsIServiceManager.h"
 #include "nsString.h"
 #include "nsIStyleSheetLinkingElement.h"
@@ -20,12 +19,6 @@
 #include "nsIDocument.h"
 #include "nsIPresShell.h"
 #include "nsIDOMDocument.h"
-#include "nsIDOMCharacterData.h"
-#ifdef MOZ_OLD_STYLE
-#include "nsRuleNode.h"
-#include "nsIStyleRule.h"
-#include "mozilla/css/StyleRule.h"
-#endif
 #include "nsIDOMWindow.h"
 #include "nsXBLBinding.h"
 #include "nsXBLPrototypeBinding.h"
@@ -37,14 +30,9 @@
 #include "nsAtom.h"
 #include "nsRange.h"
 #include "mozilla/StyleSheetInlines.h"
+#include "mozilla/dom/CharacterData.h"
 #include "mozilla/dom/Element.h"
-#ifdef MOZ_OLD_STYLE
-#include "nsRuleWalker.h"
-#endif
 #include "nsCSSPseudoClasses.h"
-#ifdef MOZ_OLD_STYLE
-#include "nsCSSRuleProcessor.h"
-#endif
 #include "mozilla/dom/CSSLexer.h"
 #include "mozilla/dom/InspectorUtilsBinding.h"
 #include "mozilla/dom/ToJSValue.h"
@@ -110,7 +98,7 @@ InspectorUtils::GetAllStyleSheets(GlobalObject& aGlobalObject,
 }
 
 bool
-InspectorUtils::IsIgnorableWhitespace(nsGenericDOMDataNode& aDataNode)
+InspectorUtils::IsIgnorableWhitespace(CharacterData& aDataNode)
 {
   if (!aDataNode.TextIsOnlyWhitespace()) {
     return false;
@@ -180,8 +168,8 @@ InspectorUtils::GetCSSStyleRules(GlobalObject& aGlobalObject,
     pseudoElt = NS_Atomize(aPseudo);
   }
 
-  RefPtr<nsStyleContext> styleContext =
-    GetCleanStyleContextForElement(&aElement, pseudoElt);
+  RefPtr<ComputedStyle> styleContext =
+    GetCleanComputedStyleForElement(&aElement, pseudoElt);
   if (!styleContext) {
     // This can fail for elements that are not in the document or
     // if the document they're in doesn't have a presshell.  Bail out.
@@ -189,91 +177,63 @@ InspectorUtils::GetCSSStyleRules(GlobalObject& aGlobalObject,
   }
 
 
-  if (styleContext->IsGecko()) {
-#ifdef MOZ_OLD_STYLE
-    auto gecko = styleContext->AsGecko();
-    nsRuleNode* ruleNode = gecko->RuleNode();
-    if (!ruleNode) {
-      return;
-    }
+  nsIDocument* doc = aElement.OwnerDoc();
+  nsIPresShell* shell = doc->GetShell();
+  if (!shell) {
+    return;
+  }
 
-    AutoTArray<nsRuleNode*, 16> ruleNodes;
-    while (!ruleNode->IsRoot()) {
-      ruleNodes.AppendElement(ruleNode);
-      ruleNode = ruleNode->GetParent();
-    }
+  ComputedStyle* servo = styleContext->AsServo();
+  nsTArray<const RawServoStyleRule*> rawRuleList;
+  Servo_ComputedValues_GetStyleRuleList(servo, &rawRuleList);
 
-    for (nsRuleNode* ruleNode : Reversed(ruleNodes)) {
-      RefPtr<Declaration> decl = do_QueryObject(ruleNode->GetRule());
-      if (decl) {
-        css::Rule* owningRule = decl->GetOwningRule();
-        if (owningRule) {
-          aResult.AppendElement(owningRule);
-        }
+  AutoTArray<ServoStyleRuleMap*, 1> maps;
+  {
+    ServoStyleSet* styleSet = shell->StyleSet()->AsServo();
+    ServoStyleRuleMap* map = styleSet->StyleRuleMap();
+    maps.AppendElement(map);
+  }
+
+  // Collect style rule maps for bindings.
+  for (nsIContent* bindingContent = &aElement; bindingContent;
+       bindingContent = bindingContent->GetBindingParent()) {
+    for (nsXBLBinding* binding = bindingContent->GetXBLBinding();
+         binding; binding = binding->GetBaseBinding()) {
+      if (auto* map = binding->PrototypeBinding()->GetServoStyleRuleMap()) {
+        maps.AppendElement(map);
       }
     }
-#else
-    MOZ_CRASH("old style system disabled");
-#endif
-  } else {
-    nsIDocument* doc = aElement.OwnerDoc();
-    nsIPresShell* shell = doc->GetShell();
-    if (!shell) {
-      return;
-    }
+    // Note that we intentionally don't cut off here, unlike when we
+    // do styling, because even if style rules from parent binding
+    // do not apply to the element directly in those cases, their
+    // rules may still show up in the list we get above due to the
+    // inheritance in cascading.
+  }
 
-    ServoStyleContext* servo = styleContext->AsServo();
-    nsTArray<const RawServoStyleRule*> rawRuleList;
-    Servo_ComputedValues_GetStyleRuleList(servo, &rawRuleList);
+  // Now shadow DOM stuff...
+  if (auto* shadow = aElement.GetShadowRoot()) {
+    maps.AppendElement(&shadow->ServoStyleRuleMap());
+  }
 
-    AutoTArray<ServoStyleRuleMap*, 1> maps;
-    {
-      ServoStyleSet* styleSet = shell->StyleSet()->AsServo();
-      ServoStyleRuleMap* map = styleSet->StyleRuleMap();
-      maps.AppendElement(map);
-    }
+  for (auto* shadow = aElement.GetContainingShadow();
+       shadow;
+       shadow = shadow->Host()->GetContainingShadow()) {
+    maps.AppendElement(&shadow->ServoStyleRuleMap());
+  }
 
-    // Collect style rule maps for bindings.
-    for (nsIContent* bindingContent = &aElement; bindingContent;
-         bindingContent = bindingContent->GetBindingParent()) {
-      for (nsXBLBinding* binding = bindingContent->GetXBLBinding();
-           binding; binding = binding->GetBaseBinding()) {
-        if (auto* map = binding->PrototypeBinding()->GetServoStyleRuleMap()) {
-          maps.AppendElement(map);
-        }
-      }
-      // Note that we intentionally don't cut off here, unlike when we
-      // do styling, because even if style rules from parent binding
-      // do not apply to the element directly in those cases, their
-      // rules may still show up in the list we get above due to the
-      // inheritance in cascading.
-    }
-
-    // Now shadow DOM stuff...
-    if (auto* shadow = aElement.GetShadowRoot()) {
-      maps.AppendElement(&shadow->ServoStyleRuleMap());
-    }
-
-    for (auto* shadow = aElement.GetContainingShadow();
-         shadow;
-         shadow = shadow->Host()->GetContainingShadow()) {
-      maps.AppendElement(&shadow->ServoStyleRuleMap());
-    }
-
-    // Find matching rules in the table.
-    for (const RawServoStyleRule* rawRule : Reversed(rawRuleList)) {
-      ServoStyleRule* rule = nullptr;
-      for (ServoStyleRuleMap* map : maps) {
-        rule = map->Lookup(rawRule);
-        if (rule) {
-          break;
-        }
-      }
+  // Find matching rules in the table.
+  for (const RawServoStyleRule* rawRule : Reversed(rawRuleList)) {
+    ServoStyleRule* rule = nullptr;
+    for (ServoStyleRuleMap* map : maps) {
+      rule = map->Lookup(rawRule);
       if (rule) {
-        aResult.AppendElement(rule);
-      } else {
-        MOZ_ASSERT_UNREACHABLE("We should be able to map a raw rule to a rule");
+        break;
       }
+    }
+    if (rule) {
+      aResult.AppendElement(rule);
+    } else {
+      MOZ_ASSERT_UNREACHABLE("We should be able to map a raw rule to a rule");
     }
   }
 }
@@ -411,7 +371,7 @@ InspectorUtils::IsInheritedProperty(GlobalObject& aGlobalObject,
   }
 
   nsStyleStructID sid = nsCSSProps::kSIDTable[prop];
-  return !nsStyleContext::IsReset(sid);
+  return !ComputedStyle::IsReset(sid);
 }
 
 /* static */ void
@@ -627,18 +587,13 @@ InspectorUtils::CssPropertyIsShorthand(GlobalObject& aGlobalObject,
                                        const nsAString& aProperty,
                                        ErrorResult& aRv)
 {
-  nsCSSPropertyID propertyID =
-    nsCSSProps::LookupProperty(aProperty, CSSEnabledState::eForAllContent);
-  if (propertyID == eCSSProperty_UNKNOWN) {
+  NS_ConvertUTF16toUTF8 prop(aProperty);
+  bool found;
+  bool isShorthand = Servo_Property_IsShorthand(&prop, &found);
+  if (!found) {
     aRv.Throw(NS_ERROR_FAILURE);
-    return false;
   }
-
-  if (propertyID == eCSSPropertyExtra_variable) {
-    return false;
-  }
-
-  return nsCSSProps::IsShorthand(propertyID);
+  return isShorthand;
 }
 
 // A helper function that determines whether the given property
@@ -900,23 +855,11 @@ InspectorUtils::ColorToRGBA(GlobalObject& aGlobalObject,
 {
   nscolor color = NS_RGB(0, 0, 0);
 
-#ifdef MOZ_STYLO
   if (!ServoCSSParser::ComputeColor(nullptr, NS_RGB(0, 0, 0), aColorString,
                                     &color)) {
     aResult.SetNull();
     return;
   }
-#else
-  nsCSSParser cssParser;
-  nsCSSValue cssValue;
-
-  if (!cssParser.ParseColorString(aColorString, nullptr, 0, cssValue, true)) {
-    aResult.SetNull();
-    return;
-  }
-
-  nsRuleNode::ComputeColor(cssValue, nullptr, nullptr, color);
-#endif
 
   InspectorRGBATuple& tuple = aResult.SetValue();
   tuple.mR = NS_GET_R(color);
@@ -929,13 +872,7 @@ InspectorUtils::ColorToRGBA(GlobalObject& aGlobalObject,
 InspectorUtils::IsValidCSSColor(GlobalObject& aGlobalObject,
                                 const nsAString& aColorString)
 {
-#ifdef MOZ_STYLO
   return ServoCSSParser::IsValidCSSColor(aColorString);
-#else
-  nsCSSParser cssParser;
-  nsCSSValue cssValue;
-  return cssParser.ParseColorString(aColorString, nullptr, 0, cssValue, true);
-#endif
 }
 
 void
@@ -1007,8 +944,8 @@ InspectorUtils::GetContentState(GlobalObject& aGlobalObject,
   return aElement.State().GetInternalValue();
 }
 
-/* static */ already_AddRefed<nsStyleContext>
-InspectorUtils::GetCleanStyleContextForElement(dom::Element* aElement,
+/* static */ already_AddRefed<ComputedStyle>
+InspectorUtils::GetCleanComputedStyleForElement(dom::Element* aElement,
                                                nsAtom* aPseudo)
 {
   MOZ_ASSERT(aElement);
@@ -1030,8 +967,8 @@ InspectorUtils::GetCleanStyleContextForElement(dom::Element* aElement,
 
   presContext->EnsureSafeToHandOutCSSRules();
 
-  RefPtr<nsStyleContext> styleContext =
-    nsComputedDOMStyle::GetStyleContext(aElement, aPseudo);
+  RefPtr<ComputedStyle> styleContext =
+    nsComputedDOMStyle::GetComputedStyle(aElement, aPseudo);
   return styleContext.forget();
 }
 
@@ -1155,16 +1092,6 @@ InspectorUtils::ParseStyleSheet(GlobalObject& aGlobalObject,
                                 const nsAString& aInput,
                                 ErrorResult& aRv)
 {
-#ifdef MOZ_OLD_STYLE
-  RefPtr<CSSStyleSheet> geckoSheet = do_QueryObject(&aSheet);
-  if (geckoSheet) {
-    nsresult rv = geckoSheet->ReparseSheet(aInput);
-    if (NS_FAILED(rv)) {
-      aRv.Throw(rv);
-    }
-    return;
-  }
-#endif
 
   RefPtr<ServoStyleSheet> servoSheet = do_QueryObject(&aSheet);
   if (servoSheet) {

@@ -35,8 +35,7 @@ const INITIAL_STATE = {
     visible: false,
     data: {}
   },
-  Sections: [],
-  PreferencesPane: {visible: false}
+  Sections: []
 };
 
 function App(prevState = INITIAL_STATE.App, action) {
@@ -177,28 +176,11 @@ function Sections(prevState = INITIAL_STATE.Sections, action) {
         }
         return section;
       });
-
-      // Invariant: Sections array sorted in increasing order of property `order`.
-      // If section doesn't exist in prevState, create a new section object. If
-      // the section has an order, insert it at the correct place in the array.
-      // Otherwise, prepend it and set the order to be minimal.
+      // Otherwise, append it
       if (!hasMatch) {
         const initialized = !!(action.data.rows && action.data.rows.length > 0);
-        let order;
-        let index;
-        if (prevState.length > 0) {
-          order = action.data.order !== undefined ? action.data.order : prevState[0].order - 1;
-          index = newState.findIndex(section => section.order >= order);
-          if (index === -1) {
-            index = newState.length;
-          }
-        } else {
-          order = action.data.order !== undefined ? action.data.order : 0;
-          index = 0;
-        }
-
-        const section = Object.assign({title: "", rows: [], order, enabled: false}, action.data, {initialized});
-        newState.splice(index, 0, section);
+        const section = Object.assign({title: "", rows: [], enabled: false}, action.data, {initialized});
+        newState.push(section);
       }
       return newState;
     case at.SECTION_UPDATE:
@@ -334,19 +316,12 @@ function Snippets(prevState = INITIAL_STATE.Snippets, action) {
   switch (action.type) {
     case at.SNIPPETS_DATA:
       return Object.assign({}, prevState, {initialized: true}, action.data);
+    case at.SNIPPET_BLOCKED:
+      return Object.assign({}, prevState, {blockList: prevState.blockList.concat(action.data)});
+    case at.SNIPPETS_BLOCKLIST_CLEARED:
+      return Object.assign({}, prevState, {blockList: []});
     case at.SNIPPETS_RESET:
       return INITIAL_STATE.Snippets;
-    default:
-      return prevState;
-  }
-}
-
-function PreferencesPane(prevState = INITIAL_STATE.PreferencesPane, action) {
-  switch (action.type) {
-    case at.SETTINGS_OPEN:
-      return Object.assign({}, prevState, {visible: true});
-    case at.SETTINGS_CLOSE:
-      return Object.assign({}, prevState, {visible: false});
     default:
       return prevState;
   }
@@ -356,6 +331,6 @@ this.INITIAL_STATE = INITIAL_STATE;
 this.TOP_SITES_DEFAULT_ROWS = TOP_SITES_DEFAULT_ROWS;
 this.TOP_SITES_MAX_SITES_PER_ROW = TOP_SITES_MAX_SITES_PER_ROW;
 
-this.reducers = {TopSites, App, Snippets, Prefs, Dialog, Sections, PreferencesPane};
+this.reducers = {TopSites, App, Snippets, Prefs, Dialog, Sections};
 
 const EXPORTED_SYMBOLS = ["reducers", "INITIAL_STATE", "insertPinned", "TOP_SITES_DEFAULT_ROWS", "TOP_SITES_MAX_SITES_PER_ROW"];

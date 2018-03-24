@@ -83,25 +83,6 @@ awsy-stylo-sequential:
 ##
 # Limited test sets for specific platforms
 
-stylo-disabled-tests:
-    - cppunit
-    - crashtest
-    - reftest
-    - web-platform-tests
-    - web-platform-tests-reftests
-    - mochitest
-    - mochitest-a11y
-    - mochitest-browser-chrome
-    - browser-screenshots
-    - mochitest-chrome
-    - mochitest-clipboard
-    - mochitest-gpu
-    - mochitest-media
-    - mochitest-webgl
-
-reftest-stylo:
-    - reftest-stylo
-
 linux-qr-talos:
     - talos-chrome
     - talos-dromaeojs
@@ -222,6 +203,7 @@ windows-talos:
     - talos-tp5o
     - talos-xperf
     - talos-speedometer
+    - talos-tp6
 
 macosx64-tests:
     - cppunit
@@ -321,6 +303,7 @@ desktop-instrumentation:
 android-common-tests:
     - cppunit
     - crashtest
+    # - jittest # not ready yet: bug 1098508
     - jsreftest
     - mochitest
     - mochitest-chrome

@@ -28,18 +28,14 @@
 #include "nsGkAtoms.h"
 #include "nsStringFwd.h"
 #include "nsStyledElement.h"
-#include "nsIFrameLoader.h"
-#include "nsFrameLoader.h" // Needed because we return an
-                           // already_AddRefed<nsFrameLoader> where bindings
-                           // want an already_AddRefed<nsIFrameLoader> and hence
-                           // bindings need to know that the former can cast to
-                           // the latter.
+#include "nsIFrameLoaderOwner.h"
 #include "mozilla/dom/DOMRect.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/DOMString.h"
 #include "mozilla/dom/FromParser.h"
 
 class nsIDocument;
+class nsFrameLoader;
 class nsXULPrototypeDocument;
 
 class nsIObjectInputStream;
@@ -350,7 +346,7 @@ public:
     Create(nsXULPrototypeElement* aPrototype, nsIDocument* aDocument,
            bool aIsScriptable, bool aIsRoot, mozilla::dom::Element** aResult);
 
-    NS_IMPL_FROMCONTENT(nsXULElement, kNameSpaceID_XUL)
+    NS_IMPL_FROMNODE(nsXULElement, kNameSpaceID_XUL)
 
     // nsISupports
     NS_DECL_ISUPPORTS_INHERITED
@@ -389,9 +385,6 @@ public:
     virtual bool IsNodeOfType(uint32_t aFlags) const override;
     virtual bool IsFocusableInternal(int32_t* aTabIndex, bool aWithMouse) override;
 
-#ifdef MOZ_OLD_STYLE
-    NS_IMETHOD WalkContentStyleRules(nsRuleWalker* aRuleWalker) override;
-#endif
     virtual nsChangeHint GetAttributeChangeHint(const nsAtom* aAttribute,
                                                 int32_t aModType) const override;
     NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const override;
@@ -403,7 +396,6 @@ public:
                            bool aPreallocateChildren) const override;
     virtual mozilla::EventStates IntrinsicState() const override;
 
-    nsresult GetFrameLoaderXPCOM(nsIFrameLoader** aFrameLoader);
     void PresetOpenerWindow(mozIDOMWindowProxy* aWindow, ErrorResult& aRv);
 
     virtual void RecompileScriptEventListeners() override;
@@ -664,7 +656,7 @@ public:
                                mozilla::ErrorResult& rv);
     // Style() inherited from nsStyledElement
     already_AddRefed<nsFrameLoader> GetFrameLoader();
-    void InternalSetFrameLoader(nsIFrameLoader* aNewFrameLoader);
+    void InternalSetFrameLoader(nsFrameLoader* aNewFrameLoader);
     void SwapFrameLoaders(mozilla::dom::HTMLIFrameElement& aOtherLoaderOwner,
                           mozilla::ErrorResult& rv);
     void SwapFrameLoaders(nsXULElement& aOtherLoaderOwner,
@@ -698,7 +690,7 @@ protected:
 
     nsresult AddPopupListener(nsAtom* aName);
 
-    nsresult LoadSrc();
+    void LoadSrc();
 
     /**
      * The nearest enclosing content node with a binding

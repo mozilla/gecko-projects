@@ -47,7 +47,8 @@ const SEARCH_ENGINE_DETAILS = [{
     submission: "",
   },
   name: "eBay",
-}, {
+},
+// {
 // TODO: Google is tested in browser_google_behaviors.js - we can't test it here
 // yet because of bug 1315953.
 //   alias: "g",
@@ -59,50 +60,9 @@ const SEARCH_ENGINE_DETAILS = [{
 //     submission: "",
 //   },
 //   name: "Google",
-// }, {
-  alias: "y",
-  baseURL: "https://search.yahoo.com/yhs/search?p=foo&ei=UTF-8&hspart=mozilla",
-  codes: {
-    context: "&hsimp=yhs-005",
-    keyword: "&hsimp=yhs-002",
-    newTab: "&hsimp=yhs-004",
-    submission: "&hsimp=yhs-001",
-  },
-  name: "Yahoo",
-}];
+// },
+];
 
-function promiseStateChangeURI() {
-  return new Promise(resolve => {
-    let listener = {
-      onStateChange: function onStateChange(webProgress, req, flags, status) {
-        info("onStateChange");
-        // Only care about top-level document starts
-        let docStart = Ci.nsIWebProgressListener.STATE_IS_DOCUMENT |
-                       Ci.nsIWebProgressListener.STATE_START;
-        if (!(flags & docStart) || !webProgress.isTopLevel)
-          return;
-
-        let spec = req.originalURI.spec;
-        if (spec == "about:blank")
-          return;
-
-        gBrowser.removeProgressListener(listener);
-
-        info("received document start");
-
-        Assert.ok(req instanceof Ci.nsIChannel, "req is a channel");
-
-        req.cancel(Cr.NS_ERROR_FAILURE);
-
-        executeSoon(() => {
-          resolve(spec);
-        });
-      }
-    };
-
-    gBrowser.addProgressListener(listener);
-  });
-}
 
 function promiseContentSearchReady(browser) {
   return ContentTask.spawn(browser, {}, async function(args) {
@@ -224,5 +184,5 @@ async function testSearchEngine(engineDetails) {
   }
 
   engine.alias = undefined;
-  await BrowserTestUtils.removeTab(tab);
+  BrowserTestUtils.removeTab(tab);
 }

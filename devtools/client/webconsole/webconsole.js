@@ -25,12 +25,12 @@ const {PrefObserver} = require("devtools/client/shared/prefs");
 loader.lazyServiceGetter(this, "clipboardHelper",
                          "@mozilla.org/widget/clipboardhelper;1",
                          "nsIClipboardHelper");
+loader.lazyRequireGetter(this, "AppConstants", "resource://gre/modules/AppConstants.jsm", true);
 loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
 loader.lazyRequireGetter(this, "ConsoleOutput", "devtools/client/webconsole/console-output", true);
 loader.lazyRequireGetter(this, "Messages", "devtools/client/webconsole/console-output", true);
 loader.lazyRequireGetter(this, "EnvironmentClient", "devtools/shared/client/environment-client");
 loader.lazyRequireGetter(this, "ObjectClient", "devtools/shared/client/object-client");
-loader.lazyRequireGetter(this, "system", "devtools/shared/system");
 loader.lazyRequireGetter(this, "JSTerm", "devtools/client/webconsole/jsterm", true);
 loader.lazyRequireGetter(this, "gSequenceId", "devtools/client/webconsole/jsterm", true);
 loader.lazyImporter(this, "VariablesView", "resource://devtools/client/shared/widgets/VariablesView.jsm");
@@ -636,13 +636,13 @@ WebConsoleFrame.prototype = {
     });
 
     shortcuts.on(l10n.getStr("webconsole.find.key"),
-                 (name, event) => {
+                 event => {
                    this.filterBox.focus();
                    event.preventDefault();
                  });
 
     let clearShortcut;
-    if (system.constants.platform === "macosx") {
+    if (AppConstants.platform === "macosx") {
       clearShortcut = l10n.getStr("webconsole.clear.keyOSX");
     } else {
       clearShortcut = l10n.getStr("webconsole.clear.key");
@@ -1873,26 +1873,35 @@ WebConsoleFrame.prototype = {
   /**
    * Handler for the tabNavigated notification.
    *
-   * @param string event
-   *        Event name.
    * @param object packet
    *        Notification packet received from the server.
    */
-  handleTabNavigated: function (event, packet) {
-    if (event == "will-navigate") {
-      if (this.persistLog) {
-        let marker = new Messages.NavigationMarker(packet, Date.now());
-        this.output.addMessage(marker);
-      } else {
-        this.jsterm.clearOutput();
-      }
-    }
+  handleTabNavigated: function (packet) {
     if (packet.url) {
       this.onLocationChange(packet.url, packet.title);
     }
 
-    if (event == "navigate" && !packet.nativeConsoleAPI) {
+    if (!packet.nativeConsoleAPI) {
       this.logWarningAboutReplacedAPI();
+    }
+  },
+
+  /**
+   * Handler for the tabNavigated notification.
+   *
+   * @param object packet
+   *        Notification packet received from the server.
+   */
+  handleTabWillNavigate: function (packet) {
+    if (this.persistLog) {
+      let marker = new Messages.NavigationMarker(packet, Date.now());
+      this.output.addMessage(marker);
+    } else {
+      this.jsterm.clearOutput();
+    }
+
+    if (packet.url) {
+      this.onLocationChange(packet.url, packet.title);
     }
   },
 

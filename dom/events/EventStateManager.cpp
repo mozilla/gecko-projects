@@ -18,9 +18,12 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/DragEvent.h"
 #include "mozilla/dom/Event.h"
+#include "mozilla/dom/FrameLoaderBinding.h"
+#include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/dom/UIEvent.h"
+#include "mozilla/dom/WheelEventBinding.h"
 
 #include "ContentEventHandler.h"
 #include "IMEContentObserver.h"
@@ -57,7 +60,6 @@
 #include "nsIDOMXULElement.h"
 #include "nsIObserverService.h"
 #include "nsIDocShell.h"
-#include "nsIDOMWheelEvent.h"
 #include "nsIDOMUIEvent.h"
 #include "nsIMozBrowserFrame.h"
 
@@ -91,7 +93,6 @@
 #include "mozilla/LookAndFeel.h"
 #include "GeckoProfiler.h"
 #include "Units.h"
-#include "mozilla/layers/APZCTreeManager.h"
 #include "nsIObjectLoadingContent.h"
 
 #ifdef XP_MACOSX
@@ -1338,10 +1339,9 @@ EventStateManager::DispatchCrossProcessEvent(WidgetEvent* aEvent,
       dragSession->DragEventDispatchedToChildProcess();
       dragSession->GetDragAction(&action);
       dragSession->GetTriggeringPrincipalURISpec(principalURISpec);
-      nsCOMPtr<nsIDOMDataTransfer> initialDataTransfer;
-      dragSession->GetDataTransfer(getter_AddRefs(initialDataTransfer));
+      RefPtr<DataTransfer> initialDataTransfer = dragSession->GetDataTransfer();
       if (initialDataTransfer) {
-        initialDataTransfer->GetDropEffectInt(&dropEffect);
+        dropEffect = initialDataTransfer->DropEffectInt();
       }
     }
 
@@ -1439,9 +1439,8 @@ EventStateManager::HandleCrossProcessEvent(WidgetEvent* aEvent,
       continue;
     }
 
-    uint32_t eventMode;
-    frameLoader->GetEventMode(&eventMode);
-    if (eventMode == nsIFrameLoader::EVENT_MODE_DONT_FORWARD_TO_CHILD) {
+    if (frameLoader->EventMode() ==
+          FrameLoaderBinding::EVENT_MODE_DONT_FORWARD_TO_CHILD) {
       continue;
     }
 
@@ -1894,7 +1893,7 @@ EventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
       if (aEvent->AsMouseEvent()) {
         startEvent.inputSource = aEvent->AsMouseEvent()->inputSource;
       } else if (aEvent->AsTouchEvent()) {
-        startEvent.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_TOUCH;
+        startEvent.inputSource = MouseEventBinding::MOZ_SOURCE_TOUCH;
       } else {
         MOZ_ASSERT(false);
       }
@@ -1994,7 +1993,7 @@ EventStateManager::DetermineDragTargetAndDefaultData(nsPIDOMWindowOuter* aWindow
   // found, just use the clicked node.
   if (!*aSelection) {
     while (dragContent) {
-      if (auto htmlElement = nsGenericHTMLElement::FromContent(dragContent)) {
+      if (auto htmlElement = nsGenericHTMLElement::FromNode(dragContent)) {
         if (htmlElement->Draggable()) {
           break;
         }
@@ -2060,10 +2059,12 @@ EventStateManager::DoDefaultDragStart(nsPresContext* aPresContext,
   // No drag session is currently active, so check if a handler added
   // any items to be dragged. If not, there isn't anything to drag.
   uint32_t count = 0;
-  if (aDataTransfer)
-    aDataTransfer->GetMozItemCount(&count);
-  if (!count)
+  if (aDataTransfer) {
+    count = aDataTransfer->MozItemCount();
+  }
+  if (!count) {
     return false;
+  }
 
   // Get the target being dragged, which may not be the same as the
   // target of the mouse event. If one wasn't set in the
@@ -2078,8 +2079,7 @@ EventStateManager::DoDefaultDragStart(nsPresContext* aPresContext,
 
   // check which drag effect should initially be used. If the effect was not
   // set, just use all actions, otherwise Windows won't allow a drop.
-  uint32_t action;
-  aDataTransfer->GetEffectAllowedInt(&action);
+  uint32_t action = aDataTransfer->EffectAllowedInt();
   if (action == nsIDragService::DRAGDROP_ACTION_UNINITIALIZED)
     action = nsIDragService::DRAGDROP_ACTION_COPY |
              nsIDragService::DRAGDROP_ACTION_MOVE |
@@ -2102,9 +2102,7 @@ EventStateManager::DoDefaultDragStart(nsPresContext* aPresContext,
                        false, getter_AddRefs(dataTransfer));
 
   // Copy over the drop effect, as Clone doesn't copy it for us.
-  uint32_t dropEffect;
-  aDataTransfer->GetDropEffectInt(&dropEffect);
-  dataTransfer->SetDropEffectInt(dropEffect);
+  dataTransfer->SetDropEffectInt(aDataTransfer->DropEffectInt());
 
   // XXXndeakin don't really want to create a new drag DOM event
   // here, but we need something to pass to the InvokeDragSession
@@ -2330,7 +2328,7 @@ EventStateManager::DispatchLegacyMouseScrollEvents(nsIFrame* aTargetFrame,
   //     rare cases.
   int32_t scrollDeltaX, scrollDeltaY, pixelDeltaX, pixelDeltaY;
   switch (aEvent->mDeltaMode) {
-    case nsIDOMWheelEvent::DOM_DELTA_PAGE:
+    case WheelEventBinding::DOM_DELTA_PAGE:
       scrollDeltaX =
         !aEvent->mLineOrPageDeltaX ? 0 :
           (aEvent->mLineOrPageDeltaX > 0  ? nsIDOMUIEvent::SCROLL_PAGE_DOWN :
@@ -2343,14 +2341,14 @@ EventStateManager::DispatchLegacyMouseScrollEvents(nsIFrame* aTargetFrame,
       pixelDeltaY = RoundDown(aEvent->mDeltaY * scrollAmountInCSSPixels.height);
       break;
 
-    case nsIDOMWheelEvent::DOM_DELTA_LINE:
+    case WheelEventBinding::DOM_DELTA_LINE:
       scrollDeltaX = aEvent->mLineOrPageDeltaX;
       scrollDeltaY = aEvent->mLineOrPageDeltaY;
       pixelDeltaX = RoundDown(aEvent->mDeltaX * scrollAmountInCSSPixels.width);
       pixelDeltaY = RoundDown(aEvent->mDeltaY * scrollAmountInCSSPixels.height);
       break;
 
-    case nsIDOMWheelEvent::DOM_DELTA_PIXEL:
+    case WheelEventBinding::DOM_DELTA_PIXEL:
       scrollDeltaX = aEvent->mLineOrPageDeltaX;
       scrollDeltaY = aEvent->mLineOrPageDeltaY;
       pixelDeltaX = RoundDown(aEvent->mDeltaX);
@@ -2645,7 +2643,7 @@ EventStateManager::ComputeScrollTarget(nsIFrame* aTargetFrame,
   }
 
   nsIFrame* newFrame = nsLayoutUtils::GetCrossDocParentFrame(
-      aTargetFrame->PresContext()->FrameManager()->GetRootFrame());
+      aTargetFrame->PresShell()->GetRootFrame());
   aOptions =
     static_cast<ComputeScrollTargetOptions>(aOptions & ~START_FROM_PARENT);
   return newFrame ? ComputeScrollTarget(newFrame, aEvent, aOptions) : nullptr;
@@ -2659,7 +2657,7 @@ EventStateManager::GetScrollAmount(nsPresContext* aPresContext,
   MOZ_ASSERT(aPresContext);
   MOZ_ASSERT(aEvent);
 
-  bool isPage = (aEvent->mDeltaMode == nsIDOMWheelEvent::DOM_DELTA_PAGE);
+  bool isPage = (aEvent->mDeltaMode == WheelEventBinding::DOM_DELTA_PAGE);
   if (aScrollableFrame) {
     return isPage ? aScrollableFrame->GetPageScrollAmount() :
                     aScrollableFrame->GetLineScrollAmount();
@@ -2719,15 +2717,15 @@ EventStateManager::DoScrollText(nsIScrollableFrame* aScrollableFrame,
   nsIScrollbarMediator::ScrollSnapMode snapMode = nsIScrollbarMediator::DISABLE_SNAP;
   nsAtom* origin = nullptr;
   switch (aEvent->mDeltaMode) {
-    case nsIDOMWheelEvent::DOM_DELTA_LINE:
+    case WheelEventBinding::DOM_DELTA_LINE:
       origin = nsGkAtoms::mouseWheel;
       snapMode = nsIScrollableFrame::ENABLE_SNAP;
       break;
-    case nsIDOMWheelEvent::DOM_DELTA_PAGE:
+    case WheelEventBinding::DOM_DELTA_PAGE:
       origin = nsGkAtoms::pages;
       snapMode = nsIScrollableFrame::ENABLE_SNAP;
       break;
-    case nsIDOMWheelEvent::DOM_DELTA_PIXEL:
+    case WheelEventBinding::DOM_DELTA_PIXEL:
       origin = nsGkAtoms::pixels;
       break;
     default:
@@ -2754,7 +2752,7 @@ EventStateManager::DoScrollText(nsIScrollableFrame* aScrollableFrame,
   }
 
   bool isDeltaModePixel =
-    (aEvent->mDeltaMode == nsIDOMWheelEvent::DOM_DELTA_PIXEL);
+    (aEvent->mDeltaMode == WheelEventBinding::DOM_DELTA_PIXEL);
 
   nsIScrollableFrame::ScrollMode mode;
   switch (aEvent->mScrollType) {
@@ -3224,7 +3222,7 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
             uint32_t flags = nsIFocusManager::FLAG_BYMOUSE |
                              nsIFocusManager::FLAG_NOSCROLL;
             // If this was a touch-generated event, pass that information:
-            if (mouseEvent->inputSource == nsIDOMMouseEvent::MOZ_SOURCE_TOUCH) {
+            if (mouseEvent->inputSource == MouseEventBinding::MOZ_SOURCE_TOUCH) {
               flags |= nsIFocusManager::FLAG_BYTOUCH;
             }
             nsCOMPtr<nsIDOMElement> newFocusElement = do_QueryInterface(newFocus);
@@ -3304,7 +3302,7 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
     PointerEventHandler::ImplicitlyReleasePointerCapture(pointerEvent);
 
     if (pointerEvent->mMessage == ePointerCancel ||
-        pointerEvent->inputSource == nsIDOMMouseEvent::MOZ_SOURCE_TOUCH) {
+        pointerEvent->inputSource == MouseEventBinding::MOZ_SOURCE_TOUCH) {
       // After pointercancel, pointer becomes invalid so we can remove relevant
       // helper from table. Regarding pointerup with non-hoverable device, the
       // pointer also becomes invalid. Hoverable (mouse/pen) pointers are valid
@@ -3382,6 +3380,8 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
       nsPluginFrame* pluginFrame = do_QueryFrame(frameToScroll);
       if (pluginFrame) {
         MOZ_ASSERT(pluginFrame->WantsToHandleWheelEventAsDefaultAction());
+        // Plugins should receive original values instead of adjusted values.
+        adjuster.CancelAdjustment();
         action = WheelPrefs::ACTION_SEND_TO_PLUGIN;
       }
 
@@ -3532,9 +3532,8 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
 
       // the initial dataTransfer is the one from the dragstart event that
       // was set on the dragSession when the drag began.
-      nsCOMPtr<nsIDOMDataTransfer> dataTransfer;
-      nsCOMPtr<nsIDOMDataTransfer> initialDataTransfer;
-      dragSession->GetDataTransfer(getter_AddRefs(initialDataTransfer));
+      RefPtr<DataTransfer> dataTransfer;
+      RefPtr<DataTransfer> initialDataTransfer = dragSession->GetDataTransfer();
 
       WidgetDragEvent *dragEvent = aEvent->AsDragEvent();
 
@@ -3557,8 +3556,8 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
         // if the event has a dataTransfer set, use it.
         if (dragEvent->mDataTransfer) {
           // get the dataTransfer and the dropEffect that was set on it
-          dataTransfer = do_QueryInterface(dragEvent->mDataTransfer);
-          dataTransfer->GetDropEffectInt(&dropEffect);
+          dataTransfer = dragEvent->mDataTransfer;
+          dropEffect = dataTransfer->DropEffectInt();
         }
         else {
           // if dragEvent->mDataTransfer is null, it means that no attempt was
@@ -3582,8 +3581,9 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
         // drag was originally started by directly calling the drag service.
         // Just assume that all effects are allowed.
         uint32_t effectAllowed = nsIDragService::DRAGDROP_ACTION_UNINITIALIZED;
-        if (dataTransfer)
-          dataTransfer->GetEffectAllowedInt(&effectAllowed);
+        if (dataTransfer) {
+          effectAllowed = dataTransfer->EffectAllowedInt();
+        }
 
         // set the drag action based on the drop effect and effect allowed.
         // The drop effect field on the drag transfer object specifies the
@@ -4258,8 +4258,7 @@ EventStateManager::NotifyMouseOut(WidgetMouseEvent* aMouseEvent,
     // tell the subdocument that we're moving out of it
     nsSubDocumentFrame* subdocFrame = do_QueryFrame(wrapper->mLastOverFrame.GetFrame());
     if (subdocFrame) {
-      nsCOMPtr<nsIDocShell> docshell;
-      subdocFrame->GetDocShell(getter_AddRefs(docshell));
+      nsIDocShell* docshell = subdocFrame->GetDocShell();
       if (docshell) {
         RefPtr<nsPresContext> presContext;
         docshell->GetPresContext(getter_AddRefs(presContext));
@@ -4351,15 +4350,15 @@ EventStateManager::NotifyMouseOver(WidgetMouseEvent* aMouseEvent,
                                        aMouseEvent,
                                        isPointer ? ePointerEnter : eMouseEnter);
 
+  if (!isPointer) {
+    SetContentState(aContent, NS_EVENT_STATE_HOVER);
+  }
+
   NotifyMouseOut(aMouseEvent, aContent);
 
   // Store the first mouseOver event we fire and don't refire mouseOver
   // to that element while the first mouseOver is still ongoing.
   wrapper->mFirstOverEventElement = aContent;
-
-  if (!isPointer) {
-    SetContentState(aContent, NS_EVENT_STATE_HOVER);
-  }
 
   // Fire mouseover
   wrapper->mLastOverFrame =
@@ -4780,8 +4779,7 @@ EventStateManager::UpdateDragDataTransfer(WidgetDragEvent* dragEvent)
   if (dragSession) {
     // the initial dataTransfer is the one from the dragstart event that
     // was set on the dragSession when the drag began.
-    nsCOMPtr<nsIDOMDataTransfer> initialDataTransfer;
-    dragSession->GetDataTransfer(getter_AddRefs(initialDataTransfer));
+    RefPtr<DataTransfer> initialDataTransfer = dragSession->GetDataTransfer();
     if (initialDataTransfer) {
       // retrieve the current moz cursor setting and save it.
       nsAutoString mozCursor;
@@ -5010,7 +5008,7 @@ static Element*
 GetLabelTarget(nsIContent* aPossibleLabel)
 {
   mozilla::dom::HTMLLabelElement* label =
-    mozilla::dom::HTMLLabelElement::FromContent(aPossibleLabel);
+    mozilla::dom::HTMLLabelElement::FromNode(aPossibleLabel);
   if (!label)
     return nullptr;
 
@@ -5470,8 +5468,11 @@ EventStateManager::DoContentCommandEvent(WidgetContentCommandEvent* aEvent)
             transferable->GetIsPrivateData(&isPrivateData);
             nsCOMPtr<nsIPrincipal> requestingPrincipal;
             transferable->GetRequestingPrincipal(getter_AddRefs(requestingPrincipal));
+            nsContentPolicyType contentPolicyType = nsIContentPolicy::TYPE_OTHER;
+            transferable->GetContentPolicyType(&contentPolicyType);
             remote->SendPasteTransferable(ipcDataTransfer, isPrivateData,
-                                          IPC::Principal(requestingPrincipal));
+                                          IPC::Principal(requestingPrincipal),
+                                          contentPolicyType);
             rv = NS_OK;
           } else {
             nsCOMPtr<nsICommandController> commandController = do_QueryInterface(controller);
@@ -5668,7 +5669,7 @@ EventStateManager::DeltaAccumulator::InitLineOrPageDelta(
   mX += aEvent->mDeltaX;
   mY += aEvent->mDeltaY;
 
-  if (mHandlingDeltaMode == nsIDOMWheelEvent::DOM_DELTA_PIXEL) {
+  if (mHandlingDeltaMode == WheelEventBinding::DOM_DELTA_PIXEL) {
     // Records pixel delta values and init mLineOrPageDeltaX and
     // mLineOrPageDeltaY for wheel events which are caused by pixel only
     // devices.  Ignore mouse wheel transaction for computing this.  The
@@ -5722,12 +5723,12 @@ EventStateManager::DeltaAccumulator::ComputeScrollAmountForDefaultAction(
   // system settings, allow to override the system speed.
   bool allowScrollSpeedOverride =
     (!aEvent->mCustomizedByUserPrefs &&
-     aEvent->mDeltaMode == nsIDOMWheelEvent::DOM_DELTA_LINE);
+     aEvent->mDeltaMode == WheelEventBinding::DOM_DELTA_LINE);
   DeltaValues acceleratedDelta =
     WheelTransaction::AccelerateWheelDelta(aEvent, allowScrollSpeedOverride);
 
   nsIntPoint result(0, 0);
-  if (aEvent->mDeltaMode == nsIDOMWheelEvent::DOM_DELTA_PIXEL) {
+  if (aEvent->mDeltaMode == WheelEventBinding::DOM_DELTA_PIXEL) {
     mPendingScrollAmountX += acceleratedDelta.deltaX;
     mPendingScrollAmountY += acceleratedDelta.deltaY;
   } else {

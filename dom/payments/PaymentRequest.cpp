@@ -8,6 +8,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/PaymentRequest.h"
 #include "mozilla/dom/PaymentResponse.h"
+#include "mozilla/EventStateManager.h"
 #include "nsContentUtils.h"
 #include "nsIURLParser.h"
 #include "nsNetCID.h"
@@ -31,6 +32,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(PaymentRequest,
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAbortPromise)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mResponse)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mShippingAddress)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFullShippingAddress)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(PaymentRequest,
@@ -40,6 +42,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(PaymentRequest,
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mAbortPromise)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mResponse)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mShippingAddress)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mFullShippingAddress)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(PaymentRequest)
@@ -627,6 +630,7 @@ PaymentRequest::PaymentRequest(nsPIDOMWindowInner* aWindow, const nsAString& aIn
   , mInternalId(aInternalId)
   , mShippingAddress(nullptr)
   , mUpdating(false)
+  , mRequestShipping(false)
   , mUpdateError(NS_OK)
   , mState(eCreated)
 {
@@ -681,6 +685,11 @@ PaymentRequest::Show(ErrorResult& aRv)
 {
   if (mState != eCreated) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return nullptr;
+  }
+
+  if (!EventStateManager::IsHandlingUserInput()) {
+    aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
     return nullptr;
   }
 
@@ -742,6 +751,10 @@ PaymentRequest::RespondShowPayment(const nsAString& aMethodName,
     RejectShowPayment(aRv);
     return;
   }
+
+  // https://github.com/w3c/payment-request/issues/692
+  mShippingAddress.swap(mFullShippingAddress);
+  mFullShippingAddress = nullptr;
 
   RefPtr<PaymentResponse> paymentResponse =
     new PaymentResponse(GetOwner(), mInternalId, mId, aMethodName,
@@ -839,7 +852,7 @@ PaymentRequest::UpdatePayment(JSContext* aCx, const PaymentDetailsUpdate& aDetai
   if (NS_WARN_IF(!manager)) {
     return NS_ERROR_FAILURE;
   }
-  nsresult rv = manager->UpdatePayment(aCx, mInternalId, aDetails);
+  nsresult rv = manager->UpdatePayment(aCx, mInternalId, aDetails, mRequestShipping);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -940,11 +953,15 @@ PaymentRequest::UpdateShippingAddress(const nsAString& aCountry,
                                       const nsAString& aRecipient,
                                       const nsAString& aPhone)
 {
-  mShippingAddress = new PaymentAddress(GetOwner(), aCountry, aAddressLine,
+  nsTArray<nsString> emptyArray;
+  mShippingAddress = new PaymentAddress(GetOwner(), aCountry, emptyArray,
                                         aRegion, aCity, aDependentLocality,
                                         aPostalCode, aSortingCode, aLanguageCode,
-                                        aOrganization, aRecipient, aPhone);
-
+                                        EmptyString(), EmptyString(), EmptyString());
+  mFullShippingAddress = new PaymentAddress(GetOwner(), aCountry, aAddressLine,
+                                            aRegion, aCity, aDependentLocality,
+                                            aPostalCode, aSortingCode, aLanguageCode,
+                                            aOrganization, aRecipient, aPhone);
   // Fire shippingaddresschange event
   return DispatchUpdateEvent(NS_LITERAL_STRING("shippingaddresschange"));
 }

@@ -11,7 +11,6 @@
 Components.utils.import("resource://gre/modules/Services.jsm");
 
 for (let script of [
-  "chrome://browser/content/tabbrowser.js",
   "chrome://browser/content/browser.js",
 
   "chrome://browser/content/browser-captivePortal.js",
@@ -24,6 +23,9 @@ for (let script of [
   "chrome://browser/content/browser-sidebar.js",
   "chrome://browser/content/browser-tabsintitlebar.js",
   "chrome://browser/content/browser-trackingprotection.js",
+
+  "chrome://global/content/globalOverlay.js",
+  "chrome://browser/content/utilityOverlay.js",
 #ifdef XP_MACOSX
   "chrome://global/content/macWindowMenu.js",
 #endif

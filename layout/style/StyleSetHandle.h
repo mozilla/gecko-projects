@@ -26,14 +26,13 @@ class nsAtom;
 class nsICSSAnonBoxPseudo;
 class nsIContent;
 class nsIDocument;
-class nsStyleContext;
 class nsStyleSet;
 class nsPresContext;
 class gfxFontFeatureValueSet;
-struct TreeMatchContext;
 
 namespace mozilla {
 
+class ComputedStyle;
 class CSSStyleSheet;
 class ServoStyleSet;
 namespace dom {
@@ -64,21 +63,13 @@ public:
 
     bool IsGecko() const
     {
-#ifdef MOZ_OLD_STYLE
-      return !IsServo();
-#else
       return false;
-#endif
     }
 
     bool IsServo() const
     {
       MOZ_ASSERT(mValue, "StyleSetHandle null pointer dereference");
-#ifdef MOZ_STYLO
       return mValue & SERVO_BIT;
-#else
-      return false;
-#endif
     }
 
     StyleBackendType BackendType() const
@@ -87,13 +78,6 @@ public:
                          StyleBackendType::Servo;
     }
 
-#ifdef MOZ_OLD_STYLE
-    nsStyleSet* AsGecko()
-    {
-      MOZ_ASSERT(IsGecko());
-      return reinterpret_cast<nsStyleSet*>(mValue);
-    }
-#endif
 
     ServoStyleSet* AsServo()
     {
@@ -101,17 +85,8 @@ public:
       return reinterpret_cast<ServoStyleSet*>(mValue & ~SERVO_BIT);
     }
 
-#ifdef MOZ_OLD_STYLE
-    nsStyleSet* GetAsGecko() { return IsGecko() ? AsGecko() : nullptr; }
-#endif
     ServoStyleSet* GetAsServo() { return IsServo() ? AsServo() : nullptr; }
 
-#ifdef MOZ_OLD_STYLE
-    const nsStyleSet* AsGecko() const
-    {
-      return const_cast<Ptr*>(this)->AsGecko();
-    }
-#endif
 
     const ServoStyleSet* AsServo() const
     {
@@ -119,9 +94,6 @@ public:
       return const_cast<Ptr*>(this)->AsServo();
     }
 
-#ifdef MOZ_OLD_STYLE
-    const nsStyleSet* GetAsGecko() const { return IsGecko() ? AsGecko() : nullptr; }
-#endif
     const ServoStyleSet* GetAsServo() const { return IsServo() ? AsServo() : nullptr; }
 
     // These inline methods are defined in StyleSetHandleInlines.h.
@@ -139,37 +111,40 @@ public:
     inline void SetAuthorStyleDisabled(bool aStyleDisabled);
     inline void BeginUpdate();
     inline nsresult EndUpdate();
-    inline already_AddRefed<nsStyleContext>
+    inline already_AddRefed<ComputedStyle>
     ResolveStyleFor(dom::Element* aElement,
-                    nsStyleContext* aParentContext,
+                    ComputedStyle* aParentContext,
                     LazyComputeBehavior aMayCompute);
-    inline already_AddRefed<nsStyleContext>
-    ResolveStyleFor(dom::Element* aElement,
-                    nsStyleContext* aParentContext,
-                    LazyComputeBehavior aMayCompute,
-                    TreeMatchContext* aTreeMatchContext);
-    inline already_AddRefed<nsStyleContext>
-    ResolveStyleForText(nsIContent* aTextNode,
-                        nsStyleContext* aParentContext);
-    inline already_AddRefed<nsStyleContext>
-    ResolveStyleForFirstLetterContinuation(nsStyleContext* aParentContext);
-    inline already_AddRefed<nsStyleContext>
+    inline already_AddRefed<ComputedStyle>
+    ResolveStyleFor(dom::Element* aElement, LazyComputeBehavior aMayCompute);
+
+    // TODO(emilio): This might be nicer (albeit a bit slower) if we just grab
+    // the style from the parent in ServoStyleSet.
+    //
+    // It may be faster if we account not having to pass it around in
+    // nsCSSFrameConstructor though.
+    inline already_AddRefed<ComputedStyle>
+    ResolveStyleForText(nsIContent* aTextNode, ComputedStyle* aParentContext);
+
+    inline already_AddRefed<ComputedStyle>
+    ResolveStyleForFirstLetterContinuation(ComputedStyle* aParentContext);
+    inline already_AddRefed<ComputedStyle>
     ResolveStyleForPlaceholder();
-    inline already_AddRefed<nsStyleContext>
+    inline already_AddRefed<ComputedStyle>
     ResolvePseudoElementStyle(dom::Element* aParentElement,
                               mozilla::CSSPseudoElementType aType,
-                              nsStyleContext* aParentContext,
+                              ComputedStyle* aParentContext,
                               dom::Element* aPseudoElement);
-    inline already_AddRefed<nsStyleContext>
+    inline already_AddRefed<ComputedStyle>
     ResolveInheritingAnonymousBoxStyle(nsAtom* aPseudoTag,
-                                       nsStyleContext* aParentContext);
-    inline already_AddRefed<nsStyleContext>
+                                       ComputedStyle* aParentContext);
+    inline already_AddRefed<ComputedStyle>
     ResolveNonInheritingAnonymousBoxStyle(nsAtom* aPseudoTag);
 #ifdef MOZ_XUL
-    inline already_AddRefed<nsStyleContext>
+    inline already_AddRefed<ComputedStyle>
     ResolveXULTreePseudoStyle(dom::Element* aParentElement,
                               nsICSSAnonBoxPseudo* aPseudoTag,
-                              nsStyleContext* aParentContext,
+                              ComputedStyle* aParentContext,
                               const AtomArray& aInputWord);
 #endif
     inline nsresult AppendStyleSheet(SheetType aType, StyleSheet* aSheet);
@@ -196,17 +171,15 @@ public:
     inline bool StyleSheetsHaveChanged() const;
     inline void InvalidateStyleForCSSRuleChanges();
     inline nsRestyleHint MediumFeaturesChanged(mozilla::MediaFeatureChangeReason);
-    inline already_AddRefed<nsStyleContext>
+    inline already_AddRefed<ComputedStyle>
     ProbePseudoElementStyle(dom::Element* aParentElement,
                             mozilla::CSSPseudoElementType aType,
-                            nsStyleContext* aParentContext);
-    inline already_AddRefed<nsStyleContext>
+                            ComputedStyle* aParentContext);
+    inline already_AddRefed<ComputedStyle>
     ProbePseudoElementStyle(dom::Element* aParentElement,
-                            mozilla::CSSPseudoElementType aType,
-                            nsStyleContext* aParentContext,
-                            TreeMatchContext* aTreeMatchContext);
-    inline void RootStyleContextAdded();
-    inline void RootStyleContextRemoved();
+                            mozilla::CSSPseudoElementType aType);
+    inline void RootComputedStyleAdded();
+    inline void RootComputedStyleRemoved();
 
     inline bool AppendFontFaceRules(nsTArray<nsFontFaceRuleContainer>& aArray);
     inline nsCSSCounterStyleRule* CounterStyleRuleForName(nsAtom* aName);
@@ -238,16 +211,11 @@ public:
 
   StyleSetHandle& operator=(ServoStyleSet* aStyleSet)
   {
-#ifdef MOZ_STYLO
     MOZ_ASSERT(!(reinterpret_cast<uintptr_t>(aStyleSet) & SERVO_BIT),
                "least significant bit shouldn't be set; we use it for state");
     mPtr.mValue =
       aStyleSet ? (reinterpret_cast<uintptr_t>(aStyleSet) | SERVO_BIT) : 0;
     return *this;
-#else
-    MOZ_CRASH("should not have a ServoStyleSet object when MOZ_STYLO is "
-              "disabled");
-#endif
   }
 
   // Make StyleSetHandle usable in boolean contexts.

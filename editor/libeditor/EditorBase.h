@@ -84,6 +84,7 @@ enum class EditAction : int32_t;
 
 namespace dom {
 class DataTransfer;
+class DragEvent;
 class Element;
 class EventTarget;
 class Text;
@@ -239,11 +240,14 @@ public:
 
   bool IsInitialized() const { return !!mDocument; }
   already_AddRefed<nsIDOMDocument> GetDOMDocument();
-  already_AddRefed<nsIDocument> GetDocument();
-  already_AddRefed<nsIPresShell> GetPresShell();
-  nsPresContext* GetPresContext()
+  nsIDocument* GetDocument() const { return mDocument; }
+  nsIPresShell* GetPresShell() const
   {
-    RefPtr<nsIPresShell> presShell = GetPresShell();
+    return mDocument ? mDocument->GetShell() : nullptr;
+  }
+  nsPresContext* GetPresContext() const
+  {
+    nsIPresShell* presShell = GetPresShell();
     return presShell ? presShell->GetPresContext() : nullptr;
   }
   already_AddRefed<nsIWidget> GetWidget();
@@ -346,8 +350,9 @@ public:
    *                            container.  Otherwise, will insert the node
    *                            before child node referred by this.
    */
+  template<typename PT, typename CT>
   nsresult InsertNode(nsIContent& aContentToInsert,
-                      const EditorRawDOMPoint& aPointToInsert);
+                      const EditorDOMPointBase<PT, CT>& aPointToInsert);
 
   enum ECloneAttributes { eDontCloneAttributes, eCloneAttributes };
   already_AddRefed<Element> ReplaceContainer(Element* aOldContainer,
@@ -377,8 +382,9 @@ public:
    * @param aError              If succeed, returns no error.  Otherwise, an
    *                            error.
    */
+  template<typename PT, typename CT>
   already_AddRefed<nsIContent>
-  SplitNode(const EditorRawDOMPoint& aStartOfRightNode,
+  SplitNode(const EditorDOMPointBase<PT, CT>& aStartOfRightNode,
             ErrorResult& aResult);
 
   nsresult JoinNodes(nsINode& aLeftNode, nsINode& aRightNode);
@@ -516,8 +522,10 @@ protected:
    *                        child node referred by this.
    * @return                The created new element node.
    */
-  already_AddRefed<Element> CreateNode(nsAtom* aTag,
-                                       const EditorRawDOMPoint& aPointToInsert);
+  template<typename PT, typename CT>
+  already_AddRefed<Element>
+  CreateNode(nsAtom* aTag,
+             const EditorDOMPointBase<PT, CT>& aPointToInsert);
 
   /**
    * Create an aggregate transaction for delete selection.  The result may
@@ -558,7 +566,7 @@ protected:
                             int32_t* aOffset,
                             int32_t* aLength);
 
-  nsresult DeleteText(nsGenericDOMDataNode& aElement,
+  nsresult DeleteText(dom::CharacterData& aElement,
                       uint32_t aOffset, uint32_t aLength);
 
   /**
@@ -733,6 +741,19 @@ protected:
   void BeginPlaceholderTransaction(nsAtom* aTransactionName);
   void EndPlaceholderTransaction();
 
+  /**
+   * InitializeSelectionAncestorLimit() is called by InitializeSelection().
+   * When this is called, each implementation has to call
+   * aSelection.SetAncestorLimiter() with aAnotherLimit.
+   *
+   * @param aSelection          The selection.
+   * @param aAncestorLimit      New ancestor limit of aSelection.  This always
+   *                            has parent node.  So, it's always safe to
+   *                            call SetAncestorLimit() with this node.
+   */
+  virtual void InitializeSelectionAncestorLimit(Selection& aSelection,
+                                                nsIContent& aAncestorLimit);
+
 public:
   /**
    * All editor operations which alter the doc should be prefaced
@@ -888,28 +909,35 @@ public:
    * you want.  They start to search the result from next node of the given
    * node.
    */
-  nsIContent* GetNextNode(const EditorRawDOMPoint& aPoint)
+  template<typename PT, typename CT>
+  nsIContent* GetNextNode(const EditorDOMPointBase<PT, CT>& aPoint)
   {
     return GetNextNodeInternal(aPoint, false, true, false);
   }
-  nsIContent* GetNextElementOrText(const EditorRawDOMPoint& aPoint)
+  template<typename PT, typename CT>
+  nsIContent* GetNextElementOrText(const EditorDOMPointBase<PT, CT>& aPoint)
   {
     return GetNextNodeInternal(aPoint, false, false, false);
   }
-  nsIContent* GetNextEditableNode(const EditorRawDOMPoint& aPoint)
+  template<typename PT, typename CT>
+  nsIContent* GetNextEditableNode(const EditorDOMPointBase<PT, CT>& aPoint)
   {
     return GetNextNodeInternal(aPoint, true, true, false);
   }
-  nsIContent* GetNextNodeInBlock(const EditorRawDOMPoint& aPoint)
+  template<typename PT, typename CT>
+  nsIContent* GetNextNodeInBlock(const EditorDOMPointBase<PT, CT>& aPoint)
   {
     return GetNextNodeInternal(aPoint, false, true, true);
   }
-  nsIContent* GetNextElementOrTextInBlock(const EditorRawDOMPoint& aPoint)
+  template<typename PT, typename CT>
+  nsIContent* GetNextElementOrTextInBlock(
+                const EditorDOMPointBase<PT, CT>& aPoint)
   {
     return GetNextNodeInternal(aPoint, false, false, true);
   }
+  template<typename PT, typename CT>
   nsIContent* GetNextEditableNodeInBlock(
-                const EditorRawDOMPoint& aPoint)
+                const EditorDOMPointBase<PT, CT>& aPoint)
   {
     return GetNextNodeInternal(aPoint, true, true, true);
   }
@@ -1104,13 +1132,7 @@ public:
   }
   static nsIContent* GetNodeAtRangeOffsetPoint(const RawRangeBoundary& aPoint);
 
-  static nsresult GetStartNodeAndOffset(Selection* aSelection,
-                                        nsINode** aStartContainer,
-                                        int32_t* aStartOffset);
   static EditorRawDOMPoint GetStartPoint(Selection* aSelection);
-  static nsresult GetEndNodeAndOffset(Selection* aSelection,
-                                      nsINode** aEndContainer,
-                                      int32_t* aEndOffset);
   static EditorRawDOMPoint GetEndPoint(Selection* aSelection);
 
   static nsresult GetEndChildNode(Selection* aSelection,
@@ -1171,9 +1193,10 @@ public:
    *                                    be good to insert something if the
    *                                    caller want to do it.
    */
+  template<typename PT, typename CT>
   SplitNodeResult
   SplitNodeDeep(nsIContent& aMostAncestorToSplit,
-                const EditorRawDOMPoint& aDeepestStartOfRightNode,
+                const EditorDOMPointBase<PT, CT>& aDeepestStartOfRightNode,
                 SplitAtEdges aSplitAtEdges);
 
   EditorDOMPoint JoinNodeDeep(nsIContent& aLeftNode,
@@ -1446,7 +1469,7 @@ public:
                                           int32_t aDestOffset,
                                           bool aDoDeleteSelection) = 0;
 
-  virtual nsresult InsertFromDrop(nsIDOMEvent* aDropEvent) = 0;
+  virtual nsresult InsertFromDrop(dom::DragEvent* aDropEvent) = 0;
 
   /**
    * GetIMESelectionStartOffsetIn() returns the start offset of IME selection in

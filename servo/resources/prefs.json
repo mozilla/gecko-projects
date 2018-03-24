@@ -63,10 +63,10 @@
   "network.http-cache.disabled": false,
   "network.mime.sniff": false,
   "session-history.max-length": 20,
-  "shell.builtin-key-shortcuts.enabled": true,
   "shell.homepage": "https://servo.org",
   "shell.keep_screen_on.enabled": false,
   "shell.native-orientation": "both",
   "shell.native-titlebar.enabled": true,
+  "shell.searchpage": "https://duckduckgo.com/html/?q=%s",
   "webgl.testing.context_creation_error": false
 }

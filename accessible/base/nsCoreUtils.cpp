@@ -37,6 +37,7 @@
 #include "nsITreeColumns.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLLabelElement.h"
+#include "mozilla/dom/MouseEventBinding.h"
 
 using namespace mozilla;
 
@@ -47,7 +48,7 @@ using namespace mozilla;
 bool
 nsCoreUtils::IsLabelWithControl(nsIContent* aContent)
 {
-  dom::HTMLLabelElement* label = dom::HTMLLabelElement::FromContent(aContent);
+  dom::HTMLLabelElement* label = dom::HTMLLabelElement::FromNode(aContent);
   if (label && label->GetControl())
     return true;
 
@@ -99,7 +100,7 @@ nsCoreUtils::DispatchClickEvent(nsITreeBoxObject *aTreeBoxObj,
 
   nsCOMPtr<nsIContent> tcXULElm(do_QueryInterface(tcElm));
   nsCOMPtr<nsIBoxObject> tcBoxObj =
-    nsXULElement::FromContent(tcXULElm)->GetBoxObject(IgnoreErrors());
+    nsXULElement::FromNode(tcXULElm)->GetBoxObject(IgnoreErrors());
 
   int32_t tcX = 0;
   tcBoxObj->GetX(&tcX);
@@ -143,7 +144,7 @@ nsCoreUtils::DispatchMouseEvent(EventMessage aMessage, int32_t aX, int32_t aY,
   event.mClickCount = 1;
   event.button = WidgetMouseEvent::eLeftButton;
   event.mTime = PR_IntervalNow();
-  event.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
+  event.inputSource = dom::MouseEventBinding::MOZ_SOURCE_UNKNOWN;
 
   nsEventStatus status = nsEventStatus_eIgnore;
   aPresShell->HandleEventWithTarget(&event, aFrame, aContent, &status);
@@ -492,7 +493,7 @@ nsCoreUtils::GetTreeBodyBoxObject(nsITreeBoxObject *aTreeBoxObj)
   nsCOMPtr<nsIDOMElement> tcElm;
   aTreeBoxObj->GetTreeBody(getter_AddRefs(tcElm));
   nsCOMPtr<nsIContent> tcContent(do_QueryInterface(tcElm));
-  RefPtr<nsXULElement> tcXULElm = nsXULElement::FromContentOrNull(tcContent);
+  RefPtr<nsXULElement> tcXULElm = nsXULElement::FromNodeOrNull(tcContent);
   if (!tcXULElm)
     return nullptr;
 
@@ -509,7 +510,7 @@ nsCoreUtils::GetTreeBoxObject(nsIContent *aContent)
                                            kNameSpaceID_XUL)) {
       // We will get the nsITreeBoxObject from the tree node
       RefPtr<nsXULElement> xulElement =
-        nsXULElement::FromContent(currentContent);
+        nsXULElement::FromNode(currentContent);
       nsCOMPtr<nsIBoxObject> box = xulElement->GetBoxObject(IgnoreErrors());
       nsCOMPtr<nsITreeBoxObject> treeBox(do_QueryInterface(box));
       if (treeBox)
@@ -667,16 +668,4 @@ nsCoreUtils::DispatchAccEvent(RefPtr<nsIAccessibleEvent> event)
   NS_ENSURE_TRUE_VOID(obsService);
 
   obsService->NotifyObservers(event, NS_ACCESSIBLE_EVENT_TOPIC, nullptr);
-}
-
-void
-nsCoreUtils::XBLBindingRole(const nsIContent* aEl, nsAString& aRole)
-{
-  for (const nsXBLBinding* binding = aEl->GetXBLBinding(); binding;
-       binding = binding->GetBaseBinding()) {
-    Element* bindingElm = binding->PrototypeBinding()->GetBindingElement();
-    bindingElm->GetAttr(kNameSpaceID_None, nsGkAtoms::role, aRole);
-    if (!aRole.IsEmpty())
-      break;
-  }
 }

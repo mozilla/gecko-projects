@@ -31,14 +31,17 @@ XPCOMUtils.defineLazyGetter(this, "Management", () => {
   return Management;
 });
 
-XPCOMUtils.defineLazyServiceGetter(this, "aomStartup",
-                                   "@mozilla.org/addons/addon-manager-startup;1",
-                                   "amIAddonManagerStartup");
-XPCOMUtils.defineLazyServiceGetter(this, "rdfService",
-                                   "@mozilla.org/rdf/rdf-service;1", "nsIRDFService");
-XPCOMUtils.defineLazyServiceGetter(this, "uuidGen",
-                                   "@mozilla.org/uuid-generator;1", "nsIUUIDGenerator");
+ChromeUtils.defineModuleGetter(this, "FileTestUtils",
+                               "resource://testing-common/FileTestUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "HttpServer",
+                               "resource://testing-common/httpd.js");
 
+XPCOMUtils.defineLazyServiceGetters(this, {
+  aomStartup: ["@mozilla.org/addons/addon-manager-startup;1", "amIAddonManagerStartup"],
+  proxyService: ["@mozilla.org/network/protocol-proxy-service;1", "nsIProtocolProxyService"],
+  rdfService: ["@mozilla.org/rdf/rdf-service;1", "nsIRDFService"],
+  uuidGen: ["@mozilla.org/uuid-generator;1", "nsIUUIDGenerator"],
+});
 
 XPCOMUtils.defineLazyGetter(this, "AppInfo", () => {
   let AppInfo = {};
@@ -73,6 +76,9 @@ const ZipWriter = Components.Constructor(
   "@mozilla.org/zipwriter;1",
   "nsIZipWriter", "open");
 
+function isRegExp(val) {
+  return val && typeof val === "object" && typeof val.test === "function";
+}
 
 // We need some internal bits of AddonManager
 var AMscope = ChromeUtils.import("resource://gre/modules/AddonManager.jsm", {});
@@ -136,7 +142,6 @@ function escaped(strings, ...values) {
 
 class AddonsList {
   constructor(file) {
-    this.multiprocessIncompatibleIDs = new Set();
     this.extensions = [];
     this.themes = [];
 
@@ -149,7 +154,7 @@ class AddonsList {
     for (let loc of Object.values(data)) {
       let dir = loc.path && new nsFile(loc.path);
 
-      for (let [id, addon] of Object.entries(loc.addons)) {
+      for (let addon of Object.values(loc.addons)) {
         if (addon.enabled && !addon.bootstrapped) {
           let file;
           if (dir) {
@@ -169,9 +174,6 @@ class AddonsList {
             this.themes.push(file);
           } else {
             this.extensions.push(file);
-            if (addon.enableShims) {
-              this.multiprocessIncompatibleIDs.add(id);
-            }
           }
         }
       }
@@ -197,10 +199,6 @@ class AddonsList {
     });
   }
 
-  isMultiprocessIncompatible(id) {
-    return this.multiprocessIncompatibleIDs.has(id);
-  }
-
   hasTheme(dir, id) {
     return this.hasItem("themes", dir, id);
   }
@@ -220,7 +218,16 @@ var AddonTestUtils = {
   usePrivilegedSignatures: true,
   overrideEntry: null,
 
+  maybeInit(testScope) {
+    if (this.testScope != testScope) {
+      this.init(testScope);
+    }
+  },
+
   init(testScope) {
+    if (this.testScope === testScope) {
+      return;
+    }
     this.testScope = testScope;
 
     // Get the profile directory for tests to use.
@@ -300,12 +307,27 @@ var AddonTestUtils = {
     testScope.registerCleanupFunction(() => {
       this.cleanupTempXPIs();
 
+      let ignoreEntries = new Set();
+      {
+        // FileTestUtils lazily creates a directory to hold the temporary files
+        // it creates. If that directory exists, ignore it.
+        let {value} = Object.getOwnPropertyDescriptor(FileTestUtils,
+                                                      "_globalTemporaryDirectory");
+        if (value) {
+          ignoreEntries.add(value.leafName);
+        }
+      }
+
       // Check that the temporary directory is empty
       var dirEntries = this.tempDir.directoryEntries
                            .QueryInterface(Ci.nsIDirectoryEnumerator);
       var entries = [];
-      while (dirEntries.hasMoreElements())
-        entries.push(dirEntries.nextFile.leafName);
+      while (dirEntries.hasMoreElements()) {
+        let {leafName} = dirEntries.nextFile;
+        if (!ignoreEntries.has(leafName)) {
+          entries.push(leafName);
+        }
+      }
       if (entries.length)
         throw new Error(`Found unexpected files in temporary directory: ${entries.join(", ")}`);
 
@@ -367,6 +389,69 @@ var AddonTestUtils = {
         Cu.reportError(e);
       }
     });
+  },
+
+  /**
+   * Creates a new HttpServer for testing, and begins listening on the
+   * specified port. Automatically shuts down the server when the test
+   * unit ends.
+   *
+   * @param {object} [options = {}]
+   *        The options object.
+   * @param {integer} [options.port = -1]
+   *        The port to listen on. If omitted, listen on a random
+   *        port. The latter is the preferred behavior.
+   * @param {sequence<string>?} [options.hosts = null]
+   *        A set of hosts to accept connections to. Support for this is
+   *        implemented using a proxy filter.
+   *
+   * @returns {HttpServer}
+   *        The HTTP server instance.
+   */
+  createHttpServer({port = -1, hosts} = {}) {
+    let server = new HttpServer();
+    server.start(port);
+
+    if (hosts) {
+      hosts = new Set(hosts);
+      const serverHost = "localhost";
+      const serverPort = server.identity.primaryPort;
+
+      for (let host of hosts) {
+        server.identity.add("http", host, 80);
+      }
+
+      const proxyFilter = {
+        proxyInfo: proxyService.newProxyInfo("http", serverHost, serverPort, 0, 4096, null),
+
+        applyFilter(service, channel, defaultProxyInfo, callback) {
+          if (hosts.has(channel.URI.host)) {
+            callback.onProxyFilterResult(this.proxyInfo);
+          } else {
+            callback.onProxyFilterResult(defaultProxyInfo);
+          }
+        },
+      };
+
+      proxyService.registerChannelFilter(proxyFilter, 0);
+      this.testScope.registerCleanupFunction(() => {
+        proxyService.unregisterChannelFilter(proxyFilter);
+      });
+    }
+
+    this.testScope.registerCleanupFunction(() => {
+      return new Promise(resolve => {
+        server.stop(resolve);
+      });
+    });
+
+    return server;
+  },
+
+  info(msg) {
+    // info() for mochitests, do_print for xpcshell.
+    let print = this.testScope.info || this.testScope.do_print;
+    print(msg);
   },
 
   cleanupTempXPIs() {
@@ -674,7 +759,7 @@ var AddonTestUtils = {
 
       for (let versionData of data[addon]) {
         rdf += "    <li><Description>\n";
-        rdf += this._writeProps(versionData, ["version", "multiprocessCompatible"],
+        rdf += this._writeProps(versionData, ["version"],
                                 `      `);
         for (let app of versionData.targetApplications || []) {
           rdf += "      <em:targetApplication><Description>\n";
@@ -725,10 +810,10 @@ var AddonTestUtils = {
 
     rdf += '<Description about="urn:mozilla:install-manifest">\n';
 
-    let props = ["id", "version", "type", "internalName", "updateURL", "updateKey",
+    let props = ["id", "version", "type", "internalName", "updateURL",
                  "optionsURL", "optionsType", "aboutURL", "iconURL", "icon64URL",
                  "skinnable", "bootstrap", "unpack", "strictCompatibility",
-                 "multiprocessCompatible", "hasEmbeddedWebExtension"];
+                 "hasEmbeddedWebExtension"];
     rdf += this._writeProps(data, props);
 
     rdf += this._writeLocaleStrings(data);
@@ -1053,6 +1138,16 @@ var AddonTestUtils = {
       QueryInterface: XPCOMUtils.generateQI([Ci.nsIDirectoryServiceProvider]),
     };
     Services.dirsvc.registerProvider(dirProvider);
+
+    try {
+      Services.dirsvc.undefine(key);
+    } catch (e) {
+      // This throws if the key is not already registered, but that
+      // doesn't matter.
+      if (e.result != Cr.NS_ERROR_FAILURE) {
+        throw e;
+      }
+    }
   },
 
   /**
@@ -1258,6 +1353,72 @@ var AddonTestUtils = {
   },
 
   /**
+   * An object describing an expected or forbidden console message. Each
+   * property in the object corresponds to a property with the same name
+   * in a console message. If the value in the pattern object is a
+   * regular expression, it must match the value of the corresponding
+   * console message property. If it is any other value, it must be
+   * strictly equal to the correspondng console message property.
+   *
+   * @typedef {object} ConsoleMessagePattern
+   */
+
+  /**
+   * Checks the list of messages returned from `promiseConsoleOutput`
+   * against the given set of expected messages.
+   *
+   * This is roughly equivalent to the expected and forbidden message
+   * matching functionality of SimpleTest.monitorConsole.
+   *
+   * @param {Array<object>} messages
+   *        The array of console messages to match.
+   * @param {object} options
+   *        Options describing how to perform the match.
+   * @param {Array<ConsoleMessagePattern>} [options.expected = []]
+   *        An array of messages which must appear in `messages`. The
+   *        matching messages in the `messages` array must appear in the
+   *        same order as the patterns in the `expected` array.
+   * @param {Array<ConsoleMessagePattern>} [options.forbidden = []]
+   *        An array of messages which must not appear in the `messages`
+   *        array.
+   * @param {bool} [options.forbidUnexpected = false]
+   *        If true, the `messages` array must not contain any messages
+   *        which are not matched by the given `expected` patterns.
+   */
+  checkMessages(messages, {expected = [], forbidden = [], forbidUnexpected = false}) {
+    function msgMatches(msg, expectedMsg) {
+      for (let [prop, pattern] of Object.entries(expectedMsg)) {
+        if (isRegExp(pattern) && typeof msg[prop] === "string") {
+          if (!pattern.test(msg[prop])) {
+            return false;
+          }
+        } else if (msg[prop] !== pattern) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    let i = 0;
+    for (let msg of messages) {
+      if (forbidden.some(pat => msgMatches(msg, pat))) {
+        this.testScope.ok(false, `Got forbidden console message: ${msg}`);
+        continue;
+      }
+
+      if (i < expected.length && msgMatches(msg, expected[i])) {
+        this.info(`Matched expected console message: ${msg}`);
+        i++;
+      } else if (forbidUnexpected) {
+        this.testScope.ok(false, `Got unexpected console message: ${msg}`);
+      }
+    }
+    for (let pat of expected.slice(i)) {
+      this.testScope.ok(false, `Did not get expected console message: ${uneval(pat)}`);
+    }
+  },
+
+  /**
    * Helper to wait for a webextension to completely start
    *
    * @param {string} [id]
@@ -1286,10 +1447,14 @@ var AddonTestUtils = {
   async overrideBuiltIns(data) {
     // We need to set this in order load the URL preloader service, which
     // is only possible when running in automation.
+    let prevPrefVal = Services.prefs.getBoolPref(PREF_DISABLE_SECURITY, false);
     Services.prefs.setBoolPref(PREF_DISABLE_SECURITY, true);
     aomStartup.initializeURLPreloader();
 
-    let file = FileUtils.getFile("TmpD", "override.txt");
+    let file = this.tempDir.clone();
+    file.append("override.txt");
+    this.tempXPIs.push(file);
+
     let manifest = Services.io.newFileURI(file);
     await OS.File.writeAtomic(file.path,
       new TextEncoder().encode(JSON.stringify(data)));
@@ -1297,7 +1462,7 @@ var AddonTestUtils = {
       ["override", "chrome://browser/content/built_in_addons.json",
        Services.io.newFileURI(file).spec],
     ]);
-    Services.prefs.setBoolPref(PREF_DISABLE_SECURITY, false);
+    Services.prefs.setBoolPref(PREF_DISABLE_SECURITY, prevPrefVal);
   }
 };
 

@@ -7,7 +7,7 @@
 "use strict";
 
 const Services = require("Services");
-const EventEmitter = require("devtools/shared/old-event-emitter");
+const EventEmitter = require("devtools/shared/event-emitter");
 const {
   VIEW_NODE_VALUE_TYPE,
   VIEW_NODE_SHAPE_POINT_TYPE
@@ -861,7 +861,7 @@ class HighlightersOverlay {
    * Handler function for "markupmutation" events. Hides the flexbox/grid/shapes
    * highlighter if the flexbox/grid/shapes container is no longer in the DOM tree.
    */
-  async onMarkupMutation(evt, mutations) {
+  async onMarkupMutation(mutations) {
     let hasInterestingMutation = mutations.some(mut => mut.type === "childList");
     if (!hasInterestingMutation) {
       // Bail out if the mutations did not remove nodes, or if no grid highlighter is

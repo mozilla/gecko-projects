@@ -11,6 +11,7 @@ ChromeUtils.defineModuleGetter(this, "AppConstants",
 // NB: Eagerly load modules that will be loaded/constructed/initialized in the
 // common case to avoid the overhead of wrapping and detecting lazy loading.
 const {actionCreators: ac, actionTypes: at} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm", {});
+const {AboutPreferences} = ChromeUtils.import("resource://activity-stream/lib/AboutPreferences.jsm", {});
 const {DefaultPrefs} = ChromeUtils.import("resource://activity-stream/lib/ActivityStreamPrefs.jsm", {});
 const {ManualMigration} = ChromeUtils.import("resource://activity-stream/lib/ManualMigration.jsm", {});
 const {NewTabInit} = ChromeUtils.import("resource://activity-stream/lib/NewTabInit.jsm", {});
@@ -54,13 +55,11 @@ const PREFS_CONFIG = new Map([
       api_key_pref: "extensions.pocket.oAuthConsumerKey",
       // Use the opposite value as what default value the feed would have used
       hidden: !PREFS_CONFIG.get("feeds.section.topstories").getValue(args),
-      provider_description: "pocket_description",
       provider_icon: "pocket",
       provider_name: "Pocket",
       read_more_endpoint: "https://getpocket.com/explore/trending?src=fx_new_tab",
       stories_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/global-recs?version=3&consumer_key=$apiKey&locale_lang=${args.locale}`,
       stories_referrer: "https://getpocket.com/recommendations",
-      privacy_notice_link: "https://www.mozilla.org/privacy/firefox/#suggest-relevant-content",
       disclaimer_link: "https://getpocket.com/firefox/new_tab_learn_more",
       topics_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/trending-topics?version=2&consumer_key=$apiKey&locale_lang=${args.locale}`,
       show_spocs: false,
@@ -118,7 +117,7 @@ const PREFS_CONFIG = new Map([
   }],
   ["telemetry.ut.events", {
     title: "Enable Unified Telemetry event data collection",
-    value: !AppConstants.RELEASE_OR_BETA,
+    value: AppConstants.EARLY_BETA_OR_EARLIER,
     value_local_dev: false
   }],
   ["telemetry.ping.endpoint", {
@@ -148,11 +147,21 @@ const PREFS_CONFIG = new Map([
   ["enableWideLayout", {
     title: "Enable the wider layout (8 topsites per row and larger pocket+highlight cards)",
     value: true
+  }],
+  ["sectionOrder", {
+    title: "The rendering order for the sections",
+    value: "topsites,topstories,highlights"
   }]
 ]);
 
 // Array of each feed's FEEDS_CONFIG factory and values to add to PREFS_CONFIG
 const FEEDS_DATA = [
+  {
+    name: "aboutpreferences",
+    factory: () => new AboutPreferences(),
+    title: "about:preferences rendering",
+    value: true
+  },
   {
     name: "migration",
     factory: () => new ManualMigration(),

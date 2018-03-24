@@ -9,7 +9,7 @@ async function runTestOnPrivacyPrefPane(testFunc) {
   browser.contentWindow.gotoPref("panePrivacy");
   info("viewing privacy pane, executing testFunc");
   testFunc(browser.contentWindow);
-  await BrowserTestUtils.removeTab(tab);
+  BrowserTestUtils.removeTab(tab);
 }
 
 function controlChanged(element) {
@@ -116,20 +116,20 @@ function test_dependent_elements(win) {
 }
 
 function test_dependent_cookie_elements(win) {
-  let controls = [
-    win.document.getElementById("acceptThirdPartyLabel"),
-    win.document.getElementById("acceptThirdPartyMenu"),
-    win.document.getElementById("keepUntil"),
-    win.document.getElementById("keepCookiesUntil"),
-  ];
+  let keepUntil = win.document.getElementById("keepUntil");
+  let keepCookiesUntil = win.document.getElementById("keepCookiesUntil");
+  let acceptThirdPartyLabel = win.document.getElementById("acceptThirdPartyLabel");
+  let acceptThirdPartyMenu = win.document.getElementById("acceptThirdPartyMenu");
+
+  let controls = [acceptThirdPartyLabel, acceptThirdPartyMenu, keepUntil, keepCookiesUntil];
   controls.forEach(function(control) {
     ok(control, "the dependent cookie controls should exist");
   });
   let acceptcookies = win.document.getElementById("acceptCookies");
   ok(acceptcookies, "the accept cookies checkbox should exist");
 
-  function expect_disabled(disabled) {
-    controls.forEach(function(control) {
+  function expect_disabled(disabled, c = controls) {
+    c.forEach(function(control) {
       is(control.disabled, disabled,
         control.getAttribute("id") + " should " + (disabled ? "" : "not ") + "be disabled");
     });
@@ -141,6 +141,19 @@ function test_dependent_cookie_elements(win) {
 
   acceptcookies.value = "1";
   controlChanged(acceptcookies);
+  expect_disabled(false);
+
+  let historymode = win.document.getElementById("historyMode");
+
+  // The History mode setting for "never remember history" should still
+  // disable the "keep cookies until..." menu.
+  historymode.value = "dontremember";
+  controlChanged(historymode);
+  expect_disabled(true, [keepUntil, keepCookiesUntil]);
+  expect_disabled(false, [acceptThirdPartyLabel, acceptThirdPartyMenu]);
+
+  historymode.value = "remember";
+  controlChanged(historymode);
   expect_disabled(false);
 }
 
@@ -285,7 +298,9 @@ function cache_preferences(win) {
 function reset_preferences(win) {
   let prefs = win.Preferences.getAll();
   for (let pref of prefs)
-    pref.value = gPrefCache.get(pref.name);
+    // Avoid assigning undefined, which means clearing a "user"/test pref value
+    if (gPrefCache.has(pref.name))
+      pref.value = gPrefCache.get(pref.name);
 }
 
 function run_test_subset(subset) {

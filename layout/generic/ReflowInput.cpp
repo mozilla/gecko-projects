@@ -654,8 +654,7 @@ ReflowInput::InitResizeFlags(nsPresContext* aPresContext,
       stack.AppendElement(mFrame);
 
       do {
-        nsIFrame *f = stack.ElementAt(stack.Length() - 1);
-        stack.RemoveElementAt(stack.Length() - 1);
+        nsIFrame *f = stack.PopLastElement();
 
         nsIFrame::ChildListIterator lists(f);
         for (; !lists.IsDone(); lists.Next()) {
@@ -1986,7 +1985,7 @@ ReflowInput::InitAbsoluteConstraints(nsPresContext* aPresContext,
 
 // This will not be converted to abstract coordinates because it's only
 // used in CalcQuirkContainingBlockHeight
-nscoord
+static nscoord
 GetBlockMarginBorderPadding(const ReflowInput* aReflowInput)
 {
   nscoord result = 0;
@@ -2466,8 +2465,8 @@ ReflowInput::InitConstraints(nsPresContext* aPresContext,
         // in its inline axis.
         auto inlineAxisAlignment =
           wm.IsOrthogonalTo(cbwm)
-            ? mStylePosition->UsedAlignSelf(alignCB->StyleContext())
-            : mStylePosition->UsedJustifySelf(alignCB->StyleContext());
+            ? mStylePosition->UsedAlignSelf(alignCB->Style())
+            : mStylePosition->UsedJustifySelf(alignCB->Style());
         if ((inlineAxisAlignment != NS_STYLE_ALIGN_STRETCH &&
              inlineAxisAlignment != NS_STYLE_ALIGN_NORMAL) ||
             mStyleMargin->mMargin.GetIStartUnit(wm) == eStyleUnit_Auto ||
@@ -2481,7 +2480,7 @@ ReflowInput::InitConstraints(nsPresContext* aPresContext,
         // Also shrink-wrap blocks that are orthogonal to their container.
         if (isBlock &&
             ((aFrameType == LayoutFrameType::Legend &&
-              mFrame->StyleContext()->GetPseudo() != nsCSSAnonBoxes::scrolledContent) ||
+              mFrame->Style()->GetPseudo() != nsCSSAnonBoxes::scrolledContent) ||
              (aFrameType == LayoutFrameType::Scroll &&
               mFrame->GetContentInsertionFrame()->IsLegendFrame()) ||
              (mCBReflowInput &&
@@ -2874,11 +2873,11 @@ GetNormalLineHeight(nsFontMetrics* aFontMetrics)
 }
 
 static inline nscoord
-ComputeLineHeight(nsStyleContext* aStyleContext,
+ComputeLineHeight(ComputedStyle* aComputedStyle,
                   nscoord aBlockBSize,
                   float aFontSizeInflation)
 {
-  const nsStyleCoord& lhCoord = aStyleContext->StyleText()->mLineHeight;
+  const nsStyleCoord& lhCoord = aComputedStyle->StyleText()->mLineHeight;
 
   if (lhCoord.GetUnit() == eStyleUnit_Coord) {
     nscoord result = lhCoord.GetCoordValue();
@@ -2893,7 +2892,7 @@ ComputeLineHeight(nsStyleContext* aStyleContext,
     // is found by multiplying the factor by the font's computed size
     // (adjusted for min-size prefs and text zoom).
     return NSToCoordRound(lhCoord.GetFactorValue() * aFontSizeInflation *
-                          aStyleContext->StyleFont()->mFont.size);
+                          aComputedStyle->StyleFont()->mFont.size);
 
   NS_ASSERTION(lhCoord.GetUnit() == eStyleUnit_Normal ||
                lhCoord.GetUnit() == eStyleUnit_Enumerated,
@@ -2908,7 +2907,7 @@ ComputeLineHeight(nsStyleContext* aStyleContext,
   }
 
   RefPtr<nsFontMetrics> fm = nsLayoutUtils::
-    GetFontMetricsForStyleContext(aStyleContext, aFontSizeInflation);
+    GetFontMetricsForComputedStyle(aComputedStyle, aFontSizeInflation);
   return GetNormalLineHeight(fm);
 }
 
@@ -2919,29 +2918,29 @@ ReflowInput::CalcLineHeight() const
     nsLayoutUtils::IsNonWrapperBlock(mFrame) ? ComputedBSize() :
     (mCBReflowInput ? mCBReflowInput->ComputedBSize() : NS_AUTOHEIGHT);
 
-  return CalcLineHeight(mFrame->GetContent(), mFrame->StyleContext(), blockBSize,
+  return CalcLineHeight(mFrame->GetContent(), mFrame->Style(), blockBSize,
                         nsLayoutUtils::FontSizeInflationFor(mFrame));
 }
 
 /* static */ nscoord
 ReflowInput::CalcLineHeight(nsIContent* aContent,
-                                  nsStyleContext* aStyleContext,
+                                  ComputedStyle* aComputedStyle,
                                   nscoord aBlockBSize,
                                   float aFontSizeInflation)
 {
-  NS_PRECONDITION(aStyleContext, "Must have a style context");
+  NS_PRECONDITION(aComputedStyle, "Must have a style context");
 
   nscoord lineHeight =
-    ComputeLineHeight(aStyleContext, aBlockBSize, aFontSizeInflation);
+    ComputeLineHeight(aComputedStyle, aBlockBSize, aFontSizeInflation);
 
   NS_ASSERTION(lineHeight >= 0, "ComputeLineHeight screwed up");
 
-  HTMLInputElement* input = HTMLInputElement::FromContentOrNull(aContent);
+  HTMLInputElement* input = HTMLInputElement::FromNodeOrNull(aContent);
   if (input && input->IsSingleLineTextControl()) {
     // For Web-compatibility, single-line text input elements cannot
     // have a line-height smaller than one.
     nscoord lineHeightOne =
-      aFontSizeInflation * aStyleContext->StyleFont()->mFont.size;
+      aFontSizeInflation * aComputedStyle->StyleFont()->mFont.size;
     if (lineHeight < lineHeightOne) {
       lineHeight = lineHeightOne;
     }

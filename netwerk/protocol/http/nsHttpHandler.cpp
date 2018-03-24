@@ -207,6 +207,7 @@ nsHttpHandler::nsHttpHandler()
     , mMaxRequestAttempts(6)
     , mMaxRequestDelay(10)
     , mIdleSynTimeout(250)
+    , mFallbackSynTimeout(5)
     , mH2MandatorySuiteEnabled(false)
     , mMaxUrgentExcessiveConns(3)
     , mMaxConnections(24)
@@ -346,7 +347,7 @@ nsHttpHandler::SetFastOpenOSSupport()
     if (NS_SUCCEEDED(rv)) {
         // set min version minus 1.
 #if XP_MACOSX
-        int min_version[] = {17, 3};
+        int min_version[] = {17, 4}; // High Sierra 10.13.4
 #elif ANDROID
         int min_version[] = {4, 4};
 #elif XP_LINUX
@@ -500,12 +501,6 @@ nsHttpHandler::Init()
 
     mSessionStartTime = NowInSeconds();
     mHandlerActive = true;
-
-    rv = mAuthCache.Init();
-    if (NS_FAILED(rv)) return rv;
-
-    rv = mPrivateAuthCache.Init();
-    if (NS_FAILED(rv)) return rv;
 
     rv = InitConnectionMgr();
     if (NS_FAILED(rv)) return rv;
@@ -1381,6 +1376,12 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         rv = prefs->GetBoolPref(HTTP_PREF("fast-fallback-to-IPv4"), &cVar);
         if (NS_SUCCEEDED(rv))
             mFastFallbackToIPv4 = cVar;
+    }
+
+    if (PREF_CHANGED(HTTP_PREF("fallback-connection-timeout"))) {
+        rv = prefs->GetIntPref(HTTP_PREF("fallback-connection-timeout"), &val);
+        if (NS_SUCCEEDED(rv))
+            mFallbackSynTimeout = (uint16_t) clamped(val, 0, 10 * 60);
     }
 
     if (PREF_CHANGED(HTTP_PREF("version"))) {

@@ -49,13 +49,8 @@
 #include "vm/SharedImmutableStringsCache.h"
 #include "vm/Stack.h"
 #include "vm/Stopwatch.h"
-#include "vm/Symbol.h"
-#include "wasm/WasmSignalHandlers.h"
-
-#ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable:4100) /* Silence unreferenced formal parameter warnings */
-#endif
+#include "vm/SymbolType.h"
+#include "wasm/WasmTypes.h"
 
 namespace js {
 
@@ -1004,18 +999,10 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
   public:
     js::RuntimeCaches& caches() { return caches_.ref(); }
 
-    // When wasm traps or is interrupted, the signal handler records some data
-    // for unwinding purposes. Wasm code can't interrupt or trap reentrantly.
-    js::ActiveThreadData<
-        mozilla::MaybeOneOf<js::wasm::TrapData, js::wasm::InterruptData>
-    > wasmUnwindData;
-
-    js::wasm::TrapData& wasmTrapData() {
-        return wasmUnwindData.ref().ref<js::wasm::TrapData>();
-    }
-    js::wasm::InterruptData& wasmInterruptData() {
-        return wasmUnwindData.ref().ref<js::wasm::InterruptData>();
-    }
+    // List of all the live wasm::Instances in the runtime. Equal to the union
+    // of all instances registered in all JSCompartments. Accessed from watchdog
+    // threads for purposes of wasm::InterruptRunningCode().
+    js::ExclusiveData<js::wasm::InstanceVector> wasmInstances;
 
   public:
 #if defined(NIGHTLY_BUILD)
@@ -1240,9 +1227,5 @@ ZoneGroup::storeBuffer()
 extern mozilla::Atomic<JS::LargeAllocationFailureCallback> OnLargeAllocationFailure;
 
 } /* namespace js */
-
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif
 
 #endif /* vm_Runtime_h */

@@ -17,7 +17,6 @@
 
 class nsIContent;
 class nsIDOMDocument;
-class nsIDOMElement;
 class nsIDOMEvent;
 class nsIDOMNode;
 class nsIDocumentEncoder;
@@ -32,6 +31,7 @@ class HTMLEditRules;
 enum class EditAction : int32_t;
 
 namespace dom {
+class DragEvent;
 class Selection;
 } // namespace dom
 
@@ -153,7 +153,7 @@ public:
                                           int32_t aDestOffset,
                                           bool aDoDeleteSelection) override;
 
-  virtual nsresult InsertFromDrop(nsIDOMEvent* aDropEvent) override;
+  virtual nsresult InsertFromDrop(dom::DragEvent* aDropEvent) override;
 
   /**
    * Extends the selection for given deletion operation
@@ -213,8 +213,10 @@ protected:
    * @return                The new <br> node.  If failed to create new <br>
    *                        node, returns nullptr.
    */
-  already_AddRefed<Element> CreateBR(const EditorRawDOMPoint& aPointToInsert,
-                                     EDirection aSelect = eNone);
+  template<typename PT, typename CT>
+  already_AddRefed<Element>
+  CreateBR(const EditorDOMPointBase<PT, CT>& aPointToInsert,
+           EDirection aSelect = eNone);
 
   /**
    * CreateBRImpl() creates a <br> element and inserts it before aPointToInsert.
@@ -233,9 +235,10 @@ protected:
    * @return                    The new <br> node.  If failed to create new
    *                            <br> node, returns nullptr.
    */
+  template<typename PT, typename CT>
   already_AddRefed<Element>
   CreateBRImpl(Selection& aSelection,
-               const EditorRawDOMPoint& aPointToInsert,
+               const EditorDOMPointBase<PT, CT>& aPointToInsert,
                EDirection aSelect);
 
   /**

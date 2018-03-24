@@ -30,7 +30,6 @@
 #include "mozilla/layers/CompositorController.h"
 #include "mozilla/layers/CompositorOptions.h"
 #include "mozilla/layers/CompositorVsyncSchedulerOwner.h"
-#include "mozilla/layers/FocusState.h"
 #include "mozilla/layers/GeckoContentController.h"
 #include "mozilla/layers/ISurfaceAllocator.h" // for ShmemAllocator
 #include "mozilla/layers/LayersMessages.h"  // for TargetConfig
@@ -114,6 +113,12 @@ public:
                                  const TimeStamp& aTime) { return true; }
   virtual void LeaveTestMode(const uint64_t& aId) { }
   virtual void ApplyAsyncProperties(LayerTransactionParent* aLayerTree) = 0;
+  virtual void SetTestAsyncScrollOffset(const uint64_t& aLayersId,
+                                        const FrameMetrics::ViewID& aScrollId,
+                                        const CSSPoint& aPoint) = 0;
+  virtual void SetTestAsyncZoom(const uint64_t& aLayersId,
+                                const FrameMetrics::ViewID& aScrollId,
+                                const LayerToParentLayerScale& aZoom) = 0;
   virtual void FlushApzRepaints(const uint64_t& aLayersId) = 0;
   virtual void GetAPZTestData(const uint64_t& aLayersId,
                               APZTestData* aOutData) { }
@@ -232,13 +237,6 @@ public:
   // @see CrossProcessCompositorBridgeParent::RecvRequestNotifyAfterRemotePaint
   mozilla::ipc::IPCResult RecvRequestNotifyAfterRemotePaint() override { return IPC_OK(); };
 
-  mozilla::ipc::IPCResult RecvClearApproximatelyVisibleRegions(const uint64_t& aLayersId,
-                                                               const uint32_t& aPresShellId) override;
-  void ClearApproximatelyVisibleRegions(const uint64_t& aLayersId,
-                                        const Maybe<uint32_t>& aPresShellId);
-  mozilla::ipc::IPCResult RecvNotifyApproximatelyVisibleRegion(const ScrollableLayerGuid& aGuid,
-                                                               const CSSIntRegion& aRegion) override;
-
   mozilla::ipc::IPCResult RecvAllPluginsCaptured() override;
 
   void ActorDestroy(ActorDestroyReason why) override;
@@ -252,6 +250,12 @@ public:
   void LeaveTestMode(const uint64_t& aId) override;
   void ApplyAsyncProperties(LayerTransactionParent* aLayerTree) override;
   CompositorAnimationStorage* GetAnimationStorage();
+  void SetTestAsyncScrollOffset(const uint64_t& aLayersId,
+                                const FrameMetrics::ViewID& aScrollId,
+                                const CSSPoint& aPoint) override;
+  void SetTestAsyncZoom(const uint64_t& aLayersId,
+                        const FrameMetrics::ViewID& aScrollId,
+                        const LayerToParentLayerScale& aZoom) override;
   void FlushApzRepaints(const uint64_t& aLayersId) override;
   void GetAPZTestData(const uint64_t& aLayersId,
                       APZTestData* aOutData) override;
@@ -261,6 +265,7 @@ public:
   AsyncCompositionManager* GetCompositionManager(LayerTransactionParent* aLayerTree) override { return mCompositionManager; }
 
   PTextureParent* AllocPTextureParent(const SurfaceDescriptor& aSharedData,
+                                      const ReadLockDescriptor& aReadLock,
                                       const LayersBackend& aLayersBackend,
                                       const TextureFlags& aFlags,
                                       const uint64_t& aId,
@@ -447,10 +452,18 @@ public:
   PAPZCTreeManagerParent* AllocPAPZCTreeManagerParent(const uint64_t& aLayersId) override;
   bool DeallocPAPZCTreeManagerParent(PAPZCTreeManagerParent* aActor) override;
 
+  // Helper method so that we don't have to expose mApzcTreeManager to
+  // CrossProcessCompositorBridgeParent.
+  void AllocateAPZCTreeManagerParent(const MonitorAutoLock& aProofOfLayerTreeStateLock,
+                                     const uint64_t& aLayersId,
+                                     LayerTreeState& aLayerTreeStateToUpdate);
+
   PAPZParent* AllocPAPZParent(const uint64_t& aLayersId) override;
   bool DeallocPAPZParent(PAPZParent* aActor) override;
 
-  RefPtr<APZCTreeManager> GetAPZCTreeManager();
+#if defined(MOZ_WIDGET_ANDROID)
+  AndroidDynamicToolbarAnimator* GetAndroidDynamicToolbarAnimator();
+#endif
   RefPtr<APZSampler> GetAPZSampler();
 
   CompositorOptions GetOptions() const {
@@ -472,13 +485,16 @@ public:
 
   static CompositorBridgeParent* GetCompositorBridgeParentFromLayersId(const uint64_t& aLayersId);
 
+  /**
+   * This returns a reference to the IAPZCTreeManager "controller subinterface"
+   * to which pan/zoom-related events can be sent. The controller subinterface
+   * doesn't expose any sampler-thread APZCTreeManager methods.
+   */
+  static already_AddRefed<IAPZCTreeManager> GetAPZCTreeManager(uint64_t aLayersId);
+
 #if defined(MOZ_WIDGET_ANDROID)
   gfx::IntSize GetEGLSurfaceSize() {
     return mEGLSurfaceSize;
-  }
-
-  uint64_t GetRootLayerTreeId() {
-    return mRootLayerTreeID;
   }
 #endif // defined(MOZ_WIDGET_ANDROID)
 
@@ -490,13 +506,6 @@ private:
    * Called during destruction in order to release resources as early as possible.
    */
   void StopAndClearResources();
-
-  /**
-   * This returns a reference to the IAPZCTreeManager "controller subinterface"
-   * to which pan/zoom-related events can be sent. The controller subinterface
-   * doesn't expose any sampler-thread APZCTreeManager methods.
-   */
-  static already_AddRefed<IAPZCTreeManager> GetAPZCTreeManager(uint64_t aLayersId);
 
   /**
    * Release compositor-thread resources referred to by |aID|.

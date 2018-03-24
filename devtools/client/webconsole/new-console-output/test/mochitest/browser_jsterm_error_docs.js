@@ -5,7 +5,7 @@
 
 const TEST_URI = "data:text/html,Test error documentation";
 
-add_task(async function () {
+add_task(async function() {
   const hud = await openNewTabAndConsole(TEST_URI);
   const {jsterm} = hud;
 
@@ -23,7 +23,7 @@ add_task(async function () {
     let title = ErrorDocs.GetURL({ errorMessageName }).split("?")[0];
 
     jsterm.clearOutput();
-    const onMessage = waitForMessage(hud, "RangeError:")
+    const onMessage = waitForMessage(hud, "RangeError:");
     jsterm.execute(expression);
     const {node} = await onMessage;
     const learnMoreLink = node.querySelector(".learn-more-link");

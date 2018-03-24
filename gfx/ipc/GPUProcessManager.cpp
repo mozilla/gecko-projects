@@ -14,7 +14,6 @@
 #include "mozilla/StaticPtr.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/gfx/gfxVars.h"
-#include "mozilla/layers/APZCTreeManager.h"
 #include "mozilla/layers/APZCTreeManagerChild.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/CompositorManagerChild.h"
@@ -828,6 +827,12 @@ GPUProcessManager::CreateRemoteSession(nsBaseWidget* aWidget,
       return nullptr;
     }
     apz = static_cast<APZCTreeManagerChild*>(papz);
+
+    PAPZInputBridgeChild* pinput = mGPUChild->SendPAPZInputBridgeConstructor(aRootLayerTreeId);
+    if (!pinput) {
+      return nullptr;
+    }
+    apz->SetInputBridge(static_cast<APZInputBridgeChild*>(pinput));
   }
 
   RefPtr<RemoteCompositorSession> session =

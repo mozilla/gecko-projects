@@ -23,7 +23,6 @@
 #include "nsICommandManager.h"
 #include "nsIDocShell.h"
 #include "nsIDocument.h"
-#include "nsIDOMCharacterData.h"
 #include "nsIDOMDocument.h"
 #include "nsPIDOMWindow.h"
 #include "nsIEditingSession.h"
@@ -442,15 +441,13 @@ DocAccessible::Shutdown()
 
   RemoveEventListeners();
 
-  nsCOMPtr<nsIDocument> kungFuDeathGripDoc = mDocumentNode;
-  mDocumentNode = nullptr;
-
   if (mParent) {
     DocAccessible* parentDocument = mParent->Document();
     if (parentDocument)
       parentDocument->RemoveChildDocument(this);
 
     mParent->RemoveChild(this);
+    MOZ_ASSERT(!mParent, "Parent has to be null!");
   }
 
   // Walk the array backwards because child documents remove themselves from the
@@ -492,7 +489,8 @@ DocAccessible::Shutdown()
 
   HyperTextAccessibleWrap::Shutdown();
 
-  GetAccService()->NotifyOfDocumentShutdown(this, kungFuDeathGripDoc);
+  GetAccService()->NotifyOfDocumentShutdown(this, mDocumentNode);
+  mDocumentNode = nullptr;
 }
 
 nsIFrame*

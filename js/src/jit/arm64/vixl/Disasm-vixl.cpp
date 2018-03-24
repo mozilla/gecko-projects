@@ -1321,6 +1321,11 @@ void Disassembler::VisitSystem(const Instruction* instr) {
         form = NULL;
         break;
       }
+      case CSDB: {
+        mnemonic = "csdb";
+        form = NULL;
+        break;
+      }
     }
   } else if (instr->Mask(MemBarrierFMask) == MemBarrierFixed) {
     switch (instr->Mask(MemBarrierMask)) {
@@ -3122,7 +3127,7 @@ int Disassembler::SubstituteImmediateField(const Instruction* instr,
             uint64_t imm8 = instr->ImmNEONabcdefgh();
             uint64_t imm = 0;
             for (int i = 0; i < 8; ++i) {
-              if (imm8 & (1 << i)) {
+              if (imm8 & (1ULL << i)) {
                 imm |= (UINT64_C(0xff) << (8 * i));
               }
             }

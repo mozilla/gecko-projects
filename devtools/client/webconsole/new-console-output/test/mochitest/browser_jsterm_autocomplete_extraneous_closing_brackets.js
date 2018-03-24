@@ -10,13 +10,13 @@
 
 const TEST_URI = "data:text/html;charset=utf-8,test for bug 592442";
 
-add_task(async function () {
+add_task(async function() {
   let { jsterm } = await openNewTabAndConsole(TEST_URI);
 
   try {
     await jstermSetValueAndComplete(jsterm, "document.getElementById)");
     ok(true, "no error was thrown when an extraneous bracket was inserted");
   } catch (ex) {
-    ok(false, "an error was thrown when an extraneous bracket was inserted")
+    ok(false, "an error was thrown when an extraneous bracket was inserted");
   }
 });

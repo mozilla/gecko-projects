@@ -16,8 +16,8 @@ replay = ["webrender_api/deserialize", "ron", "serde"]
 
 [dependencies]
 app_units = "0.6"
-bincode = "0.9"
 byteorder = "1.0"
+bincode = "1.0"
 euclid = "0.17"
 fxhash = "0.2.1"
 gleam = "0.4.20"
@@ -35,12 +35,12 @@ smallvec = "0.6"
 ws = { optional = true, version = "0.7.3" }
 serde_json = { optional = true, version = "1.0" }
 serde = { optional = true, version = "1.0", features = ["serde_derive"] }
-image = { optional = true, version = "0.17" }
-base64 = { optional = true, version = "0.3.0" }
+image = { optional = true, version = "0.18" }
+base64 = { optional = true, version = "0.6" }
 ron = { optional = true, version = "0.1.7" }
 
 [dev-dependencies]
-angle = {git = "https://github.com/servo/angle", branch = "servo"}
+mozangle = "0.1"
 env_logger = "0.5"
 rand = "0.3"                # for the benchmarks
 glutin = "0.12"             # for the example apps

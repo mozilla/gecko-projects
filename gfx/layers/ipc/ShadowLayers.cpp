@@ -56,14 +56,12 @@ typedef nsTArray<SurfaceDescriptor> BufferArray;
 typedef nsTArray<Edit> EditVector;
 typedef nsTHashtable<nsPtrHashKey<ShadowableLayer>> ShadowableLayerSet;
 typedef nsTArray<OpDestroy> OpDestroyVector;
-typedef nsTArray<ReadLockInit> ReadLockVector;
 
 class Transaction
 {
 public:
   Transaction()
-    : mReadLockSequenceNumber(0)
-    , mTargetRotation(ROTATION_0)
+    : mTargetRotation(ROTATION_0)
     , mOpen(false)
     , mRotationChanged(false)
   {}
@@ -82,8 +80,6 @@ public:
     }
     mTargetRotation = aRotation;
     mTargetOrientation = aOrientation;
-    mReadLockSequenceNumber = 0;
-    mReadLocks.AppendElement();
   }
   void AddEdit(const Edit& aEdit)
   {
@@ -110,15 +106,6 @@ public:
     MOZ_ASSERT(!Finished(), "forgot BeginTransaction?");
     mSimpleMutants.PutEntry(aLayer);
   }
-  ReadLockHandle AddReadLock(const ReadLockDescriptor& aReadLock)
-  {
-    ReadLockHandle handle(++mReadLockSequenceNumber);
-    if (mReadLocks.LastElement().Length() >= CompositableForwarder::GetMaxFileDescriptorsPerMessage()) {
-      mReadLocks.AppendElement();
-    }
-    mReadLocks.LastElement().AppendElement(ReadLockInit(aReadLock, handle));
-    return handle;
-  }
   void End()
   {
     mCset.Clear();
@@ -126,7 +113,6 @@ public:
     mMutants.Clear();
     mSimpleMutants.Clear();
     mDestroyedActors.Clear();
-    mReadLocks.Clear();
     mOpen = false;
     mRotationChanged = false;
   }
@@ -150,8 +136,6 @@ public:
   OpDestroyVector mDestroyedActors;
   ShadowableLayerSet mMutants;
   ShadowableLayerSet mSimpleMutants;
-  nsTArray<ReadLockVector> mReadLocks;
-  uint64_t mReadLockSequenceNumber;
   gfx::IntRect mTargetBounds;
   ScreenRotation mTargetRotation;
   dom::ScreenOrientationInternal mTargetOrientation;
@@ -493,15 +477,11 @@ ShadowLayerForwarder::UseTextures(CompositableClient* aCompositable,
     MOZ_ASSERT(t.mTextureClient);
     MOZ_ASSERT(t.mTextureClient->GetIPDLActor());
     MOZ_RELEASE_ASSERT(t.mTextureClient->GetIPDLActor()->GetIPCChannel() == mShadowManager->GetIPCChannel());
-    ReadLockDescriptor readLock;
-    ReadLockHandle readLockHandle;
-    if (t.mTextureClient->SerializeReadLock(readLock)) {
-      readLockHandle = mTxn->AddReadLock(readLock);
-    }
+    bool readLocked = t.mTextureClient->OnForwardedToHost();
     textures.AppendElement(TimedTexture(nullptr, t.mTextureClient->GetIPDLActor(),
-                                        readLockHandle,
                                         t.mTimeStamp, t.mPictureRect,
-                                        t.mFrameID, t.mProducerID));
+                                        t.mFrameID, t.mProducerID,
+                                        readLocked));
     mClientLayerManager->GetCompositorBridgeChild()->HoldUntilCompositableRefReleasedIfNecessary(t.mTextureClient);
   }
   mTxn->AddEdit(CompositableOperation(aCompositable->GetIPCHandle(),
@@ -528,16 +508,8 @@ ShadowLayerForwarder::UseComponentAlphaTextures(CompositableClient* aCompositabl
   MOZ_RELEASE_ASSERT(aTextureOnWhite->GetIPDLActor()->GetIPCChannel() == mShadowManager->GetIPCChannel());
   MOZ_RELEASE_ASSERT(aTextureOnBlack->GetIPDLActor()->GetIPCChannel() == mShadowManager->GetIPCChannel());
 
-  ReadLockDescriptor readLockB;
-  ReadLockHandle readLockHandleB;
-  ReadLockDescriptor readLockW;
-  ReadLockHandle readLockHandleW;
-  if (aTextureOnBlack->SerializeReadLock(readLockB)) {
-    readLockHandleB = mTxn->AddReadLock(readLockB);
-  }
-  if (aTextureOnWhite->SerializeReadLock(readLockW)) {
-    readLockHandleW = mTxn->AddReadLock(readLockW);
-  }
+  bool readLockedB = aTextureOnBlack->OnForwardedToHost();
+  bool readLockedW = aTextureOnWhite->OnForwardedToHost();
 
   mClientLayerManager->GetCompositorBridgeChild()->HoldUntilCompositableRefReleasedIfNecessary(aTextureOnBlack);
   mClientLayerManager->GetCompositorBridgeChild()->HoldUntilCompositableRefReleasedIfNecessary(aTextureOnWhite);
@@ -548,7 +520,7 @@ ShadowLayerForwarder::UseComponentAlphaTextures(CompositableClient* aCompositabl
       OpUseComponentAlphaTextures(
         nullptr, aTextureOnBlack->GetIPDLActor(),
         nullptr, aTextureOnWhite->GetIPDLActor(),
-        readLockHandleB, readLockHandleW)
+        readLockedB, readLockedW)
       )
     );
 }
@@ -792,15 +764,6 @@ ShadowLayerForwarder::EndTransaction(const nsIntRegion& aRegionToClear,
   if (startTime) {
     mPaintTiming.serializeMs() = (TimeStamp::Now() - startTime.value()).ToMilliseconds();
     startTime = Some(TimeStamp::Now());
-  }
-
-  for (ReadLockVector& locks : mTxn->mReadLocks) {
-    if (locks.Length()) {
-      if (!mShadowManager->SendInitReadLocks(locks)) {
-        MOZ_LAYERS_LOG(("[LayersForwarder] WARNING: sending read locks failed!"));
-        return false;
-      }
-    }
   }
 
   // We delay at the last possible minute, to give the paint thread a chance to

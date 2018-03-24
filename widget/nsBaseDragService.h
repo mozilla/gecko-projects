@@ -10,7 +10,6 @@
 #include "nsIDragSession.h"
 #include "nsITransferable.h"
 #include "nsIDOMDocument.h"
-#include "nsIDOMDataTransfer.h"
 #include "nsCOMPtr.h"
 #include "nsRect.h"
 #include "nsPoint.h"
@@ -33,6 +32,10 @@ namespace mozilla {
 namespace gfx {
 class SourceSurface;
 } // namespace gfx
+
+namespace dom {
+class DataTransfer;
+} // namespace dom
 } // namespace mozilla
 
 /**
@@ -165,7 +168,7 @@ protected:
                                                   //  if it came from outside the app.
   nsContentPolicyType mContentPolicyType;         // the contentpolicy type passed to the channel
                                                   // when initiating the drag session
-  nsCOMPtr<nsIDOMDataTransfer> mDataTransfer;
+  RefPtr<mozilla::dom::DataTransfer> mDataTransfer;
 
   // used to determine the image to appear on the cursor while dragging
   nsCOMPtr<nsIDOMNode> mImage;
@@ -188,7 +191,7 @@ protected:
 
   uint32_t mSuppressLevel;
 
-  // The input source of the drag event. Possible values are from nsIDOMMouseEvent.
+  // The input source of the drag event. Possible values are from MouseEvent.
   uint16_t mInputSource;
 
   nsTArray<RefPtr<mozilla::dom::ContentParent>> mChildProcesses;

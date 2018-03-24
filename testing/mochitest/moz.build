@@ -19,9 +19,7 @@ USE_EXTENSION_MANIFEST = True
 
 FINAL_TARGET_PP_FILES += ['install.rdf']
 
-if CONFIG['OS_TARGET'] != 'Android':
-    DEFINES['MOCHITEST_BOOTSTRAP'] = True
-    FINAL_TARGET_FILES += ['bootstrap.js']
+FINAL_TARGET_FILES += ['bootstrap.js']
 
 MOCHITEST_MANIFESTS += [
     'tests/MochiKit-1.4.2/tests/mochitest.ini',
@@ -44,7 +42,6 @@ TEST_HARNESS_FILES.testing.mochitest += [
     '/netwerk/test/httpserver/httpd.js',
     'bisection.py',
     'browser-harness.xul',
-    'browser-test-overlay.xul',
     'browser-test.js',
     'chrome-harness.js',
     'chunkifyTests.js',

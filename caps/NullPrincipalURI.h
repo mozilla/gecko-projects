@@ -69,6 +69,7 @@ private:
   nsresult SetFilePath(const nsACString &input);
   nsresult SetQuery(const nsACString &input);
   nsresult SetQueryWithEncoding(const nsACString &input, const mozilla::Encoding* encoding);
+  bool Deserialize(const mozilla::ipc::URIParams&);
 
 public:
   class Mutator final
@@ -81,11 +82,6 @@ public:
     NS_IMETHOD Deserialize(const mozilla::ipc::URIParams& aParams) override
     {
       return InitFromIPCParams(aParams);
-    }
-
-    NS_IMETHOD Read(nsIObjectInputStream* aStream) override
-    {
-      return NS_ERROR_NOT_IMPLEMENTED;
     }
 
     NS_IMETHOD Finalize(nsIURI** aURI) override

@@ -7,15 +7,15 @@
 const { createFactory } = require("devtools/client/shared/vendor/react");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
-const { connect } = require("../utils/redux-connect");
+const { connect } = require("devtools/client/shared/redux/visibility-handler-connect");
 const Actions = require("../actions/index");
 const { getSelectedRequest } = require("../selectors/index");
 
 // Components
-loader.lazyGetter(this, "CustomRequestPanel", function () {
+loader.lazyGetter(this, "CustomRequestPanel", function() {
   return createFactory(require("./CustomRequestPanel"));
 });
-loader.lazyGetter(this, "TabboxPanel", function () {
+loader.lazyGetter(this, "TabboxPanel", function() {
   return createFactory(require("./TabboxPanel"));
 });
 

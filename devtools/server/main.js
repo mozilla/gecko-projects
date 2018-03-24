@@ -17,7 +17,6 @@ var { LocalDebuggerTransport, ChildDebuggerTransport, WorkerDebuggerTransport } 
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
 var { dumpn } = DevToolsUtils;
 var flags = require("devtools/shared/flags");
-var SyncPromise = require("devtools/shared/deprecated-sync-thenables");
 
 DevToolsUtils.defineLazyGetter(this, "DebuggerSocket", () => {
   let { DebuggerSocket } = require("devtools/shared/security/socket");
@@ -32,7 +31,7 @@ DevToolsUtils.defineLazyGetter(this, "generateUUID", () => {
   return generateUUID;
 });
 
-// Overload `Components` to prevent SDK loader exception on Components
+// Overload `Components` to prevent DevTools loader exception on Components
 // object usage
 Object.defineProperty(this, "Components", {
   get() {
@@ -53,8 +52,8 @@ if (isWorker) {
     Services.prefs.getBoolPref(VERBOSE_PREF);
 }
 
-const CONTENT_PROCESS_DBG_SERVER_SCRIPT =
-  "resource://devtools/server/content-process-debugger-server.js";
+const CONTENT_PROCESS_SERVER_STARTUP_SCRIPT =
+  "resource://devtools/server/startup/content-process.js";
 
 function loadSubScript(url) {
   try {
@@ -128,14 +127,14 @@ function ModuleAPI() {
   };
 }
 
-/** *
+/**
  * Public API
  */
 var DebuggerServer = {
   _listeners: [],
   _initialized: false,
-  // Flag to check if the content process debugger server script was already loaded.
-  _contentProcessScriptLoaded: false,
+  // Flag to check if the content process server startup script was already loaded.
+  _contentProcessServerStartupScriptLoaded: false,
   // Map of global actor names to actor constructors provided by extensions.
   globalActorFactories: {},
   // Map of tab actor names to actor constructors provided by extensions.
@@ -700,7 +699,11 @@ var DebuggerServer = {
     return this._onConnection(transport, prefix, true);
   },
 
-  connectToContent(connection, mm, onDestroy) {
+  /**
+   * Start a DevTools server in a content process (representing the entire process, not
+   * just a single frame) and add it as a child server for an active connection.
+   */
+  connectToContentProcess(connection, mm, onDestroy) {
     return new Promise(resolve => {
       let prefix = connection.allocID("content-process");
       let actor, childTransport;
@@ -720,21 +723,21 @@ var DebuggerServer = {
 
         connection.setForwarding(prefix, childTransport);
 
-        dumpn("establishing forwarding for process with prefix " + prefix);
+        dumpn(`Start forwarding for process with prefix ${prefix}`);
 
         actor = msg.json.actor;
 
         resolve(actor);
       });
 
-      // Load the content process debugger server script only once.
-      if (!this._contentProcessScriptLoaded) {
+      // Load the content process server startup script only once.
+      if (!this._contentProcessServerStartupScriptLoaded) {
         // Load the process script that will receive the debug:init-content-server message
-        Services.ppmm.loadProcessScript(CONTENT_PROCESS_DBG_SERVER_SCRIPT, true);
-        this._contentProcessScriptLoaded = true;
+        Services.ppmm.loadProcessScript(CONTENT_PROCESS_SERVER_STARTUP_SCRIPT, true);
+        this._contentProcessServerStartupScriptLoaded = true;
       }
 
-      // Send a message to the content process debugger server script to forward it the
+      // Send a message to the content process server startup script to forward it the
       // prefix.
       mm.sendAsyncMessage("debug:init-content-server", {
         prefix: prefix
@@ -776,11 +779,15 @@ var DebuggerServer = {
     });
   },
 
+  /**
+   * Start a DevTools server in a worker and add it as a child server for an active
+   * connection.
+   */
   connectToWorker(connection, dbg, id, options) {
     return new Promise((resolve, reject) => {
       // Step 1: Ensure the worker debugger is initialized.
       if (!dbg.isInitialized) {
-        dbg.initialize("resource://devtools/server/worker.js");
+        dbg.initialize("resource://devtools/server/startup/worker.js");
 
         // Create a listener for rpc requests from the worker debugger. Only do
         // this once, when the worker debugger is first initialized, rather than
@@ -974,12 +981,13 @@ var DebuggerServer = {
   _childMessageManagers: new Set(),
 
   /**
-   * Connect to a child process.
+   * Start a DevTools server in a remote frame's process and add it as a child server for
+   * an active connection.
    *
    * @param object connection
    *        The debugger server connection to use.
    * @param nsIDOMElement frame
-   *        The browser element that holds the child process.
+   *        The frame element with remote content to connect to.
    * @param function [onDestroy]
    *        Optional function to invoke when the child process closes
    *        or the connection shuts down. (Need to forget about the
@@ -988,12 +996,12 @@ var DebuggerServer = {
    *         A promise object that is resolved once the connection is
    *         established.
    */
-  connectToChild(connection, frame, onDestroy, {addonId} = {}) {
+  connectToFrame(connection, frame, onDestroy, {addonId} = {}) {
     return new Promise(resolve => {
       // Get messageManager from XUL browser (which might be a specialized tunnel for RDM)
       // or else fallback to asking the frameLoader itself.
       let mm = frame.messageManager || frame.frameLoader.messageManager;
-      mm.loadFrameScript("resource://devtools/server/child.js", false);
+      mm.loadFrameScript("resource://devtools/server/startup/frame.js", false);
 
       let trackMessageManager = () => {
         frame.addEventListener("DevTools:BrowserSwap", onBrowserSwap);
@@ -1021,8 +1029,8 @@ var DebuggerServer = {
       // provides hook to actor modules that need to exchange messages
       // between e10s parent and child processes
       let parentModules = [];
-      let onSetupInParent = function (msg) {
-        // We may have multiple connectToChild instance running for the same tab
+      let onSetupInParent = function(msg) {
+        // We may have multiple connectToFrame instance running for the same tab
         // and need to filter the messages.
         if (msg.json.prefix != connPrefix) {
           return false;
@@ -1052,7 +1060,7 @@ var DebuggerServer = {
         }
       };
 
-      let onActorCreated = DevToolsUtils.makeInfallible(function (msg) {
+      let onActorCreated = DevToolsUtils.makeInfallible(function(msg) {
         if (msg.json.prefix != prefix) {
           return;
         }
@@ -1068,7 +1076,7 @@ var DebuggerServer = {
 
         connection.setForwarding(prefix, childTransport);
 
-        dumpn("establishing forwarding for app with prefix " + prefix);
+        dumpn(`Start forwarding for frame with prefix ${prefix}`);
 
         actor = msg.json.actor;
         resolve(actor);
@@ -1099,7 +1107,7 @@ var DebuggerServer = {
         }
       };
 
-      let destroy = DevToolsUtils.makeInfallible(function () {
+      let destroy = DevToolsUtils.makeInfallible(function() {
         EventEmitter.off(connection, "closed", destroy);
         Services.obs.removeObserver(onMessageManagerClose, "message-manager-close");
 
@@ -1130,14 +1138,14 @@ var DebuggerServer = {
             // Nothing to do
           }
         } else {
-          // Otherwise, the app has been closed before the actor
+          // Otherwise, the frame has been closed before the actor
           // had a chance to be created, so we are not able to create
           // the actor.
           resolve(null);
         }
         if (actor) {
           // The ContentActor within the child process doesn't necessary
-          // have time to uninitialize itself when the app is closed/killed.
+          // have time to uninitialize itself when the frame is closed/killed.
           // So ensure telling the client that the related actor is detached.
           connection.send({ from: actor.actor, type: "tabDetached" });
           actor = null;
@@ -1155,7 +1163,7 @@ var DebuggerServer = {
       trackMessageManager();
 
       // Listen for app process exit
-      let onMessageManagerClose = function (subject, topic, data) {
+      let onMessageManagerClose = function(subject, topic, data) {
         if (subject == mm) {
           destroy();
         }
@@ -1346,12 +1354,12 @@ var DebuggerServer = {
   },
 
   /**
-   * Called when DevTools are unloaded to remove the contend process server script for the
-   * list of scripts loaded for each new content process. Will also remove message
+   * Called when DevTools are unloaded to remove the contend process server startup script
+   * for the list of scripts loaded for each new content process. Will also remove message
    * listeners from already loaded scripts.
    */
   removeContentServerScript() {
-    Services.ppmm.removeDelayedProcessScript(CONTENT_PROCESS_DBG_SERVER_SCRIPT);
+    Services.ppmm.removeDelayedProcessScript(CONTENT_PROCESS_SERVER_STARTUP_SCRIPT);
     try {
       Services.ppmm.broadcastAsyncMessage("debug:close-content-server");
     } catch (e) {
@@ -1630,16 +1638,24 @@ DebuggerServerConnection.prototype = {
     };
   },
 
-  _queueResponse: function (from, type, responseOrPromise) {
-    let pendingResponse = this._actorResponses.get(from) || SyncPromise.resolve(null);
+  _queueResponse: function(from, type, responseOrPromise) {
+    let pendingResponse = this._actorResponses.get(from) || Promise.resolve(null);
     let responsePromise = pendingResponse.then(() => {
       return responseOrPromise;
     }).then(response => {
+      if (!this.transport) {
+        throw new Error(`Connection closed, pending response from ${from}, ` +
+                        `type ${type} failed`);
+      }
       if (!response.from) {
         response.from = from;
       }
       this.transport.send(response);
     }).catch((e) => {
+      if (!this.transport) {
+        throw new Error(`Connection closed, pending error from ${from}, ` +
+                        `type ${type} failed`);
+      }
       let errorPacket = this._unknownError(
         "error occurred while processing '" + type, e);
       errorPacket.from = from;
@@ -1661,7 +1677,7 @@ DebuggerServerConnection.prototype = {
   setAddonOptions(id, options) {
     let addonList = this.rootActor._parameters.addonList;
     if (!addonList) {
-      return SyncPromise.resolve();
+      return Promise.resolve();
     }
     return addonList.getList().then((addonActors) => {
       for (let actor of addonActors) {

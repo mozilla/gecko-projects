@@ -9,7 +9,7 @@
 #include "jit/IonIC.h"
 #include "jit/SharedICHelpers.h"
 
-#include "jsboolinlines.h"
+#include "builtin/Boolean-inl.h"
 
 #include "jit/MacroAssembler-inl.h"
 #include "vm/JSCompartment-inl.h"
@@ -929,7 +929,7 @@ CacheIRWriter::copyStubData(uint8_t* dest) const
             *reinterpret_cast<uint64_t*>(destWords) = field.asInt64();
             break;
           case StubField::Type::Value:
-            InitGCPtr<JS::Value>(destWords, field.asInt64());
+            AsGCPtr<Value>(destWords)->init(Value::fromRawBits(uint64_t(field.asInt64())));
             break;
           case StubField::Type::Limit:
             MOZ_CRASH("Invalid type");
@@ -1410,7 +1410,8 @@ CacheIRCompiler::emitGuardType()
 bool
 CacheIRCompiler::emitGuardClass()
 {
-    Register obj = allocator.useRegister(masm, reader.objOperandId());
+    ObjOperandId objId = reader.objOperandId();
+    Register obj = allocator.useRegister(masm, objId);
     AutoScratchRegister scratch(allocator, masm);
 
     FailurePath* failure;
@@ -1435,9 +1436,15 @@ CacheIRCompiler::emitGuardClass()
         clasp = &JSFunction::class_;
         break;
     }
-
     MOZ_ASSERT(clasp);
-    masm.branchTestObjClass(Assembler::NotEqual, obj, scratch, clasp, failure->label());
+
+    if (objectGuardNeedsSpectreMitigations(objId)) {
+        masm.branchTestObjClass(Assembler::NotEqual, obj, clasp, scratch, obj, failure->label());
+    } else {
+        masm.branchTestObjClassNoSpectreMitigations(Assembler::NotEqual, obj, clasp, scratch,
+                                                    failure->label());
+    }
+
     return true;
 }
 
@@ -1454,7 +1461,7 @@ CacheIRCompiler::emitGuardIsNativeFunction()
 
     // Ensure obj is a function.
     const Class* clasp = &JSFunction::class_;
-    masm.branchTestObjClass(Assembler::NotEqual, obj, scratch, clasp, failure->label());
+    masm.branchTestObjClass(Assembler::NotEqual, obj, clasp, scratch, obj, failure->label());
 
     // Ensure function native matches.
     masm.branchPtr(Assembler::NotEqual, Address(obj, JSFunction::offsetOfNativeOrEnv()),
@@ -1889,7 +1896,7 @@ CacheIRCompiler::emitLoadStringCharResult()
         return false;
 
     // Bounds check, load string char.
-    masm.boundsCheck32ForLoad(index, Address(str, JSString::offsetOfLength()), scratch1,
+    masm.spectreBoundsCheck32(index, Address(str, JSString::offsetOfLength()), scratch1,
                               failure->label());
     masm.loadStringChar(str, index, scratch1, scratch2, failure->label());
 
@@ -1927,7 +1934,7 @@ CacheIRCompiler::emitLoadArgumentsObjectArgResult()
 
     // Bounds check.
     masm.rshift32(Imm32(ArgumentsObject::PACKED_BITS_COUNT), scratch1);
-    masm.boundsCheck32ForLoad(index, scratch1, scratch2, failure->label());
+    masm.spectreBoundsCheck32(index, scratch1, scratch2, failure->label());
 
     // Load ArgumentsData.
     masm.loadPrivate(Address(obj, ArgumentsObject::getDataSlotOffset()), scratch1);
@@ -1963,7 +1970,7 @@ CacheIRCompiler::emitLoadDenseElementResult()
 
     // Bounds check.
     Address initLength(scratch1, ObjectElements::offsetOfInitializedLength());
-    masm.boundsCheck32ForLoad(index, initLength, scratch2, failure->label());
+    masm.spectreBoundsCheck32(index, initLength, scratch2, failure->label());
 
     // Hole check.
     BaseObjectElementIndex element(scratch1, index);
@@ -2034,7 +2041,7 @@ CacheIRCompiler::emitLoadDenseElementHoleResult()
     // Guard on the initialized length.
     Label hole;
     Address initLength(scratch1, ObjectElements::offsetOfInitializedLength());
-    masm.boundsCheck32ForLoad(index, initLength, scratch2, &hole);
+    masm.spectreBoundsCheck32(index, initLength, scratch2, &hole);
 
     // Load the value.
     Label done;
@@ -2218,7 +2225,7 @@ CacheIRCompiler::emitLoadTypedElementResult()
 
     // Bounds check.
     LoadTypedThingLength(masm, layout, obj, scratch1);
-    masm.boundsCheck32ForLoad(index, scratch1, scratch2, failure->label());
+    masm.spectreBoundsCheck32(index, scratch1, scratch2, failure->label());
 
     // Load the elements vector.
     LoadTypedThingData(masm, layout, obj, scratch1);

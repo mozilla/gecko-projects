@@ -11,6 +11,7 @@
 #include "gfx2DGlue.h"
 #include "gfxContext.h"
 #include "gfxUtils.h"
+#include "mozilla/ComputedStyle.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Encoding.h"
 #include "mozilla/EventStates.h"
@@ -32,7 +33,6 @@
 #include "nsIDocument.h"
 #include "nsContentUtils.h"
 #include "nsCSSAnonBoxes.h"
-#include "nsStyleContext.h"
 #include "nsStyleConsts.h"
 #include "nsStyleCoord.h"
 #include "nsStyleUtil.h"
@@ -49,14 +49,12 @@
 #ifdef ACCESSIBILITY
 #include "nsAccessibilityService.h"
 #endif
-#include "nsIDOMNode.h"
 #include "nsLayoutUtils.h"
 #include "nsDisplayList.h"
 #include "nsIContent.h"
 #include "nsIDocument.h"
 #include "FrameLayerBuilder.h"
-#include "nsISelectionController.h"
-#include "nsISelection.h"
+#include "mozilla/dom/Selection.h"
 #include "nsIURIMutator.h"
 
 #include "imgIContainer.h"
@@ -64,7 +62,7 @@
 #include "imgRequestProxy.h"
 
 #include "nsCSSFrameConstructor.h"
-#include "nsIDOMRange.h"
+#include "nsRange.h"
 
 #include "nsError.h"
 #include "nsBidiUtils.h"
@@ -94,9 +92,6 @@ using namespace mozilla::layers;
 #define ICON_SIZE        (16)
 #define ICON_PADDING     (3)
 #define ALT_BORDER_WIDTH (1)
-
-//we must add hooks soon
-#define IMAGE_EDITOR_CHECK 1
 
 // Default alignment value (so we can tell an unset value from a set value)
 #define ALIGN_UNSET uint8_t(-1)
@@ -132,15 +127,15 @@ inline bool HaveFixedSize(const ReflowInput& aReflowInput)
 }
 
 nsIFrame*
-NS_NewImageFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewImageFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsImageFrame(aContext);
+  return new (aPresShell) nsImageFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsImageFrame)
 
-nsImageFrame::nsImageFrame(nsStyleContext* aContext, ClassID aID)
-  : nsAtomicContainerFrame(aContext, aID)
+nsImageFrame::nsImageFrame(ComputedStyle* aStyle, ClassID aID)
+  : nsAtomicContainerFrame(aStyle, aID)
   , mComputedSize(0, 0)
   , mIntrinsicRatio(0, 0)
   , mDisplayingIcon(false)
@@ -231,9 +226,9 @@ nsImageFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroy
 }
 
 void
-nsImageFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
+nsImageFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
 {
-  nsAtomicContainerFrame::DidSetStyleContext(aOldStyleContext);
+  nsAtomicContainerFrame::DidSetComputedStyle(aOldComputedStyle);
 
   if (!mImage) {
     // We'll pick this change up whenever we do get an image.
@@ -246,8 +241,8 @@ nsImageFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
   // because this is the first time it's been set, or if the image-orientation
   // property changed from its previous value.
   bool shouldUpdateOrientation =
-    !aOldStyleContext ||
-    aOldStyleContext->StyleVisibility()->mImageOrientation != newOrientation;
+    !aOldComputedStyle ||
+    aOldComputedStyle->StyleVisibility()->mImageOrientation != newOrientation;
 
   if (shouldUpdateOrientation) {
     nsCOMPtr<imgIContainer> image(mImage->Unwrap());
@@ -456,11 +451,11 @@ nsImageFrame::SourceRectToDest(const nsIntRect& aRect)
 /* static */
 bool
 nsImageFrame::ShouldCreateImageFrameFor(Element* aElement,
-                                        nsStyleContext* aStyleContext)
+                                        ComputedStyle* aComputedStyle)
 {
   EventStates state = aElement->State();
   if (IMAGE_OK(state,
-               HaveSpecifiedSize(aStyleContext->StylePosition()))) {
+               HaveSpecifiedSize(aComputedStyle->StylePosition()))) {
     // Image is fine; do the image frame thing
     return true;
   }
@@ -478,7 +473,7 @@ nsImageFrame::ShouldCreateImageFrameFor(Element* aElement,
   //  - otherwise, skip the icon
   bool useSizedBox;
 
-  if (aStyleContext->StyleUIReset()->mForceBrokenImageIcon) {
+  if (aComputedStyle->StyleUIReset()->mForceBrokenImageIcon) {
     useSizedBox = true;
   }
   else if (gIconLoad && gIconLoad->mPrefForceInlineAltText) {
@@ -493,13 +488,13 @@ nsImageFrame::ShouldCreateImageFrameFor(Element* aElement,
     // text).
     useSizedBox = true;
   }
-  else if (aStyleContext->PresContext()->CompatibilityMode() !=
+  else if (aComputedStyle->PresContext()->CompatibilityMode() !=
            eCompatibility_NavQuirks) {
     useSizedBox = false;
   }
   else {
     // check whether we have specified size
-    useSizedBox = HaveSpecifiedSize(aStyleContext->StylePosition());
+    useSizedBox = HaveSpecifiedSize(aComputedStyle->StylePosition());
   }
 
   return useSizedBox;
@@ -646,13 +641,12 @@ void
 nsImageFrame::InvalidateSelf(const nsIntRect* aLayerInvalidRect,
                              const nsRect* aFrameInvalidRect)
 {
-  if (HasProperty(nsIFrame::WebRenderUserDataProperty())) {
-    nsIFrame::WebRenderUserDataTable* userDataTable =
-      GetProperty(nsIFrame::WebRenderUserDataProperty());
-    RefPtr<WebRenderUserData> data;
-    userDataTable->Get(static_cast<uint32_t>(DisplayItemType::TYPE_IMAGE), getter_AddRefs(data));
-    if (data && data->AsFallbackData()) {
-      data->AsFallbackData()->SetInvalid(true);
+  // XXX: Do we really want to check whether we have a
+  // WebRenderUserDataProperty?
+  if (HasProperty(WebRenderUserDataProperty::Key())) {
+    RefPtr<WebRenderFallbackData> data = GetWebRenderUserData<WebRenderFallbackData>(this, static_cast<uint32_t>(DisplayItemType::TYPE_IMAGE));
+    if (data) {
+      data->SetInvalid(true);
     }
     SchedulePaint();
     return;
@@ -1405,7 +1399,7 @@ nsImageFrame::DisplayAltFeedback(gfxContext& aRenderingContext,
     Unused <<
       nsCSSRendering::PaintBorderWithStyleBorder(PresContext(), aRenderingContext,
                                                  this, inner, inner,
-                                                 recessedBorder, mStyleContext,
+                                                 recessedBorder, mComputedStyle,
                                                  PaintBorderFlags::SYNC_DECODE_IMAGES);
   }
 
@@ -1612,8 +1606,7 @@ nsDisplayImage::GetLayerState(nsDisplayListBuilder* aBuilder,
                               LayerManager* aManager,
                               const ContainerLayerParameters& aParameters)
 {
-  if (!nsDisplayItem::ForceActiveLayers() &&
-      !ShouldUseAdvancedLayer(aManager, gfxPrefs::LayersAllowImageLayers)) {
+  if (!nsDisplayItem::ForceActiveLayers()) {
     bool animated = false;
     if (!nsLayoutUtils::AnimatedImageLayersEnabled() ||
         mImage->GetType() != imgIContainer::TYPE_RASTER ||
@@ -1749,7 +1742,11 @@ nsDisplayImage::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilde
     return false;
   }
 
-  return aManager->CommandBuilder().PushImage(this, container, aBuilder, aResources, aSc, destRect);
+  // If the image container is empty, we don't want to fallback. Any other
+  // failure will be due to resource constraints and fallback is unlikely to
+  // help us. Hence we can ignore the return value from PushImage.
+  aManager->CommandBuilder().PushImage(this, container, aBuilder, aResources, aSc, destRect);
+  return true;
 }
 
 ImgDrawResult
@@ -1900,62 +1897,33 @@ nsImageFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 bool
 nsImageFrame::ShouldDisplaySelection()
 {
-  // XXX what on EARTH is this code for?
-  nsresult result;
   nsPresContext* presContext = PresContext();
   int16_t displaySelection = presContext->PresShell()->GetSelectionFlags();
   if (!(displaySelection & nsISelectionDisplay::DISPLAY_IMAGES))
     return false;//no need to check the blue border, we cannot be drawn selected
-//insert hook here for image selection drawing
-#if IMAGE_EDITOR_CHECK
-  //check to see if this frame is in an editor context
-  //isEditor check. this needs to be changed to have better way to check
+
+  // If the image is the only selected node, don't draw the selection overlay.
+  // This can happen when selecting an image in contenteditable context.
   if (displaySelection == nsISelectionDisplay::DISPLAY_ALL)
   {
-    nsCOMPtr<nsISelectionController> selCon;
-    result = GetSelectionController(presContext, getter_AddRefs(selCon));
-    if (NS_SUCCEEDED(result) && selCon)
+    const nsFrameSelection* frameSelection = GetConstFrameSelection();
+    if (frameSelection)
     {
-      nsCOMPtr<nsISelection> selection;
-      result = selCon->GetSelection(nsISelectionController::SELECTION_NORMAL, getter_AddRefs(selection));
-      if (NS_SUCCEEDED(result) && selection)
+      const Selection* selection = frameSelection->GetSelection(SelectionType::eNormal);
+      if (selection && selection->RangeCount() == 1)
       {
-        int32_t rangeCount;
-        selection->GetRangeCount(&rangeCount);
-        if (rangeCount == 1) //if not one then let code drop to nsFrame::Paint
-        {
-          nsCOMPtr<nsIContent> parentContent = mContent->GetParent();
-          if (parentContent)
-          {
-            int32_t thisOffset = parentContent->ComputeIndexOf(mContent);
-            nsCOMPtr<nsIDOMNode> parentNode = do_QueryInterface(parentContent);
-            nsCOMPtr<nsIDOMNode> rangeNode;
-            uint32_t rangeOffset;
-            nsCOMPtr<nsIDOMRange> range;
-            selection->GetRangeAt(0,getter_AddRefs(range));
-            if (range)
-            {
-              range->GetStartContainer(getter_AddRefs(rangeNode));
-              range->GetStartOffset(&rangeOffset);
-
-              if (parentNode && rangeNode && rangeNode == parentNode &&
-                  static_cast<int32_t>(rangeOffset) == thisOffset) {
-                range->GetEndContainer(getter_AddRefs(rangeNode));
-                range->GetEndOffset(&rangeOffset);
-                // +1 since that would mean this whole content is selected only
-                if (rangeNode == parentNode &&
-                    static_cast<int32_t>(rangeOffset) == thisOffset + 1) {
-                  // Do not allow nsFrame do draw any further selection
-                  return false;
-                }
-              }
-            }
-          }
+        nsINode* parent = mContent->GetParent();
+        int32_t thisOffset = parent->ComputeIndexOf(mContent);
+        nsRange* range = selection->GetRangeAt(0);
+        if (range->GetStartContainer() == parent &&
+            range->GetEndContainer() == parent &&
+            static_cast<int32_t>(range->StartOffset()) == thisOffset &&
+            static_cast<int32_t>(range->EndOffset()) == thisOffset + 1) {
+          return false;
         }
       }
     }
   }
-#endif
   return true;
 }
 
@@ -2018,7 +1986,7 @@ nsImageFrame::GetAnchorHREFTargetAndNode(nsIURI** aHref, nsString& aTarget,
       }
       status = (*aHref != nullptr);
 
-      RefPtr<HTMLAnchorElement> anchor = HTMLAnchorElement::FromContent(content);
+      RefPtr<HTMLAnchorElement> anchor = HTMLAnchorElement::FromNode(content);
       if (anchor) {
         anchor->GetTarget(aTarget);
       }
@@ -2149,9 +2117,9 @@ nsImageFrame::GetCursor(const nsPoint& aPoint,
       // technically correct, but it's probably the right thing to do
       // here, since it means that areas on which the cursor isn't
       // specified will inherit the style from the image.
-      RefPtr<nsStyleContext> areaStyle =
+      RefPtr<ComputedStyle> areaStyle =
         PresShell()->StyleSet()->
-          ResolveStyleFor(area->AsElement(), StyleContext(),
+          ResolveStyleFor(area->AsElement(), Style(),
                           LazyComputeBehavior::Allow);
       FillCursorInformationFromStyle(areaStyle->StyleUserInterface(),
                                      aCursor);
@@ -2514,7 +2482,7 @@ IsInAutoWidthTableCellForQuirk(nsIFrame *aFrame)
     return false;
   // Check if the parent of the closest nsBlockFrame has auto width.
   nsBlockFrame *ancestor = nsLayoutUtils::FindNearestBlockAncestor(aFrame);
-  if (ancestor->StyleContext()->GetPseudo() == nsCSSAnonBoxes::cellContent) {
+  if (ancestor->Style()->GetPseudo() == nsCSSAnonBoxes::cellContent) {
     // Assume direct parent is a table cell frame.
     nsFrame *grandAncestor = static_cast<nsFrame*>(ancestor->GetParent());
     return grandAncestor &&

@@ -1325,6 +1325,18 @@ var AddonManagerInternal = {
     });
   },
 
+  // Returns true if System Addons should be updated
+  systemUpdateEnabled() {
+    if (!Services.prefs.getBoolPref(PREF_APP_UPDATE_ENABLED) ||
+        !Services.prefs.getBoolPref(PREF_APP_UPDATE_AUTO)) {
+      return false;
+    }
+    if (Services.policies && !Services.policies.isAllowed("SysAddonUpdate")) {
+      return false;
+    }
+    return true;
+  },
+
   /**
    * Performs a background update check by starting an update for all add-ons
    * that can be updated.
@@ -1337,9 +1349,6 @@ var AddonManagerInternal = {
                                  Cr.NS_ERROR_NOT_INITIALIZED);
 
     let buPromise = (async () => {
-      let appUpdateEnabled = Services.prefs.getBoolPref(PREF_APP_UPDATE_ENABLED) &&
-                             Services.prefs.getBoolPref(PREF_APP_UPDATE_AUTO);
-
       logger.debug("Background update check beginning");
 
       Services.obs.notifyObservers(null, "addons-background-update-start");
@@ -1386,7 +1395,7 @@ var AddonManagerInternal = {
         await Promise.all(updates);
       }
 
-      if (appUpdateEnabled) {
+      if (AddonManagerInternal.systemUpdateEnabled()) {
         try {
           await AddonManagerInternal._getProviderByName("XPIProvider").updateSystemAddons();
         } catch (e) {
@@ -1784,36 +1793,6 @@ var AddonManagerInternal = {
                                  Cr.NS_ERROR_NOT_INITIALIZED);
 
     return this.getInstallsByTypes(null);
-  },
-
-  /**
-   * Synchronously map a URI to the corresponding Addon ID.
-   *
-   * Mappable URIs are limited to in-application resources belonging to the
-   * add-on, such as Javascript compartments, XUL windows, XBL bindings, etc.
-   * but do not include URIs from meta data, such as the add-on homepage.
-   *
-   * @param  aURI
-   *         nsIURI to map to an addon id
-   * @return string containing the Addon ID or null
-   * @see    amIAddonManager.mapURIToAddonID
-   */
-  mapURIToAddonID(aURI) {
-    if (!(aURI instanceof Ci.nsIURI)) {
-      throw Components.Exception("aURI is not a nsIURI",
-                                 Cr.NS_ERROR_INVALID_ARG);
-    }
-
-    // Try all providers
-    let providers = [...this.providers];
-    for (let provider of providers) {
-      var id = callProvider(provider, "mapURIToAddonID", null, aURI);
-      if (id !== null) {
-        return id;
-      }
-    }
-
-    return null;
   },
 
   /**
@@ -2983,6 +2962,17 @@ var AddonManagerPrivate = {
                                .getNewSideloads();
   },
 
+  /**
+   * Gets a set of (ids of) distribution addons which were installed into the
+   * current profile at browser startup, or null if none were installed.
+   *
+   * @return {Set<String> | null}
+   */
+  getNewDistroAddons() {
+    return AddonManagerInternal._getProviderByName("XPIProvider")
+                               .getNewDistroAddons();
+  },
+
   get browserUpdated() {
     return gBrowserUpdated;
   },
@@ -3004,14 +2994,6 @@ var AddonManagerPrivate = {
   },
 
   backgroundUpdateTimerHandler() {
-    // Don't call through to the real update check if no checks are enabled.
-    let appUpdateEnabled = Services.prefs.getBoolPref(PREF_APP_UPDATE_ENABLED) &&
-                           Services.prefs.getBoolPref(PREF_APP_UPDATE_AUTO);
-
-    if (!AddonManagerInternal.updateEnabled && !appUpdateEnabled) {
-      logger.info("Skipping background update check");
-      return;
-    }
     // Don't return the promise here, since the caller doesn't care.
     AddonManagerInternal.backgroundUpdateCheck();
   },
@@ -3507,10 +3489,6 @@ var AddonManager = {
     return promiseOrCallback(
       AddonManagerInternal.getAllInstalls(),
       aCallback);
-  },
-
-  mapURIToAddonID(aURI) {
-    return AddonManagerInternal.mapURIToAddonID(aURI);
   },
 
   isInstallEnabled(aType) {

@@ -81,7 +81,7 @@ UnboxedLayout::makeConstructorCode(JSContext* cx, HandleObjectGroup group)
 
     JitContext jitContext(cx, nullptr);
 
-    MacroAssembler masm;
+    StackMacroAssembler masm;
 
     Register propertiesReg, newKindReg;
 #ifdef JS_CODEGEN_X86
@@ -95,7 +95,15 @@ UnboxedLayout::makeConstructorCode(JSContext* cx, HandleObjectGroup group)
 #endif
 
 #ifdef JS_CODEGEN_ARM64
-    // ARM64 communicates stack address via sp, but uses a pseudo-sp for addressing.
+    // ARM64 communicates stack address via sp, but uses a pseudo-sp (PSP) for
+    // addressing.  The register we use for PSP may however also be used by
+    // calling code, and it is nonvolatile, so save it.  Do this as a special
+    // case first because the generic save/restore code needs the PSP to be
+    // initialized already.
+    MOZ_ASSERT(PseudoStackPointer64.Is(masm.GetStackPointer64()));
+    masm.Str(PseudoStackPointer64, vixl::MemOperand(sp, -16, vixl::PreIndex));
+
+    // Initialize the PSP from the SP.
     masm.initStackPtr();
 #endif
 
@@ -233,7 +241,22 @@ UnboxedLayout::makeConstructorCode(JSContext* cx, HandleObjectGroup group)
         masm.pop(ScratchDoubleReg);
     masm.PopRegsInMask(savedNonVolatileRegisters);
 
+#ifdef JS_CODEGEN_ARM64
+    // Now restore the value that was in the PSP register on entry, and return.
+
+    // Obtain the correct SP from the PSP.
+    masm.Mov(sp, PseudoStackPointer64);
+
+    // Restore the saved value of the PSP register, this value is whatever the
+    // caller had saved in it, not any actual SP value, and it must not be
+    // overwritten subsequently.
+    masm.Ldr(PseudoStackPointer64, vixl::MemOperand(sp, 16, vixl::PostIndex));
+
+    // Perform a plain Ret(), as abiret() will move SP <- PSP and that is wrong.
+    masm.Ret(vixl::lr);
+#else
     masm.abiret();
+#endif
 
     masm.bind(&failureStoreOther);
 
@@ -538,19 +561,24 @@ UnboxedLayout::makeNativeGroup(JSContext* cx, ObjectGroup* group)
     return true;
 }
 
-/* static */ bool
+/* static */ NativeObject*
 UnboxedPlainObject::convertToNative(JSContext* cx, JSObject* obj)
 {
+    // This function returns the original object (instead of bool) to make sure
+    // Ion's LConvertUnboxedObjectToNative works correctly. If we return bool
+    // and use defineReuseInput, the object register is not preserved across the
+    // call.
+
     const UnboxedLayout& layout = obj->as<UnboxedPlainObject>().layout();
     UnboxedExpandoObject* expando = obj->as<UnboxedPlainObject>().maybeExpando();
 
     if (!layout.nativeGroup()) {
         if (!UnboxedLayout::makeNativeGroup(cx, obj->group()))
-            return false;
+            return nullptr;
 
         // makeNativeGroup can reentrantly invoke this method.
         if (obj->is<PlainObject>())
-            return true;
+            return &obj->as<PlainObject>();
     }
 
     AutoValueVector values(cx);
@@ -559,7 +587,7 @@ UnboxedPlainObject::convertToNative(JSContext* cx, JSObject* obj)
         // initialized yet. Make sure any double values we read here are
         // canonicalized.
         if (!values.append(obj->as<UnboxedPlainObject>().getValue(layout.properties()[i], true)))
-            return false;
+            return nullptr;
     }
 
     // We are eliminating the expando edge with the conversion, so trigger a
@@ -579,42 +607,43 @@ UnboxedPlainObject::convertToNative(JSContext* cx, JSObject* obj)
     for (size_t i = 0; i < values.length(); i++)
         obj->as<PlainObject>().initSlotUnchecked(i, values[i]);
 
-    if (expando) {
-        // Add properties from the expando object to the object, in order.
-        // Suppress GC here, so that callers don't need to worry about this
-        // method collecting. The stuff below can only fail due to OOM, in
-        // which case the object will not have been completely filled back in.
-        gc::AutoSuppressGC suppress(cx);
+    if (!expando)
+        return &obj->as<PlainObject>();
 
-        Vector<jsid> ids(cx);
-        for (Shape::Range<NoGC> r(expando->lastProperty()); !r.empty(); r.popFront()) {
-            if (!ids.append(r.front().propid()))
-                return false;
-        }
-        for (size_t i = 0; i < expando->getDenseInitializedLength(); i++) {
-            if (!expando->getDenseElement(i).isMagic(JS_ELEMENTS_HOLE)) {
-                if (!ids.append(INT_TO_JSID(i)))
-                    return false;
-            }
-        }
-        ::Reverse(ids.begin(), ids.end());
+    // Add properties from the expando object to the object, in order.
+    // Suppress GC here, so that callers don't need to worry about this
+    // method collecting. The stuff below can only fail due to OOM, in
+    // which case the object will not have been completely filled back in.
+    gc::AutoSuppressGC suppress(cx);
 
-        RootedPlainObject nobj(cx, &obj->as<PlainObject>());
-        Rooted<UnboxedExpandoObject*> nexpando(cx, expando);
-        RootedId id(cx);
-        Rooted<PropertyDescriptor> desc(cx);
-        for (size_t i = 0; i < ids.length(); i++) {
-            id = ids[i];
-            if (!GetOwnPropertyDescriptor(cx, nexpando, id, &desc))
-                return false;
-            ObjectOpResult result;
-            if (!DefineProperty(cx, nobj, id, desc, result))
-                return false;
-            MOZ_ASSERT(result.ok());
+    Vector<jsid> ids(cx);
+    for (Shape::Range<NoGC> r(expando->lastProperty()); !r.empty(); r.popFront()) {
+        if (!ids.append(r.front().propid()))
+            return nullptr;
+    }
+    for (size_t i = 0; i < expando->getDenseInitializedLength(); i++) {
+        if (!expando->getDenseElement(i).isMagic(JS_ELEMENTS_HOLE)) {
+            if (!ids.append(INT_TO_JSID(i)))
+                return nullptr;
         }
     }
+    ::Reverse(ids.begin(), ids.end());
 
-    return true;
+    RootedPlainObject nobj(cx, &obj->as<PlainObject>());
+    Rooted<UnboxedExpandoObject*> nexpando(cx, expando);
+    RootedId id(cx);
+    Rooted<PropertyDescriptor> desc(cx);
+    for (size_t i = 0; i < ids.length(); i++) {
+        id = ids[i];
+        if (!GetOwnPropertyDescriptor(cx, nexpando, id, &desc))
+            return nullptr;
+        ObjectOpResult result;
+        if (!DefineProperty(cx, nobj, id, desc, result))
+            return nullptr;
+        MOZ_ASSERT(result.ok());
+    }
+
+    return nobj;
 }
 
 /* static */ JS::Result<UnboxedObject*, JS::OOM&>
@@ -1165,7 +1194,7 @@ UnboxedPlainObject::fillAfterConvert(JSContext* cx,
     initExpando();
     memset(data(), 0, layout().size());
     for (size_t i = 0; i < layout().properties().length(); i++)
-        JS_ALWAYS_TRUE(setValue(cx, layout().properties()[i], NextValue(values, valueCursor)));
+        MOZ_ALWAYS_TRUE(setValue(cx, layout().properties()[i], NextValue(values, valueCursor)));
 }
 
 bool

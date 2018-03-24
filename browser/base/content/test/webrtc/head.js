@@ -475,6 +475,10 @@ async function checkSharingUI(aExpected, aWin = window, aExpectedGlobal = null) 
   let sharing = identityBox.getAttribute("sharing");
   if (aExpected.screen)
     is(sharing, "screen", "showing screen icon in the identity block");
+  else if (aExpected.video == STATE_CAPTURE_ENABLED)
+    is(sharing, "camera", "showing camera icon in the identity block");
+  else if (aExpected.audio == STATE_CAPTURE_ENABLED)
+    is(sharing, "microphone", "showing mic icon in the identity block");
   else if (aExpected.video)
     is(sharing, "camera", "showing camera icon in the identity block");
   else if (aExpected.audio)
@@ -568,5 +572,5 @@ async function runTests(tests, options = {}) {
   }
 
   // Some tests destroy the original tab and leave a new one in its place.
-  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  BrowserTestUtils.removeTab(gBrowser.selectedTab);
 }

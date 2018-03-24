@@ -27,9 +27,9 @@ using namespace mozilla::image;
 // Implementation
 
 nsIFrame*
-NS_NewSVGClipPathFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewSVGClipPathFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsSVGClipPathFrame(aContext);
+  return new (aPresShell) nsSVGClipPathFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGClipPathFrame)
@@ -41,7 +41,7 @@ nsSVGClipPathFrame::ApplyClipPath(gfxContext& aContext,
 {
   MOZ_ASSERT(IsTrivial(), "Caller needs to use GetClipMask");
 
-  DrawTarget& aDrawTarget = *aContext.GetDrawTarget();
+  const DrawTarget* drawTarget = aContext.GetDrawTarget();
 
   // No need for AutoReferenceChainGuard since simple clip paths by definition
   // don't reference another clip path.
@@ -68,7 +68,7 @@ nsSVGClipPathFrame::ApplyClipPath(gfxContext& aContext,
         aContext.SetMatrixDouble(newMatrix);
         FillRule clipRule =
           nsSVGUtils::ToFillRule(pathFrame->StyleSVG()->mClipRule);
-        clipPath = pathElement->GetOrBuildPath(aDrawTarget, clipRule);
+        clipPath = pathElement->GetOrBuildPath(drawTarget, clipRule);
       }
     }
   }
@@ -305,7 +305,7 @@ nsSVGClipPathFrame::PointIsInsideClipPath(nsIFrame* aClippedFrame,
   // that case the other clip path further clips away the element that is being
   // clipped by the original clipPath. If this clipPath is being clipped by a
   // different clip path we need to check if it prevents the original element
-  // from recieving events at aPoint:
+  // from receiving events at aPoint:
   nsSVGClipPathFrame *clipPathFrame =
     SVGObserverUtils::GetEffectProperties(this).GetClipPathFrame();
   if (clipPathFrame &&

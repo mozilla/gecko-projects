@@ -14,7 +14,7 @@
 #include "nsSliderFrame.h"
 
 #include "gfxPrefs.h"
-#include "nsStyleContext.h"
+#include "mozilla/ComputedStyle.h"
 #include "nsPresContext.h"
 #include "nsIContent.h"
 #include "nsCOMPtr.h"
@@ -24,7 +24,6 @@
 #include "nsIPresShell.h"
 #include "nsCSSRendering.h"
 #include "nsIDOMEvent.h"
-#include "nsIDOMMouseEvent.h"
 #include "nsScrollbarButtonFrame.h"
 #include "nsISliderListener.h"
 #include "nsIScrollableFrame.h"
@@ -71,9 +70,9 @@ GetContentOfBox(nsIFrame *aBox)
 }
 
 nsIFrame*
-NS_NewSliderFrame (nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewSliderFrame (nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsSliderFrame(aContext);
+  return new (aPresShell) nsSliderFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSliderFrame)
@@ -82,8 +81,8 @@ NS_QUERYFRAME_HEAD(nsSliderFrame)
   NS_QUERYFRAME_ENTRY(nsSliderFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsBoxFrame)
 
-nsSliderFrame::nsSliderFrame(nsStyleContext* aContext)
-  : nsBoxFrame(aContext, kClassID)
+nsSliderFrame::nsSliderFrame(ComputedStyle* aStyle)
+  : nsBoxFrame(aStyle, kClassID)
   , mRatio(0.0f)
   , mDragStart(0)
   , mThumbStart(0)
@@ -1047,14 +1046,14 @@ private:
   AsyncDragMetrics mDragMetrics;
 };
 
-bool
+static bool
 UsesSVGEffects(nsIFrame* aFrame)
 {
   return aFrame->StyleEffects()->HasFilters()
       || nsSVGIntegrationUtils::UsingMaskOrClipPathForFrame(aFrame);
 }
 
-bool
+static bool
 ScrollFrameWillBuildScrollInfoLayer(nsIFrame* aScrollFrame)
 {
   nsIFrame* current = aScrollFrame;

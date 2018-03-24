@@ -6,11 +6,10 @@
 
 "use strict";
 
-const INIT_URI = "data:text/html;charset=utf8,hello world";
 const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
-  "new-console-output/test/mochitest/test-duplicate-error.html";
+                 "new-console-output/test/mochitest/test-duplicate-error.html";
 
-add_task(async function () {
+add_task(async function() {
   // On e10s, the exception is triggered in child process
   // and is ignored by test harness
   if (!Services.appinfo.browserTabsRemoteAutostart) {
@@ -23,5 +22,5 @@ add_task(async function () {
   const errorMessages = hud.outputNode.querySelectorAll(".message.error");
   is(errorMessages.length, 1, "There's only one error message for fooDuplicateError1");
   is(errorMessages[0].querySelector(".message-repeats"), null,
-    "There is no repeat bubble on the error message")
+    "There is no repeat bubble on the error message");
 });

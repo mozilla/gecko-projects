@@ -10,11 +10,11 @@
 
 const TEST_URI = "data:text/html;charset=utf8,Clickable URLS";
 
-add_task(async function () {
+add_task(async function() {
   const hud = await openNewTabAndConsole(TEST_URI);
 
   const url = "http://example.com/";
-  await ContentTask.spawn(gBrowser.selectedBrowser, url, function (uri) {
+  await ContentTask.spawn(gBrowser.selectedBrowser, url, function(uri) {
     content.wrappedJSObject.console.log(uri);
   });
 
@@ -30,5 +30,5 @@ add_task(async function () {
   // We only need to check that newTab is truthy since
   // BrowserTestUtils.waitForNewTab checks the URL.
   ok(newTab, "The expected tab was opened.");
-  await BrowserTestUtils.removeTab(newTab);
+  BrowserTestUtils.removeTab(newTab);
 });

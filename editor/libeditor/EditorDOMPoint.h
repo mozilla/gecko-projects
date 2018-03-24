@@ -593,6 +593,9 @@ public:
     if (NS_WARN_IF(!mParent)) {
       return false;
     }
+    if (!mParent->IsContainerNode()) {
+      return mOffset.value() == mParent->Length();
+    }
     if (mIsChildInitialized) {
       if (!mChild) {
         NS_WARNING_ASSERTION(!mOffset.isSome() ||
@@ -624,14 +627,6 @@ public:
       return false;
     }
     return mChild->IsHTMLElement(nsGkAtoms::br);
-  }
-
-  // Convenience methods for switching between the two types
-  // of EditorDOMPointBase.
-  EditorDOMPointBase<nsINode*, nsIContent*>
-  AsRaw() const
-  {
-    return EditorRawDOMPoint(*this);
   }
 
   template<typename A, typename B>

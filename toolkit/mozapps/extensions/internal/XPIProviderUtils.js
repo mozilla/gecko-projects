@@ -52,16 +52,16 @@ const KEY_APP_TEMPORARY               = "app-temporary";
 
 // Properties to save in JSON file
 const PROP_JSON_FIELDS = ["id", "syncGUID", "location", "version", "type",
-                          "internalName", "updateURL", "updateKey", "optionsURL",
+                          "internalName", "updateURL", "optionsURL",
                           "optionsType", "optionsBrowserStyle", "aboutURL",
                           "defaultLocale", "visible", "active", "userDisabled",
                           "appDisabled", "pendingUninstall", "installDate",
                           "updateDate", "applyBackgroundUpdates", "bootstrap", "path",
                           "skinnable", "size", "sourceURI", "releaseNotesURI",
-                          "softDisabled", "foreignInstall", "hasBinaryComponents",
+                          "softDisabled", "foreignInstall",
                           "strictCompatibility", "locales", "targetApplications",
-                          "targetPlatforms", "multiprocessCompatible", "signedState",
-                          "seen", "dependencies", "hasEmbeddedWebExtension", "mpcOptedOut",
+                          "targetPlatforms", "signedState",
+                          "seen", "dependencies", "hasEmbeddedWebExtension",
                           "userPermissions", "icons", "iconURL", "icon64URL",
                           "blocklistState", "blocklistURL", "startupData"];
 
@@ -213,11 +213,6 @@ Object.assign(DBAddonInternal.prototype, {
         }
       });
     });
-    if (aUpdate.multiprocessCompatible !== undefined &&
-        aUpdate.multiprocessCompatible != this.multiprocessCompatible) {
-      this.multiprocessCompatible = aUpdate.multiprocessCompatible;
-      XPIDatabase.saveChanges();
-    }
 
     if (wasCompatible != this.isCompatible)
       XPIProvider.updateAddonDisabledState(this);

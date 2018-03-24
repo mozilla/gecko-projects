@@ -8,7 +8,8 @@ const TEST_URI = "data:text/html;charset=utf8,Test that 'Open in Network Panel' 
 
 const TEST_FILE = "test-network-request.html";
 const JSON_TEST_URL = "test-network-request.html";
-const TEST_PATH = "http://example.com/browser/devtools/client/webconsole/new-console-output/test/mochitest/";
+const TEST_PATH = "http://example.com/browser/devtools/client/webconsole/" +
+                  "new-console-output/test/mochitest/";
 
 const NET_PREF = "devtools.webconsole.filter.net";
 const XHR_PREF = "devtools.webconsole.filter.netxhr";
@@ -38,7 +39,7 @@ add_task(async function task() {
   info("console panel open again.");
 
   // Fire an XHR request.
-  await ContentTask.spawn(gBrowser.selectedBrowser, null, function () {
+  await ContentTask.spawn(gBrowser.selectedBrowser, null, function() {
     content.wrappedJSObject.testXhrGet();
   });
 

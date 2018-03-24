@@ -58,22 +58,6 @@
 
 /***************************************************************************/
 
-#if 0 && defined(DEBUG_jband)
-#define LOG_RESOLVE(x) printf x
-#define LOG_LOAD(x)    printf x
-#define LOG_AUTOREG(x) do{printf x; xptiInterfaceInfoManager::WriteToLog x;}while(0)
-#else
-#define LOG_RESOLVE(x) ((void)0)
-#define LOG_LOAD(x)    ((void)0)
-#define LOG_AUTOREG(x) ((void)0)
-#endif
-
-#if 1 && defined(DEBUG_jband)
-#define SHOW_INFO_COUNT_STATS
-#endif
-
-/***************************************************************************/
-
 class xptiInterfaceInfo;
 class xptiInterfaceEntry;
 class xptiTypelibGuts;
@@ -91,10 +75,9 @@ extern XPTArena* gXPTIStructArena;
 class xptiTypelibGuts
 {
 public:
-    static xptiTypelibGuts* Create(XPTHeader* aHeader);
+    static xptiTypelibGuts* Create(const XPTHeader* aHeader);
 
-    XPTHeader*          GetHeader()           {return mHeader;}
-    uint16_t            GetEntryCount() const {return mHeader->num_interfaces;}
+    uint16_t GetEntryCount() const {return mHeader->mNumInterfaces;}
 
     void                SetEntryAt(uint16_t i, xptiInterfaceEntry* ptr)
     {
@@ -107,13 +90,13 @@ public:
     const char* GetEntryNameAt(uint16_t i);
 
 private:
-    explicit xptiTypelibGuts(XPTHeader* aHeader)
+    explicit xptiTypelibGuts(const XPTHeader* aHeader)
         : mHeader(aHeader)
     { }
     ~xptiTypelibGuts();
 
 private:
-    XPTHeader*           mHeader;        // hold pointer into arena
+    const XPTHeader*     mHeader;        // hold pointer into arena
     xptiInterfaceEntry*  mEntryArray[1]; // Always last. Sized to fit.
 };
 
@@ -168,9 +151,7 @@ private:
 class xptiInterfaceEntry
 {
 public:
-    static xptiInterfaceEntry* Create(const char* aName,
-                                      const nsID& aIID,
-                                      XPTInterfaceDescriptor* aDescriptor,
+    static xptiInterfaceEntry* Create(const XPTInterfaceDirectoryEntry* aEntry,
                                       xptiTypelibGuts* aTypelib);
 
     enum {
@@ -266,9 +247,7 @@ public:
     nsresult GetIIDForParamNoAlloc(uint16_t methodIndex, const nsXPTParamInfo * param, nsIID *iid);
 
 private:
-    xptiInterfaceEntry(const char* aName,
-                       const nsID& aIID,
-                       XPTInterfaceDescriptor* aDescriptor,
+    xptiInterfaceEntry(const XPTInterfaceDirectoryEntry* aDescriptor,
                        xptiTypelibGuts* aTypelib);
     ~xptiInterfaceEntry();
 
@@ -304,7 +283,7 @@ private:
 
 private:
     nsID                    mIID;
-    XPTInterfaceDescriptor* mDescriptor;
+    const XPTInterfaceDescriptor* mDescriptor;
 
     xptiTypelibGuts* mTypelib;
 

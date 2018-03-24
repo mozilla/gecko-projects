@@ -69,66 +69,6 @@ let whitelist = [
    intermittent: true,
    errorMessage: /Property contained reference to invalid variable.*color/i,
    isFromDevTools: true},
-
-  // These are CSS custom properties that we found a definition of but
-  // no reference to.
-  // Bug 1441837
-  {propName: "--in-content-category-text-active",
-   isFromDevTools: false},
-  // Bug 1441844
-  {propName: "--chrome-nav-bar-separator-color",
-   isFromDevTools: false},
-  // Bug 1441855
-  {propName: "--chrome-nav-buttons-background",
-   isFromDevTools: false},
-  // Bug 1441855
-  {propName: "--chrome-nav-buttons-hover-background",
-   isFromDevTools: false},
-  // Bug 1441857
-  {propName: "--muteButton-width",
-   isFromDevTools: false},
-  // Bug 1441857
-  {propName: "--closedCaptionButton-width",
-   isFromDevTools: false},
-  // Bug 1441857
-  {propName: "--fullscreenButton-width",
-   isFromDevTools: false},
-  // Bug 1441857
-  {propName: "--durationSpan-width",
-   isFromDevTools: false},
-  // Bug 1441857
-  {propName: "--durationSpan-width-long",
-   isFromDevTools: false},
-  // Bug 1441857
-  {propName: "--positionDurationBox-width",
-   isFromDevTools: false},
-  // Bug 1441857
-  {propName: "--positionDurationBox-width-long",
-   isFromDevTools: false},
-  // Bug 1441929
-  {propName: "--theme-search-overlays-semitransparent",
-   isFromDevTools: true},
-  // Bug 1441878
-  {propName: "--theme-codemirror-gutter-background",
-   isFromDevTools: true},
-  // Bug 1441879
-  {propName: "--arrow-width",
-   isFromDevTools: true},
-  // Bug 1442300
-  {propName: "--in-content-category-background",
-   isFromDevTools: false},
-
-  // Used on Linux
-  {propName: "--in-content-box-background-odd",
-   platforms: ["win", "macosx"],
-   isFromDevTools: false},
-
-  // These properties *are* actually referenced. Need to find why
-  // their reference isn't getting counted.
-  {propName: "--bezier-diagonal-color",
-   isFromDevTools: true},
-  {propName: "--bezier-grid-color",
-   isFromDevTools: true},
 ];
 
 if (!Services.prefs.getBoolPref("full-screen-api.unprefix.enabled")) {
@@ -150,10 +90,70 @@ let allowedImageReferences = [
    isFromDevTools: true},
 ];
 
+let propNameWhitelist = [
+  // These are CSS custom properties that we found a definition of but
+  // no reference to.
+  // Bug 1441837
+  {propName: "--in-content-category-text-active",
+   isFromDevTools: false},
+  // Bug 1441855
+  {propName: "--chrome-nav-buttons-background",
+   isFromDevTools: false},
+  // Bug 1441855
+  {propName: "--chrome-nav-buttons-hover-background",
+   isFromDevTools: false},
+  // Bug 1441929
+  {propName: "--theme-search-overlays-semitransparent",
+   isFromDevTools: true},
+  // Bug 1441878
+  {propName: "--theme-codemirror-gutter-background",
+   isFromDevTools: true},
+  // These custom properties are retrieved directly from CSSOM
+  // in videocontrols.xml to get pre-defined style instead of computed
+  // dimensions, which is why they are not referenced by CSS.
+  {propName: "--clickToPlay-width",
+   isFromDevTools: false},
+  {propName: "--playButton-width",
+   isFromDevTools: false},
+  {propName: "--muteButton-width",
+   isFromDevTools: false},
+  {propName: "--castingButton-width",
+   isFromDevTools: false},
+  {propName: "--closedCaptionButton-width",
+   isFromDevTools: false},
+  {propName: "--fullscreenButton-width",
+   isFromDevTools: false},
+  {propName: "--durationSpan-width",
+   isFromDevTools: false},
+  {propName: "--durationSpan-width-long",
+   isFromDevTools: false},
+  {propName: "--positionDurationBox-width",
+   isFromDevTools: false},
+  {propName: "--positionDurationBox-width-long",
+   isFromDevTools: false},
+  // Used on Linux
+  {propName: "--in-content-box-background-odd",
+   platforms: ["win", "macosx"],
+   isFromDevTools: false},
+
+  // These properties *are* actually referenced. Need to find why
+  // their reference isn't getting counted.
+  {propName: "--bezier-diagonal-color",
+   isFromDevTools: true},
+  {propName: "--bezier-grid-color",
+   isFromDevTools: true},
+];
+
 // Add suffix to stylesheets' URI so that we always load them here and
 // have them parsed. Add a random number so that even if we run this
 // test multiple times, it would be unlikely to affect each other.
 const kPathSuffix = "?always-parse-css-" + Math.random();
+
+function dumpWhitelistItem(item) {
+  return JSON.stringify(item, (key, value) => {
+    return value instanceof RegExp ? value.toString() : value;
+  });
+}
 
 /**
  * Check if an error should be ignored due to matching one of the whitelist
@@ -165,15 +165,26 @@ const kPathSuffix = "?always-parse-css-" + Math.random();
 function ignoredError(aErrorObject) {
   for (let whitelistItem of whitelist) {
     let matches = true;
+    let catchAll = true;
     for (let prop of ["sourceName", "errorMessage"]) {
-      if (whitelistItem.hasOwnProperty(prop) &&
-          !whitelistItem[prop].test(aErrorObject[prop] || "")) {
-        matches = false;
-        break;
+      if (whitelistItem.hasOwnProperty(prop)) {
+        catchAll = false;
+        if (!whitelistItem[prop].test(aErrorObject[prop] || "")) {
+          matches = false;
+          break;
+        }
       }
+    }
+    if (catchAll) {
+      ok(false, "A whitelist item is catching all errors. " +
+         dumpWhitelistItem(whitelistItem));
+      continue;
     }
     if (matches) {
       whitelistItem.used = true;
+      let {sourceName, errorMessage} = aErrorObject;
+      info(`Ignored error "${errorMessage}" on ${sourceName} ` +
+           "because of whitelist item " + dumpWhitelistItem(whitelistItem));
       return true;
     }
   }
@@ -248,7 +259,6 @@ function messageIsCSSError(msg) {
       ok(false, `Got error message for ${sourceName}: ${msg.errorMessage}`);
       return true;
     }
-    info(`Ignored error for ${sourceName} because of filter.`);
   }
   return false;
 }
@@ -350,16 +360,16 @@ add_task(async function checkAllTheCSS() {
   // Parse and remove all manifests from the list.
   // NOTE that this must be done before filtering out devtools paths
   // so that all chrome paths can be recorded.
-  let manifestPromises = [];
+  let manifestURIs = [];
   uris = uris.filter(uri => {
     if (uri.pathQueryRef.endsWith(".manifest")) {
-      manifestPromises.push(parseManifest(uri));
+      manifestURIs.push(uri);
       return false;
     }
     return true;
   });
   // Wait for all manifest to be parsed
-  await Promise.all(manifestPromises);
+  await throttledMapPromises(manifestURIs, parseManifest);
 
   // filter out either the devtools paths or the non-devtools paths:
   let isDevtools = SimpleTest.harnessParameters.subsuite == "devtools";
@@ -403,8 +413,7 @@ add_task(async function checkAllTheCSS() {
   }
 
   // Wait for all the files to have actually loaded:
-  allPromises = allPromises.map(loadCSS);
-  await Promise.all(allPromises);
+  await throttledMapPromises(allPromises, loadCSS);
 
   // Check if all the files referenced from CSS actually exist.
   for (let [image, references] of imageURIsToReferencesMap) {
@@ -430,7 +439,7 @@ add_task(async function checkAllTheCSS() {
   for (let [prop, refCount] of customPropsToReferencesMap) {
     if (!refCount) {
       let ignored = false;
-      for (let item of whitelist) {
+      for (let item of propNameWhitelist) {
         if (item.propName == prop &&
             isDevtools == item.isFromDevTools) {
           item.used = true;
@@ -453,27 +462,18 @@ add_task(async function checkAllTheCSS() {
   is(errors.length, 0, "All the styles (" + allPromises.length + ") loaded without errors.");
 
   // Confirm that all whitelist rules have been used.
-  for (let item of whitelist) {
-    if (!item.used &&
-        (!item.platforms || item.platforms.includes(AppConstants.platform)) &&
-        isDevtools == item.isFromDevTools &&
-        !item.intermittent) {
-      ok(false, "Unused whitelist item. " +
-                (item.propName ? " propName: " + item.propName : "") +
-                (item.sourceName ? " sourceName: " + item.sourceName : "") +
-                (item.errorMessage ? " errorMessage: " + item.errorMessage : ""));
+  function checkWhitelist(list) {
+    for (let item of list) {
+      if (!item.used && isDevtools == item.isFromDevTools &&
+          (!item.platforms || item.platforms.includes(AppConstants.platform)) &&
+          !item.intermittent) {
+        ok(false, "Unused whitelist item: " + dumpWhitelistItem(item));
+      }
     }
   }
-
-  // Confirm that all file whitelist rules have been used.
-  for (let item of allowedImageReferences) {
-    if (!item.used && isDevtools == item.isFromDevTools &&
-        (!item.platforms || item.platforms.includes(AppConstants.platform))) {
-      ok(false, "Unused file whitelist item. " +
-                " file: " + item.file +
-                " from: " + item.from);
-    }
-  }
+  checkWhitelist(whitelist);
+  checkWhitelist(allowedImageReferences);
+  checkWhitelist(propNameWhitelist);
 
   // Clean up to avoid leaks:
   iframe.remove();

@@ -9,7 +9,6 @@
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/layers/LayerTransactionChild.h"
 #include "nsPresContext.h"
-#include "nsDOMClassInfoID.h"
 #include "nsError.h"
 #include "nsIDOMEvent.h"
 #include "nsQueryContentEventResult.h"
@@ -106,7 +105,7 @@
 #include "HTMLImageElement.h"
 #include "HTMLCanvasElement.h"
 #include "mozilla/css/ImageLoader.h"
-#include "mozilla/layers/APZCTreeManager.h" // for layers::ZoomToRectBehavior
+#include "mozilla/layers/IAPZCTreeManager.h" // for layers::ZoomToRectBehavior
 #include "mozilla/dom/Promise.h"
 #include "mozilla/StyleSheetInlines.h"
 #include "mozilla/gfx/GPUProcessManager.h"
@@ -329,7 +328,7 @@ nsDOMWindowUtils::GetPhysicalMillimeterInCSSPixels(float* aPhysicalMillimeter)
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  *aPhysicalMillimeter = presContext->AppUnitsToFloatCSSPixels(
+  *aPhysicalMillimeter = nsPresContext::AppUnitsToFloatCSSPixels(
     presContext->PhysicalMillimetersToAppUnits(1));
   return NS_OK;
 }
@@ -488,7 +487,7 @@ nsDOMWindowUtils::SetDisplayPortForElement(float aXPx, float aYPx,
   nsLayoutUtils::InvalidateForDisplayPortChange(content, !!currentData,
     currentData ? currentData->mRect : nsRect(), displayport);
 
-  nsIFrame* rootFrame = presShell->FrameManager()->GetRootFrame();
+  nsIFrame* rootFrame = presShell->GetRootFrame();
   if (rootFrame) {
     rootFrame->SchedulePaint();
 
@@ -1480,8 +1479,8 @@ nsDOMWindowUtils::CompareCanvases(nsISupports *aCanvas1,
 
   nsCOMPtr<nsIContent> contentCanvas1 = do_QueryInterface(aCanvas1);
   nsCOMPtr<nsIContent> contentCanvas2 = do_QueryInterface(aCanvas2);
-  auto canvas1 = HTMLCanvasElement::FromContentOrNull(contentCanvas1);
-  auto canvas2 = HTMLCanvasElement::FromContentOrNull(contentCanvas2);
+  auto canvas1 = HTMLCanvasElement::FromNodeOrNull(contentCanvas1);
+  auto canvas2 = HTMLCanvasElement::FromNodeOrNull(contentCanvas2);
 
   if (!canvas1 || !canvas2) {
     return NS_ERROR_FAILURE;
@@ -1666,7 +1665,7 @@ nsDOMWindowUtils::GetScrollbarSize(bool aFlushLayout, int32_t* aWidth,
 
 NS_IMETHODIMP
 nsDOMWindowUtils::GetBoundsWithoutFlushing(nsIDOMElement *aElement,
-                                           nsIDOMClientRect** aResult)
+                                           nsISupports** aResult)
 {
   nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(mWindow);
   NS_ENSURE_STATE(window);
@@ -1723,7 +1722,7 @@ nsDOMWindowUtils::NeedsFlush(int32_t aFlushType, bool* aResult)
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::GetRootBounds(nsIDOMClientRect** aResult)
+nsDOMWindowUtils::GetRootBounds(nsISupports** aResult)
 {
   nsIDocument* doc = GetDocument();
   NS_ENSURE_STATE(doc);
@@ -2727,8 +2726,8 @@ nsDOMWindowUtils::ComputeAnimationDistance(nsIDOMElement* aElement,
     return NS_ERROR_ILLEGAL_VALUE;
   }
 
-  RefPtr<nsStyleContext> styleContext =
-    nsComputedDOMStyle::GetStyleContext(element, nullptr);
+  RefPtr<ComputedStyle> styleContext =
+    nsComputedDOMStyle::GetComputedStyle(element, nullptr);
   *aResult = v1.ComputeDistance(property, v2, styleContext);
   return NS_OK;
 }
@@ -2825,60 +2824,20 @@ nsDOMWindowUtils::GetUnanimatedComputedStyle(nsIDOMElement* aElement,
   }
 
   RefPtr<nsAtom> pseudo = nsCSSPseudoElements::GetPseudoAtom(aPseudoElement);
-  RefPtr<nsStyleContext> styleContext =
-    nsComputedDOMStyle::GetUnanimatedStyleContextNoFlush(element, pseudo);
+  RefPtr<ComputedStyle> styleContext =
+    nsComputedDOMStyle::GetUnanimatedComputedStyleNoFlush(element, pseudo);
   if (!styleContext) {
     return NS_ERROR_FAILURE;
   }
 
-  if (styleContext->IsServo()) {
-    RefPtr<RawServoAnimationValue> value =
-      Servo_ComputedValues_ExtractAnimationValue(styleContext->AsServo(),
-                                                 propertyID).Consume();
-    if (!value) {
-      return NS_ERROR_FAILURE;
-    }
-    Servo_AnimationValue_Serialize(value, propertyID, &aResult);
-    return NS_OK;
-  }
-
-#ifdef MOZ_OLD_STYLE
-  StyleAnimationValue computedValue;
-  if (!StyleAnimationValue::ExtractComputedValue(propertyID,
-                                                 styleContext->AsGecko(),
-                                                 computedValue)) {
+  RefPtr<RawServoAnimationValue> value =
+    Servo_ComputedValues_ExtractAnimationValue(styleContext->AsServo(),
+                                               propertyID).Consume();
+  if (!value) {
     return NS_ERROR_FAILURE;
   }
-
-  // Note: ExtractComputedValue can return 'unset', 'initial', or 'inherit' in
-  // its "computedValue" outparam, even though these technically aren't valid
-  // computed values. (It has this behavior for discretely-animatable
-  // properties, e.g. 'align-content', when these keywords are explicitly
-  // specified or when there is no specified value.)  But we need to return a
-  // valid computed value -- these keywords won't do.  So we fall back to
-  // nsComputedDOMStyle in this case.
-  if (computedValue.GetUnit() == StyleAnimationValue::eUnit_DiscreteCSSValue &&
-      (computedValue.GetCSSValueValue()->GetUnit() == eCSSUnit_Unset ||
-       computedValue.GetCSSValueValue()->GetUnit() == eCSSUnit_Initial ||
-       computedValue.GetCSSValueValue()->GetUnit() == eCSSUnit_Inherit)) {
-    RefPtr<nsComputedDOMStyle> computedStyle =
-      NS_NewComputedDOMStyle(
-       element, aPseudoElement, shell,
-       nsComputedDOMStyle::StyleType::eAll,
-       nsComputedDOMStyle::AnimationFlag::eWithoutAnimation);
-    computedStyle->GetPropertyValue(propertyID, aResult);
-    return NS_OK;
-  }
-
-  DebugOnly<bool> uncomputeResult =
-    StyleAnimationValue::UncomputeValue(propertyID,
-                                        Move(computedValue), aResult);
-  MOZ_ASSERT(uncomputeResult,
-             "Unable to get specified value from computed value");
+  Servo_AnimationValue_Serialize(value, propertyID, &aResult);
   return NS_OK;
-#else
-  MOZ_CRASH("old style system disabled");
-#endif
 }
 
 nsresult
@@ -3497,7 +3456,7 @@ nsDOMWindowUtils::SelectAtPoint(float aX, float aY, uint32_t aSelectBehavior,
   }
 
   // The root frame for this content window
-  nsIFrame* rootFrame = presShell->FrameManager()->GetRootFrame();
+  nsIFrame* rootFrame = presShell->GetRootFrame();
   if (!rootFrame) {
     return NS_ERROR_UNEXPECTED;
   }
@@ -3805,8 +3764,8 @@ nsDOMWindowUtils::GetOMTAStyle(nsIDOMElement* aElement,
                                     &hadAnimatedOpacity);
         }
       } else if (WebRenderLayerManager* wrlm = widgetLayerManager->AsWebRenderLayerManager()) {
-        RefPtr<WebRenderAnimationData> animationData = wrlm->CommandBuilder()
-            .GetWebRenderUserData<WebRenderAnimationData>(frame, (uint32_t)DisplayItemType::TYPE_OPACITY);
+        RefPtr<WebRenderAnimationData> animationData =
+            GetWebRenderUserData<WebRenderAnimationData>(frame, (uint32_t)DisplayItemType::TYPE_OPACITY);
         if (animationData) {
           wrlm->WrBridge()->SendGetAnimationOpacity(
               animationData->GetAnimationInfo().GetCompositorAnimationsId(),
@@ -3830,8 +3789,8 @@ nsDOMWindowUtils::GetOMTAStyle(nsIDOMElement* aElement,
             SendGetAnimationTransform(layer->GetCompositorAnimationsId(), &transform);
         }
       } else if (WebRenderLayerManager* wrlm = widgetLayerManager->AsWebRenderLayerManager()) {
-        RefPtr<WebRenderAnimationData> animationData = wrlm->CommandBuilder()
-            .GetWebRenderUserData<WebRenderAnimationData>(frame, (uint32_t)DisplayItemType::TYPE_TRANSFORM);
+        RefPtr<WebRenderAnimationData> animationData =
+            GetWebRenderUserData<WebRenderAnimationData>(frame, (uint32_t)DisplayItemType::TYPE_TRANSFORM);
         if (animationData) {
           wrlm->WrBridge()->SendGetAnimationTransform(
               animationData->GetAnimationInfo().GetCompositorAnimationsId(),
@@ -4203,7 +4162,7 @@ nsDOMWindowUtils::ForceUseCounterFlush(nsIDOMNode *aNode)
   }
 
   if (nsCOMPtr<nsIContent> content = do_QueryInterface(aNode)) {
-    if (HTMLImageElement* img = HTMLImageElement::FromContent(content)) {
+    if (HTMLImageElement* img = HTMLImageElement::FromNode(content)) {
       img->FlushUseCounters();
       return NS_OK;
     }

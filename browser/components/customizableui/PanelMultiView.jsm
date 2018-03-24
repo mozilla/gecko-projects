@@ -875,11 +875,15 @@ var PanelMultiView = class extends AssociatedToNode {
       let width = prevPanelView.knownWidth;
       let height = prevPanelView.knownHeight;
       viewRect = Object.assign({height, width}, viewNode.customRectGetter());
+      nextPanelView.visible = true;
+      // Until the header is visible, it has 0 height.
+      // Wait for layout before measuring it
       let header = viewNode.firstChild;
       if (header && header.classList.contains("panel-header")) {
-        viewRect.height += this._dwu.getBoundsWithoutFlushing(header).height;
+        viewRect.height += await window.promiseDocumentFlushed(() => {
+          return this._dwu.getBoundsWithoutFlushing(header).height;
+        });
       }
-      nextPanelView.visible = true;
       await nextPanelView.descriptionHeightWorkaround();
     } else {
       this._offscreenViewStack.style.minHeight = olderView.knownHeight + "px";
@@ -1319,6 +1323,10 @@ var PanelView = class extends AssociatedToNode {
       collectItems();
     } else {
       await this.window.promiseDocumentFlushed(collectItems);
+      // Bail out if the panel was closed in the meantime.
+      if (!this.node.panelMultiView) {
+        return;
+      }
     }
 
     // Removing the 'height' property will only cause a layout flush in the next
@@ -1338,6 +1346,10 @@ var PanelView = class extends AssociatedToNode {
       measureItems();
     } else {
       await this.window.promiseDocumentFlushed(measureItems);
+      // Bail out if the panel was closed in the meantime.
+      if (!this.node.panelMultiView) {
+        return;
+      }
     }
 
     // Now we can make all the necessary DOM changes at once.

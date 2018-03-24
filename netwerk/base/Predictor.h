@@ -37,12 +37,13 @@ namespace net {
 class nsHttpRequestHead;
 class nsHttpResponseHead;
 
-class Predictor : public nsINetworkPredictor
-                , public nsIObserver
-                , public nsISpeculativeConnectionOverrider
-                , public nsIInterfaceRequestor
-                , public nsICacheEntryMetaDataVisitor
-                , public nsINetworkPredictorVerifier
+class Predictor final
+  : public nsINetworkPredictor
+  , public nsIObserver
+  , public nsISpeculativeConnectionOverrider
+  , public nsIInterfaceRequestor
+  , public nsICacheEntryMetaDataVisitor
+  , public nsINetworkPredictorVerifier
 {
 public:
   NS_DECL_ISUPPORTS
@@ -470,7 +471,6 @@ private:
   int32_t mPrefetchMinConfidence;
   int32_t mPreconnectMinConfidence;
   int32_t mPreresolveMinConfidence;
-  int32_t mRedirectLikelyConfidence;
 
   int32_t mPrefetchForceValidFor;
 

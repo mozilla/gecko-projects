@@ -93,7 +93,6 @@ user_pref("extensions.installDistroAddons", false);
 // XPI extensions are required for test harnesses to load
 user_pref("extensions.defaultProviders.enabled", true);
 user_pref("xpinstall.signatures.required", false);
-user_pref("extensions.allow-non-mpc-extensions", true);
 user_pref("extensions.legacy.enabled", true);
 
 user_pref("geo.wifi.uri", "http://%(server)s/tests/dom/tests/mochitest/geolocation/network_geolocation.sjs");
@@ -297,9 +296,6 @@ user_pref("browser.newtabpage.activity-stream.telemetry", false);
 user_pref("browser.newtabpage.activity-stream.tippyTop.service.endpoint", "");
 user_pref("browser.newtabpage.activity-stream.feeds.section.topstories", false);
 user_pref("browser.newtabpage.activity-stream.feeds.snippets", false);
-
-// Don't fetch directory tiles data from real servers
-user_pref("browser.newtabpage.directory.source", 'data:application/json,{"testing":1}');
 
 // Ensure UITour won't hit the network
 user_pref("browser.uitour.pinnedTabUrl", "http://%(server)s/uitour-dummy/pinnedTab");

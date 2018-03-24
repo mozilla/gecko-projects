@@ -131,6 +131,7 @@ a {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: end;
 }
 
 .stack-trace .frame-link-source-inner,
@@ -141,7 +142,6 @@ a {
 }
 
 .stack-trace .frame-link-function-display-name {
-  max-width: 50%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -290,9 +290,9 @@ a {
   border-radius: 3px;
   font-weight: bold;
   font-size: 10px;
-  padding: 2px;
+  padding: 1px 2px;
   line-height: 10px;
-  margin-inline-start: 3px;
+  margin-inline-start: 0;
   margin-inline-end: 1ex;
 }
 
@@ -610,10 +610,8 @@ textbox.jsterm-input-node[focused="true"] {
 }
 
 .message .theme-twisty {
-  display: inline-block;
-  vertical-align: middle;
-  margin: 3px 0 0 0;
-  flex-shrink: 0;
+  position: relative;
+  top: 0.1em;
 }
 
 /*Do not mirror the twisty because container force to ltr */
@@ -653,6 +651,7 @@ a.learn-more-link.webconsole-learn-more-link {
 .open-inspector:active {
   filter: var(--theme-icon-checked-filter) brightness(0.9);
 }
+
 
 /* Old console frontend filters */
 .devtools-toolbarbutton[type=menu-button] > .toolbarbutton-menubutton-button {
@@ -777,7 +776,6 @@ a.learn-more-link.webconsole-learn-more-link {
   --warning-color: var(--yellow-80);
   --warning-background-color: #FFFBD5;
   --console-output-color: var(--grey-90);
-  --attachment-border-color: var(--theme-content-color1);
   --repeat-bubble-background-color: var(--theme-highlight-blue);
 }
 
@@ -787,7 +785,6 @@ a.learn-more-link.webconsole-learn-more-link {
   --warning-color: #FCE19F;
   --warning-background-color: #44391F;
   --console-output-color: white;
-  --attachment-border-color: var(--theme-body-color);
   --repeat-bubble-background-color: var(--blue-60);
 }
 
@@ -1105,17 +1102,14 @@ a.learn-more-link.webconsole-learn-more-link {
  * console since its style is already defined in reps.css .
  */
 .webconsole-output-wrapper .open-inspector {
-  background: unset;
-  padding-left: unset;
-  margin-left: unset;
-  cursor: unset;
+  background-image: unset;
 }
 
 /* Stacktraces */
-.webconsole-output-wrapper  .stacktrace {
-  border: 1px solid var(--attachment-border-color);
-  border-radius: 2px;
+.webconsole-output-wrapper .stacktrace {
+  border: none;
   margin-block-end: var(--attachment-margin-block-end);
+  padding: 0 0 0 4px;
 }
 
 .theme-dark .webconsole-output-wrapper .message.error .stacktrace,
@@ -1222,14 +1216,12 @@ body #output-container {
  * Make the arrow the same color and approximately the same size of the twisty icon.
  * Should be properly fixed in https://bugzilla.mozilla.org/show_bug.cgi?id=1307937.
  */
-.webconsole-output-wrapper .object-inspector.tree .tree-node .arrow svg {
-  width: 8px;
-  fill: #AFA8AB;
-  margin-inline-start: 1px;
+.webconsole-output-wrapper .object-inspector.tree .tree-node .arrow {
+  background-color: #AFA8AB;
 }
 
-.theme-dark .webconsole-output-wrapper .object-inspector.tree .tree-node .arrow svg {
-  fill: #7F7E81;
+.theme-dark .webconsole-output-wrapper .object-inspector.tree .tree-node .arrow {
+  background-color: #7F7E81;
 }
 
 /* Sidebar */

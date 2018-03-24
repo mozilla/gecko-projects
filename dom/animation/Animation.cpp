@@ -471,10 +471,6 @@ Animation::UpdatePlaybackRate(double aPlaybackRate)
 AnimationPlayState
 Animation::PlayState() const
 {
-  if (!nsContentUtils::AnimationsAPIPendingMemberEnabled() && Pending()) {
-    return AnimationPlayState::Pending;
-  }
-
   Nullable<TimeDuration> currentTime = GetCurrentTime();
   if (currentTime.IsNull() && !Pending()) {
     return AnimationPlayState::Idle;
@@ -599,13 +595,6 @@ void
 Animation::Play(ErrorResult& aRv, LimitBehavior aLimitBehavior)
 {
   PlayNoUpdate(aRv, aLimitBehavior);
-  PostUpdate();
-}
-
-void
-Animation::Pause(ErrorResult& aRv)
-{
-  PauseNoUpdate(aRv);
   PostUpdate();
 }
 
@@ -1224,7 +1213,7 @@ Animation::PlayNoUpdate(ErrorResult& aRv, LimitBehavior aLimitBehavior)
 
 // https://drafts.csswg.org/web-animations/#pause-an-animation
 void
-Animation::PauseNoUpdate(ErrorResult& aRv)
+Animation::Pause(ErrorResult& aRv)
 {
   if (IsPausedOrPausing()) {
     return;
@@ -1271,6 +1260,8 @@ Animation::PauseNoUpdate(ErrorResult& aRv)
   if (IsRelevant()) {
     nsNodeUtils::AnimationChanged(this);
   }
+
+  PostUpdate();
 }
 
 // https://drafts.csswg.org/web-animations/#play-an-animation
@@ -1565,6 +1556,30 @@ Animation::GetRenderedDocument() const
   return mEffect->AsKeyframeEffect()->GetRenderedDocument();
 }
 
+class AsyncFinishNotification : public MicroTaskRunnable
+{
+public:
+  explicit AsyncFinishNotification(Animation* aAnimation)
+  : MicroTaskRunnable()
+  , mAnimation(aAnimation)
+  {}
+
+  virtual void Run(AutoSlowOperation& aAso) override
+  {
+    mAnimation->DoFinishNotificationImmediately(this);
+    mAnimation = nullptr;
+  }
+
+  virtual bool Suppressed() override
+  {
+    nsIGlobalObject* global = mAnimation->GetOwnerGlobal();
+    return global && global->IsInSyncOperation();
+  }
+
+private:
+  RefPtr<Animation> mAnimation;
+};
+
 void
 Animation::DoFinishNotification(SyncNotifyFlag aSyncNotifyFlag)
 {
@@ -1572,11 +1587,8 @@ Animation::DoFinishNotification(SyncNotifyFlag aSyncNotifyFlag)
 
   if (aSyncNotifyFlag == SyncNotifyFlag::Sync) {
     DoFinishNotificationImmediately();
-  } else if (!mFinishNotificationTask.IsPending()) {
-    RefPtr<nsRunnableMethod<Animation>> runnable =
-      NewRunnableMethod("dom::Animation::DoFinishNotificationImmediately",
-                        this,
-                        &Animation::DoFinishNotificationImmediately);
+  } else if (!mFinishNotificationTask) {
+    RefPtr<MicroTaskRunnable> runnable = new AsyncFinishNotification(this);
     context->DispatchToMicroTask(do_AddRef(runnable));
     mFinishNotificationTask = runnable.forget();
   }
@@ -1599,9 +1611,13 @@ Animation::MaybeResolveFinishedPromise()
 }
 
 void
-Animation::DoFinishNotificationImmediately()
+Animation::DoFinishNotificationImmediately(MicroTaskRunnable* aAsync)
 {
-  mFinishNotificationTask.Revoke();
+  if (aAsync && aAsync != mFinishNotificationTask) {
+    return;
+  }
+
+  mFinishNotificationTask = nullptr;
 
   if (PlayState() != AnimationPlayState::Finished) {
     return;
@@ -1641,13 +1657,6 @@ Animation::IsRunningOnCompositor() const
          mEffect->AsKeyframeEffect()->IsRunningOnCompositor();
 }
 
-#ifdef MOZ_OLD_STYLE
-template
-void
-Animation::ComposeStyle<RefPtr<AnimValuesStyleRule>&>(
-  RefPtr<AnimValuesStyleRule>& aAnimationRule,
-  const nsCSSPropertyIDSet& aPropertiesToSkip);
-#endif
 
 template
 void

@@ -12,6 +12,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "gXulStore",
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   BookmarksPolicies: "resource:///modules/policies/BookmarksPolicies.jsm",
+  ProxyPolicies: "resource:///modules/policies/ProxyPolicies.jsm",
 });
 
 const PREF_LOGLEVEL           = "browser.policies.loglevel";
@@ -107,6 +108,15 @@ var Policies = {
   "Cookies": {
     onBeforeUIStartup(manager, param) {
       addAllowDenyPermissions("cookie", param.Allow, param.Block);
+
+      if (param.Block) {
+        const hosts = param.Block.map(uri => uri.host).sort().join("\n");
+        runOncePerModification("clearCookiesForBlockedHosts", hosts, () => {
+          for (let blocked of param.Block) {
+            Services.cookies.removeCookiesWithOriginAttributes("{}", blocked.host);
+          }
+        });
+      }
     }
   },
 
@@ -126,6 +136,14 @@ var Policies = {
     }
   },
 
+  "DisableBuiltinPDFViewer": {
+    onBeforeUIStartup(manager, param) {
+      if (param) {
+        manager.disallowFeature("PDF.js");
+      }
+    }
+  },
+
   "DisableDeveloperTools": {
     onBeforeAddons(manager, param) {
       if (param) {
@@ -136,6 +154,22 @@ var Policies = {
         manager.disallowFeature("about:devtools");
         manager.disallowFeature("about:debugging");
         manager.disallowFeature("about:devtools-toolbox");
+      }
+    }
+  },
+
+  "DisableFeedbackCommands": {
+    onBeforeUIStartup(manager, param) {
+      if (param) {
+        manager.disallowFeature("feedbackCommands");
+      }
+    }
+  },
+
+  "DisableFirefoxAccounts": {
+    onBeforeAddons(manager, param) {
+      if (param) {
+        setAndLockPref("identity.fxaccounts.enabled", false);
       }
     }
   },
@@ -182,6 +216,21 @@ var Policies = {
     }
   },
 
+  "DisableSafeMode": {
+    onBeforeUIStartup(manager, param) {
+      if (param) {
+        manager.disallowFeature("safeMode");
+      }
+    }
+  },
+
+  "DisableSysAddonUpdate": {
+    onBeforeAddons(manager, param) {
+      if (param) {
+        manager.disallowFeature("SysAddonUpdate");
+      }
+    }
+  },
 
   "DisplayBookmarksToolbar": {
     onBeforeUIStartup(manager, param) {
@@ -215,6 +264,23 @@ var Policies = {
     }
   },
 
+  "EnableTrackingProtection": {
+    onBeforeUIStartup(manager, param) {
+      if (param.Value) {
+        if (param.Locked) {
+          setAndLockPref("privacy.trackingprotection.enabled", true);
+          setAndLockPref("privacy.trackingprotection.pbmode.enabled", true);
+        } else {
+          setDefaultPref("privacy.trackingprotection.enabled", true);
+          setDefaultPref("privacy.trackingprotection.pbmode.enabled", true);
+        }
+      } else {
+        setAndLockPref("privacy.trackingprotection.enabled", false);
+        setAndLockPref("privacy.trackingprotection.pbmode.enabled", false);
+      }
+    }
+  },
+
   "FlashPlugin": {
     onBeforeUIStartup(manager, param) {
       addAllowDenyPermissions("plugin:flash", param.Allow, param.Block);
@@ -237,9 +303,11 @@ var Policies = {
         setAndLockPref("pref.browser.homepage.disable_button.bookmark_page", true);
         setAndLockPref("pref.browser.homepage.disable_button.restore_default", true);
       } else {
+        setDefaultPref("browser.startup.homepage", homepages);
+        setDefaultPref("browser.startup.page", 1);
         runOncePerModification("setHomepage", homepages, () => {
-          Services.prefs.setStringPref("browser.startup.homepage", homepages);
-          Services.prefs.setIntPref("browser.startup.page", 1);
+          Services.prefs.clearUserPref("browser.startup.homepage");
+          Services.prefs.clearUserPref("browser.startup.page");
         });
       }
     }
@@ -251,9 +319,28 @@ var Policies = {
     }
   },
 
+  "NoDefaultBookmarks": {
+    onProfileAfterChange(manager, param) {
+      if (param) {
+        manager.disallowFeature("defaultBookmarks");
+      }
+    }
+  },
+
   "Popups": {
     onBeforeUIStartup(manager, param) {
       addAllowDenyPermissions("popup", param.Allow, null);
+    }
+  },
+
+  "Proxy": {
+    onBeforeAddons(manager, param) {
+      if (param.Locked) {
+        manager.disallowFeature("changeProxySettings");
+        ProxyPolicies.configureProxySettings(param, setAndLockPref);
+      } else {
+        ProxyPolicies.configureProxySettings(param, setDefaultPref);
+      }
     }
   },
 
@@ -290,6 +377,23 @@ function setAndLockPref(prefName, prefValue) {
     Services.prefs.unlockPref(prefName);
   }
 
+  setDefaultPref(prefName, prefValue);
+
+  Services.prefs.lockPref(prefName);
+}
+
+/**
+ * setDefaultPref
+ *
+ * Sets the _default_ value of a pref.
+ * The value is only changed in memory, and not stored to disk.
+ *
+ * @param {string} prefName
+ *        The pref to be changed
+ * @param {boolean,number,string} prefValue
+ *        The value to set
+ */
+function setDefaultPref(prefName, prefValue) {
   let defaults = Services.prefs.getDefaultBranch("");
 
   switch (typeof(prefValue)) {
@@ -309,8 +413,6 @@ function setAndLockPref(prefName, prefValue) {
       defaults.setStringPref(prefName, prefValue);
       break;
   }
-
-  Services.prefs.lockPref(prefName);
 }
 
 /**

@@ -11,7 +11,8 @@
 #include "mozilla/RefCounted.h"             // for RefCounted
 #include "mozilla/RefPtr.h"                 // for RefPtr
 #include "mozilla/gfx/Matrix.h"             // for Matrix4x4
-#include "mozilla/layers/APZUtils.h"        // for TouchBehaviorFlags
+#include "mozilla/layers/APZUtils.h"     
+#include "mozilla/layers/LayersTypes.h"     // for TouchBehaviorFlags
 #include "mozilla/layers/AsyncDragMetrics.h"
 #include "mozilla/TimeStamp.h"              // for TimeStamp
 #include "nsTArray.h"                       // for nsTArray
@@ -75,7 +76,8 @@ public:
 
   virtual bool SetConfirmedTargetApzc(const RefPtr<AsyncPanZoomController>& aTargetApzc,
                                       TargetConfirmationState aState,
-                                      InputData* aFirstInput);
+                                      InputData* aFirstInput,
+                                      bool aForScrollbarDrag);
   const RefPtr<AsyncPanZoomController>& GetTargetApzc() const;
   const RefPtr<const OverscrollHandoffChain>& GetOverscrollHandoffChain() const;
   uint64_t GetBlockId() const;
@@ -230,7 +232,8 @@ public:
   const char* Type() override;
   bool SetConfirmedTargetApzc(const RefPtr<AsyncPanZoomController>& aTargetApzc,
                               TargetConfirmationState aState,
-                              InputData* aFirstInput) override;
+                              InputData* aFirstInput,
+                              bool aForScrollbarDrag) override;
 
   WheelBlockState *AsWheelBlock() override {
     return this;
@@ -346,7 +349,8 @@ public:
   const char* Type() override;
   bool SetConfirmedTargetApzc(const RefPtr<AsyncPanZoomController>& aTargetApzc,
                               TargetConfirmationState aState,
-                              InputData* aFirstInput) override;
+                              InputData* aFirstInput,
+                              bool aForScrollbarDrag) override;
 
   PanGestureBlockState *AsPanGestureBlock() override {
     return this;

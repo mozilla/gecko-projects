@@ -7,7 +7,6 @@
 #define InputData_h__
 
 #include "nsDebug.h"
-#include "nsIDOMWheelEvent.h"
 #include "nsIScrollableFrame.h"
 #include "nsPoint.h"
 #include "nsTArray.h"
@@ -24,8 +23,8 @@ class nsIWidget;
 namespace mozilla {
 
 namespace layers {
-class PAPZCTreeManagerParent;
-class APZCTreeManagerChild;
+class APZInputBridgeChild;
+class PAPZInputBridgeParent;
 }
 
 namespace dom {
@@ -228,8 +227,8 @@ public:
 class MouseInput : public InputData
 {
 protected:
-  friend mozilla::layers::PAPZCTreeManagerParent;
-  friend mozilla::layers::APZCTreeManagerChild;
+  friend mozilla::layers::APZInputBridgeChild;
+  friend mozilla::layers::PAPZInputBridgeParent;
 
   MouseInput();
 
@@ -284,8 +283,8 @@ public:
 class PanGestureInput : public InputData
 {
 protected:
-  friend mozilla::layers::PAPZCTreeManagerParent;
-  friend mozilla::layers::APZCTreeManagerChild;
+  friend mozilla::layers::APZInputBridgeChild;
+  friend mozilla::layers::PAPZInputBridgeParent;
 
   PanGestureInput();
 
@@ -404,8 +403,8 @@ public:
 class PinchGestureInput : public InputData
 {
 protected:
-  friend mozilla::layers::PAPZCTreeManagerParent;
-  friend mozilla::layers::APZCTreeManagerChild;
+  friend mozilla::layers::APZInputBridgeChild;
+  friend mozilla::layers::PAPZInputBridgeParent;
 
   PinchGestureInput();
 
@@ -461,8 +460,8 @@ public:
 class TapGestureInput : public InputData
 {
 protected:
-  friend mozilla::layers::PAPZCTreeManagerParent;
-  friend mozilla::layers::APZCTreeManagerChild;
+  friend mozilla::layers::APZInputBridgeChild;
+  friend mozilla::layers::PAPZInputBridgeParent;
 
   TapGestureInput();
 
@@ -508,8 +507,8 @@ public:
 class ScrollWheelInput : public InputData
 {
 protected:
-  friend mozilla::layers::PAPZCTreeManagerParent;
-  friend mozilla::layers::APZCTreeManagerChild;
+  friend mozilla::layers::APZInputBridgeChild;
+  friend mozilla::layers::PAPZInputBridgeParent;
 
   ScrollWheelInput();
 
@@ -619,8 +618,8 @@ public:
   KeyboardScrollAction mAction;
 
 protected:
-  friend mozilla::layers::PAPZCTreeManagerParent;
-  friend mozilla::layers::APZCTreeManagerChild;
+  friend mozilla::layers::APZInputBridgeChild;
+  friend mozilla::layers::PAPZInputBridgeParent;
 
   KeyboardInput();
 };

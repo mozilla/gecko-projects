@@ -5,10 +5,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "Axis.h"
+
 #include <math.h>                       // for fabsf, pow, powf
 #include <algorithm>                    // for max
+
+#include "APZCTreeManager.h"            // for APZCTreeManager
 #include "AsyncPanZoomController.h"     // for AsyncPanZoomController
-#include "mozilla/layers/APZCTreeManager.h" // for APZCTreeManager
 #include "mozilla/layers/APZThreadUtils.h" // for AssertOnControllerThread
 #include "FrameMetrics.h"               // for FrameMetrics
 #include "mozilla/Attributes.h"         // for final
@@ -58,7 +60,7 @@ Axis::Axis(AsyncPanZoomController* aAsyncPanZoomController)
 }
 
 float Axis::ToLocalVelocity(float aVelocityInchesPerMs) const {
-  ScreenPoint velocity = MakePoint(aVelocityInchesPerMs * APZCTreeManager::GetDPI());
+  ScreenPoint velocity = MakePoint(aVelocityInchesPerMs * mAsyncPanZoomController->GetDPI());
   // Use ToScreenCoordinates() to convert a point rather than a vector by
   // treating the point as a vector, and using (0, 0) as the anchor.
   ScreenPoint panStart = mAsyncPanZoomController->ToScreenCoordinates(

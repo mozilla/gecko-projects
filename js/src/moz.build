@@ -32,7 +32,7 @@ for gcfile in ['devtools/rootAnalysis', 'devtools/gc-ubench', 'devtools/gctrace'
     with Files(gcfile):
         BUG_COMPONENT = component_gc
 
-for stlfile in ['jsarray.*', 'jsbool*', 'jsdate.*', 'jsnum.*', 'jsstr.*']:
+for stlfile in ['jsdate.*', 'jsnum.*']:
     with Files(stlfile):
         BUG_COMPONENT = component_stl
 
@@ -79,6 +79,19 @@ if CONFIG['HAVE_DTRACE']:
     GENERATED_FILES += ['javascript-trace.h']
 
     EXPORTS += ['!javascript-trace.h']
+
+# Generate jit/MOpcodes.h from jit/MIR.h
+GENERATED_FILES += ['jit/MOpcodes.h']
+MOpcodesGenerated = GENERATED_FILES['jit/MOpcodes.h']
+MOpcodesGenerated.script = 'jit/GenerateOpcodeFiles.py:generate_mir_header'
+MOpcodesGenerated.inputs = ['jit/MIR.h']
+
+# Generate jit/LOpcodes.h from jit/LIR.h, jit/shared/LIR-shared.h, and
+# platform-specific LIR files.
+GENERATED_FILES += ['jit/LOpcodes.h']
+LOpcodesGenerated = GENERATED_FILES['jit/LOpcodes.h']
+LOpcodesGenerated.script = 'jit/GenerateOpcodeFiles.py:generate_lir_header'
+LOpcodesGenerated.inputs = ['jit/LIR.h', 'jit/shared/LIR-shared.h']
 
 # Changes to internal header files, used externally, massively slow down
 # browser builds.  Don't add new files here unless you know what you're
@@ -149,6 +162,7 @@ EXPORTS.js += [
 
 UNIFIED_SOURCES += [
     'builtin/AtomicsObject.cpp',
+    'builtin/Boolean.cpp',
     'builtin/DataViewObject.cpp',
     'builtin/Eval.cpp',
     'builtin/intl/Collator.cpp',
@@ -169,7 +183,8 @@ UNIFIED_SOURCES += [
     'builtin/ReflectParse.cpp',
     'builtin/SIMD.cpp',
     'builtin/Stream.cpp',
-    'builtin/SymbolObject.cpp',
+    'builtin/String.cpp',
+    'builtin/Symbol.cpp',
     'builtin/TestingFunctions.cpp',
     'builtin/TypedObject.cpp',
     'builtin/WeakMapObject.cpp',
@@ -287,12 +302,10 @@ UNIFIED_SOURCES += [
     'jit/VMFunctions.cpp',
     'jit/WasmBCE.cpp',
     'jsapi.cpp',
-    'jsbool.cpp',
     'jsdate.cpp',
     'jsexn.cpp',
     'jsfriendapi.cpp',
     'jsnum.cpp',
-    'jsstr.cpp',
     'perf/jsperf.cpp',
     'proxy/BaseProxyHandler.cpp',
     'proxy/CrossCompartmentWrapper.cpp',
@@ -307,6 +320,9 @@ UNIFIED_SOURCES += [
     'util/AllocPolicy.cpp',
     'util/NativeStack.cpp',
     'util/Printf.cpp',
+    'util/StringBuffer.cpp',
+    'util/Text.cpp',
+    'util/Unicode.cpp',
     'vm/ArgumentsObject.cpp',
     'vm/ArrayBufferObject.cpp',
     'vm/AsyncFunction.cpp',
@@ -360,10 +376,9 @@ UNIFIED_SOURCES += [
     'vm/SharedImmutableStringsCache.cpp',
     'vm/Stack.cpp',
     'vm/Stopwatch.cpp',
-    'vm/String.cpp',
-    'vm/StringBuffer.cpp',
+    'vm/StringType.cpp',
     'vm/StructuredClone.cpp',
-    'vm/Symbol.cpp',
+    'vm/SymbolType.cpp',
     'vm/TaggedProto.cpp',
     'vm/Time.cpp',
     'vm/TypedArrayObject.cpp',
@@ -372,7 +387,6 @@ UNIFIED_SOURCES += [
     'vm/UbiNodeCensus.cpp',
     'vm/UbiNodeShortestPaths.cpp',
     'vm/UnboxedObject.cpp',
-    'vm/Unicode.cpp',
     'vm/Value.cpp',
     'vm/Xdr.cpp',
     'wasm/AsmJS.cpp',
@@ -401,10 +415,10 @@ UNIFIED_SOURCES += [
     'wasm/WasmValidate.cpp'
 ]
 
-# jsarray.cpp and vm/JSAtom.cpp cannot be built in unified mode because
+# builtin/Array.cpp and vm/JSAtom.cpp cannot be built in unified mode because
 #   xpcshell is broken during packaging when compiled with gcc-4.8.2
-# builtin/RegExp.cpp cannot be built in unified mode because it is built
-#   without PGO
+# builtin/RegExp.cpp cannot be built in unified mode because it causes huge
+#   win32 test slowdowns
 # frontend/Parser.cpp cannot be built in unified mode because of explicit
 #   template instantiations.
 # jsmath.cpp cannot be built in unified mode because it needs to re-#define the
@@ -419,10 +433,10 @@ UNIFIED_SOURCES += [
 # vm/Interpreter.cpp is gigantic and destroys incremental build times for any
 #   files unlucky enough to be unified with it.
 SOURCES += [
+    'builtin/Array.cpp',
     'builtin/RegExp.cpp',
     'frontend/Parser.cpp',
     'gc/StoreBuffer.cpp',
-    'jsarray.cpp',
     'jsmath.cpp',
     'jsutil.cpp',
     'util/DoubleToString.cpp',
@@ -448,10 +462,12 @@ if CONFIG['ENABLE_TRACE_LOGGING']:
     ]
 
 if not CONFIG['ENABLE_ION']:
+    LOpcodesGenerated.inputs += ['jit/none/LIR-none.h']
     UNIFIED_SOURCES += [
         'jit/none/Trampoline-none.cpp'
     ]
 elif CONFIG['JS_CODEGEN_X86'] or CONFIG['JS_CODEGEN_X64']:
+    LOpcodesGenerated.inputs += ['jit/x86-shared/LIR-x86-shared.h']
     UNIFIED_SOURCES += [
         'jit/x86-shared/Architecture-x86-shared.cpp',
         'jit/x86-shared/Assembler-x86-shared.cpp',
@@ -467,6 +483,7 @@ elif CONFIG['JS_CODEGEN_X86'] or CONFIG['JS_CODEGEN_X64']:
         'jit/x86-shared/Disassembler-x86-shared.cpp',  # using namespace js::jit::X86Encoding;
     ]
     if CONFIG['JS_CODEGEN_X64']:
+        LOpcodesGenerated.inputs += ['jit/x64/LIR-x64.h']
         UNIFIED_SOURCES += [
             'jit/x64/Assembler-x64.cpp',
             'jit/x64/Bailouts-x64.cpp',
@@ -479,6 +496,7 @@ elif CONFIG['JS_CODEGEN_X86'] or CONFIG['JS_CODEGEN_X64']:
             'jit/x64/Trampoline-x64.cpp',
         ]
     else:
+        LOpcodesGenerated.inputs += ['jit/x86/LIR-x86.h']
         UNIFIED_SOURCES += [
             'jit/x86/Assembler-x86.cpp',
             'jit/x86/Bailouts-x86.cpp',
@@ -491,6 +509,7 @@ elif CONFIG['JS_CODEGEN_X86'] or CONFIG['JS_CODEGEN_X64']:
             'jit/x86/Trampoline-x86.cpp',
         ]
 elif CONFIG['JS_CODEGEN_ARM']:
+    LOpcodesGenerated.inputs += ['jit/arm/LIR-arm.h']
     UNIFIED_SOURCES += [
         'jit/arm/Architecture-arm.cpp',
         'jit/arm/Assembler-arm.cpp',
@@ -516,6 +535,7 @@ elif CONFIG['JS_CODEGEN_ARM']:
             'jit/arm/llvm-compiler-rt/arm/aeabi_uidivmod.S',
         ]
 elif CONFIG['JS_CODEGEN_ARM64']:
+    LOpcodesGenerated.inputs += ['jit/arm64/LIR-arm64.h']
     UNIFIED_SOURCES += [
         'jit/arm64/Architecture-arm64.cpp',
         'jit/arm64/Assembler-arm64.cpp',
@@ -547,6 +567,7 @@ elif CONFIG['JS_CODEGEN_ARM64']:
             'jit/arm64/vixl/Simulator-vixl.cpp'
         ]
 elif CONFIG['JS_CODEGEN_MIPS32'] or CONFIG['JS_CODEGEN_MIPS64']:
+    LOpcodesGenerated.inputs += ['jit/mips-shared/LIR-mips-shared.h']
     UNIFIED_SOURCES += [
         'jit/mips-shared/Architecture-mips-shared.cpp',
         'jit/mips-shared/Assembler-mips-shared.cpp',
@@ -559,6 +580,7 @@ elif CONFIG['JS_CODEGEN_MIPS32'] or CONFIG['JS_CODEGEN_MIPS64']:
         'jit/mips-shared/MoveEmitter-mips-shared.cpp',
     ]
     if CONFIG['JS_CODEGEN_MIPS32']:
+        LOpcodesGenerated.inputs += ['jit/mips32/LIR-mips32.h']
         UNIFIED_SOURCES += [
             'jit/mips32/Architecture-mips32.cpp',
             'jit/mips32/Assembler-mips32.cpp',
@@ -577,6 +599,7 @@ elif CONFIG['JS_CODEGEN_MIPS32'] or CONFIG['JS_CODEGEN_MIPS64']:
                 'jit/mips32/Simulator-mips32.cpp'
             ]
     elif CONFIG['JS_CODEGEN_MIPS64']:
+        LOpcodesGenerated.inputs += ['jit/mips64/LIR-mips64.h']
         UNIFIED_SOURCES += [
             'jit/mips64/Architecture-mips64.cpp',
             'jit/mips64/Assembler-mips64.cpp',
@@ -705,10 +728,6 @@ if CONFIG['MOZ_LINKER']:
     DEFINES['MOZ_LINKER'] = True
 
 if CONFIG['CC_TYPE'] in ('msvc', 'clang-cl'):
-    if CONFIG['CPU_ARCH'] == 'x86':
-        SOURCES['builtin/RegExp.cpp'].no_pgo = True # Bug 772303
-    elif CONFIG['CPU_ARCH'] == 'x86_64' and CONFIG['JS_HAS_CTYPES']:
-        SOURCES['ctypes/CTypes.cpp'].no_pgo = True # Bug 810661
     # Prevent floating point errors caused by VC++ optimizations
     # XXX We should add this to CXXFLAGS, too?
     CFLAGS += ['-fp:precise']
@@ -721,13 +740,10 @@ if CONFIG['CC_TYPE'] in ('msvc', 'clang-cl'):
     # have a Parser<FullParseHandler> definition but no
     # Parser<SyntaxParseHandler> definition, see bug 1167030.
     CXXFLAGS += ['-wd4661']
-    CXXFLAGS += ['-we4067', '-we4258', '-we4275']
-    CXXFLAGS += ['-wd4146'] # FIXME: unary minus operator applied to unsigned type (bug 1229189)
-
-    # This is intended as a temporary hack to support building with VS2015.
-    # 'noexcept' used with no exception handling mode specified;
-    # termination on exception is not guaranteed. Specify /EHsc
-    CXXFLAGS += ['-wd4577']
+    # FIXME: unary minus operator applied to unsigned type (bug 1229189)
+    CXXFLAGS += ['-wd4146']
+    # FIXME: 'operation' : conversion from 'type1' to 'type2' of
+    # greater size (bug 1259304)
     CXXFLAGS += ['-wd4312']
 
 CFLAGS += CONFIG['MOZ_ICU_CFLAGS']

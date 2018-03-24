@@ -9,7 +9,7 @@
 
 const TEST_URI = "data:text/html;charset=utf8,";
 
-add_task(async function () {
+add_task(async function() {
   // Should be removed when sidebar work is complete
   await SpecialPowers.pushPrefEnv({"set": [
     ["devtools.webconsole.sidebarToggle", true]
@@ -29,7 +29,7 @@ add_task(async function () {
 
   info("Send a console.clear()");
   let onMessagesCleared = waitForMessage(hud, "Console was cleared");
-  ContentTask.spawn(gBrowser.selectedBrowser, {}, function () {
+  ContentTask.spawn(gBrowser.selectedBrowser, {}, function() {
     content.wrappedJSObject.console.clear();
   });
   await onMessagesCleared;
@@ -73,7 +73,7 @@ add_task(async function () {
 
 async function showSidebar(hud) {
   let onMessage = waitForMessage(hud, "Object");
-  ContentTask.spawn(gBrowser.selectedBrowser, {}, function () {
+  ContentTask.spawn(gBrowser.selectedBrowser, {}, function() {
     content.wrappedJSObject.console.log({a: 1});
   });
   await onMessage;

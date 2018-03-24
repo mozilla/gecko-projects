@@ -46,7 +46,6 @@ NS_IMETHODIMP
 TRR::Notify(nsITimer *aTimer)
 {
   if (aTimer == mTimeout) {
-    LOG(("TRR request for %s timed out\n", mHost.get()));
     mTimeout = nullptr;
     Cancel();
   } else {
@@ -65,7 +64,7 @@ TRR::DohEncode(nsCString &aBody)
   // Header
   aBody += '\0';
   aBody += '\0'; // 16 bit id
-  aBody += '\0'; // |QR|   Opcode  |AA|TC|RD|
+  aBody += 0x01; // |QR|   Opcode  |AA|TC|RD| Set the RD bit
   aBody += '\0'; // |RA|   Z    |   RCODE   |
   aBody += '\0';
   aBody += 1;    // QDCOUNT (number of entries in the question section)

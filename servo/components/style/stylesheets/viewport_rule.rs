@@ -20,7 +20,6 @@ use properties::StyleBuilder;
 use rule_cache::RuleCacheConditions;
 use selectors::parser::SelectorParseErrorKind;
 use shared_lock::{SharedRwLockReadGuard, StylesheetGuards, ToCssWithGuard};
-#[allow(unused_imports)] use std::ascii::AsciiExt;
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::fmt::{self, Write};
@@ -143,24 +142,12 @@ trait FromMeta: Sized {
 /// See:
 /// * http://dev.w3.org/csswg/css-device-adapt/#min-max-width-desc
 /// * http://dev.w3.org/csswg/css-device-adapt/#extend-to-zoom
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 #[allow(missing_docs)]
+#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
+#[derive(Clone, Debug, PartialEq, ToCss)]
 pub enum ViewportLength {
     Specified(LengthOrPercentageOrAuto),
     ExtendToZoom
-}
-
-impl ToCss for ViewportLength {
-    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
-    where
-        W: Write,
-    {
-        match *self {
-            ViewportLength::Specified(ref length) => length.to_css(dest),
-            ViewportLength::ExtendToZoom => dest.write_str("extend-to-zoom"),
-        }
-    }
 }
 
 impl FromMeta for ViewportLength {

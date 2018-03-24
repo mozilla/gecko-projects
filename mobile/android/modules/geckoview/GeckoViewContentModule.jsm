@@ -26,10 +26,20 @@ class GeckoViewContentModule {
     this.eventDispatcher = EventDispatcher.forMessageManager(aMessageManager);
 
     this.messageManager.addMessageListener(
+      "GeckoView:UpdateSettings",
+      aMsg => {
+        this.settings = aMsg.data;
+        this.onSettingsUpdate();
+      }
+    );
+    this.messageManager.addMessageListener(
       "GeckoView:Register",
       aMsg => {
         if (aMsg.data.module == this.moduleName) {
+          this.settings = aMsg.data.settings;
           this.register();
+          this.messageManager.sendAsyncMessage(
+            "GeckoView:ContentRegistered", { module: this.moduleName });
         }
       }
     );
@@ -48,4 +58,5 @@ class GeckoViewContentModule {
   init() {}
   register() {}
   unregister() {}
+  onSettingsUpdate() {}
 }

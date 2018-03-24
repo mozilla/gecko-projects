@@ -13,7 +13,6 @@
 #include "nsIAttribute.h"
 #include "nsIDOMNode.h"
 #include "nsIDOMNodeList.h"
-#include "nsIDOMCharacterData.h"
 #include "nsBindingManager.h"
 #include "nsNameSpaceManager.h"
 #include "nsIDocument.h"
@@ -578,14 +577,14 @@ inDOMView::IsSorted(bool *_retval)
 
 NS_IMETHODIMP
 inDOMView::CanDrop(int32_t index, int32_t orientation,
-                   nsIDOMDataTransfer* aDataTransfer, bool *_retval)
+                   nsISupports* aDataTransfer, bool *_retval)
 {
   *_retval = false;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-inDOMView::Drop(int32_t row, int32_t orientation, nsIDOMDataTransfer* aDataTransfer)
+inDOMView::Drop(int32_t row, int32_t orientation, nsISupports* aDataTransfer)
 {
   return NS_OK;
 }
@@ -1205,8 +1204,7 @@ inDOMView::AppendKidsToArray(nsINodeList* aKids,
            nodeType == nsINode::COMMENT_NODE) &&
           !mShowWhitespaceNodes) {
         nsCOMPtr<nsIContent> content = do_QueryInterface(kid);
-        auto data = static_cast<nsGenericDOMDataNode*>(content.get());
-        NS_ASSERTION(data, "Does not implement nsIDOMCharacterData!");
+        auto data = static_cast<dom::CharacterData*>(content.get());
         if (InspectorUtils::IsIgnorableWhitespace(*data)) {
           continue;
         }

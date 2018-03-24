@@ -38,6 +38,7 @@
 #include "mozilla/gfx/HelpersCairo.h"
 #include "mozilla/gfx/PathHelpers.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/layers/StackingContextHelper.h"
 
 #ifdef MOZ_X11
 #  ifdef CAIRO_HAS_XLIB_SURFACE
@@ -257,7 +258,7 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
       } else {
         if (aWidgetFlags) {
           *aWidgetFlags = 0;
-          HTMLInputElement* inputElt = HTMLInputElement::FromContent(aFrame->GetContent());
+          HTMLInputElement* inputElt = HTMLInputElement::FromNode(aFrame->GetContent());
           if (inputElt && inputElt->Checked())
             *aWidgetFlags |= MOZ_GTK_WIDGET_CHECKED;
 

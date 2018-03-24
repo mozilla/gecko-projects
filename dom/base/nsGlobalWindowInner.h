@@ -37,11 +37,11 @@
 #include "prclist.h"
 #include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/ChromeMessageBroadcaster.h"
 #include "mozilla/dom/StorageEvent.h"
 #include "mozilla/dom/StorageEventBinding.h"
 #include "mozilla/dom/UnionTypes.h"
 #include "mozilla/ErrorResult.h"
-#include "nsFrameMessageManager.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/GuardObjects.h"
 #include "mozilla/LinkedList.h"
@@ -110,6 +110,7 @@ enum class ImageBitmapFormat : uint8_t;
 class IdleRequest;
 class IdleRequestCallback;
 class IncrementalRunnable;
+class InstallTriggerImpl;
 class IntlUtils;
 class Location;
 class MediaQueryList;
@@ -204,18 +205,19 @@ ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
 // inner windows belonging to the same outer window, but that's an unimportant
 // side effect of inheriting PRCList).
 
-class nsGlobalWindowInner : public mozilla::dom::EventTarget,
-                            public nsPIDOMWindowInner,
-                            private nsIDOMWindow,
-                            // NOTE: This interface is private, as it's only
-                            // implemented on chrome windows.
-                            private nsIDOMChromeWindow,
-                            public nsIScriptGlobalObject,
-                            public nsIScriptObjectPrincipal,
-                            public nsSupportsWeakReference,
-                            public nsIInterfaceRequestor,
-                            public PRCListStr,
-                            public nsAPostRefreshObserver
+class nsGlobalWindowInner final
+  : public mozilla::dom::EventTarget
+  , public nsPIDOMWindowInner
+  , private nsIDOMWindow
+  // NOTE: This interface is private, as it's only
+  // implemented on chrome windows.
+  , private nsIDOMChromeWindow
+  , public nsIScriptGlobalObject
+  , public nsIScriptObjectPrincipal
+  , public nsSupportsWeakReference
+  , public nsIInterfaceRequestor
+  , public PRCListStr
+  , public nsAPostRefreshObserver
 {
 public:
   typedef mozilla::TimeStamp TimeStamp;
@@ -356,6 +358,9 @@ public:
 
   virtual RefPtr<mozilla::dom::ServiceWorker>
   GetOrCreateServiceWorker(const mozilla::dom::ServiceWorkerDescriptor& aDescriptor) override;
+
+  RefPtr<mozilla::dom::ServiceWorkerRegistration>
+  GetOrCreateServiceWorkerRegistration(const mozilla::dom::ServiceWorkerRegistrationDescriptor& aDescriptor) override;
 
   void NoteCalledRegisterForServiceWorkerScope(const nsACString& aScope);
 
@@ -945,9 +950,11 @@ public:
   void Restore();
   void NotifyDefaultButtonLoaded(mozilla::dom::Element& aDefaultButton,
                                  mozilla::ErrorResult& aError);
-  nsIMessageBroadcaster* GetMessageManager(mozilla::ErrorResult& aError);
-  nsIMessageBroadcaster* GetGroupMessageManager(const nsAString& aGroup,
-                                                mozilla::ErrorResult& aError);
+  mozilla::dom::ChromeMessageBroadcaster*
+    GetMessageManager(mozilla::ErrorResult& aError);
+  mozilla::dom::ChromeMessageBroadcaster*
+    GetGroupMessageManager(const nsAString& aGroup,
+                           mozilla::ErrorResult& aError);
   void BeginWindowMove(mozilla::dom::Event& aMouseDownEvent,
                        mozilla::dom::Element* aPanel,
                        mozilla::ErrorResult& aError);
@@ -984,6 +991,8 @@ public:
   already_AddRefed<nsWindowRoot> GetWindowRoot(mozilla::ErrorResult& aError);
 
   bool ShouldReportForServiceWorkerScope(const nsAString& aScope);
+
+  already_AddRefed<mozilla::dom::InstallTriggerImpl> GetInstallTrigger();
 
   void UpdateTopInnerWindow();
 
@@ -1262,6 +1271,10 @@ private:
   // Fire the JS engine's onNewGlobalObject hook.  Only used on inner windows.
   void FireOnNewGlobalObject();
 
+  // Helper for resolving the components shim.
+  bool ResolveComponentsShim(JSContext* aCx, JS::Handle<JSObject*> aObj,
+                             JS::MutableHandle<JS::PropertyDescriptor> aDesc);
+
   // nsPIDOMWindow{Inner,Outer} should be able to see these helper methods.
   friend class nsPIDOMWindowInner;
   friend class nsPIDOMWindowOuter;
@@ -1275,9 +1288,9 @@ private:
   {
     MOZ_RELEASE_ASSERT(IsChromeWindow());
     for (auto iter = mChromeFields.mGroupMessageManagers.Iter(); !iter.Done(); iter.Next()) {
-      nsIMessageBroadcaster* mm = iter.UserData();
+      mozilla::dom::ChromeMessageBroadcaster* mm = iter.UserData();
       if (mm) {
-        static_cast<nsFrameMessageManager*>(mm)->Disconnect();
+        mm->Disconnect();
       }
     }
     mChromeFields.mGroupMessageManagers.Clear();
@@ -1383,6 +1396,7 @@ protected:
   // forward declared here means that ~nsGlobalWindow wouldn't compile because
   // it wouldn't see the ~External function's declaration.
   nsCOMPtr<nsISupports>         mExternal;
+  RefPtr<mozilla::dom::InstallTriggerImpl> mInstallTrigger;
 
   RefPtr<mozilla::dom::Storage> mLocalStorage;
   RefPtr<mozilla::dom::Storage> mSessionStorage;
@@ -1483,8 +1497,9 @@ protected:
       : mGroupMessageManagers(1)
     {}
 
-    nsCOMPtr<nsIMessageBroadcaster> mMessageManager;
-    nsInterfaceHashtable<nsStringHashKey, nsIMessageBroadcaster> mGroupMessageManagers;
+    RefPtr<mozilla::dom::ChromeMessageBroadcaster> mMessageManager;
+    nsRefPtrHashtable<nsStringHashKey,
+                      mozilla::dom::ChromeMessageBroadcaster> mGroupMessageManagers;
   } mChromeFields;
 
   // These fields are used by the inner and outer windows to prevent

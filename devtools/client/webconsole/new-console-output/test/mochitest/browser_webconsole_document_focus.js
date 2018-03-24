@@ -6,7 +6,7 @@
 // Check that focus is restored to content page after closing the console. See Bug 588342.
 const TEST_URI = "data:text/html;charset=utf-8,Test content focus after closing console";
 
-add_task(async function () {
+add_task(async function() {
   let hud = await openNewTabAndConsole(TEST_URI);
 
   let inputNode = hud.jsterm.inputNode;
@@ -15,10 +15,8 @@ add_task(async function () {
 
   info("Closing console");
   await closeConsole();
-  const isFocused = await ContentTask.spawn(gBrowser.selectedBrowser, { }, function () {
-    const cmp = "@mozilla.org/focus-manager;1";
-    const fm = Cc[cmp].getService(Ci.nsIFocusManager);
-    return fm.focusedWindow == content;
+  const isFocused = await ContentTask.spawn(gBrowser.selectedBrowser, { }, function() {
+    return Services.focus.focusedWindow == content;
   });
   ok(isFocused, "content document has focus after closing the console");
 });

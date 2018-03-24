@@ -12,9 +12,12 @@
 #include "mozilla/dom/DOMPointBinding.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/ToJSValue.h"
+#include "mozilla/RuleNodeCacheConditions.h"
 #include "mozilla/ServoCSSParser.h"
 #include "nsCSSParser.h"
+#include "nsGlobalWindowInner.h"
 #include "nsStyleTransformMatrix.h"
+#include "nsGlobalWindowInner.h"
 
 #include <math.h>
 
@@ -683,40 +686,7 @@ DOMMatrix::SetMatrixValue(const nsAString& aTransformList, ErrorResult& aRv)
       return nullptr;
     }
   } else {
-#ifdef MOZ_OLD_STYLE
-    nsCSSValue value;
-    nsCSSParser parser;
-    bool parseSuccess = parser.ParseTransformProperty(aTransformList,
-                                                      true,
-                                                      value);
-    if (!parseSuccess) {
-      aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
-      return nullptr;
-    }
-
-    // A value of "none" results in a 2D identity matrix.
-    if (value.GetUnit() == eCSSUnit_None) {
-      mMatrix3D = nullptr;
-      mMatrix2D = new gfx::Matrix();
-      return this;
-    }
-
-    // A value other than a transform-list is a syntax error.
-    if (value.GetUnit() != eCSSUnit_SharedList) {
-      aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
-      return nullptr;
-    }
-
-    RuleNodeCacheConditions dummy;
-    nsStyleTransformMatrix::TransformReferenceBox dummyBox;
-    transform = nsStyleTransformMatrix::ReadTransforms(
-                    value.GetSharedListValue()->mHead,
-                    nullptr, nullptr, dummy, dummyBox,
-                    nsPresContext::AppUnitsPerCSSPixel(),
-                    &contains3dTransform);
-#else
     MOZ_CRASH("old style system disabled");
-#endif
   }
 
   if (!contains3dTransform) {

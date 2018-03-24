@@ -29,6 +29,10 @@ mochitest:
             default: mochitest/plain-chunked
     treeherder-symbol: M()
     loopback-video: true
+    run-on-projects:
+        by-test-platform:
+            .*-qr/.*: ['trunk', 'try']  # exclude beta and project branches
+            default: built-projects
     instance-size:
         by-test-platform:
             linux64-jsdcov/opt: xlarge
@@ -50,7 +54,7 @@ mochitest:
             default: true
     max-run-time:
         by-test-platform:
-            android-4.3-arm7-api-16/debug: 7200
+            android.*: 7200
             default: 5400
     allow-software-gl-layers: false
     tier:
@@ -170,14 +174,13 @@ mochitest-chrome:
             android-4.3-arm7-api-16/debug: 8
             android.*: 4
             default: 3
-    max-run-time: 3600
+    max-run-time:
+        by-test-platform:
+            android.*: 7200
+            default: 3600
     e10s: false
     mozharness:
         mochitest-flavor: chrome
-        config:
-            by-test-platform:
-                macosx.*:
-                    - remove_executables.py
         extra-options:
             by-test-platform:
                 android.*:
@@ -198,16 +201,16 @@ mochitest-clipboard:
     treeherder-symbol: M(cl)
     loopback-video: true
     instance-size: xlarge
+    max-run-time:
+        by-test-platform:
+            windows10-64-ccov/debug: 7200
+            default: 3600
     e10s:
         by-test-platform:
             linux32/debug: both
             default: true
     mozharness:
         mochitest-flavor: plain
-        config:
-            by-test-platform:
-                macosx.*:
-                    - remove_executables.py
         extra-options:
             by-test-platform:
                 android.*:
@@ -228,7 +231,14 @@ mochitest-devtools-chrome:
             default: mochitest/mochitest-devtools-chrome-chunked
     treeherder-symbol: M(dt)
     loopback-video: true
-    max-run-time: 5400
+    max-run-time:
+        by-test-platform:
+            windows10-64-ccov/debug: 7200
+            default: 5400
+    run-on-projects:
+        by-test-platform:
+            linux64-jsdcov/opt: ['try']  # jsdcov only on try, Bug 1442823
+            default: built-projects
     chunks:
         by-test-platform:
             windows10-64-ccov/debug: 10
@@ -257,7 +267,7 @@ mochitest-gpu:
     treeherder-symbol: M(gpu)
     run-on-projects:
         by-test-platform:
-            .*-qr/.*: ['mozilla-central', 'autoland', 'mozilla-inbound', 'try']  # exclude beta and project branches
+            .*-qr/.*: ['trunk', 'try']  # exclude beta and project branches
             default: built-projects
     loopback-video: true
     instance-size:
@@ -288,10 +298,13 @@ mochitest-media:
     description: "Mochitest media run"
     suite: mochitest/mochitest-media
     treeherder-symbol: M(mda)
-    max-run-time: 5400
+    max-run-time:
+        by-test-platform:
+            windows10-64-ccov/debug: 7200
+            default: 5400
     run-on-projects:
         by-test-platform:
-            .*-qr/.*: ['mozilla-central', 'autoland', 'mozilla-inbound', 'try']  # exclude beta and project branches
+            .*-qr/.*: ['trunk', 'try']  # exclude beta and project branches
             default: built-projects
     loopback-video: true
     virtualization:
@@ -364,7 +377,7 @@ mochitest-webgl:
     run-on-projects:
         by-test-platform:
             windows10-64-ccov/.*: []  # Do not run on Windows ccov, see bug 1419475.
-            .*-qr/.*: ['mozilla-central', 'autoland', 'mozilla-inbound', 'try']  # exclude beta and project branches
+            .*-qr/.*: ['trunk', 'try']  # exclude beta and project branches
             default: built-projects
     virtualization: virtual-with-gpu
     chunks:

@@ -4,7 +4,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/debug.js");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 function LOG(str) {
@@ -86,6 +85,10 @@ function getPrefReaderForType(t) {
       return PREF_SELECTED_READER;
   }
 }
+
+XPCOMUtils.defineLazyPreferenceGetter(this, "gCanFrameFeeds",
+  "browser.feeds.unsafelyFrameFeeds", false);
+
 
 function FeedConverter() {
 }
@@ -267,6 +270,13 @@ FeedConverter.prototype = {
   onStartRequest(request, context) {
     let channel = request.QueryInterface(Ci.nsIChannel);
 
+    let {loadInfo} = channel;
+    if ((loadInfo.frameOuterWindowID || loadInfo.outerWindowID) != loadInfo.topOuterWindowID &&
+        !gCanFrameFeeds) {
+      // We don't care about frame loads:
+      return;
+    }
+
     // Check for a header that tells us there was no sniffing
     // The value doesn't matter.
     try {
@@ -391,8 +401,10 @@ FeedResultService.prototype = {
    * See nsIFeedResultService.idl
    */
   addFeedResult(feedResult) {
-    NS_ASSERT(feedResult.uri != null, "null URI!");
-    NS_ASSERT(feedResult.uri != null, "null feedResult!");
+    if (feedResult.uri == null)
+      throw new Error("null URI!");
+    if (feedResult.uri == null)
+      throw new Error("null feedResult!");
     let spec = feedResult.uri.spec;
     if (!this._results[spec])
       this._results[spec] = [];
@@ -403,7 +415,8 @@ FeedResultService.prototype = {
    * See nsIFeedResultService.idl
    */
   getFeedResult(uri) {
-    NS_ASSERT(uri != null, "null URI!");
+    if (uri == null)
+      throw new Error("null URI!");
     let resultList = this._results[uri.spec];
     for (let result of resultList) {
       if (result.uri == uri)
@@ -416,7 +429,8 @@ FeedResultService.prototype = {
    * See nsIFeedResultService.idl
    */
   removeFeedResult(uri) {
-    NS_ASSERT(uri != null, "null URI!");
+    if (uri == null)
+      throw new Error("null URI!");
     let resultList = this._results[uri.spec];
     if (!resultList)
       return;

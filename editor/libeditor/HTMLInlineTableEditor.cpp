@@ -12,7 +12,6 @@
 #include "nsError.h"
 #include "nsGenericHTMLElement.h"
 #include "nsIContent.h"
-#include "nsIDOMElement.h"
 #include "nsIDOMEventTarget.h"
 #include "nsIDOMNode.h"
 #include "nsIHTMLObjectResizer.h"
@@ -205,7 +204,7 @@ HTMLEditor::RefreshInlineTableEditingUI()
   }
 
   RefPtr<nsGenericHTMLElement> htmlElement =
-    nsGenericHTMLElement::FromContent(mInlineEditedCell);
+    nsGenericHTMLElement::FromNode(mInlineEditedCell);
   if (!htmlElement) {
     return NS_ERROR_NULL_POINTER;
   }

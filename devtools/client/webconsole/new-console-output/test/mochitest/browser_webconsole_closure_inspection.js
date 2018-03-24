@@ -3,19 +3,22 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
+// XXX Remove this when the file is migrated to the new frontend.
+/* eslint-disable no-undef */
+
 // Check that inspecting a closure in the variables view sidebar works when
 // execution is paused.
 
 "use strict";
 
 const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
-                 "test/test-closures.html";
+                 "new-console-output/test/mochitest/test-closures.html";
 
 var gWebConsole, gJSTerm, gVariablesView;
 
 // Force the old debugger UI since it's directly used (see Bug 1301705)
 Services.prefs.setBoolPref("devtools.debugger.new-debugger-frontend", false);
-registerCleanupFunction(function* () {
+registerCleanupFunction(function() {
   Services.prefs.clearUserPref("devtools.debugger.new-debugger-frontend");
 });
 
@@ -38,7 +41,8 @@ function test() {
         let deferred = defer();
         fetchScopes(hud, toolbox, panelWin, deferred);
 
-        ContentTask.spawn(gBrowser.selectedBrowser, {}, function* () {
+        // eslint-disable-next-line
+        ContentTask.spawn(gBrowser.selectedBrowser, {}, () => {
           let button = content.document.querySelector("button");
           ok(button, "button element found");
           button.click();

@@ -87,7 +87,7 @@ webpackConfig.resolve = {
     "devtools/client/shared/vendor/redux": "redux",
     "devtools/client/shared/vendor/reselect": "reselect",
 
-    "devtools/shared/system": path.join(__dirname, "../../client/shared/webpack/shims/system-stub"),
+    "resource://gre/modules/AppConstants.jsm": path.join(__dirname, "../../client/shared/webpack/shims/app-constants-stub"),
 
     "devtools/client/framework/devtools": path.join(__dirname, "../../client/shared/webpack/shims/framework-devtools-shim"),
     "devtools/client/framework/menu": "devtools-modules/src/menu",
@@ -106,7 +106,7 @@ webpackConfig.resolve = {
     "toolkit/locales": path.join(__dirname, "../../../toolkit/locales/en-US"),
     "devtools/client/locales": path.join(__dirname, "../../client/locales/en-US"),
     "devtools/shared/locales": path.join(__dirname, "../../shared/locales/en-US"),
-    "devtools/shim/locales": path.join(__dirname, "../../shared/locales/en-US"),
+    "devtools/startup/locales": path.join(__dirname, "../../shared/locales/en-US"),
 
     // Unless a path explicitly needs to be rewritten or shimmed, all devtools paths can
     // be mapped to ../../

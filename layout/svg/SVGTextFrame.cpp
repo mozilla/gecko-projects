@@ -42,7 +42,7 @@
 #include "SVGContextPaint.h"
 #include "SVGLengthList.h"
 #include "SVGNumberList.h"
-#include "SVGPathElement.h"
+#include "SVGGeometryElement.h"
 #include "SVGTextPathElement.h"
 #include "nsLayoutUtils.h"
 #include "nsFrameSelection.h"
@@ -95,10 +95,10 @@ AppUnitsToGfxUnits(const nsPoint& aPoint, const nsPresContext* aContext)
 static gfxRect
 AppUnitsToFloatCSSPixels(const gfxRect& aRect, const nsPresContext* aContext)
 {
-  return gfxRect(aContext->AppUnitsToFloatCSSPixels(aRect.x),
-                 aContext->AppUnitsToFloatCSSPixels(aRect.y),
-                 aContext->AppUnitsToFloatCSSPixels(aRect.width),
-                 aContext->AppUnitsToFloatCSSPixels(aRect.height));
+  return gfxRect(nsPresContext::AppUnitsToFloatCSSPixels(aRect.x),
+                 nsPresContext::AppUnitsToFloatCSSPixels(aRect.y),
+                 nsPresContext::AppUnitsToFloatCSSPixels(aRect.width),
+                 nsPresContext::AppUnitsToFloatCSSPixels(aRect.height));
 }
 
 /**
@@ -801,8 +801,7 @@ TextRenderedRun::GetTransformFromUserSpaceForPainting(
     return m;
   }
 
-  float cssPxPerDevPx = aContext->
-    AppUnitsToFloatCSSPixels(aContext->AppUnitsPerDevPixel());
+  float cssPxPerDevPx = nsPresContext::AppUnitsToFloatCSSPixels(aContext->AppUnitsPerDevPixel());
 
   // Glyph position in user space.
   m.PreTranslate(mPosition / cssPxPerDevPx);
@@ -842,8 +841,7 @@ TextRenderedRun::GetTransformFromRunUserSpaceToUserSpace(
     return m;
   }
 
-  float cssPxPerDevPx = aContext->
-    AppUnitsToFloatCSSPixels(aContext->AppUnitsPerDevPixel());
+  float cssPxPerDevPx = nsPresContext::AppUnitsToFloatCSSPixels(aContext->AppUnitsPerDevPixel());
 
   nscoord start, end;
   GetClipEdges(start, end);
@@ -890,7 +888,7 @@ TextRenderedRun::GetTransformFromRunUserSpaceToFrameUserSpace(
 
   // Translate by the horizontal distance into the text frame this
   // rendered run is.
-  gfxFloat appPerCssPx = aContext->AppUnitsPerCSSPixel();
+  gfxFloat appPerCssPx = nsPresContext::AppUnitsPerCSSPixel();
   gfxPoint t = IsVertical() ? gfxPoint(0, start / appPerCssPx)
                             : gfxPoint(start / appPerCssPx, 0);
   return m.PreTranslate(t);
@@ -973,8 +971,8 @@ TextRenderedRun::GetRunUserSpaceRect(nsPresContext* aContext,
   // it around the text's origin.
   ScaleAround(fill,
               textRun->IsVertical()
-                ? gfxPoint(aContext->AppUnitsToFloatCSSPixels(baseline), 0.0)
-                : gfxPoint(0.0, aContext->AppUnitsToFloatCSSPixels(baseline)),
+                ? gfxPoint(nsPresContext::AppUnitsToFloatCSSPixels(baseline), 0.0)
+                : gfxPoint(0.0, nsPresContext::AppUnitsToFloatCSSPixels(baseline)),
               1.0 / mFontSizeScaleFactor);
 
   // Include the fill if requested.
@@ -1097,8 +1095,7 @@ TextRenderedRun::GetCharNumAtPosition(nsPresContext* aContext,
     return -1;
   }
 
-  float cssPxPerDevPx = aContext->
-    AppUnitsToFloatCSSPixels(aContext->AppUnitsPerDevPixel());
+  float cssPxPerDevPx = nsPresContext::AppUnitsToFloatCSSPixels(aContext->AppUnitsPerDevPixel());
 
   // Convert the point from user space into run user space, and take
   // into account any mFontSizeScaleFactor.
@@ -2623,8 +2620,7 @@ CharIterator::GetGlyphAdvance(nsPresContext* aContext) const
   gfxSkipCharsIterator it = TextFrame()->EnsureTextRun(nsTextFrame::eInflated);
   Range range = ConvertOriginalToSkipped(it, offset, length);
 
-  float cssPxPerDevPx = aContext->
-    AppUnitsToFloatCSSPixels(aContext->AppUnitsPerDevPixel());
+  float cssPxPerDevPx = nsPresContext::AppUnitsToFloatCSSPixels(aContext->AppUnitsPerDevPixel());
 
   gfxFloat advance = mTextRun->GetAdvanceWidth(range, nullptr);
   return aContext->AppUnitsToGfxUnits(advance) *
@@ -2634,8 +2630,7 @@ CharIterator::GetGlyphAdvance(nsPresContext* aContext) const
 gfxFloat
 CharIterator::GetAdvance(nsPresContext* aContext) const
 {
-  float cssPxPerDevPx = aContext->
-    AppUnitsToFloatCSSPixels(aContext->AppUnitsPerDevPixel());
+  float cssPxPerDevPx = nsPresContext::AppUnitsToFloatCSSPixels(aContext->AppUnitsPerDevPixel());
 
   uint32_t offset = mSkipCharsIterator.GetSkippedOffset();
   gfxFloat advance = mTextRun->
@@ -2657,8 +2652,7 @@ CharIterator::GetGlyphPartialAdvance(uint32_t aPartLength,
   gfxSkipCharsIterator it = TextFrame()->EnsureTextRun(nsTextFrame::eInflated);
   Range range = ConvertOriginalToSkipped(it, offset, length);
 
-  float cssPxPerDevPx = aContext->
-    AppUnitsToFloatCSSPixels(aContext->AppUnitsPerDevPixel());
+  float cssPxPerDevPx = nsPresContext::AppUnitsToFloatCSSPixels(aContext->AppUnitsPerDevPixel());
 
   gfxFloat advance = mTextRun->GetAdvanceWidth(range, nullptr);
   return aContext->AppUnitsToGfxUnits(advance) *
@@ -2764,18 +2758,21 @@ public:
    * @param aCanvasTM The transformation matrix to set when painting; this
    *   should be the FOR_OUTERSVG_TM canvas TM of the text, so that
    *   paint servers are painted correctly.
+   * @param aImgParams Whether we need to synchronously decode images.
    * @param aShouldPaintSVGGlyphs Whether SVG glyphs should be painted.
    */
   SVGTextDrawPathCallbacks(SVGTextFrame* aSVGTextFrame,
                            gfxContext& aContext,
                            nsTextFrame* aFrame,
                            const gfxMatrix& aCanvasTM,
+                           imgDrawingParams& aImgParams,
                            bool aShouldPaintSVGGlyphs)
     : DrawPathCallbacks(aShouldPaintSVGGlyphs),
       mSVGTextFrame(aSVGTextFrame),
       mContext(aContext),
       mFrame(aFrame),
-      mCanvasTM(aCanvasTM)
+      mCanvasTM(aCanvasTM),
+      mImgParams(aImgParams)
   {
   }
 
@@ -2805,8 +2802,7 @@ private:
    * Sets the gfxContext paint to the appropriate color or pattern
    * for filling text geometry.
    */
-  void MakeFillPattern(GeneralPattern* aOutPattern,
-                       imgDrawingParams& aImgParams);
+  void MakeFillPattern(GeneralPattern* aOutPattern);
 
   /**
    * Fills and strokes a piece of text geometry, using group opacity
@@ -2828,6 +2824,7 @@ private:
   gfxContext& mContext;
   nsTextFrame* mFrame;
   const gfxMatrix& mCanvasTM;
+  imgDrawingParams& mImgParams;
 
   /**
    * The color that we were last told from one of the path callback functions.
@@ -2852,9 +2849,7 @@ SVGTextDrawPathCallbacks::NotifySelectionBackgroundNeedsFill(
   mColor = aColor; // currently needed by MakeFillPattern
 
   GeneralPattern fillPattern;
-  // XXX cku Bug 1362417 we should pass imgDrawingParams from nsTextFrame.
-  imgDrawingParams imgParams;
-  MakeFillPattern(&fillPattern, imgParams);
+  MakeFillPattern(&fillPattern);
   if (fillPattern.GetPattern()) {
     DrawOptions drawOptions(aColor == NS_40PERCENT_FOREGROUND_COLOR ? 0.4 : 1.0);
     aDrawTarget.FillRect(aBackgroundRect, fillPattern, drawOptions);
@@ -2951,12 +2946,11 @@ SVGTextDrawPathCallbacks::HandleTextGeometry()
 }
 
 void
-SVGTextDrawPathCallbacks::MakeFillPattern(GeneralPattern* aOutPattern,
-                                          imgDrawingParams& aImgParams)
+SVGTextDrawPathCallbacks::MakeFillPattern(GeneralPattern* aOutPattern)
 {
   if (mColor == NS_SAME_AS_FOREGROUND_COLOR ||
       mColor == NS_40PERCENT_FOREGROUND_COLOR) {
-    nsSVGUtils::MakeFillPatternFor(mFrame, &mContext, aOutPattern, aImgParams);
+    nsSVGUtils::MakeFillPatternFor(mFrame, &mContext, aOutPattern, mImgParams);
     return;
   }
 
@@ -3005,9 +2999,7 @@ void
 SVGTextDrawPathCallbacks::FillGeometry()
 {
   GeneralPattern fillPattern;
-  // XXX cku Bug 1362417 we should pass imgDrawingParams from nsTextFrame.
-  imgDrawingParams imgParams;
-  MakeFillPattern(&fillPattern, imgParams);
+  MakeFillPattern(&fillPattern);
   if (fillPattern.GetPattern()) {
     RefPtr<Path> path = mContext.GetPath();
     FillRule fillRule = nsSVGUtils::ToFillRule(IsClipPathChild() ?
@@ -3029,10 +3021,8 @@ SVGTextDrawPathCallbacks::StrokeGeometry()
       mColor == NS_40PERCENT_FOREGROUND_COLOR) {
     if (nsSVGUtils::HasStroke(mFrame, /*aContextPaint*/ nullptr)) {
       GeneralPattern strokePattern;
-      // XXX cku Bug 1362417 we should pass imgDrawingParams from nsTextFrame.
-      imgDrawingParams imgParams;
       nsSVGUtils::MakeStrokePatternFor(mFrame, &mContext, &strokePattern,
-                                       imgParams, /*aContextPaint*/ nullptr);
+                                       mImgParams, /*aContextPaint*/ nullptr);
       if (strokePattern.GetPattern()) {
         if (!mFrame->GetParent()->GetContent()->IsSVGElement()) {
           // The cast that follows would be unsafe
@@ -3052,7 +3042,7 @@ SVGTextDrawPathCallbacks::StrokeGeometry()
         RefPtr<Path> path = mContext.GetPath();
         SVGContentUtils::AutoStrokeOptions strokeOptions;
         SVGContentUtils::GetStrokeOptions(&strokeOptions, svgOwner,
-                                          mFrame->StyleContext(),
+                                          mFrame->Style(),
                                           /*aContextPaint*/ nullptr);
         DrawOptions drawOptions;
         drawOptions.mAntialiasMode =
@@ -3164,9 +3154,9 @@ NS_QUERYFRAME_TAIL_INHERITING(nsSVGDisplayContainerFrame)
 // Implementation
 
 nsIFrame*
-NS_NewSVGTextFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewSVGTextFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) SVGTextFrame(aContext);
+  return new (aPresShell) SVGTextFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(SVGTextFrame)
@@ -3237,10 +3227,10 @@ SVGTextFrame::AttributeChanged(int32_t aNameSpaceID,
 }
 
 void
-SVGTextFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
+SVGTextFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
 {
   if (mState & NS_FRAME_IS_NONDISPLAY) {
-    // We need this DidSetStyleContext override to handle cases like this:
+    // We need this DidSetComputedStyle override to handle cases like this:
     //
     //   <defs>
     //     <g>
@@ -3256,7 +3246,7 @@ SVGTextFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
     // nsSVGDisplayContainerFrame::ReflowSVG, we would find the non-display
     // <defs> container and then call ReflowSVGNonDisplayText on it.  If we do
     // not actually reflow the parent of the <defs>, then without this
-    // DidSetStyleContext we would (a) not cause the <text>'s anonymous block
+    // DidSetComputedStyle we would (a) not cause the <text>'s anonymous block
     // child to be reflowed when it is next painted, and (b) not cause the
     // <text> to be repainted anyway since the user of the <mask> would not
     // know it needs to be repainted.
@@ -3391,7 +3381,8 @@ SVGTextFrame::HandleAttributeChangeInDescendant(Element* aElement,
 {
   if (aElement->IsSVGElement(nsGkAtoms::textPath)) {
     if (aNameSpaceID == kNameSpaceID_None &&
-        aAttribute == nsGkAtoms::startOffset) {
+        (aAttribute == nsGkAtoms::startOffset ||
+         aAttribute == nsGkAtoms::side_)) {
       NotifyGlyphMetricsChange();
     } else if ((aNameSpaceID == kNameSpaceID_XLink ||
                 aNameSpaceID == kNameSpaceID_None) &&
@@ -3631,7 +3622,7 @@ SVGTextFrame::PaintSVG(gfxContext& aContext,
   // dev pixels. Here we multiply a CSS-px-to-dev-pixel factor onto aTransform
   // so our non-SVG nsTextFrame children paint correctly.
   auto auPerDevPx = presContext->AppUnitsPerDevPixel();
-  float cssPxPerDevPx = presContext->AppUnitsToFloatCSSPixels(auPerDevPx);
+  float cssPxPerDevPx = nsPresContext::AppUnitsToFloatCSSPixels(auPerDevPx);
   gfxMatrix canvasTMForChildren = aTransform;
   canvasTMForChildren.PreScale(cssPxPerDevPx, cssPxPerDevPx);
   initialMatrix.PreScale(1 / cssPxPerDevPx, 1 / cssPxPerDevPx);
@@ -3688,6 +3679,7 @@ SVGTextFrame::PaintSVG(gfxContext& aContext,
       if (ShouldRenderAsPath(frame, paintSVGGlyphs)) {
         SVGTextDrawPathCallbacks callbacks(this, aContext, frame,
                                            matrixForPaintServers,
+                                           aImgParams,
                                            paintSVGGlyphs);
         params.callbacks = &callbacks;
         frame->PaintText(params, item);
@@ -3817,7 +3809,7 @@ SVGTextFrame::ReflowSVG()
     mRect.SetEmpty();
   } else {
     mRect =
-      nsLayoutUtils::RoundGfxRectToAppRect(r.ToThebesRect(), presContext->AppUnitsPerCSSPixel());
+      nsLayoutUtils::RoundGfxRectToAppRect(r.ToThebesRect(), nsPresContext::AppUnitsPerCSSPixel());
 
     // Due to rounding issues when we have a transform applied, we sometimes
     // don't include an additional row of pixels.  For now, just inflate our
@@ -4183,8 +4175,7 @@ SVGTextFrame::GetSubStringLength(nsIContent* aContent,
   }
 
   nsPresContext* presContext = PresContext();
-  float cssPxPerDevPx = presContext->
-    AppUnitsToFloatCSSPixels(presContext->AppUnitsPerDevPixel());
+  float cssPxPerDevPx = nsPresContext::AppUnitsToFloatCSSPixels(presContext->AppUnitsPerDevPixel());
 
   *aResult = presContext->AppUnitsToGfxUnits(textLength) *
                cssPxPerDevPx / mFontSizeScaleFactor;
@@ -4259,8 +4250,7 @@ SVGTextFrame::GetSubStringLengthSlowFallback(nsIContent* aContent,
   }
 
   nsPresContext* presContext = PresContext();
-  float cssPxPerDevPx = presContext->
-    AppUnitsToFloatCSSPixels(presContext->AppUnitsPerDevPixel());
+  float cssPxPerDevPx = nsPresContext::AppUnitsToFloatCSSPixels(presContext->AppUnitsPerDevPixel());
 
   *aResult = presContext->AppUnitsToGfxUnits(textLength) *
                cssPxPerDevPx / mFontSizeScaleFactor;
@@ -4410,8 +4400,7 @@ SVGTextFrame::GetExtentOfChar(nsIContent* aContent,
 
   nsPresContext* presContext = PresContext();
 
-  float cssPxPerDevPx = presContext->
-    AppUnitsToFloatCSSPixels(presContext->AppUnitsPerDevPixel());
+  float cssPxPerDevPx = nsPresContext::AppUnitsToFloatCSSPixels(presContext->AppUnitsPerDevPixel());
 
   // We need to return the extent of the whole glyph.
   uint32_t startIndex = it.GlyphStartTextElementCharIndex();
@@ -4987,8 +4976,8 @@ SVGTextFrame::AdjustPositionsForClusters()
   }
 }
 
-SVGPathElement*
-SVGTextFrame::GetTextPathPathElement(nsIFrame* aTextPathFrame)
+SVGGeometryElement*
+SVGTextFrame::GetTextPathGeometryElement(nsIFrame* aTextPathFrame)
 {
   nsSVGTextPathProperty *property =
     aTextPathFrame->GetProperty(SVGObserverUtils::HrefAsTextPathProperty());
@@ -5023,14 +5012,14 @@ SVGTextFrame::GetTextPathPathElement(nsIFrame* aTextPathFrame)
   }
 
   Element* element = property->GetReferencedElement();
-  return (element && element->IsSVGElement(nsGkAtoms::path)) ?
-    static_cast<SVGPathElement*>(element) : nullptr;
+  return (element && element->IsNodeOfType(nsINode::eSHAPE)) ?
+    static_cast<SVGGeometryElement*>(element) : nullptr;
 }
 
 already_AddRefed<Path>
 SVGTextFrame::GetTextPath(nsIFrame* aTextPathFrame)
 {
-  SVGPathElement* element = GetTextPathPathElement(aTextPathFrame);
+  SVGGeometryElement* element = GetTextPathGeometryElement(aTextPathFrame);
   if (!element) {
     return nullptr;
   }
@@ -5053,11 +5042,11 @@ SVGTextFrame::GetTextPath(nsIFrame* aTextPathFrame)
 gfxFloat
 SVGTextFrame::GetOffsetScale(nsIFrame* aTextPathFrame)
 {
-  SVGPathElement* pathElement = GetTextPathPathElement(aTextPathFrame);
-  if (!pathElement)
+  SVGGeometryElement* element = GetTextPathGeometryElement(aTextPathFrame);
+  if (!element)
     return 1.0;
 
-  return pathElement->GetPathLengthScale(dom::SVGPathElement::eForTextPath);
+  return element->GetPathLengthScale(dom::SVGGeometryElement::eForTextPath);
 }
 
 gfxFloat
@@ -5095,11 +5084,19 @@ SVGTextFrame::DoTextPathLayout()
     // Get the path itself.
     RefPtr<Path> path = GetTextPath(textPathFrame);
     if (!path) {
+      uint32_t start = it.TextElementCharIndex();
       it.AdvancePastCurrentTextPathFrame();
+      uint32_t end = it.TextElementCharIndex();
+      for (uint32_t i = start; i < end; i++) {
+        mPositions[i].mHidden = true;
+      }
       continue;
     }
 
-    nsIContent* textPath = textPathFrame->GetContent();
+    dom::SVGTextPathElement* textPath =
+      static_cast<dom::SVGTextPathElement*>(textPathFrame->GetContent());
+    RefPtr<SVGAnimatedEnumeration> sideEnum = textPath->Side();
+    uint16_t side = sideEnum->AnimVal();
 
     gfxFloat offset = GetStartOffset(textPathFrame);
     Float pathLength = path->ComputeLength();
@@ -5120,7 +5117,13 @@ SVGTextFrame::DoTextPathLayout()
 
       // Position the character on the path at the right angle.
       Point tangent; // Unit vector tangent to the point we find.
-      Point pt = path->ComputePointAtLength(Float(midx), &tangent);
+      Point pt;
+      if (side == TEXTPATH_SIDETYPE_RIGHT) {
+        pt = path->ComputePointAtLength(Float(pathLength - midx), &tangent);
+        tangent = -tangent;
+      } else {
+        pt = path->ComputePointAtLength(Float(midx), &tangent);
+      }
       Float rotation = vertical ? atan2f(-tangent.x, tangent.y)
                                 : atan2f(tangent.y, tangent.x);
       Point normal(-tangent.y, tangent.x); // Unit vector normal to the point.
@@ -5276,8 +5279,7 @@ SVGTextFrame::DoGlyphPositioning()
   nsPresContext* presContext = PresContext();
   bool vertical = GetWritingMode().IsVertical();
 
-  float cssPxPerDevPx = presContext->
-    AppUnitsToFloatCSSPixels(presContext->AppUnitsPerDevPixel());
+  float cssPxPerDevPx = nsPresContext::AppUnitsToFloatCSSPixels(presContext->AppUnitsPerDevPixel());
   double factor = cssPxPerDevPx / mFontSizeScaleFactor;
 
   // Determine how much to compress or expand glyph positions due to
@@ -5577,7 +5579,7 @@ SVGTextFrame::UpdateFontSizeScaleFactor()
     return mFontSizeScaleFactor != oldFontSizeScaleFactor;
   }
 
-  double minSize = presContext->AppUnitsToFloatCSSPixels(min);
+  double minSize = nsPresContext::AppUnitsToFloatCSSPixels(min);
 
   if (geometricPrecision) {
     // We want to ensure minSize is scaled to PRECISE_SIZE.
@@ -5599,14 +5601,14 @@ SVGTextFrame::UpdateFontSizeScaleFactor()
   }
   mLastContextScale = contextScale;
 
-  double maxSize = presContext->AppUnitsToFloatCSSPixels(max);
+  double maxSize = nsPresContext::AppUnitsToFloatCSSPixels(max);
 
   // But we want to ignore any scaling required due to HiDPI displays, since
   // regular CSS text frames will still create text runs using the font size
   // in CSS pixels, and we want SVG text to have the same rendering as HTML
   // text for regular font sizes.
   float cssPxPerDevPx =
-    presContext->AppUnitsToFloatCSSPixels(presContext->AppUnitsPerDevPixel());
+    nsPresContext::AppUnitsToFloatCSSPixels(presContext->AppUnitsPerDevPixel());
   contextScale *= cssPxPerDevPx;
 
   double minTextRunSize = minSize * contextScale;
@@ -5658,9 +5660,8 @@ SVGTextFrame::TransformFramePointToTextChild(const Point& aPoint,
   // Add in the mRect offset to aPoint, as that will have been taken into
   // account when transforming the point from the ancestor frame down
   // to this one.
-  float cssPxPerDevPx = presContext->
-    AppUnitsToFloatCSSPixels(presContext->AppUnitsPerDevPixel());
-  float factor = presContext->AppUnitsPerCSSPixel();
+  float cssPxPerDevPx = nsPresContext::AppUnitsToFloatCSSPixels(presContext->AppUnitsPerDevPixel());
+  float factor = nsPresContext::AppUnitsPerCSSPixel();
   Point framePosition(NSAppUnitsToFloatPixels(mRect.x, factor),
                       NSAppUnitsToFloatPixels(mRect.y, factor));
   Point pointInUserSpace = aPoint * cssPxPerDevPx + framePosition;
@@ -5767,7 +5768,7 @@ SVGTextFrame::TransformFrameRectFromTextChild(const nsRect& aRect,
 
   // Subtract the mRect offset from the result, as our user space for
   // this frame is relative to the top-left of mRect.
-  float factor = presContext->AppUnitsPerCSSPixel();
+  float factor = nsPresContext::AppUnitsPerCSSPixel();
   gfxPoint framePosition(NSAppUnitsToFloatPixels(mRect.x, factor),
                          NSAppUnitsToFloatPixels(mRect.y, factor));
 

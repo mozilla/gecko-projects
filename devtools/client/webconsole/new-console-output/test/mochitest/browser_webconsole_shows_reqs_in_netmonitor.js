@@ -11,7 +11,7 @@ const TEST_URI = "data:text/html;charset=utf8,Test that the web console " +
 
 const TEST_FILE = "test-network-request.html";
 const TEST_PATH = "http://example.com/browser/devtools/client/webconsole/" +
-                  "test/" + TEST_FILE;
+                  "new-console-output/test/mochitest/" + TEST_FILE;
 
 const NET_PREF = "devtools.webconsole.filter.net";
 Services.prefs.setBoolPref(NET_PREF, true);
@@ -19,7 +19,7 @@ registerCleanupFunction(() => {
   Services.prefs.clearUserPref(NET_PREF);
 });
 
-add_task(async function () {
+add_task(async function() {
   const toolbox = await openNewTabAndToolbox(TEST_URI, "netmonitor");
   info("Network panel is open.");
 

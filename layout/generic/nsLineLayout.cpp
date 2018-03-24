@@ -8,6 +8,8 @@
 
 #include "nsLineLayout.h"
 
+#include "mozilla/ComputedStyle.h"
+
 #include "LayoutLogging.h"
 #include "SVGTextFrame.h"
 #include "nsBlockFrame.h"
@@ -15,7 +17,6 @@
 #include "nsStyleConsts.h"
 #include "nsContainerFrame.h"
 #include "nsFloatManager.h"
-#include "nsStyleContext.h"
 #include "nsPresContext.h"
 #include "nsGkAtoms.h"
 #include "nsIContent.h"
@@ -442,7 +443,7 @@ nsLineLayout::BeginSpan(nsIFrame* aFrame,
   nsIFrame* frame = aSpanReflowInput->mFrame;
   psd->mNoWrap = !frame->StyleText()->WhiteSpaceCanWrap(frame) ||
                  mSuppressLineWrap ||
-                 frame->StyleContext()->ShouldSuppressLineBreak();
+                 frame->Style()->ShouldSuppressLineBreak();
   psd->mWritingMode = aSpanReflowInput->GetWritingMode();
 
   // Switch to new span
@@ -1707,7 +1708,7 @@ static nscoord
 GetBSizeOfEmphasisMarks(nsIFrame* aSpanFrame, float aInflation)
 {
   RefPtr<nsFontMetrics> fm = nsLayoutUtils::
-    GetFontMetricsOfEmphasisMarks(aSpanFrame->StyleContext(), aInflation);
+    GetFontMetricsOfEmphasisMarks(aSpanFrame->Style(), aInflation);
   return fm->MaxHeight();
 }
 
@@ -1929,7 +1930,7 @@ nsLineLayout::VerticalAlignFrames(PerSpanData* psd)
     float inflation =
       GetInflationForBlockDirAlignment(spanFrame, mInflationMinFontSize);
     nscoord logicalBSize = ReflowInput::
-      CalcLineHeight(spanFrame->GetContent(), spanFrame->StyleContext(),
+      CalcLineHeight(spanFrame->GetContent(), spanFrame->Style(),
                      mBlockReflowInput->ComputedHeight(),
                      inflation);
     nscoord contentBSize = spanFramePFD->mBounds.BSize(lineWM) -
@@ -2218,7 +2219,7 @@ nsLineLayout::VerticalAlignFrames(PerSpanData* psd)
         float inflation =
           GetInflationForBlockDirAlignment(frame, mInflationMinFontSize);
         pctBasis = ReflowInput::CalcLineHeight(frame->GetContent(),
-          frame->StyleContext(), mBlockReflowInput->ComputedBSize(),
+          frame->Style(), mBlockReflowInput->ComputedBSize(),
           inflation);
       }
       nscoord offset = verticalAlign.ComputeCoordPercentCalc(pctBasis);
@@ -2989,7 +2990,7 @@ nsLineLayout::ApplyFrameJustification(PerSpanData* aPSD,
 static nsIFrame*
 FindNearestRubyBaseAncestor(nsIFrame* aFrame)
 {
-  MOZ_ASSERT(aFrame->StyleContext()->ShouldSuppressLineBreak());
+  MOZ_ASSERT(aFrame->Style()->ShouldSuppressLineBreak());
   while (aFrame && !aFrame->IsRubyBaseFrame()) {
     aFrame = aFrame->GetParent();
   }
@@ -3184,7 +3185,7 @@ nsLineLayout::TextAlignLine(nsLineBox* aLine,
     ComputeFrameJustification(psd, computeState);
     if (mHasRuby && computeState.mFirstParticipant) {
       PerFrameData* firstFrame = computeState.mFirstParticipant;
-      if (firstFrame->mFrame->StyleContext()->ShouldSuppressLineBreak()) {
+      if (firstFrame->mFrame->Style()->ShouldSuppressLineBreak()) {
         MOZ_ASSERT(!firstFrame->mJustificationAssignment.mGapsAtStart);
         nsIFrame* rubyBase = FindNearestRubyBaseAncestor(firstFrame->mFrame);
         if (rubyBase && IsRubyAlignSpaceAround(rubyBase)) {
@@ -3193,7 +3194,7 @@ nsLineLayout::TextAlignLine(nsLineBox* aLine,
         }
       }
       PerFrameData* lastFrame = computeState.mLastParticipant;
-      if (lastFrame->mFrame->StyleContext()->ShouldSuppressLineBreak()) {
+      if (lastFrame->mFrame->Style()->ShouldSuppressLineBreak()) {
         MOZ_ASSERT(!lastFrame->mJustificationAssignment.mGapsAtEnd);
         nsIFrame* rubyBase = FindNearestRubyBaseAncestor(lastFrame->mFrame);
         if (rubyBase && IsRubyAlignSpaceAround(rubyBase)) {
@@ -3387,7 +3388,7 @@ nsLineLayout::RelativePositionFrames(PerSpanData* psd, nsOverflowAreas& aOverflo
         //     put further away if the text is inside ruby.
         // (4) When there are text strokes
         if (pfd->mRecomputeOverflow ||
-            frame->StyleContext()->HasTextDecorationLines() ||
+            frame->Style()->HasTextDecorationLines() ||
             frame->StyleText()->HasTextEmphasis() ||
             frame->StyleText()->HasWebkitTextStroke()) {
           nsTextFrame* f = static_cast<nsTextFrame*>(frame);

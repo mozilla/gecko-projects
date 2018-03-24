@@ -9,7 +9,6 @@
 #include "nsIChannel.h"
 #include "mozilla/dom/Element.h"
 #include "nsIDOMElement.h"
-#include "nsIDOMText.h"
 #include "nsIDocument.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMDocumentFragment.h"
@@ -374,26 +373,14 @@ txMozillaXSLTProcessor::SetTransformObserver(nsITransformObserver* aObserver)
     return NS_OK;
 }
 
-nsresult
-txMozillaXSLTProcessor::SetSourceContentModel(nsIDocument* aDocument,
-                                              const nsTArray<nsCOMPtr<nsIContent>>& aSource)
+NS_IMETHODIMP
+txMozillaXSLTProcessor::SetSourceContentModel(nsINode* aSource)
 {
+    mSource = aSource;
+
     if (NS_FAILED(mTransformResult)) {
         notifyError();
         return NS_OK;
-    }
-
-    mSource = aDocument->CreateDocumentFragment();
-
-    ErrorResult rv;
-    for (nsIContent* child : aSource) {
-        // XPath data model doesn't have DocumentType nodes.
-        if (child->NodeType() != nsINode::DOCUMENT_TYPE_NODE) {
-            mSource->AppendChild(*child, rv);
-            if (rv.Failed()) {
-                return rv.StealNSResult();
-            }
-        }
     }
 
     if (mStylesheet) {
@@ -493,7 +480,7 @@ txMozillaXSLTProcessor::AddXSLTParam(const nsString& aName,
                                      const nsString& aNamespace,
                                      const nsString& aSelect,
                                      const nsString& aValue,
-                                     nsIDOMNode* aContext)
+                                     nsINode* aContext)
 {
     nsresult rv = NS_OK;
 
@@ -869,17 +856,13 @@ txMozillaXSLTProcessor::SetParameter(const nsAString& aNamespaceURI,
                 break;
             }
 
-            nsCOMPtr<nsIDOMNodeList> nodeList = do_QueryInterface(supports);
+            nsCOMPtr<nsINodeList> nodeList = do_QueryInterface(supports);
             if (nodeList) {
-                uint32_t length;
-                nodeList->GetLength(&length);
+                uint32_t length = nodeList->Length();
 
-                nsCOMPtr<nsIDOMNode> node;
                 uint32_t i;
                 for (i = 0; i < length; ++i) {
-                    nodeList->Item(i, getter_AddRefs(node));
-
-                    if (!nsContentUtils::CanCallerAccess(node)) {
+                    if (!nsContentUtils::CanCallerAccess(nodeList->Item(i))) {
                         return NS_ERROR_DOM_SECURITY_ERR;
                     }
                 }
@@ -1434,23 +1417,19 @@ txVariable::Convert(nsIVariant *aValue, txAExprResult** aResult)
                 return xpathResult->GetExprResult(aResult);
             }
 
-            nsCOMPtr<nsIDOMNodeList> nodeList = do_QueryInterface(supports);
+            nsCOMPtr<nsINodeList> nodeList = do_QueryInterface(supports);
             if (nodeList) {
                 RefPtr<txNodeSet> nodeSet = new txNodeSet(nullptr);
                 if (!nodeSet) {
                     return NS_ERROR_OUT_OF_MEMORY;
                 }
 
-                uint32_t length;
-                nodeList->GetLength(&length);
+                uint32_t length = nodeList->Length();
 
-                nsCOMPtr<nsIDOMNode> node;
                 uint32_t i;
                 for (i = 0; i < length; ++i) {
-                    nodeList->Item(i, getter_AddRefs(node));
-
                     nsAutoPtr<txXPathNode> xpathNode(
-                        txXPathNativeNode::createXPathNode(node));
+                        txXPathNativeNode::createXPathNode(nodeList->Item(i)));
                     if (!xpathNode) {
                         return NS_ERROR_FAILURE;
                     }

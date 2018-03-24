@@ -25,6 +25,7 @@
 #include "nsMenuPopupFrame.h"
 #include "nsIScreenManager.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/MouseEventBinding.h"
 #include "nsError.h"
 #include "nsICSSDeclaration.h"
 #include "nsStyledElement.h"
@@ -38,15 +39,15 @@ using namespace mozilla;
 // Creates a new Resizer frame and returns it
 //
 nsIFrame*
-NS_NewResizerFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewResizerFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsResizerFrame(aContext);
+  return new (aPresShell) nsResizerFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsResizerFrame)
 
-nsResizerFrame::nsResizerFrame(nsStyleContext* aContext)
-  : nsTitleBarFrame(aContext, kClassID)
+nsResizerFrame::nsResizerFrame(ComputedStyle* aStyle)
+  : nsTitleBarFrame(aStyle, kClassID)
 {
 }
 
@@ -219,7 +220,7 @@ nsResizerFrame::HandleEvent(nsPresContext* aPresContext,
       }
       else if (menuPopupFrame) {
         nsRect frameRect = menuPopupFrame->GetScreenRectInAppUnits();
-        nsIFrame* rootFrame = aPresContext->PresShell()->FrameManager()->GetRootFrame();
+        nsIFrame* rootFrame = aPresContext->PresShell()->GetRootFrame();
         nsRect rootScreenRect = rootFrame->GetScreenRectInAppUnits();
 
         nsPopupLevel popupLevel = menuPopupFrame->PopupLevel();
@@ -540,7 +541,7 @@ nsResizerFrame::MouseClicked(WidgetMouseEvent* aEvent)
   bool isControl = false;
   bool isAlt = false;
   bool isMeta = false;
-  uint16_t inputSource = nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
+  uint16_t inputSource = MouseEventBinding::MOZ_SOURCE_UNKNOWN;
 
   if(aEvent) {
     isShift = aEvent->IsShift();

@@ -41,17 +41,6 @@ static constexpr Register IntArgReg2 { Registers::invalid_reg };
 static constexpr Register IntArgReg3 { Registers::invalid_reg };
 static constexpr Register HeapReg { Registers::invalid_reg };
 
-static constexpr Register WasmIonExitRegCallee { Registers::invalid_reg };
-static constexpr Register WasmIonExitRegE0 { Registers::invalid_reg };
-static constexpr Register WasmIonExitRegE1 { Registers::invalid_reg };
-
-static constexpr Register WasmIonExitRegReturnData { Registers::invalid_reg };
-static constexpr Register WasmIonExitRegReturnType { Registers::invalid_reg };
-static constexpr Register WasmIonExitTlsReg { Registers::invalid_reg };
-static constexpr Register WasmIonExitRegD0 { Registers::invalid_reg };
-static constexpr Register WasmIonExitRegD1 { Registers::invalid_reg };
-static constexpr Register WasmIonExitRegD2 { Registers::invalid_reg };
-
 static constexpr Register RegExpTesterRegExpReg { Registers::invalid_reg };
 static constexpr Register RegExpTesterStringReg { Registers::invalid_reg };
 static constexpr Register RegExpTesterLastIndexReg { Registers::invalid_reg };
@@ -81,6 +70,7 @@ static constexpr Register ABINonArgReg1 { Registers::invalid_reg };
 static constexpr Register ABINonArgReg2 { Registers::invalid_reg };
 static constexpr Register ABINonArgReturnReg0 { Registers::invalid_reg };
 static constexpr Register ABINonArgReturnReg1 { Registers::invalid_reg };
+static constexpr Register ABINonVolatileReg { Registers::invalid_reg };
 static constexpr Register ABINonArgReturnVolatileReg { Registers::invalid_reg };
 
 static constexpr FloatRegister ABINonArgDoubleReg = { FloatRegisters::invalid_reg };
@@ -211,7 +201,8 @@ class MacroAssemblerNone : public Assembler
     bool appendRawCode(const uint8_t* code, size_t numBytes) { MOZ_CRASH(); }
     bool swapBuffer(wasm::Bytes& bytes) { MOZ_CRASH(); }
 
-    void trace(JSTracer*) { MOZ_CRASH(); }
+    void assertNoGCThings() const { MOZ_CRASH(); }
+
     static void TraceJumpRelocations(JSTracer*, JitCode*, CompactBufferReader&) { MOZ_CRASH(); }
     static void TraceDataRelocations(JSTracer*, JitCode*, CompactBufferReader&) { MOZ_CRASH(); }
 

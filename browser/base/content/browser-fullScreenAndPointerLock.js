@@ -370,14 +370,13 @@ var FullScreen = {
       case "MozDOMFullscreen:Entered": {
         // The event target is the element which requested the DOM
         // fullscreen. If we were entering DOM fullscreen for a remote
-        // browser, the target would be `gBrowser` and the original
-        // target would be the browser which was the parameter of
+        // browser, the target would be the browser which was the parameter of
         // `remoteFrameFullscreenChanged` call. If the fullscreen
         // request was initiated from an in-process browser, we need
         // to get its corresponding browser here.
         let browser;
-        if (event.target == gBrowser.container) {
-          browser = event.originalTarget;
+        if (event.target.ownerGlobal == window) {
+          browser = event.target;
         } else {
           let topWin = event.target.ownerGlobal.top;
           browser = gBrowser.getBrowserForContentWindow(topWin);
@@ -592,7 +591,7 @@ var FullScreen = {
 
     // Track whether mouse is near the toolbox
     if (trackMouse && !this.useLionFullScreen) {
-      let rect = gBrowser.mPanelContainer.getBoundingClientRect();
+      let rect = gBrowser.tabpanels.getBoundingClientRect();
       this._mouseTargetRect = {
         top: rect.top + 50,
         bottom: rect.bottom,

@@ -581,12 +581,6 @@ MacroAssembler::Pop(const ValueOperand& val)
     adjustFrame(-1 * int64_t(sizeof(int64_t)));
 }
 
-void
-MacroAssembler::PopStackPtr()
-{
-    MOZ_CRASH("NYI");
-}
-
 // ===============================================================
 // Simple call functions.
 
@@ -710,33 +704,10 @@ MacroAssembler::patchFarJump(CodeOffset farJump, uint32_t targetOffset)
     inst2->SetInstructionBits((uint32_t)(distance >> 32));
 }
 
-void
-MacroAssembler::repatchFarJump(uint8_t* code, uint32_t farJumpOffset, uint32_t targetOffset)
-{
-    MOZ_CRASH("Unimplemented - never used");
-}
-
-CodeOffset
-MacroAssembler::nopPatchableToNearJump()
-{
-    MOZ_CRASH("Unimplemented - never used");
-}
-
-void
-MacroAssembler::patchNopToNearJump(uint8_t* jump, uint8_t* target)
-{
-    MOZ_CRASH("Unimplemented - never used");
-}
-
-void
-MacroAssembler::patchNearJumpToNop(uint8_t* jump)
-{
-    MOZ_CRASH("Unimplemented - never used");
-}
-
 CodeOffset
 MacroAssembler::nopPatchableToCall(const wasm::CallSiteDesc& desc)
 {
+    AutoForbidPools afp(this, /* max number of instructions in scope = */ 1);
     CodeOffset offset(currentOffset());
     Nop();
     append(desc, CodeOffset(currentOffset()));
@@ -1107,6 +1078,7 @@ MacroAssembler::comment(const char* msg)
 CodeOffset
 MacroAssembler::wasmTrapInstruction()
 {
+    AutoForbidPools afp(this, /* max number of instructions in scope = */ 1);
     CodeOffset offs(currentOffset());
     Unreachable();
     return offs;
@@ -1386,6 +1358,28 @@ MacroAssembler::wasmStoreI64(const wasm::MemoryAccessDesc& access, Register64 va
                              Register memoryBase, Register ptr, Register ptrScratch)
 {
     wasmStoreImpl(access, AnyRegister(), value, memoryBase, ptr, ptrScratch);
+}
+
+void
+MacroAssembler::enterFakeExitFrameForWasm(Register cxreg, Register scratch, ExitFrameType type)
+{
+    // Wasm stubs use the native SP, not the PSP.  Setting up the fake exit
+    // frame leaves the SP mis-aligned, which is how we want it, but we must do
+    // that carefully.
+
+    linkExitFrame(cxreg, scratch);
+
+    MOZ_ASSERT(sp.Is(GetStackPointer64()));
+
+    const ARMRegister tmp(scratch, 64);
+
+    vixl::UseScratchRegisterScope temps(this);
+    const ARMRegister tmp2 = temps.AcquireX();
+
+    Sub(sp, sp, 8);
+    Mov(tmp, sp);           // SP may be unaligned, can't use it for memory op
+    Mov(tmp2, int32_t(type));
+    Str(tmp2, vixl::MemOperand(tmp, 0));
 }
 
 // ========================================================================
@@ -1860,6 +1854,16 @@ MacroAssembler::atomicEffectOpJS(Scalar::Type arrayType, const Synchronization& 
                            Register value, const Address& mem, Register temp)
 {
     atomicEffectOp(arrayType, sync, op, value, mem, temp);
+}
+
+// ========================================================================
+// Spectre Mitigations.
+
+void
+MacroAssembler::speculationBarrier()
+{
+    // Conditional speculation barrier.
+    csdb();
 }
 
 //}}} check_macroassembler_style

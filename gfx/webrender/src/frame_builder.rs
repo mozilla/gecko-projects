@@ -13,7 +13,6 @@ use gpu_cache::GpuCache;
 use gpu_types::{ClipChainRectIndex, ClipScrollNodeData, PictureType};
 use hit_test::{HitTester, HitTestingRun};
 use internal_types::{FastHashMap};
-use picture::{ContentOrigin, PictureSurface};
 use prim_store::{CachedGradient, PrimitiveIndex, PrimitiveRun, PrimitiveStore};
 use profiler::{FrameProfileCounters, GpuCacheProfileCounters, TextureCacheProfileCounters};
 use render_backend::FrameId;
@@ -32,7 +31,6 @@ use util::{self, MaxRect, WorldToLayerFastTransform};
 pub struct FrameBuilderConfig {
     pub enable_scrollbars: bool,
     pub default_font_render_mode: FontRenderMode,
-    pub debug: bool,
     pub dual_source_blending_is_supported: bool,
     pub dual_source_blending_is_enabled: bool,
 }
@@ -71,12 +69,11 @@ pub struct FrameBuildingState<'a> {
 
 pub struct PictureContext<'a> {
     pub pipeline_id: PipelineId,
-    pub perform_culling: bool,
     pub prim_runs: Vec<PrimitiveRun>,
     pub original_reference_frame_index: Option<ClipScrollNodeIndex>,
     pub display_list: &'a BuiltDisplayList,
-    pub draw_text_transformed: bool,
     pub inv_world_transform: Option<WorldToLayerFastTransform>,
+    pub apply_local_clip_rect: bool,
 }
 
 pub struct PictureState {
@@ -125,7 +122,6 @@ impl FrameBuilder {
             config: FrameBuilderConfig {
                 enable_scrollbars: false,
                 default_font_render_mode: FontRenderMode::Mono,
-                debug: false,
                 dual_source_blending_is_enabled: true,
                 dual_source_blending_is_supported: false,
             },
@@ -168,7 +164,7 @@ impl FrameBuilder {
     ) -> Option<RenderTaskId> {
         profile_scope!("cull");
 
-        if self.prim_store.cpu_pictures.is_empty() {
+        if self.prim_store.pictures.is_empty() {
             return None
         }
 
@@ -202,12 +198,11 @@ impl FrameBuilder {
 
         let pic_context = PictureContext {
             pipeline_id: root_clip_scroll_node.pipeline_id,
-            perform_culling: true,
-            prim_runs: mem::replace(&mut self.prim_store.cpu_pictures[0].runs, Vec::new()),
+            prim_runs: mem::replace(&mut self.prim_store.pictures[0].runs, Vec::new()),
             original_reference_frame_index: None,
             display_list,
-            draw_text_transformed: true,
             inv_world_transform: None,
+            apply_local_clip_rect: true,
         };
 
         let mut pic_state = PictureState::new();
@@ -220,14 +215,14 @@ impl FrameBuilder {
             &mut frame_state,
         );
 
-        let pic = &mut self.prim_store.cpu_pictures[0];
+        let pic = &mut self.prim_store.pictures[0];
         pic.runs = pic_context.prim_runs;
 
         let root_render_task = RenderTask::new_picture(
             RenderTaskLocation::Fixed(frame_context.screen_rect),
             PrimitiveIndex(0),
             RenderTargetKind::Color,
-            ContentOrigin::Screen(DeviceIntPoint::zero()),
+            DeviceIntPoint::zero(),
             PremultipliedColorF::TRANSPARENT,
             ClearMode::Transparent,
             pic_state.tasks,
@@ -235,7 +230,7 @@ impl FrameBuilder {
         );
 
         let render_task_id = frame_state.render_tasks.add(root_render_task);
-        pic.surface = Some(PictureSurface::RenderTask(render_task_id));
+        pic.surface = Some(render_task_id);
         Some(render_task_id)
     }
 
@@ -298,7 +293,7 @@ impl FrameBuilder {
 
         let mut node_data = Vec::with_capacity(clip_scroll_tree.nodes.len());
         let total_prim_runs =
-            self.prim_store.cpu_pictures.iter().fold(1, |count, ref pic| count + pic.runs.len());
+            self.prim_store.pictures.iter().fold(1, |count, ref pic| count + pic.runs.len());
         let mut clip_chain_local_clip_rects = Vec::with_capacity(total_prim_runs);
         clip_chain_local_clip_rects.push(LayerRect::max_rect());
 

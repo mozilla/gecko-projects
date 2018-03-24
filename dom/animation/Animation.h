@@ -11,6 +11,7 @@
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/AnimationPerformanceWarning.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/EffectCompositor.h" // For EffectCompositor::CascadeLevel
 #include "mozilla/LinkedList.h"
@@ -44,6 +45,7 @@ struct AnimationRule;
 
 namespace dom {
 
+class AsyncFinishNotification;
 class CSSAnimation;
 class CSSTransition;
 
@@ -309,14 +311,7 @@ public:
 
   bool IsPausedOrPausing() const
   {
-    // FIXME: Once we drop the dom.animations-api.pending-member.enabled pref we
-    // can simplify the following check to just:
-    //
-    //   return PlayState() == AnimationPlayState::Paused;
-    //
-    // And at that point we might not need this method at all.
-    return PlayState() == AnimationPlayState::Paused ||
-           mPendingState == PendingState::PausePending;
+    return PlayState() == AnimationPlayState::Paused;
   }
 
   bool HasCurrentEffect() const
@@ -330,15 +325,10 @@ public:
 
   bool IsPlaying() const
   {
-    // FIXME: Once we drop the dom.animations-api.pending-member.enabled pref we
-    // can simplify the last two conditions to just:
-    //
-    //   PlayState() == AnimationPlayState::Running
     return mPlaybackRate != 0.0 &&
            mTimeline &&
            !mTimeline->GetCurrentTime().IsNull() &&
-           (PlayState() == AnimationPlayState::Running ||
-            mPendingState == PendingState::PlayPending);
+           PlayState() == AnimationPlayState::Running;
   }
 
   bool ShouldBeSynchronizedWithMainThread(
@@ -404,7 +394,6 @@ protected:
   void SilentlySetCurrentTime(const TimeDuration& aNewCurrentTime);
   void CancelNoUpdate();
   void PlayNoUpdate(ErrorResult& aRv, LimitBehavior aLimitBehavior);
-  void PauseNoUpdate(ErrorResult& aRv);
   void ResumeAt(const TimeDuration& aReadyTime);
   void PauseAt(const TimeDuration& aReadyTime);
   void FinishPendingAt(const TimeDuration& aReadyTime)
@@ -449,7 +438,8 @@ protected:
   void ResetFinishedPromise();
   void MaybeResolveFinishedPromise();
   void DoFinishNotification(SyncNotifyFlag aSyncNotifyFlag);
-  void DoFinishNotificationImmediately();
+  friend class AsyncFinishNotification;
+  void DoFinishNotificationImmediately(MicroTaskRunnable* aAsync = nullptr);
   void DispatchPlaybackEvent(const nsAString& aName);
 
   /**
@@ -542,7 +532,7 @@ protected:
   // getAnimations() list.
   bool mIsRelevant;
 
-  nsRevocableEventPtr<nsRunnableMethod<Animation>> mFinishNotificationTask;
+  RefPtr<MicroTaskRunnable> mFinishNotificationTask;
   // True if mFinished is resolved or would be resolved if mFinished has
   // yet to be created. This is not set when mFinished is rejected since
   // in that case mFinished is immediately reset to represent a new current

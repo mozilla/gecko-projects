@@ -12,18 +12,17 @@
 #include "frontend/TokenStream.h"
 #include "irregexp/RegExpParser.h"
 #include "jit/InlinableNatives.h"
+#include "util/StringBuffer.h"
+#include "util/Unicode.h"
 #include "vm/JSContext.h"
 #include "vm/RegExpStatics.h"
 #include "vm/SelfHosting.h"
-#include "vm/StringBuffer.h"
-#include "vm/Unicode.h"
 
 #include "vm/JSObject-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/UnboxedObject-inl.h"
 
 using namespace js;
-using namespace js::unicode;
 
 using mozilla::CheckedInt;
 

@@ -15,15 +15,15 @@
 
 using namespace mozilla;
 
-nsGfxButtonControlFrame::nsGfxButtonControlFrame(nsStyleContext* aContext)
-  : nsHTMLButtonControlFrame(aContext, kClassID)
+nsGfxButtonControlFrame::nsGfxButtonControlFrame(ComputedStyle* aStyle)
+  : nsHTMLButtonControlFrame(aStyle, kClassID)
 {
 }
 
 nsContainerFrame*
-NS_NewGfxButtonControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewGfxButtonControlFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsGfxButtonControlFrame(aContext);
+  return new (aPresShell) nsGfxButtonControlFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsGfxButtonControlFrame)
@@ -108,7 +108,7 @@ nsGfxButtonControlFrame::GetLabel(nsString& aLabel)
 {
   // Get the text from the "value" property on our content if there is
   // one; otherwise set it to a default value (localized).
-  dom::HTMLInputElement* elt = dom::HTMLInputElement::FromContent(mContent);
+  dom::HTMLInputElement* elt = dom::HTMLInputElement::FromNode(mContent);
   if (elt && elt->HasAttr(kNameSpaceID_None, nsGkAtoms::value)) {
     elt->GetValue(aLabel, dom::CallerType::System);
   } else {

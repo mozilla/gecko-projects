@@ -15,16 +15,13 @@ const FRAME_SCRIPTS = [
   ROOT + "content-forms.js"
 ];
 
-var globalMM = Cc["@mozilla.org/globalmessagemanager;1"]
-           .getService(Ci.nsIMessageListenerManager);
-
 for (let script of FRAME_SCRIPTS) {
-  globalMM.loadFrameScript(script, true);
+  Services.mm.loadFrameScript(script, true);
 }
 
 registerCleanupFunction(() => {
   for (let script of FRAME_SCRIPTS) {
-    globalMM.removeDelayedFrameScript(script, true);
+    Services.mm.removeDelayedFrameScript(script, true);
   }
 });
 
@@ -507,8 +504,10 @@ for (let name of FORM_HELPERS) {
 
 // Removes the given tab immediately and returns a promise that resolves when
 // all pending status updates (messages) of the closing tab have been received.
-function promiseRemoveTab(tab) {
-  return BrowserTestUtils.removeTab(tab);
+function promiseRemoveTabAndSessionState(tab) {
+  let sessionUpdatePromise = BrowserTestUtils.waitForSessionStoreUpdate(tab);
+  BrowserTestUtils.removeTab(tab);
+  return sessionUpdatePromise;
 }
 
 // Write DOMSessionStorage data to the given browser.

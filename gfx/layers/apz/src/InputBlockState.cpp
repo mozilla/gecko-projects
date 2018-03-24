@@ -5,12 +5,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "InputBlockState.h"
+
 #include "AsyncPanZoomController.h"         // for AsyncPanZoomController
 #include "ScrollAnimationPhysics.h"         // for kScrollSeriesTimeoutMs
 #include "gfxPrefs.h"                       // for gfxPrefs
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Telemetry.h"              // for Telemetry
-#include "mozilla/layers/APZCTreeManager.h" // for AllowedTouchBehavior
+#include "mozilla/layers/IAPZCTreeManager.h" // for AllowedTouchBehavior
 #include "OverscrollHandoffState.h"
 #include "QueuedInput.h"
 
@@ -39,7 +40,8 @@ InputBlockState::InputBlockState(const RefPtr<AsyncPanZoomController>& aTargetAp
 bool
 InputBlockState::SetConfirmedTargetApzc(const RefPtr<AsyncPanZoomController>& aTargetApzc,
                                         TargetConfirmationState aState,
-                                        InputData* aFirstInput)
+                                        InputData* aFirstInput,
+                                        bool aForScrollbarDrag)
 {
   MOZ_ASSERT(aState == TargetConfirmationState::eConfirmed
           || aState == TargetConfirmationState::eTimedOut);
@@ -51,6 +53,26 @@ InputBlockState::SetConfirmedTargetApzc(const RefPtr<AsyncPanZoomController>& aT
     // can record the time for telemetry purposes.
     mTargetConfirmed = TargetConfirmationState::eTimedOutAndMainThreadResponded;
   }
+  // Sometimes, bugs in compositor hit testing can lead to APZ confirming
+  // a different target than the main thread. If this happens for a drag
+  // block created for a scrollbar drag, the consequences can be fairly
+  // user-unfriendly, such as the scrollbar not being draggable at all,
+  // or it scrolling the contents of the wrong scrollframe. In Nightly
+  // builds, we issue a diagnostic assert in this situation, so that the
+  // underlying compositor hit testing bug can be fixed. In release builds,
+  // however, we just silently accept the main thread's confirmed target,
+  // which will produce the expected behaviour (apart from drag events
+  // received so far being dropped).
+  if (AsDragBlock() && aForScrollbarDrag &&
+      mTargetConfirmed == TargetConfirmationState::eConfirmed &&
+      aState == TargetConfirmationState::eConfirmed &&
+      mTargetApzc && aTargetApzc &&
+      mTargetApzc->GetGuid() != aTargetApzc->GetGuid()) {
+    MOZ_DIAGNOSTIC_ASSERT(false, "APZ and main thread confirmed scrollbar drag block with different targets");
+    UpdateTargetApzc(aTargetApzc);
+    return true;
+  }
+
   if (mTargetConfirmed != TargetConfirmationState::eUnconfirmed) {
     return false;
   }
@@ -363,7 +385,8 @@ WheelBlockState::SetContentResponse(bool aPreventDefault)
 bool
 WheelBlockState::SetConfirmedTargetApzc(const RefPtr<AsyncPanZoomController>& aTargetApzc,
                                         TargetConfirmationState aState,
-                                        InputData* aFirstInput)
+                                        InputData* aFirstInput,
+                                        bool aForScrollbarDrag)
 {
   // The APZC that we find via APZCCallbackHelpers may not be the same APZC
   // ESM or OverscrollHandoff would have computed. Make sure we get the right
@@ -374,7 +397,7 @@ WheelBlockState::SetConfirmedTargetApzc(const RefPtr<AsyncPanZoomController>& aT
         *aFirstInput, &mAllowedScrollDirections);
   }
 
-  InputBlockState::SetConfirmedTargetApzc(apzc, aState, aFirstInput);
+  InputBlockState::SetConfirmedTargetApzc(apzc, aState, aFirstInput, aForScrollbarDrag);
   return true;
 }
 
@@ -580,7 +603,8 @@ PanGestureBlockState::PanGestureBlockState(const RefPtr<AsyncPanZoomController>&
 bool
 PanGestureBlockState::SetConfirmedTargetApzc(const RefPtr<AsyncPanZoomController>& aTargetApzc,
                                              TargetConfirmationState aState,
-                                             InputData* aFirstInput)
+                                             InputData* aFirstInput,
+                                             bool aForScrollbarDrag)
 {
   // The APZC that we find via APZCCallbackHelpers may not be the same APZC
   // ESM or OverscrollHandoff would have computed. Make sure we get the right
@@ -595,7 +619,7 @@ PanGestureBlockState::SetConfirmedTargetApzc(const RefPtr<AsyncPanZoomController
     }
   }
 
-  InputBlockState::SetConfirmedTargetApzc(apzc, aState, aFirstInput);
+  InputBlockState::SetConfirmedTargetApzc(apzc, aState, aFirstInput, aForScrollbarDrag);
   return true;
 }
 
@@ -865,9 +889,13 @@ TouchBlockState::UpdateSlopState(const MultiTouchInput& aInput,
     return false;
   }
   if (mInSlop) {
-    ScreenCoord threshold = aApzcCanConsumeEvents
-        ? AsyncPanZoomController::GetTouchStartTolerance()
-        : ScreenCoord(gfxPrefs::APZTouchMoveTolerance() * APZCTreeManager::GetDPI());
+    ScreenCoord threshold = 0;
+    // If the target was confirmed to null then the threshold doesn't
+    // matter anyway since the events will never be processed.
+    if (const RefPtr<AsyncPanZoomController>& apzc = GetTargetApzc()) {
+      threshold = aApzcCanConsumeEvents ? apzc->GetTouchStartTolerance()
+                                        : apzc->GetTouchMoveTolerance();
+    }
     bool stayInSlop = (aInput.mType == MultiTouchInput::MULTITOUCH_MOVE) &&
         (aInput.mTouches.Length() == 1) &&
         ((aInput.mTouches[0].mScreenPoint - mSlopOrigin).Length() < threshold);

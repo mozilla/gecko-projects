@@ -4,7 +4,8 @@
 "use strict";
 
 const TEST_FILE = "test-network-request.html";
-const TEST_PATH = "http://example.com/browser/devtools/client/webconsole/new-console-output/test/mochitest/";
+const TEST_PATH = "http://example.com/browser/devtools/client/webconsole/" +
+                  "new-console-output/test/mochitest/";
 const TEST_URI = TEST_PATH + TEST_FILE;
 
 const NET_PREF = "devtools.webconsole.filter.net";
@@ -77,7 +78,7 @@ async function openRequestAfterUpdates(target, hud) {
   let message = waitForMessage(hud, xhrUrl);
 
   // Fire an XHR POST request.
-  ContentTask.spawn(gBrowser.selectedBrowser, null, function () {
+  ContentTask.spawn(gBrowser.selectedBrowser, null, function() {
     content.wrappedJSObject.testXhrPostSlowResponse();
   });
 
@@ -106,7 +107,7 @@ async function openRequestBeforeUpdates(target, hud, tab) {
   let message = waitForMessage(hud, xhrUrl);
 
   // Fire an XHR POST request.
-  ContentTask.spawn(gBrowser.selectedBrowser, null, function () {
+  ContentTask.spawn(gBrowser.selectedBrowser, null, function() {
     content.wrappedJSObject.testXhrPostSlowResponse();
   });
 

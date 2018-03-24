@@ -97,7 +97,7 @@ ClientSingleTiledLayerBuffer::GetTextureClient()
   MOZ_ASSERT(mFormat != gfx::SurfaceFormat::UNKNOWN);
   return mCompositableClient.CreateTextureClientForDrawing(
     gfx::ImageFormatToSurfaceFormat(mFormat), mSize, BackendSelector::Content,
-    TextureFlags::DISALLOW_BIGIMAGE | TextureFlags::IMMEDIATE_UPLOAD);
+    TextureFlags::DISALLOW_BIGIMAGE | TextureFlags::IMMEDIATE_UPLOAD | TextureFlags::NON_BLOCKING_READ_LOCK);
 }
 
 void
@@ -286,10 +286,10 @@ ClientSingleTiledLayerBuffer::PaintThebes(const nsIntRegion& aNewValidRegion,
 
   if (asyncPaint) {
     // Create a capture draw target
-    RefPtr<DrawTargetCapture> captureDT =
-      Factory::CreateCaptureDrawTarget(dt->GetBackendType(),
-                                       dt->GetSize(),
-                                       dt->GetFormat());
+    RefPtr<gfx::DrawTargetCapture> captureDT =
+      gfx::Factory::CreateCaptureDrawTarget(dt->GetBackendType(),
+                                            dt->GetSize(),
+                                            dt->GetFormat());
 
     RefPtr<gfxContext> ctx = gfxContext::CreateOrNull(captureDT);
     if (!ctx) {

@@ -680,6 +680,7 @@ static nsresult AppendImagePromise(nsITransferable* aTransferable,
   NS_ENSURE_SUCCESS(rv, rv);
 
   aTransferable->SetRequestingPrincipal(node->NodePrincipal());
+  aTransferable->SetContentPolicyType(nsIContentPolicy::TYPE_INTERNAL_IMAGE);
 
   // add the dataless file promise flavor
   return aTransferable->AddDataFlavor(kFilePromiseMime);
@@ -919,7 +920,7 @@ nsCopySupport::FireClipboardEvent(EventMessage aEventMessage,
     }
   } else if (clipboardData) {
     // check to see if any data was put on the data transfer.
-    clipboardData->GetMozItemCount(&count);
+    count = clipboardData->MozItemCount();
     if (count) {
       nsCOMPtr<nsIClipboard> clipboard(do_GetService("@mozilla.org/widget/clipboard;1"));
       NS_ENSURE_TRUE(clipboard, false);

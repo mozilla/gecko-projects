@@ -23,7 +23,7 @@ let FrameActor = ActorClassWithSpec(frameSpec, {
    * @param threadActor ThreadActor
    *        The parent thread actor for this frame.
    */
-  initialize: function (frame, threadActor) {
+  initialize: function(frame, threadActor) {
     this.frame = frame;
     this.threadActor = threadActor;
   },
@@ -44,12 +44,12 @@ let FrameActor = ActorClassWithSpec(frameSpec, {
    * Finalization handler that is called when the actor is being evicted from
    * the pool.
    */
-  destroy: function () {
+  destroy: function() {
     this.conn.removeActorPool(this._frameLifetimePool);
     this._frameLifetimePool = null;
   },
 
-  getEnvironment: function () {
+  getEnvironment: function() {
     try {
       if (!this.frame.environment) {
         return {};
@@ -70,7 +70,7 @@ let FrameActor = ActorClassWithSpec(frameSpec, {
   /**
    * Returns a frame form for use in a protocol message.
    */
-  form: function () {
+  form: function() {
     let threadActor = this.threadActor;
     let form = { actor: this.actorID,
                  type: this.frame.type };
@@ -110,7 +110,7 @@ let FrameActor = ActorClassWithSpec(frameSpec, {
     return form;
   },
 
-  _args: function () {
+  _args: function() {
     if (!this.frame.arguments) {
       return [];
     }

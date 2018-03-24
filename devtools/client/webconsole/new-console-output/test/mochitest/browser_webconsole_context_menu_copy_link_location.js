@@ -9,7 +9,8 @@
 "use strict";
 
 const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
-  "new-console-output/test/mochitest/test-console.html?_date=" + Date.now();
+                 "new-console-output/test/mochitest/test-console.html?_date=" +
+                 Date.now();
 const CONTEXT_MENU_ID = "#console-menu-copy-url";
 
 add_task(async function() {

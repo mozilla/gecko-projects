@@ -39,9 +39,9 @@ using namespace mozilla::image;
 
 nsIFrame*
 NS_NewSVGGeometryFrame(nsIPresShell* aPresShell,
-                       nsStyleContext* aContext)
+                       ComputedStyle* aStyle)
 {
-  return new (aPresShell) SVGGeometryFrame(aContext);
+  return new (aPresShell) SVGGeometryFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(SVGGeometryFrame)
@@ -187,15 +187,15 @@ SVGGeometryFrame::AttributeChanged(int32_t         aNameSpaceID,
 }
 
 /* virtual */ void
-SVGGeometryFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
+SVGGeometryFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
 {
-  nsFrame::DidSetStyleContext(aOldStyleContext);
+  nsFrame::DidSetComputedStyle(aOldComputedStyle);
 
-  if (aOldStyleContext) {
+  if (aOldComputedStyle) {
     SVGGeometryElement* element =
       static_cast<SVGGeometryElement*>(GetContent());
 
-    auto oldStyleSVG = aOldStyleContext->PeekStyleSVG();
+    auto oldStyleSVG = aOldComputedStyle->PeekStyleSVG();
     if (oldStyleSVG && !SVGContentUtils::ShapeTypeHasNoCorners(GetContent())) {
       if (StyleSVG()->mStrokeLinecap != oldStyleSVG->mStrokeLinecap &&
           element->IsSVGElement(nsGkAtoms::path)) {
@@ -340,7 +340,7 @@ SVGGeometryFrame::GetFrameForPoint(const gfxPoint& aPoint)
   // so that we get more consistent/backwards compatible results?
   RefPtr<DrawTarget> drawTarget =
     gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget();
-  RefPtr<Path> path = content->GetOrBuildPath(*drawTarget, fillRule);
+  RefPtr<Path> path = content->GetOrBuildPath(drawTarget, fillRule);
   if (!path) {
     return nullptr; // no path, so we don't paint anything that can be hit
   }
@@ -351,7 +351,7 @@ SVGGeometryFrame::GetFrameForPoint(const gfxPoint& aPoint)
   if (!isHit && (hitTestFlags & SVG_HIT_TEST_STROKE)) {
     Point point = ToPoint(aPoint);
     SVGContentUtils::AutoStrokeOptions stroke;
-    SVGContentUtils::GetStrokeOptions(&stroke, content, StyleContext(), nullptr);
+    SVGContentUtils::GetStrokeOptions(&stroke, content, Style(), nullptr);
     gfxMatrix userToOuterSVG;
     if (nsSVGUtils::GetNonScalingStrokeTransform(this, &userToOuterSVG)) {
       // We need to transform the path back into the appropriate ancestor
@@ -497,7 +497,7 @@ SVGGeometryFrame::GetBBoxContribution(const Matrix &aToBBoxUserspace,
   SVGContentUtils::AutoStrokeOptions strokeOptions;
   if (getStroke) {
     SVGContentUtils::GetStrokeOptions(&strokeOptions, element,
-                                      StyleContext(), nullptr,
+                                      Style(), nullptr,
                                       SVGContentUtils::eIgnoreStrokeDashing);
   } else {
     // Override the default line width of 1.f so that when we call
@@ -547,7 +547,7 @@ SVGGeometryFrame::GetBBoxContribution(const Matrix &aToBBoxUserspace,
         (GetStateBits() & NS_STATE_SVG_CLIPPATH_CHILD)
       ? StyleSVG()->mClipRule
       : StyleSVG()->mFillRule);
-    RefPtr<Path> pathInUserSpace = element->GetOrBuildPath(*tmpDT, fillRule);
+    RefPtr<Path> pathInUserSpace = element->GetOrBuildPath(tmpDT, fillRule);
     if (!pathInUserSpace) {
       return bbox;
     }
@@ -607,7 +607,7 @@ SVGGeometryFrame::GetBBoxContribution(const Matrix &aToBBoxUserspace,
       // into aToBBoxUserspace and then scales the bounds that we return.
       SVGContentUtils::AutoStrokeOptions strokeOptions;
       SVGContentUtils::GetStrokeOptions(&strokeOptions, element,
-                                        StyleContext(), nullptr,
+                                        Style(), nullptr,
                                         SVGContentUtils::eIgnoreStrokeDashing);
       Rect strokeBBoxExtents;
       gfxMatrix userToOuterSVG;
@@ -772,7 +772,7 @@ SVGGeometryFrame::Render(gfxContext* aContext,
   if (GetStateBits() & NS_STATE_SVG_CLIPPATH_CHILD) {
     // We don't complicate this code with GetAsSimplePath since the cost of
     // masking will dwarf Path creation overhead anyway.
-    RefPtr<Path> path = element->GetOrBuildPath(*drawTarget, fillRule);
+    RefPtr<Path> path = element->GetOrBuildPath(drawTarget, fillRule);
     if (path) {
       ColorPattern white(ToDeviceColor(Color(1.0f, 1.0f, 1.0f, 1.0f)));
       drawTarget->Fill(path, white,
@@ -786,7 +786,7 @@ SVGGeometryFrame::Render(gfxContext* aContext,
 
   element->GetAsSimplePath(&simplePath);
   if (!simplePath.IsPath()) {
-    path = element->GetOrBuildPath(*drawTarget, fillRule);
+    path = element->GetOrBuildPath(drawTarget, fillRule);
     if (!path) {
       return;
     }
@@ -817,7 +817,7 @@ SVGGeometryFrame::Render(gfxContext* aContext,
       // A simple Rect can't be transformed with rotate/skew, so let's switch
       // to using a real path:
       if (!path) {
-        path = element->GetOrBuildPath(*drawTarget, fillRule);
+        path = element->GetOrBuildPath(drawTarget, fillRule);
         if (!path) {
           return;
         }
@@ -841,7 +841,7 @@ SVGGeometryFrame::Render(gfxContext* aContext,
       SVGContentUtils::AutoStrokeOptions strokeOptions;
       SVGContentUtils::GetStrokeOptions(&strokeOptions,
                                         static_cast<nsSVGElement*>(GetContent()),
-                                        StyleContext(), contextPaint);
+                                        Style(), contextPaint);
       // GetStrokeOptions may set the line width to zero as an optimization
       if (strokeOptions.mLineWidth <= 0) {
         return;

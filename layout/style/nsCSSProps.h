@@ -14,7 +14,7 @@
 
 #include <limits>
 #include <type_traits>
-#include "nsString.h"
+#include "nsStringFwd.h"
 #include "nsCSSPropertyID.h"
 #include "nsStyleStructFwd.h"
 #include "nsCSSKeywords.h"
@@ -645,7 +645,7 @@ public:
     // In the child process, assert that we're not trying to parse stylesheets
     // before we've gotten all our prefs.
     MOZ_ASSERT_IF(!XRE_IsParentProcess(),
-                  mozilla::Preferences::AreAllPrefsSetInContentProcess());
+                  mozilla::Preferences::ArePrefsInitedInContentProcess());
     return gPropertyEnabled[aProperty];
   }
 
@@ -798,6 +798,7 @@ public:
   static const KTableEntry kFontDisplayKTable[];
   static const KTableEntry kFontKTable[];
   static const KTableEntry kFontKerningKTable[];
+  static const KTableEntry kFontOpticalSizingKTable[];
   static const KTableEntry kFontSizeKTable[];
   static const KTableEntry kFontSmoothingKTable[];
   static const KTableEntry kFontStretchKTable[];

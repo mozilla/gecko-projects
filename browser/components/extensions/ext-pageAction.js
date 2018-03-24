@@ -85,14 +85,16 @@ this.pageAction = class extends ExtensionAPI {
 
     this.defaults.icon = await StartupCache.get(
       extension, ["pageAction", "default_icon"],
-      () => IconDetails.normalize({path: options.default_icon}, extension));
+      () => this.normalize({path: options.default_icon || ""}));
+
+    this.lastValues = new DefaultWeakMap(() => ({}));
 
     if (!this.browserPageAction) {
       this.browserPageAction = PageActions.addAction(new PageActions.Action({
         id: widgetId,
         extensionID: extension.id,
         title: this.defaults.title,
-        iconURL: this.getIconData(this.defaults.icon),
+        iconURL: this.defaults.icon,
         pinnedToUrlbar: true,
         disabled: !this.defaults.show,
         onCommand: (event, buttonNode) => {
@@ -160,6 +162,14 @@ this.pageAction = class extends ExtensionAPI {
     }
   }
 
+  normalize(details, context = null) {
+    let icon = IconDetails.normalize(details, this.extension, context);
+    if (!Object.keys(icon).length) {
+      icon = null;
+    }
+    return icon;
+  }
+
   // Updates the page action button in the given window to reflect the
   // properties of the currently selected tab:
   //
@@ -169,30 +179,35 @@ this.pageAction = class extends ExtensionAPI {
   updateButton(window) {
     let tab = window.gBrowser.selectedTab;
     let tabData = this.tabContext.get(tab);
-    let title = tabData.title || this.extension.name;
-    this.browserPageAction.setTitle(title, window);
-    this.browserPageAction.setTooltip(title, window);
+    let last = this.lastValues.get(window);
 
-    // At least one of "show" or "patternMatching" must be defined here.
-    let {show = tabData.patternMatching} = tabData;
-    this.browserPageAction.setDisabled(!show, window);
+    window.requestAnimationFrame(() => {
+      let title = tabData.title || this.extension.name;
+      if (last.title !== title) {
+        this.browserPageAction.setTitle(title, window);
+        last.title = title;
+      }
 
-    let iconURL;
-    if (typeof(tabData.icon) == "string") {
-      iconURL = IconDetails.escapeUrl(tabData.icon);
-    } else {
-      iconURL = this.getIconData(tabData.icon);
-    }
-    this.browserPageAction.setIconURL(iconURL, window);
+      let show = tabData.show != null ? tabData.show : tabData.patternMatching;
+      if (last.show !== show) {
+        this.browserPageAction.setDisabled(!show, window);
+        last.show = show;
+      }
+
+      let icon = tabData.icon;
+      if (last.icon !== icon) {
+        this.browserPageAction.setIconURL(icon, window);
+        last.icon = icon;
+      }
+    });
   }
 
   // Checks whether the tab action is shown when the specified tab becomes active.
   // Does pattern matching if necessary, and caches the result as a tab-specific value.
   // @param {XULElement} tab
   //        The tab to be checked
-  // @param [optional] {boolean} ignoreCache
-  //        If true, forces pattern matching to be reevaluated, even if there is a cached value.
-  isShown(tab, ignoreCache = false) {
+  // @return boolean
+  isShown(tab) {
     let tabData = this.tabContext.get(tab);
 
     // If there is a "show" value, return it. Can be due to show(), hide() or empty show_matches.
@@ -201,23 +216,11 @@ this.pageAction = class extends ExtensionAPI {
     }
 
     // Otherwise pattern matching must have been configured. Do it, caching the result.
-    if (ignoreCache || tabData.patternMatching === undefined) {
+    if (tabData.patternMatching === undefined) {
       let uri = tab.linkedBrowser.currentURI;
       tabData.patternMatching = tabData.showMatches.matches(uri) && !tabData.hideMatches.matches(uri);
     }
     return tabData.patternMatching;
-  }
-
-  getIconData(icons) {
-    let getIcon = size => {
-      let {icon} = IconDetails.getPreferredIcon(icons, this.extension, size);
-      // TODO: implement theme based icon for pageAction (Bug 1398156)
-      return IconDetails.escapeUrl(icon);
-    };
-    return {
-      "16": getIcon(16),
-      "32": getIcon(32),
-    };
   }
 
   /**
@@ -229,9 +232,8 @@ this.pageAction = class extends ExtensionAPI {
    * @param {Window} window
    */
   triggerAction(window) {
-    let pageAction = pageActionMap.get(this.extension);
-    if (pageAction.getProperty(window.gBrowser.selectedTab, "show")) {
-      pageAction.handleClick(window);
+    if (this.isShown(window.gBrowser.selectedTab)) {
+      this.handleClick(window);
     }
   }
 
@@ -284,19 +286,38 @@ this.pageAction = class extends ExtensionAPI {
     }
   }
 
+  /**
+   * Updates the `tabData` for any location change, however it only updates the button
+   * when the selected tab has a location change, or the selected tab has changed.
+   *
+   * @param {string} eventType
+   *        The type of the event, should be "location-change".
+   * @param {XULElement} tab
+   *        The tab whose location changed, or which has become selected.
+   * @param {boolean} [fromBrowse]
+   *        - `true` if navigation occurred in `tab`.
+   *        - `false` if the location changed but no navigation occurred, e.g. due to
+               a hash change or `history.pushState`.
+   *        - Omitted if TabSelect has occurred, tabData does not need to be updated.
+   */
   handleLocationChange(eventType, tab, fromBrowse) {
-    // fromBrowse can have three values:
-    // - true: navigation occurred in the active tab
-    // - false: the location changed in the active tab but no navigation occurred
-    // - undefined: an inactive tab has become active
     if (fromBrowse === true) {
+      // Clear tab data on navigation.
       this.tabContext.clear(tab);
+    } else if (fromBrowse === false) {
+      // Clear pattern matching cache when URL changes.
+      let tabData = this.tabContext.get(tab);
+      if (tabData.patternMatching !== undefined) {
+        tabData.patternMatching = undefined;
+      }
     }
 
-    // isShown will do pattern matching (if necessary) and store the result
-    // so that updateButton knows whether the page action should be shown.
-    this.isShown(tab, fromBrowse !== undefined);
-    this.updateButton(tab.ownerGlobal);
+    if (tab.selected) {
+      // isShown will do pattern matching (if necessary) and store the result
+      // so that updateButton knows whether the page action should be shown.
+      this.isShown(tab);
+      this.updateButton(tab.ownerGlobal);
+    }
   }
 
   getAPI(context) {
@@ -349,10 +370,8 @@ this.pageAction = class extends ExtensionAPI {
         setIcon(details) {
           let tab = tabTracker.getTab(details.tabId);
 
-          let icon = IconDetails.normalize(details, extension, context);
-          if (!Object.keys(icon).length) {
-            icon = null;
-          }
+          let icon = pageAction.normalize(details, context);
+
           pageAction.setProperty(tab, "icon", icon);
         },
 

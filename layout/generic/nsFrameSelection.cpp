@@ -35,6 +35,7 @@
 #include "nsTextFragment.h"
 #include <algorithm>
 #include "nsContentUtils.h"
+#include "nsCSSFrameConstructor.h"
 
 #include "nsGkAtoms.h"
 #include "nsIFrameTraversal.h"
@@ -44,12 +45,9 @@
 static NS_DEFINE_CID(kFrameTraversalCID, NS_FRAMETRAVERSAL_CID);
 #include "nsTextFrame.h"
 
-#include "nsIDOMText.h"
-
 #include "nsContentUtils.h"
 #include "nsThreadUtils.h"
 #include "mozilla/Preferences.h"
-#include "nsDOMClassInfoID.h"
 
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
@@ -77,6 +75,7 @@ static NS_DEFINE_CID(kFrameTraversalCID, NS_FRAMETRAVERSAL_CID);
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/ShadowRoot.h"
+#include "mozilla/dom/Text.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/SelectionBinding.h"
 #include "mozilla/AsyncEventDispatcher.h"
@@ -508,7 +507,7 @@ nsFrameSelection::ConstrainFrameAndPointToAnchorSubtree(nsIFrame* aFrame,
       // Find the frame under the mouse cursor with the root frame.
       // At this time, don't use the anchor's frame because it may not have
       // fixed positioned frames.
-      nsIFrame* rootFrame = mShell->FrameManager()->GetRootFrame();
+      nsIFrame* rootFrame = mShell->GetRootFrame();
       nsPoint ptInRoot = aPoint + aFrame->GetOffsetTo(rootFrame);
       nsIFrame* cursorFrame =
         nsLayoutUtils::GetFrameForPoint(rootFrame, ptInRoot);
@@ -1602,7 +1601,7 @@ nsFrameSelection::GetFrameForNodeOffset(nsIContent*        aNode,
     return nullptr;
 
   if (!aNode->GetPrimaryFrame() &&
-      !mShell->FrameManager()->GetDisplayContentsStyleFor(aNode)) {
+      !mShell->FrameConstructor()->GetDisplayContentsStyleFor(aNode)) {
     return nullptr;
   }
 
@@ -1659,15 +1658,11 @@ nsFrameSelection::GetFrameForNodeOffset(nsIContent*        aNode,
         // Check to see if theNode is a text node. If it is, translate
         // aOffset into an offset into the text node.
 
-        nsCOMPtr<nsIDOMText> textNode = do_QueryInterface(theNode);
+        RefPtr<Text> textNode = theNode->GetAsText();
         if (textNode) {
           if (theNode->GetPrimaryFrame()) {
             if (aOffset > childIndex) {
-              uint32_t textLength = 0;
-              nsresult rv = textNode->GetLength(&textLength);
-              if (NS_FAILED(rv)) {
-                break;
-              }
+              uint32_t textLength = textNode->Length();
 
               *aReturnOffset = (int32_t)textLength;
             } else {
@@ -1871,7 +1866,7 @@ nsFrameSelection::PhysicalMove(int16_t aDirection, int16_t aAmount,
   if (NS_SUCCEEDED(sel->GetPrimaryFrameForFocusNode(&frame, &offsetused,
                                                     true))) {
     if (frame) {
-      if (!frame->StyleContext()->IsTextCombined()) {
+      if (!frame->Style()->IsTextCombined()) {
         wm = frame->GetWritingMode();
       } else {
         // Using different direction for horizontal-in-vertical would

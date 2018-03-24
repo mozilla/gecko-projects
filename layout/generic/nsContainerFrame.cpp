@@ -8,13 +8,13 @@
 
 #include "nsContainerFrame.h"
 
+#include "mozilla/ComputedStyle.h"
 #include "mozilla/dom/HTMLSummaryElement.h"
 #include "nsAbsoluteContainingBlock.h"
 #include "nsAttrValue.h"
 #include "nsAttrValueInlines.h"
 #include "nsIDocument.h"
 #include "nsPresContext.h"
-#include "nsStyleContext.h"
 #include "nsRect.h"
 #include "nsPoint.h"
 #include "nsStyleConsts.h"
@@ -1080,6 +1080,14 @@ nsContainerFrame::PositionChildViews(nsIFrame* aFrame)
  *    don't want to automatically sync the frame and view
  * NS_FRAME_NO_SIZE_VIEW - don't size the frame's view
  */
+
+/**
+ * De-optimize function to work around a VC2017 15.5+ compiler bug:
+ * https://bugzil.la/1424281#c12
+ */
+#if defined(_MSC_VER) && !defined(__clang__) && defined(_M_AMD64)
+#pragma optimize("g", off)
+#endif
 void
 nsContainerFrame::FinishReflowChild(nsIFrame*                  aKidFrame,
                                     nsPresContext*             aPresContext,
@@ -1126,6 +1134,9 @@ nsContainerFrame::FinishReflowChild(nsIFrame*                  aKidFrame,
 
   aKidFrame->DidReflow(aPresContext, aReflowInput);
 }
+#if defined(_MSC_VER) && !defined(__clang__) && defined(_M_AMD64)
+#pragma optimize("", on)
+#endif
 
 //XXX temporary: hold on to a copy of the old physical version of
 //    FinishReflowChild so that we can convert callers incrementally.
@@ -1852,7 +1863,7 @@ nsContainerFrame::RenumberList()
     increment = 1;
   }
 
-  nsGenericHTMLElement* hc = nsGenericHTMLElement::FromContent(mContent);
+  nsGenericHTMLElement* hc = nsGenericHTMLElement::FromNode(mContent);
   // Must be non-null, since FrameStartsCounterScope only returns true
   // for HTML elements.
   MOZ_ASSERT(hc, "How is mContent not HTML?");
@@ -1896,7 +1907,7 @@ nsContainerFrame::RenumberFrameAndDescendants(int32_t* aOrdinal,
 
   // Do not renumber list for summary elements.
   HTMLSummaryElement* summary =
-    HTMLSummaryElement::FromContent(kid->GetContent());
+    HTMLSummaryElement::FromNode(kid->GetContent());
   if (summary && summary->IsMainSummary()) {
     return false;
   }

@@ -8,9 +8,6 @@
 
 #include "mozilla/Attributes.h"
 #include "nsGenericHTMLElement.h"
-#ifdef MOZ_OLD_STYLE
-#include "nsIStyleRule.h"
-#endif
 
 namespace mozilla {
 
@@ -34,7 +31,7 @@ public:
   // nsISupports
   NS_INLINE_DECL_REFCOUNTING_INHERITED(HTMLBodyElement, nsGenericHTMLElement)
 
-  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLBodyElement, body);
+  NS_IMPL_FROMNODE_HTML_WITH_TAG(HTMLBodyElement, body);
 
   // Event listener stuff; we need to declare only the ones we need to
   // forward to window that don't come from nsIDOMHTMLBodyElement.

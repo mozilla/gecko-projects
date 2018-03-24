@@ -158,6 +158,14 @@ public:
    * Should the constraints lead to choosing a new capability while the device
    * is actively being captured, the device will restart using the new
    * capability.
+   *
+   * We return one of the following:
+   * NS_OK                - Successful reconfigure.
+   * NS_ERROR_INVALID_ARG - Couldn't find a capability fitting aConstraints.
+   *                        See aBadConstraint for details.
+   * NS_ERROR_UNEXPECTED  - Reconfiguring the underlying device failed
+   *                        unexpectedly. This leaves the device in a stopped
+   *                        state.
    */
   virtual nsresult Reconfigure(const RefPtr<AllocationHandle>& aHandle,
                                const dom::MediaTrackConstraints& aConstraints,
@@ -171,6 +179,9 @@ public:
    *
    * If this was the last AllocationHandle that had been started,
    * the underlying device will be stopped.
+   *
+   * Double-stopping a given allocation handle is allowed and will return NS_OK.
+   * This is necessary sometimes during shutdown.
    */
   virtual nsresult Stop(const RefPtr<const AllocationHandle>& aHandle) = 0;
 

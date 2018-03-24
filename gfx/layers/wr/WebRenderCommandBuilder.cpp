@@ -32,6 +32,9 @@ void WebRenderCommandBuilder::Destroy()
 {
   mLastCanvasDatas.Clear();
   RemoveUnusedAndResetWebRenderUserData();
+  // UserDatas should only be in the used state during a call to WebRenderCommandBuilder::BuildWebRenderCommands
+  // The should always be false upon return from BuildWebRenderCommands().
+  MOZ_RELEASE_ASSERT(mWebRenderUserDatas.Count() == 0);
 }
 
 void
@@ -595,7 +598,7 @@ WebRenderCommandBuilder::GenerateFallbackData(nsDisplayItem* aItem,
       }
       bool isInvalidated = PaintItemByDrawTarget(aItem, dt, paintRect, offset, aDisplayListBuilder,
                                                  fallbackData->mBasicLayerManager, scale, highlight);
-      recorder->FlushItem(IntRect());
+      recorder->FlushItem(IntRect(0, 0, paintSize.width, paintSize.height));
       recorder->Finish();
 
       if (isInvalidated) {
@@ -725,17 +728,18 @@ WebRenderCommandBuilder::RemoveUnusedAndResetWebRenderUserData()
     if (!data->IsUsed()) {
       nsIFrame* frame = data->GetFrame();
 
-      MOZ_ASSERT(frame->HasProperty(nsIFrame::WebRenderUserDataProperty()));
+      MOZ_ASSERT(frame->HasProperty(WebRenderUserDataProperty::Key()));
 
-      nsIFrame::WebRenderUserDataTable* userDataTable =
-        frame->GetProperty(nsIFrame::WebRenderUserDataProperty());
+      WebRenderUserDataTable* userDataTable =
+        frame->GetProperty(WebRenderUserDataProperty::Key());
 
       MOZ_ASSERT(userDataTable->Count());
 
-      userDataTable->Remove(data->GetDisplayItemKey());
+      userDataTable->Remove(WebRenderUserDataKey(data->GetDisplayItemKey(), data->GetType()));
 
       if (!userDataTable->Count()) {
-        frame->RemoveProperty(nsIFrame::WebRenderUserDataProperty());
+        frame->RemoveProperty(WebRenderUserDataProperty::Key());
+        delete userDataTable;
       }
 
       if (data->GetType() == WebRenderUserData::UserDataType::eCanvas) {

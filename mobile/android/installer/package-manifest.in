@@ -144,6 +144,7 @@
 #ifdef MOZ_WEBSPEECH
 @BINPATH@/components/dom_webspeechrecognition.xpt
 #endif
+@BINPATH@/components/dom_workers.xpt
 @BINPATH@/components/dom_xhr.xpt
 @BINPATH@/components/dom_xul.xpt
 @BINPATH@/components/dom_presentation.xpt
@@ -161,7 +162,6 @@
 @BINPATH@/components/intl.xpt
 @BINPATH@/components/jar.xpt
 @BINPATH@/components/jsdebugger.xpt
-@BINPATH@/components/jsdownloads.xpt
 @BINPATH@/components/jsinspector.xpt
 @BINPATH@/components/layout_base.xpt
 #ifdef NS_PRINTING
@@ -329,10 +329,8 @@
 @BINPATH@/components/txEXSLTRegExFunctions.js
 @BINPATH@/components/ContentPrefService2.manifest
 @BINPATH@/components/ContentPrefService2.js
-@BINPATH@/components/nsHandlerService-json.manifest
-@BINPATH@/components/nsHandlerService-json.js
-@BINPATH@/components/nsHandlerService.manifest
-@BINPATH@/components/nsHandlerService.js
+@BINPATH@/components/HandlerService.manifest
+@BINPATH@/components/HandlerService.js
 @BINPATH@/components/nsWebHandlerApp.manifest
 @BINPATH@/components/nsWebHandlerApp.js
 @BINPATH@/components/satchel.manifest

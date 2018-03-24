@@ -11,6 +11,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/Casting.h"
+#include "mozilla/Compiler.h"
 #include "mozilla/EndianUtils.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Likely.h"
@@ -38,15 +39,16 @@ namespace JS { class Value; }
 // Use enums so that printing a JS::Value in the debugger shows nice
 // symbolic type tags.
 
-#if defined(_MSC_VER)
-# define JS_ENUM_HEADER(id, type)              enum id : type
-# define JS_ENUM_FOOTER(id)
-#else
+// Work around a GCC bug. See comment above #undef JS_ENUM_HEADER.
+#if MOZ_IS_GCC
 # define JS_ENUM_HEADER(id, type)              enum id
 # define JS_ENUM_FOOTER(id)                    __attribute__((packed))
+#else
+# define JS_ENUM_HEADER(id, type)              enum id : type
+# define JS_ENUM_FOOTER(id)
 #endif
 
-JS_ENUM_HEADER(JSValueType, uint8_t)
+enum JSValueType : uint8_t
 {
     JSVAL_TYPE_DOUBLE              = 0x00,
     JSVAL_TYPE_INT32               = 0x01,
@@ -62,7 +64,7 @@ JS_ENUM_HEADER(JSValueType, uint8_t)
     /* These never appear in a jsval; they are only provided as an out-of-band value. */
     JSVAL_TYPE_UNKNOWN             = 0x20,
     JSVAL_TYPE_MISSING             = 0x21
-} JS_ENUM_FOOTER(JSValueType);
+};
 
 static_assert(sizeof(JSValueType) == 1,
               "compiler typed enum support is apparently buggy");
@@ -105,7 +107,7 @@ JS_ENUM_HEADER(JSValueTag, uint32_t)
 static_assert(sizeof(JSValueTag) == sizeof(uint32_t),
               "compiler typed enum support is apparently buggy");
 
-JS_ENUM_HEADER(JSValueShiftedTag, uint64_t)
+enum JSValueShiftedTag : uint64_t
 {
     JSVAL_SHIFTED_TAG_MAX_DOUBLE      = ((((uint64_t)JSVAL_TAG_MAX_DOUBLE)     << JSVAL_TAG_SHIFT) | 0xFFFFFFFF),
     JSVAL_SHIFTED_TAG_INT32           = (((uint64_t)JSVAL_TAG_INT32)           << JSVAL_TAG_SHIFT),
@@ -117,7 +119,7 @@ JS_ENUM_HEADER(JSValueShiftedTag, uint64_t)
     JSVAL_SHIFTED_TAG_SYMBOL          = (((uint64_t)JSVAL_TAG_SYMBOL)          << JSVAL_TAG_SHIFT),
     JSVAL_SHIFTED_TAG_PRIVATE_GCTHING = (((uint64_t)JSVAL_TAG_PRIVATE_GCTHING) << JSVAL_TAG_SHIFT),
     JSVAL_SHIFTED_TAG_OBJECT          = (((uint64_t)JSVAL_TAG_OBJECT)          << JSVAL_TAG_SHIFT)
-} JS_ENUM_FOOTER(JSValueShiftedTag);
+};
 
 static_assert(sizeof(JSValueShiftedTag) == sizeof(uint64_t),
               "compiler typed enum support is apparently buggy");
@@ -138,11 +140,15 @@ static_assert(sizeof(JSValueShiftedTag) == sizeof(uint64_t),
 
 #define JSVAL_TYPE_TO_TAG(type)      ((JSValueTag)(JSVAL_TAG_CLEAR | (type)))
 
+#define JSVAL_RAW64_UNDEFINED        (uint64_t(JSVAL_TAG_UNDEFINED) << 32)
+
 #define JSVAL_UPPER_EXCL_TAG_OF_PRIMITIVE_SET           JSVAL_TAG_OBJECT
 #define JSVAL_UPPER_INCL_TAG_OF_NUMBER_SET              JSVAL_TAG_INT32
 #define JSVAL_LOWER_INCL_TAG_OF_GCTHING_SET             JSVAL_TAG_STRING
 
 #elif defined(JS_PUNBOX64)
+
+#define JSVAL_RAW64_UNDEFINED        (uint64_t(JSVAL_TAG_UNDEFINED) << JSVAL_TAG_SHIFT)
 
 // This should only be used in toGCThing, see the 'Spectre mitigations' comment.
 #define JSVAL_PAYLOAD_MASK_GCTHING   0x00007FFFFFFFFFFFLL
@@ -167,7 +173,7 @@ static_assert((JSVAL_SHIFTED_TAG_NULL ^ JSVAL_SHIFTED_TAG_OBJECT) == JSVAL_OBJEC
 
 #endif /* JS_PUNBOX64 */
 
-typedef enum JSWhyMagic
+enum JSWhyMagic
 {
     /** a hole in a native object's elements */
     JS_ELEMENTS_HOLE,
@@ -224,7 +230,7 @@ typedef enum JSWhyMagic
     JS_GENERIC_MAGIC,
 
     JS_WHY_MAGIC_COUNT
-} JSWhyMagic;
+};
 
 namespace js {
 static inline JS::Value PoisonedObjectValue(uintptr_t poison);
@@ -259,10 +265,6 @@ GenericNaN()
                                       detail::CanonicalizedNaNSignificand);
 }
 
-/* MSVC with PGO miscompiles this function. */
-#if defined(_MSC_VER)
-# pragma optimize("g", off)
-#endif
 static inline double
 CanonicalizeNaN(double d)
 {
@@ -270,9 +272,6 @@ CanonicalizeNaN(double d)
         return GenericNaN();
     return d;
 }
-#if defined(_MSC_VER)
-# pragma optimize("", on)
-#endif
 
 /**
  * JS::Value is the interface for a single JavaScript Engine value.  A few
@@ -859,7 +858,7 @@ class MOZ_NON_PARAM alignas(8) Value
         double asDouble;
         void* asPtr;
 
-        layout() = default;
+        layout() : asBits(JSVAL_RAW64_UNDEFINED) {}
         explicit constexpr layout(uint64_t bits) : asBits(bits) {}
         explicit constexpr layout(double d) : asDouble(d) {}
     } data;
@@ -885,7 +884,7 @@ class MOZ_NON_PARAM alignas(8) Value
         size_t asWord;
         uintptr_t asUIntPtr;
 
-        layout() = default;
+        layout() : asBits(JSVAL_RAW64_UNDEFINED) {}
         explicit constexpr layout(uint64_t bits) : asBits(bits) {}
         explicit constexpr layout(double d) : asDouble(d) {}
     } data;
@@ -913,7 +912,7 @@ class MOZ_NON_PARAM alignas(8) Value
         double asDouble;
         void* asPtr;
 
-        layout() = default;
+        layout() : asBits(JSVAL_RAW64_UNDEFINED) {}
         explicit constexpr layout(uint64_t bits) : asBits(bits) {}
         explicit constexpr layout(double d) : asDouble(d) {}
     } data;
@@ -937,7 +936,7 @@ class MOZ_NON_PARAM alignas(8) Value
         size_t asWord;
         uintptr_t asUIntPtr;
 
-        layout() = default;
+        layout() : asBits(JSVAL_RAW64_UNDEFINED) {}
         explicit constexpr layout(uint64_t bits) : asBits(bits) {}
         explicit constexpr layout(double d) : asDouble(d) {}
     } data;
@@ -990,7 +989,50 @@ class MOZ_NON_PARAM alignas(8) Value
     }
 } JS_HAZ_GC_POINTER;
 
+/**
+ * This is a null-constructible structure that can convert to and from
+ * a Value, allowing UninitializedValue to be stored in unions.
+ */
+struct MOZ_NON_PARAM alignas(8) UninitializedValue
+{
+  private:
+    uint64_t bits;
+
+  public:
+    UninitializedValue() = default;
+    UninitializedValue(const UninitializedValue&) = default;
+    MOZ_IMPLICIT UninitializedValue(const Value& val) : bits(val.asRawBits()) {}
+
+    inline uint64_t asRawBits() const {
+        return bits;
+    }
+
+    inline Value& asValueRef() {
+        return *reinterpret_cast<Value*>(this);
+    }
+    inline const Value& asValueRef() const {
+        return *reinterpret_cast<const Value*>(this);
+    }
+
+    inline operator Value&() {
+        return asValueRef();
+    }
+    inline operator Value const&() const {
+        return asValueRef();
+    }
+    inline operator Value() const {
+        return asValueRef();
+    }
+
+    inline void operator=(Value const& other) {
+        asValueRef() = other;
+    }
+};
+
 static_assert(sizeof(Value) == 8, "Value size must leave three tag bits, be a binary power, and is ubiquitously depended upon everywhere");
+
+static_assert(sizeof(UninitializedValue) == sizeof(Value), "Value and UninitializedValue must be the same size");
+static_assert(alignof(UninitializedValue) == alignof(Value), "Value and UninitializedValue must have same alignment");
 
 inline bool
 IsOptimizedPlaceholderMagicValue(const Value& v)

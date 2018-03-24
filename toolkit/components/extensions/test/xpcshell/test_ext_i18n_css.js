@@ -54,10 +54,17 @@ let extensionData = {
 
     "web_accessible_resources": ["foo.css", "foo.txt", "locale.css"],
 
-    "content_scripts": [{
-      "matches": ["http://*/*/file_sample.html"],
-      "css": ["foo.css"],
-    }],
+    "content_scripts": [
+      {
+        "matches": ["http://*/*/file_sample.html"],
+        "css": ["foo.css"],
+        "run_at": "document_start",
+      },
+      {
+        "matches": ["http://*/*/file_sample.html"],
+        "js": ["content.js"],
+      },
+    ],
 
     "default_locale": "en",
   },
@@ -69,6 +76,11 @@ let extensionData = {
         "description": "foo",
       },
     }),
+
+    "content.js": function() {
+      let style = getComputedStyle(document.body);
+      browser.test.sendMessage("content-maxWidth", style.maxWidth);
+    },
 
     "foo.css": "body { __MSG_foo__; }",
     "bar.CsS": "body { __MSG_foo__; }",
@@ -84,41 +96,22 @@ async function test_i18n_css(options = {}) {
   await extension.startup();
   let cssURL = await extension.awaitMessage("ready");
 
-  function fetch(url) {
-    return new Promise((resolve, reject) => {
-      let xhr = new XMLHttpRequest();
-      xhr.overrideMimeType("text/plain");
-      xhr.open("GET", url);
-      xhr.onload = () => { resolve(xhr.responseText); };
-      xhr.onerror = reject;
-      xhr.send();
-    });
-  }
+  let contentPage = await ExtensionTestUtils.loadContentPage(`${BASE_URL}/file_sample.html`);
 
-  let css = await fetch(cssURL);
+  let css = await contentPage.fetch(cssURL);
 
   equal(css, "body { max-width: 42px; }", "CSS file localized in mochitest scope");
 
-  let contentPage = await ExtensionTestUtils.loadContentPage(`${BASE_URL}/file_sample.html`);
-
-  // workaround for extension may not be ready for applying foo.css
-  await new Promise(executeSoon);
-
-  let maxWidth = await ContentTask.spawn(contentPage.browser, {}, async function() {
-    /* globals content */
-    let style = content.getComputedStyle(content.document.body);
-
-    return style.maxWidth;
-  });
+  let maxWidth = await extension.awaitMessage("content-maxWidth");
 
   equal(maxWidth, "42px", "stylesheet correctly applied");
 
-  await contentPage.close();
-
   cssURL = cssURL.replace(/foo.css$/, "locale.css");
 
-  css = await fetch(cssURL);
+  css = await contentPage.fetch(cssURL);
   equal(css, '* { content: "en-US ltr rtl left right" }', "CSS file localized in mochitest scope");
+
+  await contentPage.close();
 
   // We don't currently have a good way to mock this.
   if (false) {

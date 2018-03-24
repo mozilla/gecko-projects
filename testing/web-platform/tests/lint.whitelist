@@ -110,9 +110,10 @@ CR AT EOL: webvtt/parsing/file-parsing/tests/support/newlines.vtt
 # Intentional use of tabs
 INDENT TABS: html/semantics/embedded-content/the-canvas-element/size.attributes.parse.whitespace.html
 
-# Test generation files containing print statements
+# Intentional use of print statements
 PRINT STATEMENT: dom/nodes/Document-createElement-namespace-tests/generate.py
 PRINT STATEMENT: encrypted-media/polyfill/make-polyfill-tests.py
+PRINT STATEMENT: webdriver/tests/support/fixtures.py
 
 # semi-legitimate use of console.*
 CONSOLE: console/*
@@ -225,6 +226,7 @@ SET TIMEOUT: streams/writable-streams/byte-length-queuing-strategy.js
 SET TIMEOUT: user-timing/*
 SET TIMEOUT: webaudio/js/lodash.js
 SET TIMEOUT: webaudio/the-audio-api/the-mediaelementaudiosourcenode-interface/mediaElementAudioSourceToScriptProcessorTest.html
+SET TIMEOUT: webauthn/*timeout.https.html
 SET TIMEOUT: webdriver/*
 SET TIMEOUT: webmessaging/*
 SET TIMEOUT: websockets/*

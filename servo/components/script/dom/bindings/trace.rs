@@ -59,9 +59,11 @@ use hyper::mime::Mime;
 use hyper::status::StatusCode;
 use ipc_channel::ipc::{IpcReceiver, IpcSender};
 use js::glue::{CallObjectTracer, CallValueTracer};
-use js::jsapi::{GCTraceKindToAscii, Heap, JSObject, JSTracer, TraceKind};
+use js::jsapi::{GCTraceKindToAscii, Heap, Handle, JSObject, JSTracer, TraceKind};
 use js::jsval::JSVal;
-use js::rust::Runtime;
+use js::rust::{GCMethods, Runtime};
+use js::typedarray::TypedArray;
+use js::typedarray::TypedArrayElement;
 use metrics::{InteractiveMetrics, InteractiveWindow};
 use msg::constellation_msg::{BrowsingContextId, PipelineId, TopLevelBrowsingContextId};
 use net_traits::{Metadata, NetworkError, ReferrerPolicy, ResourceThreads};
@@ -658,6 +660,12 @@ unsafe impl JSTraceable for StyleLocked<MediaList> {
     }
 }
 
+unsafe impl<T> JSTraceable for TypedArray<T, Box<Heap<*mut JSObject>>> where T: TypedArrayElement {
+    unsafe fn trace(&self, trc: *mut JSTracer) {
+        self.underlying_object().trace(trc);
+    }
+}
+
 unsafe impl<S> JSTraceable for DocumentStylesheetSet<S>
 where
     S: JSTraceable + ::style::stylesheets::StylesheetInDocument + PartialEq + 'static,
@@ -765,13 +773,28 @@ unsafe impl<T: JSTraceable + 'static> JSTraceable for RootedTraceableBox<T> {
 impl<T: JSTraceable + 'static> RootedTraceableBox<T> {
     /// DomRoot a JSTraceable thing for the life of this RootedTraceable
     pub fn new(traceable: T) -> RootedTraceableBox<T> {
-        let traceable = Box::into_raw(Box::new(traceable));
+        Self::from_box(Box::new(traceable))
+    }
+
+    /// Consumes a boxed JSTraceable and roots it for the life of this RootedTraceable.
+    pub fn from_box(boxed_traceable: Box<T>) -> RootedTraceableBox<T> {
+        let traceable = Box::into_raw(boxed_traceable);
         unsafe {
             RootedTraceableSet::add(traceable);
         }
         RootedTraceableBox {
             ptr: traceable,
         }
+    }
+}
+
+impl<T> RootedTraceableBox<Heap<T>>
+    where
+        Heap<T>: JSTraceable + 'static,
+        T: GCMethods + Copy,
+{
+    pub fn handle(&self) -> Handle<T> {
+        unsafe { (*self.ptr).handle() }
     }
 }
 

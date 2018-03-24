@@ -3,6 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* import-globals-from ../../../../toolkit/components/places/PlacesUtils.jsm */
+
 ChromeUtils.import("resource://gre/modules/TelemetryStopwatch.jsm");
 
 var gHistoryTree;
@@ -84,7 +86,7 @@ function searchHistory(aInput) {
   // call load() on the tree manually
   // instead of setting the place attribute in history-panel.xul
   // otherwise, we will end up calling load() twice
-  gHistoryTree.load([query], options);
+  gHistoryTree.load(query, options);
 
   if (gHistoryGrouping == "lastvisited")
     this.TelemetryStopwatch.finish("HISTORY_LASTVISITED_TREE_QUERY_TIME_MS");

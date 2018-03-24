@@ -1427,8 +1427,6 @@ toolbar#nav-bar {
                 mozinfo.update(options.extra_mozinfo_json)
             if 'STYLO_FORCE_ENABLED' in os.environ:
                 mozinfo.update({'stylo': True})
-            if 'STYLO_FORCE_DISABLED' in os.environ:
-                mozinfo.update({'stylo': False})
 
             info = mozinfo.info
 
@@ -1524,6 +1522,8 @@ toolbar#nav-bar {
                 testob['disabled'] = test['disabled']
             if 'expected' in test:
                 testob['expected'] = test['expected']
+            if 'uses-unsafe-cpows' in test:
+                testob['uses-unsafe-cpows'] = test['uses-unsafe-cpows'] == 'true'
             if 'scheme' in test:
                 testob['scheme'] = test['scheme']
             if options.failure_pattern_file:
@@ -3058,6 +3058,9 @@ def run_test_harness(parser, options):
         if key.startswith('log') or key == 'valgrind'}
 
     runner = MochitestDesktop(options.flavor, logger_options, quiet=options.quiet)
+
+    if hasattr(options, 'log'):
+        delattr(options, 'log')
 
     options.runByManifest = False
     if options.flavor in ('plain', 'browser', 'chrome'):

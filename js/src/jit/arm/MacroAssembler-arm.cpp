@@ -10,6 +10,7 @@
 #include "mozilla/Casting.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MathAlgorithms.h"
+#include "mozilla/Maybe.h"
 
 #include "jit/arm/Simulator-arm.h"
 #include "jit/AtomicOp.h"
@@ -28,6 +29,7 @@ using namespace jit;
 using mozilla::Abs;
 using mozilla::BitwiseCast;
 using mozilla::IsPositiveZero;
+using mozilla::Maybe;
 
 bool
 isValueDTRDCandidate(ValueOperand& val)
@@ -4482,42 +4484,6 @@ MacroAssembler::patchFarJump(CodeOffset farJump, uint32_t targetOffset)
     *u32 = (targetOffset - addOffset) - 8;
 }
 
-void
-MacroAssembler::repatchFarJump(uint8_t* code, uint32_t farJumpOffset, uint32_t targetOffset)
-{
-    uint32_t* u32 = reinterpret_cast<uint32_t*>(code + farJumpOffset);
-
-    uint32_t addOffset = farJumpOffset - 4;
-    MOZ_ASSERT(reinterpret_cast<Instruction*>(code + addOffset)->is<InstALU>());
-
-    *u32 = (targetOffset - addOffset) - 8;
-}
-
-CodeOffset
-MacroAssembler::nopPatchableToNearJump()
-{
-    // Inhibit pools so that the offset points precisely to the nop.
-    AutoForbidPools afp(this, 1);
-
-    CodeOffset offset(currentOffset());
-    ma_nop();
-    return offset;
-}
-
-void
-MacroAssembler::patchNopToNearJump(uint8_t* jump, uint8_t* target)
-{
-    MOZ_ASSERT(reinterpret_cast<Instruction*>(jump)->is<InstNOP>());
-    new (jump) InstBImm(BOffImm(target - jump), Assembler::Always);
-}
-
-void
-MacroAssembler::patchNearJumpToNop(uint8_t* jump)
-{
-    MOZ_ASSERT(reinterpret_cast<Instruction*>(jump)->is<InstBImm>());
-    new (jump) InstNOP();
-}
-
 CodeOffset
 MacroAssembler::nopPatchableToCall(const wasm::CallSiteDesc& desc)
 {
@@ -4700,6 +4666,12 @@ MacroAssembler::pushFakeReturnAddress(Register scratch)
 
     MOZ_ASSERT_IF(!oom(), pseudoReturnOffset - offsetBeforePush == 8);
     return pseudoReturnOffset;
+}
+
+void
+MacroAssembler::enterFakeExitFrameForWasm(Register cxreg, Register scratch, ExitFrameType type)
+{
+    enterFakeExitFrame(cxreg, scratch, type);
 }
 
 // ===============================================================
@@ -5783,6 +5755,17 @@ MacroAssembler::convertUInt64ToDouble(Register64 src, FloatRegister dest, Regist
     mulDouble(scratchDouble, dest);
     convertUInt32ToDouble(src.low, scratchDouble);
     addDouble(scratchDouble, dest);
+}
+
+// ========================================================================
+// Spectre Mitigations.
+
+void
+MacroAssembler::speculationBarrier()
+{
+    // Spectre mitigation recommended by ARM for cases where csel/cmov cannot be
+    // used.
+    as_csdb();
 }
 
 //}}} check_macroassembler_style

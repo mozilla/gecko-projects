@@ -9,6 +9,7 @@
 
 #include "mozilla/dom/WorkerCommon.h"
 #include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/Headers.h"
 #include "mozilla/dom/RequestBinding.h"
 #include "nsWeakReference.h"
@@ -34,7 +35,6 @@ enum class ImageBitmapFormat : uint8_t;
 class Performance;
 class Promise;
 class RequestOrUSVString;
-class ServiceWorkerRegistration;
 class WorkerLocation;
 class WorkerNavigator;
 class WorkerPrivate;
@@ -235,6 +235,9 @@ public:
 
   Maybe<ServiceWorkerDescriptor>
   GetController() const override;
+
+  RefPtr<mozilla::dom::ServiceWorkerRegistration>
+  GetOrCreateServiceWorkerRegistration(const ServiceWorkerRegistrationDescriptor& aDescriptor) override;
 };
 
 class DedicatedWorkerGlobalScope final : public WorkerGlobalScope
@@ -262,7 +265,7 @@ public:
               ErrorResult& aRv);
 
   void
-  Close(JSContext* aCx);
+  Close();
 
   IMPL_EVENT_HANDLER(message)
   IMPL_EVENT_HANDLER(messageerror)
@@ -288,7 +291,7 @@ public:
   }
 
   void
-  Close(JSContext* aCx);
+  Close();
 
   IMPL_EVENT_HANDLER(connect)
 };

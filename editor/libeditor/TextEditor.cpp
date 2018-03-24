@@ -37,7 +37,6 @@
 #include "nsIContent.h"
 #include "nsIContentIterator.h"
 #include "nsIDOMDocument.h"
-#include "nsIDOMElement.h"
 #include "nsIDOMEventTarget.h"
 #include "nsIDOMNode.h"
 #include "nsIDocumentEncoder.h"
@@ -63,6 +62,13 @@ class nsISupports;
 namespace mozilla {
 
 using namespace dom;
+
+template already_AddRefed<Element>
+TextEditor::CreateBR(const EditorDOMPoint& aPointToInsert,
+                     EDirection aSelect);
+template already_AddRefed<Element>
+TextEditor::CreateBR(const EditorRawDOMPoint& aPointToInsert,
+                     EDirection aSelect);
 
 TextEditor::TextEditor()
   : mWrapColumn(0)
@@ -409,8 +415,9 @@ TextEditor::TypedText(const nsAString& aString, ETypingAction aAction)
   }
 }
 
+template<typename PT, typename CT>
 already_AddRefed<Element>
-TextEditor::CreateBR(const EditorRawDOMPoint& aPointToInsert,
+TextEditor::CreateBR(const EditorDOMPointBase<PT, CT>& aPointToInsert,
                      EDirection aSelect /* = eNone */)
 {
   RefPtr<Selection> selection = GetSelection();
@@ -421,9 +428,10 @@ TextEditor::CreateBR(const EditorRawDOMPoint& aPointToInsert,
   return CreateBRImpl(*selection, aPointToInsert, aSelect);
 }
 
+template<typename PT, typename CT>
 already_AddRefed<Element>
 TextEditor::CreateBRImpl(Selection& aSelection,
-                         const EditorRawDOMPoint& aPointToInsert,
+                         const EditorDOMPointBase<PT, CT>& aPointToInsert,
                          EDirection aSelect)
 {
   if (NS_WARN_IF(!aPointToInsert.IsSet())) {
@@ -463,7 +471,7 @@ TextEditor::CreateBRImpl(Selection& aSelection,
       pointInContainer.Set(aPointToInsert.GetContainer());
     }
     // Create a <br> node.
-    newBRElement = CreateNode(nsGkAtoms::br, pointInContainer.AsRaw());
+    newBRElement = CreateNode(nsGkAtoms::br, pointInContainer);
     if (NS_WARN_IF(!newBRElement)) {
       return nullptr;
     }
@@ -1653,8 +1661,10 @@ TextEditor::SelectEntireDocument(Selection* aSelection)
   // is doc empty?
   if (rules->DocumentIsEmpty()) {
     // get root node
-    nsCOMPtr<nsIDOMElement> rootElement = do_QueryInterface(GetRoot());
-    NS_ENSURE_TRUE(rootElement, NS_ERROR_FAILURE);
+    Element* rootElement = GetRoot();
+    if (NS_WARN_IF(!rootElement)) {
+      return NS_ERROR_FAILURE;
+    }
 
     // if it's empty don't select entire doc - that would select the bogus node
     return aSelection->Collapse(rootElement, 0);

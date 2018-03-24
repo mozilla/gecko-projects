@@ -9,8 +9,6 @@
 
 #include "CrossProcessMutex.h"
 #include "mozilla/layers/GeckoContentController.h"
-#include "mozilla/layers/APZCTreeManager.h"
-#include "mozilla/layers/AsyncPanZoomAnimation.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/Monitor.h"
@@ -43,6 +41,7 @@ class SharedMemoryBasic;
 namespace layers {
 
 class AsyncDragMetrics;
+class APZCTreeManager;
 struct ScrollableLayerGuid;
 class CompositorController;
 class MetricsSharingController;
@@ -52,9 +51,11 @@ class AsyncPanZoomAnimation;
 class AndroidFlingAnimation;
 class GenericFlingAnimation;
 class InputBlockState;
+struct FlingHandoffState;
 class TouchBlockState;
 class PanGestureBlockState;
 class OverscrollHandoffChain;
+struct OverscrollHandoffState;
 class StateChangeNotificationBlocker;
 class CheckerboardEvent;
 class OverscrollEffectBase;
@@ -152,6 +153,11 @@ public:
   };
 
   /**
+   * Gets the DPI from the tree manager.
+   */
+  float GetDPI() const;
+
+  /**
    * Constant describing the tolerance in distance we use, multiplied by the
    * device DPI, before we start panning the screen. This is to prevent us from
    * accidentally processing taps as touch moves, and from very short/accidental
@@ -159,13 +165,19 @@ public:
    * Note: It's an abuse of the 'Coord' class to use it to represent a 2D
    *       distance, but it's the closest thing we currently have.
    */
-  static ScreenCoord GetTouchStartTolerance();
+  ScreenCoord GetTouchStartTolerance() const;
+  /**
+   * Same as GetTouchStartTolerance, but the tolerance for how far the touch
+   * has to move before it starts allowing touchmove events to be dispatched
+   * to content, for non-scrollable content.
+   */
+  ScreenCoord GetTouchMoveTolerance() const;
   /**
    * Same as GetTouchStartTolerance, but the tolerance for how close the second
    * tap has to be to the first tap in order to be counted as part of a multi-tap
    * gesture (double-tap or one-touch-pinch).
    */
-  static ScreenCoord GetSecondTapTolerance();
+  ScreenCoord GetSecondTapTolerance() const;
 
   AsyncPanZoomController(uint64_t aLayersId,
                          APZCTreeManager* aTreeManager,
@@ -471,6 +483,10 @@ public:
 
   // Return whether or not a scroll delta will be able to scroll in either
   // direction.
+  bool CanScroll(const ParentLayerPoint& aDelta) const;
+
+  // Return whether or not a scroll delta will be able to scroll in either
+  // direction with wheel.
   bool CanScrollWithWheel(const ParentLayerPoint& aDelta) const;
 
   // Return whether or not there is room to scroll this APZC

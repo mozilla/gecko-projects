@@ -46,6 +46,10 @@ add_task(async function testSyncRemoteTabsButtonFunctionality() {
   info("The sync now button was clicked");
 
   await waitForCondition(() => syncWasCalled);
+
+  // We need to stop the Syncing animation manually otherwise the button
+  // will be disabled at the beginning of a next test.
+  gSync._onActivityStop();
 });
 
 add_task(async function asyncCleanup() {
@@ -66,23 +70,23 @@ function mockFunctions() {
   // mock UIState.get()
   UIState.get = () => ({
     status: UIState.STATUS_SIGNED_IN,
+    lastSync: new Date(),
     email: "user@mozilla.com"
   });
 
-  // mock service.errorHandler.syncAndReportErrors()
-  service.errorHandler.syncAndReportErrors = mocked_syncAndReportErrors;
+  service.sync = mocked_sync;
 }
 
-function mocked_syncAndReportErrors() {
+function mocked_sync() {
   syncWasCalled = true;
 }
 
 function restoreValues() {
   UIState.get = getState;
-  service.syncAndReportErrors = originalSync;
+  service.sync = originalSync;
 }
 
 function storeInitialValues() {
   getState = UIState.get;
-  originalSync = service.syncAndReportErrors;
+  originalSync = service.sync;
 }

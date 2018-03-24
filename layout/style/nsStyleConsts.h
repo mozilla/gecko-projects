@@ -4,16 +4,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* constants used in the style struct data provided by nsStyleContext */
+/* constants used in the style struct data provided by ComputedStyle */
 
 #ifndef nsStyleConsts_h___
 #define nsStyleConsts_h___
 
-#include "gfxRect.h"
-#include "nsFont.h"
+#include <inttypes.h>
+
+#include "gfxFontConstants.h"
 #include "X11UndefineNone.h"
 
-// XXX fold this into nsStyleContext and group by nsStyleXXX struct
+// XXX fold this into ComputedStyle and group by nsStyleXXX struct
 
 namespace mozilla {
 
@@ -1206,18 +1207,24 @@ enum class StyleOverscrollBehavior : uint8_t {
  *****************************************************************************/
 
 // orientation
-#define NS_STYLE_ORIENTATION_PORTRAIT           0
-#define NS_STYLE_ORIENTATION_LANDSCAPE          1
+enum class StyleOrientation : uint8_t {
+  Portrait = 0,
+  Landscape,
+};
 
 // scan
-#define NS_STYLE_SCAN_PROGRESSIVE               0
-#define NS_STYLE_SCAN_INTERLACE                 1
+enum class StyleScan : uint8_t {
+  Progressive = 0,
+  Interlace,
+};
 
 // display-mode
-#define NS_STYLE_DISPLAY_MODE_BROWSER           0
-#define NS_STYLE_DISPLAY_MODE_MINIMAL_UI        1
-#define NS_STYLE_DISPLAY_MODE_STANDALONE        2
-#define NS_STYLE_DISPLAY_MODE_FULLSCREEN        3
+enum class StyleDisplayMode : uint8_t {
+  Browser = 0,
+  MinimalUi,
+  Standalone,
+  Fullscreen,
+};
 
 } // namespace mozilla
 

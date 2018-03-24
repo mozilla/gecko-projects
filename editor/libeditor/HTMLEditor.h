@@ -21,7 +21,6 @@
 #include "nsCOMPtr.h"
 #include "nsICSSLoaderObserver.h"
 #include "nsIDocumentObserver.h"
-#include "nsIDOMElement.h"
 #include "nsIDOMEventListener.h"
 #include "nsIEditorMailSupport.h"
 #include "nsIEditorStyleSheets.h"
@@ -39,7 +38,7 @@ class nsDocumentFragment;
 class nsITransferable;
 class nsIClipboard;
 class nsIDOMDocument;
-class nsIDOMMouseEvent;
+class nsIDOMElement;
 class nsILinkHandler;
 class nsTableWrapperFrame;
 class nsIDOMRange;
@@ -58,6 +57,7 @@ struct PropItem;
 template<class T> class OwningNonNull;
 namespace dom {
 class DocumentFragment;
+class MouseEvent;
 } // namespace dom
 namespace widget {
 struct IMEState;
@@ -327,6 +327,10 @@ protected:
   using EditorBase::IsBlockNode;
   virtual bool IsBlockNode(nsINode *aNode) override;
 
+  virtual void
+  InitializeSelectionAncestorLimit(Selection& aSelection,
+                                   nsIContent& aAncestorLimit) override;
+
 public:
   // XXX Why don't we move following methods above for grouping by the origins?
   NS_IMETHOD SetFlags(uint32_t aFlags) override;
@@ -382,7 +386,7 @@ public:
                                  EStripWrappers aStripWrappers) override;
   nsresult DeleteNode(nsINode* aNode);
   NS_IMETHOD DeleteNode(nsIDOMNode* aNode) override;
-  nsresult DeleteText(nsGenericDOMDataNode& aTextNode, uint32_t aOffset,
+  nsresult DeleteText(dom::CharacterData& aTextNode, uint32_t aOffset,
                       uint32_t aLength);
   virtual nsresult
   InsertTextImpl(nsIDocument& aDocument,
@@ -419,9 +423,10 @@ public:
    * @return                  Returns inserted point if succeeded.
    *                          Otherwise, the result is not set.
    */
+  template<typename PT, typename CT>
   EditorDOMPoint
   InsertNodeIntoProperAncestor(nsIContent& aNode,
-                               const EditorRawDOMPoint& aPointToInsert,
+                               const EditorDOMPointBase<PT, CT>& aPointToInsert,
                                SplitAtEdges aSplitAtEdges);
 
   /**
@@ -531,7 +536,7 @@ public:
    * event callback when the mouse pointer is moved
    * @param aMouseEvent [IN] the event
    */
-  nsresult OnMouseMove(nsIDOMMouseEvent* aMouseEvent);
+  nsresult OnMouseMove(dom::MouseEvent* aMouseEvent);
 
   /**
    * Modifies the table containing the selection according to the
@@ -539,6 +544,32 @@ public:
    * @param aUIAnonymousElement [IN] the inline table editing UI element
    */
   nsresult DoInlineTableEditingAction(const Element& aUIAnonymousElement);
+
+  /**
+   * MaybeCollapseSelectionAtFirstEditableNode() may collapse selection at
+   * proper position to staring to edit.  If there is a non-editable node
+   * before any editable text nodes or inline elements which can have text
+   * nodes as their children, collapse selection at start of the editing
+   * host.  If there is an editable text node which is not collapsed, collapses
+   * selection at the start of the text node.  If there is an editable inline
+   * element which cannot have text nodes as its child, collapses selection at
+   * before the element node.  Otherwise, collapses selection at start of the
+   * editing host.
+   *
+   * @param aIgnoreIfSelectionInEditingHost
+   *                        This method does nothing if selection is in the
+   *                        editing host except if it's collapsed at start of
+   *                        the editing host.
+   *                        Note that if selection ranges were outside of
+   *                        current selection limiter, selection was collapsed
+   *                        at the start of the editing host therefore, if
+   *                        you call this with setting this to true, you can
+   *                        keep selection ranges if user has already been
+   *                        changed.
+   */
+  nsresult
+  MaybeCollapseSelectionAtFirstEditableNode(
+    bool aIgnoreIfSelectionInEditingHost);
 
 protected:
   class BlobReader final : public nsIEditorBlobListener
@@ -904,12 +935,15 @@ protected:
   {
     return GetPreviousHTMLElementOrTextInternal(aNode, true);
   }
-  nsIContent* GetPreviousHTMLElementOrText(const EditorRawDOMPoint& aPoint)
+  template<typename PT, typename CT>
+  nsIContent*
+  GetPreviousHTMLElementOrText(const EditorDOMPointBase<PT, CT>& aPoint)
   {
     return GetPreviousHTMLElementOrTextInternal(aPoint, false);
   }
+  template<typename PT, typename CT>
   nsIContent*
-  GetPreviousHTMLElementOrTextInBlock(const EditorRawDOMPoint& aPoint)
+  GetPreviousHTMLElementOrTextInBlock(const EditorDOMPointBase<PT, CT>& aPoint)
   {
     return GetPreviousHTMLElementOrTextInternal(aPoint, true);
   }
@@ -920,8 +954,9 @@ protected:
    */
   nsIContent* GetPreviousHTMLElementOrTextInternal(nsINode& aNode,
                                                    bool aNoBlockCrossing);
+  template<typename PT, typename CT>
   nsIContent*
-  GetPreviousHTMLElementOrTextInternal(const EditorRawDOMPoint& aPoint,
+  GetPreviousHTMLElementOrTextInternal(const EditorDOMPointBase<PT, CT>& aPoint,
                                        bool aNoBlockCrossing);
 
   /**
@@ -937,12 +972,15 @@ protected:
   {
     return GetPreviousEditableHTMLNodeInternal(aNode, true);
   }
-  nsIContent* GetPreviousEditableHTMLNode(const EditorRawDOMPoint& aPoint)
+  template<typename PT, typename CT>
+  nsIContent*
+  GetPreviousEditableHTMLNode(const EditorDOMPointBase<PT, CT>& aPoint)
   {
     return GetPreviousEditableHTMLNodeInternal(aPoint, false);
   }
+  template<typename PT, typename CT>
   nsIContent* GetPreviousEditableHTMLNodeInBlock(
-                const EditorRawDOMPoint& aPoint)
+                const EditorDOMPointBase<PT, CT>& aPoint)
   {
     return GetPreviousEditableHTMLNodeInternal(aPoint, true);
   }
@@ -953,8 +991,9 @@ protected:
    */
   nsIContent* GetPreviousEditableHTMLNodeInternal(nsINode& aNode,
                                                   bool aNoBlockCrossing);
+  template<typename PT, typename CT>
   nsIContent* GetPreviousEditableHTMLNodeInternal(
-                const EditorRawDOMPoint& aPoint,
+                const EditorDOMPointBase<PT, CT>& aPoint,
                 bool aNoBlockCrossing);
 
   /**
@@ -975,11 +1014,15 @@ protected:
   {
     return GetNextHTMLElementOrTextInternal(aNode, true);
   }
-  nsIContent* GetNextHTMLElementOrText(const EditorRawDOMPoint& aPoint)
+  template<typename PT, typename CT>
+  nsIContent*
+  GetNextHTMLElementOrText(const EditorDOMPointBase<PT, CT>& aPoint)
   {
     return GetNextHTMLElementOrTextInternal(aPoint, false);
   }
-  nsIContent* GetNextHTMLElementOrTextInBlock(const EditorRawDOMPoint& aPoint)
+  template<typename PT, typename CT>
+  nsIContent*
+  GetNextHTMLElementOrTextInBlock(const EditorDOMPointBase<PT, CT>& aPoint)
   {
     return GetNextHTMLElementOrTextInternal(aPoint, true);
   }
@@ -990,8 +1033,10 @@ protected:
    */
   nsIContent* GetNextHTMLElementOrTextInternal(nsINode& aNode,
                                                bool aNoBlockCrossing);
-  nsIContent* GetNextHTMLElementOrTextInternal(const EditorRawDOMPoint& aPoint,
-                                               bool aNoBlockCrossing);
+  template<typename PT, typename CT>
+  nsIContent*
+  GetNextHTMLElementOrTextInternal(const EditorDOMPointBase<PT, CT>& aPoint,
+                                   bool aNoBlockCrossing);
 
   /**
    * GetNextEditableHTMLNode*() methods are similar to
@@ -1011,12 +1056,14 @@ protected:
   {
     return GetNextEditableHTMLNodeInternal(aNode, true);
   }
-  nsIContent* GetNextEditableHTMLNode(const EditorRawDOMPoint& aPoint)
+  template<typename PT, typename CT>
+  nsIContent* GetNextEditableHTMLNode(const EditorDOMPointBase<PT, CT>& aPoint)
   {
     return GetNextEditableHTMLNodeInternal(aPoint, false);
   }
+  template<typename PT, typename CT>
   nsIContent* GetNextEditableHTMLNodeInBlock(
-                const EditorRawDOMPoint& aPoint)
+                const EditorDOMPointBase<PT, CT>& aPoint)
   {
     return GetNextEditableHTMLNodeInternal(aPoint, true);
   }
@@ -1026,9 +1073,10 @@ protected:
    * of above methods.  Please don't use this method directly.
    */
   nsIContent* GetNextEditableHTMLNodeInternal(nsINode& aNode,
-                                                  bool aNoBlockCrossing);
+                                              bool aNoBlockCrossing);
+  template<typename PT, typename CT>
   nsIContent* GetNextEditableHTMLNodeInternal(
-                const EditorRawDOMPoint& aPoint,
+                const EditorDOMPointBase<PT, CT>& aPoint,
                 bool aNoBlockCrossing);
 
   bool IsFirstEditableChild(nsINode* aNode);
@@ -1302,7 +1350,7 @@ protected:
   void HideGrabber();
 
   ManualNACPtr CreateGrabber(nsIContent& aParentContent);
-  nsresult StartMoving(nsIDOMElement* aHandle);
+  nsresult StartMoving();
   nsresult SetFinalPosition(int32_t aX, int32_t aY);
   void AddPositioningOffset(int32_t& aX, int32_t& aY);
   void SnapToGrid(int32_t& newX, int32_t& newY);

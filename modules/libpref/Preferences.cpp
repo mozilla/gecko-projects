@@ -15,7 +15,6 @@
 #include "mozilla/ArenaAllocator.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/dom/ContentPrefs.h"
 #include "mozilla/dom/PContent.h"
 #include "mozilla/HashFunctions.h"
 #include "mozilla/Logging.h"
@@ -131,6 +130,29 @@ enum class PrefType : uint8_t
   Bool = 3,
 };
 
+// This is used for pref names and string pref values. We encode the string
+// length, then a '/', then the string chars. This encoding means there are no
+// special chars that are forbidden or require escaping.
+static void
+SerializeAndAppendString(const char* aChars, nsCString& aStr)
+{
+  aStr.AppendInt(uint32_t(strlen(aChars)));
+  aStr.Append('/');
+  aStr.Append(aChars);
+}
+
+static char*
+DeserializeString(char* aChars, nsCString& aStr)
+{
+  char* p = aChars;
+  uint32_t length = strtol(p, &p, 10);
+  MOZ_ASSERT(p[0] == '/');
+  p++; // move past the '/'
+  aStr.Assign(p, length);
+  p += length; // move past the string itself
+  return p;
+}
+
 // Keep this in sync with PrefValue in prefs_parser/src/lib.rs.
 union PrefValue {
   const char* mStringVal;
@@ -223,6 +245,64 @@ union PrefValue {
         MOZ_CRASH();
     }
   }
+
+  void SerializeAndAppend(PrefType aType, nsCString& aStr)
+  {
+    switch (aType) {
+      case PrefType::Bool:
+        aStr.Append(mBoolVal ? 'T' : 'F');
+        break;
+
+      case PrefType::Int:
+        aStr.AppendInt(mIntVal);
+        break;
+
+      case PrefType::String: {
+        SerializeAndAppendString(mStringVal, aStr);
+        break;
+      }
+
+      case PrefType::None:
+      default:
+        MOZ_CRASH();
+    }
+  }
+
+  static char* Deserialize(PrefType aType,
+                           char* aStr,
+                           dom::MaybePrefValue* aDomValue)
+  {
+    char* p = aStr;
+
+    switch (aType) {
+      case PrefType::Bool:
+        if (*p == 'T') {
+          *aDomValue = true;
+        } else if (*p == 'F') {
+          *aDomValue = false;
+        } else {
+          *aDomValue = false;
+          NS_ERROR("bad bool pref value");
+        }
+        p++;
+        return p;
+
+      case PrefType::Int: {
+        *aDomValue = int32_t(strtol(p, &p, 10));
+        return p;
+      }
+
+      case PrefType::String: {
+        nsCString str;
+        p = DeserializeString(p, str);
+        *aDomValue = str;
+        return p;
+      }
+
+      default:
+        MOZ_CRASH();
+    }
+  }
 };
 
 #ifdef DEBUG
@@ -305,7 +385,8 @@ struct PrefsSizes
     , mCacheData(0)
     , mRootBranches(0)
     , mPrefNameArena(0)
-    , mCallbacks(0)
+    , mCallbacksObjects(0)
+    , mCallbacksDomains(0)
     , mMisc(0)
   {
   }
@@ -316,7 +397,8 @@ struct PrefsSizes
   size_t mCacheData;
   size_t mRootBranches;
   size_t mPrefNameArena;
-  size_t mCallbacks;
+  size_t mCallbacksObjects;
+  size_t mCallbacksDomains;
   size_t mMisc;
 };
 }
@@ -594,8 +676,9 @@ public:
 
   nsresult SetDefaultValue(PrefType aType,
                            PrefValue aValue,
-                           bool aFromFile,
                            bool aIsSticky,
+                           bool aIsLocked,
+                           bool aFromFile,
                            bool* aValueChanged)
   {
     // Types must always match when setting the default value.
@@ -605,20 +688,25 @@ public:
 
     // Should we set the default value? Only if the pref is not locked, and
     // doing so would change the default value.
-    if (!IsLocked() && !ValueMatches(PrefValueKind::Default, aType, aValue)) {
-      mDefaultValue.Replace(Type(), aType, aValue);
-      mHasDefaultValue = true;
-      if (!aFromFile) {
-        mHasChangedSinceInit = true;
+    if (!IsLocked()) {
+      if (aIsLocked) {
+        SetIsLocked(true);
       }
-      if (aIsSticky) {
-        mIsSticky = true;
+      if (!ValueMatches(PrefValueKind::Default, aType, aValue)) {
+        mDefaultValue.Replace(Type(), aType, aValue);
+        mHasDefaultValue = true;
+        if (!aFromFile) {
+          mHasChangedSinceInit = true;
+        }
+        if (aIsSticky) {
+          mIsSticky = true;
+        }
+        if (!mHasUserValue) {
+          *aValueChanged = true;
+        }
+        // What if we change the default to be the same as the user value?
+        // Should we clear the user value? Currently we don't.
       }
-      if (!mHasUserValue) {
-        *aValueChanged = true;
-      }
-      // What if we change the default to be the same as the user value?
-      // Should we clear the user value? Currently we don't.
     }
     return NS_OK;
   }
@@ -686,6 +774,159 @@ public:
     return false;
   }
 
+  // Prefs are serialized in a manner that mirrors dom::Pref. The two should be
+  // kept in sync. E.g. if something is added to one it should also be added to
+  // the other. (It would be nice to be able to use the code generated from
+  // IPDL for serializing dom::Pref here instead of writing by hand this
+  // serialization/deserialization. Unfortunately, that generated code is
+  // difficult to use directly, outside of the IPDL IPC code.)
+  //
+  // The grammar for the serialized prefs has the following form.
+  //
+  // <pref>         = <type> <locked> ':' <name> ':' <value>? ':' <value>? '\n'
+  // <type>         = 'B' | 'I' | 'S'
+  // <locked>       = 'L' | '-'
+  // <name>         = <string-value>
+  // <value>        = <bool-value> | <int-value> | <string-value>
+  // <bool-value>   = 'T' | 'F'
+  // <int-value>    = an integer literal accepted by strtol()
+  // <string-value> = <int-value> '/' <chars>
+  // <chars>        = any char sequence of length dictated by the preceding
+  //                  <int-value>.
+  //
+  // No whitespace is tolerated between tokens. <type> must match the types of
+  // the values.
+  //
+  // The serialization is text-based, rather than binary, for the following
+  // reasons.
+  //
+  // - The size difference wouldn't be much different between text-based and
+  //   binary. Most of the space is for strings (pref names and string pref
+  //   values), which would be the same in both styles. And other differences
+  //   would be minimal, e.g. small integers are shorter in text but long
+  //   integers are longer in text.
+  //
+  // - Likewise, speed differences should be negligible.
+  //
+  // - It's much easier to debug a text-based serialization. E.g. you can
+  //   print it and inspect it easily in a debugger.
+  //
+  // Examples of unlocked boolean prefs:
+  // - "B-:8/my.bool1:F:T\n"
+  // - "B-:8/my.bool2:F:\n"
+  // - "B-:8/my.bool3::T\n"
+  //
+  // Examples of locked integer prefs:
+  // - "IL:7/my.int1:0:1\n"
+  // - "IL:7/my.int2:123:\n"
+  // - "IL:7/my.int3::-99\n"
+  //
+  // Examples of unlocked string prefs:
+  // - "S-:10/my.string1:3/abc:4/wxyz\n"
+  // - "S-:10/my.string2:5/1.234:\n"
+  // - "S-:10/my.string3::7/string!\n"
+
+  void SerializeAndAppend(nsCString& aStr)
+  {
+    switch (Type()) {
+      case PrefType::Bool:
+        aStr.Append('B');
+        break;
+
+      case PrefType::Int:
+        aStr.Append('I');
+        break;
+
+      case PrefType::String: {
+        aStr.Append('S');
+        break;
+      }
+
+      case PrefType::None:
+      default:
+        MOZ_CRASH();
+    }
+
+    aStr.Append(mIsLocked ? 'L' : '-');
+    aStr.Append(':');
+
+    SerializeAndAppendString(mName, aStr);
+    aStr.Append(':');
+
+    if (mHasDefaultValue) {
+      mDefaultValue.SerializeAndAppend(Type(), aStr);
+    }
+    aStr.Append(':');
+
+    if (mHasUserValue) {
+      mUserValue.SerializeAndAppend(Type(), aStr);
+    }
+    aStr.Append('\n');
+  }
+
+  static char* Deserialize(char* aStr, dom::Pref* aDomPref)
+  {
+    char* p = aStr;
+
+    // The type.
+    PrefType type;
+    if (*p == 'B') {
+      type = PrefType::Bool;
+    } else if (*p == 'I') {
+      type = PrefType::Int;
+    } else if (*p == 'S') {
+      type = PrefType::String;
+    } else {
+      NS_ERROR("bad pref type");
+      type = PrefType::None;
+    }
+    p++; // move past the type char
+
+    // Locked?
+    bool isLocked;
+    if (*p == 'L') {
+      isLocked = true;
+    } else if (*p == '-') {
+      isLocked = false;
+    } else {
+      NS_ERROR("bad pref locked status");
+      isLocked = false;
+    }
+    p++; // move past the isLocked char
+
+    MOZ_ASSERT(*p == ':');
+    p++; // move past the ':'
+
+    // The pref name.
+    nsCString name;
+    p = DeserializeString(p, name);
+
+    MOZ_ASSERT(*p == ':');
+    p++; // move past the ':' preceding the default value
+
+    dom::MaybePrefValue maybeDefaultValue;
+    if (*p != ':') {
+      dom::PrefValue defaultValue;
+      p = PrefValue::Deserialize(type, p, &maybeDefaultValue);
+    }
+
+    MOZ_ASSERT(*p == ':');
+    p++; // move past the ':' between the default and user values
+
+    dom::MaybePrefValue maybeUserValue;
+    if (*p != '\n') {
+      dom::PrefValue userValue;
+      p = PrefValue::Deserialize(type, p, &maybeUserValue);
+    }
+
+    MOZ_ASSERT(*p == '\n');
+    p++; // move past the '\n' following the user value
+
+    *aDomPref = dom::Pref(name, isLocked, maybeDefaultValue, maybeUserValue);
+
+    return p;
+  }
+
   void AddSizeOfIncludingThis(MallocSizeOf aMallocSizeOf, PrefsSizes& aSizes)
   {
     // Note: mName is allocated in gPrefNameArena, measured elsewhere.
@@ -717,7 +958,11 @@ private:
 class PrefEntry : public PLDHashEntryHdr
 {
 public:
-  Pref* mPref;  // Note: this is never null in a live entry.
+#ifdef DEBUG
+  // This field is before mPref to minimize sizeof(PrefEntry) on 64-bit.
+  uint32_t mAccessCount;
+#endif
+  Pref* mPref; // Note: this is never null in a live entry.
 
   static bool MatchEntry(const PLDHashEntryHdr* aEntry, const void* aKey)
   {
@@ -732,6 +977,9 @@ public:
     auto entry = static_cast<PrefEntry*>(aEntry);
     auto prefName = static_cast<const char*>(aKey);
 
+#ifdef DEBUG
+    entry->mAccessCount = 0;
+#endif
     entry->mPref = new Pref(prefName);
   }
 
@@ -744,8 +992,9 @@ public:
   }
 };
 
-struct CallbackNode
+class CallbackNode
 {
+public:
   CallbackNode(const char* aDomain,
                PrefChangedFunc aFunc,
                void* aData,
@@ -753,10 +1002,47 @@ struct CallbackNode
     : mDomain(moz_xstrdup(aDomain))
     , mFunc(aFunc)
     , mData(aData)
-    , mMatchKind(aMatchKind)
-    , mNext(nullptr)
+    , mNextAndMatchKind(aMatchKind)
   {
   }
+
+  // mDomain is a UniquePtr<>, so any uses of Domain() should only be temporary
+  // borrows.
+  const char* Domain() const { return mDomain.get(); }
+
+  PrefChangedFunc Func() const { return mFunc; }
+  void ClearFunc() { mFunc = nullptr; }
+
+  void* Data() const { return mData; }
+
+  Preferences::MatchKind MatchKind() const
+  {
+    return static_cast<Preferences::MatchKind>(mNextAndMatchKind &
+                                               kMatchKindMask);
+  }
+
+  CallbackNode* Next() const
+  {
+    return reinterpret_cast<CallbackNode*>(mNextAndMatchKind & kNextMask);
+  }
+
+  void SetNext(CallbackNode* aNext)
+  {
+    uintptr_t matchKind = mNextAndMatchKind & kMatchKindMask;
+    mNextAndMatchKind = reinterpret_cast<uintptr_t>(aNext);
+    MOZ_ASSERT((mNextAndMatchKind & kMatchKindMask) == 0);
+    mNextAndMatchKind |= matchKind;
+  }
+
+  void AddSizeOfIncludingThis(MallocSizeOf aMallocSizeOf, PrefsSizes& aSizes)
+  {
+    aSizes.mCallbacksObjects += aMallocSizeOf(this);
+    aSizes.mCallbacksDomains += aMallocSizeOf(mDomain.get());
+  }
+
+private:
+  static const uintptr_t kMatchKindMask = uintptr_t(0x1);
+  static const uintptr_t kNextMask = ~kMatchKindMask;
 
   UniqueFreePtr<const char> mDomain;
 
@@ -765,8 +1051,12 @@ struct CallbackNode
   // be removed at the end of NotifyCallbacks().
   PrefChangedFunc mFunc;
   void* mData;
-  Preferences::MatchKind mMatchKind;
-  CallbackNode* mNext;
+
+  // Conceptually this is two fields:
+  // - CallbackNode* mNext;
+  // - Preferences::MatchKind mMatchKind;
+  // They are combined into a tagged pointer to save memory.
+  uintptr_t mNextAndMatchKind;
 };
 
 static PLDHashTable* gHashTable;
@@ -776,17 +1066,13 @@ static PLDHashTable* gHashTable;
 static CallbackNode* gFirstCallback = nullptr;
 static CallbackNode* gLastPriorityNode = nullptr;
 
-static bool gIsAnyPrefLocked = false;
-
 // These are only used during the call to NotifyCallbacks().
 static bool gCallbacksInProgress = false;
 static bool gShouldCleanupDeadNodes = false;
 
 static PLDHashTableOps pref_HashTableOps = {
-  PLDHashTable::HashStringKey,
-  PrefEntry::MatchEntry,
-  PLDHashTable::MoveEntryStub,
-  PrefEntry::ClearEntry,
+  PLDHashTable::HashStringKey, PrefEntry::MatchEntry,
+  PLDHashTable::MoveEntryStub, PrefEntry::ClearEntry,
   PrefEntry::InitEntry,
 };
 
@@ -827,41 +1113,9 @@ pref_savePrefs()
 
 #ifdef DEBUG
 
-// For content processes, what prefs have been initialized?
-enum class ContentProcessPhase
-{
-  eNoPrefsSet,
-  eEarlyPrefsSet,
-  eEarlyAndLatePrefsSet,
-};
-
 // Note that this never changes in the parent process, and is only read in
 // content processes.
-static ContentProcessPhase gPhase = ContentProcessPhase::eNoPrefsSet;
-
-struct StringComparator
-{
-  const char* mPrefName;
-
-  explicit StringComparator(const char* aPrefName)
-    : mPrefName(aPrefName)
-  {
-  }
-
-  int operator()(const char* aPrefName) const
-  {
-    return strcmp(mPrefName, aPrefName);
-  }
-};
-
-static bool
-IsEarlyPref(const char* aPrefName)
-{
-  size_t prefsLen;
-  size_t found;
-  const char** list = mozilla::dom::ContentPrefs::GetEarlyPrefs(&prefsLen);
-  return BinarySearchIf(list, 0, prefsLen, StringComparator(aPrefName), &found);
-}
+static bool gContentProcessPrefsAreInited = false;
 
 #endif // DEBUG
 
@@ -870,23 +1124,7 @@ pref_HashTableLookupInner(const char* aPrefName)
 {
   MOZ_ASSERT(NS_IsMainThread() || mozilla::ServoStyleSet::IsInServoTraversal());
 
-#ifdef DEBUG
-  if (!XRE_IsParentProcess()) {
-    if (gPhase == ContentProcessPhase::eNoPrefsSet) {
-      MOZ_CRASH_UNSAFE_PRINTF("accessing pref %s before early prefs are set",
-                              aPrefName);
-    }
-
-    if (gPhase == ContentProcessPhase::eEarlyPrefsSet &&
-        !IsEarlyPref(aPrefName)) {
-      // If you hit this crash, you have an early access of a non-early pref.
-      // Consider moving the access later or add the pref to the whitelist of
-      // early prefs in ContentPrefs.cpp and get review from a DOM peer.
-      MOZ_CRASH_UNSAFE_PRINTF(
-        "accessing non-early pref %s before late prefs are set", aPrefName);
-    }
-  }
-#endif
+  MOZ_ASSERT_IF(!XRE_IsParentProcess(), gContentProcessPrefsAreInited);
 
   return static_cast<PrefEntry*>(gHashTable->Search(aPrefName));
 }
@@ -895,7 +1133,15 @@ static Pref*
 pref_HashTableLookup(const char* aPrefName)
 {
   PrefEntry* entry = pref_HashTableLookupInner(aPrefName);
-  return entry ? entry->mPref : nullptr;
+  if (!entry) {
+    return nullptr;
+  }
+
+#ifdef DEBUG
+  entry->mAccessCount += 1;
+#endif
+
+  return entry->mPref;
 }
 
 static nsresult
@@ -904,6 +1150,7 @@ pref_SetPref(const char* aPrefName,
              PrefValueKind aKind,
              PrefValue aValue,
              bool aIsSticky,
+             bool aIsLocked,
              bool aFromFile)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -926,9 +1173,10 @@ pref_SetPref(const char* aPrefName,
   bool valueChanged = false;
   nsresult rv;
   if (aKind == PrefValueKind::Default) {
-    rv =
-      pref->SetDefaultValue(aType, aValue, aFromFile, aIsSticky, &valueChanged);
+    rv = pref->SetDefaultValue(
+      aType, aValue, aIsSticky, aIsLocked, aFromFile, &valueChanged);
   } else {
+    MOZ_ASSERT(!aIsLocked); // `locked` is disallowed in user pref files
     rv = pref->SetUserValue(aType, aValue, aFromFile, &valueChanged);
   }
   if (NS_FAILED(rv)) {
@@ -958,16 +1206,13 @@ pref_SetPref(const char* aPrefName,
 static CallbackNode*
 pref_RemoveCallbackNode(CallbackNode* aNode, CallbackNode* aPrevNode)
 {
-  NS_PRECONDITION(!aPrevNode || aPrevNode->mNext == aNode, "invalid params");
-  NS_PRECONDITION(aPrevNode || gFirstCallback == aNode, "invalid params");
+  MOZ_ASSERT(!aPrevNode || aPrevNode->Next() == aNode);
+  MOZ_ASSERT(aPrevNode || gFirstCallback == aNode);
+  MOZ_ASSERT(!gCallbacksInProgress);
 
-  NS_ASSERTION(
-    !gCallbacksInProgress,
-    "modifying the callback list while gCallbacksInProgress is true");
-
-  CallbackNode* next_node = aNode->mNext;
+  CallbackNode* next_node = aNode->Next();
   if (aPrevNode) {
-    aPrevNode->mNext = next_node;
+    aPrevNode->SetNext(next_node);
   } else {
     gFirstCallback = next_node;
   }
@@ -989,15 +1234,14 @@ NotifyCallbacks(const char* aPrefName)
   // if we haven't reentered.
   gCallbacksInProgress = true;
 
-  for (CallbackNode* node = gFirstCallback; node; node = node->mNext) {
-    if (node->mFunc) {
-      bool matches = node->mMatchKind == Preferences::ExactMatch
-                       ? strcmp(node->mDomain.get(), aPrefName) == 0
-                       : strncmp(node->mDomain.get(),
-                                 aPrefName,
-                                 strlen(node->mDomain.get())) == 0;
+  for (CallbackNode* node = gFirstCallback; node; node = node->Next()) {
+    if (node->Func()) {
+      bool matches =
+        node->MatchKind() == Preferences::ExactMatch
+          ? strcmp(node->Domain(), aPrefName) == 0
+          : strncmp(node->Domain(), aPrefName, strlen(node->Domain())) == 0;
       if (matches) {
-        (node->mFunc)(aPrefName, node->mData);
+        (node->Func())(aPrefName, node->Data());
       }
     }
   }
@@ -1009,11 +1253,11 @@ NotifyCallbacks(const char* aPrefName)
     CallbackNode* node = gFirstCallback;
 
     while (node) {
-      if (!node->mFunc) {
+      if (!node->Func()) {
         node = pref_RemoveCallbackNode(node, prev_node);
       } else {
         prev_node = node;
-        node = node->mNext;
+        node = node->Next();
       }
     }
     gShouldCleanupDeadNodes = false;
@@ -1040,7 +1284,8 @@ typedef void (*PrefsParserPrefFn)(const char* aPrefName,
                                   PrefType aType,
                                   PrefValueKind aKind,
                                   PrefValue aValue,
-                                  bool aIsSticky);
+                                  bool aIsSticky,
+                                  bool aIsLocked);
 
 // Keep this in sync with ErrorFn in prefs_parser/src/lib.rs.
 //
@@ -1051,6 +1296,7 @@ typedef void (*PrefsParserErrorFn)(const char* aMsg);
 // Keep this in sync with prefs_parser_parse() in prefs_parser/src/lib.rs.
 bool
 prefs_parser_parse(const char* aPath,
+                   PrefValueKind aKind,
                    const char* aBuf,
                    size_t aLen,
                    PrefsParserPrefFn aPrefFn,
@@ -1064,13 +1310,14 @@ public:
   ~Parser() = default;
 
   bool Parse(const nsCString& aName,
+             PrefValueKind aKind,
              const char* aPath,
              const TimeStamp& aStartTime,
              const nsCString& aBuf)
   {
     sNumPrefs = 0;
     bool ok = prefs_parser_parse(
-      aPath, aBuf.get(), aBuf.Length(), HandlePref, HandleError);
+      aPath, aKind, aBuf.get(), aBuf.Length(), HandlePref, HandleError);
     if (!ok) {
       return false;
     }
@@ -1092,11 +1339,17 @@ private:
                          PrefType aType,
                          PrefValueKind aKind,
                          PrefValue aValue,
-                         bool aIsSticky)
+                         bool aIsSticky,
+                         bool aIsLocked)
   {
     sNumPrefs++;
-    pref_SetPref(
-      aPrefName, aType, aKind, aValue, aIsSticky, /* fromFile */ true);
+    pref_SetPref(aPrefName,
+                 aType,
+                 aKind,
+                 aValue,
+                 aIsSticky,
+                 aIsLocked,
+                 /* fromFile */ true);
   }
 
   static void HandleError(const char* aMsg)
@@ -1128,7 +1381,8 @@ TestParseErrorHandlePref(const char* aPrefName,
                          PrefType aType,
                          PrefValueKind aKind,
                          PrefValue aValue,
-                         bool aIsSticky)
+                         bool aIsSticky,
+                         bool aIsLocked)
 {
 }
 
@@ -1143,9 +1397,10 @@ TestParseErrorHandleError(const char* aMsg)
 
 // Keep this in sync with the declaration in test/gtest/Parser.cpp.
 void
-TestParseError(const char* aText, nsCString& aErrorMsg)
+TestParseError(PrefValueKind aKind, const char* aText, nsCString& aErrorMsg)
 {
   prefs_parser_parse("test",
+                     aKind,
                      aText,
                      strlen(aText),
                      TestParseErrorHandlePref,
@@ -2265,7 +2520,7 @@ nsPrefBranch::FreeObserverList()
 void
 nsPrefBranch::RemoveExpiredCallback(PrefCallback* aCallback)
 {
-  NS_PRECONDITION(aCallback->IsExpired(), "Callback should be expired.");
+  MOZ_ASSERT(aCallback->IsExpired());
   mObservers.Remove(aCallback);
 }
 
@@ -2301,7 +2556,7 @@ nsPrefBranch::GetDefaultFromPropertiesFile(const char* aPrefName,
 nsPrefBranch::PrefName
 nsPrefBranch::GetPrefName(const char* aPrefName) const
 {
-  NS_ASSERTION(aPrefName, "null pref name!");
+  MOZ_ASSERT(aPrefName);
 
   // For speed, avoid strcpy if we can.
   if (mPrefRoot.IsEmpty()) {
@@ -2413,10 +2668,7 @@ Preferences::HandleDirty()
 }
 
 static nsresult
-openPrefFile(nsIFile* aFile);
-
-static const char kTelemetryPref[] = "toolkit.telemetry.enabled";
-static const char kChannelPref[] = "app.update.channel";
+openPrefFile(nsIFile* aFile, PrefValueKind aKind);
 
 // clang-format off
 static const char kPrefFileHeader[] =
@@ -2503,7 +2755,7 @@ public:
     // Tell the safe output stream to overwrite the real prefs file.
     // (It'll abort if there were any errors during writing.)
     nsCOMPtr<nsISafeOutputStream> safeStream = do_QueryInterface(outStream);
-    NS_ASSERTION(safeStream, "expected a safe output stream!");
+    MOZ_ASSERT(safeStream, "expected a safe output stream!");
     if (safeStream) {
       rv = safeStream->Finish();
     }
@@ -2699,9 +2951,8 @@ PreferenceServiceReporter::CollectReports(
 
   sizes.mPrefNameArena += gPrefNameArena.SizeOfExcludingThis(mallocSizeOf);
 
-  for (CallbackNode* node = gFirstCallback; node; node = node->mNext) {
-    sizes.mCallbacks += mallocSizeOf(node);
-    sizes.mCallbacks += mallocSizeOf(node->mDomain.get());
+  for (CallbackNode* node = gFirstCallback; node; node = node->Next()) {
+    node->AddSizeOfIncludingThis(mallocSizeOf, sizes);
   }
 
   MOZ_COLLECT_REPORT("explicit/preferences/hash-table",
@@ -2740,12 +2991,18 @@ PreferenceServiceReporter::CollectReports(
                      sizes.mPrefNameArena,
                      "Memory used by libpref's arena for pref names.");
 
-  MOZ_COLLECT_REPORT("explicit/preferences/callbacks",
+  MOZ_COLLECT_REPORT("explicit/preferences/callbacks/objects",
                      KIND_HEAP,
                      UNITS_BYTES,
-                     sizes.mCallbacks,
-                     "Memory used by libpref's callbacks list, including "
-                     "pref names and prefixes.");
+                     sizes.mCallbacksObjects,
+                     "Memory used by pref callback objects.");
+
+  MOZ_COLLECT_REPORT("explicit/preferences/callbacks/domains",
+                     KIND_HEAP,
+                     UNITS_BYTES,
+                     sizes.mCallbacksDomains,
+                     "Memory used by pref callback domains (pref names and "
+                     "prefixes).");
 
   MOZ_COLLECT_REPORT("explicit/preferences/misc",
                      KIND_HEAP,
@@ -2860,8 +3117,112 @@ public:
 
 } // namespace
 
-// A list of prefs sent early from the parent, via the command line.
-static InfallibleTArray<dom::Pref>* gEarlyDomPrefs;
+// A list of changed prefs sent from the parent via shared memory.
+static InfallibleTArray<dom::Pref>* gChangedDomPrefs;
+
+static const char kTelemetryPref[] = "toolkit.telemetry.enabled";
+static const char kChannelPref[] = "app.update.channel";
+
+#ifdef MOZ_WIDGET_ANDROID
+
+static Maybe<bool>
+TelemetryPrefValue()
+{
+  // Leave it unchanged if it's already set.
+  // XXX: how could it already be set?
+  if (Preferences::GetType(kTelemetryPref) != nsIPrefBranch::PREF_INVALID) {
+    return Nothing();
+  }
+
+    // Determine the correct default for toolkit.telemetry.enabled. If this
+    // build has MOZ_TELEMETRY_ON_BY_DEFAULT *or* we're on the beta channel,
+    // telemetry is on by default, otherwise not. This is necessary so that
+    // beta users who are testing final release builds don't flipflop defaults.
+#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
+  return Some(true);
+#else
+  nsAutoCString channelPrefValue;
+  Unused << Preferences::GetCString(
+    kChannelPref, channelPrefValue, PrefValueKind::Default);
+  return Some(channelPrefValue.EqualsLiteral("beta"));
+#endif
+}
+
+/* static */ void
+Preferences::SetupTelemetryPref()
+{
+  MOZ_ASSERT(XRE_IsParentProcess());
+
+  Maybe<bool> telemetryPrefValue = TelemetryPrefValue();
+  if (telemetryPrefValue.isSome()) {
+    Preferences::SetBool(
+      kTelemetryPref, *telemetryPrefValue, PrefValueKind::Default);
+  }
+}
+
+#else // !MOZ_WIDGET_ANDROID
+
+static bool
+TelemetryPrefValue()
+{
+  // For platforms with Unified Telemetry (here meaning not-Android),
+  // toolkit.telemetry.enabled determines whether we send "extended" data.
+  // We only want extended data from pre-release channels due to size.
+
+  NS_NAMED_LITERAL_CSTRING(channel, NS_STRINGIFY(MOZ_UPDATE_CHANNEL));
+
+  // Easy cases: Nightly, Aurora, Beta.
+  if (channel.EqualsLiteral("nightly") || channel.EqualsLiteral("aurora") ||
+      channel.EqualsLiteral("beta")) {
+    return true;
+  }
+
+#ifndef MOZILLA_OFFICIAL
+  // Local developer builds: non-official builds on the "default" channel.
+  if (channel.EqualsLiteral("default")) {
+    return true;
+  }
+#endif
+
+  // Release Candidate builds: builds that think they are release builds, but
+  // are shipped to beta users.
+  if (channel.EqualsLiteral("release")) {
+    nsAutoCString channelPrefValue;
+    Unused << Preferences::GetCString(
+      kChannelPref, channelPrefValue, PrefValueKind::Default);
+    if (channelPrefValue.EqualsLiteral("beta")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/* static */ void
+Preferences::SetupTelemetryPref()
+{
+  MOZ_ASSERT(XRE_IsParentProcess());
+
+  Preferences::SetBool(
+    kTelemetryPref, TelemetryPrefValue(), PrefValueKind::Default);
+  Preferences::Lock(kTelemetryPref);
+}
+
+static void
+CheckTelemetryPref()
+{
+  MOZ_ASSERT(!XRE_IsParentProcess());
+
+  // Make sure the children got passed the right telemetry pref details.
+  DebugOnly<bool> value;
+  MOZ_ASSERT(NS_SUCCEEDED(Preferences::GetBool(kTelemetryPref, &value)) &&
+             value == TelemetryPrefValue());
+  // njn: uncomment after bug 1436911 lands; it ensures that the locked status
+  //      is passed correctly
+  // MOZ_ASSERT(Preferences::IsLocked(kTelemetryPref));
+}
+
+#endif // MOZ_WIDGET_ANDROID
 
 /* static */ already_AddRefed<Preferences>
 Preferences::GetInstanceForService()
@@ -2892,12 +3253,16 @@ Preferences::GetInstanceForService()
   }
 
   if (!XRE_IsParentProcess()) {
-    MOZ_ASSERT(gEarlyDomPrefs);
-    for (unsigned int i = 0; i < gEarlyDomPrefs->Length(); i++) {
-      Preferences::SetPreference(gEarlyDomPrefs->ElementAt(i));
+    MOZ_ASSERT(gChangedDomPrefs);
+    for (unsigned int i = 0; i < gChangedDomPrefs->Length(); i++) {
+      Preferences::SetPreference(gChangedDomPrefs->ElementAt(i));
     }
-    delete gEarlyDomPrefs;
-    gEarlyDomPrefs = nullptr;
+    delete gChangedDomPrefs;
+    gChangedDomPrefs = nullptr;
+
+#ifndef MOZ_WIDGET_ANDROID
+    CheckTelemetryPref();
+#endif
 
   } else {
     // Check if there is a deployment configuration file. If so, set up the
@@ -2995,12 +3360,11 @@ Preferences::~Preferences()
   delete gCacheData;
   gCacheData = nullptr;
 
-  NS_ASSERTION(!gCallbacksInProgress,
-               "~Preferences was called while gCallbacksInProgress is true!");
+  MOZ_ASSERT(!gCallbacksInProgress);
 
   CallbackNode* node = gFirstCallback;
   while (node) {
-    CallbackNode* next_node = node->mNext;
+    CallbackNode* next_node = node->Next();
     delete node;
     node = next_node;
   }
@@ -3022,30 +3386,44 @@ NS_IMPL_ISUPPORTS(Preferences,
                   nsISupportsWeakReference)
 
 /* static */ void
-Preferences::SetEarlyPreferences(const nsTArray<dom::Pref>* aDomPrefs)
+Preferences::SerializePreferences(nsCString& aStr)
 {
-  MOZ_ASSERT(!XRE_IsParentProcess());
+  MOZ_RELEASE_ASSERT(InitStaticMembers());
 
-  gEarlyDomPrefs = new InfallibleTArray<dom::Pref>(mozilla::Move(*aDomPrefs));
+  aStr.Truncate();
 
-#ifdef DEBUG
-  MOZ_ASSERT(gPhase == ContentProcessPhase::eNoPrefsSet);
-  gPhase = ContentProcessPhase::eEarlyPrefsSet;
-#endif
+  for (auto iter = gHashTable->Iter(); !iter.Done(); iter.Next()) {
+    Pref* pref = static_cast<PrefEntry*>(iter.Get())->mPref;
+    if (pref->MustSendToContentProcesses() && pref->HasAdvisablySizedValues()) {
+      pref->SerializeAndAppend(aStr);
+    }
+  }
+
+  aStr.Append('\0');
 }
 
 /* static */ void
-Preferences::SetLatePreferences(const nsTArray<dom::Pref>* aDomPrefs)
+Preferences::DeserializePreferences(char* aStr, size_t aPrefsLen)
 {
   MOZ_ASSERT(!XRE_IsParentProcess());
 
-  for (unsigned int i = 0; i < aDomPrefs->Length(); i++) {
-    Preferences::SetPreference(aDomPrefs->ElementAt(i));
+  MOZ_ASSERT(!gChangedDomPrefs);
+  gChangedDomPrefs = new InfallibleTArray<dom::Pref>();
+
+  char* p = aStr;
+  while (*p != '\0') {
+    dom::Pref pref;
+    p = Pref::Deserialize(p, &pref);
+    gChangedDomPrefs->AppendElement(pref);
   }
 
+  // We finished parsing on a '\0'. That should be the last char in the shared
+  // memory. (aPrefsLen includes the '\0'.)
+  MOZ_ASSERT(p == aStr + aPrefsLen - 1);
+
 #ifdef DEBUG
-  MOZ_ASSERT(gPhase == ContentProcessPhase::eEarlyPrefsSet);
-  gPhase = ContentProcessPhase::eEarlyAndLatePrefsSet;
+  MOZ_ASSERT(!gContentProcessPrefsAreInited);
+  gContentProcessPrefsAreInited = true;
 #endif
 }
 
@@ -3117,6 +3495,19 @@ Preferences::Observe(nsISupports* aSubject,
 }
 
 NS_IMETHODIMP
+Preferences::ReadDefaultPrefsFromFile(nsIFile* aFile)
+{
+  ENSURE_PARENT_PROCESS("Preferences::ReadDefaultPrefsFromFile", "all prefs");
+
+  if (!aFile) {
+    NS_ERROR("ReadDefaultPrefsFromFile requires a parameter");
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  return openPrefFile(aFile, PrefValueKind::Default);
+}
+
+NS_IMETHODIMP
 Preferences::ReadUserPrefsFromFile(nsIFile* aFile)
 {
   ENSURE_PARENT_PROCESS("Preferences::ReadUserPrefsFromFile", "all prefs");
@@ -3126,7 +3517,7 @@ Preferences::ReadUserPrefsFromFile(nsIFile* aFile)
     return NS_ERROR_INVALID_ARG;
   }
 
-  return openPrefFile(aFile);
+  return openPrefFile(aFile, PrefValueKind::User);
 }
 
 NS_IMETHODIMP
@@ -3269,36 +3660,12 @@ Preferences::GetPreference(dom::Pref* aDomPref)
   }
 }
 
-void
-Preferences::GetPreferences(InfallibleTArray<dom::Pref>* aDomPrefs)
-{
-  MOZ_ASSERT(XRE_IsParentProcess());
-  MOZ_ASSERT(NS_IsMainThread());
-
-  aDomPrefs->SetCapacity(gHashTable->EntryCount());
-  for (auto iter = gHashTable->Iter(); !iter.Done(); iter.Next()) {
-    Pref* pref = static_cast<PrefEntry*>(iter.Get())->mPref;
-
-    if (!pref->MustSendToContentProcesses()) {
-      // The pref value hasn't changed since it was initialized at startup.
-      // Don't bother sending it, because the content process will initialize
-      // it the same way.
-      continue;
-    }
-
-    if (pref->HasAdvisablySizedValues()) {
-      dom::Pref* setting = aDomPrefs->AppendElement();
-      pref->ToDomPref(setting);
-    }
-  }
-}
-
 #ifdef DEBUG
 bool
-Preferences::AreAllPrefsSetInContentProcess()
+Preferences::ArePrefsInitedInContentProcess()
 {
   MOZ_ASSERT(!XRE_IsParentProcess());
-  return gPhase == ContentProcessPhase::eEarlyAndLatePrefsSet;
+  return gContentProcessPrefsAreInited;
 }
 #endif
 
@@ -3342,6 +3709,34 @@ Preferences::GetDefaultBranch(const char* aPrefRoot, nsIPrefBranch** aRetVal)
 }
 
 NS_IMETHODIMP
+Preferences::ReadStats(nsIPrefStatsCallback* aCallback)
+{
+#ifdef DEBUG
+  for (auto iter = gHashTable->Iter(); !iter.Done(); iter.Next()) {
+    PrefEntry* entry = static_cast<PrefEntry*>(iter.Get());
+    aCallback->Visit(entry->mPref->Name(), entry->mAccessCount);
+  }
+
+  return NS_OK;
+#else
+  return NS_ERROR_NOT_IMPLEMENTED;
+#endif
+}
+
+NS_IMETHODIMP
+Preferences::ResetStats()
+{
+#ifdef DEBUG
+  for (auto iter = gHashTable->Iter(); !iter.Done(); iter.Next()) {
+    static_cast<PrefEntry*>(iter.Get())->mAccessCount = 0;
+  }
+  return NS_OK;
+#else
+  return NS_ERROR_NOT_IMPLEMENTED;
+#endif
+}
+
+NS_IMETHODIMP
 Preferences::GetDirty(bool* aRetVal)
 {
   *aRetVal = mDirty;
@@ -3373,7 +3768,7 @@ Preferences::ReadSavedPrefs()
     return nullptr;
   }
 
-  rv = openPrefFile(file);
+  rv = openPrefFile(file, PrefValueKind::User);
   if (rv == NS_ERROR_FILE_NOT_FOUND) {
     // This is a normal case for new users.
     Telemetry::ScalarSet(
@@ -3402,7 +3797,7 @@ Preferences::ReadUserOverridePrefs()
   }
 
   aFile->AppendNative(NS_LITERAL_CSTRING("user.js"));
-  rv = openPrefFile(aFile);
+  rv = openPrefFile(aFile, PrefValueKind::User);
   if (rv != NS_ERROR_FILE_NOT_FOUND) {
     // If the file exists and was at least partially read, record that in
     // telemetry as it may be a sign of pref injection.
@@ -3544,7 +3939,7 @@ Preferences::WritePrefFile(nsIFile* aFile, SaveMethod aSaveMethod)
 }
 
 static nsresult
-openPrefFile(nsIFile* aFile)
+openPrefFile(nsIFile* aFile, PrefValueKind aKind)
 {
   TimeStamp startTime = TimeStamp::Now();
 
@@ -3560,7 +3955,7 @@ openPrefFile(nsIFile* aFile)
 
   Parser parser;
   if (!parser.Parse(
-        filename, NS_ConvertUTF16toUTF8(path).get(), startTime, data)) {
+        filename, aKind, NS_ConvertUTF16toUTF8(path).get(), startTime, data)) {
     return NS_ERROR_FILE_CORRUPTED;
   }
 
@@ -3620,7 +4015,7 @@ pref_LoadPrefsInDir(nsIFile* aDir,
 
     nsAutoCString leafName;
     prefFile->GetNativeLeafName(leafName);
-    NS_ASSERTION(
+    MOZ_ASSERT(
       !leafName.IsEmpty(),
       "Failure in default prefs: directory enumerator returned empty file?");
 
@@ -3661,7 +4056,7 @@ pref_LoadPrefsInDir(nsIFile* aDir,
   uint32_t arrayCount = prefFiles.Count();
   uint32_t i;
   for (i = 0; i < arrayCount; ++i) {
-    rv2 = openPrefFile(prefFiles[i]);
+    rv2 = openPrefFile(prefFiles[i], PrefValueKind::Default);
     if (NS_FAILED(rv2)) {
       NS_ERROR("Default pref file not parsed successfully.");
       rv = rv2;
@@ -3673,7 +4068,7 @@ pref_LoadPrefsInDir(nsIFile* aDir,
     // This may be a sparse array; test before parsing.
     nsIFile* file = specialFiles[i];
     if (file) {
-      rv2 = openPrefFile(file);
+      rv2 = openPrefFile(file, PrefValueKind::Default);
       if (NS_FAILED(rv2)) {
         NS_ERROR("Special default pref file not parsed successfully.");
         rv = rv2;
@@ -3694,7 +4089,11 @@ pref_ReadPrefFromJar(nsZipArchive* aJarReader, const char* aName)
               URLPreloader::ReadZip(aJarReader, nsDependentCString(aName)));
 
   Parser parser;
-  if (!parser.Parse(nsDependentCString(aName), aName, startTime, manifest)) {
+  if (!parser.Parse(nsDependentCString(aName),
+                    PrefValueKind::Default,
+                    aName,
+                    startTime,
+                    manifest)) {
     return NS_ERROR_FILE_CORRUPTED;
   }
 
@@ -3774,7 +4173,7 @@ Preferences::InitInitialObjects()
     rv = greprefsFile->AppendNative(NS_LITERAL_CSTRING("greprefs.js"));
     NS_ENSURE_SUCCESS(rv, Err("greprefsFile->AppendNative() failed"));
 
-    rv = openPrefFile(greprefsFile);
+    rv = openPrefFile(greprefsFile, PrefValueKind::Default);
     if (NS_FAILED(rv)) {
       NS_WARNING("Error parsing GRE default preferences. Is this an old-style "
                  "embedding app?");
@@ -3868,59 +4267,9 @@ Preferences::InitInitialObjects()
     }
   }
 
-#ifdef MOZ_WIDGET_ANDROID
-  // Set up the correct default for toolkit.telemetry.enabled. If this build
-  // has MOZ_TELEMETRY_ON_BY_DEFAULT *or* we're on the beta channel, telemetry
-  // is on by default, otherwise not. This is necessary so that beta users who
-  // are testing final release builds don't flipflop defaults.
-  if (Preferences::GetType(kTelemetryPref) == nsIPrefBranch::PREF_INVALID) {
-    bool prerelease = false;
-#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
-    prerelease = true;
-#else
-    nsAutoCString prefValue;
-    Preferences::GetCString(kChannelPref, prefValue, PrefValueKind::Default);
-    if (prefValue.EqualsLiteral("beta")) {
-      prerelease = true;
-    }
-#endif
-    Preferences::SetBoolInAnyProcess(
-      kTelemetryPref, prerelease, PrefValueKind::Default);
+  if (XRE_IsParentProcess()) {
+    SetupTelemetryPref();
   }
-#else
-  // For platforms with Unified Telemetry (here meaning not-Android),
-  // toolkit.telemetry.enabled determines whether we send "extended" data.
-  // We only want extended data from pre-release channels due to size. We
-  // also want it to be recorded for local developer builds (non-official builds
-  // on the "default" channel).
-  bool developerBuild = false;
-#ifndef MOZILLA_OFFICIAL
-  developerBuild = !strcmp(NS_STRINGIFY(MOZ_UPDATE_CHANNEL), "default");
-#endif
-
-  // Release Candidate builds are builds that think they are release builds, but
-  // are shipped to beta users. We still need extended data from these users.
-  bool releaseCandidateOnBeta = false;
-  if (!strcmp(NS_STRINGIFY(MOZ_UPDATE_CHANNEL), "release")) {
-    nsAutoCString updateChannelPrefValue;
-    Preferences::GetCString(kChannelPref, updateChannelPrefValue,
-                            PrefValueKind::Default);
-    releaseCandidateOnBeta = updateChannelPrefValue.EqualsLiteral("beta");
-  }
-
-  if (!strcmp(NS_STRINGIFY(MOZ_UPDATE_CHANNEL), "nightly") ||
-      !strcmp(NS_STRINGIFY(MOZ_UPDATE_CHANNEL), "aurora") ||
-      !strcmp(NS_STRINGIFY(MOZ_UPDATE_CHANNEL), "beta") ||
-      developerBuild ||
-      releaseCandidateOnBeta) {
-    Preferences::SetBoolInAnyProcess(
-      kTelemetryPref, true, PrefValueKind::Default);
-  } else {
-    Preferences::SetBoolInAnyProcess(
-      kTelemetryPref, false, PrefValueKind::Default);
-  }
-  Preferences::LockInAnyProcess(kTelemetryPref);
-#endif // MOZ_WIDGET_ANDROID
 
   NS_CreateServicesFromCategory(NS_PREFSERVICE_APPDEFAULTS_TOPIC_ID,
                                 nullptr,
@@ -3939,7 +4288,7 @@ Preferences::InitInitialObjects()
 /* static */ nsresult
 Preferences::GetBool(const char* aPrefName, bool* aResult, PrefValueKind aKind)
 {
-  NS_PRECONDITION(aResult, "aResult must not be NULL");
+  MOZ_ASSERT(aResult);
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
 
   Pref* pref = pref_HashTableLookup(aPrefName);
@@ -3951,7 +4300,7 @@ Preferences::GetInt(const char* aPrefName,
                     int32_t* aResult,
                     PrefValueKind aKind)
 {
-  NS_PRECONDITION(aResult, "aResult must not be NULL");
+  MOZ_ASSERT(aResult);
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
 
   Pref* pref = pref_HashTableLookup(aPrefName);
@@ -3963,7 +4312,7 @@ Preferences::GetFloat(const char* aPrefName,
                       float* aResult,
                       PrefValueKind aKind)
 {
-  NS_PRECONDITION(aResult, "aResult must not be NULL");
+  MOZ_ASSERT(aResult);
 
   nsAutoCString result;
   nsresult rv = Preferences::GetCString(aPrefName, result, aKind);
@@ -4024,7 +4373,7 @@ Preferences::GetLocalizedString(const char* aPrefName,
                                           NS_GET_IID(nsIPrefLocalizedString),
                                           getter_AddRefs(prefLocalString));
   if (NS_SUCCEEDED(rv)) {
-    NS_ASSERTION(prefLocalString, "Succeeded but the result is NULL");
+    MOZ_ASSERT(prefLocalString, "Succeeded but the result is NULL");
     prefLocalString->GetData(aResult);
   }
   return rv;
@@ -4041,10 +4390,11 @@ Preferences::GetComplex(const char* aPrefName,
 }
 
 /* static */ nsresult
-Preferences::SetCStringInAnyProcess(const char* aPrefName,
-                                    const nsACString& aValue,
-                                    PrefValueKind aKind)
+Preferences::SetCString(const char* aPrefName,
+                        const nsACString& aValue,
+                        PrefValueKind aKind)
 {
+  ENSURE_PARENT_PROCESS("SetCString", aPrefName);
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
 
   if (aValue.Length() > MAX_PREF_LENGTH) {
@@ -4061,23 +4411,14 @@ Preferences::SetCStringInAnyProcess(const char* aPrefName,
                       aKind,
                       prefValue,
                       /* isSticky */ false,
+                      /* isLocked */ false,
                       /* fromFile */ false);
 }
 
 /* static */ nsresult
-Preferences::SetCString(const char* aPrefName,
-                        const nsACString& aValue,
-                        PrefValueKind aKind)
+Preferences::SetBool(const char* aPrefName, bool aValue, PrefValueKind aKind)
 {
-  ENSURE_PARENT_PROCESS("SetCString", aPrefName);
-  return SetCStringInAnyProcess(aPrefName, aValue, aKind);
-}
-
-/* static */ nsresult
-Preferences::SetBoolInAnyProcess(const char* aPrefName,
-                                 bool aValue,
-                                 PrefValueKind aKind)
-{
+  ENSURE_PARENT_PROCESS("SetBool", aPrefName);
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
 
   PrefValue prefValue;
@@ -4087,21 +4428,14 @@ Preferences::SetBoolInAnyProcess(const char* aPrefName,
                       aKind,
                       prefValue,
                       /* isSticky */ false,
+                      /* isLocked */ false,
                       /* fromFile */ false);
 }
 
 /* static */ nsresult
-Preferences::SetBool(const char* aPrefName, bool aValue, PrefValueKind aKind)
+Preferences::SetInt(const char* aPrefName, int32_t aValue, PrefValueKind aKind)
 {
-  ENSURE_PARENT_PROCESS("SetBool", aPrefName);
-  return SetBoolInAnyProcess(aPrefName, aValue, aKind);
-}
-
-/* static */ nsresult
-Preferences::SetIntInAnyProcess(const char* aPrefName,
-                                int32_t aValue,
-                                PrefValueKind aKind)
-{
+  ENSURE_PARENT_PROCESS("SetInt", aPrefName);
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
 
   PrefValue prefValue;
@@ -4111,14 +4445,8 @@ Preferences::SetIntInAnyProcess(const char* aPrefName,
                       aKind,
                       prefValue,
                       /* isSticky */ false,
+                      /* isLocked */ false,
                       /* fromFile */ false);
-}
-
-/* static */ nsresult
-Preferences::SetInt(const char* aPrefName, int32_t aValue, PrefValueKind aKind)
-{
-  ENSURE_PARENT_PROCESS("SetInt", aPrefName);
-  return SetIntInAnyProcess(aPrefName, aValue, aKind);
 }
 
 /* static */ nsresult
@@ -4132,8 +4460,9 @@ Preferences::SetComplex(const char* aPrefName,
 }
 
 /* static */ nsresult
-Preferences::LockInAnyProcess(const char* aPrefName)
+Preferences::Lock(const char* aPrefName)
 {
+  ENSURE_PARENT_PROCESS("Lock", aPrefName);
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
 
   Pref* pref = pref_HashTableLookup(aPrefName);
@@ -4143,18 +4472,10 @@ Preferences::LockInAnyProcess(const char* aPrefName)
 
   if (!pref->IsLocked()) {
     pref->SetIsLocked(true);
-    gIsAnyPrefLocked = true;
     NotifyCallbacks(aPrefName);
   }
 
   return NS_OK;
-}
-
-/* static */ nsresult
-Preferences::Lock(const char* aPrefName)
-{
-  ENSURE_PARENT_PROCESS("Lock", aPrefName);
-  return Preferences::LockInAnyProcess(aPrefName);
 }
 
 /* static */ nsresult
@@ -4181,19 +4502,14 @@ Preferences::IsLocked(const char* aPrefName)
 {
   NS_ENSURE_TRUE(InitStaticMembers(), false);
 
-  if (gIsAnyPrefLocked) {
-    Pref* pref = pref_HashTableLookup(aPrefName);
-    if (pref && pref->IsLocked()) {
-      return true;
-    }
-  }
-
-  return false;
+  Pref* pref = pref_HashTableLookup(aPrefName);
+  return pref && pref->IsLocked();
 }
 
 /* static */ nsresult
-Preferences::ClearUserInAnyProcess(const char* aPrefName)
+Preferences::ClearUser(const char* aPrefName)
 {
+  ENSURE_PARENT_PROCESS("ClearUser", aPrefName);
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
 
   PrefEntry* entry = pref_HashTableLookupInner(aPrefName);
@@ -4211,13 +4527,6 @@ Preferences::ClearUserInAnyProcess(const char* aPrefName)
   return NS_OK;
 }
 
-/* static */ nsresult
-Preferences::ClearUser(const char* aPrefName)
-{
-  ENSURE_PARENT_PROCESS("ClearUser", aPrefName);
-  return ClearUserInAnyProcess(aPrefName);
-}
-
 /* static */ bool
 Preferences::HasUserValue(const char* aPrefName)
 {
@@ -4225,15 +4534,6 @@ Preferences::HasUserValue(const char* aPrefName)
 
   Pref* pref = pref_HashTableLookup(aPrefName);
   return pref && pref->HasUserValue();
-}
-
-/* static */ bool
-Preferences::MustSendToContentProcesses(const char* aPrefName)
-{
-  NS_ENSURE_TRUE(InitStaticMembers(), false);
-
-  Pref* pref = pref_HashTableLookup(aPrefName);
-  return pref && pref->MustSendToContentProcesses();
 }
 
 /* static */ int32_t
@@ -4344,7 +4644,7 @@ Preferences::RegisterCallback(PrefChangedFunc aCallback,
 
   if (aIsPriority) {
     // Add to the start of the list.
-    node->mNext = gFirstCallback;
+    node->SetNext(gFirstCallback);
     gFirstCallback = node;
     if (!gLastPriorityNode) {
       gLastPriorityNode = node;
@@ -4352,10 +4652,10 @@ Preferences::RegisterCallback(PrefChangedFunc aCallback,
   } else {
     // Add to the start of the non-priority part of the list.
     if (gLastPriorityNode) {
-      node->mNext = gLastPriorityNode->mNext;
-      gLastPriorityNode->mNext = node;
+      node->SetNext(gLastPriorityNode->Next());
+      gLastPriorityNode->SetNext(node);
     } else {
-      node->mNext = gFirstCallback;
+      node->SetNext(gFirstCallback);
       gFirstCallback = node;
     }
   }
@@ -4395,23 +4695,23 @@ Preferences::UnregisterCallback(PrefChangedFunc aCallback,
   CallbackNode* prev_node = nullptr;
 
   while (node) {
-    if (node->mFunc == aCallback && node->mData == aData &&
-        node->mMatchKind == aMatchKind &&
-        strcmp(node->mDomain.get(), aPrefNode) == 0) {
+    if (node->Func() == aCallback && node->Data() == aData &&
+        node->MatchKind() == aMatchKind &&
+        strcmp(node->Domain(), aPrefNode) == 0) {
       if (gCallbacksInProgress) {
-        // postpone the node removal until after
-        // callbacks enumeration is finished.
-        node->mFunc = nullptr;
+        // Postpone the node removal until after callbacks enumeration is
+        // finished.
+        node->ClearFunc();
         gShouldCleanupDeadNodes = true;
         prev_node = node;
-        node = node->mNext;
+        node = node->Next();
       } else {
         node = pref_RemoveCallbackNode(node, prev_node);
       }
       rv = NS_OK;
     } else {
       prev_node = node;
-      node = node->mNext;
+      node = node->Next();
     }
   }
   return rv;
@@ -4437,7 +4737,7 @@ BoolVarChanged(const char* aPref, void* aClosure)
 /* static */ nsresult
 Preferences::AddBoolVarCache(bool* aCache, const char* aPref, bool aDefault)
 {
-  NS_ASSERTION(aCache, "aCache must not be NULL");
+  MOZ_ASSERT(aCache);
 #ifdef DEBUG
   AssertNotAlreadyCached("bool", aPref, aCache);
 #endif
@@ -4469,7 +4769,7 @@ Preferences::AddAtomicBoolVarCache(Atomic<bool, Order>* aCache,
                                    const char* aPref,
                                    bool aDefault)
 {
-  NS_ASSERTION(aCache, "aCache must not be NULL");
+  MOZ_ASSERT(aCache);
 #ifdef DEBUG
   AssertNotAlreadyCached("bool", aPref, aCache);
 #endif
@@ -4499,7 +4799,7 @@ Preferences::AddIntVarCache(int32_t* aCache,
                             const char* aPref,
                             int32_t aDefault)
 {
-  NS_ASSERTION(aCache, "aCache must not be NULL");
+  MOZ_ASSERT(aCache);
 #ifdef DEBUG
   AssertNotAlreadyCached("int", aPref, aCache);
 #endif
@@ -4528,7 +4828,7 @@ Preferences::AddAtomicIntVarCache(Atomic<int32_t, Order>* aCache,
                                   const char* aPref,
                                   int32_t aDefault)
 {
-  NS_ASSERTION(aCache, "aCache must not be NULL");
+  MOZ_ASSERT(aCache);
 #ifdef DEBUG
   AssertNotAlreadyCached("int", aPref, aCache);
 #endif
@@ -4558,7 +4858,7 @@ Preferences::AddUintVarCache(uint32_t* aCache,
                              const char* aPref,
                              uint32_t aDefault)
 {
-  NS_ASSERTION(aCache, "aCache must not be NULL");
+  MOZ_ASSERT(aCache);
 #ifdef DEBUG
   AssertNotAlreadyCached("uint", aPref, aCache);
 #endif
@@ -4590,7 +4890,7 @@ Preferences::AddAtomicUintVarCache(Atomic<uint32_t, Order>* aCache,
                                    const char* aPref,
                                    uint32_t aDefault)
 {
-  NS_ASSERTION(aCache, "aCache must not be NULL");
+  MOZ_ASSERT(aCache);
 #ifdef DEBUG
   AssertNotAlreadyCached("uint", aPref, aCache);
 #endif
@@ -4649,7 +4949,7 @@ FloatVarChanged(const char* aPref, void* aClosure)
 /* static */ nsresult
 Preferences::AddFloatVarCache(float* aCache, const char* aPref, float aDefault)
 {
-  NS_ASSERTION(aCache, "aCache must not be NULL");
+  MOZ_ASSERT(aCache);
 #ifdef DEBUG
   AssertNotAlreadyCached("float", aPref, aCache);
 #endif

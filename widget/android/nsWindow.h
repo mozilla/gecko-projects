@@ -54,7 +54,7 @@ public:
 
     static void InitNatives();
     void SetScreenId(uint32_t aScreenId) { mScreenId = aScreenId; }
-    void EnableEventDispatcher();
+    void OnGeckoViewReady();
 
 private:
     uint32_t mScreenId;
@@ -192,11 +192,6 @@ private:
     // Because other objects get destroyed in the mGeckOViewSupport destructor,
     // keep it last in the list, so its destructor is called first.
     mozilla::UniquePtr<GeckoViewSupport> mGeckoViewSupport;
-
-#ifdef MOZ_NATIVE_DEVICES
-    // Class that implements native PresentationMediaPlayerManager calls.
-    class PMPMSupport;
-#endif
 
     mozilla::Atomic<bool, mozilla::ReleaseAcquire> mContentDocumentDisplayed;
 

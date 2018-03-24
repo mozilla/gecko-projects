@@ -42,10 +42,7 @@ var gTests = [
 
     // If we have reached the max process count already, increase it to ensure
     // our new tab can have its own content process.
-    var ppmm = Cc["@mozilla.org/parentprocessmessagemanager;1"]
-                 .getService(Ci.nsIMessageBroadcaster);
-    ppmm.QueryInterface(Ci.nsIProcessScriptLoader);
-    let childCount = ppmm.childCount;
+    let childCount = Services.ppmm.childCount;
     let maxContentProcess = Services.prefs.getIntPref("dom.ipc.processCount");
     // The first check is because if we are on a branch where e10s-multi is
     // disabled, we want to keep testing e10s with a single content process.
@@ -86,10 +83,13 @@ var gTests = [
     is(webrtcUI.getActiveStreams(true, true, true).length, 2, "2 active streams");
 
     info("removing the second tab");
-    await BrowserTestUtils.removeTab(tab);
+    // FIXME: This should wait for indicator update instead (bug 1444007).
+    let sessionStorePromise = BrowserTestUtils.waitForSessionStoreUpdate(tab);
+    BrowserTestUtils.removeTab(tab);
+    await sessionStorePromise;
 
     // Check that we still show the sharing indicators for the first tab's stream.
-    await promiseWaitForCondition(() => !webrtcUI.showCameraIndicator);
+    await TestUtils.waitForCondition(() => !webrtcUI.showCameraIndicator);
     ok(webrtcUI.showGlobalIndicator, "webrtcUI wants the global indicator shown");
     ok(!webrtcUI.showCameraIndicator, "webrtcUI wants the camera indicator hidden");
     ok(webrtcUI.showMicrophoneIndicator, "webrtcUI wants the mic indicator shown");
@@ -146,10 +146,7 @@ var gTests = [
 
     // If we have reached the max process count already, increase it to ensure
     // our new tab can have its own content process.
-    var ppmm = Cc["@mozilla.org/parentprocessmessagemanager;1"]
-                 .getService(Ci.nsIMessageBroadcaster);
-    ppmm.QueryInterface(Ci.nsIProcessScriptLoader);
-    let childCount = ppmm.childCount;
+    let childCount = Services.ppmm.childCount;
     let maxContentProcess = Services.prefs.getIntPref("dom.ipc.processCount");
     // The first check is because if we are on a branch where e10s-multi is
     // disabled, we want to keep testing e10s with a single content process.
@@ -189,14 +186,16 @@ var gTests = [
     is(webrtcUI.getActiveStreams(true, true, true).length, 2, "2 active streams");
 
     info("removing the second tab");
-    await BrowserTestUtils.removeTab(tab);
+    BrowserTestUtils.removeTab(tab);
 
     // Check that we still show the sharing indicators for the first tab's stream.
-    await promiseWaitForCondition(() => webrtcUI.showCameraIndicator);
+    await Promise.all([
+      TestUtils.waitForCondition(() => webrtcUI.showCameraIndicator),
+      TestUtils.waitForCondition(() => webrtcUI.getActiveStreams(true).length == 1),
+    ]);
     ok(webrtcUI.showGlobalIndicator, "webrtcUI wants the global indicator shown");
     ok(webrtcUI.showCameraIndicator, "webrtcUI wants the camera indicator shown");
     ok(!webrtcUI.showMicrophoneIndicator, "webrtcUI wants the mic indicator hidden");
-    is(webrtcUI.getActiveStreams(true).length, 1, "1 active camera stream");
     is(webrtcUI.getActiveStreams(true, true, true).length, 1, "1 active stream");
 
     await checkSharingUI({video: true});
@@ -255,10 +254,7 @@ var gTests = [
 
     // If we have reached the max process count already, increase it to ensure
     // our new tab can have its own content process.
-    var ppmm = Cc["@mozilla.org/parentprocessmessagemanager;1"]
-                 .getService(Ci.nsIMessageBroadcaster);
-    ppmm.QueryInterface(Ci.nsIProcessScriptLoader);
-    let childCount = ppmm.childCount;
+    let childCount = Services.ppmm.childCount;
     let maxContentProcess = Services.prefs.getIntPref("dom.ipc.processCount");
     // The first check is because if we are on a branch where e10s-multi is
     // disabled, we want to keep testing e10s with a single content process.
@@ -304,7 +300,7 @@ var gTests = [
     is(webrtcUI.getActiveStreams(true, true, true).length, 2, "2 active streams");
 
     info("removing the second tab");
-    await BrowserTestUtils.removeTab(tab);
+    BrowserTestUtils.removeTab(tab);
 
     // When both tabs use the same content process, the frame script for the
     // first tab receives observer notifications for things happening in the

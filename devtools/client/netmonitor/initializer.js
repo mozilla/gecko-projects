@@ -16,7 +16,7 @@ const require = window.windowRequire = BrowserLoader({
   window,
 }).require;
 
-const EventEmitter = require("devtools/shared/old-event-emitter");
+const EventEmitter = require("devtools/shared/event-emitter");
 const { createFactory } = require("devtools/client/shared/vendor/react");
 const { render, unmountComponentAtNode } = require("devtools/client/shared/vendor/react-dom");
 const Provider = createFactory(require("devtools/client/shared/vendor/react-redux").Provider);
@@ -105,21 +105,13 @@ window.Netmonitor = {
    */
   getHar() {
     let { HarExporter } = require("devtools/client/netmonitor/src/har/har-exporter");
-    let {
-      getLongString,
-      getTabTarget,
-      getTimingMarker,
-      requestData,
-    } = connector;
-    let { form: { title, url } } = getTabTarget();
     let state = store.getState();
 
     let options = {
-      getString: getLongString,
+      connector,
       items: getSortedRequests(state),
-      requestData,
-      getTimingMarker,
-      title: title || url,
+      // Always generate HAR log even if there are no requests.
+      forceExport: true,
     };
 
     return HarExporter.getHar(options);
@@ -129,20 +121,15 @@ window.Netmonitor = {
    * Support for `devtools.network.onRequestFinished`. A hook for
    * every finished HTTP request used by WebExtensions API.
    */
-  onRequestAdded(event, requestId) {
+  onRequestAdded(requestId) {
     let listeners = this.toolbox.getRequestFinishedListeners();
     if (!listeners.size) {
       return;
     }
 
     let { HarExporter } = require("devtools/client/netmonitor/src/har/har-exporter");
-    let { getLongString, getTabTarget, requestData } = connector;
-    let { form: { title, url } } = getTabTarget();
-
     let options = {
-      getString: getLongString,
-      requestData,
-      title: title || url,
+      connector,
       includeResponseBodies: false,
       items: [getDisplayedRequestById(store.getState(), requestId)],
     };
@@ -218,7 +205,7 @@ let url = new window.URL(href);
 if (window.location.protocol === "chrome:" && url.search.length > 1) {
   const { targetFromURL } = require("devtools/client/framework/target-from-url");
 
-  (async function () {
+  (async function() {
     try {
       let target = await targetFromURL(url);
 

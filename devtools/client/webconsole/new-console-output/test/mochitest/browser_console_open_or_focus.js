@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Test that the "browser console" menu item opens or focuses (if already open)
 // the console window instead of toggling it open/close.
 
@@ -13,7 +11,7 @@
 const TEST_MESSAGE = "testmessage";
 const { Tools } = require("devtools/client/definitions");
 
-add_task(async function () {
+add_task(async function() {
   let currWindow, hud, mainWindow;
 
   mainWindow = Services.wm.getMostRecentWindow(null);

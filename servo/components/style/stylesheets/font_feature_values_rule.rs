@@ -80,7 +80,7 @@ impl ToGeckoFontFeatureValues for SingleValue {
 }
 
 /// A @font-feature-values block declaration value that keeps one or two values.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, ToCss)]
 pub struct PairValues(pub u32, pub Option<u32>);
 
 impl Parse for PairValues {
@@ -104,20 +104,6 @@ impl Parse for PairValues {
     }
 }
 
-impl ToCss for PairValues {
-    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
-    where
-        W: Write,
-    {
-        self.0.to_css(dest)?;
-        if let Some(second) = self.1 {
-            dest.write_char(' ')?;
-            second.to_css(dest)?;
-        }
-        Ok(())
-    }
-}
-
 #[cfg(feature = "gecko")]
 impl ToGeckoFontFeatureValues for PairValues {
     fn to_gecko_font_feature_values(&self, array: &mut nsTArray<u32>) {
@@ -132,8 +118,8 @@ impl ToGeckoFontFeatureValues for PairValues {
 }
 
 /// A @font-feature-values block declaration value that keeps a list of values.
-#[derive(Clone, Debug, PartialEq)]
-pub struct VectorValues(pub Vec<u32>);
+#[derive(Clone, Debug, PartialEq, ToCss)]
+pub struct VectorValues(#[css(iterable)] pub Vec<u32>);
 
 impl Parse for VectorValues {
     fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
@@ -156,24 +142,6 @@ impl Parse for VectorValues {
         }
 
         Ok(VectorValues(vec))
-    }
-}
-
-impl ToCss for VectorValues {
-    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
-    where
-        W: Write,
-    {
-        let mut iter = self.0.iter();
-        let first = iter.next();
-        if let Some(first) = first {
-            first.to_css(dest)?;
-            for value in iter {
-                dest.write_char(' ')?;
-                value.to_css(dest)?;
-            }
-        }
-        Ok(())
     }
 }
 

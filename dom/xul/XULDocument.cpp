@@ -78,7 +78,6 @@
 #include "nsXULPopupManager.h"
 #include "nsCCUncollectableMarker.h"
 #include "nsURILoader.h"
-#include "mozilla/AddonPathService.h"
 #include "mozilla/BasicEvents.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/NodeInfoInlines.h"
@@ -1161,6 +1160,41 @@ XULDocument::Persist(const nsAString& aID,
     aRv = Persist(element, nameSpaceID, tag);
 }
 
+enum class ConversionDirection {
+    InnerToOuter,
+    OuterToInner,
+};
+
+static void
+ConvertWindowSize(nsIXULWindow* aWin,
+                  nsAtom* aAttr,
+                  ConversionDirection aDirection,
+                  nsAString& aInOutString)
+{
+    MOZ_ASSERT(aWin);
+    MOZ_ASSERT(aAttr == nsGkAtoms::width || aAttr == nsGkAtoms::height);
+
+    nsresult rv;
+    int32_t size = aInOutString.ToInteger(&rv);
+    if (NS_FAILED(rv)) {
+        return;
+    }
+
+    int32_t sizeDiff = aAttr == nsGkAtoms::width
+        ? aWin->GetOuterToInnerWidthDifferenceInCSSPixels()
+        : aWin->GetOuterToInnerHeightDifferenceInCSSPixels();
+
+    if (!sizeDiff) {
+        return;
+    }
+
+    int32_t multiplier =
+        aDirection == ConversionDirection::InnerToOuter ? 1 : - 1;
+
+    CopyASCIItoUTF16(nsPrintfCString("%d", size + multiplier * sizeDiff),
+                     aInOutString);
+}
+
 nsresult
 XULDocument::Persist(Element* aElement, int32_t aNameSpaceID,
                      nsAtom* aAttribute)
@@ -1199,9 +1233,21 @@ XULDocument::Persist(Element* aElement, int32_t aNameSpaceID,
 
     if (hasAttr && valuestr.IsEmpty()) {
         return mLocalStore->RemoveValue(uri, id, attrstr);
-    } else {
-        return mLocalStore->SetValue(uri, id, attrstr, valuestr);
     }
+
+    // Make sure we store the <window> attributes as outer window size, see
+    // bug 1444525 & co.
+    if (aElement->IsXULElement(nsGkAtoms::window) &&
+        (aAttribute == nsGkAtoms::width || aAttribute == nsGkAtoms::height)) {
+        if (nsCOMPtr<nsIXULWindow> win = GetXULWindowIfToplevelChrome()) {
+            ConvertWindowSize(win,
+                              aAttribute,
+                              ConversionDirection::InnerToOuter,
+                              valuestr);
+        }
+    }
+
+    return mLocalStore->SetValue(uri, id, attrstr, valuestr);
 }
 
 
@@ -1749,7 +1795,6 @@ XULDocument::ApplyPersistentAttributesInternal()
     return NS_OK;
 }
 
-
 nsresult
 XULDocument::ApplyPersistentAttributesToElements(const nsAString &aID,
                                                  nsCOMArray<Element>& aElements)
@@ -1790,11 +1835,27 @@ XULDocument::ApplyPersistentAttributesToElements(const nsAString &aID,
         }
 
         uint32_t cnt = aElements.Count();
-
         for (int32_t i = int32_t(cnt) - 1; i >= 0; --i) {
             RefPtr<Element> element = aElements.SafeObjectAt(i);
             if (!element) {
                  continue;
+            }
+
+            // Convert attributes from outer size to inner size for top-level
+            // windows, see bug 1444525 & co.
+            if (element->IsXULElement(nsGkAtoms::window) &&
+                (attr == nsGkAtoms::width || attr == nsGkAtoms::height)) {
+                if (nsCOMPtr<nsIXULWindow> win = GetXULWindowIfToplevelChrome()) {
+                    nsAutoString maybeConvertedValue = value;
+                    ConvertWindowSize(win,
+                                      attr,
+                                      ConversionDirection::OuterToInner,
+                                      maybeConvertedValue);
+                    Unused <<
+                        element->SetAttr(kNameSpaceID_None, attr, maybeConvertedValue, true);
+
+                    continue;
+                }
             }
 
             Unused << element->SetAttr(kNameSpaceID_None, attr, value, true);
@@ -2219,7 +2280,8 @@ XULDocument::LoadOverlayInternal(nsIURI* aURI, bool aIsDynamic,
     // document is chrome otherwise it may not have a system principal and
     // the cached document will, see bug 565610.
     bool overlayIsChrome = IsChromeURI(aURI);
-    bool documentIsChrome = IsChromeURI(mDocumentURI);
+    bool documentIsChrome = mDocumentURI ?
+        IsChromeURI(mDocumentURI) : false;
     mCurrentPrototype = overlayIsChrome && documentIsChrome ?
         nsXULPrototypeCache::GetInstance()->GetPrototype(aURI) : nullptr;
 
@@ -2630,6 +2692,27 @@ XULDocument::ResumeWalk()
     return rv;
 }
 
+already_AddRefed<nsIXULWindow>
+XULDocument::GetXULWindowIfToplevelChrome() const
+{
+    nsCOMPtr<nsIDocShellTreeItem> item = GetDocShell();
+    if (!item) {
+        return nullptr;
+    }
+    nsCOMPtr<nsIDocShellTreeOwner> owner;
+    item->GetTreeOwner(getter_AddRefs(owner));
+    nsCOMPtr<nsIXULWindow> xulWin = do_GetInterface(owner);
+    if (!xulWin) {
+        return nullptr;
+    }
+    nsCOMPtr<nsIDocShell> xulWinShell;
+    xulWin->GetDocShell(getter_AddRefs(xulWinShell));
+    if (!SameCOMIdentity(xulWinShell, item)) {
+        return nullptr;
+    }
+    return xulWin.forget();
+}
+
 nsresult
 XULDocument::DoneWalking()
 {
@@ -2661,29 +2744,20 @@ XULDocument::DoneWalking()
 
         NotifyPossibleTitleChange(false);
 
-        // Before starting layout, check whether we're a toplevel chrome
-        // window.  If we are, set our chrome flags now, so that we don't have
-        // to restyle the whole frame tree after StartLayout.
-        nsCOMPtr<nsIDocShellTreeItem> item = GetDocShell();
-        if (item) {
-            nsCOMPtr<nsIDocShellTreeOwner> owner;
-            item->GetTreeOwner(getter_AddRefs(owner));
-            nsCOMPtr<nsIXULWindow> xulWin = do_GetInterface(owner);
-            if (xulWin) {
-                nsCOMPtr<nsIDocShell> xulWinShell;
-                xulWin->GetDocShell(getter_AddRefs(xulWinShell));
-                if (SameCOMIdentity(xulWinShell, item)) {
-                    // We're the chrome document!  Apply our chrome flags now.
-                    xulWin->ApplyChromeFlags();
-                }
-            }
-        }
+        nsContentUtils::DispatchTrustedEvent(
+            this,
+            static_cast<nsIDocument*>(this),
+            NS_LITERAL_STRING("MozBeforeInitialXULLayout"),
+            true,
+            false);
 
-        nsContentUtils::DispatchTrustedEvent(this,
-                static_cast<nsIDocument*>(this),
-                NS_LITERAL_STRING("MozBeforeInitialXULLayout"),
-                true,
-                false);
+        // Before starting layout, check whether we're a toplevel chrome
+        // window.  If we are, setup some state so that we don't have to restyle
+        // the whole tree after StartLayout.
+        if (nsCOMPtr<nsIXULWindow> win = GetXULWindowIfToplevelChrome()) {
+            // We're the chrome document!
+            win->BeforeStartLayout();
+        }
 
         StartLayout();
 
@@ -3178,12 +3252,8 @@ XULDocument::ExecuteScript(nsXULPrototypeScript *aScript)
     JS::Rooted<JSScript*> scriptObject(cx, aScript->GetScriptObject());
     NS_ENSURE_TRUE(scriptObject, NS_ERROR_UNEXPECTED);
 
-    JS::Rooted<JSObject*> baseGlobal(cx, JS::CurrentGlobalOrNull(cx));
-    NS_ENSURE_TRUE(xpc::Scriptability::Get(baseGlobal).Allowed(), NS_OK);
-
-    JSAddonId* addonId = mCurrentPrototype ? MapURIToAddonID(mCurrentPrototype->GetURI()) : nullptr;
-    JS::Rooted<JSObject*> global(cx, xpc::GetAddonScope(cx, baseGlobal, addonId));
-    NS_ENSURE_TRUE(global, NS_ERROR_FAILURE);
+    JS::Rooted<JSObject*> global(cx, JS::CurrentGlobalOrNull(cx));
+    NS_ENSURE_TRUE(xpc::Scriptability::Get(global).Allowed(), NS_OK);
 
     JS::ExposeObjectToActiveJS(global);
     JSAutoCompartment ac(cx, global);
@@ -3350,7 +3420,7 @@ XULDocument::OverlayForwardReference::Resolve()
             return eResolve_Error;
         }
 
-        rv = mDocument->InsertElement(root, mOverlay, notify);
+        rv = XULDocument::InsertElement(root, mOverlay, notify);
         if (NS_FAILED(rv)) return eResolve_Error;
 
         target = mOverlay;

@@ -487,11 +487,42 @@ Shmem::ShareTo(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
 
 IPC::Message*
 Shmem::UnshareFrom(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
-                   base::ProcessId aTargetPid,
                    int32_t routingId)
 {
   AssertInvariants();
   return new ShmemDestroyed(routingId, mId);
+}
+
+void
+IPDLParamTraits<Shmem>::Write(IPC::Message* aMsg, IProtocol* aActor,
+                              Shmem& aParam)
+{
+  WriteIPDLParam(aMsg, aActor, aParam.mId);
+
+  aParam.RevokeRights(
+    Shmem::IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead());
+  aParam.forget(
+    Shmem::IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead());
+}
+
+bool
+IPDLParamTraits<Shmem>::Read(const IPC::Message* aMsg, PickleIterator* aIter,
+                             IProtocol* aActor, paramType* aResult)
+{
+  paramType::id_t id;
+  if (!ReadIPDLParam(aMsg, aIter, aActor, &id)) {
+    return false;
+  }
+
+  Shmem::SharedMemory* rawmem = aActor->LookupSharedMemory(id);
+  if (rawmem) {
+    *aResult = Shmem(
+      Shmem::IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead(),
+      rawmem, id);
+    return true;
+  }
+  *aResult = Shmem();
+  return true;
 }
 
 } // namespace ipc

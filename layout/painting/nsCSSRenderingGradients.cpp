@@ -10,6 +10,7 @@
 
 #include "gfx2DGlue.h"
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/ComputedStyle.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/Helpers.h"
@@ -19,7 +20,6 @@
 #include "nsPresContext.h"
 #include "nsPoint.h"
 #include "nsRect.h"
-#include "nsStyleContext.h"
 #include "nsCSSColorUtils.h"
 #include "gfxContext.h"
 #include "nsStyleStructInlines.h"
@@ -873,8 +873,8 @@ nsCSSGradientRenderer::Paint(gfxContext& aContext,
   // Use a pattern transform to take account of source and dest rects
   matrix.PreTranslate(gfxPoint(mPresContext->CSSPixelsToDevPixels(aSrc.x),
                                mPresContext->CSSPixelsToDevPixels(aSrc.y)));
-  matrix.PreScale(gfxFloat(mPresContext->CSSPixelsToAppUnits(aSrc.width))/aDest.width,
-                  gfxFloat(mPresContext->CSSPixelsToAppUnits(aSrc.height))/aDest.height);
+  matrix.PreScale(gfxFloat(nsPresContext::CSSPixelsToAppUnits(aSrc.width))/aDest.width,
+                  gfxFloat(nsPresContext::CSSPixelsToAppUnits(aSrc.height))/aDest.height);
   gradientPattern->SetMatrix(matrix);
 
   if (stopDelta == 0.0) {
@@ -1061,15 +1061,11 @@ nsCSSGradientRenderer::BuildWebRenderDisplayItems(wr::DisplayListBuilder& aBuild
   // Calculate the tile spacing, which is the repeat size minus the tile size
   LayoutDeviceSize tileSpacing = tileRepeat - firstTileBounds.Size();
 
-  // Make the rects relative to the parent stacking context
-  wr::LayoutRect wrClipBounds = aSc.ToRelativeLayoutRect(clipBounds);
-  wr::LayoutRect wrGradientBounds = aSc.ToRelativeLayoutRect(gradientBounds);
-
   // srcTransform is used for scaling the gradient to match aSrc
-  LayoutDeviceRect srcTransform = LayoutDeviceRect(mPresContext->CSSPixelsToAppUnits(aSrc.x),
-                                                   mPresContext->CSSPixelsToAppUnits(aSrc.y),
-                                                   aDest.width / ((float)mPresContext->CSSPixelsToAppUnits(aSrc.width)),
-                                                   aDest.height / ((float)mPresContext->CSSPixelsToAppUnits(aSrc.height)));
+  LayoutDeviceRect srcTransform = LayoutDeviceRect(nsPresContext::CSSPixelsToAppUnits(aSrc.x),
+                                                   nsPresContext::CSSPixelsToAppUnits(aSrc.y),
+                                                   aDest.width / ((float)nsPresContext::CSSPixelsToAppUnits(aSrc.width)),
+                                                   aDest.height / ((float)nsPresContext::CSSPixelsToAppUnits(aSrc.height)));
 
   lineStart.x = (lineStart.x - srcTransform.x) * srcTransform.width;
   lineStart.y = (lineStart.y - srcTransform.y) * srcTransform.height;
@@ -1079,8 +1075,8 @@ nsCSSGradientRenderer::BuildWebRenderDisplayItems(wr::DisplayListBuilder& aBuild
     lineEnd.y = (lineEnd.y - srcTransform.y) * srcTransform.height;
 
     aBuilder.PushLinearGradient(
-      wrGradientBounds,
-      wrClipBounds,
+      mozilla::wr::ToLayoutRect(gradientBounds),
+      mozilla::wr::ToLayoutRect(clipBounds),
       aIsBackfaceVisible,
       mozilla::wr::ToLayoutPoint(lineStart),
       mozilla::wr::ToLayoutPoint(lineEnd),
@@ -1093,8 +1089,8 @@ nsCSSGradientRenderer::BuildWebRenderDisplayItems(wr::DisplayListBuilder& aBuild
     gradientRadius.height *= srcTransform.height;
 
     aBuilder.PushRadialGradient(
-      wrGradientBounds,
-      wrClipBounds,
+      mozilla::wr::ToLayoutRect(gradientBounds),
+      mozilla::wr::ToLayoutRect(clipBounds),
       aIsBackfaceVisible,
       mozilla::wr::ToLayoutPoint(lineStart),
       mozilla::wr::ToLayoutSize(gradientRadius),

@@ -83,8 +83,10 @@ class DOMQuad;
 class DOMRectReadOnly;
 class Element;
 class EventHandlerNonNull;
+class L10nCallback;
 template<typename T> class Optional;
 class OwningNodeOrString;
+class Promise;
 template<typename> class Sequence;
 class Text;
 class TextOrElementOrDocument;
@@ -125,14 +127,10 @@ enum {
   // NOTE: Should only be used on nsIContent nodes
   NODE_IS_NATIVE_ANONYMOUS_ROOT =         NODE_FLAG_BIT(4),
 
-  // Forces the XBL code to treat this node as if it were
-  // in the document and therefore should get bindings attached.
-  NODE_FORCE_XBL_BINDINGS =               NODE_FLAG_BIT(5),
-
   // Whether a binding manager may have a pointer to this
-  NODE_MAY_BE_IN_BINDING_MNGR =           NODE_FLAG_BIT(6),
+  NODE_MAY_BE_IN_BINDING_MNGR =           NODE_FLAG_BIT(5),
 
-  NODE_IS_EDITABLE =                      NODE_FLAG_BIT(7),
+  NODE_IS_EDITABLE =                      NODE_FLAG_BIT(6),
 
   // This node was created by layout as native anonymous content. This
   // generally corresponds to things created by nsIAnonymousContentCreator,
@@ -155,21 +153,21 @@ enum {
   // a detail of layout, is not script-observable in any way, and other engines
   // might accomplish the same task with a nodeless layout frame, then the node
   // should have this bit set.
-  NODE_IS_NATIVE_ANONYMOUS =              NODE_FLAG_BIT(8),
+  NODE_IS_NATIVE_ANONYMOUS =              NODE_FLAG_BIT(7),
 
   // Whether the node participates in a shadow tree.
-  NODE_IS_IN_SHADOW_TREE =                NODE_FLAG_BIT(9),
+  NODE_IS_IN_SHADOW_TREE =                NODE_FLAG_BIT(8),
 
   // Node has an :empty or :-moz-only-whitespace selector
-  NODE_HAS_EMPTY_SELECTOR =               NODE_FLAG_BIT(10),
+  NODE_HAS_EMPTY_SELECTOR =               NODE_FLAG_BIT(9),
 
   // A child of the node has a selector such that any insertion,
   // removal, or appending of children requires restyling the parent.
-  NODE_HAS_SLOW_SELECTOR =                NODE_FLAG_BIT(11),
+  NODE_HAS_SLOW_SELECTOR =                NODE_FLAG_BIT(10),
 
   // A child of the node has a :first-child, :-moz-first-node,
   // :only-child, :last-child or :-moz-last-node selector.
-  NODE_HAS_EDGE_CHILD_SELECTOR =          NODE_FLAG_BIT(12),
+  NODE_HAS_EDGE_CHILD_SELECTOR =          NODE_FLAG_BIT(11),
 
   // A child of the node has a selector such that any insertion or
   // removal of children requires restyling later siblings of that
@@ -178,7 +176,7 @@ enum {
   // other content tree changes (e.g., the child changes to or from
   // matching :empty due to a grandchild insertion or removal), the
   // child's later siblings must also be restyled.
-  NODE_HAS_SLOW_SELECTOR_LATER_SIBLINGS = NODE_FLAG_BIT(13),
+  NODE_HAS_SLOW_SELECTOR_LATER_SIBLINGS = NODE_FLAG_BIT(12),
 
   NODE_ALL_SELECTOR_FLAGS =               NODE_HAS_EMPTY_SELECTOR |
                                           NODE_HAS_SLOW_SELECTOR |
@@ -187,31 +185,31 @@ enum {
 
   // This node needs to go through frame construction to get a frame (or
   // undisplayed entry).
-  NODE_NEEDS_FRAME =                      NODE_FLAG_BIT(14),
+  NODE_NEEDS_FRAME =                      NODE_FLAG_BIT(13),
 
   // At least one descendant in the flattened tree has NODE_NEEDS_FRAME set.
   // This should be set on every node on the flattened tree path between the
   // node(s) with NODE_NEEDS_FRAME and the root content.
-  NODE_DESCENDANTS_NEED_FRAMES =          NODE_FLAG_BIT(15),
+  NODE_DESCENDANTS_NEED_FRAMES =          NODE_FLAG_BIT(14),
 
   // Set if the node has the accesskey attribute set.
-  NODE_HAS_ACCESSKEY =                    NODE_FLAG_BIT(16),
+  NODE_HAS_ACCESSKEY =                    NODE_FLAG_BIT(15),
 
   // Set if the node has right-to-left directionality
-  NODE_HAS_DIRECTION_RTL =                NODE_FLAG_BIT(17),
+  NODE_HAS_DIRECTION_RTL =                NODE_FLAG_BIT(16),
 
   // Set if the node has left-to-right directionality
-  NODE_HAS_DIRECTION_LTR =                NODE_FLAG_BIT(18),
+  NODE_HAS_DIRECTION_LTR =                NODE_FLAG_BIT(17),
 
   NODE_ALL_DIRECTION_FLAGS =              NODE_HAS_DIRECTION_LTR |
                                           NODE_HAS_DIRECTION_RTL,
 
-  NODE_CHROME_ONLY_ACCESS =               NODE_FLAG_BIT(19),
+  NODE_CHROME_ONLY_ACCESS =               NODE_FLAG_BIT(18),
 
-  NODE_IS_ROOT_OF_CHROME_ONLY_ACCESS =    NODE_FLAG_BIT(20),
+  NODE_IS_ROOT_OF_CHROME_ONLY_ACCESS =    NODE_FLAG_BIT(19),
 
   // Remaining bits are node type specific.
-  NODE_TYPE_SPECIFIC_BITS_OFFSET =        21
+  NODE_TYPE_SPECIFIC_BITS_OFFSET =        20
 };
 
 // Make sure we have space for our bits
@@ -274,10 +272,6 @@ private:
 #define NS_DECL_ADDSIZEOFEXCLUDINGTHIS \
   virtual void AddSizeOfExcludingThis(nsWindowSizes& aSizes, \
                                       size_t* aNodeSize) const override;
-
-// Categories of node properties
-// 0 is global.
-#define DOM_USER_DATA         1
 
 // IID for the nsINode interface
 // Must be kept in sync with xpcom/rust/xpcom/src/interfaces/nonidl.rs
@@ -412,15 +406,16 @@ public:
     eHTML_FORM_CONTROL   = 1 << 6,
     /** document fragments */
     eDOCUMENT_FRAGMENT   = 1 << 7,
-    /** data nodes (comments, PIs, text). Nodes of this type always
-     returns a non-null value for nsIContent::GetText() */
+    /** character data nodes (comments, PIs, text). */
     eDATA_NODE           = 1 << 8,
     /** HTMLMediaElement */
     eMEDIA               = 1 << 9,
     /** animation elements */
     eANIMATION           = 1 << 10,
     /** filter elements that implement SVGFilterPrimitiveStandardAttributes */
-    eFILTER              = 1 << 11
+    eFILTER              = 1 << 11,
+    /** SVGGeometryElement */
+    eSHAPE               = 1 << 12
   };
 
   /**
@@ -503,12 +498,43 @@ public:
     return const_cast<nsINode*>(this)->AsContent();
   }
 
+  /*
+   * Return whether the node is a Text node (which might be an actual
+   * textnode, or might be a CDATA section).
+   */
+  bool IsText() const
+  {
+    uint32_t nodeType = NodeType();
+    return nodeType == TEXT_NODE || nodeType == CDATA_SECTION_NODE;
+  }
+
   /**
    * Return this node as Text if it is one, otherwise null.  This is defined
    * inline in Text.h.
    */
   mozilla::dom::Text* GetAsText();
   const mozilla::dom::Text* GetAsText() const;
+
+  /*
+   * Return whether the node is a ProcessingInstruction node.
+   */
+  bool IsProcessingInstruction() const
+  {
+    return NodeType() == PROCESSING_INSTRUCTION_NODE;
+  }
+
+  /*
+   * Return whether the node is a CharacterData node (text, cdata,
+   * comment, processing instruction)
+   */
+  bool IsCharacterData() const
+  {
+    uint32_t nodeType = NodeType();
+    return nodeType == TEXT_NODE ||
+           nodeType == CDATA_SECTION_NODE ||
+           nodeType == PROCESSING_INSTRUCTION_NODE ||
+           nodeType == COMMENT_NODE;
+  }
 
   virtual nsIDOMNode* AsDOMNode() = 0;
 
@@ -844,26 +870,7 @@ public:
    *                       (though a null return value does not imply the
    *                       property was not set, i.e. it can be set to null).
    */
-  void* GetProperty(nsAtom *aPropertyName,
-                    nsresult *aStatus = nullptr) const
-  {
-    return GetProperty(0, aPropertyName, aStatus);
-  }
-
-  /**
-   * Get a property associated with this node.
-   *
-   * @param aCategory      category of property to get.
-   * @param aPropertyName  name of property to get.
-   * @param aStatus        out parameter for storing resulting status.
-   *                       Set to NS_PROPTABLE_PROP_NOT_THERE if the property
-   *                       is not set.
-   * @return               the property. Null if the property is not set
-   *                       (though a null return value does not imply the
-   *                       property was not set, i.e. it can be set to null).
-   */
-  void* GetProperty(uint16_t aCategory, nsAtom *aPropertyName,
-                    nsresult *aStatus = nullptr) const;
+  void* GetProperty(nsAtom* aPropertyName, nsresult* aStatus = nullptr) const;
 
   /**
    * Set a property to be associated with this node. This will overwrite an
@@ -882,43 +889,16 @@ public:
    *                                       was already set
    * @throws NS_ERROR_OUT_OF_MEMORY if that occurs
    */
-  nsresult SetProperty(nsAtom *aPropertyName, void *aValue,
+  nsresult SetProperty(nsAtom* aPropertyName,
+                       void* aValue,
                        NSPropertyDtorFunc aDtor = nullptr,
-                       bool aTransfer = false)
-  {
-    return SetProperty(0, aPropertyName, aValue, aDtor, aTransfer);
-  }
-
-  /**
-   * Set a property to be associated with this node. This will overwrite an
-   * existing value if one exists. The existing value is destroyed using the
-   * destructor function given when that value was set.
-   *
-   * @param aCategory       category of property to set.
-   * @param aPropertyName   name of property to set.
-   * @param aValue          new value of property.
-   * @param aDtor           destructor function to be used when this property
-   *                        is destroyed.
-   * @param aTransfer       if true the property will not be deleted when the
-   *                        ownerDocument of the node changes, if false it
-   *                        will be deleted.
-   * @param aOldValue [out] previous value of property.
-   *
-   * @return NS_PROPTABLE_PROP_OVERWRITTEN (success value) if the property
-   *                                       was already set
-   * @throws NS_ERROR_OUT_OF_MEMORY if that occurs
-   */
-  nsresult SetProperty(uint16_t aCategory,
-                       nsAtom *aPropertyName, void *aValue,
-                       NSPropertyDtorFunc aDtor = nullptr,
-                       bool aTransfer = false,
-                       void **aOldValue = nullptr);
+                       bool aTransfer = false);
 
   /**
    * A generic destructor for property values allocated with new.
    */
   template<class T>
-  static void DeleteProperty(void *, nsAtom *, void *aPropertyValue, void *)
+  static void DeleteProperty(void*, nsAtom*, void* aPropertyValue, void*)
   {
     delete static_cast<T *>(aPropertyValue);
   }
@@ -929,19 +909,7 @@ public:
    *
    * @param aPropertyName  name of property to destroy.
    */
-  void DeleteProperty(nsAtom *aPropertyName)
-  {
-    DeleteProperty(0, aPropertyName);
-  }
-
-  /**
-   * Destroys a property associated with this node. The value is destroyed
-   * using the destruction function given when that value was set.
-   *
-   * @param aCategory      category of property to destroy.
-   * @param aPropertyName  name of property to destroy.
-   */
-  void DeleteProperty(uint16_t aCategory, nsAtom *aPropertyName);
+  void DeleteProperty(nsAtom* aPropertyName);
 
   /**
    * Unset a property associated with this node. The value will not be
@@ -956,28 +924,7 @@ public:
    *                       (though a null return value does not imply the
    *                       property was not set, i.e. it can be set to null).
    */
-  void* UnsetProperty(nsAtom  *aPropertyName,
-                      nsresult *aStatus = nullptr)
-  {
-    return UnsetProperty(0, aPropertyName, aStatus);
-  }
-
-  /**
-   * Unset a property associated with this node. The value will not be
-   * destroyed but rather returned. It is the caller's responsibility to
-   * destroy the value after that point.
-   *
-   * @param aCategory      category of property to unset.
-   * @param aPropertyName  name of property to unset.
-   * @param aStatus        out parameter for storing resulting status.
-   *                       Set to NS_PROPTABLE_PROP_NOT_THERE if the property
-   *                       is not set.
-   * @return               the property. Null if the property is not set
-   *                       (though a null return value does not imply the
-   *                       property was not set, i.e. it can be set to null).
-   */
-  void* UnsetProperty(uint16_t aCategory, nsAtom *aPropertyName,
-                      nsresult *aStatus = nullptr);
+  void* UnsetProperty(nsAtom* aPropertyName, nsresult* aStatus = nullptr);
 
   bool HasProperties() const
   {
@@ -1010,6 +957,12 @@ public:
   {
     return mParent;
   }
+
+  /**
+   * This is similar to above, but in case 'this' is ShadowRoot, we return its
+   * host element.
+   */
+  nsINode* GetParentOrHostNode() const;
 
   enum FlattenedParentType { eNotForStyle, eForStyle };
 
@@ -1090,11 +1043,7 @@ public:
    * Returns true if this is a node belonging to a document that uses the Servo
    * style system.
    */
-#ifdef MOZ_STYLO
   bool IsStyledByServo() const;
-#else
-  bool IsStyledByServo() const { return false; }
-#endif
 
   inline void UnsetRestyleFlagsIfGecko();
 
@@ -1445,31 +1394,6 @@ protected:
   // should really only be called for elements and document fragments.
   mozilla::dom::Element* GetElementById(const nsAString& aId);
 
-  /**
-   * Associate an object aData to aKey on this node. If aData is null any
-   * previously registered object associated to aKey on this node will
-   * be removed.
-   * Should only be used to implement the DOM Level 3 UserData API.
-   *
-   * @param aKey the key to associate the object to
-   * @param aData the object to associate to aKey on this node (may be null)
-   * @param aResult [out] the previously registered object for aKey on this
-   *                      node, if any
-   * @return whether adding the object succeeded
-   */
-  nsresult SetUserData(const nsAString& aKey, nsIVariant* aData,
-                       nsIVariant** aResult);
-
-  /**
-   * Get the UserData object registered for a Key on this node, if any.
-   * Should only be used to implement the DOM Level 3 UserData API.
-   *
-   * @param aKey the key to get UserData for
-   * @return aResult the previously registered object for aKey on this node, if
-   *                 any
-   */
-  nsIVariant* GetUserData(const nsAString& aKey);
-
 public:
   void LookupPrefix(const nsAString& aNamespace, nsAString& aResult);
   bool IsDefaultNamespace(const nsAString& aNamespaceURI)
@@ -1654,11 +1578,6 @@ private:
     NodeHasTextNodeDirectionalityMap,
     // Set if a node in the node's parent chain has dir=auto.
     NodeAncestorHasDirAuto,
-    // Set if the element is in the scope of a scoped style sheet; this flag is
-    // only accurate for elements bound to a document
-    ElementIsInStyleScope,
-    // Set if the element is a scoped style sheet root
-    ElementIsScopedStyleRoot,
     // Set if the node is handling a click.
     NodeHandlingClick,
     // Set if the node has had :hover selectors matched against it
@@ -1787,23 +1706,6 @@ public:
   // Implemented in nsIContentInlines.h.
   inline bool NodeOrAncestorHasDirAuto() const;
 
-  void SetIsElementInStyleScope(bool aValue) {
-    MOZ_ASSERT(IsElement(), "SetIsInStyleScope on a non-Element node");
-    SetBoolFlag(ElementIsInStyleScope, aValue);
-  }
-  void SetIsElementInStyleScope() {
-    MOZ_ASSERT(IsElement(), "SetIsInStyleScope on a non-Element node");
-    SetBoolFlag(ElementIsInStyleScope);
-  }
-  void ClearIsElementInStyleScope() {
-    MOZ_ASSERT(IsElement(), "ClearIsInStyleScope on a non-Element node");
-    ClearBoolFlag(ElementIsInStyleScope);
-  }
-  bool IsElementInStyleScope() const { return GetBoolFlag(ElementIsInStyleScope); }
-
-  void SetIsScopedStyleRoot() { SetBoolFlag(ElementIsScopedStyleRoot); }
-  void ClearIsScopedStyleRoot() { ClearBoolFlag(ElementIsScopedStyleRoot); }
-  bool IsScopedStyleRoot() { return GetBoolFlag(ElementIsScopedStyleRoot); }
   bool HasRelevantHoverRules() const { return GetBoolFlag(NodeHasRelevantHoverRules); }
   void SetHasRelevantHoverRules() { SetBoolFlag(NodeHasRelevantHoverRules); }
   void SetParserHasNotified() { SetBoolFlag(ParserHasNotified); };
@@ -1875,8 +1777,10 @@ public:
   // aObject alive anymore.
   void UnbindObject(nsISupports* aObject);
 
-  void GetBoundMutationObservers(nsTArray<RefPtr<nsDOMMutationObserver> >& aResult);
   void GenerateXPath(nsAString& aResult);
+
+  already_AddRefed<mozilla::dom::Promise>
+  Localize(JSContext* aCx, mozilla::dom::L10nCallback& aCallback, mozilla::ErrorResult& aRv);
 
   already_AddRefed<mozilla::dom::AccessibleNode> GetAccessibleNode();
 
@@ -1957,13 +1861,6 @@ public:
   }
 
   nsDOMAttributeMap* GetAttributes();
-  void SetUserData(JSContext* aCx, const nsAString& aKey,
-                   JS::Handle<JS::Value> aData,
-                   JS::MutableHandle<JS::Value> aRetval,
-                   mozilla::ErrorResult& aError);
-  void GetUserData(JSContext* aCx, const nsAString& aKey,
-                   JS::MutableHandle<JS::Value> aRetval,
-                   mozilla::ErrorResult& aError);
 
   // Helper method to remove this node from its parent. This is not exposed
   // through WebIDL.
@@ -2182,11 +2079,7 @@ protected:
     if (IsStyledByServo()) {
       return aServoFunctor(ParseServoSelectorList(aSelectorString, aRv));
     }
-#ifdef MOZ_OLD_STYLE
-    return aGeckoFunctor(ParseSelectorList(aSelectorString, aRv));
-#else
     MOZ_CRASH("old style system disabled");
-#endif
   }
 
 public:

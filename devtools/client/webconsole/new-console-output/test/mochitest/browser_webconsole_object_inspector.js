@@ -8,13 +8,13 @@
 // Check expanding/collapsing object inspector in the console.
 const TEST_URI = "data:text/html;charset=utf8,<h1>test Object Inspector</h1>";
 
-add_task(async function () {
+add_task(async function() {
   let toolbox = await openNewTabAndToolbox(TEST_URI, "webconsole");
   let hud = toolbox.getCurrentPanel().hud;
 
   logAllStoreChanges(hud);
 
-  await ContentTask.spawn(gBrowser.selectedBrowser, null, function () {
+  await ContentTask.spawn(gBrowser.selectedBrowser, null, function() {
     content.wrappedJSObject.console.log(
       "oi-test",
       [1, 2, {a: "a", b: "b"}],
@@ -48,7 +48,7 @@ add_task(async function () {
   // |  1: 2
   // |  ▶︎ 2: {a: "a", b: "b"}
   // |  length: 3
-  // |  ▶︎ __proto__
+  // |  ▶︎ <prototype>
   is(arrayOiNodes.length, 6, "There is the expected number of nodes in the tree");
 
   info("Expanding a leaf of the array object inspector");
@@ -72,9 +72,9 @@ add_task(async function () {
   // |  ▼ 2: {…}
   // |  |  a: "a"
   // |  |  b: "b"
-  // |  |  ▶︎ __proto__
+  // |  |  ▶︎ <prototype>
   // |  length: 3
-  // |  ▶︎ __proto__
+  // |  ▶︎ <prototype>
   is(arrayOiNodes.length, 9, "There is the expected number of nodes in the tree");
 
   info("Collapsing the root");
@@ -121,6 +121,6 @@ add_task(async function () {
   // |  c: "c"
   // |  ▶︎ d: [3, 4]
   // |  length: 987
-  // |  ▶︎ __proto__
+  // |  ▶︎ <prototype>
   is(objectOiNodes.length, 5, "There is the expected number of nodes in the tree");
 });

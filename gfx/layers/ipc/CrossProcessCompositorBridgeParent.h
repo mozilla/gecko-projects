@@ -59,12 +59,6 @@ public:
 
   mozilla::ipc::IPCResult RecvCheckContentOnlyTDR(const uint32_t& sequenceNum, bool* isContentOnlyTDR) override;
 
-  mozilla::ipc::IPCResult RecvClearApproximatelyVisibleRegions(const uint64_t& aLayersId,
-                                                               const uint32_t& aPresShellId) override;
-
-  mozilla::ipc::IPCResult RecvNotifyApproximatelyVisibleRegion(const ScrollableLayerGuid& aGuid,
-                                                               const CSSIntRegion& aRegion) override;
-
   mozilla::ipc::IPCResult RecvAllPluginsCaptured() override { return IPC_OK(); }
 
   mozilla::ipc::IPCResult RecvGetFrameUniformity(FrameUniformityData* aOutData) override
@@ -95,6 +89,12 @@ public:
                          const TimeStamp& aTime) override;
   void LeaveTestMode(const uint64_t& aId) override;
   void ApplyAsyncProperties(LayerTransactionParent* aLayerTree) override;
+  void SetTestAsyncScrollOffset(const uint64_t& aLayersId,
+                                const FrameMetrics::ViewID& aScrollId,
+                                const CSSPoint& aPoint) override;
+  void SetTestAsyncZoom(const uint64_t& aLayersId,
+                        const FrameMetrics::ViewID& aScrollId,
+                        const LayerToParentLayerScale& aZoom) override;
   void FlushApzRepaints(const uint64_t& aLayersId) override;
   void GetAPZTestData(const uint64_t& aLayersId,
                       APZTestData* aOutData) override;
@@ -116,6 +116,7 @@ public:
                     TimeStamp& aCompositeEnd) override;
 
   PTextureParent* AllocPTextureParent(const SurfaceDescriptor& aSharedData,
+                                      const ReadLockDescriptor& aReadLock,
                                       const LayersBackend& aLayersBackend,
                                       const TextureFlags& aFlags,
                                       const uint64_t& aId,

@@ -175,7 +175,7 @@
     "record_in_processes": ["main", "content"],
     "alert_emails": ["padenot@mozilla.com", "kinetik@flim.org"],
     "bug_numbers": [1280630],
-    "expires_in_version": "60",
+    "expires_in_version": "65",
     "kind": "enumerated",
     "n_values": 16,
     "description": "The operating system audio back-end used when successfully opening an audio stream, or whether the failure occurred on the first try or not <https://dxr.mozilla.org/mozilla-central/search?q=AUDIOSTREAM_BACKEND_ID_STR>",
@@ -443,246 +443,6 @@
     "kind" : "exponential",
     "high": 60000,
     "n_buckets": 50
-  },
-  "CREATE_EVENT_BEFOREUNLOADEVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"beforeunloadevent\") ever called",
-    "expires_in_version": "60",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198, 1358893]
-  },
-  "CREATE_EVENT_COMPOSITIONEVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"compositionevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_CUSTOMEVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"customevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_DEVICEMOTIONEVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"devicemotionevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_DEVICEORIENTATIONEVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"deviceorientationevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_DRAGEVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"dragevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_ERROREVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"errorevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198, 1333901]
-  },
-  "CREATE_EVENT_EVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"event\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_EVENTS" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"events\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_HASHCHANGEEVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"hashchangeevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_HTMLEVENTS" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"htmlevents\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_KEYBOARDEVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"keyboardevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_KEYEVENTS" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"keyevents\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_MESSAGEEVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"messageevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_MOUSEEVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"mouseevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_MOUSEEVENTS" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"mouseevents\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_MOUSESCROLLEVENTS" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"mousescrollevents\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_MUTATIONEVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"mutationevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_MUTATIONEVENTS" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"mutationevents\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_POPSTATEEVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"popstateevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_SCROLLAREAEVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"scrollareaevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_STORAGEEVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"storageevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_SVGEVENTS" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"svgevents\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_TEXTEVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"textevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_TIMEEVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"timeevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_TOUCHEVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"touchevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_UIEVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"uievent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_UIEVENTS" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"uievents\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_XULCOMMANDEVENT" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"xulcommandevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_XULCOMMANDEVENTS" : {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"xulcommandevents\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
   },
   "CYCLE_COLLECTOR": {
     "record_in_processes": ["main", "content"],
@@ -2869,6 +2629,17 @@
     "n_values": 16,
     "releaseChannelCollection": "opt-out",
     "description": "Channel Disposition: 0=Cancel, 1=Disk, 2=NetOK, 3=NetEarlyFail, 4=NetlateFail, +8 for HTTPS"
+  },
+  "HTTP_CHANNEL_DISPOSITION_UPGRADE" : {
+    "record_in_processes": ["main"],
+    "alert_emails": ["necko@mozilla.com", "seceng-telemetry@mozilla.com", "jkt@mozilla.com"],
+    "bug_numbers": [1440701],
+    "expires_in_version": "70",
+    "kind": "categorical",
+    "keyed": true,
+    "releaseChannelCollection": "opt-out",
+    "description": "Upgrading display content Channel Disposition",
+    "labels": ["cancel", "disk", "netOk", "netEarlyFail", "netLateFail"]
   },
   "HTTP_CONNECTION_ENTRY_CACHE_HIT_1" : {
     "record_in_processes": ["main", "content"],
@@ -6160,16 +5931,6 @@
     "n_buckets": 20,
     "description": "Firefox: Time in ms spent updating UI in response to a tab switch"
   },
-  "FX_TAB_SWITCH_TOTAL_MS": {
-    "record_in_processes": ["main"],
-    "alert_emails": ["mconley@mozilla.com"],
-    "expires_in_version": "57",
-    "kind": "exponential",
-    "high": 1000,
-    "n_buckets": 20,
-    "releaseChannelCollection": "opt-out",
-    "description": "Firefox: Time in ms till a tab switch is complete including the first paint for non-e10s windows"
-  },
   "FX_TAB_SWITCH_TOTAL_E10S_MS": {
     "record_in_processes": ["main"],
     "alert_emails": ["mconley@mozilla.com"],
@@ -6200,6 +5961,16 @@
     "alert_emails": ["mconley@mozilla.com"],
     "releaseChannelCollection": "opt-out",
     "description": "Firefox: If the spinner interstitial displays during tab switching, records the time in ms the graphic is visible. This probe is similar to FX_TAB_SWITCH_SPINNER_VISIBLE_MS, but is for truly degenerate cases."
+  },
+  "FX_TAB_SWITCH_SPINNER_VISIBLE_TRIGGER": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["dothayer@mozilla.com"],
+    "bug_numbers": [1442068],
+    "expires_in_version": "63",
+    "kind": "categorical",
+    "labels": ["none", "preActions", "postActions", "onLoadTimeout", "onLayersReady", "onSizeModeOrOcc", "onEndSwapDocShells"],
+    "releaseChannelCollection": "opt-out",
+    "description": "Diagnostic probe to aid in categorizing tab switch spinners. Records what most recently set the loadTimer to null if a spinner was displayed."
   },
   "FX_TAB_SWITCH_REQUEST_TAB_WARMING_STATE": {
     "record_in_processes": ["main"],
@@ -6983,10 +6754,12 @@
     "labels": [
       "enter",
       "enterSelection",
-      "click"
+      "click",
+      "arrowEnterSelection",
+      "tabEnterSelection"
     ],
     "bug_numbers": [1334615],
-    "description": "The input method the user used to select a result in the urlbar. 'enter' => The user hit the Enter key on the heuristic result at index 0. 'enterSelection' => The user chose a non-heuristic result and then hit the Enter key. 'click' => The user clicked a result with the mouse."
+    "description": "The input method the user used to select a result in the urlbar. 'enter' => The user hit the Enter key on the heuristic result at index 0. 'enterSelection' => The user chose a non-heuristic result (in exotic ways) and then hit the Enter key. 'click' => The user clicked a result with the mouse. 'arrowEnterSelection' => The user chose a non-heuristic result using arrow keys and then hit the Enter key. 'tabEnterSelection' => The user chose a non-heuristic result using tab at least once and then hit the Enter key."
   },
   "FX_SEARCHBAR_SELECTED_RESULT_METHOD": {
     "record_in_processes": ["main", "content"],
@@ -8056,13 +7829,6 @@
     "kind": "enumerated",
     "n_values": 100,
     "description": "Security-related UI events (addons, form submission, TLS certs, Safe Browsing, updates and geolocation). See /security/manager/ssl/nsISecurityUITelemetry.idl for the specific values."
-  },
-  "JS_TELEMETRY_ADDON_EXCEPTIONS" : {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version" : "never",
-    "kind": "count",
-    "keyed" : true,
-    "description" : "Exceptions thrown by add-ons"
   },
   "IPC_TRANSACTION_CANCEL": {
     "record_in_processes": ["main", "content"],
@@ -9528,7 +9294,7 @@
     "alert_emails": ["dev-developer-tools@lists.mozilla.org", "apoirot@mozilla.com"],
     "expires_in_version": "never",
     "kind": "categorical",
-    "labels": ["KeyShortcut", "SystemMenu", "HamburgerMenu", "ContextMenu", "CommandLine"],
+    "labels": ["KeyShortcut", "SystemMenu", "HamburgerMenu", "ContextMenu", "CommandLine", "DeveloperToolbar", "SessionRestore"],
     "releaseChannelCollection": "opt-out",
     "description": "Records how the user is triggering Developer Tools startup."
   },
@@ -9730,15 +9496,6 @@
     "description": "Number of times the DevTools Paint Flashing has been opened via the toolbox button.",
     "releaseChannelCollection": "opt-out"
   },
-  "DEVTOOLS_TILT_OPENED_COUNT": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["dev-developer-tools@lists.mozilla.org"],
-    "expires_in_version": "never",
-    "kind": "count",
-    "bug_numbers": [1247985],
-    "description": "Number of times the DevTools Tilt has been opened via the toolbox button.",
-    "releaseChannelCollection": "opt-out"
-  },
   "DEVTOOLS_SCRATCHPAD_OPENED_COUNT": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["dev-developer-tools@lists.mozilla.org"],
@@ -9853,6 +9610,9 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the toolbox been active (seconds)"
   },
   "DEVTOOLS_OPTIONS_TIME_ACTIVE_SECONDS": {
@@ -9861,6 +9621,9 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the options panel been active (seconds)"
   },
   "DEVTOOLS_WEBCONSOLE_TIME_ACTIVE_SECONDS": {
@@ -9869,6 +9632,9 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the web console been active (seconds)"
   },
   "DEVTOOLS_BROWSERCONSOLE_TIME_ACTIVE_SECONDS": {
@@ -9877,6 +9643,9 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the browser console been active (seconds)"
   },
   "DEVTOOLS_INSPECTOR_TIME_ACTIVE_SECONDS": {
@@ -9885,6 +9654,9 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the inspector been active (seconds)"
   },
   "DEVTOOLS_RULEVIEW_TIME_ACTIVE_SECONDS": {
@@ -9893,6 +9665,9 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the rule view been active (seconds)"
   },
   "DEVTOOLS_COMPUTEDVIEW_TIME_ACTIVE_SECONDS": {
@@ -9901,16 +9676,20 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the computed view been active (seconds)"
   },
   "DEVTOOLS_LAYOUTVIEW_TIME_ACTIVE_SECONDS": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["dev-developer-tools@lists.mozilla.org"],
     "expires_in_version": "never",
     "kind": "exponential",
-    "bug_numbers": [1347552],
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1347552, 1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the layout view been active (seconds)"
   },
   "DEVTOOLS_FONTINSPECTOR_TIME_ACTIVE_SECONDS": {
@@ -9919,6 +9698,9 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the font inspector been active (seconds)"
   },
   "DEVTOOLS_ANIMATIONINSPECTOR_TIME_ACTIVE_SECONDS": {
@@ -9927,6 +9709,9 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the animation inspector been active (seconds)"
   },
   "DEVTOOLS_JSDEBUGGER_TIME_ACTIVE_SECONDS": {
@@ -9935,6 +9720,9 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the JS debugger been active (seconds)"
   },
   "DEVTOOLS_JSBROWSERDEBUGGER_TIME_ACTIVE_SECONDS": {
@@ -9943,6 +9731,9 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the JS browser debugger been active (seconds)"
   },
   "DEVTOOLS_STYLEEDITOR_TIME_ACTIVE_SECONDS": {
@@ -9951,6 +9742,9 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the style editor been active (seconds)"
   },
   "DEVTOOLS_SHADEREDITOR_TIME_ACTIVE_SECONDS": {
@@ -9959,6 +9753,9 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the Shader Editor been active (seconds)"
   },
   "DEVTOOLS_WEBAUDIOEDITOR_TIME_ACTIVE_SECONDS": {
@@ -9967,6 +9764,9 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the Web Audio Editor been active (seconds)"
   },
   "DEVTOOLS_CANVASDEBUGGER_TIME_ACTIVE_SECONDS": {
@@ -9975,6 +9775,9 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the Canvas Debugger been active (seconds)"
   },
   "DEVTOOLS_JSPROFILER_TIME_ACTIVE_SECONDS": {
@@ -9983,6 +9786,9 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the JS profiler been active (seconds)"
   },
   "DEVTOOLS_MEMORY_TIME_ACTIVE_SECONDS": {
@@ -9991,6 +9797,9 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the Memory Tool been active (seconds)"
   },
   "DEVTOOLS_NETMONITOR_TIME_ACTIVE_SECONDS": {
@@ -9999,6 +9808,9 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the network monitor been active (seconds)"
   },
   "DEVTOOLS_STORAGE_TIME_ACTIVE_SECONDS": {
@@ -10007,16 +9819,20 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the storage inspector been active (seconds)"
   },
   "DEVTOOLS_DOM_TIME_ACTIVE_SECONDS": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["dev-developer-tools@lists.mozilla.org"],
     "expires_in_version": "never",
     "kind": "exponential",
-    "bug_numbers": [1343501],
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1343501, 1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the DOM inspector been active (seconds)"
   },
   "DEVTOOLS_PAINTFLASHING_TIME_ACTIVE_SECONDS": {
@@ -10025,15 +9841,10 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has paint flashing been active (seconds)"
-  },
-  "DEVTOOLS_TILT_TIME_ACTIVE_SECONDS": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000000,
-    "n_buckets": 100,
-    "description": "How long has Tilt been active (seconds)"
   },
   "DEVTOOLS_SCRATCHPAD_TIME_ACTIVE_SECONDS": {
     "record_in_processes": ["main", "content"],
@@ -10041,17 +9852,21 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has Scratchpad been active (seconds)"
   },
   "DEVTOOLS_RESPONSIVE_TIME_ACTIVE_SECONDS": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "55",
+    "expires_in_version": "never",
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
-    "bug_numbers": [1242057],
-    "description": "How long has the responsive view been active (seconds)",
-    "releaseChannelCollection": "opt-out"
+    "bug_numbers": [1242057, 1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
+    "description": "How long has the responsive view been active (seconds)"
   },
   "DEVTOOLS_DEVELOPERTOOLBAR_TIME_ACTIVE_SECONDS": {
     "record_in_processes": ["main", "content"],
@@ -10059,15 +9874,20 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has the developer toolbar been active (seconds)"
   },
   "DEVTOOLS_ABOUTDEBUGGING_TIME_ACTIVE_SECONDS": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jan@mozilla.com"],
-    "expires_in_version": "55",
+    "expires_in_version": "never",
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has about:debugging been active? (seconds) (bug 1204601)"
   },
   "DEVTOOLS_WEBIDE_TIME_ACTIVE_SECONDS": {
@@ -10076,6 +9896,9 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has WebIDE been active (seconds)"
   },
   "DEVTOOLS_CUSTOM_TIME_ACTIVE_SECONDS": {
@@ -10084,6 +9907,9 @@
     "kind": "exponential",
     "high": 10000000,
     "n_buckets": 100,
+    "bug_numbers": [1446496],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "How long has a custom developer tool been active (seconds)"
   },
   "DEVTOOLS_WEBIDE_CONNECTION_RESULT": {
@@ -10322,27 +10148,6 @@
     "bug_numbers": [1373483],
     "description": "On page load, record the number of CSS Grid elements present on a page when the DevTools is open",
     "releaseChannelCollection": "opt-out"
-  },
-  "VIEW_SOURCE_IN_BROWSER_OPENED_BOOLEAN": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["mozilla-dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
-    "expires_in_version": "53",
-    "kind": "boolean",
-    "description": "How many times has view source in browser / tab been opened?"
-  },
-  "VIEW_SOURCE_IN_WINDOW_OPENED_BOOLEAN": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["mozilla-dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
-    "expires_in_version": "53",
-    "kind": "boolean",
-    "description": "How many times has view source in a new window been opened?"
-  },
-  "VIEW_SOURCE_EXTERNAL_RESULT_BOOLEAN": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["mozilla-dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
-    "expires_in_version": "53",
-    "kind": "boolean",
-    "description": "How many times has view source in an external editor been opened, and did it succeed?"
   },
   "BROWSER_IS_USER_DEFAULT": {
     "record_in_processes": ["main"],
@@ -11008,6 +10813,9 @@
   "CERT_VALIDATION_SUCCESS_BY_CA": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
+    "alert_emails": ["jjones@mozilla.com", "seceng-telemetry@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
+    "bug_numbers": [1364159, 1369747, 1441550],
     "kind": "enumerated",
     "n_values": 256,
     "description": "Successful SSL server cert validations by CA (see RootHashes.inc for names of CAs)"
@@ -13028,7 +12836,7 @@
   "FENNEC_SESSIONSTORE_DAMAGED_SESSION_FILE": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["jh+bugzilla@buttercookie.de"],
-    "expires_in_version": "61",
+    "expires_in_version": "66",
     "kind": "flag",
     "bug_numbers": [1284017],
     "description": "When restoring tabs on startup, reading from sessionstore.js failed, even though the file exists and is not containing an explicitly empty window.",
@@ -13037,7 +12845,7 @@
   "FENNEC_SESSIONSTORE_RESTORING_FROM_BACKUP": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["jh+bugzilla@buttercookie.de"],
-    "expires_in_version": "61",
+    "expires_in_version": "66",
     "kind": "flag",
     "bug_numbers": [1190627],
     "description": "When restoring tabs on startup, reading from sessionstore.js failed, but sessionstore.bak was read successfully.",
@@ -13046,7 +12854,7 @@
   "FENNEC_SESSIONSTORE_ALL_FILES_DAMAGED": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["jh+bugzilla@buttercookie.de"],
-    "expires_in_version": "61",
+    "expires_in_version": "66",
     "kind": "flag",
     "bug_numbers": [1337115],
     "description": "Both the main session file and its backup could not be read and and the first run pref is false.",
@@ -13059,16 +12867,6 @@
     "bug_numbers": [1296606],
     "kind": "count",
     "description": "Number of named browser profiles for the current user, as reported by the profile service at startup."
-  },
-  "WEB_PERMISSION_CLEARED": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["firefox-dev@mozilla.org"],
-    "bug_numbers": [1286118],
-    "expires_in_version": "55",
-    "kind": "enumerated",
-    "keyed": true,
-    "n_values": 6,
-    "description": "Number of revoke actions on permissions in the control center, keyed by permission id. Values represent the permission type that was revoked. (0=unknown, 1=permanently allowed, 2=permanently blocked, 3=temporarily allowed, 4=temporarily blocked)"
   },
   "TIME_TO_FIRST_CLICK_MS": {
     "record_in_processes": ["main", "content"],

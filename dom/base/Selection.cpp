@@ -42,8 +42,6 @@
 #include "nsBidiPresUtils.h"
 #include "nsTextFrame.h"
 
-#include "nsIDOMText.h"
-
 #include "nsContentUtils.h"
 #include "nsThreadUtils.h"
 
@@ -223,7 +221,7 @@ public:
       mContent = nullptr;
 
       nsPoint pt = mPoint -
-        frame->GetOffsetTo(mPresContext->PresShell()->FrameManager()->GetRootFrame());
+        frame->GetOffsetTo(mPresContext->PresShell()->GetRootFrame());
       RefPtr<nsFrameSelection> frameSelection = mFrameSelection;
       frameSelection->HandleDrag(frame, pt);
       if (!frame.IsAlive()) {
@@ -907,10 +905,11 @@ CompareToRangeStart(nsINode* aCompareNode, int32_t aCompareOffset,
 {
   nsINode* start = aRange->GetStartContainer();
   NS_ENSURE_STATE(aCompareNode && start);
-  // If the nodes that we're comparing are not in the same document,
-  // assume that aCompareNode will fall at the end of the ranges.
+  // If the nodes that we're comparing are not in the same document or in the
+  // same subtree, assume that aCompareNode will fall at the end of the ranges.
   if (aCompareNode->GetComposedDoc() != start->GetComposedDoc() ||
-      !start->GetComposedDoc()) {
+      !start->GetComposedDoc() ||
+      aCompareNode->SubtreeRoot() != start->SubtreeRoot()) {
     *aCmp = 1;
   } else {
     *aCmp = nsContentUtils::ComparePoints(aCompareNode, aCompareOffset,
@@ -925,10 +924,11 @@ CompareToRangeEnd(nsINode* aCompareNode, int32_t aCompareOffset,
 {
   nsINode* end = aRange->GetEndContainer();
   NS_ENSURE_STATE(aCompareNode && end);
-  // If the nodes that we're comparing are not in the same document,
-  // assume that aCompareNode will fall at the end of the ranges.
+  // If the nodes that we're comparing are not in the same document or in the
+  // same subtree, assume that aCompareNode will fall at the end of the ranges.
   if (aCompareNode->GetComposedDoc() != end->GetComposedDoc() ||
-      !end->GetComposedDoc()) {
+      !end->GetComposedDoc() ||
+      aCompareNode->SubtreeRoot() != end->SubtreeRoot()) {
     *aCmp = 1;
   } else {
     *aCmp = nsContentUtils::ComparePoints(aCompareNode, aCompareOffset,
@@ -1792,7 +1792,7 @@ Selection::SelectFrames(nsPresContext* aPresContext, nsRange* aRange,
   if (mFrameSelection->GetTableCellSelection()) {
     nsINode* node = aRange->GetCommonAncestor();
     nsIFrame* frame = node->IsContent() ? node->AsContent()->GetPrimaryFrame()
-                                : aPresContext->FrameManager()->GetRootFrame();
+                                : aPresContext->PresShell()->GetRootFrame();
     if (frame) {
       frame->InvalidateFrameSubtree();
     }
@@ -2179,7 +2179,7 @@ Selection::DoAutoScroll(nsIFrame* aFrame, nsPoint aPoint)
   nsRootPresContext* rootPC = presContext->GetRootPresContext();
   if (!rootPC)
     return NS_OK;
-  nsIFrame* rootmostFrame = rootPC->PresShell()->FrameManager()->GetRootFrame();
+  nsIFrame* rootmostFrame = rootPC->PresShell()->GetRootFrame();
   AutoWeakFrame weakRootFrame(rootmostFrame);
   AutoWeakFrame weakFrame(aFrame);
   // Get the point relative to the root most frame because the scroll we are
@@ -2225,7 +2225,7 @@ Selection::DoAutoScroll(nsIFrame* aFrame, nsPoint aPoint)
   // Start the AutoScroll timer if necessary.
   if (didScroll && mAutoScrollTimer) {
     nsPoint presContextPoint = globalPoint -
-      shell->FrameManager()->GetRootFrame()->GetOffsetToCrossDoc(rootmostFrame);
+      shell->GetRootFrame()->GetOffsetToCrossDoc(rootmostFrame);
     mAutoScrollTimer->Start(presContext, presContextPoint);
   }
 
