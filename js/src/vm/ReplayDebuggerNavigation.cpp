@@ -85,6 +85,13 @@ CopyVector(T& dst, const T& src)
     TRY(dst.append(src.begin(), src.length()));
 }
 
+static void
+ExecutionPositionToString(const ExecutionPosition& pos, Sprinter& sp)
+{
+    sp.printf("{ Kind: %s, Script: %d, Offset: %d, Frame: %d }",
+              pos.kindString(), (int) pos.script, (int) pos.offset, (int) pos.frameIndex);
+}
+
 // Identify a unique point in the JS execution of a process.
 struct ExecutionPoint
 {
@@ -109,6 +116,14 @@ struct ExecutionPoint
     ExecutionPoint(const ExecutionPoint& o) { *this = o; }
 
     typedef size_t Prefix;
+
+    void toString(Sprinter& sp) {
+        sp.printf("Snapshot %d Positions %d:", (int) snapshot, (int) positions.length());
+        for (const ExecutionPosition& pos : positions) {
+            sp.printf(" ");
+            ExecutionPositionToString(pos, sp);
+        }
+    }
 };
 
 // Information about a debugger request sent by the middleman.
@@ -138,16 +153,17 @@ typedef Vector<RequestInfo, 4, UntrackedAllocPolicy> UntrackedRequestVector;
 class NavigationPhase
 {
     MOZ_NORETURN void unsupported(const char* operation) {
-        char buf[1024];
-        toString(buf, sizeof(buf));
+        Sprinter sp(nullptr);
+        (void) sp.init();
+        toString(sp);
 
         AutoEnsurePassThroughThreadEvents pt;
-        fprintf(stderr, "Operation %s not supported: %s\n", operation, buf);
+        fprintf(stderr, "Operation %s not supported: %s\n", operation, sp.string());
         MOZ_CRASH();
     }
 
   public:
-    virtual void toString(char* buf, size_t len) = 0;
+    virtual void toString(Sprinter& sp) = 0;
 
     // The process has just reached or rewound to a snapshot.
     virtual void afterSnapshot(size_t snapshot, bool final) {
@@ -230,9 +246,9 @@ class BreakpointPausedPhase : public NavigationPhase
   public:
     void enter(const PauseInfo& info, bool recoveringFromDivergence = false);
 
-    void toString(char* buf, size_t len) override {
-        snprintf(buf, len, "BreakpointPaused Breakpoint %zu OtherBreakpointsCount %zu",
-                 mInfo.mBreakpoint, mInfo.mRemainingBreakpoints.length());
+    void toString(Sprinter& sp) override {
+        sp.printf("BreakpointPaused Breakpoint %zu OtherBreakpointsCount %zu",
+                  mInfo.mBreakpoint, mInfo.mRemainingBreakpoints.length());
     }
 
     void afterSnapshot(size_t snapshot, bool final) override;
@@ -254,8 +270,8 @@ class SnapshotPausedPhase : public NavigationPhase
   public:
     void enter(size_t snapshot, bool final, bool rewind);
 
-    void toString(char* buf, size_t len) override {
-        snprintf(buf, len, "SnapshotPaused");
+    void toString(Sprinter& sp) override {
+        sp.printf("SnapshotPaused");
     }
 
     void afterSnapshot(size_t snapshot, bool final) override;
@@ -274,8 +290,8 @@ class ForwardPhase : public NavigationPhase
   public:
     void enter(const ExecutionPoint& point);
 
-    void toString(char* buf, size_t len) override {
-        snprintf(buf, len, "Forward");
+    void toString(Sprinter& sp) override {
+        sp.printf("Forward");
     }
 
     void afterSnapshot(size_t snapshot, bool final) override;
@@ -297,6 +313,15 @@ class ReachPointPhase : public NavigationPhase
   private:
     Kind mKind;
 
+    const char* kindString() {
+        switch (mKind) {
+          case Resume: return "Resume";
+          case HitBreakpoint: return "HitBreakpoint";
+          case RecoverFromDivergence: return "RecoverFromDivergence";
+        }
+        MOZ_CRASH("Bad ReachPointPhase kind");
+    }
+
     // The point we are running to.
     ExecutionPoint mPoint;
 
@@ -305,6 +330,9 @@ class ReachPointPhase : public NavigationPhase
 
     // Prefix after which to decide whether to take a temporary snapshot.
     Maybe<ExecutionPoint::Prefix> mTemporarySnapshotPrefix;
+
+    // Whether we have taken a temporary snapshot at the specified prefix.
+    bool mTookTemporarySnapshot;
 
     // If we are recovering from a recording divergence, the information to
     // instantiate the pause state with when we reach the target point.
@@ -318,8 +346,11 @@ class ReachPointPhase : public NavigationPhase
                const Maybe<ExecutionPoint::Prefix>& temporarySnapshotPrefix,
                const PauseInfo& pauseInfo, bool rewind);
 
-    void toString(char* buf, size_t len) override {
-        snprintf(buf, len, "ReachPoint");
+    void toString(Sprinter& sp) override {
+        sp.printf("ReachPoint %s: ", kindString());
+        mPoint.toString(sp);
+        if (mTemporarySnapshotPrefix.isSome())
+            sp.printf(" TemporarySnapshotPrefix %d", (int) mTemporarySnapshotPrefix.ref());
     }
 
     void afterSnapshot(size_t snapshot, bool final) override;
@@ -355,8 +386,8 @@ class FindLastHitPhase : public NavigationPhase
     // Note: this always rewinds.
     void enter(const ExecutionPoint& point);
 
-    void toString(char* buf, size_t len) override {
-        snprintf(buf, len, "FindLastHit");
+    void toString(Sprinter& sp) override {
+        sp.printf("FindLastHit");
     }
 
     void afterSnapshot(size_t snapshot, bool final) override;
@@ -374,8 +405,8 @@ class RemoveTemporarySnapshotsPhase : public NavigationPhase
     // Note: this always rewinds.
     void enter(size_t snapshot);
 
-    void toString(char* buf, size_t len) override {
-        snprintf(buf, len, "RemoveTemporarySnapshots");
+    void toString(Sprinter& sp) override {
+        sp.printf("RemoveTemporarySnapshots");
     }
 
     void afterSnapshot(size_t snapshot, bool final) override;
@@ -410,11 +441,12 @@ struct NavigationState
         mPhase = phase;
 
         if (gSpewEnabled) {
-            char buf[1024];
-            mPhase->toString(buf, sizeof(buf));
+            Sprinter sp(nullptr);
+            (void) sp.init();
+            mPhase->toString(sp);
 
             AutoEnsurePassThroughThreadEvents pt;
-            fprintf(stderr, "SetNavigationPhase %s\n", buf);
+            fprintf(stderr, "SetNavigationPhase %s\n", sp.string());
         }
     }
 
@@ -424,6 +456,10 @@ struct NavigationState
     ReachPointPhase mReachPointPhase;
     FindLastHitPhase mFindLastHitPhase;
     RemoveTemporarySnapshotsPhase mRemoveTemporarySnapshotsPhase;
+
+    // For testing, specify that temporary snapshots should be taken irrespective
+    // of how much time has elapsed.
+    bool mAlwaysTakeTemporarySnapshots;
 
     // Note: NavigationState is initially zeroed.
     NavigationState()
@@ -510,7 +546,7 @@ BreakpointPausedPhase::resume(bool forward, bool hitOtherBreakpoints)
         // If we are paused at a breakpoint and are replaying, we may have
         // diverged from the recording. We have to clear any unwanted changes
         // induced by evals and so forth by rewinding to the last snapshot
-        // encountered, then running  forward to the current execution point
+        // encountered, then running forward to the current execution point
         // and resuming normal forward execution from there.
         if (IsReplaying()) {
             // Allow taking a temporary snapshot after reaching the destination.
@@ -754,6 +790,7 @@ ReachPointPhase::enter(Kind kind, const ExecutionPoint& point,
     mPoint = point;
     mReached = 0;
     mTemporarySnapshotPrefix = temporarySnapshotPrefix;
+    mTookTemporarySnapshot = false;
     mPauseInfo = pauseInfo;
 
     gNavigation->setPhase(this);
@@ -771,9 +808,10 @@ ReachPointPhase::afterSnapshot(size_t snapshot, bool final)
 {
     if (snapshot != mPoint.snapshot) {
         // We just took a temporary snapshot.
+        MOZ_RELEASE_ASSERT(mTookTemporarySnapshot);
         MOZ_RELEASE_ASSERT(snapshot == mPoint.snapshot + 1);
-        MOZ_RELEASE_ASSERT(mTemporarySnapshotPrefix.isSome() &&
-                           mTemporarySnapshotPrefix.ref() == mReached);
+        MOZ_RELEASE_ASSERT(mTemporarySnapshotPrefix.isSome());
+        MOZ_RELEASE_ASSERT(mTemporarySnapshotPrefix.ref() == mReached);
         return;
     }
 
@@ -790,6 +828,12 @@ ReachPointPhase::afterSnapshot(size_t snapshot, bool final)
 // will take a temporary snapshot.
 static const double TemporarySnapshotThresholdMs = 10;
 
+static void
+AlwaysTakeTemporarySnapshotsHook()
+{
+    gNavigation->mAlwaysTakeTemporarySnapshots = true;
+}
+
 void
 ReachPointPhase::positionHit(const std::function<bool(const ExecutionPosition&)>& match)
 {
@@ -801,8 +845,11 @@ ReachPointPhase::positionHit(const std::function<bool(const ExecutionPosition&)>
     if (mTemporarySnapshotPrefix.isSome() && mTemporarySnapshotPrefix.ref() == mReached) {
         // We've reached the point at which we have the option of taking a snapshot.
         double elapsedMs = (ReallyNow() - mStartTime).ToMilliseconds();
-        if (elapsedMs >= TemporarySnapshotThresholdMs) {
+        if (elapsedMs >= TemporarySnapshotThresholdMs || gNavigation->mAlwaysTakeTemporarySnapshots) {
             size_t numTemporarySnapshots = gNavigation->temporarySnapshots.length();
+
+            MOZ_RELEASE_ASSERT(!mTookTemporarySnapshot);
+            mTookTemporarySnapshot = true;
 
             TakeTemporarySnapshot();
 
@@ -1257,11 +1304,12 @@ class DebuggerHandlerManager
             if (script)
                 TRY(debugger->ensureExecutionObservabilityOfScript(cx, script));
             else
-                TRY(debugger->updateObservesAllExecutionOnDebuggees(cx, Debugger::Observing));
+                observeAllExecution(cx);
             break;
           case ExecutionPosition::EnterFrame: {
             if (mInstalledEnterFrameHandler)
                 return true;
+            observeAllExecution(cx);
             RootedObject handler(cx, NewNativeFunction(cx, EnterFrameHandler, 1, nullptr));
             TRY(handler);
             RootedValue handlerValue(cx, ObjectValue(*handler));
@@ -1273,6 +1321,14 @@ class DebuggerHandlerManager
           MOZ_CRASH();
         }
         return true;
+    }
+
+    void observeAllExecution(JSContext* cx) {
+        RootedValue unused(cx);
+        TRY(JS_CallFunctionName(cx, *gHookDebugger, "addAllGlobalsAsDebuggees",
+                                JS::HandleValueArray::empty(), &unused));
+        Debugger* debugger = Debugger::fromJSObject(*gHookDebugger);
+        TRY(debugger->updateObservesAllExecutionOnDebuggees(cx, Debugger::Observing));
     }
 
   public:
@@ -1425,6 +1481,7 @@ ReplayDebugger::Initialize()
         JS::replay::hooks.resumeReplay = ResumeHook;
         JS::replay::hooks.respondAfterRecoveringFromDivergence = RespondAfterRecoveringFromDivergenceHook;
         JS::replay::hooks.setBreakpointReplay = SetBreakpointHook;
+        JS::replay::hooks.alwaysTakeTemporarySnapshots = AlwaysTakeTemporarySnapshotsHook;
 
         SetSnapshotHooks(::BeforeSnapshotHook, ::AfterSnapshotHook);
 

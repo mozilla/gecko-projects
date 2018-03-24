@@ -196,7 +196,7 @@ TakeSnapshot(bool aFinal, bool aTemporary)
 
   // Get the ID of the new snapshot.
   size_t snapshot = gRewindInfo->mTakenSnapshot ? gRewindInfo->mLastSnapshot + 1 : 0;
-  if (aFinal) {
+  if (aFinal && !gHasTemporarySnapshot) {
     MOZ_RELEASE_ASSERT(!gRewindInfo->mFinalSnapshot || gRewindInfo->mFinalSnapshot == snapshot);
     gRewindInfo->mFinalSnapshot = snapshot;
   } else if (aTemporary) {

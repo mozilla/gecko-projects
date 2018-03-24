@@ -507,6 +507,9 @@ RecordReplayInterface_InternalRecordReplayDirective(long aDirective)
     }
     gMemoryInfo->mCrashSoon = false;
     break;
+  case Directive::AlwaysTakeTemporarySnapshots:
+    JS::replay::hooks.alwaysTakeTemporarySnapshots();
+    break;
   default:
     MOZ_CRASH("Unknown directive");
   }

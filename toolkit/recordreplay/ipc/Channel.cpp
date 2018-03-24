@@ -255,6 +255,14 @@ PrintMessage(const char* aPrefix, const Message& aMsg)
     snprintf(data, 128, "Forward %d, HitOtherBreakpoints %d", nmsg.mForward, nmsg.mHitOtherBreakpoints);
     break;
   }
+  case MessageType::SetBreakpoint: {
+    const SetBreakpointMessage& nmsg = *(const SetBreakpointMessage*)&aMsg;
+    data = new char[128];
+    snprintf(data, 128, "Id %d, Kind %s, Script %d, Offset %d, Frame %d",
+             (int) nmsg.mId, nmsg.mPosition.kindString(), (int) nmsg.mPosition.script,
+             (int) nmsg.mPosition.offset, (int) nmsg.mPosition.frameIndex);
+    break;
+  }
   case MessageType::DebuggerRequest: {
     const DebuggerRequestMessage& nmsg = *(const DebuggerRequestMessage*)&aMsg;
     data = WideCharString(nmsg.Buffer(), nmsg.BufferSize());

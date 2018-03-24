@@ -113,7 +113,10 @@ enum class Directive
   CrashSoon = 1,
 
   // Irrevocably crash if CrashSoon has ever been used on the process.
-  MaybeCrash = 2
+  MaybeCrash = 2,
+
+  // Always take temporary snapshots when stepping around in the debugger.
+  AlwaysTakeTemporarySnapshots = 3,
 };
 
 ///////////////////////////////////////////////////////////////////////////////

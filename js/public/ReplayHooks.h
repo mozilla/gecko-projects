@@ -62,6 +62,17 @@ struct ExecutionPosition
             || (kind == OnPop && o.kind == OnPop && script == EMPTY_SCRIPT)
             || (kind == Break && o.kind == OnStep && script == o.script && offset == o.offset);
     }
+
+    const char* kindString() const {
+        switch (kind) {
+          case Invalid: return "Invalid";
+          case Break: return "Break";
+          case OnStep: return "OnStep";
+          case OnPop: return "OnPop";
+          case EnterFrame: return "EnterFrame";
+        }
+        MOZ_CRASH("Bad ExecutionPosition kind");
+    }
 };
 
 // These hooks are used for transmitting messages between a ReplayDebugger in
@@ -95,6 +106,9 @@ struct Hooks
     // Finish recovering from an unhandled divergence at a breakpoint, and send
     // a response to the middleman for the last request.
     void (*respondAfterRecoveringFromDivergence)();
+
+    // Notify the debugger that it should always take temporary snapshots.
+    void (*alwaysTakeTemporarySnapshots)();
 };
 
 extern Hooks hooks;
