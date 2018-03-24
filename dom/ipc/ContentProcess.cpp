@@ -216,18 +216,28 @@ ContentProcess::Init(int aArgc, char* aArgv[])
                                      /* auto_close */ true);
 #endif
 
-  // Set up early prefs from the shared memory.
-  base::SharedMemory shm;
-  if (!shm.SetHandle(prefsHandle, /* read_only */ true)) {
-    NS_ERROR("failed to open shared memory in the child");
-    return false;
+  if (recordreplay::IsRecordingOrReplaying()) {
+    // Set up early prefs from shmem contents passed to us by the middleman.
+    Preferences::DeserializePreferences(recordreplay::child::PrefsShmemContents(prefsLen),
+                                        prefsLen);
+  } else {
+    // Set up early prefs from the shared memory.
+    base::SharedMemory shm;
+    if (!shm.SetHandle(prefsHandle, /* read_only */ true)) {
+      NS_ERROR("failed to open shared memory in the child");
+      return false;
+    }
+    if (!shm.Map(prefsLen)) {
+      NS_ERROR("failed to map shared memory in the child");
+      return false;
+    }
+    Preferences::DeserializePreferences(static_cast<char*>(shm.memory()),
+                                        prefsLen);
+    if (recordreplay::IsMiddleman()) {
+      recordreplay::parent::NotePrefsShmemContents(static_cast<char*>(shm.memory()),
+                                                   prefsLen);
+    }
   }
-  if (!shm.Map(prefsLen)) {
-    NS_ERROR("failed to map shared memory in the child");
-    return false;
-  }
-  Preferences::DeserializePreferences(static_cast<char*>(shm.memory()),
-                                      prefsLen);
 
   Scheduler::SetPrefs(schedulerPrefs);
 

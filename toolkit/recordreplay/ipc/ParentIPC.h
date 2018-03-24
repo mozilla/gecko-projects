@@ -41,6 +41,9 @@ void
 Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChildID,
            dom::ContentChild* aContentChild);
 
+// Note the contents of the prefs shmem for use by the child process.
+void NotePrefsShmemContents(char* aPrefs, size_t aPrefsLen);
+
 } // namespace parent
 } // namespace recordreplay
 } // namespace mozilla

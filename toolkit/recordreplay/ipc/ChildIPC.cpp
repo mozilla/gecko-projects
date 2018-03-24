@@ -43,6 +43,9 @@ static base::ProcessId gMiddlemanPid;
 static base::ProcessId gParentPid;
 static StaticInfallibleVector<char*> gParentArgv;
 
+static char* gShmemPrefs;
+static size_t gShmemPrefsLen;
+
 // File descriptors used by a pipe to take snapshots when instructed by the
 // parent process.
 static FileHandle gSnapshotWriteFd;
@@ -58,12 +61,17 @@ ChannelThreadMain(void*)
     channel::Message* msg = channel::WaitForMessage();
     switch (msg->mType) {
     case channel::MessageType::Introduction: {
+      MOZ_RELEASE_ASSERT(!gShmemPrefs);
       MOZ_RELEASE_ASSERT(gParentArgv.empty());
 
       MonitorAutoLock lock(*gMonitor);
       channel::IntroductionMessage& nmsg = *(channel::IntroductionMessage*) msg;
 
       gParentPid = nmsg.mParentPid;
+
+      gShmemPrefs = new char[nmsg.mPrefsLen];
+      memcpy(gShmemPrefs, nmsg.PrefsData(), nmsg.mPrefsLen);
+      gShmemPrefsLen = nmsg.mPrefsLen;
 
       char* pos = nmsg.ArgvString();
       for (size_t i = 0; i < nmsg.mArgc; i++) {
@@ -130,6 +138,13 @@ ChannelThreadMain(void*)
     }
     free(msg);
   }
+}
+
+char*
+PrefsShmemContents(size_t aPrefsLen)
+{
+  MOZ_RELEASE_ASSERT(aPrefsLen == gShmemPrefsLen);
+  return gShmemPrefs;
 }
 
 // The singleton channel messaging thread.

@@ -43,6 +43,9 @@ namespace child {
 void InitRecordingOrReplayingProcess(base::ProcessId aParentPid,
                                      int* aArgc, char*** aArgv);
 
+// Get the contents of the prefs shmem as conveyed to the middleman process.
+char* PrefsShmemContents(size_t aPrefsLen);
+
 base::ProcessId MiddlemanProcessId();
 base::ProcessId ParentProcessId();
 

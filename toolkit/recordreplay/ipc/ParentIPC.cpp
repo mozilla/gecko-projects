@@ -332,17 +332,31 @@ static void InitDebuggerHooks();
 // A saved introduction message for sending to any respawned children.
 static channel::IntroductionMessage* gIntroductionMessage;
 
-// The last time we received a message from the child.
+// The last time we sent or received a message from the child.
 static TimeStamp gLastMessageTime;
 
 // Whether we are allowed to recover crashed/hung child processes.
 static bool gRecoveryEnabled;
 
+// Contents of the prefs shmem block that is sent to the child on startup.
+static char* gShmemPrefs;
+static size_t gShmemPrefsLen;
+
+void
+NotePrefsShmemContents(char* aPrefs, size_t aPrefsLen)
+{
+  MOZ_RELEASE_ASSERT(!gShmemPrefs);
+  gShmemPrefs = new char[aPrefsLen];
+  memcpy(gShmemPrefs, aPrefs, aPrefsLen);
+  gShmemPrefsLen = aPrefsLen;
+}
+
 void
 Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChildID,
            dom::ContentChild* aContentChild)
 {
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
+  MOZ_RELEASE_ASSERT(gShmemPrefs);
 
   gChildProcessIsRecording = TestEnv("MIDDLEMAN_RECORD");
 
@@ -388,7 +402,7 @@ Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChild
 
   channel::ConnectParent();
 
-  gIntroductionMessage = channel::IntroductionMessage::New(aParentPid, aArgc, aArgv);
+  gIntroductionMessage = channel::IntroductionMessage::New(aParentPid, gShmemPrefs, gShmemPrefsLen, aArgc, aArgv);
 
   channel::SendMessage(*gIntroductionMessage);
 
