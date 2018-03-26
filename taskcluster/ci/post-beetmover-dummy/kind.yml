@@ -2,9 +2,10 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-loader: taskgraph.loader.transform:loader
+loader: taskgraph.loader.single_dep:loader
 
 transforms:
+   - taskgraph.transforms.per_platform_dummy:transforms
    - taskgraph.transforms.reverse_chunk_deps:transforms
    - taskgraph.transforms.release_notifications:transforms
    - taskgraph.transforms.task:transforms
@@ -16,8 +17,7 @@ kind-dependencies:
    # also depend on vanilla beetmover.
    - beetmover
 
-job-defaults:
-   name: post-beetmover-dummy
+job-template:
    description: Dummy task to deal with max_dependencies
    run-on-projects: []
    shipping-phase: promote
@@ -31,57 +31,3 @@ job-defaults:
          - /bin/bash
          - -c
          - echo "Dummy task"
-
-jobs:
-   firefox-linux:
-      attributes:
-         build_platform: linux-nightly
-      shipping-product: firefox
-
-   firefox-linux64:
-      attributes:
-         build_platform: linux64-nightly
-      shipping-product: firefox
-
-   firefox-macosx64:
-      attributes:
-         build_platform: macosx64-nightly
-      shipping-product: firefox
-
-   firefox-win32:
-      attributes:
-         build_platform: win32-nightly
-      shipping-product: firefox
-
-   firefox-win64:
-      attributes:
-         build_platform: win64-nightly
-      shipping-product: firefox
-
-   devedition-linux:
-      attributes:
-         build_platform: linux-devedition-nightly
-      shipping-product: devedition
-
-   devedition-linux64:
-      attributes:
-         build_platform: linux64-devedition-nightly
-      shipping-product: devedition
-
-   devedition-macosx64:
-      attributes:
-         build_platform: macosx64-devedition-nightly
-      shipping-product: devedition
-
-   devedition-win32:
-      attributes:
-         build_platform: win32-devedition-nightly
-      shipping-product: devedition
-
-   devedition-win64:
-      attributes:
-         build_platform: win64-devedition-nightly
-      shipping-product: devedition
-
-   fennec-promote:
-      shipping-product: fennec
