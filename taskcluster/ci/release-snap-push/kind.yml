@@ -27,10 +27,10 @@ job-defaults:
       kind: build
       tier: 2
    worker-type:
-       by-project:
-          mozilla-beta: scriptworker-prov-v1/pushsnap-v1
-          mozilla-release: scriptworker-prov-v1/pushsnap-v1
-          default: scriptworker-prov-v1/dep-pushsnap
+      by-project:
+         mozilla-beta: scriptworker-prov-v1/pushsnap-v1
+         mozilla-release: scriptworker-prov-v1/pushsnap-v1
+         default: scriptworker-prov-v1/dep-pushsnap
    worker:
       implementation: push-snap
 

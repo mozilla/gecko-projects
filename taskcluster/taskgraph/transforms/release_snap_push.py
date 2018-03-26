@@ -7,12 +7,9 @@ Transform the release-snap-push kind into an actual task description.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-import re
-
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.task import task_description_schema
 from taskgraph.util.schema import optionally_keyed_by, resolve_keyed_by, Schema, validate_schema
-from taskgraph.util.scriptworker import get_push_apk_scope
 
 from voluptuous import Optional, Required
 
@@ -59,13 +56,13 @@ def make_task_description(config, jobs):
 
         job['worker']['upstream-artifacts'] = generate_upstream_artifacts(job['dependencies'])
 
-
         resolve_keyed_by(job, 'scopes', item_name=job['name'], project=config.params['project'])
         resolve_keyed_by(
             job, 'worker-type', item_name=job['name'], project=config.params['project']
         )
 
         yield job
+
 
 def generate_upstream_artifacts(dependencies):
     return [{
