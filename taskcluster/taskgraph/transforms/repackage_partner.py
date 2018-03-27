@@ -168,7 +168,8 @@ def make_job_description(config, jobs):
         })
 
         worker = {
-            'env': _generate_task_env(build_platform, signing_task_ref, partner=repack_id),
+            'env': _generate_task_env(build_platform, signing_task, signing_task_ref,
+                                      partner=repack_id),
             'artifacts': _generate_task_output_files(build_platform, partner=repack_id),
             'chain-of-trust': True,
             'max-run-time': 7200 if build_platform.startswith('win') else 3600,
@@ -222,8 +223,8 @@ def make_job_description(config, jobs):
         yield task
 
 
-def _generate_task_env(build_platform, signing_task_ref, partner):
-    signed_prefix = get_taskcluster_artifact_prefix(signing_task_ref, locale=partner)
+def _generate_task_env(build_platform, signing_task, signing_task_ref, partner):
+    signed_prefix = get_taskcluster_artifact_prefix(signing_task, signing_task_ref, locale=partner)
 
     if build_platform.startswith('macosx'):
         return {
