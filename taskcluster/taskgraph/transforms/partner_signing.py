@@ -35,8 +35,7 @@ def define_upstream_artifacts(config, jobs):
                         repack_ids.append("{}-{}".format(sub_partner, locale))
 
         artifacts_specifications = generate_specifications_of_artifacts_to_sign(
-            build_platform,
-            dep_job.attributes.get('nightly'),
+            dep_job,
             keep_locale_template=True,
             kind=config.kind,
         )
