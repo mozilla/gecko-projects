@@ -20,7 +20,9 @@ job-defaults:
    scopes:
       by-project:
          mozilla-beta: ["project:releng:snapcraft:firefox:beta"]
+         # XXX Temporary test
          mozilla-release: ["project:releng:snapcraft:firefox:candidate"]
+         maple: ["project:releng:snapcraft:firefox:beta"]
          default: ["project:releng:snapcraft:firefox:mock"]
    treeherder:
       platform: linux64/opt
@@ -30,6 +32,8 @@ job-defaults:
       by-project:
          mozilla-beta: scriptworker-prov-v1/pushsnap-v1
          mozilla-release: scriptworker-prov-v1/pushsnap-v1
+         # Temporary test
+         maple: scriptworker-prov-v1/pushsnap-v1
          default: scriptworker-prov-v1/dep-pushsnap
    worker:
       implementation: push-snap
