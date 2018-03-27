@@ -14,7 +14,6 @@ from taskgraph.util.scriptworker import (
     get_signing_cert_scope,
     get_worker_type_for_scope,
 )
-from taskgraph.util.taskcluster import get_artifact_path
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Required, Optional
 
@@ -71,8 +70,8 @@ def make_release_generate_checksums_signing_description(config, jobs):
             "taskId": {"task-reference": "<build>"},
             "taskType": "build",
             "paths": [
-                get_artifact_path(dep_job, "SHA256SUMS"),
-                get_artifact_path(dep_job, "SHA512SUMS"),
+                "public/build/SHA256SUMS",
+                "public/build/SHA512SUMS",
             ],
             "formats": ["gpg"]
         }]

@@ -27,12 +27,7 @@ RELEASE_PROMOTION_PROJECTS = {
 } | RELEASE_PROJECTS
 
 _OPTIONAL_ATTRIBUTES = (
-    'artifact_prefix',
-    'l10n_chunk',
-    'nightly',
-    'signed',
-    'shipping_phase',
-    'shipping_product',
+    'nightly', 'signed', 'l10n_chunk', 'shipping_product', 'shipping_phase'
 )
 
 
