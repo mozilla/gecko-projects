@@ -69,6 +69,12 @@ def add_command(config, tasks):
                     repack_ids.append("{}-{}".format(sub_partner, locale))
 
         if 'mac' in task['attributes']['build_platform']:
+            # TODO
+            # - get_taskcluster_artifact_prefix ?
+            # - get taskId from deps ?
+            # - s,eme-free,$partner, ?
+            # - We could potentially add the URL(s) to an env var, and have
+            #   the script do the downloading, which would allow for retries
             download_cmd = "curl -L https://queue.taskcluster.net/v1/task/YfqwST9zRo2-QddTuetDQA"\
                            "/runs/0/artifacts/public/build/target.dmg > eme-free.dmg"
             for repack_id in repack_ids:
