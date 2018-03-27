@@ -101,11 +101,8 @@ def make_task_description(config, jobs):
         dep_th_platform = dep_job.task.get('extra', {}).get(
             'treeherder', {}).get('machine', {}).get('platform', '')
         treeherder.setdefault('platform', '{}/opt'.format(dep_th_platform))
-        treeherder.setdefault('tier', 2)
+        treeherder.setdefault('tier', 1)
         treeherder.setdefault('kind', 'build')
-
-        dependent_kind = str(dep_job.kind)
-        dependencies = {dependent_kind: dep_job.label}
 
         job['attributes'] = copy_attributes_from_dependent_job(dep_job)
         job['attributes']['chunk_locales'] = dep_job.attributes.get('chunk_locales', ['en-US'])
@@ -114,7 +111,9 @@ def make_task_description(config, jobs):
             locales='/'.join(job['attributes']['chunk_locales']),
         )
 
-        job['dependencies'] = dependencies
+        job['dependencies'] = {
+            str(dep_job.kind): dep_job.label
+        }
         job['treeherder'] = treeherder
 
         yield job
@@ -136,23 +135,26 @@ def generate_upstream_artifacts(upstream_task_ref, locales):
 @transforms.add
 def make_task_worker(config, jobs):
     for job in jobs:
-        upstream_tasks = [
-            job_kind
-            for job_kind in job['dependencies'].keys()
-            if job_kind in ('build', 'nightly-l10n')
-        ]
-
-        if len(upstream_tasks) > 1:
-            raise Exception('Only one dependency expected')
-
-        upstream_task = upstream_tasks[0]
-        upstream_task_ref = '<' + str(upstream_task) + '>'
+        upstream_task_ref = get_upstream_task_ref(job, expected_kinds=('build', 'nightly-l10n'))
 
         job['worker']['upstream-artifacts'] = generate_upstream_artifacts(
             upstream_task_ref, job['attributes']['chunk_locales']
         )
 
         yield job
+
+
+def get_upstream_task_ref(job, expected_kinds):
+    upstream_tasks = [
+        job_kind
+        for job_kind in job['dependencies'].keys()
+        if job_kind in expected_kinds
+    ]
+
+    if len(upstream_tasks) > 1:
+        raise Exception('Only one dependency expected')
+
+    return '<{}>'.format(upstream_tasks[0])
 
 
 @transforms.add
