@@ -17,7 +17,7 @@ from taskgraph.util.schema import (
     resolve_keyed_by,
     Schema,
 )
-from taskgraph.util.taskcluster import get_taskcluster_artifact_prefix
+from taskgraph.util.taskcluster import get_taskcluster_artifact_prefix, get_artifact_prefix
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
 
@@ -170,7 +170,7 @@ def make_job_description(config, jobs):
         worker = {
             'env': _generate_task_env(build_platform, signing_task, signing_task_ref,
                                       partner=repack_id),
-            'artifacts': _generate_task_output_files(build_platform, partner=repack_id),
+            'artifacts': _generate_task_output_files(dep_job, build_platform, partner=repack_id),
             'chain-of-trust': True,
             'max-run-time': 7200 if build_platform.startswith('win') else 3600,
         }
@@ -241,22 +241,23 @@ def _generate_task_env(build_platform, signing_task, signing_task_ref, partner):
     raise NotImplementedError('Unsupported build_platform: "{}"'.format(build_platform))
 
 
-def _generate_task_output_files(build_platform, partner):
+def _generate_task_output_files(task, build_platform, partner):
     partner_output_path = '{}/'.format(partner)
+    artifact_prefix = get_artifact_prefix(task)
 
     if build_platform.startswith('macosx'):
         output_files = [{
             'type': 'file',
             'path': '/builds/worker/workspace/build/artifacts/{}target.dmg'
                     .format(partner_output_path),
-            'name': 'public/build/{}target.dmg'.format(partner_output_path),
+            'name': '{}/{}target.dmg'.format(artifact_prefix, partner_output_path),
         }]
 
     elif build_platform.startswith('win'):
         output_files = [{
             'type': 'file',
-            'path': 'public/build/{}target.installer.exe'.format(partner_output_path),
-            'name': 'public/build/{}target.installer.exe'.format(partner_output_path),
+            'path': '{}/{}target.installer.exe'.format(artifact_prefix, partner_output_path),
+            'name': '{}/{}target.installer.exe'.format(artifact_prefix, partner_output_path),
         }]
 
     if output_files:
