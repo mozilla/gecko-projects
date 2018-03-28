@@ -378,6 +378,7 @@ task_description_schema = Schema({
 
         # optional features
         Required('chain-of-trust'): bool,
+        Optional('taskcluster-proxy'): bool,
     }, {
         Required('implementation'): 'buildbot-bridge',
 
@@ -948,6 +949,9 @@ def build_generic_worker_payload(config, task, task_def):
 
     if worker.get('chain-of-trust'):
         features['chainOfTrust'] = True
+
+    if worker.get('taskcluster-proxy'):
+        features['taskclusterProxy'] = True
 
     if features:
         task_def['payload']['features'] = features
