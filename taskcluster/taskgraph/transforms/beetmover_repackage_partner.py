@@ -14,6 +14,7 @@ from taskgraph.util.schema import validate_schema, Schema
 from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
                                          get_beetmover_action_scope,
                                          get_phase)
+from taskgraph.util.taskcluster import get_artifact_prefix
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
 
@@ -165,30 +166,31 @@ def make_task_description(config, jobs):
         yield task
 
 
-def generate_upstream_artifacts(build_task_ref, repackage_task_ref,
+def generate_upstream_artifacts(job, build_task_ref, repackage_task_ref,
                                 repackage_signing_task_ref, platform, repack_id):
 
     upstream_artifacts = []
+    artifact_prefix = get_artifact_prefix(job)
 
     if "linux" in platform:
         upstream_artifacts.append({
             "taskId": {"task-reference": build_task_ref},
             "taskType": "build",
-            "paths": ["public/build/{}/target.tar.bz2".format(repack_id)],
+            "paths": ["{}/{}/target.tar.bz2".format(artifact_prefix, repack_id)],
             "locale": repack_id,
         })
     elif "macosx" in platform:
         upstream_artifacts.append({
             "taskId": {"task-reference": repackage_task_ref},
             "taskType": "repackage",
-            "paths": ["public/build/{}/target.dmg".format(repack_id)],
+            "paths": ["{}/{}/target.dmg".format(artifact_prefix, repack_id)],
             "locale": repack_id,
         })
     elif "win" in platform:
         upstream_artifacts.append({
             "taskId": {"task-reference": repackage_signing_task_ref},
             "taskType": "repackage",
-            "paths": ["public/build/{}/target.installer.exe".format(repack_id)],
+            "paths": ["{}/{}/target.installer.exe".format(artifact_prefix, repack_id)],
             "locale": repack_id,
         })
 
@@ -223,7 +225,7 @@ def make_task_worker(config, jobs):
             'implementation': 'beetmover',
             'release-properties': craft_release_properties(config, job),
             'upstream-artifacts': generate_upstream_artifacts(
-                build_task_ref, repackage_task_ref,
+                job, build_task_ref, repackage_task_ref,
                 repackage_signing_task_ref, platform, repack_id
             ),
         }
