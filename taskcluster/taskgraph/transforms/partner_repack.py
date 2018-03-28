@@ -10,6 +10,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import resolve_keyed_by
 from taskgraph.util.partners import get_partner_config_by_url
+from taskgraph.util.taskcluster import get_artifact_prefix
 
 
 transforms = TransformSequence()
@@ -47,6 +48,7 @@ def make_label(config, tasks):
 @transforms.add
 def add_command(config, tasks):
     for task in tasks:
+        artifact_prefix = get_artifact_prefix(task)
         partner_configs = get_partner_config_by_url(task['worker']['env']['REPACK_MANIFESTS_URL'],
                                                     config.kind,
                                                     config.params['release_partners'])
@@ -79,7 +81,7 @@ def add_command(config, tasks):
                            "/runs/0/artifacts/public/build/target.dmg > eme-free.dmg"
             for repack_id in repack_ids:
                 task["worker"]["artifacts"].append({
-                    "name": "public/build/{}/target.dmg".format(repack_id),
+                    "name": "{}/{}/target.dmg".format(artifact_prefix, repack_id),
                     "path": "/builds/worker/checkouts/gecko/{}.dmg".format(repack_id),
                     "type": "file"
                 })
@@ -93,12 +95,12 @@ def add_command(config, tasks):
                             "> eme-free.zip"
             for repack_id in repack_ids:
                 task["worker"]["artifacts"].append({
-                    "name": "public/build/{}/setup.exe".format(repack_id),
+                    "name": "{}/{}/setup.exe".format(artifact_prefix, repack_id),
                     "path": "/builds/worker/checkouts/gecko/{}.exe".format(repack_id),
                     "type": "file"
                 })
                 task["worker"]["artifacts"].append({
-                    "name": "public/build/{}/target.zip".format(repack_id),
+                    "name": "{}/{}/target.zip".format(artifact_prefix, repack_id),
                     "path": "/builds/worker/checkouts/gecko/{}.zip".format(repack_id),
                     "type": "file"
                 })
@@ -113,12 +115,12 @@ def add_command(config, tasks):
                             "> eme-free.zip"
             for repack_id in repack_ids:
                 task["worker"]["artifacts"].append({
-                    "name": "public/build/{}/setup.exe".format(repack_id),
+                    "name": "{}/{}/setup.exe".format(artifact_prefix, repack_id),
                     "path": "/builds/worker/checkouts/gecko/{}.exe".format(repack_id),
                     "type": "file"
                 })
                 task["worker"]["artifacts"].append({
-                    "name": "public/build/{}/target.zip".format(repack_id),
+                    "name": "{}/{}/target.zip".format(artifact_prefix, repack_id),
                     "path": "/builds/worker/checkouts/gecko/{}.zip".format(repack_id),
                     "type": "file"
                 })
@@ -130,7 +132,7 @@ def add_command(config, tasks):
                            "/runs/0/artifacts/public/build/target.tar.bz2 > eme-free.tar.bz2"
             for repack_id in repack_ids:
                 task["worker"]["artifacts"].append({
-                    "name": "public/build/{}/target.tar.bz2".format(repack_id),
+                    "name": "{}/{}/target.tar.bz2".format(artifact_prefix, repack_id),
                     "path": "/builds/worker/checkouts/gecko/{}.tar.bz2".format(repack_id),
                     "type": "file"
                 })
@@ -141,7 +143,7 @@ def add_command(config, tasks):
                            "/runs/0/artifacts/public/build/target.tar.bz2 > eme-free.tar.bz2"
             for repack_id in repack_ids:
                 task["worker"]["artifacts"].append({
-                    "name": "public/build/{}/target.tar.bz2".format(repack_id),
+                    "name": "{}/{}/target.tar.bz2".format(artifact_prefix, repack_id),
                     "path": "/builds/worker/checkouts/gecko/{}.tar.bz2".format(repack_id),
                     "type": "file"
                 })
