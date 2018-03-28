@@ -14,6 +14,7 @@ from taskgraph.util.scriptworker import (
     add_scope_prefix,
     get_signing_cert_scope_per_platform,
 )
+from taskgraph.util.taskcluster import get_artifact_path
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Required, Optional
 
@@ -93,7 +94,7 @@ def make_repackage_signing_description(config, jobs):
             "taskId": {"task-reference": "<repackage>"},
             "taskType": "repackage",
             "paths": [
-                "public/build/{}/target.installer.exe".format(repack_id),
+                get_artifact_path(dep_job, "{}/target.installer.exe".format(repack_id)),
             ],
             "formats": ["sha2signcode"]
         }]
