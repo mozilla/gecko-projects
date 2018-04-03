@@ -184,7 +184,7 @@ def status_task(task_id, use_proxy=False):
         logger.info('Would have gotten status for {}.'.format(task_id))
     else:
         resp = _do_request(get_task_url(task_id, use_proxy) + '/status')
-        status = resp.get("status", {}).get('state') or 'unknown'
+        status = resp.json().get("status", {}).get('state') or 'unknown'
         return status
 
 
