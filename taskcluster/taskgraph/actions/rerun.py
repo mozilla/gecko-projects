@@ -13,6 +13,7 @@ from taskgraph.util.taskcluster import (
     rerun_task
 )
 from .registry import register_callback_action
+from .util import fetch_graph_and_labels
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,14 @@ RERUN_STATES = ('exception', 'failed')
     }
 )
 def rerun_action(parameters, input, task_group_id, task_id, task):
+    decision_task_id, full_task_graph, label_to_taskid = fetch_graph_and_labels(parameters)
     label = task['metadata']['name']
+    if task_id not in label_to_taskid.values():
+        logger.error(
+            "Refusing to rerun {}: taskId {} not in decision task {} label_to_taskid!".format(
+                label, task_id, decision_task_id
+            )
+        )
 
     status = status_task(task_id)
     if status not in RERUN_STATES:
