@@ -188,13 +188,13 @@ def status_task(task_id, use_proxy=False):
         return status
 
 
-def rerun_task(task_id, use_proxy=False):
+def rerun_task(task_id):
     """Reruns a task given a task_id. In testing mode, just logs that it would
     have reran."""
     if testing:
         logger.info('Would have rerun {}.'.format(task_id))
     else:
-        _do_request(get_task_url(task_id, use_proxy) + '/rerun', json={})
+        _do_request(get_task_url(task_id, True) + '/rerun', json={})
 
 
 def get_purge_cache_url(provisioner_id, worker_type, use_proxy=False):
