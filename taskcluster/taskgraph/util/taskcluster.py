@@ -194,7 +194,7 @@ def rerun_task(task_id):
     if testing:
         logger.info('Would have rerun {}.'.format(task_id))
     else:
-        _do_request(get_task_url(task_id, True) + '/rerun', json={})
+        _do_request(get_task_url(task_id, use_proxy=True) + '/rerun', json={})
 
 
 def get_purge_cache_url(provisioner_id, worker_type, use_proxy=False):

@@ -18,7 +18,6 @@ from .util import fetch_graph_and_labels
 
 logger = logging.getLogger(__name__)
 
-STATUS_URL = "https://queue.taskcluster.net/v1/task/{task_id}/status"
 RERUN_STATES = ('exception', 'failed')
 
 
@@ -27,7 +26,7 @@ RERUN_STATES = ('exception', 'failed')
     name='rerun',
     symbol='rr',
     description=(
-        'Rerun a task.\n\n'
+        'Rerun a task.\n\nThis only works on failed or exception tasks in the original taskgraph, and is CoT friendly.'
     ),
     order=1,
     context=[{}],
