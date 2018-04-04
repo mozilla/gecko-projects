@@ -163,7 +163,10 @@ Release Promotion
    Boolean which controls repacking vanilla Firefox builds for partners.
 
 ``release_partners``
-   List of partners to repack. A null will result in lookup using the manifest url
+   List of partners to repack. A null value defaults to all.
+
+``release_partner_config``
+   Configuration for partner repacks.
 
 ``release_enable_emefree``
    Boolean which controls repacking vanilla Firefox builds into EME-free builds.
