@@ -55,6 +55,15 @@ _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US = [
     "target_info.txt",
     "target.jsshell.zip",
     "mozharness.zip",
+    "target.langpack.xpi",
+]
+
+# Until bug 1331141 is fixed, if you are adding any new artifacts here that
+# need to be transfered to S3, please be aware you also need to follow-up
+# with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
+# See example in bug 1348286
+_DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N = [
+    "target.langpack.xpi",
 ]
 
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
@@ -72,7 +81,8 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
             "host/bin/mar.exe",
             "host/bin/mbsdiff.exe",
         ],
-    r'^(linux(|64)|macosx64|win(32|64))(|-devedition)-nightly-l10n$': [],
+    r'^(linux(|64)|macosx64|win(32|64))(|-devedition)-nightly-l10n$':
+        _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
 }
 
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
