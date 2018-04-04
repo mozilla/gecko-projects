@@ -24,9 +24,9 @@ job-template:
    description: Signs {locales} XPIs for platform via addons.mozilla.org and pushes them
    worker-type:
       by-project:
-         mozilla-beta: scriptworker-prov-v1/pushaddon-v1
-         mozilla-release: scriptworker-prov-v1/pushaddon-v1
-         default: scriptworker-prov-v1/pushaddon-dev
+         mozilla-beta: scriptworker-prov-v1/addon-v1
+         mozilla-release: scriptworker-prov-v1/addon-v1
+         default: scriptworker-prov-v1/addon-dev
    worker:
       implementation: sign-and-push-addons
       channel:
