@@ -53,36 +53,6 @@ taskref_or_string = Any(
     {Required('task-reference'): basestring},
 )
 
-# For more details look at https://github.com/mozilla-releng/pulse-notify#task-definition
-#
-# Notification fields are keyed by project, which lets you use
-# `by-project` and define different messages or recepients for each
-# project.
-notification_schema = Schema({
-    # notification routes for this task status
-    # https://github.com/mozilla-releng/pulse-notify/tree/master/pulsenotify/plugins
-    Optional('plugins'): optionally_keyed_by('project', [basestring]),
-
-    # notification subject
-    Optional('subject'): optionally_keyed_by('project', basestring),
-
-    # notification message
-    Optional('message'): optionally_keyed_by('project', basestring),
-
-    # emails to be notified (for ses and smtp plugins only)
-    Optional('emails'): optionally_keyed_by('project', [basestring]),
-
-    # IRC nicknames to notify (for irc plugin only)
-    Optional('nicks'): optionally_keyed_by('project', [basestring]),
-
-    # IRC channels to send a notification to (for irc plugin only)
-    Optional('channels'): optionally_keyed_by('project', [basestring]),
-
-    # notify a 'name' based on a configuration in the service
-    # https://github.com/mozilla-releng/pulse-notify/blob/production/pulsenotify/id_configs/prod.yml
-    Optional('ids'): optionally_keyed_by('project', [basestring]),
-})
-
 # A task description is a general description of a TaskCluster task
 task_description_schema = Schema({
     # the label for this task
@@ -185,7 +155,7 @@ task_description_schema = Schema({
     # The `run_on_projects` attribute, defaulting to "all".  This dictates the
     # projects on which this task should be included in the target task set.
     # See the attributes documentation for details.
-    Optional('run-on-projects'): optionally_keyed_by('build-platform', [basestring]),
+    Optional('run-on-projects'): [basestring],
 
     # The `shipping_phase` attribute, defaulting to None. This specifies the
     # release promotion phase that this task belongs to.
@@ -245,22 +215,6 @@ task_description_schema = Schema({
 
     # Whether the job should use sccache compiler caching.
     Required('needs-sccache'): bool,
-
-    # Send notifications using pulse-notifier[1] service:
-    #
-    #     https://github.com/mozilla-releng/pulse-notify
-    #
-    # Notifications are send uppon task completion, failure or when exception
-    # is raised.
-    Optional('notifications'): {
-        Optional('defined'): notification_schema,
-        Optional('pending'): notification_schema,
-        Optional('running'): notification_schema,
-        Optional('artifact-created'): notification_schema,
-        Optional('completed'): notification_schema,
-        Optional('failed'): notification_schema,
-        Optional('exception'): notification_schema,
-    },
 
     # information specific to the worker implementation that will run this task
     'worker': Any({
@@ -424,6 +378,7 @@ task_description_schema = Schema({
 
         # optional features
         Required('chain-of-trust'): bool,
+        Optional('taskcluster-proxy'): bool,
     }, {
         Required('implementation'): 'buildbot-bridge',
 
@@ -504,12 +459,12 @@ task_description_schema = Schema({
         Required('implementation'): 'beetmover',
 
         # the maximum time to run, in seconds
-        Required('max-run-time', default=600): int,
+        Required('max-run-time'): int,
 
         # locale key, if this is a locale beetmover job
         Optional('locale'): basestring,
 
-        Optional('release-properties'): {
+        Required('release-properties'): {
             'app-name': basestring,
             'app-version': basestring,
             'branch': basestring,
@@ -580,19 +535,10 @@ task_description_schema = Schema({
 
     }, {
         Required('implementation'): 'push-apk',
-
-        # list of artifact URLs for the artifacts that should be beetmoved
         Required('upstream-artifacts'): [{
-            # taskId of the task with the artifact
             Required('taskId'): taskref_or_string,
-
-            # type of signing task (for CoT)
             Required('taskType'): basestring,
-
-            # Paths to the artifacts to sign
             Required('paths'): [basestring],
-
-            # Artifact is optional to run the task
             Optional('optional', default=False): bool,
         }],
 
@@ -600,6 +546,13 @@ task_description_schema = Schema({
         Required('google-play-track'): Any('production', 'beta', 'alpha', 'rollout', 'invalid'),
         Required('commit'): bool,
         Optional('rollout-percentage'): Any(int, None),
+    }, {
+        Required('implementation'): 'push-snap',
+        Required('upstream-artifacts'): [{
+            Required('taskId'): taskref_or_string,
+            Required('taskType'): basestring,
+            Required('paths'): [basestring],
+        }],
     }, {
         Required('implementation'): 'sign-and-push-addons',
         Required('channel'): Any('listed', 'unlisted'),
@@ -632,31 +585,31 @@ V2_ROUTE_TEMPLATES = [
     "index.{trust-domain}.v2.{project}.latest.{product}.{job-name}",
     "index.{trust-domain}.v2.{project}.pushdate.{build_date_long}.{product}.{job-name}",
     "index.{trust-domain}.v2.{project}.pushlog-id.{pushlog_id}.{product}.{job-name}",
-    "index.{trust-domain}.v2.{project}.revision.{branch_rev}.{product}.{job-name}",
+    "index.{trust-domain}.v2.{project}.revision.{head_rev}.{product}.{job-name}",
 ]
 
 # {central, inbound, autoland} write to a "trunk" index prefix. This facilitates
 # walking of tasks with similar configurations.
 V2_TRUNK_ROUTE_TEMPLATES = [
-    "index.{trust-domain}.v2.trunk.revision.{branch_rev}.{product}.{job-name}",
+    "index.{trust-domain}.v2.trunk.revision.{head_rev}.{product}.{job-name}",
 ]
 
 V2_NIGHTLY_TEMPLATES = [
     "index.{trust-domain}.v2.{project}.nightly.latest.{product}.{job-name}",
-    "index.{trust-domain}.v2.{project}.nightly.{build_date}.revision.{branch_rev}.{product}.{job-name}",  # noqa - too long
+    "index.{trust-domain}.v2.{project}.nightly.{build_date}.revision.{head_rev}.{product}.{job-name}",  # noqa - too long
     "index.{trust-domain}.v2.{project}.nightly.{build_date}.latest.{product}.{job-name}",
-    "index.{trust-domain}.v2.{project}.nightly.revision.{branch_rev}.{product}.{job-name}",
+    "index.{trust-domain}.v2.{project}.nightly.revision.{head_rev}.{product}.{job-name}",
 ]
 
 V2_NIGHTLY_L10N_TEMPLATES = [
     "index.{trust-domain}.v2.{project}.nightly.latest.{product}-l10n.{job-name}.{locale}",
-    "index.{trust-domain}.v2.{project}.nightly.{build_date}.revision.{branch_rev}.{product}-l10n.{job-name}.{locale}",  # noqa - too long
+    "index.{trust-domain}.v2.{project}.nightly.{build_date}.revision.{head_rev}.{product}-l10n.{job-name}.{locale}",  # noqa - too long
     "index.{trust-domain}.v2.{project}.nightly.{build_date}.latest.{product}-l10n.{job-name}.{locale}",  # noqa - too long
-    "index.{trust-domain}.v2.{project}.nightly.revision.{branch_rev}.{product}-l10n.{job-name}.{locale}",  # noqa - too long
+    "index.{trust-domain}.v2.{project}.nightly.revision.{head_rev}.{product}-l10n.{job-name}.{locale}",  # noqa - too long
 ]
 
 V2_L10N_TEMPLATES = [
-    "index.{trust-domain}.v2.{project}.revision.{branch_rev}.{product}-l10n.{job-name}.{locale}",
+    "index.{trust-domain}.v2.{project}.revision.{head_rev}.{product}-l10n.{job-name}.{locale}",
     "index.{trust-domain}.v2.{project}.pushdate.{build_date_long}.{product}-l10n.{job-name}.{locale}",  # noqa - too long
     "index.{trust-domain}.v2.{project}.latest.{product}-l10n.{job-name}.{locale}",
 ]
@@ -674,16 +627,6 @@ BRANCH_REV_PARAM = {
     'comm-aurora': 'comm_head_rev',
     'try-comm-central': 'comm_head_rev',
 }
-
-
-def get_branch_rev(config):
-    return config.params[
-        BRANCH_REV_PARAM.get(
-            config.params['project'],
-            DEFAULT_BRANCH_REV_PARAM
-        )
-    ]
-
 
 COALESCE_KEY = '{project}.{job-identifier}'
 SUPERSEDER_URL = 'https://coalesce.mozilla-releng.net/v1/list/{age}/{size}/{key}'
@@ -1015,6 +958,9 @@ def build_generic_worker_payload(config, task, task_def):
     if worker.get('chain-of-trust'):
         features['chainOfTrust'] = True
 
+    if worker.get('taskcluster-proxy'):
+        features['taskclusterProxy'] = True
+
     if features:
         task_def['payload']['features'] = features
 
@@ -1167,6 +1113,15 @@ def build_push_apk_payload(config, task, task_def):
 
     if worker.get('rollout-percentage', None):
         task_def['payload']['rollout_percentage'] = worker['rollout-percentage']
+
+
+@payload_builder('push-snap')
+def build_push_snap_payload(config, task, task_def):
+    worker = task['worker']
+
+    task_def['payload'] = {
+        'upstreamArtifacts':  worker['upstream-artifacts'],
+    }
 
 
 @payload_builder('shipit')
@@ -1360,7 +1315,6 @@ def add_generic_index_routes(config, task):
                                             time.gmtime(config.params['build_date']))
     subs['product'] = index['product']
     subs['trust-domain'] = config.graph_config['trust-domain']
-    subs['branch_rev'] = get_branch_rev(config)
 
     project = config.params.get('project')
 
@@ -1391,7 +1345,6 @@ def add_nightly_index_routes(config, task):
                                        time.gmtime(config.params['build_date']))
     subs['product'] = index['product']
     subs['trust-domain'] = config.graph_config['trust-domain']
-    subs['branch_rev'] = get_branch_rev(config)
 
     for tpl in V2_NIGHTLY_TEMPLATES:
         routes.append(tpl.format(**subs))
@@ -1414,7 +1367,6 @@ def add_release_index_routes(config, task):
     subs['underscore_version'] = release_config['version'].replace('.', '_')
     subs['product'] = index['product']
     subs['trust-domain'] = config.graph_config['trust-domain']
-    subs['branch_rev'] = get_branch_rev(config)
     subs['branch'] = subs['project']
     if 'channel' in index:
         resolve_keyed_by(
@@ -1450,7 +1402,6 @@ def add_l10n_index_routes(config, task, force_locale=None):
                                             time.gmtime(config.params['build_date']))
     subs['product'] = index['product']
     subs['trust-domain'] = config.graph_config['trust-domain']
-    subs['branch_rev'] = get_branch_rev(config)
 
     locales = task['attributes'].get('chunk_locales',
                                      task['attributes'].get('all_locales'))
@@ -1490,7 +1441,6 @@ def add_nightly_l10n_index_routes(config, task, force_locale=None):
                                             time.gmtime(config.params['build_date']))
     subs['product'] = index['product']
     subs['trust-domain'] = config.graph_config['trust-domain']
-    subs['branch_rev'] = get_branch_rev(config)
 
     locales = task['attributes'].get('chunk_locales',
                                      task['attributes'].get('all_locales'))
@@ -1584,12 +1534,15 @@ def build_task(config, tasks):
             treeherder['jobKind'] = task_th['kind']
             treeherder['tier'] = task_th['tier']
 
-            branch_rev = get_branch_rev(config)
+            treeherder_rev = config.params[
+                BRANCH_REV_PARAM.get(
+                    config.params['project'],
+                    DEFAULT_BRANCH_REV_PARAM)]
 
             routes.append(
                 '{}.v2.{}.{}.{}'.format(TREEHERDER_ROUTE_ROOT,
                                         config.params['project'],
-                                        branch_rev,
+                                        treeherder_rev,
                                         config.params['pushlog_id'])
             )
 
@@ -1640,7 +1593,7 @@ def build_task(config, tasks):
         if task_th:
             # link back to treeherder in description
             th_push_link = 'https://treeherder.mozilla.org/#/jobs?repo={}&revision={}'.format(
-                config.params['project'], branch_rev)
+                config.params['project'], treeherder_rev)
             task_def['metadata']['description'] += ' ([Treeherder push]({}))'.format(
                 th_push_link)
 
@@ -1648,10 +1601,6 @@ def build_task(config, tasks):
         payload_builders[task['worker']['implementation']](config, task, task_def)
 
         attributes = task.get('attributes', {})
-        # Resolve run-on-projects
-        build_platform = attributes.get('build_platform')
-        resolve_keyed_by(task, 'run-on-projects', item_name=task['label'],
-                         **{'build-platform': build_platform})
         attributes['run_on_projects'] = task.get('run-on-projects', ['all'])
         attributes['always_target'] = task['always-target']
         # This logic is here since downstream tasks don't always match their
@@ -1686,45 +1635,6 @@ def build_task(config, tasks):
             if payload:
                 env = payload.setdefault('env', {})
                 env['MOZ_AUTOMATION'] = '1'
-
-        notifications = task.get('notifications')
-        if notifications:
-            release_config = get_release_config(config)
-            task_def['extra'].setdefault('notifications', {})
-            for notification_event, notification in notifications.items():
-
-                for notification_option, notification_option_value in notification.items():
-
-                    # resolve by-project
-                    resolve_keyed_by(
-                        notification,
-                        notification_option,
-                        'notifications',
-                        project=config.params['project'],
-                    )
-
-                    # resolve formatting for each of the fields
-                    format_kwargs = dict(
-                            task=task,
-                            task_def=task_def,
-                            config=config.__dict__,
-                            release_config=release_config,
-                    )
-                    if isinstance(notification_option_value, basestring):
-                        notification[notification_option] = notification_option_value.format(
-                            **format_kwargs
-                        )
-                    elif isinstance(notification_option_value, list):
-                        notification[notification_option] = [
-                            i.format(**format_kwargs) for i in notification_option_value
-                        ]
-
-                # change event to correct event
-                if notification_event != 'artifact-created':
-                    notification_event = 'task-' + notification_event
-
-                # update notifications
-                task_def['extra']['notifications'][notification_event] = notification
 
         yield {
             'label': task['label'],
