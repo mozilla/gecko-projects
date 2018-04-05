@@ -17,7 +17,7 @@ transforms = TransformSequence()
 
 @transforms.add
 def chunk_partners(config, jobs):
-    partner_configs = get_partner_config_by_kind(config, config.kind)
+    partner_configs = get_partner_config_by_kind(config.kind)
 
     for job in jobs:
         dep_job = job['dependent-task']
