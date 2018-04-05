@@ -7,6 +7,7 @@ import os
 import xml.etree.ElementTree as ET
 
 import requests
+from taskgraph.parameters import Parameters
 
 # Suppress chatty requests logging
 logging.getLogger("requests").setLevel(logging.WARNING)
@@ -270,9 +271,7 @@ def get_partner_config_by_url(config, manifest_url, kind, partner_subset=None):
     Supports caching data by kind to avoid repeated requests, relying on the related kinds for
     partner repacking, signing, repackage, repackage signing all having the same kind prefix.
     """
-    if config.params['release_partner_config'] is None:
-        config.params['release_partner_config'] = {}
-    partner_configs = config.params['release_partner_config']
+    partner_configs = config.params.get('release_partner_config') or {}
     if kind not in partner_configs:
         log.info('Looking up data for %s from %s', kind, manifest_url)
         token = get_token()
@@ -295,6 +294,10 @@ def get_partner_config_by_url(config, manifest_url, kind, partner_subset=None):
                     new_config[partner] = partner_configs[kind][partner]
             partner_configs[kind] = new_config
 
+    if config.params['release_partner_config'] != partner_configs
+        parameters = dict(config.params)
+        parameters['release_partner_config'] = partner_configs
+        config.params = Parameters(**parameters)
     return partner_configs[kind]
 
 
