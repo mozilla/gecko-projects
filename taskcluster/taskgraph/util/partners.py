@@ -294,7 +294,7 @@ def get_partner_config_by_url(config, manifest_url, kind, partner_subset=None):
                     new_config[partner] = partner_configs[kind][partner]
             partner_configs[kind] = new_config
 
-    if config.params['release_partner_config'] != partner_configs
+    if config.params['release_partner_config'] != partner_configs:
         parameters = dict(config.params)
         parameters['release_partner_config'] = partner_configs
         config.params = Parameters(**parameters)
