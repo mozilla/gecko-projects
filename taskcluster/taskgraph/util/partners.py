@@ -271,7 +271,9 @@ def get_partner_config_by_url(config, manifest_url, kind, partner_subset=None):
     Supports caching data by kind to avoid repeated requests, relying on the related kinds for
     partner repacking, signing, repackage, repackage signing all having the same kind prefix.
     """
-    partner_configs = config.params.get('release_partner_config') or {}
+    partner_configs = {}
+    if isinstance(config.params.get('release_partner_config'), dict):
+        partner_configs = config.params['release_partner_config']
     if kind not in partner_configs:
         log.info('Looking up data for %s from %s', kind, manifest_url)
         token = get_token()
