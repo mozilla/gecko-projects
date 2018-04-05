@@ -91,7 +91,6 @@ def make_task_description(config, jobs):
         )
 
         job['attributes'] = copy_attributes_from_dependent_job(dep_job)
-        print(job['attributes'])
         job['attributes']['chunk_locales'] = dep_job.attributes['chunk_locales']
 
         job['worker-type'] = 'scriptworker-prov-v1/beetmoverworker-v1'
