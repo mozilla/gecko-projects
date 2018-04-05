@@ -206,7 +206,6 @@ def get_decision_parameters(options):
     parameters['release_eta'] = ''
     parameters['release_enable_partners'] = False
     parameters['release_partners'] = []
-    parameters['release_partner_config'] = {}
     parameters['release_enable_emefree'] = False
 
     # owner must be an email, but sometimes (e.g., for ffxbld) it is not, in which
