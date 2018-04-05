@@ -12,6 +12,7 @@ transforms:
 
 kind-dependencies:
    - release-generate-checksums-beetmover
+   - release-beetmover-signed-langpacks
 
 job-defaults:
    worker-type:
