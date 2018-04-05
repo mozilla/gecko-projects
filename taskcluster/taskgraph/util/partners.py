@@ -7,6 +7,7 @@ import os
 import xml.etree.ElementTree as ET
 
 import requests
+from taskgraph.parameters import Parameters
 
 # Suppress chatty requests logging
 logging.getLogger("requests").setLevel(logging.WARNING)
@@ -131,9 +132,6 @@ TC_PLATFORM_PER_FTP = {
 }
 
 TASKCLUSTER_PROXY_SECRET_ROOT = 'http://taskcluster/secrets/v1/secret/'
-
-# cache data at the module level
-partner_configs = {}
 
 
 # TODO - grant private repo access to P.A.T.
@@ -263,7 +261,7 @@ def get_repack_configs(repackRepo, token):
     return configs
 
 
-def get_partner_config_by_url(manifest_url, kind, partner_subset=None):
+def get_partner_config_by_url(config, manifest_url, kind, partner_subset=None):
     """ Retrieve partner data starting from the manifest url, which points to a repository
     containing a default.xml that is intended to be drive the Google tool 'repo'. It
     descends into each partner repo to lookup and parse the repack.cfg file(s).
@@ -273,6 +271,7 @@ def get_partner_config_by_url(manifest_url, kind, partner_subset=None):
     Supports caching data by kind to avoid repeated requests, relying on the related kinds for
     partner repacking, signing, repackage, repackage signing all having the same kind prefix.
     """
+    partner_configs = config.params.get('release_partner_config') or {}
     if kind not in partner_configs:
         log.info('Looking up data for %s from %s', kind, manifest_url)
         token = get_token()
@@ -295,11 +294,16 @@ def get_partner_config_by_url(manifest_url, kind, partner_subset=None):
                     new_config[partner] = partner_configs[kind][partner]
             partner_configs[kind] = new_config
 
+    if config.params['release_partner_config'] != partner_configs:
+        parameters = dict(config.params)
+        parameters['release_partner_config'] = partner_configs
+        config.params = Parameters(**parameters)
     return partner_configs[kind]
 
 
-def get_partner_config_by_kind(kind):
+def get_partner_config_by_kind(config, kind):
     """ Lookup partner config cached by upstream kinds. Using .startswith() may be fragile. """
+    partner_configs = config.params['release_partner_config']
     for k in partner_configs.keys():
         if kind.startswith(k):
             return partner_configs[k]

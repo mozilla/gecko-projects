@@ -49,9 +49,10 @@ def make_label(config, tasks):
 def add_command(config, tasks):
     for task in tasks:
         artifact_prefix = get_artifact_prefix(task)
-        partner_configs = get_partner_config_by_url(task['worker']['env']['REPACK_MANIFESTS_URL'],
-                                                    config.kind,
-                                                    config.params['release_partners'])
+        partner_configs = get_partner_config_by_url(
+            config, task['worker']['env']['REPACK_MANIFESTS_URL'],
+            config.kind, config.params['release_partners']
+        )
         build_task = None
         for dep in task.get("dependencies", {}).keys():
             if "build" in dep:
