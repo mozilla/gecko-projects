@@ -23,9 +23,9 @@ def chunk_partners(config, jobs):
         dep_job = job['dependent-task']
         for partner, partner_config in partner_configs.iteritems():
             for sub_partner, cfg in partner_config.iteritems():
-                if dep_job.attributes["build_platform"] not in cfg["platforms"]:
+                if dep_job.attributes["build_platform"] not in cfg.get("platforms", []):
                     continue
-                for locale in cfg["locales"]:
+                for locale in cfg.get("locales", []):
                     repack_id = "{}-{}".format(partner, locale)
 
                     partner_job = copy.deepcopy(job)  # don't overwrite dict values here

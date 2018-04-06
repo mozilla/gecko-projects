@@ -57,12 +57,10 @@ def add_command(config, tasks):
         repack_ids = []
         for partner, partner_config in partner_configs.iteritems():
             # TODO clean up configs? Some have a {} as the config
-            if not partner_config:
-                continue
             for sub_partner, cfg in partner_config.iteritems():
-                if task["attributes"]["build_platform"] not in cfg["platforms"]:
+                if task["attributes"]["build_platform"] not in cfg.get("platforms", []):
                     continue
-                for locale in cfg["locales"]:
+                for locale in cfg.get("locales", []):
                     repack_ids.append("{}-{}".format(sub_partner, locale))
 
         if 'mac' in task['attributes']['build_platform']:
