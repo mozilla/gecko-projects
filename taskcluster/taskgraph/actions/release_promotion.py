@@ -235,11 +235,17 @@ def is_release_promotion_available(parameters):
             },
             'release_partners': {
                 'type': 'array',
-                'description': ('A list of partners to repack, or if null or empty then lookup '
+                'description': ('A list of partners to repack, or if null or empty then use '
                                 'the current full set'),
                 'items': {
                     'type': 'string',
                 }
+            },
+            'release_partner_config': {
+                'type': 'object',
+                'description': ('Partner configuration to use for partner repacks.'),
+                'properties': {},
+                'additionalProperties': True,
             },
             'release_enable_emefree': {
                 'type': 'boolean',
@@ -335,6 +341,7 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     parameters['release_eta'] = input.get('release_eta', '')
     parameters['release_enable_partners'] = release_enable_partners
     parameters['release_partners'] = input.get('release_partners')
+    parameters['release_partner_config'] = input.get('release_partner_config')
     parameters['release_enable_emefree'] = release_enable_emefree
 
     if input['version']:
