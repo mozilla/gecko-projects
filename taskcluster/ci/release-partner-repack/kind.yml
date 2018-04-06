@@ -23,7 +23,7 @@ job-defaults:
    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
    worker:
       docker-image:
-         in-tree: "update-verify"
+         in-tree: "partner-repack"
       chain-of-trust: true
       max-run-time: 7200
       env:
