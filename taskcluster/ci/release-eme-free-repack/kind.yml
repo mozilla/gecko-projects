@@ -54,6 +54,7 @@ jobs:
       attributes:
          build_platform: macosx64-nightly
          build_type: opt
+         artifact_prefix: releng/partner
 
    win32-nightly:
       worker:
@@ -72,6 +73,7 @@ jobs:
       attributes:
          build_platform: win32-nightly
          build_type: opt
+         artifact_prefix: releng/partner
 
    win64-nightly:
       worker:
@@ -90,3 +92,4 @@ jobs:
       attributes:
          build_platform: win64-nightly
          build_type: opt
+         artifact_prefix: releng/partner
