@@ -18,6 +18,7 @@ from taskgraph.util.schema import (
     Schema,
 )
 from taskgraph.util.taskcluster import get_taskcluster_artifact_prefix, get_artifact_prefix
+from taskgraph.util.partners import check_if_partners_enabled
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
 
@@ -76,6 +77,8 @@ packaging_description_schema = Schema({
         Required('comm-checkout', default=False): bool,
     }
 })
+
+transforms.add(check_if_partners_enabled)
 
 
 @transforms.add

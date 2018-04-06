@@ -9,6 +9,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
+from taskgraph.util.partners import check_if_partners_enabled
 from taskgraph.util.schema import validate_schema, Schema
 from taskgraph.util.scriptworker import (
     add_scope_prefix,
@@ -33,6 +34,8 @@ repackage_signing_description_schema = Schema({
     Optional('shipping-product'): task_description_schema['shipping-product'],
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
 })
+
+transforms.add(check_if_partners_enabled)
 
 
 @transforms.add

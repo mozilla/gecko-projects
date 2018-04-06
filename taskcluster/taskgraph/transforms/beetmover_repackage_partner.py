@@ -10,6 +10,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.beetmover import craft_release_properties
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
+from taskgraph.util.partners import check_if_partners_enabled
 from taskgraph.util.schema import validate_schema, Schema
 from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
                                          get_beetmover_action_scope,
@@ -53,6 +54,8 @@ beetmover_description_schema = Schema({
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
     Optional('shipping-product'): task_description_schema['shipping-product'],
 })
+
+transforms.add(check_if_partners_enabled)
 
 
 @transforms.add

@@ -9,7 +9,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import resolve_keyed_by
-from taskgraph.util.partners import get_partner_config_by_url
+from taskgraph.util.partners import get_partner_config_by_kind, check_if_partners_enabled
 from taskgraph.util.taskcluster import get_artifact_prefix
 
 
@@ -18,15 +18,7 @@ transforms = TransformSequence()
 import logging
 log = logging.getLogger(__name__)
 
-
-@transforms.add
-# We can disable the whole tree of partner jobs by skipping the repacking here
-# TODO - is this better implemented in a loader (which 'subclasses' taskgraph.loader.transform) ??
-def filter_early_if_partners_disabled(config, tasks):
-    if (config.params['release_enable_partners'] and config.kind == 'release-partner-repack') or \
-            (config.params['release_enable_emefree'] and config.kind == 'release-eme-free-repack'):
-        for task in tasks:
-            yield task
+transforms.add(check_if_partners_enabled)
 
 
 @transforms.add
@@ -49,9 +41,8 @@ def make_label(config, tasks):
 def add_command(config, tasks):
     for task in tasks:
         artifact_prefix = get_artifact_prefix(task)
-        partner_configs = get_partner_config_by_url(
-            config, task['worker']['env']['REPACK_MANIFESTS_URL'],
-            config.kind, config.params['release_partners']
+        partner_configs = get_partner_config_by_kind(
+            config, config.kind
         )
         build_task = None
         for dep in task.get("dependencies", {}).keys():

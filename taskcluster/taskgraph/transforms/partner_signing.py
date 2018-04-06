@@ -8,16 +8,20 @@ Transform the signing task into an actual task description.
 from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
-from taskgraph.util.partners import get_partner_config_by_kind
+from taskgraph.util.partners import get_partner_config_by_kind, check_if_partners_enabled
 from taskgraph.util.signed_artifacts import generate_specifications_of_artifacts_to_sign
 
 
 transforms = TransformSequence()
 
+transforms.add(check_if_partners_enabled)
+
 
 @transforms.add
 def define_upstream_artifacts(config, jobs):
     partner_configs = get_partner_config_by_kind(config, config.kind)
+    if not partner_configs:
+        return
 
     for job in jobs:
         dep_job = job['dependent-task']
