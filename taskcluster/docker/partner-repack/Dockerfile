@@ -10,6 +10,7 @@ RUN dpkg --add-architecture amd64
 RUN apt-get update && \
     apt-get install \
       bzip2 \
+      curl \
       git \
       gzip \
       openssh-client \
