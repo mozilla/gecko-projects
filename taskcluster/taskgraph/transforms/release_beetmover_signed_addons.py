@@ -10,7 +10,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.beetmover import craft_release_properties
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
-from taskgraph.util.schema import validate_schema, Schema
+from taskgraph.util.schema import validate_schema, Schema, optionally_keyed_by, resolve_keyed_by
 from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
                                          get_beetmover_action_scope)
 from taskgraph.transforms.task import task_description_schema
@@ -43,6 +43,9 @@ beetmover_description_schema = Schema({
     # below transforms for defaults of various values.
     Optional('treeherder'): task_description_schema['treeherder'],
 
+    Required('worker-type'): optionally_keyed_by('project', basestring),
+    Required('run-on-projects'): [],
+
     # locale is passed only for l10n beetmoving
     Optional('locale'): basestring,
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
@@ -71,6 +74,14 @@ def validate(config, jobs):
 
 
 @transforms.add
+def resolve_keys(config, jobs):
+    for job in jobs:
+        resolve_keyed_by(
+            job, 'worker-type', item_name=job['label'], project=config.params['project']
+        )
+        yield job
+
+@transforms.add
 def make_task_description(config, jobs):
     for job in jobs:
         dep_job = job['dependent-task']
@@ -93,7 +104,6 @@ def make_task_description(config, jobs):
         job['attributes'] = copy_attributes_from_dependent_job(dep_job)
         job['attributes']['chunk_locales'] = dep_job.attributes['chunk_locales']
 
-        job['worker-type'] = 'scriptworker-prov-v1/beetmoverworker-v1'
         job['scopes'] = [
             get_beetmover_bucket_scope(config),
             get_beetmover_action_scope(config),
