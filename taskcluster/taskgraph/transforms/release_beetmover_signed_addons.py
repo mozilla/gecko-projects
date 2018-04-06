@@ -83,6 +83,7 @@ def resolve_keys(config, jobs):
         )
         yield job
 
+
 @transforms.add
 def make_task_description(config, jobs):
     for job in jobs:
@@ -105,7 +106,6 @@ def make_task_description(config, jobs):
             locales='/'.join(job['attributes']['chunk_locales']),
             platform=job['attributes']['build_platform']
         )
-
 
         job['scopes'] = [
             get_beetmover_bucket_scope(config),
@@ -173,7 +173,8 @@ def yield_all_platform_jobs(config, jobs):
             platform_job['attributes']['build_platform'] = platform
             platform_job['label'] = job['label'].replace('linux64', platform)
             platform_job['description'] = job['description'].replace('linux64', platform)
-            platform_job['treeherder']['platform'] = platform_job['treeherder']['platform'].replace('linux64', platform)
+            platform_job['treeherder']['platform'] = platform_job['treeherder'][
+                    'platform'].replace('linux64', platform)
             platform_job['worker']['release-properties']['platform'] = platform
 
             yield platform_job
