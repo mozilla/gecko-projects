@@ -43,7 +43,7 @@ jobs:
    macosx64-nightly:
       worker:
          artifacts:
-            - name: public/build/eme-free/target.dmg
+            - name: releng/partner/eme-free/target.dmg
               path: /builds/worker/checkouts/gecko/eme-free.dmg
               type: file
       treeherder:
@@ -59,10 +59,10 @@ jobs:
    win32-nightly:
       worker:
          artifacts:
-            - name: public/build/eme-free/setup.exe
+            - name: releng/partner/eme-free/setup.exe
               path: /builds/worker/checkouts/gecko/eme-free.exe
               type: file
-            - name: public/build/eme-free/target.zip
+            - name: releng/partner/eme-free/target.zip
               path: /builds/worker/checkouts/gecko/eme-free.zip
               type: file
       treeherder:
@@ -78,10 +78,10 @@ jobs:
    win64-nightly:
       worker:
          artifacts:
-            - name: public/build/eme-free/setup.exe
+            - name: releng/partner/eme-free/setup.exe
               path: /builds/worker/checkouts/gecko/eme-free.exe
               type: file
-            - name: public/build/eme-free/target.zip
+            - name: releng/partner/eme-free/target.zip
               path: /builds/worker/checkouts/gecko/eme-free.zip
               type: file
       treeherder:
