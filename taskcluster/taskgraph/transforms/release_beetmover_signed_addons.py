@@ -18,6 +18,7 @@ from taskgraph.transforms.release_sign_and_push_langpacks import get_upstream_ta
 from voluptuous import Required, Optional
 
 import logging
+import copy
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ beetmover_description_schema = Schema({
     # below transforms for defaults of various values.
     Optional('treeherder'): task_description_schema['treeherder'],
 
+    Required('description'): basestring,
     Required('worker-type'): optionally_keyed_by('project', basestring),
     Required('run-on-projects'): [],
 
@@ -95,14 +97,15 @@ def make_task_description(config, jobs):
                               "{}/opt".format(dep_th_platform))
         treeherder.setdefault('tier', 1)
         treeherder.setdefault('kind', 'build')
-        job['description'] = (
-            "Beetmover submission for langpacks '{locale}'".format(
-                locale=attributes.get('locale', 'en-US'),
-            )
-        )
 
         job['attributes'] = copy_attributes_from_dependent_job(dep_job)
         job['attributes']['chunk_locales'] = dep_job.attributes['chunk_locales']
+
+        job['description'] = job['description'].format(
+            locales='/'.join(job['attributes']['chunk_locales']),
+            platform=job['attributes']['build_platform']
+        )
+
 
         job['scopes'] = [
             get_beetmover_bucket_scope(config),
@@ -145,9 +148,8 @@ def generate_upstream_artifacts(upstream_task_ref, locales):
         'taskType': 'scriptworker',
         'locale': locale,
         'paths': [
-            'public/build{locale}/target.langpack.xpi'.format(
-                locale='' if locale == 'en-US' else '/' + locale
-            )
+            # addonscript uploads en-US XPI in the en-US folder
+            'public/build/{}/target.langpack.xpi'.format(locale)
         ],
     } for locale in locales]
 
@@ -158,3 +160,20 @@ def strip_unused_data(config, jobs):
         del job['dependent-task']
 
         yield job
+
+
+@transforms.add
+def yield_all_platform_jobs(config, jobs):
+    # Even though langpacks are now platform independent, we keep beetmoving them at old
+    # platform-specific locations. That's why this transform exist
+    for job in jobs:
+        for platform in ('linux32', 'linux64', 'macosx64', 'win32', 'win64'):
+            platform_job = copy.deepcopy(job)
+
+            platform_job['attributes']['build_platform'] = platform
+            platform_job['label'] = job['label'].replace('linux64', platform)
+            platform_job['description'] = job['description'].replace('linux64', platform)
+            platform_job['treeherder']['platform'] = platform_job['treeherder']['platform'].replace('linux64', platform)
+            platform_job['worker']['release-properties']['platform'] = platform
+
+            yield platform_job

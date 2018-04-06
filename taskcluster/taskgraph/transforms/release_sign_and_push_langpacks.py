@@ -105,7 +105,7 @@ def make_task_description(config, jobs):
         treeherder.setdefault('kind', 'build')
 
         job['attributes'] = copy_attributes_from_dependent_job(dep_job)
-        job['attributes']['chunk_locales'] = dep_job.attributes.get('chunk_locales', ['en-US'])
+        job['attributes']['chunk_locales'] = attributes.get('chunk_locales', ['en-US'])
 
         job['description'] = job['description'].format(
             locales='/'.join(job['attributes']['chunk_locales']),

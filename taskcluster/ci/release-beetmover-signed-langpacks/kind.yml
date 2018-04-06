@@ -17,6 +17,7 @@ only-for-attributes:
    - nightly
 
 job-template:
+   description: Beetmover submission for platform-independent langpacks {locales} in {platform} directory
    worker-type:
       by-project:
          mozilla-beta: scriptworker-prov-v1/beetmoverworker-v1
