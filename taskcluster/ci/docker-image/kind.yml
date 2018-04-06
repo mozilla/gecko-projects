@@ -98,3 +98,7 @@ jobs:
     symbol: I(diff)
   firefox-snap:
     symbol: I(snap)
+  partner-repack:
+    symbol: I(PR)
+    parent: debian9-base
+    definition: partner-repack
