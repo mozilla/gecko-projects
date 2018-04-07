@@ -11,10 +11,12 @@ from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.partners import get_partner_config_by_kind, check_if_partners_enabled
 from taskgraph.util.signed_artifacts import generate_specifications_of_artifacts_to_sign
 
+MAX_REPACK_IDS = 50
 
 transforms = TransformSequence()
 
 transforms.add(check_if_partners_enabled)
+
 
 
 @transforms.add
@@ -37,6 +39,10 @@ def define_upstream_artifacts(config, jobs):
                         continue
                     for locale in cfg["locales"]:
                         repack_ids.append("{}-{}".format(sub_partner, locale))
+
+        # continue the hack, remove when we have a real script
+        if len(repack_ids) > MAX_REPACK_IDS:
+            repack_ids = sorted(repack_ids)[:MAX_REPACK_IDS]
 
         artifacts_specifications = generate_specifications_of_artifacts_to_sign(
             dep_job,

@@ -68,7 +68,7 @@ def add_command(config, tasks):
         # Hack to limit the length of the command line, until we have a real
         # script
         if len(repack_ids) > MAX_REPACK_IDS:
-            repack_ids = repack_ids[:MAX_REPACK_IDS]
+            repack_ids = sorted(repack_ids)[:MAX_REPACK_IDS]
 
         if 'mac' in task['attributes']['build_platform']:
             # TODO
