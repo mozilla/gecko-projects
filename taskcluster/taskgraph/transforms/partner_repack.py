@@ -18,7 +18,7 @@ transforms = TransformSequence()
 import logging
 log = logging.getLogger(__name__)
 
-MAX_REPACK_IDS = 50
+MAX_REPACK_IDS = 20
 
 transforms.add(check_if_partners_enabled)
 

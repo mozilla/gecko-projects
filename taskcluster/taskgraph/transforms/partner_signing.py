@@ -11,7 +11,7 @@ from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.partners import get_partner_config_by_kind, check_if_partners_enabled
 from taskgraph.util.signed_artifacts import generate_specifications_of_artifacts_to_sign
 
-MAX_REPACK_IDS = 50
+MAX_REPACK_IDS = 20
 
 transforms = TransformSequence()
 
