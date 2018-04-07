@@ -18,6 +18,8 @@ transforms = TransformSequence()
 import logging
 log = logging.getLogger(__name__)
 
+MAX_REPACK_IDS = 50
+
 transforms.add(check_if_partners_enabled)
 
 
@@ -62,6 +64,11 @@ def add_command(config, tasks):
                     continue
                 for locale in cfg.get("locales", []):
                     repack_ids.append("{}-{}".format(sub_partner, locale))
+
+        # Hack to limit the length of the command line, until we have a real
+        # script
+        if len(repack_ids) > MAX_REPACK_IDS:
+            repack_ids = repack_ids[:MAX_REPACK_IDS]
 
         if 'mac' in task['attributes']['build_platform']:
             # TODO
