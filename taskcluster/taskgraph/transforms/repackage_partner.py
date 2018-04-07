@@ -210,6 +210,7 @@ def make_job_description(config, jobs):
             'worker-type': worker_type,
             'dependencies': dependencies,
             'attributes': attributes,
+            'scopes': ['queue:get-artifact:releng/partner/*'],
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
             'routes': job.get('routes', []),
             'extra': job.get('extra', {}),
@@ -232,7 +233,7 @@ def _generate_task_env(build_platform, signing_task, signing_task_ref, partner):
         signing_task, signing_task_ref, locale=partner, force_private=True
     )
     # TODO figure out why artifact_prefix for signing_task is busted on windows
-    signed_prefix = signed_prefix.replace('public/build', 'partner/repack')
+    signed_prefix = signed_prefix.replace('public/build', 'releng/partner')
 
     if build_platform.startswith('macosx'):
         return {
