@@ -18,7 +18,6 @@ transforms = TransformSequence()
 transforms.add(check_if_partners_enabled)
 
 
-
 @transforms.add
 def define_upstream_artifacts(config, jobs):
     partner_configs = get_partner_config_by_kind(config, config.kind)
