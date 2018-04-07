@@ -231,6 +231,8 @@ def _generate_task_env(build_platform, signing_task, signing_task_ref, partner):
     signed_prefix = get_taskcluster_artifact_prefix(
         signing_task, signing_task_ref, locale=partner, force_private=True
     )
+    # TODO figure out why artifact_prefix for signing_task is busted on windows
+    signed_prefix = signed_prefix.replace('public/build', 'partner/repack')
 
     if build_platform.startswith('macosx'):
         return {
