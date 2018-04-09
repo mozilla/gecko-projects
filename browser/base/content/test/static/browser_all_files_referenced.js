@@ -50,18 +50,11 @@ var whitelist = [
   // security/manager/pki/resources/content/device_manager.js
   {file: "chrome://pippki/content/load_device.xul"},
 
-  // Used by setting this url as a pref in about:config
-  {file: "chrome://browser/content/newtab/alternativeDefaultSites.json"},
-
-  // Add-on compat
-  {file: "chrome://global/content/XPCNativeWrapper.js"},
-  {file: "chrome://global/locale/brand.dtd"},
-
   // The l10n build system can't package string files only for some platforms.
   // See bug 1339424 for why this is hard to fix.
   {file: "chrome://global/locale/fallbackMenubar.properties",
    platforms: ["linux", "win"]},
-  {file: "chrome://global/locale/printPageSetup.dtd", platforms: ["macosx"]},
+  {file: "chrome://global/locale/printPageSetup.dtd", platforms: ["linux", "macosx"]},
   {file: "chrome://global/locale/printPreviewProgress.dtd",
    platforms: ["macosx"]},
   {file: "chrome://global/locale/printProgress.dtd", platforms: ["macosx"]},
@@ -72,9 +65,6 @@ var whitelist = [
   // devtools/client/inspector/bin/dev-server.js
   {file: "chrome://devtools/content/inspector/markup/markup.xhtml",
    isFromDevTools: true},
-
-  // Kept for add-on compatibility, should be removed in bug 851471.
-  {file: "chrome://mozapps/skin/downloads/downloadIcon.png"},
 
   // SpiderMonkey parser API, currently unused in browser/ and toolkit/
   {file: "resource://gre/modules/reflect.jsm"},
@@ -130,11 +120,6 @@ var whitelist = [
   {file: "chrome://global/skin/icons/error-16.png"},
   // Bug 1348362
   {file: "chrome://global/skin/icons/warning-64.png", platforms: ["linux"]},
-  // Bug 1348525
-  {file: "chrome://global/skin/splitter/grip-bottom.gif", platforms: ["linux"]},
-  {file: "chrome://global/skin/splitter/grip-left.gif", platforms: ["linux"]},
-  {file: "chrome://global/skin/splitter/grip-right.gif", platforms: ["linux"]},
-  {file: "chrome://global/skin/splitter/grip-top.gif", platforms: ["linux"]},
   // Bug 1348526
   {file: "chrome://global/skin/tree/sort-asc-classic.png", platforms: ["linux"]},
   {file: "chrome://global/skin/tree/sort-asc.png", platforms: ["linux"]},
@@ -536,11 +521,11 @@ add_task(async function checkAllTheFiles() {
   // Parse and remove all manifests from the list.
   // NOTE that this must be done before filtering out devtools paths
   // so that all chrome paths can be recorded.
-  let manifestPromises = [];
+  let manifestURIs = [];
   uris = uris.filter(uri => {
     let path = uri.pathQueryRef;
     if (path.endsWith(".manifest")) {
-      manifestPromises.push(parseManifest(uri));
+      manifestURIs.push(uri);
       return false;
     }
 
@@ -548,7 +533,7 @@ add_task(async function checkAllTheFiles() {
   });
 
   // Wait for all manifest to be parsed
-  await Promise.all(manifestPromises);
+  await throttledMapPromises(manifestURIs, parseManifest);
 
   // We build a list of promises that get resolved when their respective
   // files have loaded and produced no errors.
@@ -557,13 +542,13 @@ add_task(async function checkAllTheFiles() {
   for (let uri of uris) {
     let path = uri.pathQueryRef;
     if (path.endsWith(".css"))
-      allPromises.push(parseCSSFile(uri));
+      allPromises.push([parseCSSFile, uri]);
     else if (kCodeExtensions.some(ext => path.endsWith(ext)))
-      allPromises.push(parseCodeFile(uri));
+      allPromises.push([parseCodeFile, uri]);
   }
 
   // Wait for all the files to have actually loaded:
-  await Promise.all(allPromises);
+  await throttledMapPromises(allPromises, ([task, uri]) => task(uri));
 
   // Keep only chrome:// files, and filter out either the devtools paths or
   // the non-devtools paths:

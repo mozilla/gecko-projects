@@ -8,7 +8,6 @@ interface LoadContext;
 interface TabParent;
 interface URI;
 interface nsIDocShell;
-interface nsIMessageSender;
 interface nsIPrintSettings;
 interface nsIWebBrowserPersistDocumentReceiver;
 interface nsIWebProgressListener;
@@ -35,33 +34,12 @@ interface FrameLoader {
   readonly attribute LoadContext loadContext;
 
   /**
-   * Start loading the frame. This method figures out what to load
-   * from the owner content in the frame loader.
-   */
-  [Throws]
-  void loadFrame(optional boolean originalSrc = false);
-
-  /**
-   * Loads the specified URI in this frame. Behaves identically to loadFrame,
-   * except that this method allows specifying the URI to load.
-   */
-  [Throws]
-  void loadURI(URI aURI, optional boolean originalSrc = false);
-
-  /**
    * Adds a blocking promise for the current cross process navigation.
    * This method can only be called while the "BrowserWillChangeProcess" event
    * is being fired.
    */
   [Throws]
   void addProcessChangeBlockingPromise(Promise<any> aPromise);
-
-  /**
-   * Destroy the frame loader and everything inside it. This will
-   * clear the weak owner content reference.
-   */
-  [Throws]
-  void destroy();
 
   /**
    * Find out whether the loader's frame is at too great a depth in
@@ -104,14 +82,13 @@ interface FrameLoader {
   void activateFrameEvent(DOMString aType, boolean capture);
 
   // Note, when frameloaders are swapped, also messageManagers are swapped.
-  readonly attribute nsIMessageSender? messageManager;
+  readonly attribute MessageSender? messageManager;
 
   /**
    * Request that the next time a remote layer transaction has been
    * received by the Compositor, a MozAfterRemoteFrame event be sent
    * to the window.
    */
-  [Throws]
   void requestNotifyAfterRemotePaint();
 
   /**
@@ -138,25 +115,6 @@ interface FrameLoader {
   void print(unsigned long long aOuterWindowID,
              nsIPrintSettings aPrintSettings,
              optional nsIWebProgressListener? aProgressListener = null);
-
-  /**
-   * The default event mode automatically forwards the events
-   * handled in EventStateManager::HandleCrossProcessEvent to
-   * the child content process when these events are targeted to
-   * the remote browser element.
-   *
-   * Used primarly for input events (mouse, keyboard)
-   */
-  const unsigned long EVENT_MODE_NORMAL_DISPATCH = 0x00000000;
-
-  /**
-   * With this event mode, it's the application's responsability to
-   * convert and forward events to the content process
-   */
-  const unsigned long EVENT_MODE_DONT_FORWARD_TO_CHILD = 0x00000001;
-
-  [Pure]
-  attribute unsigned long eventMode;
 
   /**
    * If false, then the subdocument is not clipped to its CSS viewport, and the

@@ -142,6 +142,18 @@ public:
   static MediaManager* GetIfExists();
   static void StartupInit();
   static void PostTask(already_AddRefed<Runnable> task);
+
+  /**
+   * Posts an async operation to the media manager thread.
+   * FunctionType must be a function that takes a `MozPromiseHolder&`.
+   *
+   * The returned promise is resolved or rejected by aFunction on the media
+   * manager thread.
+   */
+  template<typename MozPromiseType, typename FunctionType>
+  static RefPtr<MozPromiseType>
+  PostTask(const char* aName, FunctionType&& aFunction);
+
 #ifdef DEBUG
   static bool IsInMediaThread();
 #endif
@@ -174,6 +186,7 @@ public:
   bool IsWindowStillActive(uint64_t aWindowId) {
     return !!GetWindowListener(aWindowId);
   }
+  bool IsWindowListenerStillActive(GetUserMediaWindowListener* aListener);
   // Note: also calls aListener->Remove(), even if inactive
   void RemoveFromWindowList(uint64_t aWindowID,
     GetUserMediaWindowListener *aListener);
@@ -218,16 +231,24 @@ public: // TODO: make private once we upgrade to GCC 4.8+ on linux.
   static void AnonymizeDevices(SourceSet& aDevices, const nsACString& aOriginKey);
   static already_AddRefed<nsIWritableVariant> ToJSArray(SourceSet& aDevices);
 private:
+  enum class DeviceEnumerationType :uint8_t {
+    Normal, // Enumeration should not return loopback or fake devices
+    Fake, // Enumeration should return fake device(s)
+    Loopback /* Enumeration should return loopback device(s) (possibly in
+             addition to normal devices) */
+  };
   already_AddRefed<PledgeSourceSet>
   EnumerateRawDevices(uint64_t aWindowId,
                       dom::MediaSourceEnum aVideoType,
                       dom::MediaSourceEnum aAudioType,
-                      bool aFake);
+                      DeviceEnumerationType aVideoEnumType = DeviceEnumerationType::Normal,
+                      DeviceEnumerationType aAudioEnumType = DeviceEnumerationType::Normal);
   already_AddRefed<PledgeSourceSet>
   EnumerateDevicesImpl(uint64_t aWindowId,
-                       dom::MediaSourceEnum aVideoSrcType,
-                       dom::MediaSourceEnum aAudioSrcType,
-                       bool aFake = false);
+                       dom::MediaSourceEnum aVideoType,
+                       dom::MediaSourceEnum aAudioType,
+                       DeviceEnumerationType aVideoEnumType = DeviceEnumerationType::Normal,
+                       DeviceEnumerationType aAudioEnumType = DeviceEnumerationType::Normal);
   already_AddRefed<PledgeChar>
   SelectSettings(
       dom::MediaStreamConstraints& aConstraints,
@@ -276,7 +297,6 @@ private:
 
   media::CoatCheck<PledgeSourceSet> mOutstandingPledges;
   media::CoatCheck<PledgeChar> mOutstandingCharPledges;
-  media::CoatCheck<PledgeVoid> mOutstandingVoidPledges;
   nsTArray<nsString> mDeviceIDs;
 public:
   media::CoatCheck<media::Pledge<nsCString>> mGetPrincipalKeyPledges;

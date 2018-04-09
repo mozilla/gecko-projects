@@ -597,6 +597,11 @@ where
         self.collection.dirty
     }
 
+    /// Whether the collection is empty.
+    pub fn is_empty(&self) -> bool {
+        self.collection.len() == 0
+    }
+
     fn collection_for(
         &mut self,
         _sheet: &S,

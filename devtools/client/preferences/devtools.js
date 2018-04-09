@@ -48,10 +48,14 @@ pref("devtools.inspector.enabled", true);
 // What was the last active sidebar in the inspector
 pref("devtools.inspector.activeSidebar", "ruleview");
 pref("devtools.inspector.remote", false);
-// Enable the split rule view sidebar toggle in the inspector
-pref("devtools.inspector.split-sidebar-toggle", false);
-// Enable the split rule view in the inspector
-pref("devtools.inspector.split-rule-enabled", false);
+// Enable the 3 pane mode toggle in the inspector
+#if defined(NIGHTLY_BUILD)
+pref("devtools.inspector.three-pane-toggle", true);
+#else
+pref("devtools.inspector.three-pane-toggle", false);
+#endif
+// Enable the 3 pane mode in the inspector
+pref("devtools.inspector.three-pane-enabled", false);
 // Collapse pseudo-elements by default in the rule-view
 pref("devtools.inspector.show_pseudo_elements", false);
 // The default size for image preview tooltips in the rule-view/computed-view/markup-view
@@ -60,8 +64,6 @@ pref("devtools.inspector.imagePreviewTooltipSize", 300);
 pref("devtools.inspector.showUserAgentStyles", false);
 // Show all native anonymous content (like controls in <video> tags)
 pref("devtools.inspector.showAllAnonymousContent", false);
-// Enable the new color widget
-pref("devtools.inspector.colorWidget.enabled", false);
 // Enable the Flexbox highlighter
 pref("devtools.inspector.flexboxHighlighter.enabled", false);
 // Enable the CSS shapes highlighter
@@ -72,8 +74,14 @@ pref("devtools.changesview.enabled", false);
 pref("devtools.eventsview.enabled", false);
 // Enable the Flexbox Inspector panel
 pref("devtools.flexboxinspector.enabled", false);
-// Enable the new Animation Inspector
+// Enable the new Animation Inspector in Nightly only
+#if defined(NIGHTLY_BUILD)
+pref("devtools.new-animationinspector.enabled", true);
+#else
 pref("devtools.new-animationinspector.enabled", false);
+#endif
+// Enable the Variable Fonts editor
+pref("devtools.inspector.fonteditor.enabled", false);
 
 // Grid highlighter preferences
 pref("devtools.gridinspector.gridOutlineMaxColumns", 50);
@@ -82,8 +90,6 @@ pref("devtools.gridinspector.showGridAreas", false);
 pref("devtools.gridinspector.showGridLineNumbers", false);
 pref("devtools.gridinspector.showInfiniteLines", false);
 
-// Whether or not the box model panel is opened in the computed view
-pref("devtools.computed.boxmodel.opened", true);
 // Whether or not the box model panel is opened in the layout view
 pref("devtools.layout.boxmodel.opened", true);
 // Whether or not the flexbox panel is opened in the layout view
@@ -165,6 +171,9 @@ pref("devtools.netmonitor.visibleColumns",
   "[\"status\",\"method\",\"file\",\"domain\",\"cause\",\"type\",\"transferred\",\"contentSize\",\"waterfall\"]"
 );
 
+// Save request/response bodies yes/no.
+pref("devtools.netmonitor.saveRequestAndResponseBodies", true);
+
 // The default Network monitor HAR export setting
 pref("devtools.netmonitor.har.defaultLogDir", "");
 pref("devtools.netmonitor.har.defaultFileName", "Archive %date");
@@ -222,6 +231,9 @@ pref("devtools.scratchpad.enabled", false);
 
 // Make sure the DOM panel is hidden by default
 pref("devtools.dom.enabled", false);
+
+// Make sure the Accessibility panel is hidden by default
+pref("devtools.accessibility.enabled", false);
 
 // Web Audio Editor Inspector Width should be a preference
 pref("devtools.webaudioeditor.inspectorWidth", 300);
@@ -316,7 +328,11 @@ pref("devtools.webconsole.autoMultiline", true);
 pref("devtools.webconsole.new-frontend-enabled", true);
 
 // Enable the new webconsole frontend in the browser console
+#if defined(NIGHTLY_BUILD)
+pref("devtools.browserconsole.new-frontend-enabled", true);
+#else
 pref("devtools.browserconsole.new-frontend-enabled", false);
+#endif
 
 // Enable the webconsole sidebar toggle
 pref("devtools.webconsole.sidebarToggle", false);

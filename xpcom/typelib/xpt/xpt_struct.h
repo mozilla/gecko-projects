@@ -5,7 +5,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /*
- * Structures matching the in-memory representation of typelib structures.
+ * Structures for representing typelib structures in memory.
  * http://www.mozilla.org/scriptable/typelib_file.html
  */
 
@@ -14,20 +14,8 @@
 
 #include "nsID.h"
 #include <stdint.h>
+#include "mozilla/Assertions.h"
 
-/*
- * Originally, I was going to have structures that exactly matched the on-disk
- * representation, but that proved difficult: different compilers can pack
- * their structs differently, and that makes overlaying them atop a
- * read-from-disk byte buffer troublesome.  So now I just have some structures
- * that are used in memory, and we're going to write a nice XDR library to
- * write them to disk and stuff.  It is pure joy. -- shaver
- */
-
-/* Structures for the typelib components */
-
-struct XPTHeader;
-struct XPTInterfaceDirectoryEntry;
 struct XPTInterfaceDescriptor;
 struct XPTConstDescriptor;
 struct XPTMethodDescriptor;
@@ -35,50 +23,24 @@ struct XPTParamDescriptor;
 struct XPTTypeDescriptor;
 struct XPTTypeDescriptorPrefix;
 
-/*
- * Every XPCOM typelib file begins with a header.
- */
 struct XPTHeader {
-  // Some of these fields exists in the on-disk format but don't need to be
-  // stored in memory (other than very briefly, which can be done with local
-  // variables).
+  friend struct XPTInterfaceDescriptor;
+  friend struct XPTConstDescriptor;
+  friend struct XPTMethodDescriptor;
+  friend struct XPTTypeDescriptor;
 
-  //uint8_t magic[16];
-  uint8_t major_version;
-  //uint8_t minor_version;
-  uint16_t num_interfaces;
-  //uint32_t file_length;
-  XPTInterfaceDirectoryEntry* interface_directory;
-  //uint32_t data_pool;
-};
+  static const uint16_t kNumInterfaces;
+  static const XPTInterfaceDescriptor kInterfaces[];
 
-/*
- * Any file with a major version number of XPT_MAJOR_INCOMPATIBLE_VERSION
- * or higher is to be considered incompatible by this version of xpt and
- * we will refuse to read it. We will return a header with magic, major and
- * minor versions set from the file. num_interfaces will be set to zero to
- * confirm our inability to read the file; i.e. even if some client of this
- * library gets out of sync with us regarding the agreed upon value for
- * XPT_MAJOR_INCOMPATIBLE_VERSION, anytime num_interfaces is zero we *know*
- * that this library refused to read the file due to version incompatibility.
- */
-#define XPT_MAJOR_INCOMPATIBLE_VERSION 0x02
+private:
+  static const XPTTypeDescriptor kTypes[];
+  static const XPTParamDescriptor kParams[];
+  static const XPTMethodDescriptor kMethods[];
+  static const XPTConstDescriptor kConsts[];
 
-/*
- * A contiguous array of fixed-size InterfaceDirectoryEntry records begins at
- * the byte offset identified by the interface_directory field in the file
- * header.  The array is used to quickly locate an interface description
- * using its IID.  No interface should appear more than once in the array.
- */
-struct XPTInterfaceDirectoryEntry {
-  nsID iid;
-  char* name;
-
-  // This field exists in the on-disk format. But it isn't used so we don't
-  // allocate space for it in memory.
-  //char* name_space;
-
-  XPTInterfaceDescriptor* interface_descriptor;
+  // All of the strings for this header, including their null
+  // terminators, concatenated into a single string.
+  static const char kStrings[];
 };
 
 /*
@@ -86,51 +48,60 @@ struct XPTInterfaceDirectoryEntry {
  * its methods.
  */
 struct XPTInterfaceDescriptor {
+  constexpr XPTInterfaceDescriptor(nsID aIID,
+                                   uint32_t aName,
+                                   uint16_t aMethodDescriptors,
+                                   uint16_t aConstDescriptors,
+                                   uint16_t aParentInterface,
+                                   uint16_t aNumMethods,
+                                   uint16_t aNumConstants,
+                                   uint8_t aFlags)
+    : mIID(aIID)
+    , mName(aName)
+    , mMethodDescriptors(aMethodDescriptors)
+    , mConstDescriptors(aConstDescriptors)
+    , mParentInterface(aParentInterface)
+    , mNumMethods(aNumMethods)
+    , mNumConstants(aNumConstants)
+    , mFlags(aFlags)
+  {}
+
   static const uint8_t kScriptableMask =                0x80;
   static const uint8_t kFunctionMask =                  0x40;
   static const uint8_t kBuiltinClassMask =              0x20;
   static const uint8_t kMainProcessScriptableOnlyMask = 0x10;
 
-  bool IsScriptable() const { return !!(flags & kScriptableMask); }
-  bool IsFunction() const { return !!(flags & kFunctionMask); }
-  bool IsBuiltinClass() const { return !!(flags & kBuiltinClassMask); }
-  bool IsMainProcessScriptableOnly() const { return !!(flags & kMainProcessScriptableOnlyMask); }
+  bool IsScriptable() const { return !!(mFlags & kScriptableMask); }
+  bool IsFunction() const { return !!(mFlags & kFunctionMask); }
+  bool IsBuiltinClass() const { return !!(mFlags & kBuiltinClassMask); }
+  bool IsMainProcessScriptableOnly() const { return !!(mFlags & kMainProcessScriptableOnlyMask); }
+
+  inline const char* Name() const;
+  inline const XPTMethodDescriptor& Method(size_t aIndex) const;
+  inline const XPTConstDescriptor& Const(size_t aIndex) const;
 
   /*
    * This field ordering minimizes the size of this struct.
-   * The fields are serialized on disk in a different order.
-   * See DoInterfaceDescriptor().
    */
-  XPTMethodDescriptor* method_descriptors;
-  XPTConstDescriptor* const_descriptors;
-  XPTTypeDescriptor* additional_types;
-  uint16_t parent_interface;
-  uint16_t num_methods;
-  uint16_t num_constants;
-  uint8_t flags;
+  nsID mIID;
 
-  /*
-   * additional_types are used for arrays where we may need multiple
-   * XPTTypeDescriptors for a single XPTMethodDescriptor. Since we still
-   * want to have a simple array of XPTMethodDescriptor (each with a single
-   * embedded XPTTypeDescriptor), a XPTTypeDescriptor can have a reference
-   * to an 'additional_type'. That reference is an index in this
-   * "additional_types" array. So a given XPTMethodDescriptor might have
-   * a whole chain of these XPTTypeDescriptors to represent, say, a multi
-   * dimensional array.
-   *
-   * Note that in the typelib file these additional types are stored 'inline'
-   * in the MethodDescriptor. But, in the typelib MethodDescriptors can be
-   * of varying sizes, where in XPT's in memory mapping of the data we want
-   * them to be of fixed size. This additional_types scheme is here to allow
-   * for that.
-   */
-  uint8_t num_additional_types;
+private:
+  uint32_t mName; // Index into XPTHeader::mStrings.
+  uint16_t mMethodDescriptors; // Index into XPTHeader::mMethods.
+  uint16_t mConstDescriptors; // Index into XPTHeader::mConsts.
+
+public:
+  uint16_t mParentInterface;
+  uint16_t mNumMethods;
+  uint16_t mNumConstants;
+
+private:
+  uint8_t mFlags;
 };
 
 /*
- * A TypeDescriptor is a variable-size record used to identify the type of a
- * method argument or return value.
+ * A TypeDescriptor is a union used to identify the type of a method
+ * argument or return value.
  *
  * There are three types of TypeDescriptors:
  *
@@ -139,20 +110,19 @@ struct XPTInterfaceDescriptor {
  * InterfaceIsTypeDescriptor
  *
  * The tag field in the prefix indicates which of the variant TypeDescriptor
- * records is being used, and hence the way any remaining fields should be
- * parsed. Values from 0 to 17 refer to SimpleTypeDescriptors. The value 18
- * designates an InterfaceTypeDescriptor, while 19 represents an
- * InterfaceIsTypeDescriptor.
+ * records is being used, and hence which union members are valid. Values from 0
+ * to 17 refer to SimpleTypeDescriptors. The value 18 designates an
+ * InterfaceTypeDescriptor, while 19 represents an InterfaceIsTypeDescriptor.
  */
 
 /* why bother with a struct?  - other code relies on this being a struct */
 struct XPTTypeDescriptorPrefix {
   uint8_t TagPart() const {
     static const uint8_t kFlagMask = 0xe0;
-    return (uint8_t) (flags & ~kFlagMask);
+    return (uint8_t) (mFlags & ~kFlagMask);
   }
 
-  uint8_t flags;
+  uint8_t mFlags;
 };
 
 /*
@@ -190,87 +160,157 @@ enum XPTTypeDescriptorTags {
 };
 
 struct XPTTypeDescriptor {
+  explicit constexpr XPTTypeDescriptor(XPTTypeDescriptorPrefix aPrefix,
+                                       uint8_t aData1 = 0,
+                                       uint8_t aData2 = 0)
+    : mPrefix(aPrefix)
+    , mData1(aData1)
+    , mData2(aData2)
+  {}
+
   uint8_t Tag() const {
-    return prefix.TagPart();
+    return mPrefix.TagPart();
   }
 
-  XPTTypeDescriptorPrefix prefix;
+  uint8_t ArgNum() const {
+    MOZ_ASSERT(Tag() == TD_INTERFACE_IS_TYPE ||
+               Tag() == TD_PSTRING_SIZE_IS ||
+               Tag() == TD_PWSTRING_SIZE_IS ||
+               Tag() == TD_ARRAY);
+    return mData1;
+  }
 
-  // The memory layout here doesn't exactly match (for the appropriate types)
-  // the on-disk format. This is to save memory.
-  union {
-    // Used for TD_INTERFACE_IS_TYPE.
-    struct {
-      uint8_t argnum;
-    } interface_is;
+  const XPTTypeDescriptor* ArrayElementType() const {
+    MOZ_ASSERT(Tag() == TD_ARRAY);
+    return &XPTHeader::kTypes[mData2];
+  }
 
-    // Used for TD_PSTRING_SIZE_IS, TD_PWSTRING_SIZE_IS.
-    struct {
-      uint8_t argnum;
-      //uint8_t argnum2;          // Present on disk, omitted here.
-    } pstring_is;
+  // We store the 16-bit iface value as two 8-bit values in order to
+  // avoid 16-bit alignment requirements for XPTTypeDescriptor, which
+  // reduces its size and also the size of XPTParamDescriptor.
+  uint16_t InterfaceIndex() const {
+    MOZ_ASSERT(Tag() == TD_INTERFACE_TYPE);
+    return (mData1 << 8) | mData2;
+  }
 
-    // Used for TD_ARRAY.
-    struct {
-      uint8_t argnum;
-      //uint8_t argnum2;          // Present on disk, omitted here.
-      uint8_t additional_type;    // uint16_t on disk, uint8_t here;
-                                  // in practice it never exceeds 20.
-    } array;
+  XPTTypeDescriptorPrefix mPrefix;
 
-    // Used for TD_INTERFACE_TYPE.
-    struct {
-      // We store the 16-bit iface value as two 8-bit values in order to
-      // avoid 16-bit alignment requirements for XPTTypeDescriptor, which
-      // reduces its size and also the size of XPTParamDescriptor.
-      uint8_t iface_hi8;
-      uint8_t iface_lo8;
-    } iface;
-  } u;
+private:
+  // The data for the different variants is stored in these two data fields.
+  // These should only be accessed via the getter methods above, which will
+  // assert if the tag is invalid. The memory layout here doesn't exactly match
+  // the on-disk format. This is to save memory. Some fields for some cases are
+  // smaller than they are on disk or omitted entirely.
+  uint8_t mData1;
+  uint8_t mData2;
 };
 
 /*
- * A ConstDescriptor is a variable-size record that records the name and
- * value of a scoped interface constant. This is allowed only for a subset
- * of types.
+ * A ConstDescriptor records the name and value of a scoped interface constant.
+ * This is allowed only for a subset of types.
  *
- * The type (and thus the size) of the value record is determined by the
- * contents of the associated TypeDescriptor record. For instance, if type
- * corresponds to int16_t, then value is a two-byte record consisting of a
- * 16-bit signed integer.
+ * The type of the value record is determined by the contents of the associated
+ * TypeDescriptor record. For instance, if type corresponds to int16_t, then
+ * value is a 16-bit signed integer.
  */
 union XPTConstValue {
   int16_t i16;
   uint16_t ui16;
   int32_t i32;
   uint32_t ui32;
-}; /* varies according to type */
+
+  // These constructors are needed to statically initialize different cases of
+  // the union because MSVC does not support the use of designated initializers
+  // in C++ code. They need to be constexpr to ensure that no initialization code
+  // is run at startup, to enable sharing of this memory between Firefox processes.
+  explicit constexpr XPTConstValue(int16_t aInt) : i16(aInt) {}
+  explicit constexpr XPTConstValue(uint16_t aInt) : ui16(aInt) {}
+  explicit constexpr XPTConstValue(int32_t aInt) : i32(aInt) {}
+  explicit constexpr XPTConstValue(uint32_t aInt) : ui32(aInt) {}
+};
 
 struct XPTConstDescriptor {
-  char* name;
-  XPTTypeDescriptor type;
-  union XPTConstValue value;
+  constexpr XPTConstDescriptor(uint32_t aName,
+                               const XPTTypeDescriptor& aType,
+                               const XPTConstValue& aValue)
+    : mName(aName)
+    , mType(aType)
+    , mValue(aValue)
+  {}
+
+  const char* Name() const {
+    return &XPTHeader::kStrings[mName];
+  }
+
+private:
+  uint32_t mName; // Index into XPTHeader::mStrings.
+
+public:
+  XPTTypeDescriptor mType;
+  XPTConstValue mValue;
 };
 
 /*
- * A ParamDescriptor is a variable-size record used to describe either a
- * single argument to a method or a method's result.
+ * A ParamDescriptor is used to describe either a single argument to a method or
+ * a method's result.
  */
 struct XPTParamDescriptor {
-  uint8_t flags;
-  XPTTypeDescriptor type;
+  constexpr XPTParamDescriptor(uint8_t aFlags,
+                               const XPTTypeDescriptor& aType)
+    : mFlags(aFlags)
+    , mType(aType)
+  {}
+
+protected:
+  uint8_t mFlags;
+
+public:
+  XPTTypeDescriptor mType;
 };
 
 /*
- * A MethodDescriptor is a variable-size record used to describe a single
- * interface method.
+ * A MethodDescriptor is used to describe a single interface method.
  */
 struct XPTMethodDescriptor {
-  char* name;
-  XPTParamDescriptor* params;
-  //XPTParamDescriptor result; // Present on disk, omitted here.
-  uint8_t flags;
-  uint8_t num_args;
+  constexpr XPTMethodDescriptor(uint32_t aName,
+                                uint32_t aParams,
+                                uint8_t aFlags,
+                                uint8_t aNumArgs)
+    : mName(aName)
+    , mParams(aParams)
+    , mFlags(aFlags)
+    , mNumArgs(aNumArgs)
+  {}
+
+  const char* Name() const {
+    return &XPTHeader::kStrings[mName];
+  }
+  const XPTParamDescriptor& Param(uint8_t aIndex) const {
+    return XPTHeader::kParams[mParams + aIndex];
+  }
+
+private:
+  uint32_t mName; // Index into XPTHeader::mStrings.
+  uint32_t mParams; // Index into XPTHeader::mParams.
+
+protected:
+  uint8_t mFlags;
+  uint8_t mNumArgs;
 };
+
+const char*
+XPTInterfaceDescriptor::Name() const {
+  return &XPTHeader::kStrings[mName];
+}
+
+const XPTMethodDescriptor&
+XPTInterfaceDescriptor::Method(size_t aIndex) const {
+  return XPTHeader::kMethods[mMethodDescriptors + aIndex];
+}
+
+const XPTConstDescriptor&
+XPTInterfaceDescriptor::Const(size_t aIndex) const {
+  return XPTHeader::kConsts[mConstDescriptors + aIndex];
+}
 
 #endif /* xpt_struct_h */

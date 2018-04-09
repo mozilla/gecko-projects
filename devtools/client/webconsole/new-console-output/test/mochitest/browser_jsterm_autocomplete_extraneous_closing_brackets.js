@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Tests that, when the user types an extraneous closing bracket, no error
 // appears. See Bug 592442.
 
@@ -12,7 +10,7 @@
 
 const TEST_URI = "data:text/html;charset=utf-8,test for bug 592442";
 
-add_task(async function () {
+add_task(async function() {
   let { jsterm } = await openNewTabAndConsole(TEST_URI);
 
   try {

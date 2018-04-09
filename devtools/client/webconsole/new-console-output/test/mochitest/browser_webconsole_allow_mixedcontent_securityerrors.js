@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // The test loads a web page with mixed active and display content
 // on it while the "block mixed content" settings are _off_.
 // It then checks that the loading mixed content warning messages
@@ -21,7 +19,7 @@ const TEST_URI = "https://example.com/browser/devtools/client/webconsole/" +
 const LEARN_MORE_URI = "https://developer.mozilla.org/docs/Web/Security/" +
                        "Mixed_content" + DOCS_GA_PARAMS;
 
-add_task(async function () {
+add_task(async function() {
   await Promise.all([
     pushPref("security.mixed_content.block_active_content", false),
     pushPref("security.mixed_content.block_display_content", false),

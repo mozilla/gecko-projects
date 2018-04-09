@@ -621,6 +621,16 @@ const TEST_CASES_EN = [
               location: KeyboardEvent.DOM_KEY_LOCATION_STANDARD, altKey: false, shiftKey: false,
               ctrlKey: false, altGraphKey: false }
   },
+  { key: "a", modifiers: { ctrlKey: true }, expectedKeyEvent: SHOULD_DELIVER_ALL_FOR_NON_PRINTABLE,
+    result: { key: "a", code: "KeyA", charCode: 97, keyCode: KeyboardEvent.DOM_VK_A,
+              location: KeyboardEvent.DOM_KEY_LOCATION_STANDARD, altKey: false, shiftKey: false,
+              ctrlKey: true, altGraphKey: false }
+  },
+  { key: "a", modifiers: { altKey: true }, expectedKeyEvent: SHOULD_DELIVER_ALL_FOR_NON_PRINTABLE,
+    result: { key: "a", code: "KeyA", charCode: 97, keyCode: KeyboardEvent.DOM_VK_A,
+              location: KeyboardEvent.DOM_KEY_LOCATION_STANDARD, altKey: false, shiftKey: false,
+              ctrlKey: false, altGraphKey: false }
+  },
 ];
 
 async function testKeyEvent(aTab, aTestCase) {
@@ -749,7 +759,7 @@ add_task(async function runTestsForEnglishContent() {
 
   gBrowser.removeEventListener("keypress", eventConsumer, true);
 
-  await BrowserTestUtils.removeTab(tab);
+  BrowserTestUtils.removeTab(tab);
 });
 
 add_task(async function runTestForSuppressModifierKeys() {
@@ -809,6 +819,6 @@ add_task(async function runTestForSuppressModifierKeys() {
 
   gBrowser.removeEventListener("keydown", eventConsumer, true);
 
-  await BrowserTestUtils.removeTab(tab);
+  BrowserTestUtils.removeTab(tab);
 });
 

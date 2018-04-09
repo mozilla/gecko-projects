@@ -24,6 +24,7 @@ const { require } = BrowserLoader({
 
 const { createFactory } = require("devtools/client/shared/vendor/react");
 const { render, unmountComponentAtNode } = require("devtools/client/shared/vendor/react-dom");
+const EventEmitter = require("devtools/shared/event-emitter");
 
 const AboutDebuggingApp = createFactory(require("./components/Aboutdebugging"));
 const { createClient } = require("./modules/connect");
@@ -57,10 +58,13 @@ var AboutDebugging = {
   },
 };
 
-window.addEventListener("DOMContentLoaded", function () {
+// Used to track async requests in tests.  See bug 1444424 for better ideas.
+EventEmitter.decorate(AboutDebugging);
+
+window.addEventListener("DOMContentLoaded", function() {
   AboutDebugging.init();
 }, {once: true});
 
-window.addEventListener("unload", function () {
+window.addEventListener("unload", function() {
   AboutDebugging.destroy();
 }, {once: true});

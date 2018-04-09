@@ -752,7 +752,6 @@ function checkPlugin(data) {
 }
 
 function checkTheme(data) {
-  // "hasBinaryComponents" is not available when testing.
   const EXPECTED_THEME_FIELDS_TYPES = {
     id: "string",
     blocklisted: "boolean",
@@ -821,12 +820,9 @@ function checkAddonsSection(data, expectBrokenAddons, partialAddonsRecords) {
     checkActiveGMPlugin(activeGMPlugins[gmPlugin]);
   }
 
-  // Check the active Experiment
+  // Check that we don't send Experiment Telemetry
   let experiment = data.addons.activeExperiment;
-  if (Object.keys(experiment).length !== 0) {
-    Assert.ok(checkString(experiment.id));
-    Assert.ok(checkString(experiment.branch));
-  }
+  Assert.equal(Object.keys(experiment).length, 0);
 
   // Check persona
   Assert.ok(checkNullOrString(data.addons.persona));
@@ -906,9 +902,6 @@ add_task(async function setup() {
   gDataRoot = gHttpRoot + "data/";
   gHttpServer.registerDirectory("/data/", do_get_cwd());
   registerCleanupFunction(() => gHttpServer.stop(() => {}));
-
-  // Allow non-multiprocessCompatible extensions
-  Preferences.set("extensions.allow-non-mpc-extensions", true);
 
   // Create the attribution data file, so that settings.attribution will exist.
   // The attribution functionality only exists in Firefox.

@@ -42,8 +42,6 @@
 #include "nsBidiPresUtils.h"
 #include "nsTextFrame.h"
 
-#include "nsIDOMText.h"
-
 #include "nsContentUtils.h"
 #include "nsThreadUtils.h"
 
@@ -223,7 +221,7 @@ public:
       mContent = nullptr;
 
       nsPoint pt = mPoint -
-        frame->GetOffsetTo(mPresContext->PresShell()->FrameManager()->GetRootFrame());
+        frame->GetOffsetTo(mPresContext->PresShell()->GetRootFrame());
       RefPtr<nsFrameSelection> frameSelection = mFrameSelection;
       frameSelection->HandleDrag(frame, pt);
       if (!frame.IsAlive()) {
@@ -262,14 +260,6 @@ private:
 };
 
 NS_IMPL_ISUPPORTS(nsAutoScrollTimer, nsITimerCallback, nsINamed)
-
-nsresult NS_NewDomSelection(nsISelection **aDomSelection)
-{
-  Selection* rlist = new Selection;
-  *aDomSelection = (nsISelection *)rlist;
-  NS_ADDREF(rlist);
-  return NS_OK;
-}
 
 /*
 The limiter is used specifically for the text areas and textfields
@@ -788,7 +778,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Selection)
   // in JS!).
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSelectionListeners)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mCachedRange)
-  tmp->RemoveAllRanges();
+  tmp->RemoveAllRanges(IgnoreErrors());
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mFrameSelection)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
@@ -1794,7 +1784,7 @@ Selection::SelectFrames(nsPresContext* aPresContext, nsRange* aRange,
   if (mFrameSelection->GetTableCellSelection()) {
     nsINode* node = aRange->GetCommonAncestor();
     nsIFrame* frame = node->IsContent() ? node->AsContent()->GetPrimaryFrame()
-                                : aPresContext->FrameManager()->GetRootFrame();
+                                : aPresContext->PresShell()->GetRootFrame();
     if (frame) {
       frame->InvalidateFrameSubtree();
     }
@@ -2181,7 +2171,7 @@ Selection::DoAutoScroll(nsIFrame* aFrame, nsPoint aPoint)
   nsRootPresContext* rootPC = presContext->GetRootPresContext();
   if (!rootPC)
     return NS_OK;
-  nsIFrame* rootmostFrame = rootPC->PresShell()->FrameManager()->GetRootFrame();
+  nsIFrame* rootmostFrame = rootPC->PresShell()->GetRootFrame();
   AutoWeakFrame weakRootFrame(rootmostFrame);
   AutoWeakFrame weakFrame(aFrame);
   // Get the point relative to the root most frame because the scroll we are
@@ -2227,23 +2217,13 @@ Selection::DoAutoScroll(nsIFrame* aFrame, nsPoint aPoint)
   // Start the AutoScroll timer if necessary.
   if (didScroll && mAutoScrollTimer) {
     nsPoint presContextPoint = globalPoint -
-      shell->FrameManager()->GetRootFrame()->GetOffsetToCrossDoc(rootmostFrame);
+      shell->GetRootFrame()->GetOffsetToCrossDoc(rootmostFrame);
     mAutoScrollTimer->Start(presContext, presContextPoint);
   }
 
   return NS_OK;
 }
 
-
-/** RemoveAllRanges zeroes the selection
- */
-NS_IMETHODIMP
-Selection::RemoveAllRanges()
-{
-  ErrorResult result;
-  RemoveAllRanges(result);
-  return result.StealNSResult();
-}
 
 void
 Selection::RemoveAllRanges(ErrorResult& aRv)
@@ -2295,21 +2275,6 @@ Selection::RemoveAllRangesTemporarily()
   if (result.Failed()) {
     mCachedRange = nullptr;
   }
-  return result.StealNSResult();
-}
-
-/** AddRange adds the specified range to the selection
- *  @param aRange is the range to be added
- */
-NS_IMETHODIMP
-Selection::AddRange(nsIDOMRange* aDOMRange)
-{
-  if (!aDOMRange) {
-    return NS_ERROR_NULL_POINTER;
-  }
-  nsRange* range = static_cast<nsRange*>(aDOMRange);
-  ErrorResult result;
-  AddRange(*range, result);
   return result.StealNSResult();
 }
 
@@ -2402,18 +2367,6 @@ Selection::AddRangeInternal(nsRange& aRange, nsIDocument* aDocument,
 //    We therefore find any ranges that intersect the same nodes as the range
 //    being removed, and cause them to set the selected bits back on their
 //    selected frames after we've cleared the bit from ours.
-
-nsresult
-Selection::RemoveRange(nsIDOMRange* aDOMRange)
-{
-  if (!aDOMRange) {
-    return NS_ERROR_INVALID_ARG;
-  }
-  nsRange* range = static_cast<nsRange*>(aDOMRange);
-  ErrorResult result;
-  RemoveRange(*range, result);
-  return result.StealNSResult();
-}
 
 void
 Selection::RemoveRange(nsRange& aRange, ErrorResult& aRv)
@@ -2662,9 +2615,7 @@ Selection::CollapseToStartJS(ErrorResult& aRv)
 void
 Selection::CollapseToStart(ErrorResult& aRv)
 {
-  int32_t cnt;
-  nsresult rv = GetRangeCount(&cnt);
-  if (NS_FAILED(rv) || cnt <= 0) {
+  if (RangeCount() == 0) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
   }
@@ -2711,9 +2662,8 @@ Selection::CollapseToEndJS(ErrorResult& aRv)
 void
 Selection::CollapseToEnd(ErrorResult& aRv)
 {
-  int32_t cnt;
-  nsresult rv = GetRangeCount(&cnt);
-  if (NS_FAILED(rv) || cnt <= 0) {
+  uint32_t cnt = RangeCount();
+  if (cnt == 0) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
   }
@@ -2753,14 +2703,6 @@ Selection::GetIsCollapsed(bool* aIsCollapsed)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-Selection::GetRangeCount(int32_t* aRangeCount)
-{
-  *aRangeCount = (int32_t)RangeCount();
-
-  return NS_OK;
-}
-
 void
 Selection::GetType(nsAString& aOutType) const
 {
@@ -2771,15 +2713,6 @@ Selection::GetType(nsAString& aOutType) const
   } else {
     aOutType.AssignLiteral("Range");
   }
-}
-
-NS_IMETHODIMP
-Selection::GetRangeAt(int32_t aIndex, nsIDOMRange** aReturn)
-{
-  ErrorResult result;
-  *aReturn = GetRangeAt(aIndex, result);
-  NS_IF_ADDREF(*aReturn);
-  return result.StealNSResult();
 }
 
 nsRange*
@@ -4082,15 +4015,13 @@ Selection::SetBaseAndExtent(nsINode& aAnchorNode, uint32_t aAnchorOffset,
     return;
   }
 
-  // Use non-virtual method instead of nsISelection::RemoveAllRanges().
   RemoveAllRanges(aRv);
   if (aRv.Failed()) {
     return;
   }
 
-  rv = AddRange(newRange);
-  if (NS_FAILED(rv)) {
-    aRv.Throw(rv);
+  AddRange(*newRange, aRv);
+  if (aRv.Failed()) {
     return;
   }
 

@@ -7,7 +7,8 @@
 
 #![deny(missing_docs)]
 
-use context::{StyleContext, ThreadLocalStyleContext};
+use context::{StyleContext, PerThreadTraversalStatistics};
+use context::{ThreadLocalStyleContext, TraversalStatistics};
 use dom::{SendNode, TElement, TNode};
 use parallel;
 use parallel::{DispatchMode, WORK_UNIT_MAX};
@@ -17,6 +18,36 @@ use std::collections::VecDeque;
 use std::mem;
 use time;
 use traversal::{DomTraversal, PerLevelTraversalData, PreTraverseToken};
+
+#[cfg(feature = "servo")]
+fn should_report_statistics() -> bool {
+    false
+}
+
+#[cfg(feature = "gecko")]
+fn should_report_statistics() -> bool {
+    unsafe { ::gecko_bindings::structs::ServoTraversalStatistics_sActive }
+}
+
+#[cfg(feature = "servo")]
+fn report_statistics(_stats: &PerThreadTraversalStatistics) {
+    unreachable!("Servo never report stats");
+}
+
+#[cfg(feature = "gecko")]
+fn report_statistics(stats: &PerThreadTraversalStatistics) {
+    // This should only be called in the main thread, or it may be racy
+    // to update the statistics in a global variable.
+    debug_assert!(unsafe { ::gecko_bindings::bindings::Gecko_IsMainThread() });
+    let gecko_stats = unsafe {
+        &mut ::gecko_bindings::structs::ServoTraversalStatistics_sSingleton
+    };
+    gecko_stats.mElementsTraversed += stats.elements_traversed;
+    gecko_stats.mElementsStyled += stats.elements_styled;
+    gecko_stats.mElementsMatched += stats.elements_matched;
+    gecko_stats.mStylesShared += stats.styles_shared;
+    gecko_stats.mStylesReused += stats.styles_reused;
+}
 
 /// Do a DOM traversal for top-down and (optionally) bottom-up processing,
 /// generic over `D`.
@@ -41,8 +72,8 @@ where
     let root =
         token.traversal_root().expect("Should've ensured we needed to traverse");
 
+    let report_stats = should_report_statistics();
     let dump_stats = traversal.shared_context().options.dump_style_statistics;
-    let is_nightly  = traversal.shared_context().options.is_nightly();
     let start_time = if dump_stats { Some(time::precise_time_s()) } else { None };
 
     // Declare the main-thread context, as well as the worker-thread contexts,
@@ -113,8 +144,9 @@ where
             nodes_remaining_at_current_depth = discovered.len();
         }
     }
-    // Accumulate statistics
-    if dump_stats || is_nightly {
+
+    // Collect statistics from thread-locals if requested.
+    if dump_stats || report_stats {
         let mut aggregate =
             mem::replace(&mut context.thread_local.statistics, Default::default());
         let parallel = maybe_tls.is_some();
@@ -128,10 +160,20 @@ where
             });
         }
 
-        // dump to stdout if requested
-        if dump_stats && aggregate.is_large_traversal() {
-            aggregate.finish(traversal, parallel, start_time.unwrap());
-             println!("{}", aggregate);
+        if report_stats {
+            report_statistics(&aggregate);
+        }
+        // dump statistics to stdout if requested
+        if dump_stats {
+            let stats = TraversalStatistics::new(
+                aggregate,
+                traversal,
+                parallel,
+                start_time.unwrap()
+            );
+            if stats.is_large {
+                println!("{}", stats);
+            }
         }
     }
 }

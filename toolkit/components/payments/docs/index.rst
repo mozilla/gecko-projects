@@ -13,6 +13,11 @@ JSDoc style comments are used within the JS files of the component. This documen
 Debugging/Development
 =====================
 
+Must Have Electrolysis
+-------
+
+Web Payments `does not work without e10s <https://bugzilla.mozilla.org/show_bug.cgi?id=1365964>`_!
+
 Logging
 -------
 
@@ -20,10 +25,10 @@ Set the pref ``dom.payments.loglevel`` to "Debug" to increase the verbosity of c
 
 Unprivileged UI Development
 ---------------------------
-During development of the unprivileged custom elements, you can load the dialog over a file: URI or
-local server without even requiring a build. Simply load
-`toolkit/components/payments/res/paymentRequest.xhtml` in the browser. Use the debugging console to
-load sample data.
+During development of the unprivileged custom elements, you can load the dialog from a
+local server without even requiring a build. Simply run `./mach python toolkit/components/payments/server.py`
+then load `http://localhost:8000/paymentRequest.xhtml?debug=1` in the browser.
+Use the debugging console to load sample data.
 
 Debugging Console
 -----------------

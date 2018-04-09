@@ -12,7 +12,6 @@
 #include "mozilla/ServoBindings.h"
 #include "mozilla/ServoDeclarationBlock.h"
 #include "mozilla/dom/CSSStyleRuleBinding.h"
-#include "nsCSSPseudoClasses.h"
 
 #include "mozAutoDocUpdate.h"
 
@@ -73,8 +72,6 @@ ServoStyleRuleDeclaration::SetCSSDeclaration(DeclarationBlock* aDecl)
 {
   ServoStyleRule* rule = Rule();
   if (RefPtr<StyleSheet> sheet = rule->GetStyleSheet()) {
-    MOZ_ASSERT(sheet->IsServo(), "Servo style rules should have "
-                                 "servo stylesheets.");
     nsCOMPtr<nsIDocument> doc = sheet->GetAssociatedDocument();
     mozAutoDocUpdate updateBatch(doc, UPDATE_STYLE, true);
     if (aDecl != mDecls) {
@@ -158,16 +155,6 @@ ServoStyleRule::IsCCLeaf() const
   return !mDecls.PreservingWrapper();
 }
 
-already_AddRefed<css::Rule>
-ServoStyleRule::Clone() const
-{
-  // Rule::Clone is only used when CSSStyleSheetInner is cloned in
-  // preparation of being mutated. However, ServoStyleSheet never clones
-  // anything, so this method should never be called.
-  MOZ_ASSERT_UNREACHABLE("Shouldn't be cloning ServoStyleRule");
-  return nullptr;
-}
-
 size_t
 ServoStyleRule::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
@@ -195,12 +182,6 @@ ServoStyleRule::List(FILE* out, int32_t aIndent) const
 #endif
 
 /* CSSRule implementation */
-
-uint16_t
-ServoStyleRule::Type() const
-{
-  return CSSRuleBinding::STYLE_RULE;
-}
 
 void
 ServoStyleRule::GetCssText(nsAString& aCssText) const

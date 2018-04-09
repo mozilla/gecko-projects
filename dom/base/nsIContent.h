@@ -11,6 +11,7 @@
 #include "nsCaseTreatment.h" // for enum, cannot be forward-declared
 #include "nsINode.h"
 #include "nsStringFwd.h"
+#include "nsISupportsImpl.h"
 
 // Forward declarations
 class nsAtom;
@@ -67,6 +68,9 @@ public:
 #endif // MOZILLA_INTERNAL_API
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_ICONTENT_IID)
+
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_CLASS(nsIContent)
 
   /**
    * Bind this content node to a tree.  If this method throws, the caller must
@@ -203,7 +207,7 @@ public:
    * Returns |this| if it is not chrome-only/native anonymous, otherwise
    * first non chrome-only/native anonymous ancestor.
    */
-  virtual nsIContent* FindFirstNonChromeOnlyAccessContent() const;
+  nsIContent* FindFirstNonChromeOnlyAccessContent() const;
 
   /**
    * Returns true if and only if this node has a parent, but is not in
@@ -246,14 +250,6 @@ public:
     return IsInNativeAnonymousSubtree() || (!IsInShadowTree() && GetBindingParent() != nullptr);
   }
 
-  /*
-   * Return true if this node is the shadow root of an use-element shadow tree.
-   */
-  bool IsRootOfUseElementShadowTree() const {
-    return GetParent() && GetParent()->IsSVGElement(nsGkAtoms::use) &&
-           IsRootOfAnonymousSubtree();
-  }
-
   /**
    * Return true iff this node is in an HTML document (in the HTML5 sense of
    * the term, i.e. not in an XHTML/XML document).
@@ -264,7 +260,7 @@ public:
   /**
    * Returns true if in a chrome document
    */
-  virtual bool IsInChromeDocument() const;
+  inline bool IsInChromeDocument() const;
 
   /**
    * Get the namespace that this element's tag is defined in
@@ -384,32 +380,6 @@ public:
   }
 
   /**
-   * Set the text to the given value. If aNotify is true then
-   * the document is notified of the content change.
-   * NOTE: For elements this always ASSERTS and returns NS_ERROR_FAILURE
-   */
-  virtual nsresult SetText(const char16_t* aBuffer, uint32_t aLength,
-                           bool aNotify) = 0;
-
-  /**
-   * Append the given value to the current text. If aNotify is true then
-   * the document is notified of the content change.
-   * NOTE: For elements this always ASSERTS and returns NS_ERROR_FAILURE
-   */
-  virtual nsresult AppendText(const char16_t* aBuffer, uint32_t aLength,
-                              bool aNotify) = 0;
-
-  /**
-   * Set the text to the given value. If aNotify is true then
-   * the document is notified of the content change.
-   * NOTE: For elements this always asserts and returns NS_ERROR_FAILURE
-   */
-  nsresult SetText(const nsAString& aStr, bool aNotify)
-  {
-    return SetText(aStr.BeginReading(), aStr.Length(), aNotify);
-  }
-
-  /**
    * Query method to see if the frame is nothing but whitespace
    * NOTE: Always returns false for elements
    */
@@ -419,27 +389,6 @@ public:
    * Thread-safe version of TextIsOnlyWhitespace.
    */
   virtual bool ThreadSafeTextIsOnlyWhitespace() const = 0;
-
-  /**
-   * Method to see if the text node contains data that is useful
-   * for a translation: i.e., it consists of more than just whitespace,
-   * digits and punctuation.
-   * NOTE: Always returns false for elements.
-   */
-  virtual bool HasTextForTranslation() = 0;
-
-  /**
-   * Append the text content to aResult.
-   * NOTE: This asserts and returns for elements
-   */
-  virtual void AppendTextTo(nsAString& aResult) = 0;
-
-  /**
-   * Append the text content to aResult.
-   * NOTE: This asserts and returns for elements
-   */
-  MOZ_MUST_USE
-  virtual bool AppendTextTo(nsAString& aResult, const mozilla::fallible_t&) = 0;
 
   /**
    * Check if this content is focusable and in the current tab order.
@@ -675,16 +624,6 @@ public:
   }
 
   /**
-   * This method is called when the parser begins creating the element's
-   * children, if any are present.
-   *
-   * This is only called for XTF elements currently.
-   */
-  virtual void BeginAddingChildren()
-  {
-  }
-
-  /**
    * This method is called when the parser finishes creating the element's children,
    * if any are present.
    *
@@ -832,17 +771,26 @@ public:
   already_AddRefed<mozilla::URLExtraData>
   GetURLDataForStyleAttr(nsIPrincipal* aSubjectPrincipal = nullptr) const;
 
-  virtual nsresult GetEventTargetParent(
-                     mozilla::EventChainPreVisitor& aVisitor) override;
+  void GetEventTargetParent(mozilla::EventChainPreVisitor& aVisitor) override;
 
-  virtual bool IsPurple() = 0;
-  virtual void RemovePurple() = 0;
-
-  virtual bool OwnedOnlyByTheDOMTree() { return false; }
-
-  virtual already_AddRefed<nsITextControlElement> GetAsTextControlElement()
+  bool IsPurple() const
   {
-    return nullptr;
+    return mRefCnt.IsPurple();
+  }
+
+  void RemovePurple()
+  {
+    mRefCnt.RemovePurple();
+  }
+
+  bool OwnedOnlyByTheDOMTree()
+  {
+    uint32_t rc = mRefCnt.get();
+    if (GetParent()) {
+      --rc;
+    }
+    rc -= GetChildCount();
+    return rc == 0;
   }
 
 protected:
@@ -960,6 +908,8 @@ protected:
    */
   nsAtom* DoGetID() const;
 
+  ~nsIContent() {}
+
 public:
 #ifdef DEBUG
   /**
@@ -975,15 +925,6 @@ public:
   virtual void DumpContent(FILE* out = stdout, int32_t aIndent = 0,
                            bool aDumpAll = true) const = 0;
 #endif
-
-  /**
-   * Append to aOutDescription a short (preferably one line) string
-   * describing the content.
-   * Currently implemented for elements only.
-   */
-  virtual void Describe(nsAString& aOutDescription) const {
-    aOutDescription = NS_LITERAL_STRING("(not an element)");
-  }
 
   enum ETabFocusType {
     eTabFocus_textControlsMask = (1<<0),  // textboxes and lists always tabbable
@@ -1008,31 +949,41 @@ inline nsIContent* nsINode::AsContent()
   return static_cast<nsIContent*>(this);
 }
 
-#define NS_IMPL_FROMCONTENT_HELPER(_class, _check)                             \
-  static _class* FromContent(nsIContent* aContent)                             \
-  {                                                                            \
-    return aContent->_check ? static_cast<_class*>(aContent) : nullptr;        \
-  }                                                                            \
-  static const _class* FromContent(const nsIContent* aContent)                 \
-  {                                                                            \
-    return aContent->_check ? static_cast<const _class*>(aContent) : nullptr;  \
-  }                                                                            \
-  static _class* FromContentOrNull(nsIContent* aContent)                       \
-  {                                                                            \
-    return aContent ? FromContent(aContent) : nullptr;                         \
-  }                                                                            \
-  static const _class* FromContentOrNull(const nsIContent* aContent)           \
-  {                                                                            \
-    return aContent ? FromContent(aContent) : nullptr;                         \
+// Some checks are faster to do on nsIContent or Element than on
+// nsINode, so spit out FromNode versions taking those types too.
+#define NS_IMPL_FROMNODE_HELPER(_class, _check)                         \
+  template<typename ArgType>                                            \
+  static _class* FromNode(ArgType&& aNode)                              \
+  {                                                                     \
+    /* We need the double-cast in case aNode is a smartptr.  Those */   \
+    /* can cast to superclasses of the type they're templated on, */    \
+    /* but not directly to subclasses.  */                              \
+    return aNode->_check ?                                              \
+      static_cast<_class*>(static_cast<nsINode*>(aNode)) : nullptr;     \
+  }                                                                     \
+  template<typename ArgType>                                            \
+  static _class* FromNodeOrNull(ArgType&& aNode)                        \
+  {                                                                     \
+    return aNode ? FromNode(aNode) : nullptr;                           \
+  }                                                                     \
+  template<typename ArgType>                                            \
+  static const _class* FromNode(const ArgType* aNode)                   \
+  {                                                                     \
+    return aNode->_check ? static_cast<const _class*>(aNode) : nullptr; \
+  }                                                                     \
+  template<typename ArgType>                                            \
+  static const _class* FromNodeOrNull(const ArgType* aNode)             \
+  {                                                                     \
+    return aNode ? FromNode(aNode) : nullptr;                           \
   }
 
-#define NS_IMPL_FROMCONTENT(_class, _nsid)                                     \
-  NS_IMPL_FROMCONTENT_HELPER(_class, IsInNamespace(_nsid))
+#define NS_IMPL_FROMNODE(_class, _nsid)                                     \
+  NS_IMPL_FROMNODE_HELPER(_class, IsInNamespace(_nsid))
 
-#define NS_IMPL_FROMCONTENT_WITH_TAG(_class, _nsid, _tag)                      \
-  NS_IMPL_FROMCONTENT_HELPER(_class, NodeInfo()->Equals(nsGkAtoms::_tag, _nsid))
+#define NS_IMPL_FROMNODE_WITH_TAG(_class, _nsid, _tag)                      \
+  NS_IMPL_FROMNODE_HELPER(_class, NodeInfo()->Equals(nsGkAtoms::_tag, _nsid))
 
-#define NS_IMPL_FROMCONTENT_HTML_WITH_TAG(_class, _tag)                        \
-  NS_IMPL_FROMCONTENT_WITH_TAG(_class, kNameSpaceID_XHTML, _tag)
+#define NS_IMPL_FROMNODE_HTML_WITH_TAG(_class, _tag)                        \
+  NS_IMPL_FROMNODE_WITH_TAG(_class, kNameSpaceID_XHTML, _tag)
 
 #endif /* nsIContent_h___ */

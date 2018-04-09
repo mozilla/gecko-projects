@@ -11,8 +11,10 @@ ChromeUtils.import("resource://services-sync/util.js");
 
 const PREFS_GUID = CommonUtils.encodeBase64URL(Services.appinfo.ID);
 
-loadAddonTestFunctions();
-startupManager();
+AddonTestUtils.init(this);
+AddonTestUtils.createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1.9.2");
+AddonTestUtils.overrideCertDB();
+AddonTestUtils.awaitPromise(AddonTestUtils.promiseStartupManager());
 
 function makePersona(id) {
   return {
@@ -25,7 +27,7 @@ function makePersona(id) {
 add_task(async function run_test() {
   _("Test fixtures.");
   // read our custom prefs file before doing anything.
-  Services.prefs.readUserPrefsFromFile(do_get_file("prefs_test_prefs_store.js"));
+  Services.prefs.readDefaultPrefsFromFile(do_get_file("prefs_test_prefs_store.js"));
 
   let engine = Service.engineManager.get("prefs");
   let store = engine._store;

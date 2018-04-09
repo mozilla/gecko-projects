@@ -9,6 +9,8 @@ const Services = require("Services");
 const SwatchColorPickerTooltip = require("devtools/client/shared/widgets/tooltip/SwatchColorPickerTooltip");
 const { throttle } = require("devtools/client/inspector/shared/utils");
 const { compareFragmentsGeometry } = require("devtools/client/inspector/grids/utils/utils");
+const asyncStorage = require("devtools/shared/async-storage");
+const { parseURL } = require("devtools/client/shared/source-utils");
 
 const {
   updateGridColor,
@@ -55,7 +57,8 @@ class GridInspector {
     this.getSwatchColorPickerTooltip = this.getSwatchColorPickerTooltip.bind(this);
     this.updateGridPanel = this.updateGridPanel.bind(this);
 
-    this.onHighlighterChange = this.onHighlighterChange.bind(this);
+    this.onHighlighterShown = this.onHighlighterShown.bind(this);
+    this.onHighlighterHidden = this.onHighlighterHidden.bind(this);
     this.onNavigate = this.onNavigate.bind(this);
     this.onReflow = throttle(this.onReflow, 500, this);
     this.onSetGridOverlayColor = this.onSetGridOverlayColor.bind(this);
@@ -80,7 +83,13 @@ class GridInspector {
       return;
     }
 
-    this.layoutInspector = await this.inspector.walker.getLayoutInspector();
+    try {
+      this.layoutInspector = await this.inspector.walker.getLayoutInspector();
+    } catch (e) {
+      // This call might fail if called asynchrously after the toolbox is finished
+      // closing.
+      return;
+    }
 
     this.loadHighlighterSettings();
 
@@ -93,8 +102,8 @@ class GridInspector {
       }
     );
 
-    this.highlighters.on("grid-highlighter-hidden", this.onHighlighterChange);
-    this.highlighters.on("grid-highlighter-shown", this.onHighlighterChange);
+    this.highlighters.on("grid-highlighter-hidden", this.onHighlighterHidden);
+    this.highlighters.on("grid-highlighter-shown", this.onHighlighterShown);
     this.inspector.sidebar.on("select", this.onSidebarSelect);
     this.inspector.on("new-root", this.onNavigate);
 
@@ -106,8 +115,8 @@ class GridInspector {
    * and cleans up references.
    */
   destroy() {
-    this.highlighters.off("grid-highlighter-hidden", this.onHighlighterChange);
-    this.highlighters.off("grid-highlighter-shown", this.onHighlighterChange);
+    this.highlighters.off("grid-highlighter-hidden", this.onHighlighterHidden);
+    this.highlighters.off("grid-highlighter-shown", this.onHighlighterShown);
     this.inspector.sidebar.off("select", this.onSidebarSelect);
     this.inspector.off("new-root", this.onNavigate);
 
@@ -148,16 +157,20 @@ class GridInspector {
    *
    * @param  {NodeFront} nodeFront
    *         The NodeFront for which we need the color.
+   * @param  {String} customColor
+   *         The color fetched from the custom palette, if it exists.
    * @param  {String} fallbackColor
    *         The color to use if no color could be found for the node front.
    * @return {String} color
    *         The color to use.
    */
-  getInitialGridColor(nodeFront, fallbackColor) {
+  getInitialGridColor(nodeFront, customColor, fallbackColor) {
     let highlighted = nodeFront == this.highlighters.gridHighlighterShown;
 
     let color;
-    if (highlighted && this.highlighters.state.grid.options) {
+    if (customColor) {
+      color = customColor;
+    } else if (highlighted && this.highlighters.state.grid.options) {
       // If the node front is currently highlighted, use the color from the highlighter
       // options.
       color = this.highlighters.state.grid.options.color;
@@ -288,6 +301,11 @@ class GridInspector {
     if (!this.inspector || !this.store) {
       return;
     }
+    let currentUrl = this.inspector.target.url;
+    // Get the hostname, if there is no hostname, fall back on protocol
+    // ex: `data:` uri, and `about:` pages
+    let hostname = parseURL(currentUrl).hostname || parseURL(currentUrl).protocol;
+    let customColors = await asyncStorage.getItem("gridInspectorHostColors") || {};
 
     // Get all the GridFront from the server if no gridFronts were provided.
     let gridFronts;
@@ -301,9 +319,9 @@ class GridInspector {
 
     // Log how many CSS Grid elements DevTools sees.
     if (gridFronts.length > 0 &&
-        this.inspector.target.url != this.inspector.previousURL) {
+        currentUrl != this.inspector.previousURL) {
       this.telemetry.log(CSS_GRID_COUNT_HISTOGRAM_ID, gridFronts.length);
-      this.inspector.previousURL = this.inspector.target.url;
+      this.inspector.previousURL = currentUrl;
     }
 
     let grids = [];
@@ -325,8 +343,9 @@ class GridInspector {
         }
       }
 
+      let colorForHost = customColors[hostname] ? customColors[hostname][i] : undefined;
       let fallbackColor = GRID_COLORS[i % GRID_COLORS.length];
-      let color = this.getInitialGridColor(nodeFront, fallbackColor);
+      let color = this.getInitialGridColor(nodeFront, colorForHost, fallbackColor);
 
       grids.push({
         id: i,
@@ -341,22 +360,51 @@ class GridInspector {
     }
 
     this.store.dispatch(updateGrids(grids));
+    this.inspector.emit("grid-panel-updated");
+  }
+  /**
+   * Handler for "grid-highlighter-shown" events emitted from the
+   * HighlightersOverlay. Passes nodefront and event name to handleHighlighterChange.
+   * Required since on and off events need the same reference object.
+   *
+   * @param  {NodeFront} nodeFront
+   *         The NodeFront of the flex container element for which the flexbox
+   *         highlighter is shown for.
+   * @param  {Object} options
+   *         The highlighter options used for the highlighter being shown/hidden.
+   */
+  onHighlighterShown(nodeFront, options) {
+    return this.onHighlighterChange(true, nodeFront, options);
+  }
+
+  /**
+   * Handler for "grid-highlighter-hidden" events emitted from the
+   * HighlightersOverlay. Passes nodefront and event name to handleHighlighterChange.
+   * Required since on and off events need the same reference object.
+   *
+   * @param  {NodeFront} nodeFront
+   *         The NodeFront of the flex container element for which the flexbox
+   *         highlighter is shown for.
+   * @param  {Object} options
+   *         The highlighter options used for the highlighter being shown/hidden.
+   */
+  onHighlighterHidden(nodeFront, options) {
+    return this.onHighlighterChange(false, nodeFront, options);
   }
 
   /**
    * Handler for "grid-highlighter-shown" and "grid-highlighter-hidden" events emitted
    * from the HighlightersOverlay. Updates the NodeFront's grid highlighted state.
    *
-   * @param  {Event} event
-   *         Event that was triggered.
+   * @param  {Boolean} highlighted
+   *         If the grid should be updated to highlight or hide.
    * @param  {NodeFront} nodeFront
    *         The NodeFront of the grid container element for which the grid highlighter
    *         is shown for.
    * @param  {Object} options
    *         The highlighter options used for the highlighter being shown/hidden.
    */
-  onHighlighterChange(event, nodeFront, options = {}) {
-    let highlighted = event === "grid-highlighter-shown";
+  onHighlighterChange(highlighted, nodeFront, options = {}) {
     let { color } = options;
 
     // Only tell the store that the highlighter changed if it did change.
@@ -455,16 +503,30 @@ class GridInspector {
    * @param  {String} color
    *         A hex string representing the color to use.
    */
-  onSetGridOverlayColor(node, color) {
+  async onSetGridOverlayColor(node, color) {
     this.store.dispatch(updateGridColor(node, color));
     let { grids } = this.store.getState();
+    let currentUrl = this.inspector.target.url;
+    // Get the hostname, if there is no hostname, fall back on protocol
+    // ex: `data:` uri, and `about:` pages
+    let hostname = parseURL(currentUrl).hostname || parseURL(currentUrl).protocol;
+    let customGridColors = await asyncStorage.getItem("gridInspectorHostColors") || {};
 
-    // If the grid for which the color was updated currently has a highlighter, update
-    // the color.
     for (let grid of grids) {
-      if (grid.nodeFront === node && grid.highlighted) {
-        let highlighterSettings = this.getGridHighlighterSettings(node);
-        this.showGridHighlighter(node, highlighterSettings);
+      if (grid.nodeFront === node) {
+        if (!customGridColors[hostname]) {
+          customGridColors[hostname] = [];
+        }
+        // Update the custom color for the grid in this position.
+        customGridColors[hostname][grid.id] = color;
+        await asyncStorage.setItem("gridInspectorHostColors", customGridColors);
+
+        // If the grid for which the color was updated currently has a highlighter, update
+        // the color.
+        if (grid.highlighted) {
+          let highlighterSettings = this.getGridHighlighterSettings(node);
+          this.showGridHighlighter(node, highlighterSettings);
+        }
       }
     }
   }

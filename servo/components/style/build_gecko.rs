@@ -43,42 +43,32 @@ mod bindings {
     use super::common::*;
     use super::super::PYTHON;
     use toml;
+    use toml::value::Table;
 
     const STRUCTS_FILE: &'static str = "structs.rs";
     const BINDINGS_FILE: &'static str = "bindings.rs";
 
-    fn read_config(path: &PathBuf) -> toml::Table {
+    fn read_config(path: &PathBuf) -> Table {
         println!("cargo:rerun-if-changed={}", path.to_str().unwrap());
         update_last_modified(&path);
 
         let mut contents = String::new();
         File::open(path).expect("Failed to open config file")
             .read_to_string(&mut contents).expect("Failed to read config file");
-        let mut parser = toml::Parser::new(&contents);
-        if let Some(result) = parser.parse() {
-            result
-        } else {
-            use std::fmt::Write;
-            let mut reason = String::from("Failed to parse config file:");
-            for err in parser.errors.iter() {
-                let parsed = &contents[..err.lo];
-                write!(&mut reason, "\n* line {} column {}: {}",
-                       parsed.lines().count(),
-                       parsed.lines().last().map_or(0, |l| l.len()),
-                       err).unwrap();
-            }
-            panic!(reason)
+        match toml::from_str::<toml::value::Table>(&contents) {
+            Ok(result) => result,
+            Err(e) => panic!("Failed to parse config file: {}", e)
         }
     }
 
     lazy_static! {
-        static ref CONFIG: toml::Table = {
+        static ref CONFIG: Table = {
             // Load Gecko's binding generator config from the source tree.
             let path = PathBuf::from(env::var_os("MOZ_SRC").unwrap())
                 .join("layout/style/ServoBindings.toml");
             read_config(&path)
         };
-        static ref BUILD_CONFIG: toml::Table = {
+        static ref BUILD_CONFIG: Table = {
             // Load build-specific config overrides.
             // FIXME: We should merge with CONFIG above instead of
             // forcing callers to do it.
@@ -169,7 +159,7 @@ mod bindings {
         fn mutable_borrowed_type(self, ty: &str) -> Builder;
     }
 
-    fn add_clang_args(mut builder: Builder, config: &toml::Table, matched_os: &mut bool) -> Builder {
+    fn add_clang_args(mut builder: Builder, config: &Table, matched_os: &mut bool) -> Builder {
         fn add_args(mut builder: Builder, values: &[toml::Value]) -> Builder {
             for item in values.iter() {
                 builder = builder.clang_arg(item.as_str().expect("Expect string in list"));
@@ -178,7 +168,7 @@ mod bindings {
         }
         for (k, v) in config.iter() {
             if k == "args" {
-                builder = add_args(builder, v.as_slice().unwrap());
+                builder = add_args(builder, v.as_array().unwrap().as_slice());
                 continue;
             }
             let equal_idx = k.find('=').expect(&format!("Invalid key: {}", k));
@@ -207,7 +197,7 @@ mod bindings {
             let mut builder = Builder::default()
                 .rust_target(RustTarget::Stable_1_0);
             let rustfmt_path = env::var_os("MOZ_AUTOMATION").and_then(|_| {
-                env::var_os("TOOLTOOL_DIR")
+                env::var_os("TOOLTOOL_DIR").or_else(|| env::var_os("MOZ_SRC"))
             }).map(PathBuf::from);
 
             builder = match rustfmt_path {
@@ -324,11 +314,11 @@ mod bindings {
 
     struct BuilderWithConfig<'a> {
         builder: Builder,
-        config: &'a toml::Table,
+        config: &'a Table,
         used_keys: HashSet<&'static str>,
     }
     impl<'a> BuilderWithConfig<'a> {
-        fn new(builder: Builder, config: &'a toml::Table) -> Self {
+        fn new(builder: Builder, config: &'a Table) -> Self {
             BuilderWithConfig {
                 builder, config,
                 used_keys: HashSet::new(),
@@ -342,7 +332,7 @@ mod bindings {
             let mut used_keys = self.used_keys;
             if let Some(list) = config.get(key) {
                 used_keys.insert(key);
-                builder = func(builder, list.as_slice().unwrap().iter());
+                builder = func(builder, list.as_array().unwrap().as_slice().iter());
             }
             BuilderWithConfig { builder, config, used_keys }
         }
@@ -355,7 +345,9 @@ mod bindings {
             self.handle_items(key, |b, item| func(b, item.as_str().unwrap()))
         }
         fn handle_table_items<F>(self, key: &'static str, mut func: F) -> BuilderWithConfig<'a>
-        where F: FnMut(Builder, &'a toml::Table) -> Builder {
+        where
+            F: FnMut(Builder, &'a Table) -> Builder
+        {
             self.handle_items(key, |b, item| func(b, item.as_table().unwrap()))
         }
         fn handle_common(self, fixups: &mut Vec<Fixup>) -> BuilderWithConfig<'a> {
@@ -419,7 +411,7 @@ mod bindings {
                 for item in iter {
                     let item = item.as_table().unwrap();
                     let name = item["enum"].as_str().unwrap();
-                    let variants = item["variants"].as_slice().unwrap().iter()
+                    let variants = item["variants"].as_array().unwrap().as_slice().iter()
                         .map(|item| item.as_str().unwrap());
                     map.insert(name.into(), RegexSet::new(variants).unwrap());
                 }
@@ -456,11 +448,11 @@ mod bindings {
         }
 
         impl log::Log for BuildLogger {
-            fn enabled(&self, meta: &log::LogMetadata) -> bool {
+            fn enabled(&self, meta: &log::Metadata) -> bool {
                 self.file.is_some() && meta.target().contains(&self.filter)
             }
 
-            fn log(&self, record: &log::LogRecord) {
+            fn log(&self, record: &log::Record) {
                 if !self.enabled(record.metadata()) {
                     return;
                 }
@@ -471,21 +463,27 @@ mod bindings {
                              record.level(),
                              record.target(),
                              record.args(),
-                             record.location().file(),
-                             record.location().line());
+                             record.file().unwrap_or("<unknown>"),
+                             record.line().unwrap_or(0));
+            }
+
+            fn flush(&self) {
+                if let Some(ref file) = self.file {
+                    file.lock().unwrap().flush().unwrap();
+                }
             }
         }
 
         if let Some(path) = env::var_os("STYLO_BUILD_LOG") {
-            log::set_logger(|log_level| {
-                log_level.set(log::LogLevelFilter::Debug);
+            log::set_max_level(log::LevelFilter::Debug);
+            log::set_boxed_logger(
                 Box::new(BuildLogger {
                     file: fs::File::create(path).ok().map(Mutex::new),
                     filter: env::var("STYLO_BUILD_FILTER").ok()
                         .unwrap_or_else(|| "bindgen".to_owned()),
                 })
-            })
-            .expect("Failed to set logger.");
+            ).expect("Failed to set logger.");
+
             true
         } else {
             false

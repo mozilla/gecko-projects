@@ -3,8 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{BorderRadius, ClipMode, HitTestFlags, HitTestItem, HitTestResult, ItemTag, LayerPoint};
-use api::{LayerPrimitiveInfo, LayerRect, LocalClip, PipelineId, WorldPoint};
-use clip::{ClipSource, ClipStore, Contains, rounded_rectangle_contains_point};
+use api::{LayerPrimitiveInfo, LayerRect, PipelineId, WorldPoint};
+use clip::{ClipSource, ClipStore, rounded_rectangle_contains_point};
 use clip_scroll_node::{ClipScrollNode, NodeType};
 use clip_scroll_tree::{ClipChainIndex, ClipScrollNodeIndex, ClipScrollTree};
 use internal_types::FastHashMap;
@@ -55,16 +55,18 @@ impl HitTestClipChainDescriptor {
 #[derive(Clone)]
 pub struct HitTestingItem {
     rect: LayerRect,
-    clip: LocalClip,
+    clip_rect: LayerRect,
     tag: ItemTag,
+    is_backface_visible: bool,
 }
 
 impl HitTestingItem {
     pub fn new(tag: ItemTag, info: &LayerPrimitiveInfo) -> HitTestingItem {
         HitTestingItem {
             rect: info.rect,
-            clip: info.local_clip,
+            clip_rect: info.clip_rect,
             tag: tag,
+            is_backface_visible: info.is_backface_visible,
         }
     }
 }
@@ -232,6 +234,7 @@ impl HitTester {
             }
 
             let transform = scroll_node.world_content_transform;
+            let mut facing_backwards: Option<bool> = None;  // will be computed on first use
             let point_in_layer = match transform.inverse() {
                 Some(inverted) => inverted.transform_point2d(&point),
                 None => continue,
@@ -239,7 +242,8 @@ impl HitTester {
 
             let mut clipped_in = false;
             for item in items.iter().rev() {
-                if !item.rect.contains(&point_in_layer) || !item.clip.contains(&point_in_layer) {
+                if !item.rect.contains(&point_in_layer) ||
+                    !item.clip_rect.contains(&point_in_layer) {
                     continue;
                 }
 
@@ -263,6 +267,13 @@ impl HitTester {
                     Some(point) => point,
                     None => continue,
                 };
+
+                // Don't hit items with backface-visibility:hidden if they are facing the back.
+                if !item.is_backface_visible {
+                    if *facing_backwards.get_or_insert_with(|| transform.is_backface_visible()) {
+                        continue;
+                    }
+                }
 
                 result.items.push(HitTestItem {
                     pipeline: pipeline_id,
@@ -300,8 +311,11 @@ fn get_regions_for_clip_scroll_node(
             ClipSource::RoundedRectangle(ref rect, ref radii, ref mode) =>
                 HitTestRegion::RoundedRectangle(*rect, *radii, *mode),
             ClipSource::Image(ref mask) => HitTestRegion::Rectangle(mask.rect),
-            ClipSource::BorderCorner(_) =>
-                unreachable!("Didn't expect to hit test against BorderCorner"),
+            ClipSource::BorderCorner(_) |
+            ClipSource::LineDecoration(_) |
+            ClipSource::BoxShadow(_) => {
+                unreachable!("Didn't expect to hit test against BorderCorner / BoxShadow / LineDecoration");
+            }
         }
     }).collect()
 }

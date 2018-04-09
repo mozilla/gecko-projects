@@ -6,17 +6,16 @@
 //!
 //! TODO(emilio): Enhance docs.
 
-use Prefix;
+use {Atom, Namespace, Prefix};
 use context::QuirksMode;
-use cssparser::{Parser, Token, serialize_identifier};
+use cssparser::{Parser, Token};
 use num_traits::One;
 use parser::{ParserContext, Parse};
-use self::url::SpecifiedUrl;
 use std::f32;
 use std::fmt::{self, Write};
 use style_traits::{CssWriter, ParseError, StyleParseErrorKind, ToCss};
 use style_traits::values::specified::AllowedNumericType;
-use super::{Auto, CSSFloat, CSSInteger, Either, None_};
+use super::{Auto, CSSFloat, CSSInteger, Either};
 use super::computed::{Context, ToComputedValue};
 use super::generics::{GreaterThanOrEqualToOne, NonNegative};
 use super::generics::grid::{GridLine as GenericGridLine, TrackBreadth as GenericTrackBreadth};
@@ -55,8 +54,8 @@ pub use self::length::{FontRelativeLength, Length, LengthOrNumber};
 pub use self::length::{LengthOrPercentage, LengthOrPercentageOrAuto};
 pub use self::length::{LengthOrPercentageOrNone, MaxLength, MozLength};
 pub use self::length::{NoCalcLength, ViewportPercentageLength};
-pub use self::length::NonNegativeLengthOrPercentage;
-pub use self::list::{ListStyleImage, Quotes};
+pub use self::length::{NonNegativeLengthOrPercentage, NonNegativeLengthOrPercentageOrAuto};
+pub use self::list::Quotes;
 #[cfg(feature = "gecko")]
 pub use self::list::ListStyleType;
 pub use self::outline::OutlineStyle;
@@ -72,6 +71,7 @@ pub use self::svg::{SVGPaintOrder, SVGStrokeDashArray, SVGWidth};
 pub use self::svg::MozContextProperties;
 pub use self::table::XSpan;
 pub use self::text::{InitialLetter, LetterSpacing, LineHeight, MozTabSize, TextAlign};
+pub use self::text::{TextEmphasisStyle, TextEmphasisPosition};
 pub use self::text::{TextAlignKeyword, TextDecorationLine, TextOverflow, WordSpacing};
 pub use self::time::Time;
 pub use self::transform::{Rotate, Scale, TimingFunction, Transform};
@@ -113,27 +113,7 @@ pub mod text;
 pub mod time;
 pub mod transform;
 pub mod ui;
-
-/// Common handling for the specified value CSS url() values.
-pub mod url {
-use cssparser::Parser;
-use parser::{Parse, ParserContext};
-use style_traits::ParseError;
-
-#[cfg(feature = "servo")]
-pub use ::servo::url::*;
-#[cfg(feature = "gecko")]
-pub use ::gecko::url::*;
-
-impl Parse for SpecifiedUrl {
-    fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
-        let url = input.expect_url()?;
-        Self::parse_from_string(url.as_ref().to_owned(), context)
-    }
-}
-
-impl Eq for SpecifiedUrl {}
-}
+pub mod url;
 
 /// Parse a `<number>` value, with a given clamping mode.
 fn parse_number_with_clamping_mode<'i, 't>(
@@ -171,7 +151,7 @@ fn parse_number_with_clamping_mode<'i, 't>(
 #[allow(missing_docs)]
 #[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
 #[derive(Clone, Copy, Debug, Eq, MallocSizeOf, Ord, Parse, PartialEq)]
-#[derive(PartialOrd, ToCss)]
+#[derive(PartialOrd, ToComputedValue, ToCss)]
 pub enum BorderStyle {
     None = -1,
     Solid = 6,
@@ -390,7 +370,7 @@ impl ToComputedValue for Opacity {
     }
 }
 
-/// An specified `<integer>`, optionally coming from a `calc()` expression.
+/// A specified `<integer>`, optionally coming from a `calc()` expression.
 ///
 /// <https://drafts.csswg.org/css-values/#integers>
 #[derive(Clone, Copy, Debug, Eq, MallocSizeOf, PartialEq, PartialOrd)]
@@ -530,9 +510,6 @@ impl Parse for PositiveInteger {
         Integer::parse_positive(context, input).map(GreaterThanOrEqualToOne::<Integer>)
     }
 }
-
-#[allow(missing_docs)]
-pub type UrlOrNone = Either<SpecifiedUrl, None_>;
 
 /// The specified value of a grid `<track-breadth>`
 pub type TrackBreadth = GenericTrackBreadth<LengthOrPercentage>;
@@ -708,24 +685,15 @@ impl AllowQuirks {
     }
 }
 
-#[cfg(feature = "gecko")]
-/// A namespace ID
-pub type NamespaceId = i32;
-
-
-#[cfg(feature = "servo")]
-/// A namespace ID (used by gecko only)
-pub type NamespaceId = ();
-
 /// An attr(...) rule
 ///
 /// `[namespace? `|`]? ident`
 #[derive(Clone, Debug, Eq, MallocSizeOf, PartialEq, ToComputedValue)]
 pub struct Attr {
-    /// Optional namespace prefix, with the actual namespace id.
-    pub namespace: Option<(Prefix, NamespaceId)>,
+    /// Optional namespace prefix and URL.
+    pub namespace: Option<(Prefix, Namespace)>,
     /// Attribute name
-    pub attribute: String,
+    pub attribute: Atom,
 }
 
 impl Parse for Attr {
@@ -735,9 +703,9 @@ impl Parse for Attr {
     }
 }
 
-/// Get the Namespace id from the namespace map.
-fn get_id_for_namespace(prefix: &Prefix, context: &ParserContext) -> Option<NamespaceId> {
-    Some(context.namespaces.as_ref()?.prefixes.get(prefix)?.1)
+/// Get the Namespace for a given prefix from the namespace map.
+fn get_namespace_for_prefix(prefix: &Prefix, context: &ParserContext) -> Option<Namespace> {
+    context.namespaces.as_ref()?.prefixes.get(prefix).map(|x| x.clone())
 }
 
 impl Attr {
@@ -760,21 +728,21 @@ impl Attr {
                         ref t => return Err(location.new_unexpected_token_error(t.clone())),
                     };
 
-                    let ns_with_id = if let Some(ns) = first {
-                        let ns = Prefix::from(ns.as_ref());
-                        let id = match get_id_for_namespace(&ns, context) {
-                            Some(id) => id,
+                    let prefix_and_ns = if let Some(ns) = first {
+                        let prefix = Prefix::from(ns.as_ref());
+                        let ns = match get_namespace_for_prefix(&prefix, context) {
+                            Some(ns) => ns,
                             None => return Err(location.new_custom_error(
                                 StyleParseErrorKind::UnspecifiedError
                             )),
                         };
-                        Some((ns, id))
+                        Some((prefix, ns))
                     } else {
                         None
                     };
                     return Ok(Attr {
-                        namespace: ns_with_id,
-                        attribute: second_token.as_ref().to_owned(),
+                        namespace: prefix_and_ns,
+                        attribute: Atom::from(second_token.as_ref()),
                     })
                 }
                 // In the case of attr(foobar    ) we don't want to error out
@@ -787,7 +755,7 @@ impl Attr {
         if let Some(first) = first {
             Ok(Attr {
                 namespace: None,
-                attribute: first.as_ref().to_owned(),
+                attribute: Atom::from(first.as_ref()),
             })
         } else {
             Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
@@ -801,11 +769,11 @@ impl ToCss for Attr {
         W: Write,
     {
         dest.write_str("attr(")?;
-        if let Some((ref prefix, _id)) = self.namespace {
+        if let Some((ref prefix, ref _url)) = self.namespace {
             serialize_atom_identifier(prefix, dest)?;
             dest.write_str("|")?;
         }
-        serialize_identifier(&self.attribute, dest)?;
+        serialize_atom_identifier(&self.attribute, dest)?;
         dest.write_str(")")
     }
 }

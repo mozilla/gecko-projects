@@ -19,7 +19,6 @@
 #include "mozilla/AlertNotification.h"
 #include "nsAlertsService.h"
 
-#include "nsDownloadManager.h"
 #include "DownloadPlatform.h"
 #include "rdf.h"
 
@@ -37,7 +36,6 @@
 #include "mozilla/NativeOSFileInternals.h"
 #include "mozilla/AddonContentPolicy.h"
 #include "mozilla/AddonManagerStartup.h"
-#include "mozilla/AddonPathService.h"
 #include "mozilla/ExtensionPolicyService.h"
 
 #if defined(XP_WIN)
@@ -84,8 +82,6 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsParentalControlsService)
 NS_GENERIC_FACTORY_CONSTRUCTOR(AlertNotification)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsAlertsService)
 
-NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsDownloadManager,
-                                         nsDownloadManager::GetSingleton)
 NS_GENERIC_FACTORY_CONSTRUCTOR(DownloadPlatform)
 
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsTypeAheadFind)
@@ -126,7 +122,6 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(NativeOSFileInternalsService)
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(NativeFileWatcherService, Init)
 
 NS_GENERIC_FACTORY_CONSTRUCTOR(AddonContentPolicy)
-NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(AddonPathService, AddonPathService::GetInstance)
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(AddonManagerStartup, AddonManagerStartup::GetInstance)
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(ExtensionPolicyService, ExtensionPolicyService::GetInstance)
 
@@ -144,7 +139,6 @@ NS_DEFINE_NAMED_CID(NS_ALERTSSERVICE_CID);
 #if !defined(MOZ_DISABLE_PARENTAL_CONTROLS)
 NS_DEFINE_NAMED_CID(NS_PARENTALCONTROLSSERVICE_CID);
 #endif
-NS_DEFINE_NAMED_CID(NS_DOWNLOADMANAGER_CID);
 NS_DEFINE_NAMED_CID(NS_DOWNLOADPLATFORM_CID);
 NS_DEFINE_NAMED_CID(NS_FIND_SERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_TYPEAHEADFIND_CID);
@@ -161,7 +155,6 @@ NS_DEFINE_NAMED_CID(NS_UPDATEPROCESSOR_CID);
 NS_DEFINE_NAMED_CID(FINALIZATIONWITNESSSERVICE_CID);
 NS_DEFINE_NAMED_CID(NATIVE_OSFILE_INTERNALS_SERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_ADDONCONTENTPOLICY_CID);
-NS_DEFINE_NAMED_CID(NS_ADDON_PATH_SERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_ADDON_MANAGER_STARTUP_CID);
 NS_DEFINE_NAMED_CID(NS_ADDON_POLICY_SERVICE_CID);
 NS_DEFINE_NAMED_CID(NATIVE_FILEWATCHER_SERVICE_CID);
@@ -180,7 +173,6 @@ static const Module::CIDEntry kToolkitCIDs[] = {
 #if !defined(MOZ_DISABLE_PARENTAL_CONTROLS)
   { &kNS_PARENTALCONTROLSSERVICE_CID, false, nullptr, nsParentalControlsServiceConstructor },
 #endif
-  { &kNS_DOWNLOADMANAGER_CID, false, nullptr, nsDownloadManagerConstructor },
   { &kNS_DOWNLOADPLATFORM_CID, false, nullptr, DownloadPlatformConstructor },
   { &kNS_FIND_SERVICE_CID, false, nullptr, nsFindServiceConstructor },
   { &kNS_TYPEAHEADFIND_CID, false, nullptr, nsTypeAheadFindConstructor },
@@ -197,7 +189,6 @@ static const Module::CIDEntry kToolkitCIDs[] = {
   { &kFINALIZATIONWITNESSSERVICE_CID, false, nullptr, FinalizationWitnessServiceConstructor },
   { &kNATIVE_OSFILE_INTERNALS_SERVICE_CID, false, nullptr, NativeOSFileInternalsServiceConstructor },
   { &kNS_ADDONCONTENTPOLICY_CID, false, nullptr, AddonContentPolicyConstructor },
-  { &kNS_ADDON_PATH_SERVICE_CID, false, nullptr, AddonPathServiceConstructor },
   { &kNS_ADDON_MANAGER_STARTUP_CID, false, nullptr, AddonManagerStartupConstructor },
   { &kNS_ADDON_POLICY_SERVICE_CID, false, nullptr, ExtensionPolicyServiceConstructor },
   { &kNATIVE_FILEWATCHER_SERVICE_CID, false, nullptr, NativeFileWatcherServiceConstructor },
@@ -218,7 +209,6 @@ static const Module::ContractIDEntry kToolkitContracts[] = {
 #if !defined(MOZ_DISABLE_PARENTAL_CONTROLS)
   { NS_PARENTALCONTROLSSERVICE_CONTRACTID, &kNS_PARENTALCONTROLSSERVICE_CID },
 #endif
-  { NS_DOWNLOADMANAGER_CONTRACTID, &kNS_DOWNLOADMANAGER_CID },
   { NS_DOWNLOADPLATFORM_CONTRACTID, &kNS_DOWNLOADPLATFORM_CID },
   { NS_FIND_SERVICE_CONTRACTID, &kNS_FIND_SERVICE_CID },
   { NS_TYPEAHEADFIND_CONTRACTID, &kNS_TYPEAHEADFIND_CID },
@@ -236,7 +226,6 @@ static const Module::ContractIDEntry kToolkitContracts[] = {
   { FINALIZATIONWITNESSSERVICE_CONTRACTID, &kFINALIZATIONWITNESSSERVICE_CID },
   { NATIVE_OSFILE_INTERNALS_SERVICE_CONTRACTID, &kNATIVE_OSFILE_INTERNALS_SERVICE_CID },
   { NS_ADDONCONTENTPOLICY_CONTRACTID, &kNS_ADDONCONTENTPOLICY_CID },
-  { NS_ADDONPATHSERVICE_CONTRACTID, &kNS_ADDON_PATH_SERVICE_CID },
   { NS_ADDONMANAGERSTARTUP_CONTRACTID, &kNS_ADDON_MANAGER_STARTUP_CID },
   { NS_ADDON_POLICY_SERVICE_CONTRACTID, &kNS_ADDON_POLICY_SERVICE_CID },
   { NATIVE_FILEWATCHER_SERVICE_CONTRACTID, &kNATIVE_FILEWATCHER_SERVICE_CID },

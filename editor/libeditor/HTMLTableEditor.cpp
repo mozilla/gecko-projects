@@ -151,7 +151,7 @@ HTMLEditor::InsertCell(nsIDOMElement* aDOMCell,
 
   // Don't let Rules System change the selection.
   AutoTransactionsConserveSelection dontChangeSelection(this);
-  return InsertNode(*newCell, pointToInsert.AsRaw());
+  return InsertNode(*newCell, pointToInsert);
 }
 
 nsresult
@@ -1423,7 +1423,7 @@ HTMLEditor::SelectBlockOfCells(nsIDOMElement* aStartCell,
 
     if (currentRowIndex < maxRow || currentRowIndex > maxRow ||
         currentColIndex < maxColumn || currentColIndex > maxColumn) {
-      selection->RemoveRange(range);
+      selection->RemoveRange(*static_cast<nsRange*>(range.get()), IgnoreErrors());
       // Since we've removed the range, decrement pointer to next range
       mSelectedCellIndex--;
     }
@@ -2183,7 +2183,7 @@ HTMLEditor::JoinTableCells(bool aMergeNonContiguousContents)
       nsCOMPtr<nsIDOMElement> deletedCell;
       GetCellFromRange(range, getter_AddRefs(deletedCell));
       if (!deletedCell) {
-        selection->RemoveRange(range);
+        selection->RemoveRange(*range, IgnoreErrors());
         rangeCount--;
         i--;
       }

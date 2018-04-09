@@ -865,23 +865,6 @@ JS_ResumeCooperativeContext(JSContext* cx);
 extern JS_PUBLIC_API(JSContext*)
 JS_NewCooperativeContext(JSContext* siblingContext);
 
-namespace JS {
-
-// Class to relinquish exclusive access to all zone groups in use by this
-// thread. This allows other cooperative threads to enter the zone groups
-// and modify their contents.
-struct AutoRelinquishZoneGroups
-{
-    explicit AutoRelinquishZoneGroups(JSContext* cx);
-    ~AutoRelinquishZoneGroups();
-
-  private:
-    JSContext* cx;
-    mozilla::Vector<void*> enterList;
-};
-
-} // namespace JS
-
 // Destroy a context allocated with JS_NewContext or JS_NewCooperativeContext.
 // The context must be the current active context in the runtime, and after
 // this call the runtime will have no active context.
@@ -908,31 +891,6 @@ JS_EndRequest(JSContext* cx);
 
 extern JS_PUBLIC_API(void)
 JS_SetFutexCanWait(JSContext* cx);
-
-namespace JS {
-
-// Single threaded execution callbacks are used to notify API clients that a
-// feature is in use on a context's runtime that is not yet compatible with
-// cooperatively multithreaded execution.
-//
-// Between a call to BeginSingleThreadedExecutionCallback and a corresponding
-// call to EndSingleThreadedExecutionCallback, only one thread at a time may
-// enter compartments in the runtime. The begin callback may yield as necessary
-// to permit other threads to finish up what they're doing, while the end
-// callback may not yield or otherwise operate on the runtime (it may be called
-// during GC).
-//
-// These callbacks may be left unspecified for runtimes which only ever have a
-// single context.
-typedef void (*BeginSingleThreadedExecutionCallback)(JSContext* cx);
-typedef void (*EndSingleThreadedExecutionCallback)(JSContext* cx);
-
-extern JS_PUBLIC_API(void)
-SetSingleThreadedExecutionCallbacks(JSContext* cx,
-                                    BeginSingleThreadedExecutionCallback begin,
-                                    EndSingleThreadedExecutionCallback end);
-
-} // namespace JS
 
 namespace js {
 
@@ -990,7 +948,6 @@ class JS_PUBLIC_API(ContextOptions) {
 #ifdef FUZZING
         , fuzzing_(false)
 #endif
-        , expressionClosures_(false)
         , arrayProtoValues_(true)
     {
     }
@@ -1147,12 +1104,6 @@ class JS_PUBLIC_API(ContextOptions) {
     }
 #endif
 
-    bool expressionClosures() const { return expressionClosures_; }
-    ContextOptions& setExpressionClosures(bool flag) {
-        expressionClosures_ = flag;
-        return *this;
-    }
-
     bool arrayProtoValues() const { return arrayProtoValues_; }
     ContextOptions& setArrayProtoValues(bool flag) {
         arrayProtoValues_ = flag;
@@ -1189,7 +1140,6 @@ class JS_PUBLIC_API(ContextOptions) {
 #ifdef FUZZING
     bool fuzzing_ : 1;
 #endif
-    bool expressionClosures_ : 1;
     bool arrayProtoValues_ : 1;
 
 };
@@ -1986,8 +1936,7 @@ class JS_PUBLIC_API(CompartmentCreationOptions)
 {
   public:
     CompartmentCreationOptions()
-      : addonId_(nullptr),
-        traceGlobal_(nullptr),
+      : traceGlobal_(nullptr),
         zoneSpec_(NewZoneInSystemZoneGroup),
         zonePointer_(nullptr),
         invisibleToDebugger_(false),
@@ -1995,16 +1944,9 @@ class JS_PUBLIC_API(CompartmentCreationOptions)
         preserveJitCode_(false),
         cloneSingletons_(false),
         sharedMemoryAndAtomics_(false),
-        secureContext_(false)
+        secureContext_(false),
+        clampAndJitterTime_(true)
     {}
-
-    // A null add-on ID means that the compartment is not associated with an
-    // add-on.
-    JSAddonId* addonIdOrNull() const { return addonId_; }
-    CompartmentCreationOptions& setAddonId(JSAddonId* id) {
-        addonId_ = id;
-        return *this;
-    }
 
     JSTraceOp getTrace() const {
         return traceGlobal_;
@@ -2071,8 +2013,13 @@ class JS_PUBLIC_API(CompartmentCreationOptions)
         return *this;
     }
 
+    bool clampAndJitterTime() const { return clampAndJitterTime_; }
+    CompartmentCreationOptions& setClampAndJitterTime(bool flag) {
+        clampAndJitterTime_ = flag;
+        return *this;
+    }
+
   private:
-    JSAddonId* addonId_;
     JSTraceOp traceGlobal_;
     ZoneSpecifier zoneSpec_;
     void* zonePointer_; // Per zoneSpec_, either a Zone, ZoneGroup, or null.
@@ -2082,6 +2029,7 @@ class JS_PUBLIC_API(CompartmentCreationOptions)
     bool cloneSingletons_;
     bool sharedMemoryAndAtomics_;
     bool secureContext_;
+    bool clampAndJitterTime_;
 };
 
 /**
@@ -3253,6 +3201,42 @@ JS_SetAllNonReservedSlotsToUndefined(JSContext* cx, JSObject* objArg);
 extern JS_PUBLIC_API(JSObject*)
 JS_NewArrayBufferWithContents(JSContext* cx, size_t nbytes, void* contents);
 
+namespace JS {
+
+using BufferContentsRefFunc = void (*)(void* contents, void* userData);
+
+}  /* namespace JS */
+
+/**
+ * Create a new array buffer with the given contents. The ref and unref
+ * functions should increment or decrement the reference count of the contents.
+ * These functions allow array buffers to be used with embedder objects that
+ * use reference counting, for example. The contents must not be modified by
+ * any reference holders, internal or external.
+ *
+ * On success, the new array buffer takes a reference, and |ref(contents,
+ * refUserData)| will be called. When the array buffer is ready to be disposed
+ * of, |unref(contents, refUserData)| will be called to release the array
+ * buffer's reference on the contents.
+ *
+ * The ref and unref functions must not call any JSAPI functions that could
+ * cause a garbage collection.
+ *
+ * The ref function is optional. If it is nullptr, the caller is responsible
+ * for incrementing the reference count before passing the contents to this
+ * function. This also allows using non-reference-counted contents that must be
+ * freed with some function other than free().
+ *
+ * The ref function may also be called in case the buffer is cloned in some
+ * way. Currently this is not used, but it may be in the future. If the ref
+ * function is nullptr, any operation where an extra reference would otherwise
+ * be taken, will either copy the data, or throw an exception.
+ */
+extern JS_PUBLIC_API(JSObject*)
+JS_NewExternalArrayBuffer(JSContext* cx, size_t nbytes, void* contents,
+                          JS::BufferContentsRefFunc ref, JS::BufferContentsRefFunc unref,
+                          void* refUserData = nullptr);
+
 /**
  * Create a new array buffer with the given contents.  The array buffer does not take ownership of
  * contents, and JS_DetachArrayBuffer must be called before the contents are disposed of.
@@ -3557,14 +3541,13 @@ class JS_FRIEND_API(TransitiveCompileOptions)
         canLazilyParse(true),
         strictOption(false),
         extraWarningsOption(false),
-        expressionClosuresOption(false),
         werrorOption(false),
         asmJSOption(AsmJSOption::Disabled),
         throwOnAsmJSValidationFailureOption(false),
         forceAsync(false),
         sourceIsLazy(false),
         allowHTMLComments(true),
-        isProbablySystemOrAddonCode(false),
+        isProbablySystemCode(false),
         hideScriptFromDebugger(false),
         introductionType(nullptr),
         introductionLineno(0),
@@ -3593,14 +3576,13 @@ class JS_FRIEND_API(TransitiveCompileOptions)
     bool canLazilyParse;
     bool strictOption;
     bool extraWarningsOption;
-    bool expressionClosuresOption;
     bool werrorOption;
     AsmJSOption asmJSOption;
     bool throwOnAsmJSValidationFailureOption;
     bool forceAsync;
     bool sourceIsLazy;
     bool allowHTMLComments;
-    bool isProbablySystemOrAddonCode;
+    bool isProbablySystemCode;
     bool hideScriptFromDebugger;
 
     // |introductionType| is a statically allocated C string:
@@ -4680,6 +4662,9 @@ extern JS_PUBLIC_API(JSString*)
 JS_NewUCString(JSContext* cx, char16_t* chars, size_t length);
 
 extern JS_PUBLIC_API(JSString*)
+JS_NewUCStringDontDeflate(JSContext* cx, char16_t* chars, size_t length);
+
+extern JS_PUBLIC_API(JSString*)
 JS_NewUCStringCopyN(JSContext* cx, const char16_t* s, size_t n);
 
 extern JS_PUBLIC_API(JSString*)
@@ -4950,19 +4935,6 @@ class MOZ_RAII JSAutoByteString
     JSAutoByteString(const JSAutoByteString& another);
     JSAutoByteString& operator=(const JSAutoByteString& another);
 };
-
-namespace JS {
-
-extern JS_PUBLIC_API(JSAddonId*)
-NewAddonId(JSContext* cx, JS::HandleString str);
-
-extern JS_PUBLIC_API(JSString*)
-StringOfAddonId(JSAddonId* id);
-
-extern JS_PUBLIC_API(JSAddonId*)
-AddonIdOfObject(JSObject* obj);
-
-} // namespace JS
 
 /************************************************************************/
 /*
@@ -5847,19 +5819,22 @@ JS_SetOffthreadIonCompilationEnabled(JSContext* cx, bool enabled);
     Register(ION_GVN_ENABLE, "ion.gvn.enable")                              \
     Register(ION_FORCE_IC, "ion.forceinlineCaches")                         \
     Register(ION_ENABLE, "ion.enable")                                      \
-    Register(ION_INTERRUPT_WITHOUT_SIGNAL, "ion.interrupt-without-signals") \
     Register(ION_CHECK_RANGE_ANALYSIS, "ion.check-range-analysis")          \
     Register(BASELINE_ENABLE, "baseline.enable")                            \
     Register(OFFTHREAD_COMPILATION_ENABLE, "offthread-compilation.enable")  \
     Register(FULL_DEBUG_CHECKS, "jit.full-debug-checks")                    \
     Register(JUMP_THRESHOLD, "jump-threshold")                              \
+    Register(TRACK_OPTIMIZATIONS, "jit.track-optimizations")                \
     Register(SIMULATOR_ALWAYS_INTERRUPT, "simulator.always-interrupt")      \
     Register(SPECTRE_INDEX_MASKING, "spectre.index-masking")                \
     Register(SPECTRE_OBJECT_MITIGATIONS_BARRIERS, "spectre.object-mitigations.barriers") \
+    Register(SPECTRE_OBJECT_MITIGATIONS_MISC, "spectre.object-mitigations.misc") \
     Register(SPECTRE_STRING_MITIGATIONS, "spectre.string-mitigations")      \
     Register(SPECTRE_VALUE_MASKING, "spectre.value-masking")                \
+    Register(SPECTRE_JIT_TO_CXX_CALLS, "spectre.jit-to-C++-calls")          \
     Register(ASMJS_ATOMICS_ENABLE, "asmjs.atomics.enable")                  \
-    Register(WASM_FOLD_OFFSETS, "wasm.fold-offsets")
+    Register(WASM_FOLD_OFFSETS, "wasm.fold-offsets")                        \
+    Register(WASM_DELAY_TIER2, "wasm.delay-tier2")
 
 typedef enum JSJitCompilerOption {
 #define JIT_COMPILER_DECLARE(key, str) \
@@ -6010,13 +5985,13 @@ struct TranscodeSource
 
 typedef mozilla::Vector<JS::TranscodeSource> TranscodeSources;
 
-enum TranscodeResult
+enum TranscodeResult: uint8_t
 {
     // Successful encoding / decoding.
     TranscodeResult_Ok = 0,
 
     // A warning message, is set to the message out-param.
-    TranscodeResult_Failure = 0x100,
+    TranscodeResult_Failure = 0x10,
     TranscodeResult_Failure_BadBuildId =          TranscodeResult_Failure | 0x1,
     TranscodeResult_Failure_RunOnceNotSupported = TranscodeResult_Failure | 0x2,
     TranscodeResult_Failure_AsmJSNotSupported =   TranscodeResult_Failure | 0x3,
@@ -6025,7 +6000,7 @@ enum TranscodeResult
     TranscodeResult_Failure_NotInterpretedFun =   TranscodeResult_Failure | 0x6,
 
     // There is a pending exception on the context.
-    TranscodeResult_Throw = 0x200
+    TranscodeResult_Throw = 0x20
 };
 
 extern JS_PUBLIC_API(TranscodeResult)
@@ -6469,14 +6444,14 @@ CaptureCurrentStack(JSContext* cx, MutableHandleObject stackp,
  * Here |asyncStack| is the async stack to prepare.  It is copied into
  * |cx|'s current compartment, and the newest frame is given
  * |asyncCause| as its asynchronous cause.  If |maxFrameCount| is
- * non-zero, capture at most the youngest |maxFrameCount| frames.  The
+ * |Some(n)|, capture at most the youngest |n| frames.  The
  * new stack object is written to |stackp|.  Returns true on success,
  * or sets an exception and returns |false| on error.
  */
 extern JS_PUBLIC_API(bool)
 CopyAsyncStack(JSContext* cx, HandleObject asyncStack,
                HandleString asyncCause, MutableHandleObject stackp,
-               unsigned maxFrameCount);
+               const mozilla::Maybe<size_t>& maxFrameCount);
 
 /*
  * Accessors for working with SavedFrame JSObjects

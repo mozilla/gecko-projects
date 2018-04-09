@@ -553,10 +553,8 @@ BaselineCompiler::emitStackCheck(bool earlyCheck)
                           &forceCall);
     }
 
-    void* contextAddr = cx->zone()->group()->addressOfOwnerContext();
-    masm.loadPtr(AbsoluteAddress(contextAddr), R0.scratchReg());
     masm.branchPtr(Assembler::BelowOrEqual,
-                   Address(R0.scratchReg(), offsetof(JSContext, jitStackLimit)), R1.scratchReg(),
+                   AbsoluteAddress(cx->addressOfJitStackLimit()), R1.scratchReg(),
                    &skipCall);
 
     if (!earlyCheck && needsEarlyStackCheck())
@@ -702,10 +700,8 @@ BaselineCompiler::emitInterruptCheck()
     frame.syncStack(0);
 
     Label done;
-    void* context = cx->zone()->group()->addressOfOwnerContext();
-    masm.loadPtr(AbsoluteAddress(context), R0.scratchReg());
     masm.branch32(Assembler::Equal,
-                  Address(R0.scratchReg(), offsetof(JSContext, interrupt_)), Imm32(0),
+                  AbsoluteAddress(cx->addressOfInterrupt()), Imm32(0),
                   &done);
 
     prepareVMCall();
@@ -727,7 +723,7 @@ BaselineCompiler::emitWarmUpCounterIncrement(bool allowOsr)
     // Emit no warm-up counter increments or bailouts if Ion is not
     // enabled, or if the script will never be Ion-compileable
 
-    if (!ionCompileable_ && !ionOSRCompileable_)
+    if (!ionCompileable_)
         return true;
 
     frame.assertSyncedStack();
@@ -1930,7 +1926,7 @@ BaselineCompiler::emitUnaryArith()
     frame.popRegsAndSync(1);
 
     // Call IC
-    ICUnaryArith_Fallback::Compiler stubCompiler(cx, ICStubCompiler::Engine::Baseline);
+    ICUnaryArith_Fallback::Compiler stubCompiler(cx);
     if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))
         return false;
 
@@ -4380,7 +4376,8 @@ BaselineCompiler::emit_JSOP_SUPERFUN()
     masm.branchPtr(Assembler::BelowOrEqual, proto, ImmWord(1), &needVMCall);
 
     // Use VMCall for non-JSFunction objects (eg. Proxy)
-    masm.branchTestObjClass(Assembler::NotEqual, proto, scratch, &JSFunction::class_, &needVMCall);
+    masm.branchTestObjClass(Assembler::NotEqual, proto, &JSFunction::class_, scratch, proto,
+                            &needVMCall);
 
     // Use VMCall if not constructor
     masm.load16ZeroExtend(Address(proto, JSFunction::offsetOfFlags()), scratch);

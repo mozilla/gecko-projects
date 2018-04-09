@@ -43,7 +43,6 @@
 #include "nsCSSValue.h"                 // for nsCSSValue::Array, etc
 #include "nsDisplayList.h"              // for nsDisplayItem
 #include "nsPrintfCString.h"            // for nsPrintfCString
-#include "nsStyleStruct.h"              // for nsTimingFunction, etc
 #include "protobuf/LayerScopePacket.pb.h"
 #include "mozilla/Compression.h"
 #include "TreeTraversal.h"              // for ForEachNode
@@ -230,6 +229,8 @@ void
 Layer::SetAsyncPanZoomController(uint32_t aIndex, AsyncPanZoomController *controller)
 {
   MOZ_ASSERT(aIndex < GetScrollMetadataCount());
+  // We should never be setting an APZC on a non-scrollable layer
+  MOZ_ASSERT(!controller || GetFrameMetrics(aIndex).IsScrollable());
   mApzcs[aIndex] = controller;
 }
 
@@ -1314,7 +1315,7 @@ ContainerLayer::DefaultComputeEffectiveTransforms(const Matrix4x4& aTransformToS
     // transform while 2D is expected.
     idealTransform.ProjectTo2D();
   }
-  mUseIntermediateSurface = useIntermediateSurface && !GetLocalVisibleRegion().IsEmpty();
+  mUseIntermediateSurface = useIntermediateSurface;
   if (useIntermediateSurface) {
     ComputeEffectiveTransformsForChildren(Matrix4x4::From2D(residual));
   } else {
@@ -2073,34 +2074,6 @@ ContainerLayer::DumpPacket(layerscope::LayersPacket* aPacket, const void* aParen
 }
 
 void
-DisplayItemLayer::EndTransaction() {
-  mItem = nullptr;
-  mBuilder = nullptr;
-}
-
-void
-DisplayItemLayer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
-{
-  Layer::PrintInfo(aStream, aPrefix);
-  const char* type = "TYPE_UNKNOWN";
-  if (mItem) {
-    type = mItem->Name();
-  }
-
-  aStream << " [itype type=" << type << "]";
-}
-
-void
-DisplayItemLayer::DumpPacket(layerscope::LayersPacket* aPacket, const void* aParent)
-{
-  Layer::DumpPacket(aPacket, aParent);
-  // Get this layer data
-  using namespace layerscope;
-  LayersPacket::Layer* layer = aPacket->mutable_layer(aPacket->layer_size()-1);
-  layer->set_type(LayersPacket::Layer::DisplayItemLayer);
-}
-
-void
 ColorLayer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
 {
   Layer::PrintInfo(aStream, aPrefix);
@@ -2216,8 +2189,8 @@ void
 RefLayer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
 {
   ContainerLayer::PrintInfo(aStream, aPrefix);
-  if (0 != mId) {
-    AppendToString(aStream, mId, " [id=", "]");
+  if (mId.IsValid()) {
+    AppendToString(aStream, uint64_t(mId), " [id=", "]");
   }
   if (mEventRegionsOverride & EventRegionsOverride::ForceDispatchToContent) {
     aStream << " [force-dtc]";
@@ -2235,7 +2208,7 @@ RefLayer::DumpPacket(layerscope::LayersPacket* aPacket, const void* aParent)
   using namespace layerscope;
   LayersPacket::Layer* layer = aPacket->mutable_layer(aPacket->layer_size()-1);
   layer->set_type(LayersPacket::Layer::RefLayer);
-  layer->set_refid(mId);
+  layer->set_refid(uint64_t(mId));
 }
 
 void
@@ -2369,22 +2342,6 @@ LayerManager::DumpPacket(layerscope::LayersPacket* aPacket)
   layer->set_ptr(reinterpret_cast<uint64_t>(this));
   // Layer Tree Root
   layer->set_parentptr(0);
-}
-
-void
-LayerManager::TrackDisplayItemLayer(RefPtr<DisplayItemLayer> aLayer)
-{
-  mDisplayItemLayers.AppendElement(aLayer);
-}
-
-void
-LayerManager::ClearDisplayItemLayers()
-{
-  for (uint32_t i = 0; i < mDisplayItemLayers.Length(); i++) {
-    mDisplayItemLayers[i]->EndTransaction();
-  }
-
-  mDisplayItemLayers.Clear();
 }
 
 /*static*/ bool

@@ -41,6 +41,7 @@ public:
 
   static already_AddRefed<Performance>
   CreateForMainThread(nsPIDOMWindowInner* aWindow,
+                      nsIPrincipal* aPrincipal,
                       nsDOMNavigationTiming* aDOMTiming,
                       nsITimedChannel* aChannel);
 
@@ -63,7 +64,9 @@ public:
 
   void ClearResourceTimings();
 
-  DOMHighResTimeStamp Now() const;
+  DOMHighResTimeStamp Now();
+
+  DOMHighResTimeStamp NowUnclamped() const;
 
   DOMHighResTimeStamp TimeOrigin();
 
@@ -99,6 +102,13 @@ public:
   virtual nsITimedChannel* GetChannel() const = 0;
 
   virtual TimeStamp CreationTimeStamp() const = 0;
+
+  uint64_t IsSystemPrincipal()
+  {
+    return mSystemPrincipal;
+  }
+
+  virtual uint64_t GetRandomTimelineSeed() = 0;
 
   void MemoryPressure();
 
@@ -143,8 +153,6 @@ protected:
   void RunNotificationObserversTask();
   void QueueEntry(PerformanceEntry* aEntry);
 
-  DOMHighResTimeStamp RoundTime(double aTime) const;
-
   nsTObserverArray<PerformanceObserver*> mObservers;
 
 protected:
@@ -159,6 +167,8 @@ protected:
   bool mPendingNotificationObserversTask;
 
   RefPtr<PerformanceService> mPerformanceService;
+
+  bool mSystemPrincipal;
 };
 
 } // namespace dom

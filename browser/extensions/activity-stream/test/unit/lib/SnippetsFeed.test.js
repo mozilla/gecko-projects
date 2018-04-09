@@ -31,9 +31,16 @@ let overrider = new GlobalOverrider();
 describe("SnippetsFeed", () => {
   let sandbox;
   let clock;
+  let fakeDB;
   beforeEach(() => {
     clock = sinon.useFakeTimers();
     sandbox = sinon.sandbox.create();
+    fakeDB = {
+      objectStore: sandbox.stub().returns({
+        get: sandbox.stub().returns(Promise.resolve()),
+        set: sandbox.stub().returns(Promise.resolve())
+      })
+    };
     overrider.set({
       ProfileAge: class ProfileAge {
         constructor() {
@@ -42,7 +49,16 @@ describe("SnippetsFeed", () => {
         }
       },
       FxAccounts: {config: {promiseSignUpURI: sandbox.stub().returns(Promise.resolve(signUpUrl))}},
-      NewTabUtils: {activityStreamProvider: {getTotalBookmarksCount: () => Promise.resolve(42)}}
+      NewTabUtils: {activityStreamProvider: {getTotalBookmarksCount: () => Promise.resolve(42)}},
+      ActivityStreamStorage: class ActivityStreamStorage {
+        constructor() {
+          this.init = sandbox.stub.callsFake(Promise.resolve());
+        }
+        init() {
+          return Promise.resolve();
+        }
+      },
+      IndexedDB: {open: () => Promise.resolve(fakeDB)}
     });
   });
   afterEach(() => {
@@ -65,16 +81,21 @@ describe("SnippetsFeed", () => {
       .withArgs("devtools.selfxss.count")
       .returns(5);
     sandbox.stub(global.AddonManager, "getActiveAddons")
-      .returns(Promise.resolve({
+      .resolves({
         addons: [
           Object.assign({id: "foo"}, FAKE_ADDONS.foo),
           Object.assign({id: "bar"}, FAKE_ADDONS.bar)
         ],
         fullData: true
-      }));
+      });
 
     const feed = new SnippetsFeed();
     feed.store = {dispatch: sandbox.stub()};
+    sandbox.stub(feed._storage, "get")
+      .withArgs("previousSessionEnd")
+      .resolves(42)
+      .withArgs("blockList")
+      .resolves([1]);
 
     clock.tick(WEEK_IN_MS * 2);
 
@@ -97,6 +118,8 @@ describe("SnippetsFeed", () => {
     assert.propertyVal(action.data, "defaultBrowser", true);
     assert.propertyVal(action.data, "isDevtoolsUser", true);
     assert.deepEqual(action.data.addonInfo, FAKE_ADDONS);
+    assert.deepEqual(action.data.blockList, [1]);
+    assert.propertyVal(action.data, "previousSessionEnd", 42);
   });
   it("should call .init on an INIT action", () => {
     const feed = new SnippetsFeed();
@@ -109,6 +132,7 @@ describe("SnippetsFeed", () => {
   it("should call .uninit on an UNINIT action", () => {
     const feed = new SnippetsFeed();
     sandbox.stub(feed, "uninit");
+    sandbox.stub(feed._storage, "set");
     feed.store = {dispatch: sandbox.stub()};
 
     feed.onAction({type: at.UNINIT});
@@ -117,19 +141,48 @@ describe("SnippetsFeed", () => {
   it("should broadcast a SNIPPETS_RESET on uninit", () => {
     const feed = new SnippetsFeed();
     feed.store = {dispatch: sandbox.stub()};
+    sandbox.stub(feed._storage, "set");
 
     feed.uninit();
 
     assert.calledWith(feed.store.dispatch, ac.BroadcastToContent({type: at.SNIPPETS_RESET}));
   });
+  it("should update the blocklist on SNIPPETS_BLOCKLIST_UPDATED", async () => {
+    const feed = new SnippetsFeed();
+    const saveBlockList = sandbox.stub(feed._storage, "set");
+    sandbox.stub(feed._storage, "get").returns(["bar"]);
+    feed.store = {dispatch: sandbox.stub()};
+
+    await feed._saveBlockedSnippet("foo");
+
+    assert.calledOnce(saveBlockList);
+    assert.equal(saveBlockList.args[0][0], "blockList");
+    assert.deepEqual(saveBlockList.args[0][1], ["bar", "foo"]);
+  });
   it("should broadcast a SNIPPET_BLOCKED when a SNIPPETS_BLOCKLIST_UPDATED is received", () => {
     const feed = new SnippetsFeed();
     feed.store = {dispatch: sandbox.stub()};
-    const blockList = ["foo", "bar", "baz"];
 
-    feed.onAction({type: at.SNIPPETS_BLOCKLIST_UPDATED, data: blockList});
+    feed.onAction({type: at.SNIPPETS_BLOCKLIST_UPDATED, data: "foo"});
 
-    assert.calledWith(feed.store.dispatch, ac.BroadcastToContent({type: at.SNIPPET_BLOCKED, data: blockList}));
+    assert.calledWith(feed.store.dispatch, ac.BroadcastToContent({type: at.SNIPPET_BLOCKED, data: "foo"}));
+  });
+  it("should call _clearBlockList on SNIPPETS_BLOCKLIST_CLEARED", () => {
+    const feed = new SnippetsFeed();
+    const stub = sandbox.stub(feed, "_clearBlockList");
+
+    feed.onAction({type: at.SNIPPETS_BLOCKLIST_CLEARED});
+
+    assert.calledOnce(stub);
+  });
+  it("should set blockList to [] on SNIPPETS_BLOCKLIST_CLEARED", async () => {
+    const feed = new SnippetsFeed();
+    const stub = sandbox.stub(feed._storage, "set");
+
+    await feed._clearBlockList();
+
+    assert.calledOnce(stub);
+    assert.calledWithExactly(stub, "blockList", []);
   });
   it("should dispatch an update event when the Search observer is called", async () => {
     const feed = new SnippetsFeed();
@@ -201,5 +254,16 @@ describe("SnippetsFeed", () => {
     const feed = new SnippetsFeed();
     const result = feed.isDevtoolsUser();
     assert.isFalse(result);
+  });
+  it("should set _previousSessionEnd on uninit", async () => {
+    const feed = new SnippetsFeed();
+    feed.store = {dispatch: sandbox.stub()};
+    feed._previousSessionEnd = null;
+    const stub = sandbox.stub(feed._storage, "set");
+
+    feed.uninit();
+
+    assert.calledOnce(stub);
+    assert.calledWithExactly(stub, "previousSessionEnd", Date.now());
   });
 });

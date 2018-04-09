@@ -17,9 +17,7 @@
 #include "nsDirectoryServiceDefs.h"
 #include "nsCategoryManager.h"
 #include "nsCategoryManagerUtils.h"
-#include "xptiprivate.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/XPTInterfaceInfoManager.h"
 #include "nsIConsoleService.h"
 #include "nsIObserverService.h"
 #include "nsISimpleEnumerator.h"
@@ -32,7 +30,6 @@
 #include "nsReadableUtils.h"
 #include "nsString.h"
 #include "prcmon.h"
-#include "xptinfo.h" // this after nsISupports, to pick up IID so that xpt stuff doesn't try to define it itself...
 #include "nsThreadUtils.h"
 #include "prthread.h"
 #include "private/pprthred.h"
@@ -535,16 +532,13 @@ CutExtension(nsCString& aPath)
 static void
 DoRegisterManifest(NSLocationType aType,
                    FileLocation& aFile,
-                   bool aChromeOnly,
-                   bool aXPTOnly)
+                   bool aChromeOnly)
 {
-  MOZ_ASSERT(!aXPTOnly || !nsComponentManagerImpl::gComponentManager);
-
   auto result = URLPreloader::Read(aFile);
   if (result.isOk()) {
     nsCString buf(result.unwrap());
 
-    ParseManifest(aType, aFile, buf.BeginWriting(), aChromeOnly, aXPTOnly);
+    ParseManifest(aType, aFile, buf.BeginWriting(), aChromeOnly);
   } else if (NS_BOOTSTRAPPED_LOCATION != aType) {
     nsCString uri;
     aFile.GetURIString(uri);
@@ -557,7 +551,7 @@ nsComponentManagerImpl::RegisterManifest(NSLocationType aType,
                                          FileLocation& aFile,
                                          bool aChromeOnly)
 {
-  DoRegisterManifest(aType, aFile, aChromeOnly, false);
+  DoRegisterManifest(aType, aFile, aChromeOnly);
 }
 
 void
@@ -576,37 +570,6 @@ nsComponentManagerImpl::ManifestBinaryComponent(ManifestProcessingContext& aCx,
 {
   LogMessageWithContext(aCx.mFile, aLineNo,
                         "Binary XPCOM components are no longer supported.");
-}
-
-static void
-DoRegisterXPT(FileLocation& aFile)
-{
-  uint32_t len;
-  FileLocation::Data data;
-  UniquePtr<char[]> buf;
-  nsresult rv = aFile.GetData(data);
-  if (NS_SUCCEEDED(rv)) {
-    rv = data.GetSize(&len);
-  }
-  if (NS_SUCCEEDED(rv)) {
-    buf = MakeUnique<char[]>(len);
-    rv = data.Copy(buf.get(), len);
-  }
-  if (NS_SUCCEEDED(rv)) {
-    XPTInterfaceInfoManager::GetSingleton()->RegisterBuffer(buf.get(), len);
-  } else {
-    nsCString uri;
-    aFile.GetURIString(uri);
-    LogMessage("Could not read '%s'.", uri.get());
-  }
-}
-
-void
-nsComponentManagerImpl::ManifestXPT(ManifestProcessingContext& aCx,
-                                    int aLineNo, char* const* aArgv)
-{
-  FileLocation f(aCx.mFile, aArgv[0]);
-  DoRegisterXPT(f);
 }
 
 void

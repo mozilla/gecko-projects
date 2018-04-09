@@ -3,14 +3,12 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Check that the browser console gets session state is set correctly, and that
 // it re-opens when restore is requested.
 
 "use strict";
 
-add_task(async function () {
+add_task(async function() {
   is(HUDService.getBrowserConsoleSessionState(), false, "Session state false by default");
   HUDService.storeBrowserConsoleSessionState();
   is(HUDService.getBrowserConsoleSessionState(), false,

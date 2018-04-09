@@ -355,7 +355,7 @@ public:
     return nullptr;
   }
 
-  Maybe<uint64_t> GetReferentId() const
+  Maybe<LayersId> GetReferentId() const
   {
     MOZ_ASSERT(IsValid());
 
@@ -444,6 +444,13 @@ public:
     MOZ_ASSERT(IsValid());
 
     return mLayer->GetFixedPositionScrollContainerId();
+  }
+
+  bool IsBackfaceHidden() const
+  {
+    MOZ_ASSERT(IsValid());
+
+    return mLayer->IsBackfaceHidden();
   }
 
   // Expose an opaque pointer to the layer. Mostly used for printf

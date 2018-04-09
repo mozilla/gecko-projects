@@ -12,13 +12,133 @@ module.exports = {
     "reportError": true,
     "require": true,
   },
+  "overrides": [{
+    // XXX Bug 1230193. We're still working on enabling no-undef for these test
+    // directories.
+    "files": [
+      "client/framework/test/**",
+      "client/scratchpad/**",
+      "server/tests/mochitest/**",
+      "shared/tests/unit/**",
+    ],
+    "rules": {
+      "no-undef": "off",
+    }
+  }, {
+    "files": [
+      "client/framework/**",
+    ],
+    "rules": {
+      "no-return-assign": "off",
+      "no-unused-vars": "off",
+    }
+  }, {
+    "files": [
+      "client/scratchpad/scratchpad-manager.jsm",
+      "client/scratchpad/scratchpad.js",
+    ],
+    "rules": {
+      "camelcase": "off",
+    }
+  }, {
+    "files": [
+      "client/framework/**",
+      "client/scratchpad/**",
+    ],
+    "rules": {
+      "consistent-return": "off",
+    }
+  }, {
+    "files": [
+      "client/framework/**",
+      "client/scratchpad/**",
+    ],
+    "rules": {
+      "max-nested-callbacks": "off",
+    }
+  }, {
+    "files": [
+      "client/framework/**",
+      "client/scratchpad/**",
+    ],
+    "rules": {
+      "max-len": "off",
+    }
+  }, {
+    "files": [
+      "client/scratchpad/test/browser_scratchpad_inspect.js",
+      "client/scratchpad/test/browser_scratchpad_inspect_primitives.js",
+    ],
+    "rules": {
+      "no-labels": "off",
+    }
+  }, {
+    "files": [
+      "client/framework/**",
+      "client/scratchpad/**",
+    ],
+    "rules": {
+      "mozilla/no-aArgs": "off",
+    }
+  }, {
+    "files": [
+      "client/framework/test/**",
+      "client/scratchpad/**",
+    ],
+    "rules": {
+      "mozilla/var-only-at-top-level": "off",
+    }
+  }, {
+    "files": [
+      "client/framework/**",
+      "client/scratchpad/**",
+    ],
+    "rules": {
+      "no-shadow": "off",
+    }
+  }, {
+    "files": [
+      "client/framework/**",
+      "client/scratchpad/**",
+    ],
+    "rules": {
+      "strict": "off",
+    }
+  }, {
+    "files": [
+      // Note: Bug 1403938 may be removing canvasdebugger, check before
+      // doing more work on enabling these rules.
+      "client/canvasdebugger/**",
+      // Note: Bug 1342237 may be removing shadereditor, check before
+      // doing more work on enabling these rules.
+      "client/shadereditor/**",
+    ],
+    "rules": {
+      "consistent-return": "off",
+      "max-len": "off",
+      "mozilla/no-aArgs": "off",
+      "mozilla/var-only-at-top-level": "off",
+      "no-return-assign": "off",
+      "no-shadow": "off",
+      "no-undef": "off",
+      "no-unused-vars": "off",
+      "strict": "off",
+    }
+  }, {
+    // For all head*.js files, turn off no-unused-vars at a global level
+    "files": [
+      "**/head*.js",
+    ],
+    "rules": {
+      "no-unused-vars": ["error", {"args": "none", "vars": "local"}],
+    }
+  }],
   "rules": {
     // These are the rules that have been configured so far to match the
     // devtools coding style.
 
     // Rules from the mozilla plugin
     "mozilla/no-aArgs": "error",
-    "mozilla/no-cpows-in-tests": "error",
     "mozilla/no-single-arg-cu-import": "error",
     // See bug 1224289.
     "mozilla/reject-importGlobalProperties": "error",
@@ -240,9 +360,6 @@ module.exports = {
     // Don't require to sort variables within the same declaration block.
     // Anyway, one-var is disabled.
     "sort-vars": "off",
-    // Require space after keyword for anonymous functions, but disallow space
-    // after name of named functions.
-    "space-before-function-paren": ["error", {"anonymous": "always", "named": "never"}],
     // Disable the rule that checks if spaces inside {} and [] are there or not.
     // Our code is split on conventions, and it'd be nice to have "error" rules
     // instead, one for [] and one for {}. So, disabling until we write them.

@@ -1,7 +1,10 @@
+/* -*- Mode: Java; c-basic-offset: 4; tab-width: 4; indent-tabs-mode: nil; -*-
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.geckoview.test;
 
-import org.mozilla.gecko.mozglue.GeckoLoader;
-import org.mozilla.gecko.mozglue.SafeIntent;
 import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoSessionSettings;
 import org.mozilla.geckoview.GeckoView;
@@ -10,12 +13,6 @@ import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
-import android.util.Log;
-
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.io.OutputStream;
 
 public class TestRunnerActivity extends Activity {
     private static final String LOGTAG = "TestRunnerActivity";
@@ -40,9 +37,10 @@ public class TestRunnerActivity extends Activity {
         }
 
         @Override
-        public boolean onLoadUri(GeckoSession session, String uri, TargetWindow where) {
+        public void onLoadRequest(GeckoSession session, String uri,
+                                  int target, GeckoSession.Response<Boolean> response) {
             // Allow Gecko to load all URIs
-            return false;
+            response.respond(false);
         }
 
         @Override
@@ -64,7 +62,7 @@ public class TestRunnerActivity extends Activity {
 
         @Override
         public void onCloseRequest(GeckoSession session) {
-            session.closeWindow();
+            session.close();
         }
 
         @Override
@@ -73,8 +71,12 @@ public class TestRunnerActivity extends Activity {
         }
 
         @Override
-        public void onContextMenu(GeckoSession session, int screenX, int screenY, String uri, String elementSrc) {
+        public void onContextMenu(GeckoSession session, int screenX, int screenY, String uri, int elementType, String elementSrc) {
 
+        }
+
+        @Override
+        public void onExternalResponse(GeckoSession session, GeckoSession.WebResponseInfo request) {
         }
     };
 
@@ -93,7 +95,6 @@ public class TestRunnerActivity extends Activity {
 
         final GeckoSession session = new GeckoSession(settings);
         session.setNavigationDelegate(mNavigationDelegate);
-        session.openWindow(this);
         return session;
     }
 
@@ -101,16 +102,14 @@ public class TestRunnerActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        Intent intent = getIntent();
-        GeckoLoader.setLastIntent(new SafeIntent(getIntent()));
-
-        final String intentArgs = intent.getStringExtra("args");
-        final String args = intentArgs != null ? "-purgecaches " + intentArgs : "-purgecaches";
-        GeckoSession.preload(this, args, false /* no multiprocess, see below */);
+        final Intent intent = getIntent();
+        GeckoSession.preload(this, new String[] { "-purgecaches" },
+                             intent.getExtras(), false /* no multiprocess, see below */);
 
         // We can't use e10s because we get deadlocked when quickly creating and
         // destroying sessions. Bug 1348361.
         mSession = createSession();
+        mSession.open(this);
 
         // If we were passed a URI in the Intent, open it
         final Uri uri = intent.getData();
@@ -125,7 +124,7 @@ public class TestRunnerActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        mSession.closeWindow();
+        mSession.close();
         super.onDestroy();
     }
 

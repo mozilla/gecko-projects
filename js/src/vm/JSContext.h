@@ -21,11 +21,6 @@
 #include "vm/MallocProvider.h"
 #include "vm/Runtime.h"
 
-#ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable:4100) /* Silence unreferenced formal parameter warnings */
-#endif
-
 struct DtoaState;
 
 namespace js {
@@ -89,6 +84,11 @@ enum class ContextKind
     Background
 };
 
+#ifdef DEBUG
+bool
+CurrentThreadIsParseThread();
+#endif
+
 } /* namespace js */
 
 /*
@@ -107,10 +107,7 @@ struct JSContext : public JS::RootingContext,
     js::UnprotectedData<JSRuntime*> runtime_;
     js::WriteOnceData<js::ContextKind> kind_;
 
-    // System handle for the thread this context is associated with.
-    js::WriteOnceData<size_t> threadNative_;
-
-    // The thread on which this context is running, if this is performing a parse task.
+    // The thread on which this context is running if this is not the main thread.
     js::ThreadLocalData<js::HelperThread*> helperThread_;
 
     friend class js::gc::AutoSuppressNurseryCellAlloc;
@@ -126,7 +123,6 @@ struct JSContext : public JS::RootingContext,
     void setRuntime(JSRuntime* rt);
 
     bool isCooperativelyScheduled() const { return kind_ == js::ContextKind::Cooperative; }
-    size_t threadNative() const { return threadNative_; }
 
     inline js::gc::ArenaLists* arenas() const { return arenas_; }
 
@@ -227,9 +223,6 @@ struct JSContext : public JS::RootingContext,
     inline void enterNullCompartment();
     inline void leaveCompartment(JSCompartment* oldCompartment,
                                  const js::AutoLockForExclusiveAccess* maybeLock = nullptr);
-
-    inline void enterZoneGroup(js::ZoneGroup* group);
-    inline void leaveZoneGroup(js::ZoneGroup* group);
 
     void setHelperThread(js::HelperThread* helperThread);
     js::HelperThread* helperThread() const { return helperThread_; }
@@ -844,23 +837,18 @@ struct JSContext : public JS::RootingContext,
         return interrupt_;
     }
 
-  private:
-    // Set when we're handling an interrupt of JIT/wasm code in
-    // InterruptRunningJitCode.
-    mozilla::Atomic<bool> handlingJitInterrupt_;
-
   public:
-    bool startHandlingJitInterrupt() {
-        // Return true if we changed handlingJitInterrupt_ from
-        // false to true.
-        return handlingJitInterrupt_.compareExchange(false, true);
+    void* addressOfInterrupt() {
+        return &interrupt_;
     }
-    void finishHandlingJitInterrupt() {
-        MOZ_ASSERT(handlingJitInterrupt_);
-        handlingJitInterrupt_ = false;
+    void* addressOfInterruptRegExpJit() {
+        return &interruptRegExpJit_;
     }
-    bool handlingJitInterrupt() const {
-        return handlingJitInterrupt_;
+    void* addressOfJitStackLimit() {
+        return &jitStackLimit;
+    }
+    void* addressOfJitStackLimitNoInterrupt() {
+        return &jitStackLimitNoInterrupt;
     }
 
     /* Futex state, used by Atomics.wait() and Atomics.wake() on the Atomics object */
@@ -940,10 +928,10 @@ JSContext::boolToResult(bool ok)
 }
 
 inline JSContext*
-JSRuntime::activeContextFromOwnThread()
+JSRuntime::mainContextFromOwnThread()
 {
-    MOZ_ASSERT(activeContext() == js::TlsContext.get());
-    return activeContext();
+    MOZ_ASSERT(mainContextFromAnyThread() == js::TlsContext.get());
+    return mainContextFromAnyThread();
 }
 
 namespace js {
@@ -990,15 +978,6 @@ struct MOZ_RAII AutoResolving {
  */
 extern JSContext*
 NewContext(uint32_t maxBytes, uint32_t maxNurseryBytes, JSRuntime* parentRuntime);
-
-extern JSContext*
-NewCooperativeContext(JSContext* siblingContext);
-
-extern void
-YieldCooperativeContext(JSContext* cx);
-
-extern void
-ResumeCooperativeContext(JSContext* cx);
 
 extern void
 DestroyContext(JSContext* cx);
@@ -1197,6 +1176,7 @@ class MOZ_RAII AutoLockForExclusiveAccess
     JSRuntime* runtime;
 
     void init(JSRuntime* rt) {
+        MOZ_ASSERT(CurrentThreadCanAccessRuntime(rt) || CurrentThreadIsParseThread());
         runtime = rt;
         if (runtime->hasHelperThreadZones()) {
             runtime->exclusiveAccessLock.lock();
@@ -1238,6 +1218,7 @@ class MOZ_RAII AutoLockScriptData
   public:
     explicit AutoLockScriptData(JSRuntime* rt MOZ_GUARD_OBJECT_NOTIFIER_PARAM) {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+        MOZ_ASSERT(CurrentThreadCanAccessRuntime(rt) || CurrentThreadIsParseThread());
         runtime = rt;
         if (runtime->hasHelperThreadZones()) {
             runtime->scriptDataLock.lock();
@@ -1385,9 +1366,5 @@ struct MOZ_RAII AutoSetThreadIsSweeping
 } // namespace gc
 
 } /* namespace js */
-
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif
 
 #endif /* vm_JSContext_h */

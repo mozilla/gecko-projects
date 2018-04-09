@@ -132,7 +132,7 @@ panelview[mainview] > .panel-header {
 }
 
 
-#tabbrowser-tabs:not([overflow="true"]) ~ #alltabs-button,
+#tabbrowser-tabs:not([overflow="true"]):not([hashiddentabs]) ~ #alltabs-button,
 #tabbrowser-tabs[hasadjacentnewtabbutton]:not([overflow="true"]) ~ #new-tab-button,
 #tabbrowser-tabs[overflow="true"] > .tabbrowser-arrowscrollbox > .tabs-newtab-button,
 #tabbrowser-tabs:not([hasadjacentnewtabbutton]) > .tabbrowser-arrowscrollbox > .tabs-newtab-button,
@@ -195,6 +195,15 @@ panelview[mainview] > .panel-header {
 .tab-icon-image:not([fadein]) {
   display: none;
 }
+
+%ifdef NIGHTLY_BUILD
+@supports -moz-bool-pref("browser.tabs.hideThrobber") {
+  .tab-throbber,
+  .tab-throbber-fallback {
+    display: none;
+  }
+}
+%endif
 
 #tabbrowser-tabs[positionpinnedtabs] > .tabbrowser-tab[pinned] {
   position: fixed !important;
@@ -268,7 +277,6 @@ window:not([chromehidden~="toolbar"]) #nav-bar[nonemptyoverflow] > .overflow-but
 }
 
 
-%ifdef CAN_DRAW_IN_TITLEBAR
 %ifdef MENUBAR_CAN_AUTOHIDE
 #toolbar-menubar:not([autohide=true]) + #TabsToolbar > .titlebar-placeholder,
 %endif
@@ -336,8 +344,6 @@ toolbarpaletteitem {
 #main-window[tabletmode] #titlebar-max {
   display: none !important;
 }
-%endif
-
 %endif
 
 #main-window[inFullscreen][inDOMFullscreen] #navigator-toolbox,
@@ -976,51 +982,50 @@ browser[tabmodalPromptShowing] {
 
 /* Status panel */
 
-statuspanel {
-  -moz-binding: url("chrome://browser/content/tabbrowser.xml#statuspanel");
+#statuspanel {
   position: fixed;
   margin-top: -3em;
   max-width: calc(100% - 5px);
   pointer-events: none;
 }
 
-statuspanel[mirror] {
+#statuspanel[mirror] {
   offset-inline-start: auto;
   offset-inline-end: 0;
 }
 
-statuspanel[sizelimit] {
+#statuspanel[sizelimit] {
   max-width: 50%;
 }
 
-statuspanel[type=status] {
+#statuspanel[type=status] {
   min-width: 23em;
 }
 
 @media all and (max-width: 800px) {
-  statuspanel[type=status] {
+  #statuspanel[type=status] {
     min-width: 33%;
   }
 }
 
-statuspanel[type=overLink] {
+#statuspanel[type=overLink] {
   transition: opacity 120ms ease-out;
 }
 
-statuspanel[type=overLink] > .statuspanel-inner {
+#statuspanel[type=overLink] > #statuspanel-inner {
   direction: ltr;
 }
 
-statuspanel[inactive] {
+#statuspanel[inactive] {
   transition: none;
   opacity: 0;
 }
 
-statuspanel[inactive][previoustype=overLink] {
+#statuspanel[inactive][previoustype=overLink] {
   transition: opacity 200ms ease-out;
 }
 
-.statuspanel-inner {
+#statuspanel-inner {
   height: 3em;
   width: 100%;
   -moz-box-align: end;
@@ -1367,6 +1372,10 @@ toolbarpaletteitem[place="palette"][hidden] {
   box-shadow: 0 0 2px 2px rgba(255,0,0,0.4);
 }
 
+.popup-notification-description[popupid=webauthn-prompt-register-direct] {
+  white-space: pre-line;
+}
+
 .dragfeedback-tab {
   -moz-appearance: none;
   opacity: 0.65;
@@ -1374,8 +1383,8 @@ toolbarpaletteitem[place="palette"][hidden] {
 }
 
 /* Page action panel */
-#pageAction-panel-sendToDevice-subview-body:not([state="notready"]) > #pageAction-panel-sendToDevice-notReady,
-#pageAction-urlbar-sendToDevice-subview-body:not([state="notready"]) > #pageAction-urlbar-sendToDevice-notReady {
+#pageAction-panel-sendToDevice-subview-body:not([state="notready"]) > .pageAction-sendToDevice-notReady,
+#pageAction-urlbar-sendToDevice-subview-body:not([state="notready"]) > .pageAction-sendToDevice-notReady {
   display: none;
 }
 

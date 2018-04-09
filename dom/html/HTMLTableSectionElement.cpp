@@ -165,13 +165,11 @@ void
 HTMLTableSectionElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
                                                GenericSpecifiedValues* aData)
 {
-  if (aData->ShouldComputeStyleStruct(NS_STYLE_INHERIT_BIT(Position))) {
-    // height: value
-    if (!aData->PropertyIsSet(eCSSProperty_height)) {
-      const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::height);
-      if (value && value->Type() == nsAttrValue::eInteger)
-        aData->SetPixelValue(eCSSProperty_height, (float)value->GetIntegerValue());
-    }
+  // height: value
+  if (!aData->PropertyIsSet(eCSSProperty_height)) {
+    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::height);
+    if (value && value->Type() == nsAttrValue::eInteger)
+      aData->SetPixelValue(eCSSProperty_height, (float)value->GetIntegerValue());
   }
   nsGenericHTMLElement::MapDivAlignAttributeInto(aAttributes, aData);
   nsGenericHTMLElement::MapVAlignAttributeInto(aAttributes, aData);
@@ -183,9 +181,9 @@ NS_IMETHODIMP_(bool)
 HTMLTableSectionElement::IsAttributeMapped(const nsAtom* aAttribute) const
 {
   static const MappedAttributeEntry attributes[] = {
-    { &nsGkAtoms::align },
-    { &nsGkAtoms::valign },
-    { &nsGkAtoms::height },
+    { nsGkAtoms::align },
+    { nsGkAtoms::valign },
+    { nsGkAtoms::height },
     { nullptr }
   };
 

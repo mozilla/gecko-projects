@@ -1,7 +1,6 @@
 toolkit.jar:
 %  content global %content/global/ contentaccessible=yes
 *  content/global/license.html
-   content/global/XPCNativeWrapper.js
    content/global/minimal-xul.css
 *  content/global/xul.css
    content/global/components.css
@@ -94,7 +93,6 @@ toolkit.jar:
    content/global/bindings/scrollbar.xml       (widgets/scrollbar.xml)
    content/global/bindings/scrollbox.xml       (widgets/scrollbox.xml)
    content/global/bindings/spinner.js          (widgets/spinner.js)
-   content/global/bindings/splitter.xml        (widgets/splitter.xml)
    content/global/bindings/stringbundle.xml    (widgets/stringbundle.xml)
 *  content/global/bindings/tabbox.xml          (widgets/tabbox.xml)
    content/global/bindings/text.xml            (widgets/text.xml)
@@ -105,7 +103,6 @@ toolkit.jar:
    content/global/bindings/toolbarbutton.xml   (widgets/toolbarbutton.xml)
 *  content/global/bindings/tree.xml            (widgets/tree.xml)
    content/global/bindings/videocontrols.xml   (widgets/videocontrols.xml)
-   content/global/bindings/videocontrols.css   (widgets/videocontrols.css)
 *  content/global/bindings/wizard.xml          (widgets/wizard.xml)
 #ifdef XP_MACOSX
    content/global/macWindowMenu.js

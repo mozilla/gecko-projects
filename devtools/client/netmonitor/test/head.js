@@ -1,17 +1,17 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from ../../framework/test/shared-head.js */
+/* import-globals-from ../../shared/test/shared-head.js */
 /* exported Toolbox, restartNetMonitor, teardown, waitForExplicitFinish,
-   verifyRequestItemTarget, waitFor, testFilterButtons, loadCommonFrameScript,
+   verifyRequestItemTarget, waitFor, testFilterButtons,
    performRequestsInContent, waitForNetworkEvents, selectIndexAndWaitForSourceEditor,
-   testColumnsAlignment, hideColumn, showColumn */
+   testColumnsAlignment, hideColumn, showColumn, performRequests */
 
 "use strict";
 
 // shared-head.js handles imports, constants, and utility functions
 Services.scriptloader.loadSubScript(
-  "chrome://mochitests/content/browser/devtools/client/framework/test/shared-head.js",
+  "chrome://mochitests/content/browser/devtools/client/shared/test/shared-head.js",
   this);
 
 const {
@@ -40,6 +40,7 @@ const CONTENT_TYPE_WITHOUT_CACHE_REQUESTS = 8;
 const CYRILLIC_URL = EXAMPLE_URL + "html_cyrillic-test-page.html";
 const STATUS_CODES_URL = EXAMPLE_URL + "html_status-codes-test-page.html";
 const POST_DATA_URL = EXAMPLE_URL + "html_post-data-test-page.html";
+const POST_ARRAY_DATA_URL = EXAMPLE_URL + "html_post-array-data-test-page.html";
 const POST_JSON_URL = EXAMPLE_URL + "html_post-json-test-page.html";
 const POST_RAW_URL = EXAMPLE_URL + "html_post-raw-test-page.html";
 const POST_RAW_WITH_HEADERS_URL = EXAMPLE_URL + "html_post-raw-with-headers-test-page.html";
@@ -62,6 +63,7 @@ const CURL_UTILS_URL = EXAMPLE_URL + "html_curl-utils.html";
 const SEND_BEACON_URL = EXAMPLE_URL + "html_send-beacon.html";
 const CORS_URL = EXAMPLE_URL + "html_cors-test-page.html";
 const PAUSE_URL = EXAMPLE_URL + "html_pause-test-page.html";
+const OPEN_REQUEST_IN_TAB_URL = EXAMPLE_URL + "html_open-request-in-tab.html";
 
 const SIMPLE_SJS = EXAMPLE_URL + "sjs_simple-test-server.sjs";
 const SIMPLE_UNSORTED_COOKIES_SJS = EXAMPLE_URL + "sjs_simple-unsorted-cookies-test-server.sjs";
@@ -72,6 +74,7 @@ const SORTING_SJS = EXAMPLE_URL + "sjs_sorting-test-server.sjs";
 const HTTPS_REDIRECT_SJS = EXAMPLE_URL + "sjs_https-redirect-test-server.sjs";
 const CORS_SJS_PATH = "/browser/devtools/client/netmonitor/test/sjs_cors-test-server.sjs";
 const HSTS_SJS = EXAMPLE_URL + "sjs_hsts-test-server.sjs";
+const METHOD_SJS = EXAMPLE_URL + "sjs_method-test-server.sjs";
 
 const HSTS_BASE_URL = EXAMPLE_URL;
 const HSTS_PAGE_URL = CUSTOM_GET_URL;
@@ -79,7 +82,6 @@ const HSTS_PAGE_URL = CUSTOM_GET_URL;
 const TEST_IMAGE = EXAMPLE_URL + "test-image.png";
 const TEST_IMAGE_DATA_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABGdBTUEAAK/INwWK6QAAABl0RVh0U29mdHdhcmUAQWRvYmUgSW1hZ2VSZWFkeXHJZTwAAAHWSURBVHjaYvz//z8DJQAggJiQOe/fv2fv7Oz8rays/N+VkfG/iYnJfyD/1+rVq7ffu3dPFpsBAAHEAHIBCJ85c8bN2Nj4vwsDw/8zQLwKiO8CcRoQu0DxqlWrdsHUwzBAAIGJmTNnPgYa9j8UqhFElwPxf2MIDeIrKSn9FwSJoRkAEEAM0DD4DzMAyPi/G+QKY4hh5WAXGf8PDQ0FGwJ22d27CjADAAIIrLmjo+MXA9R2kAHvGBA2wwx6B8W7od6CeQcggKCmCEL8bgwxYCbUIGTDVkHDBia+CuotgACCueD3TDQN75D4xmAvCoK9ARMHBzAw0AECiBHkAlC0Mdy7x9ABNA3obAZXIAa6iKEcGlMVQHwWyjYuL2d4v2cPg8vZswx7gHyAAAK7AOif7SAbOqCmn4Ha3AHFsIDtgPq/vLz8P4MSkJ2W9h8ggBjevXvHDo4FQUQg/kdypqCg4H8lUIACnQ/SOBMYI8bAsAJFPcj1AAEEjwVQqLpAbXmH5BJjqI0gi9DTAAgDBBCcAVLkgmQ7yKCZxpCQxqUZhAECCJ4XgMl493ug21ZD+aDAXH0WLM4A9MZPXJkJIIAwTAR5pQMalaCABQUULttBGCCAGCnNzgABBgAMJ5THwGvJLAAAAABJRU5ErkJggg==";
 
-const FRAME_SCRIPT_UTILS_URL = "chrome://devtools/content/shared/frame-script-utils.js";
 /* eslint-enable no-unused-vars, max-len */
 
 // All tests are asynchronous.
@@ -146,7 +148,7 @@ function waitForTimelineMarkers(monitor) {
   return new Promise(resolve => {
     let markers = [];
 
-    function handleTimelineEvent(_, marker) {
+    function handleTimelineEvent(marker) {
       info(`Got marker: ${marker.name}`);
       markers.push(marker);
       if (markers.length == 2) {
@@ -185,14 +187,14 @@ function waitForAllRequestsFinished(monitor) {
     // Key is the request id, value is a boolean - is request finished or not?
     let requests = new Map();
 
-    function onRequest(_, id) {
+    function onRequest(id) {
       let networkInfo = getNetworkRequest(id);
       let { url } = networkInfo.request;
       info(`Request ${id} for ${url} not yet done, keep waiting...`);
       requests.set(id, false);
     }
 
-    function onTimings(_, id) {
+    function onTimings(id) {
       let networkInfo = getNetworkRequest(id);
       let { url } = networkInfo.request;
       info(`Request ${id} for ${url} done`);
@@ -243,18 +245,18 @@ let updatedTypes = [
 // Start collecting all networkEventUpdate event when panel is opened.
 // removeTab() should be called once all corresponded RECEIVED_* events finished.
 function startNetworkEventUpdateObserver(panelWin) {
-  updatingTypes.forEach((type) => panelWin.on(type, (event, actor) => {
-    let key = actor + "-" + updatedTypes[updatingTypes.indexOf(event)];
+  updatingTypes.forEach((type) => panelWin.on(type, actor => {
+    let key = actor + "-" + updatedTypes[updatingTypes.indexOf(type)];
     finishedQueue[key] = finishedQueue[key] ? finishedQueue[key] + 1 : 1;
   }));
 
-  updatedTypes.forEach((type) => panelWin.on(type, (event, actor) => {
-    let key = actor + "-" + event;
+  updatedTypes.forEach((type) => panelWin.on(type, actor => {
+    let key = actor + "-" + type;
     finishedQueue[key] = finishedQueue[key] ? finishedQueue[key] - 1 : -1;
   }));
 }
 
-function* waitForAllNetworkUpdateEvents() {
+async function waitForAllNetworkUpdateEvents() {
   function checkNetworkEventUpdateState() {
     for (let key in finishedQueue) {
       if (finishedQueue[key] > 0) {
@@ -265,23 +267,23 @@ function* waitForAllNetworkUpdateEvents() {
     return true;
   }
   info("Wait for completion of all NetworkUpdateEvents packets...");
-  yield waitUntil(() => checkNetworkEventUpdateState());
+  await waitUntil(() => checkNetworkEventUpdateState());
   finishedQueue = {};
 }
 
 function initNetMonitor(url, enableCache) {
   info("Initializing a network monitor pane.");
 
-  return Task.spawn(function* () {
-    let tab = yield addTab(url);
+  return (async function() {
+    let tab = await addTab(url);
     info("Net tab added successfully: " + url);
 
     let target = TargetFactory.forTab(tab);
 
-    yield target.makeRemote();
+    await target.makeRemote();
     info("Target remoted.");
 
-    let toolbox = yield gDevTools.showToolbox(target, "netmonitor");
+    let toolbox = await gDevTools.showToolbox(target, "netmonitor");
     info("Network monitor pane shown successfully.");
 
     let monitor = toolbox.getCurrentPanel();
@@ -296,8 +298,8 @@ function initNetMonitor(url, enableCache) {
       info("Disabling cache and reloading page.");
       let requestsDone = waitForAllRequestsFinished(monitor);
       let markersDone = waitForTimelineMarkers(monitor);
-      yield toggleCache(target, true);
-      yield Promise.all([requestsDone, markersDone]);
+      await toggleCache(target, true);
+      await Promise.all([requestsDone, markersDone]);
       info("Cache disabled when the current and all future toolboxes are open.");
       // Remove any requests generated by the reload while toggling the cache to
       // avoid interfering with the test.
@@ -311,40 +313,40 @@ function initNetMonitor(url, enableCache) {
     }
 
     return {tab, monitor, toolbox};
-  });
+  })();
 }
 
 function restartNetMonitor(monitor, newUrl) {
   info("Restarting the specified network monitor.");
 
-  return Task.spawn(function* () {
+  return (async function() {
     let tab = monitor.toolbox.target.tab;
     let url = newUrl || tab.linkedBrowser.currentURI.spec;
 
-    yield waitForAllNetworkUpdateEvents();
+    await waitForAllNetworkUpdateEvents();
     info("All pending requests finished.");
 
     let onDestroyed = monitor.once("destroyed");
-    yield removeTab(tab);
-    yield onDestroyed;
+    await removeTab(tab);
+    await onDestroyed;
 
     return initNetMonitor(url);
-  });
+  })();
 }
 
 function teardown(monitor) {
   info("Destroying the specified network monitor.");
 
-  return Task.spawn(function* () {
+  return (async function() {
     let tab = monitor.toolbox.target.tab;
 
-    yield waitForAllNetworkUpdateEvents();
+    await waitForAllNetworkUpdateEvents();
     info("All pending requests finished.");
 
     let onDestroyed = monitor.once("destroyed");
-    yield removeTab(tab);
-    yield onDestroyed;
-  });
+    await removeTab(tab);
+    await onDestroyed;
+  })();
 }
 
 function waitForNetworkEvents(monitor, getRequests) {
@@ -354,7 +356,7 @@ function waitForNetworkEvents(monitor, getRequests) {
     let networkEvent = 0;
     let payloadReady = 0;
 
-    function onNetworkEvent(event, actor) {
+    function onNetworkEvent(actor) {
       let networkInfo = getNetworkRequest(actor);
       if (!networkInfo) {
         // Must have been related to reloading document to disable cache.
@@ -362,10 +364,10 @@ function waitForNetworkEvents(monitor, getRequests) {
         return;
       }
       networkEvent++;
-      maybeResolve(event, actor, networkInfo);
+      maybeResolve(EVENTS.NETWORK_EVENT, actor, networkInfo);
     }
 
-    function onPayloadReady(event, actor) {
+    function onPayloadReady(actor) {
       let networkInfo = getNetworkRequest(actor);
       if (!networkInfo) {
         // Must have been related to reloading document to disable cache.
@@ -373,7 +375,7 @@ function waitForNetworkEvents(monitor, getRequests) {
         return;
       }
       payloadReady++;
-      maybeResolve(event, actor, networkInfo);
+      maybeResolve(EVENTS.PAYLOAD_READY, actor, networkInfo);
     }
 
     function maybeResolve(event, actor, networkInfo) {
@@ -395,7 +397,7 @@ function waitForNetworkEvents(monitor, getRequests) {
   });
 }
 
-function* verifyRequestItemTarget(document, requestList, requestItem, method,
+function verifyRequestItemTarget(document, requestList, requestItem, method,
                                  url, data = {}) {
   info("> Verifying: " + method + " " + url + " " + data.toSource());
 
@@ -618,23 +620,11 @@ function testFilterButtonsCustom(monitor, isChecked) {
 }
 
 /**
- * Loads shared/frame-script-utils.js in the specified tab.
- *
- * @param tab
- *        Optional tab to load the frame script in. Defaults to the current tab.
- */
-function loadCommonFrameScript(tab) {
-  let browser = tab ? tab.linkedBrowser : gBrowser.selectedBrowser;
-
-  browser.messageManager.loadFrameScript(FRAME_SCRIPT_UTILS_URL, false);
-}
-
-/**
  * Perform the specified requests in the context of the page content.
  *
  * @param Array requests
  *        An array of objects specifying the requests to perform. See
- *        shared/frame-script-utils.js for more information.
+ *        shared/test/frame-script-utils.js for more information.
  *
  * @return A promise that resolves once the requests complete.
  */
@@ -649,7 +639,7 @@ function performRequestsInContent(requests) {
  *
  * @param String name
  *        The message name. Should be one of the messages defined
- *        shared/frame-script-utils.js
+ *        shared/test/frame-script-utils.js
  * @param Object data
  *        Optional data to send along
  * @param Object objects
@@ -756,4 +746,17 @@ async function selectIndexAndWaitForSourceEditor(monitor, index) {
     await waitDOM;
   }
   await onResponseContent;
+}
+
+/**
+ * Helper function for executing XHRs on a test page.
+ *
+ * @param {Number} count Number of requests to be executed.
+ */
+async function performRequests(monitor, tab, count) {
+  let wait = waitForNetworkEvents(monitor, count);
+  await ContentTask.spawn(tab.linkedBrowser, count, requestCount => {
+    content.wrappedJSObject.performRequests(requestCount);
+  });
+  await wait;
 }

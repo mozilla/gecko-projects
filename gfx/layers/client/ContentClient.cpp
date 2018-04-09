@@ -231,6 +231,8 @@ ContentClient::BeginPaint(PaintedLayer* aLayer,
     }
   }
 
+  MOZ_ASSERT(dest.mBufferRect.Contains(result.mRegionToDraw.GetBounds()));
+
   NS_ASSERTION(!(aFlags & PAINT_WILL_RESAMPLE) || dest.mBufferRect == dest.mNeededRegion.GetBounds(),
                "If we're resampling, we need to validate the entire buffer");
 
@@ -750,14 +752,13 @@ ContentClientRemoteBuffer::CreateBufferInternal(const gfx::IntRect& aRect,
 
   RefPtr<TextureClient> textureClient = CreateTextureClientForDrawing(
     aFormat, aRect.Size(), BackendSelector::Content,
-    aFlags | ExtraTextureFlags(),
+    aFlags | ExtraTextureFlags() | TextureFlags::BLOCKING_READ_LOCK,
     textureAllocFlags
   );
 
   if (!textureClient || !AddTextureClient(textureClient)) {
     return nullptr;
   }
-  textureClient->EnableBlockingReadLock();
 
   RefPtr<TextureClient> textureClientOnWhite;
   if (aFlags & TextureFlags::COMPONENT_ALPHA) {

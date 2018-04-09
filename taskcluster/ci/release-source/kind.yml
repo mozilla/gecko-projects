@@ -31,7 +31,7 @@ job-defaults:
          PKG_SRCPACK_BASENAME: source
    run:
       using: mozharness
-      actions: [clobber package-source]
+      actions: [package-source]
       script: "mozharness/scripts/fx_desktop_build.py"
       config:
          - builds/releng_sub_linux_configs/64_source.py

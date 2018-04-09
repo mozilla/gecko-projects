@@ -246,6 +246,17 @@ Event::GetTarget(nsIDOMEventTarget** aTarget)
   return NS_OK;
 }
 
+bool
+Event::IsSrcElementEnabled(JSContext* /* unused */, JSObject* /* unused */)
+{
+  // Not a pref, because that's a pain on workers.
+#ifdef NIGHTLY_BUILD
+  return true;
+#else
+  return false;
+#endif
+}
+
 EventTarget*
 Event::GetCurrentTarget() const
 {
@@ -1084,10 +1095,15 @@ Event::DefaultPrevented(CallerType aCallerType) const
 }
 
 double
-Event::TimeStampImpl() const
+Event::TimeStamp()
 {
   if (!sReturnHighResTimeStamp) {
-    return static_cast<double>(mEvent->mTime);
+    // In the situation where you have set a very old, not-very-supported
+    // non-default preference, we will always reduce the precision,
+    // regardless of system principal or not.
+    // The timestamp is absolute, so we supply a zero context mix-in.
+    double ret = static_cast<double>(mEvent->mTime);
+    return nsRFPService::ReduceTimePrecisionAsMSecs(ret, 0);
   }
 
   if (mEvent->mTimeStamp.IsNull()) {
@@ -1109,19 +1125,24 @@ Event::TimeStampImpl() const
       return 0.0;
     }
 
-    return perf->GetDOMTiming()->TimeStampToDOMHighRes(mEvent->mTimeStamp);
+    double ret = perf->GetDOMTiming()->TimeStampToDOMHighRes(mEvent->mTimeStamp);
+    MOZ_ASSERT(mOwner->PrincipalOrNull());
+    if (nsContentUtils::IsSystemPrincipal(mOwner->PrincipalOrNull()))
+      return ret;
+
+    return nsRFPService::ReduceTimePrecisionAsMSecs(ret,
+      perf->GetRandomTimelineSeed());
   }
 
   WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
   MOZ_ASSERT(workerPrivate);
 
-  return workerPrivate->TimeStampToDOMHighRes(mEvent->mTimeStamp);
-}
+  double ret = workerPrivate->TimeStampToDOMHighRes(mEvent->mTimeStamp);
+  if (workerPrivate->UsesSystemPrincipal())
+    return ret;
 
-double
-Event::TimeStamp() const
-{
-  return nsRFPService::ReduceTimePrecisionAsMSecs(TimeStampImpl());
+  return nsRFPService::ReduceTimePrecisionAsMSecs(ret,
+    workerPrivate->GetRandomTimelineSeed());
 }
 
 NS_IMETHODIMP

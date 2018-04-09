@@ -24,7 +24,6 @@ function run_test() {
   checkService("appShell", Ci.nsIAppShellService);
   checkService("appinfo", Ci.nsIXULRuntime);
   checkService("blocklist", Ci.nsIBlocklistService);
-  checkService("cache", Ci.nsICacheService);
   checkService("cache2", Ci.nsICacheStorageService);
   checkService("clipboard", Ci.nsIClipboard);
   checkService("console", Ci.nsIConsoleService);
@@ -33,7 +32,6 @@ function run_test() {
   checkService("dirsvc", Ci.nsIProperties);
   checkService("DOMRequest", Ci.nsIDOMRequestService);
   checkService("domStorageManager", Ci.nsIDOMStorageManager);
-  checkService("downloads", Ci.nsIDownloadManager);
   checkService("droppedLinkHandler", Ci.nsIDroppedLinkHandler);
   checkService("eTLD", Ci.nsIEffectiveTLDService);
   checkService("focus", Ci.nsIFocusManager);

@@ -88,18 +88,6 @@ class WebPlatformTest(TestingMixin, MercurialScript, BlobUploadMixin, CodeCovera
             "default": False,
             "help": "Forcibly enable single thread traversal in Stylo with STYLO_THREADS=1"}
          ],
-        [["--enable-stylo"], {
-            "action": "store_true",
-            "dest": "enable_stylo",
-            "default": False,
-            "help": "Run tests with Stylo enabled"}
-         ],
-        [["--disable-stylo"], {
-            "action": "store_true",
-            "dest": "disable_stylo",
-            "default": False,
-            "help": "Run tests with Stylo disabled"}
-         ],
     ] + copy.deepcopy(testing_config_options) + \
         copy.deepcopy(blobupload_config_options) + \
         copy.deepcopy(code_coverage_config_options)
@@ -242,6 +230,7 @@ class WebPlatformTest(TestingMixin, MercurialScript, BlobUploadMixin, CodeCovera
                 self.fatal("Unable to find geckodriver binary "
                            "in common test package: %s" % str(geckodriver_path))
             cmd.append("--webdriver-binary=%s" % geckodriver_path)
+            cmd.append("--webdriver-arg=-vv")  # enable trace logs
 
         options = list(c.get("options", []))
 
@@ -321,21 +310,10 @@ class WebPlatformTest(TestingMixin, MercurialScript, BlobUploadMixin, CodeCovera
             env['MOZ_HEADLESS_WIDTH'] = self.config['headless_width']
             env['MOZ_HEADLESS_HEIGHT'] = self.config['headless_height']
 
-        if self.config['disable_stylo']:
-            if self.config['single_stylo_traversal']:
-                self.fatal("--disable-stylo conflicts with --single-stylo-traversal")
-            if self.config['enable_stylo']:
-                self.fatal("--disable-stylo conflicts with --enable-stylo")
-
         if self.config['single_stylo_traversal']:
             env['STYLO_THREADS'] = '1'
         else:
             env['STYLO_THREADS'] = '4'
-
-        if self.config['enable_stylo']:
-            env['STYLO_FORCE_ENABLED'] = '1'
-        if self.config['disable_stylo']:
-            env['STYLO_FORCE_DISABLED'] = '1'
 
         env = self.query_env(partial_env=env, log_level=INFO)
 

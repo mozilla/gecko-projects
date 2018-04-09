@@ -51,10 +51,10 @@ using mozilla::layers::BorderCorners from "mozilla/layers/LayersTypes.h";
 using mozilla::layers::BorderWidths from "mozilla/layers/LayersTypes.h";
 using mozilla::layers::LayerHandle from "mozilla/layers/LayersTypes.h";
 using mozilla::layers::CompositableHandle from "mozilla/layers/LayersTypes.h";
-using mozilla::layers::ReadLockHandle from "mozilla/layers/LayersTypes.h";
 using mozilla::layers::SimpleLayerAttributes from "mozilla/layers/LayerAttributes.h";
 using mozilla::CrossProcessSemaphoreHandle from "mozilla/ipc/CrossProcessSemaphore.h";
 using struct mozilla::void_t from "ipc/IPCMessageUtils.h";
+using mozilla::layers::LayersId from "mozilla/layers/LayersTypes.h";
 
 namespace mozilla {
 namespace layers {
@@ -306,7 +306,7 @@ struct GlyphArray
 struct ColorLayerAttributes     { LayerColor color; IntRect bounds; };
 struct CanvasLayerAttributes    { SamplingFilter samplingFilter; IntRect bounds; };
 struct RefLayerAttributes {
-  uint64_t id;
+  LayersId id;
   EventRegionsOverride eventRegionsOverride;
 };
 struct ImageLayerAttributes     { SamplingFilter samplingFilter; IntSize scaleToSize; ScaleMode scaleMode; };
@@ -379,11 +379,6 @@ union ReadLockDescriptor {
   null_t;
 };
 
-struct ReadLockInit {
-  ReadLockDescriptor sharedLock;
-  ReadLockHandle handle;
-};
-
 union MaybeTexture {
   PTexture;
   null_t;
@@ -393,8 +388,8 @@ struct TexturedTileDescriptor {
   PTexture texture;
   MaybeTexture textureOnWhite;
   IntRect updateRect;
-  ReadLockDescriptor sharedLock;
-  ReadLockDescriptor sharedLockOnWhite;
+  bool readLocked;
+  bool readLockedOnWhite;
   bool wasPlaceholder;
 };
 
@@ -439,11 +434,11 @@ struct OpRemoveTexture {
 
 struct TimedTexture {
   PTexture texture;
-  ReadLockHandle sharedLock;
   TimeStamp timeStamp;
   IntRect picture;
   uint32_t frameID;
   uint32_t producerID;
+  bool readLocked;
 };
 
 /**
@@ -463,8 +458,8 @@ struct OpUseTexture {
 struct OpUseComponentAlphaTextures {
   PTexture textureOnBlack;
   PTexture textureOnWhite;
-  ReadLockHandle sharedLockBlack;
-  ReadLockHandle sharedLockWhite;
+  bool readLockedBlack;
+  bool readLockedWhite;
 };
 
 union MaybeRegion {

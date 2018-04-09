@@ -6,8 +6,9 @@
 
 .popup-notification-icon,
 .identity-popup-permission-icon {
-  -moz-context-properties: fill;
-  fill: GrayText;
+  -moz-context-properties: fill, fill-opacity;
+  fill: currentColor;
+  fill-opacity: 0.6;
 }
 
 #notification-popup-box {
@@ -130,6 +131,11 @@
   list-style-image: url(chrome://browser/skin/notification-icons/canvas-blocked.svg);
 }
 
+#webauthn-notification-icon,
+.popup-notification-icon[popupid^="webauthn-prompt-"] {
+  list-style-image: url(chrome://browser/skin/notification-icons/webauthn.svg);
+}
+
 #webRTC-preview:not([hidden]) {
   display: -moz-stack;
   border-radius: 4px;
@@ -222,9 +228,6 @@ html|*#webRTC-previewVideo {
   list-style-image: url(chrome://browser/skin/addons/addon-install-installed.svg);
 }
 
-.popup-notification-icon[popupid="addon-install-restart"] {
-  list-style-image: url(chrome://browser/skin/addons/addon-install-restart.svg);
-}
 /* OFFLINE APPS */
 
 .popup-notification-icon[popupid*="offline-app-requested"],

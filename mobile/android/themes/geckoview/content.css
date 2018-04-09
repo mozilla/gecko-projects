@@ -116,8 +116,10 @@ textarea,
   background-color: var(--form_background);
 }
 
-/* Selects are handled by the form helper, see bug 685197 */
-select option, select optgroup {
+/* These elements are handled by the prompt module. */
+select option, select optgroup,
+input[type="date"] div:-moz-native-anonymous.datetime-input-box-wrapper,
+input[type="time"] div:-moz-native-anonymous.datetime-input-box-wrapper {
   pointer-events: none;
 }
 
@@ -262,11 +264,6 @@ select:disabled > button {
   padding-inline-end: 7px;
   padding-block-start: 1px;
   padding-block-end: 1px;
-}
-
-/* -moz-touch-enabled? media elements */
-:-moz-any(video, audio) > xul|videocontrols {
-  -moz-binding: url("chrome://global/content/bindings/videocontrols.xml#touchControls");
 }
 
 /* display click to play when autoplay is blocked for videos */

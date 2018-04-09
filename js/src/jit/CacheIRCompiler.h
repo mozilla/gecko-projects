@@ -7,6 +7,8 @@
 #ifndef jit_CacheIRCompiler_h
 #define jit_CacheIRCompiler_h
 
+#include "mozilla/Maybe.h"
+
 #include "jit/CacheIR.h"
 
 namespace js {
@@ -21,6 +23,7 @@ namespace jit {
     _(GuardIsString)                      \
     _(GuardIsSymbol)                      \
     _(GuardIsNumber)                      \
+    _(GuardIsInt32)                       \
     _(GuardIsInt32Index)                  \
     _(GuardType)                          \
     _(GuardClass)                         \
@@ -46,6 +49,10 @@ namespace jit {
     _(LoadUndefinedResult)                \
     _(LoadBooleanResult)                  \
     _(LoadInt32ArrayLengthResult)         \
+    _(Int32NegationResult)                \
+    _(Int32NotResult)                     \
+    _(DoubleNegationResult)               \
+    _(TruncateDoubleToUInt32)             \
     _(LoadArgumentsObjectLengthResult)    \
     _(LoadFunctionLengthResult)           \
     _(LoadStringLengthResult)             \
@@ -379,6 +386,10 @@ class MOZ_RAII CacheRegisterAllocator
         currentInstruction_++;
     }
 
+    bool isDeadAfterInstruction(OperandId opId) const {
+        return writer_.operandIsDead(opId.id(), currentInstruction_ + 1);
+    }
+
     uint32_t stackPushed() const {
         return stackPushed_;
     }
@@ -533,7 +544,7 @@ class MOZ_RAII CacheIRCompiler
     JSContext* cx_;
     CacheIRReader reader;
     const CacheIRWriter& writer_;
-    MacroAssembler masm;
+    StackMacroAssembler masm;
 
     CacheRegisterAllocator allocator;
     Vector<FailurePath, 4, SystemAllocPolicy> failurePaths;
@@ -544,11 +555,11 @@ class MOZ_RAII CacheIRCompiler
     // the IC register allocator allocates GPRs.
     LiveFloatRegisterSet liveFloatRegs_;
 
-    Maybe<TypedOrValueRegister> outputUnchecked_;
+    mozilla::Maybe<TypedOrValueRegister> outputUnchecked_;
     Mode mode_;
 
     // Whether this IC may read double values from uint32 arrays.
-    Maybe<bool> allowDoubleResult_;
+    mozilla::Maybe<bool> allowDoubleResult_;
 
     CacheIRCompiler(JSContext* cx, const CacheIRWriter& writer, Mode mode)
       : cx_(cx),
@@ -568,6 +579,14 @@ class MOZ_RAII CacheIRCompiler
     // registers need to be saved when making non-GC calls with callWithABI.
     FloatRegisterSet liveVolatileFloatRegs() const {
         return FloatRegisterSet::Intersect(liveFloatRegs_.set(), FloatRegisterSet::Volatile());
+    }
+
+    bool objectGuardNeedsSpectreMitigations(ObjOperandId objId) const {
+        // Instructions like GuardShape need Spectre mitigations if
+        // (1) mitigations are enabled and (2) the object is used by other
+        // instructions (if the object is *not* used by other instructions,
+        // zeroing its register is pointless).
+        return JitOptions.spectreObjectMitigationsMisc && !allocator.isDeadAfterInstruction(objId);
     }
 
     void emitLoadTypedObjectResultShared(const Address& fieldAddr, Register scratch,

@@ -874,8 +874,8 @@ class JS_PUBLIC_API(AutoGCRooter)
 
     /* Implemented in gc/RootMarking.cpp. */
     inline void trace(JSTracer* trc);
-    static void traceAll(const js::CooperatingContext& target, JSTracer* trc);
-    static void traceAllWrappers(const js::CooperatingContext& target, JSTracer* trc);
+    static void traceAll(JSContext* cx, JSTracer* trc);
+    static void traceAllWrappers(JSContext* cx, JSTracer* trc);
 
   protected:
     AutoGCRooter * const down;
@@ -895,7 +895,6 @@ class JS_PUBLIC_API(AutoGCRooter)
 #if defined(JS_BUILD_BINAST)
         BINPARSER =    -4, /* js::frontend::BinSource */
 #endif // defined(JS_BUILD_BINAST)
-        IONMASM =     -19, /* js::jit::MacroAssembler */
         WRAPVECTOR =  -20, /* js::AutoWrapperVector */
         WRAPPER =     -21, /* js::AutoWrapperRooter */
         CUSTOM =      -26  /* js::CustomAutoRooter */

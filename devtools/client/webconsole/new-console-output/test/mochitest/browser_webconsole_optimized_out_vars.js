@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Check that inspecting an optimized out variable works when execution is
 // paused.
 
@@ -14,7 +12,7 @@ const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
                  "new-console-output/test/mochitest/" +
                  "test-closure-optimized-out.html";
 
-add_task(async function () {
+add_task(async function() {
   // Force the old debugger UI since it's directly used (see Bug 1301705)
   await pushPref("devtools.debugger.new-debugger-frontend", false);
 
@@ -29,7 +27,7 @@ add_task(async function () {
   let fetchedScopes = debuggerPanel.panelWin.once(FETCHED_SCOPES);
 
   // Cause the debuggee to pause
-  ContentTask.spawn(gBrowser.selectedBrowser, {}, function* () {
+  ContentTask.spawn(gBrowser.selectedBrowser, {}, async function() {
     let button = content.document.querySelector("button");
     button.click();
   });

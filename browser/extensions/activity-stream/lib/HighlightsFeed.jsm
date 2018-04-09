@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const {actionTypes: at} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm", {});
 
@@ -26,6 +26,9 @@ ChromeUtils.defineModuleGetter(this, "PageThumbs",
 const HIGHLIGHTS_MAX_LENGTH = 9;
 const MANY_EXTRA_LENGTH = HIGHLIGHTS_MAX_LENGTH * 5 + TOP_SITES_DEFAULT_ROWS * TOP_SITES_MAX_SITES_PER_ROW;
 const SECTION_ID = "highlights";
+const SYNC_BOOKMARKS_FINISHED_EVENT = "weave:engine:sync:applied";
+const BOOKMARKS_RESTORE_SUCCESS_EVENT = "bookmarks-restore-success";
+const BOOKMARKS_RESTORE_FAILED_EVENT = "bookmarks-restore-failed";
 
 this.HighlightsFeed = class HighlightsFeed {
   constructor() {
@@ -41,6 +44,9 @@ this.HighlightsFeed = class HighlightsFeed {
   }
 
   init() {
+    Services.obs.addObserver(this, SYNC_BOOKMARKS_FINISHED_EVENT);
+    Services.obs.addObserver(this, BOOKMARKS_RESTORE_SUCCESS_EVENT);
+    Services.obs.addObserver(this, BOOKMARKS_RESTORE_FAILED_EVENT);
     SectionsManager.onceInitialized(this.postInit.bind(this));
   }
 
@@ -52,11 +58,25 @@ this.HighlightsFeed = class HighlightsFeed {
   uninit() {
     SectionsManager.disableSection(SECTION_ID);
     PageThumbs.removeExpirationFilter(this);
+    Services.obs.removeObserver(this, SYNC_BOOKMARKS_FINISHED_EVENT);
+    Services.obs.removeObserver(this, BOOKMARKS_RESTORE_SUCCESS_EVENT);
+    Services.obs.removeObserver(this, BOOKMARKS_RESTORE_FAILED_EVENT);
+  }
+
+  observe(subject, topic, data) {
+    // When we receive a notification that a sync has happened for bookmarks,
+    // or Places finished importing or restoring bookmarks, refresh highlights
+    const manyBookmarksChanged =
+      (topic === SYNC_BOOKMARKS_FINISHED_EVENT && data === "bookmarks") ||
+      topic === BOOKMARKS_RESTORE_SUCCESS_EVENT ||
+      topic === BOOKMARKS_RESTORE_FAILED_EVENT;
+    if (manyBookmarksChanged) {
+      this.fetchHighlights({broadcast: true});
+    }
   }
 
   filterForThumbnailExpiration(callback) {
-    const sectionIndex = SectionsManager.sections.get(SECTION_ID).order;
-    const state = this.store.getState().Sections[sectionIndex];
+    const state = this.store.getState().Sections.find(section => section.id === SECTION_ID);
 
     callback(state && state.initialized ? state.rows.reduce((acc, site) => {
       // Screenshots call in `fetchImage` will search for preview_image_url or
@@ -140,8 +160,7 @@ this.HighlightsFeed = class HighlightsFeed {
       }
     }
 
-    const sectionIndex = SectionsManager.sections.get(SECTION_ID).order;
-    const {initialized} = this.store.getState().Sections[sectionIndex];
+    const {initialized} = this.store.getState().Sections.find(section => section.id === SECTION_ID);
     // Broadcast when required or if it is the first update.
     const shouldBroadcast = options.broadcast || !initialized;
 
@@ -194,11 +213,11 @@ this.HighlightsFeed = class HighlightsFeed {
         this.init();
         break;
       case at.SYSTEM_TICK:
+      case at.TOP_SITES_UPDATED:
         this.fetchHighlights({broadcast: false});
         break;
       case at.MIGRATION_COMPLETED:
       case at.PLACES_HISTORY_CLEARED:
-      case at.PLACES_LINKS_DELETED:
       case at.PLACES_LINK_BLOCKED:
         this.fetchHighlights({broadcast: true});
         break;
@@ -208,13 +227,9 @@ this.HighlightsFeed = class HighlightsFeed {
       case at.ARCHIVE_FROM_POCKET:
         this.archiveFromPocket(action.data.pocket_id);
         break;
-      case at.PLACES_BOOKMARK_ADDED:
-      case at.PLACES_BOOKMARK_REMOVED:
+      case at.PLACES_LINKS_CHANGED:
       case at.PLACES_SAVED_TO_POCKET:
         this.linksCache.expire();
-        this.fetchHighlights({broadcast: false});
-        break;
-      case at.TOP_SITES_UPDATED:
         this.fetchHighlights({broadcast: false});
         break;
       case at.UNINIT:
@@ -224,4 +239,4 @@ this.HighlightsFeed = class HighlightsFeed {
   }
 };
 
-const EXPORTED_SYMBOLS = ["HighlightsFeed", "SECTION_ID", "MANY_EXTRA_LENGTH"];
+const EXPORTED_SYMBOLS = ["HighlightsFeed", "SECTION_ID", "MANY_EXTRA_LENGTH", "SYNC_BOOKMARKS_FINISHED_EVENT", "BOOKMARKS_RESTORE_SUCCESS_EVENT", "BOOKMARKS_RESTORE_FAILED_EVENT"];

@@ -524,7 +524,7 @@ SVGSVGElement::BindToTree(nsIDocument* aDocument,
     // Setup the style sheet during binding, not element construction,
     // because we could move the root SVG element from the document
     // that created it to another document.
-    auto cache = nsLayoutStylesheetCache::For(doc->GetStyleBackendType());
+    auto cache = nsLayoutStylesheetCache::Singleton();
     doc->EnsureOnDemandBuiltInUASheet(cache->SVGSheet());
   }
 
@@ -558,7 +558,7 @@ SVGSVGElement::GetAnimatedTransformList(uint32_t aFlags)
   return SVGGraphicsElement::GetAnimatedTransformList(aFlags);
 }
 
-nsresult
+void
 SVGSVGElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   if (aVisitor.mEvent->mMessage == eSVGLoad) {
@@ -570,7 +570,7 @@ SVGSVGElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
       AnimationNeedsResample();
     }
   }
-  return SVGSVGElementBase::GetEventTargetParent(aVisitor);
+  SVGSVGElementBase::GetEventTargetParent(aVisitor);
 }
 
 bool

@@ -11,8 +11,7 @@
 #include "nsIContentPolicy.idl"
 
 interface nsIDOMNode;
-interface nsIDOMDragEvent;
-interface nsIDOMDataTransfer;
+interface nsIDOMEvent;
 interface nsISelection;
 
 %{C++
@@ -21,11 +20,13 @@ interface nsISelection;
 namespace mozilla {
 namespace dom {
 class ContentParent;
+class DataTransfer;
 } // namespace dom
 } // namespace mozilla
 %}
 
 [ptr] native ContentParentPtr(mozilla::dom::ContentParent);
+[ptr] native DataTransferPtr(mozilla::dom::DataTransfer);
 native EventMessage(mozilla::EventMessage);
 
 [scriptable, uuid(ebd6b3a2-af16-43af-a698-3091a087dd62), builtinclass]
@@ -85,7 +86,10 @@ interface nsIDragService : nsISupports
    *
    * The aDragEvent must be supplied as the current screen coordinates of the
    * event are needed to calculate the image location.
+   *
+   * aDragEvent should be a DragEvent.  See bug 1444991.
    */
+  [noscript]
   void invokeDragSessionWithImage(in nsIDOMNode aDOMNode,
                                   in AUTF8String aPrincipalURISpec,
                                   in nsIArray aTransferableArray,
@@ -94,8 +98,8 @@ interface nsIDragService : nsISupports
                                   in nsIDOMNode aImage,
                                   in long aImageX,
                                   in long aImageY,
-                                  in nsIDOMDragEvent aDragEvent,
-                                  in nsIDOMDataTransfer aDataTransfer);
+                                  in nsIDOMEvent aDragEvent,
+                                  in DataTransferPtr aDataTransfer);
 
   /**
    * Start a modal drag session using the selection as the drag image.
@@ -103,18 +107,20 @@ interface nsIDragService : nsISupports
    * event are needed to calculate the image location.
    *
    * Note: This method is deprecated for non-native code.
+   *
+   * aDragEvent should be a DragEvent.  See bug 1444991.
    */
   void invokeDragSessionWithSelection(in nsISelection aSelection,
                                       in AUTF8String aPrincipalURISpec,
                                       in nsIArray aTransferableArray,
                                       in unsigned long aActionType,
-                                      in nsIDOMDragEvent aDragEvent,
-                                      in nsIDOMDataTransfer aDataTransfer);
+                                      in nsIDOMEvent aDragEvent,
+                                      in DataTransferPtr aDataTransfer);
 
   /**
-    * Returns the current Drag Session  
+    * Returns the current Drag Session
     */
-  nsIDragSession getCurrentSession ( ) ;
+  nsIDragSession getCurrentSession();
 
   /**
     * Tells the Drag Service to start a drag session. This is called when

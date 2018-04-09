@@ -63,7 +63,7 @@ public:
 
   NS_DECL_ISUPPORTS_INHERITED
 
-  NS_IMPL_FROMCONTENT(nsGenericHTMLElement, kNameSpaceID_XHTML)
+  NS_IMPL_FROMNODE(nsGenericHTMLElement, kNameSpaceID_XHTML)
 
   // From Element
   nsresult CopyInnerTo(mozilla::dom::Element* aDest, bool aPreallocateChildren);
@@ -149,7 +149,7 @@ public:
   bool IsContentEditable()
   {
     for (nsIContent* node = this; node; node = node->GetParent()) {
-      nsGenericHTMLElement* element = FromContent(node);
+      nsGenericHTMLElement* element = FromNode(node);
       if (element) {
         ContentEditableTristate value = element->GetContentEditableValue();
         if (value != eInherit) {
@@ -301,8 +301,7 @@ public:
    */
   bool CheckHandleEventForAnchorsPreconditions(
          mozilla::EventChainVisitor& aVisitor);
-  nsresult GetEventTargetParentForAnchors(
-             mozilla::EventChainPreVisitor& aVisitor);
+  void GetEventTargetParentForAnchors(mozilla::EventChainPreVisitor& aVisitor);
   nsresult PostHandleEventForAnchors(mozilla::EventChainPostVisitor& aVisitor);
   bool IsHTMLLink(nsIURI** aURI) const;
 
@@ -767,7 +766,7 @@ protected:
 
   void GetHTMLAttr(nsAtom* aName, nsAString& aResult) const
   {
-    GetAttr(kNameSpaceID_None, aName, aResult);
+    GetAttr(aName, aResult);
   }
   void GetHTMLAttr(nsAtom* aName, mozilla::dom::DOMString& aResult) const
   {
@@ -788,15 +787,15 @@ protected:
   }
   void SetHTMLAttr(nsAtom* aName, const nsAString& aValue, mozilla::ErrorResult& aError)
   {
-    mozilla::dom::Element::SetAttr(aName, aValue, aError);
+    SetAttr(aName, aValue, aError);
   }
   void SetHTMLAttr(nsAtom* aName, const nsAString& aValue, nsIPrincipal* aTriggeringPrincipal, mozilla::ErrorResult& aError)
   {
-    mozilla::dom::Element::SetAttr(aName, aValue, aTriggeringPrincipal, aError);
+    SetAttr(aName, aValue, aTriggeringPrincipal, aError);
   }
   void UnsetHTMLAttr(nsAtom* aName, mozilla::ErrorResult& aError)
   {
-    mozilla::dom::Element::UnsetAttr(aName, aError);
+    UnsetAttr(aName, aError);
   }
   void SetHTMLBoolAttr(nsAtom* aName, bool aValue, mozilla::ErrorResult& aError)
   {
@@ -921,7 +920,7 @@ protected:
   ContentEditableTristate GetContentEditableValue() const
   {
     static const Element::AttrValuesArray values[] =
-      { &nsGkAtoms::_false, &nsGkAtoms::_true, &nsGkAtoms::_empty, nullptr };
+      { nsGkAtoms::_false, nsGkAtoms::_true, nsGkAtoms::_empty, nullptr };
 
     if (!MayHaveContentEditableAttr())
       return eInherit;
@@ -1011,10 +1010,8 @@ public:
   {
     return mForm;
   }
-  virtual void SetForm(nsIDOMHTMLFormElement* aForm) override;
+  virtual void SetForm(mozilla::dom::HTMLFormElement* aForm) override;
   virtual void ClearForm(bool aRemoveFromForm, bool aUnbindOrDelete) override;
-
-  nsresult GetForm(nsIDOMHTMLFormElement** aForm);
 
   NS_IMETHOD SaveState() override
   {
@@ -1039,8 +1036,7 @@ public:
   virtual IMEState GetDesiredIMEState() override;
   virtual mozilla::EventStates IntrinsicState() const override;
 
-  virtual nsresult GetEventTargetParent(
-                     mozilla::EventChainPreVisitor& aVisitor) override;
+  void GetEventTargetParent(mozilla::EventChainPreVisitor& aVisitor) override;
   virtual nsresult PreHandleEvent(
                      mozilla::EventChainVisitor& aVisitor) override;
 

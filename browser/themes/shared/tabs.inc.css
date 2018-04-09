@@ -201,6 +201,14 @@
   opacity: 0.7;
 }
 
+%ifdef NIGHTLY_BUILD
+@supports -moz-bool-pref("browser.tabs.30FpsThrobber") {
+  :root[sessionrestored] .tab-throbber[busy]::before {
+    animation: tab-throbber-animation 1.05s steps(30) infinite;
+  }
+}
+%endif
+
 :root[sessionrestored] .tab-throbber[busy]:-moz-locale-dir(rtl)::before {
   animation-name: tab-throbber-animation-rtl;
 }
@@ -644,12 +652,10 @@
   margin-inline-start: -1px;
 }
 
-%ifdef CAN_DRAW_IN_TITLEBAR
 %ifdef MENUBAR_CAN_AUTOHIDE
 :root[tabsintitlebar]:not([extradragspace]) #toolbar-menubar[autohide=true] + #TabsToolbar > #tabbrowser-tabs > .tabbrowser-tab::after,
 %else
 :root[tabsintitlebar]:not([extradragspace]) .tabbrowser-tab::after,
-%endif
 %endif
 /* Show full height tab separators on hover. */
 .tabbrowser-tab:hover::after,
@@ -742,55 +748,3 @@
   list-style-image: url(chrome://browser/skin/tabbrowser/tab-audio-blocked.svg);
 }
 
-.restore-tabs-button-wrapper {
-  visibility: hidden;
-  position: fixed; /* so the button does not take up actual space and cause overflow buttons in the tabbar when hidden */
-}
-
-.restore-tabs-button-wrapper[shown] {
-  visibility: visible;
-  position: initial;
-}
-
-.restore-tabs-button {
-  box-sizing: border-box;
-  -moz-appearance: none;
-  background-color: hsl(0,0%,0%,.04);
-  border: 1px solid hsla(0,0%,16%,.2);
-  border-radius: 3px;
-  margin: 3px;
-  margin-inline-start: 9px;
-  transition: max-width 100ms;
-  padding: 0 5px;
-}
-
-.restore-tabs-button:hover {
-  background-color: hsl(0,0%,0%,.08);
-}
-
-.restore-tabs-button:active {
-  background-color: hsl(0,0%,0%,.11);
-}
-
-#TabsToolbar[brighttext] .restore-tabs-button {
-  background-color: hsl(0,0%,100%,.07);
-  border-color:currentColor;
-  color: currentColor;
-  opacity: .7;
-}
-
-#TabsToolbar[brighttext] .restore-tabs-button:hover {
-  background-color: hsl(0,0%,100%,.17);
-}
-
-#TabsToolbar[brighttext] .restore-tabs-button:active {
-  background-color: hsl(0,0%,100%,.27);
-}
-
-.restore-tabs-button > .toolbarbutton-icon {
-  display: none;
-}
-
-.restore-tabs-button > .toolbarbutton-text {
-  display: -moz-box;
-}

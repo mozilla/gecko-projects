@@ -51,8 +51,9 @@ config = {
     ],
     'vcs_share_base': '/builds/hg-shared',
     'objdir': 'obj-firefox',
-    'enable_count_ctors': False,
     'multi_locale': True,
+    'find_links': ['http://pypi.pub.build.mozilla.org/pub'],
+    'pip_index': False,
     #########################################################################
 
 

@@ -416,38 +416,6 @@ NS_IMETHODIMP xpcProperty::GetValue(nsIVariant * *aValue)
 }
 
 /***************************************************************************/
-// This 'WrappedJSIdentity' class and singleton allow us to figure out if
-// any given nsISupports* is implemented by a WrappedJS object. This is done
-// using a QueryInterface call on the interface pointer with our ID. If
-// that call returns NS_OK and the pointer is to our singleton, then the
-// interface must be implemented by a WrappedJS object. NOTE: the
-// 'WrappedJSIdentity' object is not a real XPCOM object and should not be
-// used for anything else (hence it is declared in this implementation file).
-
-// {5C5C3BB0-A9BA-11d2-BA64-00805F8A5DD7}
-#define NS_IXPCONNECT_WRAPPED_JS_IDENTITY_CLASS_IID                           \
-{ 0x5c5c3bb0, 0xa9ba, 0x11d2,                                                 \
-  { 0xba, 0x64, 0x0, 0x80, 0x5f, 0x8a, 0x5d, 0xd7 } }
-
-class WrappedJSIdentity
-{
-    // no instance methods...
-public:
-    NS_DECLARE_STATIC_IID_ACCESSOR(NS_IXPCONNECT_WRAPPED_JS_IDENTITY_CLASS_IID)
-
-    static void* GetSingleton()
-    {
-        static WrappedJSIdentity* singleton = nullptr;
-        if (!singleton)
-            singleton = new WrappedJSIdentity();
-        return (void*) singleton;
-    }
-};
-
-NS_DEFINE_STATIC_IID_ACCESSOR(WrappedJSIdentity,
-                              NS_IXPCONNECT_WRAPPED_JS_IDENTITY_CLASS_IID)
-
-/***************************************************************************/
 
 namespace {
 
@@ -540,17 +508,6 @@ GetFunctionName(JSContext* cx, HandleObject obj)
 
 /***************************************************************************/
 
-// static
-bool
-nsXPCWrappedJSClass::IsWrappedJS(nsISupports* aPtr)
-{
-    void* result;
-    NS_PRECONDITION(aPtr, "null pointer");
-    return aPtr &&
-           NS_OK == aPtr->QueryInterface(NS_GET_IID(WrappedJSIdentity), &result) &&
-           result == WrappedJSIdentity::GetSingleton();
-}
-
 NS_IMETHODIMP
 nsXPCWrappedJSClass::DelegatedQueryInterface(nsXPCWrappedJS* self,
                                              REFNSIID aIID,
@@ -559,14 +516,6 @@ nsXPCWrappedJSClass::DelegatedQueryInterface(nsXPCWrappedJS* self,
     if (aIID.Equals(NS_GET_IID(nsIXPConnectJSObjectHolder))) {
         NS_ADDREF(self);
         *aInstancePtr = (void*) static_cast<nsIXPConnectJSObjectHolder*>(self);
-        return NS_OK;
-    }
-
-    // Objects internal to xpconnect are the only objects that even know *how*
-    // to ask for this iid. And none of them bother refcounting the thing.
-    if (aIID.Equals(NS_GET_IID(WrappedJSIdentity))) {
-        // asking to find out if this is a wrapper object
-        *aInstancePtr = WrappedJSIdentity::GetSingleton();
         return NS_OK;
     }
 
@@ -1040,11 +989,6 @@ nsXPCWrappedJSClass::CallMethod(nsXPCWrappedJS* wrapper, uint16_t methodIndex,
     const char* name = info->GetName();
     bool foundDependentParam;
 
-    // Make sure not to set the callee on ccx until after we've gone through
-    // the whole nsIXPCFunctionThisTranslator bit.  That code uses ccx to
-    // convert natives to JSObjects, but we do NOT plan to pass those JSObjects
-    // to our real callee.
-    //
     // We're about to call into script via an XPCWrappedJS, so we need an
     // AutoEntryScript. This is probably Gecko-specific at this point, and
     // definitely will be when we turn off XPConnect for the web.
@@ -1126,49 +1070,7 @@ nsXPCWrappedJSClass::CallMethod(nsXPCWrappedJS* wrapper, uint16_t methodIndex,
         // pass this along to the caller as an exception/result code.
 
         fval = ObjectValue(*obj);
-        if (isFunction &&
-            JS_TypeOfValue(ccx, fval) == JSTYPE_FUNCTION) {
-
-            // We may need to translate the 'this' for the function object.
-
-            if (paramCount) {
-                const nsXPTParamInfo& firstParam = info->GetParam(0);
-                if (firstParam.IsIn()) {
-                    const nsXPTType& firstType = firstParam.GetType();
-
-                    if (firstType.IsInterfacePointer()) {
-                        nsIXPCFunctionThisTranslator* translator;
-
-                        IID2ThisTranslatorMap* map =
-                            mRuntime->GetThisTranslatorMap();
-
-                        translator = map->Find(mIID);
-
-                        if (translator) {
-                            nsCOMPtr<nsISupports> newThis;
-                            if (NS_FAILED(translator->
-                                          TranslateThis((nsISupports*)nativeParams[0].val.p,
-                                                        getter_AddRefs(newThis)))) {
-                                goto pre_call_clean_up;
-                            }
-                            if (newThis) {
-                                RootedValue v(cx);
-                                xpcObjectHelper helper(newThis);
-                                bool ok =
-                                  XPCConvert::NativeInterface2JSObject(
-                                      &v, helper, nullptr, false, nullptr);
-                                if (!ok) {
-                                    goto pre_call_clean_up;
-                                }
-                                thisObj = v.toObjectOrNull();
-                                if (!JS_WrapObject(cx, &thisObj))
-                                    goto pre_call_clean_up;
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
+        if (!isFunction || JS_TypeOfValue(ccx, fval) != JSTYPE_FUNCTION) {
             if (!JS_GetProperty(cx, obj, name, &fval))
                 goto pre_call_clean_up;
             // XXX We really want to factor out the error reporting better and

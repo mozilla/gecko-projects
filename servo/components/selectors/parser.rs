@@ -14,7 +14,6 @@ use precomputed_hash::PrecomputedHash;
 use servo_arc::ThinArc;
 use sink::Push;
 use smallvec::SmallVec;
-#[allow(unused_imports)] use std::ascii::AsciiExt;
 use std::borrow::{Borrow, Cow};
 use std::fmt::{self, Display, Debug, Write};
 use std::iter::Rev;
@@ -34,6 +33,18 @@ pub trait PseudoElement : Sized + ToCss {
     ) -> bool {
         false
     }
+}
+
+/// A trait that represents a pseudo-class.
+pub trait NonTSPseudoClass : Sized + ToCss {
+    /// The `SelectorImpl` this pseudo-element is used for.
+    type Impl: SelectorImpl;
+
+    /// Whether this pseudo-class is :active or :hover.
+    fn is_active_or_hover(&self) -> bool;
+
+    /// Whether this pseudo-class is :host.
+    fn is_host(&self) -> bool;
 }
 
 fn to_ascii_lowercase(s: &str) -> Cow<str> {
@@ -96,14 +107,10 @@ macro_rules! with_all_bounds {
 
             /// non tree-structural pseudo-classes
             /// (see: https://drafts.csswg.org/selectors/#structural-pseudos)
-            type NonTSPseudoClass: $($CommonBounds)* + Sized + ToCss;
+            type NonTSPseudoClass: $($CommonBounds)* + NonTSPseudoClass<Impl = Self>;
 
             /// pseudo-elements
             type PseudoElement: $($CommonBounds)* + PseudoElement<Impl = Self>;
-
-            /// Returns whether the given pseudo class is :active or :hover.
-            #[inline]
-            fn is_active_or_hover(pseudo_class: &Self::NonTSPseudoClass) -> bool;
         }
     }
 }
@@ -356,7 +363,10 @@ impl<Impl: SelectorImpl> Visit for Selector<Impl> where Impl::NonTSPseudoClass: 
     }
 }
 
-impl<Impl: SelectorImpl> Visit for Component<Impl> where Impl::NonTSPseudoClass: Visit<Impl=Impl> {
+impl<Impl: SelectorImpl> Visit for Component<Impl>
+where
+    Impl::NonTSPseudoClass: Visit<Impl=Impl>
+{
     type Impl = Impl;
 
     fn visit<V>(&self, visitor: &mut V) -> bool
@@ -1011,6 +1021,7 @@ impl<Impl: SelectorImpl> ToCss for Component<Impl> {
                 (0, 0) => dest.write_char('0'),
 
                 (1, 0) => dest.write_char('n'),
+                (-1, 0) => dest.write_str("-n"),
                 (_, 0) => write!(dest, "{}n", a),
 
                 (0, _) => write!(dest, "{}", b),
@@ -1981,6 +1992,20 @@ pub mod tests {
         }
     }
 
+    impl parser::NonTSPseudoClass for PseudoClass {
+        type Impl = DummySelectorImpl;
+
+        #[inline]
+        fn is_active_or_hover(&self) -> bool {
+            matches!(*self, PseudoClass::Active | PseudoClass::Hover)
+        }
+
+        #[inline]
+        fn is_host(&self) -> bool {
+            false
+        }
+    }
+
     impl ToCss for PseudoClass {
         fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
             match *self {
@@ -2045,12 +2070,6 @@ pub mod tests {
         type BorrowedNamespaceUrl = DummyAtom;
         type NonTSPseudoClass = PseudoClass;
         type PseudoElement = PseudoElement;
-
-        #[inline]
-        fn is_active_or_hover(pseudo_class: &Self::NonTSPseudoClass) -> bool {
-            matches!(*pseudo_class, PseudoClass::Active |
-                                    PseudoClass::Hover)
-        }
     }
 
     #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]

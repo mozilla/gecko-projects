@@ -83,13 +83,11 @@ void
 HTMLSharedListElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
                                              GenericSpecifiedValues* aData)
 {
-  if (aData->ShouldComputeStyleStruct(NS_STYLE_INHERIT_BIT(List))) {
-    if (!aData->PropertyIsSet(eCSSProperty_list_style_type)) {
-      // type: enum
-      const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::type);
-      if (value && value->Type() == nsAttrValue::eEnum) {
-        aData->SetKeywordValue(eCSSProperty_list_style_type, value->GetEnumValue());
-      }
+  if (!aData->PropertyIsSet(eCSSProperty_list_style_type)) {
+    // type: enum
+    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::type);
+    if (value && value->Type() == nsAttrValue::eEnum) {
+      aData->SetKeywordValue(eCSSProperty_list_style_type, value->GetEnumValue());
     }
   }
 
@@ -102,7 +100,7 @@ HTMLSharedListElement::IsAttributeMapped(const nsAtom* aAttribute) const
   if (mNodeInfo->Equals(nsGkAtoms::ol) ||
       mNodeInfo->Equals(nsGkAtoms::ul)) {
     static const MappedAttributeEntry attributes[] = {
-      { &nsGkAtoms::type },
+      { nsGkAtoms::type },
       { nullptr }
     };
 

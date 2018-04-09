@@ -28,7 +28,6 @@
 #include "nsAppRunner.h"
 #include "nsContentUtils.h"
 #include "nsChromeRegistry.h"
-#include "nsIAddonInterposition.h"
 #include "nsIDOMWindowUtils.h" // for nsIJSRAIIHelper
 #include "nsIFileURL.h"
 #include "nsIIOService.h"
@@ -409,8 +408,6 @@ public:
 
   bool Enabled() { return GetBool("enabled"); }
 
-  bool ShimsEnabled() { return GetBool("enableShims"); }
-
   double LastModifiedTime() { return GetNumber("lastModifiedTime"); }
 
 
@@ -511,23 +508,6 @@ InstallLocation::InstallLocation(JSContext* cx, const JS::Value& value)
  * XPC interfacing
  *****************************************************************************/
 
-static void
-EnableShimsAndCPOWs(const nsAString& addonId, bool enableShims)
-{
-  NS_ConvertUTF16toUTF8 id(addonId);
-
-  if (enableShims) {
-    nsCOMPtr<nsIAddonInterposition> interposition =
-      do_GetService("@mozilla.org/addons/multiprocess-shims;1");
-
-    if (!interposition || !xpc::SetAddonInterposition(id, interposition)) {
-      return;
-    }
-  }
-
-  Unused << xpc::AllowCPOWsInAddon(id, true);
-}
-
 Result<Ok, nsresult>
 AddonManagerStartup::AddInstallLocation(Addon& addon)
 {
@@ -542,7 +522,7 @@ AddonManagerStartup::AddInstallLocation(Addon& addon)
   if (type == NS_SKIN_LOCATION) {
     mThemePaths.AppendElement(file);
   } else {
-    mExtensionPaths.AppendElement(file);
+    return Ok();
   }
 
   if (StringTail(path, 4).LowerCaseEqualsLiteral(".xpi")) {
@@ -613,8 +593,6 @@ AddonManagerStartup::InitializeExtensions(JS::HandleValue locations, JSContext* 
     return NS_OK;
   }
 
-  bool enableInterpositions = Preferences::GetBool("extensions.interposition.enabled", false);
-
   JS::RootedObject locs(cx, &locations.toObject());
   for (auto e1 : PropertyIter(cx, locs)) {
     InstallLocation loc(e1);
@@ -624,10 +602,6 @@ AddonManagerStartup::InitializeExtensions(JS::HandleValue locations, JSContext* 
 
       if (addon.Enabled() && !addon.Bootstrapped()) {
         Unused << AddInstallLocation(addon);
-
-        if (addon.ShimsEnabled()) {
-          EnableShimsAndCPOWs(addon.Id(), enableInterpositions);
-        }
       }
     }
   }

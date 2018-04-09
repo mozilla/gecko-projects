@@ -16,12 +16,13 @@ use ron_frame_writer::RonFrameWriter;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::sync::mpsc::Receiver;
 use time;
 use webrender;
 use webrender::api::*;
 use webrender::{DebugFlags, RendererStats};
 use yaml_frame_writer::YamlFrameWriterReceiver;
-use {WindowWrapper, BLACK_COLOR, WHITE_COLOR};
+use {WindowWrapper, NotifierEvent, BLACK_COLOR, WHITE_COLOR};
 
 // TODO(gw): This descriptor matches what we currently support for fonts
 //           but is quite a mess. We should at least document and
@@ -173,7 +174,6 @@ impl Wrench {
         size: DeviceUintSize,
         do_rebuild: bool,
         no_subpixel_aa: bool,
-        debug: bool,
         verbose: bool,
         no_scissor: bool,
         no_batch: bool,
@@ -206,7 +206,6 @@ impl Wrench {
             resource_override_path: shader_override_path,
             recorder,
             enable_subpixel_aa: !no_subpixel_aa,
-            debug,
             debug_flags,
             enable_clear_scissor: !no_scissor,
             max_recorded_profiles: 16,
@@ -516,27 +515,11 @@ impl Wrench {
                 false,
             );
         }
-        // TODO(nical) - Need to separate the set_display_list from the scrolling
-        // operations into separate transactions for mysterious -but probably related
-        // to the other comment below- reasons.
-        self.api.send_transaction(self.document_id, txn);
 
-        let mut txn = Transaction::new();
         for (id, offset) in scroll_offsets {
             txn.scroll_node_with_id(*offset, *id, ScrollClamping::NoClamping);
         }
-        // TODO(nical) - Wrench does not notify frames when there was scrolling
-        // in the transaction (See RenderNotifier implementations). If we don't
-        // generate a frame after scrolling, wrench just stops and some tests
-        // will time out.
-        // I suppose this was to avoid taking the snapshot after scrolling if
-        // there was other updates coming in a subsequent messages but it's very
-        // error-prone with transactions.
-        // For now just send two transactions to avoid the deadlock, but we should
-        // figure this out.
-        self.api.send_transaction(self.document_id, txn);
 
-        let mut txn = Transaction::new();
         txn.generate_frame();
         self.api.send_transaction(self.document_id, txn);
     }
@@ -576,6 +559,7 @@ impl Wrench {
             "M - Trigger memory pressure event",
             "T - Save CPU profile to a file",
             "C - Save a capture to captures/wrench/",
+            "X - Do a hit test at the current cursor position",
         ];
 
         let color_and_offset = [(*BLACK_COLOR, 2.0), (*WHITE_COLOR, 0.0)];
@@ -589,5 +573,19 @@ impl Wrench {
                 y += self.device_pixel_ratio * dr.line_height();
             }
         }
+    }
+
+    pub fn shut_down(self, rx: Receiver<NotifierEvent>) {
+        self.api.shut_down();
+
+        loop {
+            match rx.recv() {
+                Ok(NotifierEvent::ShutDown) => { break; }
+                Ok(_) => {}
+                Err(e) => { panic!("Did not shut down properly: {:?}.", e); }
+            }
+        }
+
+        self.renderer.deinit();
     }
 }

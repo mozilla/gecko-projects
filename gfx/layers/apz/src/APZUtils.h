@@ -8,6 +8,7 @@
 #define mozilla_layers_APZUtils_h
 
 #include <stdint.h>                     // for uint32_t
+#include "FrameMetrics.h"
 #include "LayersTypes.h"
 #include "UnitTransforms.h"
 #include "mozilla/gfx/CompositorHitTestInfo.h"
@@ -50,8 +51,6 @@ enum class ScrollSource {
   Keyboard,
 };
 
-typedef uint32_t TouchBehaviorFlags;
-
 // Epsilon to be used when comparing 'float' coordinate values
 // with FuzzyEqualsAdditive. The rationale is that 'float' has 7 decimal
 // digits of precision, and coordinate values should be no larger than in the
@@ -92,6 +91,26 @@ struct TargetConfirmationFlags {
   bool mTargetConfirmed : 1;
   bool mRequiresTargetConfirmation : 1;
 };
+
+namespace apz {
+
+/**
+ * Initializes the global state used in AsyncPanZoomController.
+ * This is normally called when it is first needed in the constructor
+ * of APZCTreeManager, but can be called manually to force it to be
+ * initialized earlier.
+ */
+void InitializeGlobalState();
+
+/**
+ * See AsyncPanZoomController::CalculatePendingDisplayPort. This
+ * function simply delegates to that one, so that non-layers code
+ * never needs to include AsyncPanZoomController.h
+ */
+const ScreenMargin CalculatePendingDisplayPort(const FrameMetrics& aFrameMetrics,
+                                               const ParentLayerPoint& aVelocity);
+
+} // namespace apz
 
 } // namespace layers
 } // namespace mozilla

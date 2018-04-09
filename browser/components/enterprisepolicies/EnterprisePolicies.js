@@ -27,10 +27,6 @@ const PREF_ALTERNATE_PATH     = "browser.policies.alternatePath";
 const MAGIC_TEST_ROOT_PREFIX  = "<test-root>";
 const PREF_TEST_ROOT          = "mochitest.testRoot";
 
-// This pref is meant to be temporary: it will only be used while we're
-// testing this feature without rolling it out officially. When the
-// policy engine is released, this pref should be removed.
-const PREF_ENABLED            = "browser.policies.enabled";
 const PREF_LOGLEVEL           = "browser.policies.loglevel";
 
 // To force disallowing enterprise-only policies during tests
@@ -81,11 +77,6 @@ EnterprisePoliciesManager.prototype = {
   _xpcom_factory: EnterprisePoliciesFactory,
 
   _initialize() {
-    if (!Services.prefs.getBoolPref(PREF_ENABLED, false)) {
-      this.status = Ci.nsIEnterprisePolicies.INACTIVE;
-      return;
-    }
-
     let provider = this._chooseProvider();
 
     if (!provider) {
@@ -369,12 +360,18 @@ class JSONPoliciesProvider {
   }
 
   _getConfigurationFile() {
-    let configFile = Services.dirsvc.get("XREAppDist", Ci.nsIFile);
-    configFile.append(POLICIES_FILENAME);
+    let configFile = null;
+    try {
+      configFile = Services.dirsvc.get("XREAppDist", Ci.nsIFile);
+      configFile.append(POLICIES_FILENAME);
+    } catch (ex) {
+      // Getting the correct directory will fail in xpcshell tests. This should
+      // be handled the same way as if the configFile simply does not exist.
+    }
 
     let alternatePath = Services.prefs.getStringPref(PREF_ALTERNATE_PATH, "");
 
-    if (alternatePath && !configFile.exists()) {
+    if (alternatePath && (!configFile || !configFile.exists())) {
       // We only want to use the alternate file path if the file on the install
       // folder doesn't exist. Otherwise it'd be possible for a user to override
       // the admin-provided policies by changing the user-controlled prefs.

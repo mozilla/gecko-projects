@@ -592,6 +592,12 @@ DebugFrame::alignmentStaticAsserts()
                   "Aligned by ABI before pushing DebugFrame");
     static_assert((offsetof(DebugFrame, frame_) + sizeof(Frame)) % Alignment == 0,
                   "Aligned after pushing DebugFrame");
+#ifdef JS_CODEGEN_ARM64
+    // This constraint may or may not be necessary.  If you hit this because
+    // you've changed the frame size then feel free to remove it, but be extra
+    // aware of possible problems.
+    static_assert(sizeof(DebugFrame) % 16 == 0, "ARM64 SP alignment");
+#endif
 }
 
 GlobalObject*
@@ -784,7 +790,6 @@ CodeRange::CodeRange(Kind kind, Offsets offsets)
       case UnalignedExit:
       case TrapExit:
       case Throw:
-      case Interrupt:
         break;
       default:
         MOZ_CRASH("should use more specific constructor");
@@ -817,7 +822,6 @@ CodeRange::CodeRange(Kind kind, CallableOffsets offsets)
     PodZero(&u);
 #ifdef DEBUG
     switch (kind_) {
-      case OldTrapExit:
       case DebugTrap:
       case BuiltinThunk:
         break;
@@ -856,17 +860,6 @@ CodeRange::CodeRange(uint32_t funcIndex, JitExitOffsets offsets)
     u.jitExit.beginToUntrustedFPEnd_ = offsets.untrustedFPEnd - begin_;
     MOZ_ASSERT(jitExitUntrustedFPStart() == offsets.untrustedFPStart);
     MOZ_ASSERT(jitExitUntrustedFPEnd() == offsets.untrustedFPEnd);
-}
-
-CodeRange::CodeRange(Trap trap, CallableOffsets offsets)
-  : begin_(offsets.begin),
-    ret_(offsets.ret),
-    end_(offsets.end),
-    kind_(OldTrapExit)
-{
-    MOZ_ASSERT(begin_ < ret_);
-    MOZ_ASSERT(ret_ < end_);
-    u.trap_ = trap;
 }
 
 CodeRange::CodeRange(uint32_t funcIndex, uint32_t funcLineOrBytecode, FuncOffsets offsets)
@@ -911,4 +904,24 @@ wasm::CreateTlsData(uint32_t globalDataLength)
     tlsData->allocatedBase = allocatedBase;
 
     return UniqueTlsData(tlsData);
+}
+
+void
+TlsData::setInterrupt()
+{
+    interrupt = true;
+    stackLimit = UINTPTR_MAX;
+}
+
+bool
+TlsData::isInterrupted() const
+{
+    return interrupt || stackLimit == UINTPTR_MAX;
+}
+
+void
+TlsData::resetInterrupt(JSContext* cx)
+{
+    interrupt = false;
+    stackLimit = cx->stackLimitForJitCode(JS::StackForUntrustedScript);
 }

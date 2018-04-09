@@ -257,6 +257,8 @@ WebRenderAPI::Create(layers::CompositorBridgeParentBase* aBridge,
 {
   MOZ_ASSERT(aBridge);
   MOZ_ASSERT(aWidget);
+  static_assert(sizeof(size_t) == sizeof(uintptr_t),
+      "The FFI bindings assume size_t is the same size as uintptr_t!");
 
   static uint64_t sNextId = 1;
   auto id = NewWindowId(sNextId++);
@@ -939,7 +941,7 @@ Maybe<wr::WrScrollId>
 DisplayListBuilder::GetScrollIdForDefinedScrollLayer(layers::FrameMetrics::ViewID aViewId) const
 {
   if (aViewId == layers::FrameMetrics::NULL_SCROLL_ID) {
-    return Some(wr::WrScrollId { 0 });
+    return Some(wr::WrScrollId::RootScrollNode());
   }
 
   auto it = mScrollIds.find(aViewId);
@@ -1318,7 +1320,7 @@ DisplayListBuilder::TopmostScrollId()
       return it->as<wr::WrScrollId>();
     }
   }
-  return wr::WrScrollId { 0 };
+  return wr::WrScrollId::RootScrollNode();
 }
 
 bool

@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Test that the "Open in sidebar" context menu entry is active for
 // the correct objects and opens the sidebar when clicked.
 
@@ -14,7 +12,7 @@ const TEST_URI =
   "data:text/html;charset=utf8," +
   "<script>console.log({a:1},100,{b:1},'foo',false,null,undefined);</script>";
 
-add_task(async function () {
+add_task(async function() {
   // Should be removed when sidebar work is complete
   await pushPref("devtools.webconsole.sidebarToggle", true);
 

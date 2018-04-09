@@ -6,7 +6,7 @@
 "use strict";
 
 // shared-head.js handles imports, constants, and utility functions
-Services.scriptloader.loadSubScript("chrome://mochitests/content/browser/devtools/client/framework/test/shared-head.js", this);
+Services.scriptloader.loadSubScript("chrome://mochitests/content/browser/devtools/client/shared/test/shared-head.js", this);
 
 // Disable logging for faster test runs. Set this pref to true if you want to
 // debug a test in your try runs. Both the debugger server and frontend will
@@ -21,6 +21,7 @@ var ObjectClient = require("devtools/shared/client/object-client");
 var { AddonManager } = ChromeUtils.import("resource://gre/modules/AddonManager.jsm", {});
 var EventEmitter = require("devtools/shared/old-event-emitter");
 var { Toolbox } = require("devtools/client/framework/toolbox");
+var { Task } = require("devtools/shared/task");
 
 const chromeRegistry = Cc["@mozilla.org/chrome/chrome-registry;1"].getService(Ci.nsIChromeRegistry);
 
@@ -208,7 +209,10 @@ function attachThreadActorForUrl(aClient, aUrl) {
   return deferred.promise;
 }
 
-function once(aTarget, aEventName, aUseCapture = false) {
+// Override once from shared-head, as some tests depend on trying native DOM listeners
+// before EventEmitter.  Since this directory is deprecated, there's little value in
+// resolving the descrepency here.
+this.once = function (aTarget, aEventName, aUseCapture = false) {
   info("Waiting for event: '" + aEventName + "' on " + aTarget + ".");
 
   let deferred = promise.defer();
@@ -228,7 +232,7 @@ function once(aTarget, aEventName, aUseCapture = false) {
   }
 
   return deferred.promise;
-}
+};
 
 function waitForTick() {
   let deferred = promise.defer();
@@ -770,7 +774,7 @@ function initChromeDebugger(aOnClose) {
   let deferred = promise.defer();
 
   // Wait for the toolbox process to start...
-  BrowserToolboxProcess.init(aOnClose, (aEvent, aProcess) => {
+  BrowserToolboxProcess.init(aOnClose, aProcess => {
     info("Browser toolbox process started successfully.");
 
     prepareDebugger(aProcess);

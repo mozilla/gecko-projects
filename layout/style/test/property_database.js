@@ -1710,7 +1710,7 @@ var gCSSProperties = {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "normal" ],
-    other_values: [ "2px", "1em", "4em",
+    other_values: [ "2px", "1em", "4em", "3%", "calc(3%)", "calc(1em - 3%)",
       "calc(2px)",
       "calc(-2px)",
       "calc(0px)",
@@ -1721,7 +1721,7 @@ var gCSSProperties = {
       "calc(25px*3)",
       "calc(3*25px + 5em)",
     ],
-    invalid_values: [ "3%", "-1px", "4" ]
+    invalid_values: [ "-3%", "-1px", "4" ]
   },
   "-moz-column-gap": {
     domProp: "MozColumnGap",
@@ -4741,6 +4741,7 @@ var gCSSProperties = {
       "calc(50px/(2 - 1))",
     ],
     invalid_values: [ "none", "-2px",
+      "content",  /* (valid for 'flex-basis' but not 'width') */
       /* invalid calc() values */
       "calc(50%+ 2px)",
       "calc(50% +2px)",
@@ -5183,8 +5184,9 @@ var gCSSProperties = {
     initial_values: [ "normal" ],
     other_values: [ "normal start", "baseline end", "end end",
                     "space-between flex-end", "last baseline start",
-                    "space-evenly", "flex-start", "end" ],
-    invalid_values: [ "none", "center safe", "unsafe start", "right / end" ]
+                    "space-evenly", "flex-start", "end", "unsafe start", "safe center",
+                    "baseline", "last baseline" ],
+    invalid_values: [ "none", "center safe", "right / end" ]
   },
   "place-items": {
     domProp: "placeItems",
@@ -5193,9 +5195,10 @@ var gCSSProperties = {
     subproperties: [ "align-items", "justify-items" ],
     initial_values: [ "normal" ],
     other_values: [ "normal center", "baseline end", "end auto",
-                    "end", "flex-end left", "last baseline start", "stretch" ],
+                    "end", "flex-end left", "last baseline start", "stretch",
+                    "safe center", "end legacy left" ],
     invalid_values: [ "space-between", "start space-evenly", "none", "end/end",
-                      "center safe", "auto start", "end legacy left" ]
+                      "center safe", "auto start" ]
   },
   "place-self": {
     domProp: "placeSelf",
@@ -5256,12 +5259,14 @@ var gCSSProperties = {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ " auto" ],
-        // NOTE: This is cribbed directly from the "width" chunk, since this
-        // property takes the exact same values as width (albeit with
-        // different semantics on 'auto').
+        // NOTE: Besides "content", this is cribbed directly from the "width"
+        // chunk, since this property takes the exact same values as width
+        // (plus 'content' & with different semantics on 'auto').
         // XXXdholbert (Maybe these should get separated out into
         // a reusable array defined at the top of this file?)
-    other_values: [ "15px", "3em", "15%", "-moz-max-content", "-moz-min-content", "-moz-fit-content", "-moz-available",
+    other_values: [
+      "content",
+      "15px", "3em", "15%", "-moz-max-content", "-moz-min-content", "-moz-fit-content", "-moz-available",
       // valid calc() values
       "calc(-2px)",
       "calc(2px)",
@@ -6373,6 +6378,14 @@ if (IsCSSPropertyPrefEnabled("layout.css.font-variations.enabled")) {
     invalid_values: [ "on" ]
   };
   gCSSProperties["font"].subproperties.push("font-optical-sizing");
+  if (SpecialPowers.DOMWindowUtils.isStyledByServo) {
+    gCSSProperties["font-variation-settings"].other_values
+      .push("'vert' calc(2.5)");
+  }
+}
+
+if (SpecialPowers.DOMWindowUtils.isStyledByServo) {
+  gCSSProperties["font-feature-settings"].other_values.push("'vert' calc(2)");
 }
 
 if (IsCSSPropertyPrefEnabled("layout.css.frames-timing.enabled")) {

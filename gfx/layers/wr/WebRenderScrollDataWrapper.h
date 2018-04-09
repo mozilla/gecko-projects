@@ -263,7 +263,7 @@ public:
         PixelCastJustification::MovingDownToChildren);
   }
 
-  Maybe<uint64_t> GetReferentId() const
+  Maybe<LayersId> GetReferentId() const
   {
     MOZ_ASSERT(IsValid());
 
@@ -313,6 +313,13 @@ public:
   {
     MOZ_ASSERT(IsValid());
     return mLayer->GetFixedPositionScrollContainerId();
+  }
+
+  bool IsBackfaceHidden() const
+  {
+    // This is only used by APZCTM hit testing, and WR does its own
+    // hit testing, so no need to implement this.
+    return false;
   }
 
   const void* GetLayer() const

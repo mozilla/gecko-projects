@@ -47,7 +47,6 @@
 #include "Units.h"
 #include "prenv.h"
 #include "mozilla/StaticPresData.h"
-#include "mozilla/StyleBackendType.h"
 
 class nsBidi;
 class nsIPrintSettings;
@@ -160,7 +159,7 @@ public:
    * Set and detach presentation shell that this context is bound to.
    * A presentation context may only be bound to a single shell.
    */
-  void AttachShell(nsIPresShell* aShell, mozilla::StyleBackendType aBackendType);
+  void AttachShell(nsIPresShell* aShell);
   void DetachShell();
 
 
@@ -224,15 +223,13 @@ public:
       return mDocument;
   }
 
-  mozilla::StyleSetHandle StyleSet() const { return GetPresShell()->StyleSet(); }
+  mozilla::ServoStyleSet* StyleSet() const
+    { return GetPresShell()->StyleSet(); }
 
   bool HasPendingMediaQueryUpdates() const
   {
     return !!mPendingMediaFeatureValuesChange;
   }
-
-  nsFrameManager* FrameManager()
-    { return PresShell()->FrameManager(); }
 
   nsCSSFrameConstructor* FrameConstructor()
     { return PresShell()->FrameConstructor(); }
@@ -1068,12 +1065,6 @@ public:
   bool HasPendingRestyleOrReflow();
 
   /**
-   * Informs the document's FontFaceSet that the refresh driver ticked,
-   * flushing style and layout.
-   */
-  void NotifyFontFaceSetOnRefresh();
-
-  /**
    * Notify the prescontext that the presshell is about to reflow a reflow root.
    * The single argument indicates whether this reflow should be interruptible.
    * If aInterruptible is false then CheckForInterrupt and HasPendingInterrupt
@@ -1231,7 +1222,7 @@ protected:
   static void PrefChangedCallback(const char*, void*);
 
   void UpdateAfterPreferencesChanged();
-  static void PrefChangedUpdateTimerCallback(nsITimer *aTimer, void *aClosure);
+  void DispatchPrefChangedRunnableIfNeeded();
 
   void GetUserPreferences();
 
@@ -1362,7 +1353,6 @@ protected:
   nsCOMPtr<nsITheme> mTheme;
   nsLanguageAtomService* mLangService;
   nsCOMPtr<nsIPrintSettings> mPrintSettings;
-  nsCOMPtr<nsITimer>    mPrefChangedTimer;
 
   mozilla::UniquePtr<nsBidi> mBidiEngine;
 
@@ -1470,6 +1460,7 @@ protected:
   unsigned              mPendingThemeChanged : 1;
   unsigned              mPendingUIResolutionChanged : 1;
   unsigned              mPrefChangePendingNeedsReflow : 1;
+  unsigned              mPostedPrefChangedRunnable : 1;
   unsigned              mIsEmulatingMedia : 1;
 
   // Are we currently drawing an SVG glyph?

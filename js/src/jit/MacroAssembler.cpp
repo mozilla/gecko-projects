@@ -1711,7 +1711,7 @@ MacroAssembler::loadStringChar(Register str, Register index, Register output, Re
 
     // Check if the index is contained in the leftChild.
     // Todo: Handle index in the rightChild.
-    boundsCheck32ForLoad(index, Address(output, JSString::offsetOfLength()), scratch, fail);
+    spectreBoundsCheck32(index, Address(output, JSString::offsetOfLength()), scratch, fail);
 
     // If the left side is another rope, give up.
     branchIfRope(output, fail);
@@ -1778,19 +1778,7 @@ void
 MacroAssembler::loadJSContext(Register dest)
 {
     JitContext* jcx = GetJitContext();
-    CompileCompartment* compartment = jcx->compartment;
-    if (compartment->zone()->isAtomsZone()) {
-        // If we are in the atoms zone then we are generating a runtime wide
-        // trampoline which can run in any zone. Load the context which is
-        // currently running using cooperative scheduling in the runtime.
-        // (This will need to be fixed when we have preemptive scheduling,
-        // bug 1323066).
-        loadPtr(AbsoluteAddress(jcx->runtime->addressOfActiveJSContext()), dest);
-    } else {
-        // If we are in a specific zone then the current context will be stored
-        // in the containing zone group.
-        loadPtr(AbsoluteAddress(compartment->zone()->addressOfJSContext()), dest);
-    }
+    movePtr(ImmPtr(jcx->runtime->mainContextPtr()), dest);
 }
 
 void
@@ -2803,15 +2791,13 @@ MacroAssembler::alignJitStackBasedOnNArgs(uint32_t nargs)
 
 // ===============================================================
 
-MacroAssembler::MacroAssembler(JSContext* cx, IonScript* ion,
-                               JSScript* script, jsbytecode* pc)
+MacroAssembler::MacroAssembler(JSContext* cx)
   : framePushed_(0),
 #ifdef DEBUG
     inCall_(false),
 #endif
     emitProfilingInstrumentation_(false)
 {
-    constructRoot(cx);
     jitContext_.emplace(cx, (js::jit::TempAllocator*)nullptr);
     alloc_.emplace(cx);
     moveResolver_.setAllocator(*jitContext_->temp);
@@ -2822,11 +2808,53 @@ MacroAssembler::MacroAssembler(JSContext* cx, IonScript* ion,
     initWithAllocator();
     armbuffer_.id = GetJitContext()->getNextAssemblerId();
 #endif
-    if (ion) {
-        setFramePushed(ion->frameSize());
-        if (pc && cx->runtime()->geckoProfiler().enabled())
-            enableProfilingInstrumentation();
+}
+
+MacroAssembler::MacroAssembler()
+  : framePushed_(0),
+#ifdef DEBUG
+    inCall_(false),
+#endif
+    emitProfilingInstrumentation_(false)
+{
+    JitContext* jcx = GetJitContext();
+
+    if (!jcx->temp) {
+        JSContext* cx = jcx->cx;
+        MOZ_ASSERT(cx);
+        alloc_.emplace(cx);
     }
+
+    moveResolver_.setAllocator(*jcx->temp);
+
+#if defined(JS_CODEGEN_ARM)
+    initWithAllocator();
+    m_buffer.id = jcx->getNextAssemblerId();
+#elif defined(JS_CODEGEN_ARM64)
+    initWithAllocator();
+    armbuffer_.id = jcx->getNextAssemblerId();
+#endif
+}
+
+MacroAssembler::MacroAssembler(WasmToken, TempAllocator& alloc)
+  : framePushed_(0),
+#ifdef DEBUG
+    inCall_(false),
+#endif
+    emitProfilingInstrumentation_(false)
+{
+    moveResolver_.setAllocator(alloc);
+
+#if defined(JS_CODEGEN_ARM)
+    initWithAllocator();
+    m_buffer.id = 0;
+#elif defined(JS_CODEGEN_ARM64)
+    initWithAllocator();
+    // Stubs + builtins + the baseline compiler all require the native SP,
+    // not the PSP.
+    SetStackPointer64(sp);
+    armbuffer_.id = 0;
+#endif
 }
 
 bool
@@ -3163,7 +3191,7 @@ MacroAssembler::callWithABI(wasm::BytecodeOffset bytecode, wasm::SymbolicAddress
     // points when placing arguments.
     loadWasmTlsRegFromFrame();
 
-    call(wasm::CallSiteDesc(bytecode.offset, wasm::CallSite::Symbolic), imm);
+    call(wasm::CallSiteDesc(bytecode.offset(), wasm::CallSite::Symbolic), imm);
     callWithABIPost(stackAdjust, result, /* callFromWasm = */ true);
 
     Pop(WasmTlsReg);
@@ -3201,13 +3229,32 @@ MacroAssembler::branchIfNotInterpretedConstructor(Register fun, Register scratch
 }
 
 void
-MacroAssembler::branchTestObjGroup(Condition cond, Register obj, const Address& group,
-                                   Register scratch, Label* label)
+MacroAssembler::branchTestObjGroupNoSpectreMitigations(Condition cond, Register obj,
+                                                       const Address& group, Register scratch,
+                                                       Label* label)
 {
     // Note: obj and scratch registers may alias.
+    MOZ_ASSERT(group.base != scratch);
+    MOZ_ASSERT(group.base != obj);
 
     loadPtr(Address(obj, JSObject::offsetOfGroup()), scratch);
     branchPtr(cond, group, scratch, label);
+}
+
+void
+MacroAssembler::branchTestObjGroup(Condition cond, Register obj, const Address& group,
+                                   Register scratch, Register spectreRegToZero, Label* label)
+{
+    // Note: obj and scratch registers may alias.
+    MOZ_ASSERT(group.base != scratch);
+    MOZ_ASSERT(group.base != obj);
+    MOZ_ASSERT(scratch != spectreRegToZero);
+
+    loadPtr(Address(obj, JSObject::offsetOfGroup()), scratch);
+    branchPtr(cond, group, scratch, label);
+
+    if (JitOptions.spectreObjectMitigationsMisc)
+        spectreZeroRegister(cond, scratch, spectreRegToZero);
 }
 
 void
@@ -3357,7 +3404,50 @@ MacroAssembler::maybeBranchTestType(MIRType type, MDefinition* maybeDef, Registe
 void
 MacroAssembler::wasmTrap(wasm::Trap trap, wasm::BytecodeOffset bytecodeOffset)
 {
-    append(trap, wasm::TrapSite(wasmTrapInstruction().offset(), bytecodeOffset));
+    uint32_t trapOffset = wasmTrapInstruction().offset();
+    MOZ_ASSERT_IF(!oom(), currentOffset() - trapOffset == WasmTrapInstructionLength);
+
+    append(trap, wasm::TrapSite(trapOffset, bytecodeOffset));
+}
+
+void
+MacroAssembler::wasmInterruptCheck(Register tls, wasm::BytecodeOffset bytecodeOffset)
+{
+    Label ok;
+    branch32(Assembler::Equal, Address(tls, offsetof(wasm::TlsData, interrupt)), Imm32(0), &ok);
+    wasmTrap(wasm::Trap::CheckInterrupt, bytecodeOffset);
+    bind(&ok);
+}
+
+void
+MacroAssembler::wasmReserveStackChecked(uint32_t amount, wasm::BytecodeOffset trapOffset)
+{
+    if (!amount)
+        return;
+
+    // If the frame is large, don't bump sp until after the stack limit check so
+    // that the trap handler isn't called with a wild sp.
+
+    if (amount > MAX_UNCHECKED_LEAF_FRAME_SIZE) {
+        Label ok;
+        Register scratch = ABINonArgReg0;
+        moveStackPtrTo(scratch);
+        subPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, stackLimit)), scratch);
+        branchPtr(Assembler::GreaterThan, scratch, Imm32(amount), &ok);
+        wasmTrap(wasm::Trap::StackOverflow, trapOffset);
+        bind(&ok);
+    }
+
+    reserveStack(amount);
+
+    if (amount <= MAX_UNCHECKED_LEAF_FRAME_SIZE) {
+        Label ok;
+        branchStackPtrRhs(Assembler::Below,
+                          Address(WasmTlsReg, offsetof(wasm::TlsData, stackLimit)),
+                          &ok);
+        wasmTrap(wasm::Trap::StackOverflow, trapOffset);
+        bind(&ok);
+    }
 }
 
 void
@@ -3436,8 +3526,10 @@ MacroAssembler::wasmCallIndirect(const wasm::CallSiteDesc& desc, const wasm::Cal
     if (needsBoundsCheck) {
         loadWasmGlobalPtr(callee.tableLengthGlobalDataOffset(), scratch);
 
-        wasm::OldTrapDesc oobTrap(trapOffset, wasm::Trap::OutOfBounds, framePushed());
-        branch32(Assembler::Condition::AboveOrEqual, index, scratch, oobTrap);
+        Label ok;
+        branch32(Assembler::Condition::Below, index, scratch, &ok);
+        wasmTrap(wasm::Trap::OutOfBounds, trapOffset);
+        bind(&ok);
     }
 
     // Load the base pointer of the table.
@@ -3474,70 +3566,6 @@ MacroAssembler::wasmCallIndirect(const wasm::CallSiteDesc& desc, const wasm::Cal
     }
 
     call(desc, scratch);
-}
-
-void
-MacroAssembler::wasmEmitOldTrapOutOfLineCode()
-{
-    for (const wasm::OldTrapSite& site : oldTrapSites()) {
-        // Trap out-of-line codes are created for two kinds of trap sites:
-        //  - jumps, which are bound directly to the trap out-of-line path
-        //  - memory accesses, which can fault and then have control transferred
-        //    to the out-of-line path directly via signal handler setting pc
-        switch (site.kind) {
-          case wasm::OldTrapSite::Jump: {
-            RepatchLabel jump;
-            jump.use(site.codeOffset);
-            bind(&jump);
-            break;
-          }
-          case wasm::OldTrapSite::MemoryAccess: {
-            append(wasm::MemoryAccess(site.codeOffset, currentOffset()));
-            break;
-          }
-        }
-
-        MOZ_ASSERT(site.trap != wasm::Trap::IndirectCallBadSig);
-
-        // Inherit the frame depth of the trap site. This value is captured
-        // by the wasm::CallSite to allow unwinding this frame.
-        setFramePushed(site.framePushed);
-
-        // Align the stack for a nullary call.
-        size_t alreadyPushed = sizeof(wasm::Frame) + framePushed();
-        size_t toPush = ABIArgGenerator().stackBytesConsumedSoFar();
-        if (size_t dec = StackDecrementForCall(ABIStackAlignment, alreadyPushed, toPush))
-            reserveStack(dec);
-
-        // To call the trap handler function, we must have the WasmTlsReg
-        // filled since this is the normal calling ABI. To avoid requiring
-        // every trapping operation to have the TLS register filled for the
-        // rare case that it takes a trap, we restore it from the frame on
-        // the out-of-line path. However, there are millions of out-of-line
-        // paths (viz. for loads/stores), so the load is factored out into
-        // the shared FarJumpIsland generated by patchCallSites.
-
-        // Call the trap's exit, using the bytecode offset of the trap site.
-        // Note that this code is inside the same CodeRange::Function as the
-        // trap site so it's as if the trapping instruction called the
-        // trap-handling function. The frame iterator knows to skip the trap
-        // exit's frame so that unwinding begins at the frame and offset of
-        // the trapping instruction.
-        wasm::CallSiteDesc desc(site.offset, wasm::CallSiteDesc::OldTrapExit);
-        call(desc, site.trap);
-
-#ifdef DEBUG
-        // Traps do not return, so no need to freeStack().
-        breakpoint();
-#endif
-    }
-
-    // Ensure that the return address of the last emitted call above is always
-    // within this function's CodeRange which is necessary for the stack
-    // iterator to find the right CodeRange while walking the stack.
-    breakpoint();
-
-    oldTrapSites().clear();
 }
 
 void
@@ -3656,6 +3684,44 @@ MacroAssembler::emitPreBarrierFastPath(JSRuntime* rt, MIRType type, Register tem
     branchTestPtr(Assembler::NonZero, temp2, temp1, noBarrier);
 }
 
+// ========================================================================
+// Spectre Mitigations.
+
+void
+MacroAssembler::spectreMaskIndex(Register index, Register length, Register output)
+{
+    MOZ_ASSERT(JitOptions.spectreIndexMasking);
+    MOZ_ASSERT(length != output);
+    MOZ_ASSERT(index != output);
+
+    move32(Imm32(0), output);
+    cmp32Move32(Assembler::Below, index, length, index, output);
+}
+
+void
+MacroAssembler::spectreMaskIndex(Register index, const Address& length, Register output)
+{
+    MOZ_ASSERT(JitOptions.spectreIndexMasking);
+    MOZ_ASSERT(index != length.base);
+    MOZ_ASSERT(length.base != output);
+    MOZ_ASSERT(index != output);
+
+    move32(Imm32(0), output);
+    cmp32Move32(Assembler::Below, index, length, index, output);
+}
+
+void
+MacroAssembler::boundsCheck32PowerOfTwo(Register index, uint32_t length, Label* failure)
+{
+    MOZ_ASSERT(mozilla::IsPowerOfTwo(length));
+    branch32(Assembler::AboveOrEqual, index, Imm32(length), failure);
+
+    // Note: it's fine to clobber the input register, as this is a no-op: it
+    // only affects speculative execution.
+    if (JitOptions.spectreIndexMasking)
+        and32(Imm32(length - 1), index);
+}
+
 //}}} check_macroassembler_style
 
 void
@@ -3705,41 +3771,6 @@ MacroAssembler::debugAssertObjHasFixedSlots(Register obj, Register scratch)
     assumeUnreachable("Expected a fixed slot");
     bind(&hasFixedSlots);
 #endif
-}
-
-void
-MacroAssembler::spectreMaskIndex(Register index, Register length, Register output)
-{
-    MOZ_ASSERT(JitOptions.spectreIndexMasking);
-    MOZ_ASSERT(length != output);
-    MOZ_ASSERT(index != output);
-
-    move32(Imm32(0), output);
-    cmp32Move32(Assembler::Below, index, length, index, output);
-}
-
-void
-MacroAssembler::spectreMaskIndex(Register index, const Address& length, Register output)
-{
-    MOZ_ASSERT(JitOptions.spectreIndexMasking);
-    MOZ_ASSERT(index != length.base);
-    MOZ_ASSERT(length.base != output);
-    MOZ_ASSERT(index != output);
-
-    move32(Imm32(0), output);
-    cmp32Move32(Assembler::Below, index, length, index, output);
-}
-
-void
-MacroAssembler::boundsCheck32PowerOfTwo(Register index, uint32_t length, Label* failure)
-{
-    MOZ_ASSERT(mozilla::IsPowerOfTwo(length));
-    branch32(Assembler::AboveOrEqual, index, Imm32(length), failure);
-
-    // Note: it's fine to clobber the input register, as this is a no-op: it
-    // only affects speculative execution.
-    if (JitOptions.spectreIndexMasking)
-        and32(Imm32(length - 1), index);
 }
 
 template <typename T, size_t N, typename P>

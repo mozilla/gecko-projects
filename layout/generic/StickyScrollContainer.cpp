@@ -10,10 +10,11 @@
  */
 
 #include "StickyScrollContainer.h"
+
+#include "mozilla/OverflowChangedTracker.h"
 #include "nsIFrame.h"
 #include "nsIScrollableFrame.h"
 #include "nsLayoutUtils.h"
-#include "RestyleTracker.h"
 
 namespace mozilla {
 
@@ -279,8 +280,8 @@ StickyScrollContainer::ComputePosition(nsIFrame* aFrame) const
 }
 
 void
-StickyScrollContainer::GetScrollRanges(nsIFrame* aFrame, nsCoordBox* aOuter,
-                                       nsCoordBox* aInner) const
+StickyScrollContainer::GetScrollRanges(nsIFrame* aFrame, nsRectAbsolute* aOuter,
+                                       nsRectAbsolute* aInner) const
 {
   // We need to use the first in flow; continuation frames should not move
   // relative to each other and should get identical scroll ranges.
@@ -292,8 +293,8 @@ StickyScrollContainer::GetScrollRanges(nsIFrame* aFrame, nsCoordBox* aOuter,
   nsRect containRect;
   ComputeStickyLimits(firstCont, &stickRect, &containRect);
 
-  nsCoordBox stick = nsCoordBox::FromRect(stickRect);
-  nsCoordBox contain = nsCoordBox::FromRect(containRect);
+  nsRectAbsolute stick = nsRectAbsolute::FromRect(stickRect);
+  nsRectAbsolute contain = nsRectAbsolute::FromRect(containRect);
 
   aOuter->SetBox(gUnboundedNegative, gUnboundedNegative, gUnboundedPositive, gUnboundedPositive);
   aInner->SetBox(gUnboundedNegative, gUnboundedNegative, gUnboundedPositive, gUnboundedPositive);

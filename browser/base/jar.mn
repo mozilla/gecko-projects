@@ -66,13 +66,10 @@ browser.jar:
         content/browser/browser-plugins.js            (content/browser-plugins.js)
         content/browser/browser-safebrowsing.js       (content/browser-safebrowsing.js)
         content/browser/browser-sidebar.js            (content/browser-sidebar.js)
+        content/browser/browser-siteIdentity.js       (content/browser-siteIdentity.js)
         content/browser/browser-sync.js               (content/browser-sync.js)
 *       content/browser/browser-tabPreviews.xml       (content/browser-tabPreviews.xml)
-#ifdef CAN_DRAW_IN_TITLEBAR
         content/browser/browser-tabsintitlebar.js       (content/browser-tabsintitlebar.js)
-#else
-        content/browser/browser-tabsintitlebar.js       (content/browser-tabsintitlebar-stub.js)
-#endif
         content/browser/browser-thumbnails.js         (content/browser-thumbnails.js)
         content/browser/browser-trackingprotection.js (content/browser-trackingprotection.js)
         content/browser/browser-webrender.js          (content/browser-webrender.js)
@@ -96,10 +93,6 @@ browser.jar:
         content/browser/defaultthemes/5.preview.jpg   (content/defaultthemes/5.preview.jpg)
         content/browser/defaultthemes/dark.icon.svg  (content/defaultthemes/dark.icon.svg)
         content/browser/defaultthemes/light.icon.svg (content/defaultthemes/light.icon.svg)
-        content/browser/newtab/newTab.xhtml           (content/newtab/newTab.xhtml)
-*       content/browser/newtab/newTab.js              (content/newtab/newTab.js)
-        content/browser/newtab/newTab.css             (content/newtab/newTab.css)
-        content/browser/newtab/alternativeDefaultSites.json   (content/newtab/alternativeDefaultSites.json)
 *       content/browser/pageinfo/pageInfo.xul         (content/pageinfo/pageInfo.xul)
         content/browser/pageinfo/pageInfo.js          (content/pageinfo/pageInfo.js)
         content/browser/pageinfo/pageInfo.css         (content/pageinfo/pageInfo.css)
@@ -128,9 +121,6 @@ browser.jar:
         content/browser/nsContextMenu.js              (content/nsContextMenu.js)
 # XXX: We should exclude this one as well (bug 71895)
 *       content/browser/hiddenWindow.xul              (content/hiddenWindow.xul)
-#ifdef XP_MACOSX
-*       content/browser/macBrowserOverlay.xul         (content/macBrowserOverlay.xul)
-#endif
 #ifndef XP_MACOSX
 *       content/browser/webrtcIndicator.xul           (content/webrtcIndicator.xul)
         content/browser/webrtcIndicator.js            (content/webrtcIndicator.js)

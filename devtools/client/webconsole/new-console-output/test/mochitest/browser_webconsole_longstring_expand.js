@@ -3,7 +3,8 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
+// XXX Remove this when the file is migrated to the new frontend.
+/* eslint-disable no-undef */
 
 // Test that long strings can be expanded in the console output.
 
@@ -12,7 +13,7 @@
 const TEST_URI = "data:text/html;charset=utf8,test for bug 787981 - check " +
                  "that long strings can be expanded in the output.";
 
-add_task(function* () {
+add_task(async function() {
   let { DebuggerServer } = require("devtools/server/main");
 
   let longString = (new Array(DebuggerServer.LONG_STRING_LENGTH + 4))
@@ -20,14 +21,14 @@ add_task(function* () {
   let initialString =
     longString.substring(0, DebuggerServer.LONG_STRING_INITIAL_LENGTH);
 
-  yield loadTab(TEST_URI);
+  await loadTab(TEST_URI);
 
-  let hud = yield openConsole();
+  let hud = await openConsole();
 
   hud.jsterm.clearOutput(true);
   hud.jsterm.execute("console.log('bazbaz', '" + longString + "', 'boom')");
 
-  let [result] = yield waitForMessages({
+  let [result] = await waitForMessages({
     webconsole: hud,
     messages: [{
       name: "console.log output",
@@ -44,7 +45,7 @@ add_task(function* () {
 
   EventUtils.synthesizeMouse(clickable, 2, 2, {}, hud.iframeWindow);
 
-  yield waitForMessages({
+  await waitForMessages({
     webconsole: hud,
     messages: [{
       name: "full string",
@@ -55,7 +56,7 @@ add_task(function* () {
   });
 
   hud.jsterm.clearOutput(true);
-  let msg = yield execute(hud, "'" + longString + "'");
+  let msg = await execute(hud, "'" + longString + "'");
 
   isnot(msg.textContent.indexOf(initialString), -1,
       "initial string is shown");
@@ -69,7 +70,7 @@ add_task(function* () {
 
   EventUtils.synthesizeMouse(clickable, 3, 4, {}, hud.iframeWindow);
 
-  yield waitForMessages({
+  await waitForMessages({
     webconsole: hud,
     messages: [{
       name: "full string",

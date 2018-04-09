@@ -16,15 +16,15 @@ prefs_parser = { path = "../../../../modules/libpref/parser" }
 rust_url_capi = { path = "../../../../netwerk/base/rust-url-capi" }
 webrender_bindings = { path = "../../../../gfx/webrender_bindings", optional = true }
 cubeb-pulse = { path = "../../../../media/libcubeb/cubeb-pulse-rs", optional = true, features=["pulse-dlopen"] }
-cubeb-sys = { version = "0.4.1", optional = true, features=["gecko-in-tree"] }
+cubeb-sys = { version = "0.5.0", optional = true, features=["gecko-in-tree"] }
 encoding_c = "0.8.0"
 encoding_glue = { path = "../../../../intl/encoding_glue" }
 audioipc-client = { path = "../../../../media/audioipc/client", optional = true }
 audioipc-server = { path = "../../../../media/audioipc/server", optional = true }
 u2fhid = { path = "../../../../dom/webauthn/u2f-hid-rs" }
+rsdparsa_capi = { path = "../../../../media/webrtc/signaling/src/sdp/rsdparsa_capi" }
 # We have these to enforce common feature sets for said crates.
 log = {version = "0.3", features = ["release_max_level_info"]}
-syn = { version = "0.11", features = ["full", "visit", "parsing"] }
 cose-c = { version = "0.1.5" }
 
 [features]

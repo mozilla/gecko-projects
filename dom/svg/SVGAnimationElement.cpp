@@ -59,25 +59,6 @@ SVGAnimationElement::Init()
 
 //----------------------------------------------------------------------
 
-const nsAttrValue*
-SVGAnimationElement::GetAnimAttr(nsAtom* aName) const
-{
-  return mAttrsAndChildren.GetAttr(aName, kNameSpaceID_None);
-}
-
-bool
-SVGAnimationElement::GetAnimAttr(nsAtom* aAttName,
-                                 nsAString& aResult) const
-{
-  return GetAttr(kNameSpaceID_None, aAttName, aResult);
-}
-
-bool
-SVGAnimationElement::HasAnimAttr(nsAtom* aAttName) const
-{
-  return HasAttr(kNameSpaceID_None, aAttName);
-}
-
 Element*
 SVGAnimationElement::GetTargetElementContent()
 {
@@ -351,15 +332,6 @@ bool
 SVGAnimationElement::IsNodeOfType(uint32_t aFlags) const
 {
   return !(aFlags & ~eANIMATION);
-}
-
-//----------------------------------------------------------------------
-// SVGTests methods
-
-bool
-SVGAnimationElement::IsInChromeDoc() const
-{
-  return nsContentUtils::IsChromeDoc(OwnerDoc());
 }
 
 //----------------------------------------------------------------------

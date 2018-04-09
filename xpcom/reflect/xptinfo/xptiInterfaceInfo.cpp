@@ -16,33 +16,32 @@
 using namespace mozilla;
 
 /* static */ xptiInterfaceEntry*
-xptiInterfaceEntry::Create(const char* aName,
-                           const nsID& aIID,
-                           XPTInterfaceDescriptor* aDescriptor,
+xptiInterfaceEntry::Create(const XPTInterfaceDescriptor* aIface,
                            xptiTypelibGuts* aTypelib)
 {
     void* place = XPT_CALLOC8(gXPTIStructArena, sizeof(xptiInterfaceEntry));
     if (!place) {
         return nullptr;
     }
-    return new (place) xptiInterfaceEntry(aName, aIID, aDescriptor, aTypelib);
+    return new (place) xptiInterfaceEntry(aIface, aTypelib);
 }
 
-xptiInterfaceEntry::xptiInterfaceEntry(const char* aName,
-                                       const nsID& aIID,
-                                       XPTInterfaceDescriptor* aDescriptor,
+xptiInterfaceEntry::xptiInterfaceEntry(const XPTInterfaceDescriptor* aIface,
                                        xptiTypelibGuts* aTypelib)
-    : mIID(aIID)
-    , mDescriptor(aDescriptor)
+    : mIID(aIface->mIID)
+    , mDescriptor(aIface)
     , mTypelib(aTypelib)
     , mParent(nullptr)
     , mInfo(nullptr)
     , mMethodBaseIndex(0)
     , mConstantBaseIndex(0)
     , mFlags(0)
-    , mName(aName)
+    , mName(aIface->Name())
 {
     SetResolvedState(PARTIALLY_RESOLVED);
+    SetScriptableFlag(aIface->IsScriptable());
+    SetBuiltinClassFlag(aIface->IsBuiltinClass());
+    SetMainProcessScriptableOnlyFlag(aIface->IsMainProcessScriptableOnly());
 }
 
 bool
@@ -67,7 +66,7 @@ xptiInterfaceEntry::ResolveLocked()
     // Finish out resolution by finding parent and Resolving it so
     // we can set the info we get from it.
 
-    uint16_t parent_index = mDescriptor->parent_interface;
+    uint16_t parent_index = mDescriptor->mParentInterface;
 
     if(parent_index)
     {
@@ -84,9 +83,9 @@ xptiInterfaceEntry::ResolveLocked()
         if (parent->GetHasNotXPCOMFlag()) {
             SetHasNotXPCOMFlag();
         } else {
-            for (uint16_t idx = 0; idx < mDescriptor->num_methods; ++idx) {
-                nsXPTMethodInfo* method = reinterpret_cast<nsXPTMethodInfo*>(
-                    mDescriptor->method_descriptors + idx);
+            for (uint16_t idx = 0; idx < mDescriptor->mNumMethods; ++idx) {
+                const nsXPTMethodInfo* method = static_cast<const nsXPTMethodInfo*>(
+                    &mDescriptor->Method(idx));
                 if (method->IsNotXPCOM()) {
                     SetHasNotXPCOMFlag();
                     break;
@@ -97,14 +96,13 @@ xptiInterfaceEntry::ResolveLocked()
 
         mMethodBaseIndex =
             parent->mMethodBaseIndex +
-            parent->mDescriptor->num_methods;
+            parent->mDescriptor->mNumMethods;
 
         mConstantBaseIndex =
             parent->mConstantBaseIndex +
-            parent->mDescriptor->num_constants;
+            parent->mDescriptor->mNumConstants;
 
     }
-    LOG_RESOLVE(("+ complete resolve of %s\n", mName));
 
     SetResolvedState(FULLY_RESOLVED);
     return true;
@@ -154,7 +152,7 @@ xptiInterfaceEntry::GetMethodCount(uint16_t* count)
         return NS_ERROR_UNEXPECTED;
 
     *count = mMethodBaseIndex +
-             mDescriptor->num_methods;
+             mDescriptor->mNumMethods;
     return NS_OK;
 }
 
@@ -168,7 +166,7 @@ xptiInterfaceEntry::GetConstantCount(uint16_t* count)
         return NS_ERROR_UNEXPECTED;
 
     *count = mConstantBaseIndex +
-             mDescriptor->num_constants;
+             mDescriptor->mNumConstants;
     return NS_OK;
 }
 
@@ -182,7 +180,7 @@ xptiInterfaceEntry::GetMethodInfo(uint16_t index, const nsXPTMethodInfo** info)
         return mParent->GetMethodInfo(index, info);
 
     if(index >= mMethodBaseIndex +
-                mDescriptor->num_methods)
+                mDescriptor->mNumMethods)
     {
         NS_ERROR("bad param");
         *info = nullptr;
@@ -190,8 +188,8 @@ xptiInterfaceEntry::GetMethodInfo(uint16_t index, const nsXPTMethodInfo** info)
     }
 
     // else...
-    *info = reinterpret_cast<nsXPTMethodInfo*>
-       (&mDescriptor->method_descriptors[index - mMethodBaseIndex]);
+    *info = static_cast<const nsXPTMethodInfo*>
+        (&mDescriptor->Method(index - mMethodBaseIndex));
     return NS_OK;
 }
 
@@ -203,12 +201,10 @@ xptiInterfaceEntry::GetMethodInfoForName(const char* methodName, uint16_t *index
         return NS_ERROR_UNEXPECTED;
 
     // This is a slow algorithm, but this is not expected to be called much.
-    for(uint16_t i = 0; i < mDescriptor->num_methods; ++i)
+    for(uint16_t i = 0; i < mDescriptor->mNumMethods; ++i)
     {
         const nsXPTMethodInfo* info;
-        info = reinterpret_cast<nsXPTMethodInfo*>
-                               (&mDescriptor->
-                                        method_descriptors[i]);
+        info = static_cast<const nsXPTMethodInfo*>(&mDescriptor->Method(i));
         if (PL_strcmp(methodName, info->GetName()) == 0) {
             *index = i + mMethodBaseIndex;
             *result = info;
@@ -237,36 +233,36 @@ xptiInterfaceEntry::GetConstant(uint16_t index, JS::MutableHandleValue constant,
         return mParent->GetConstant(index, constant, name);
 
     if(index >= mConstantBaseIndex +
-                mDescriptor->num_constants)
+                mDescriptor->mNumConstants)
     {
         NS_PRECONDITION(0, "bad param");
         return NS_ERROR_INVALID_ARG;
     }
 
-    const auto& c = mDescriptor->const_descriptors[index - mConstantBaseIndex];
+    const auto& c = mDescriptor->Const(index - mConstantBaseIndex);
     AutoJSContext cx;
     JS::Rooted<JS::Value> v(cx);
     v.setUndefined();
 
-    switch (c.type.prefix.flags) {
+    switch (c.mType.mPrefix.mFlags) {
       case nsXPTType::T_I16:
       {
-        v.setInt32(c.value.i16);
+        v.setInt32(c.mValue.i16);
         break;
       }
       case nsXPTType::T_U16:
       {
-        v.setInt32(c.value.ui16);
+        v.setInt32(c.mValue.ui16);
         break;
       }
       case nsXPTType::T_I32:
       {
-        v = JS_NumberValue(c.value.i32);
+        v = JS_NumberValue(c.mValue.i32);
         break;
       }
       case nsXPTType::T_U32:
       {
-        v = JS_NumberValue(c.value.ui32);
+        v = JS_NumberValue(c.mValue.ui32);
         break;
       }
       default:
@@ -276,7 +272,7 @@ xptiInterfaceEntry::GetConstant(uint16_t index, JS::MutableHandleValue constant,
     }
 
     constant.set(v);
-    *name = ToNewCString(nsDependentCString(c.name));
+    *name = ToNewCString(nsDependentCString(c.Name()));
 
     return NS_OK;
 }
@@ -296,24 +292,23 @@ xptiInterfaceEntry::GetInterfaceIndexForParam(uint16_t methodIndex,
                                                   interfaceIndex);
 
     if(methodIndex >= mMethodBaseIndex +
-                      mDescriptor->num_methods)
+                      mDescriptor->mNumMethods)
     {
         NS_ERROR("bad param");
         return NS_ERROR_INVALID_ARG;
     }
 
-    const XPTTypeDescriptor *td = &param->type;
+    const XPTTypeDescriptor *td = &param->mType;
 
     while (td->Tag() == TD_ARRAY) {
-        td = &mDescriptor->additional_types[td->u.array.additional_type];
+        td = td->ArrayElementType();
     }
 
     if (td->Tag() != TD_INTERFACE_TYPE) {
         NS_ERROR("not an interface");
         return NS_ERROR_INVALID_ARG;
     }
-
-    *interfaceIndex = (td->u.iface.iface_hi8 << 8) | td->u.iface.iface_lo8;
+    *interfaceIndex = td->InterfaceIndex();
     return NS_OK;
 }
 
@@ -370,45 +365,6 @@ xptiInterfaceEntry::GetShimForParam(uint16_t methodIndex,
 }
 
 nsresult
-xptiInterfaceEntry::GetInfoForParam(uint16_t methodIndex,
-                                    const nsXPTParamInfo *param,
-                                    nsIInterfaceInfo** info)
-{
-    xptiInterfaceEntry* entry;
-    nsresult rv = GetEntryForParam(methodIndex, param, &entry);
-    if (NS_FAILED(rv)) {
-        RefPtr<ShimInterfaceInfo> shim = GetShimForParam(methodIndex, param);
-        if (!shim) {
-            return rv;
-        }
-
-        shim.forget(info);
-        return NS_OK;
-    }
-
-    *info = entry->InterfaceInfo().take();
-
-    return NS_OK;
-}
-
-nsresult
-xptiInterfaceEntry::GetIIDForParam(uint16_t methodIndex,
-                                   const nsXPTParamInfo* param, nsIID** iid)
-{
-    xptiInterfaceEntry* entry;
-    nsresult rv = GetEntryForParam(methodIndex, param, &entry);
-    if (NS_FAILED(rv)) {
-        RefPtr<ShimInterfaceInfo> shim = GetShimForParam(methodIndex, param);
-        if (!shim) {
-            return rv;
-        }
-
-        return shim->GetInterfaceIID(iid);
-    }
-    return entry->GetIID(iid);
-}
-
-nsresult
 xptiInterfaceEntry::GetIIDForParamNoAlloc(uint16_t methodIndex,
                                           const nsXPTParamInfo * param,
                                           nsIID *iid)
@@ -439,16 +395,14 @@ xptiInterfaceEntry::GetTypeInArray(const nsXPTParamInfo* param,
 {
     NS_ASSERTION(IsFullyResolved(), "bad state");
 
-    const XPTTypeDescriptor *td = &param->type;
-    const XPTTypeDescriptor *additional_types =
-                mDescriptor->additional_types;
+    const XPTTypeDescriptor *td = &param->mType;
 
     for (uint16_t i = 0; i < dimension; i++) {
         if (td->Tag() != TD_ARRAY) {
             NS_ERROR("bad dimension");
             return NS_ERROR_INVALID_ARG;
         }
-        td = &additional_types[td->u.array.additional_type];
+        td = td->ArrayElementType();
     }
 
     *type = td;
@@ -469,7 +423,7 @@ xptiInterfaceEntry::GetTypeForParam(uint16_t methodIndex,
             GetTypeForParam(methodIndex, param, dimension, type);
 
     if(methodIndex >= mMethodBaseIndex +
-                      mDescriptor->num_methods)
+                      mDescriptor->mNumMethods)
     {
         NS_ERROR("bad index");
         return NS_ERROR_INVALID_ARG;
@@ -483,9 +437,9 @@ xptiInterfaceEntry::GetTypeForParam(uint16_t methodIndex,
             return rv;
     }
     else
-        td = &param->type;
+        td = &param->mType;
 
-    *type = nsXPTType(td->prefix);
+    *type = nsXPTType(td->mPrefix);
     return NS_OK;
 }
 
@@ -503,7 +457,7 @@ xptiInterfaceEntry::GetSizeIsArgNumberForParam(uint16_t methodIndex,
             GetSizeIsArgNumberForParam(methodIndex, param, dimension, argnum);
 
     if(methodIndex >= mMethodBaseIndex +
-                      mDescriptor->num_methods)
+                      mDescriptor->mNumMethods)
     {
         NS_ERROR("bad index");
         return NS_ERROR_INVALID_ARG;
@@ -517,16 +471,14 @@ xptiInterfaceEntry::GetSizeIsArgNumberForParam(uint16_t methodIndex,
             return rv;
     }
     else
-        td = &param->type;
+        td = &param->mType;
 
     // verify that this is a type that has size_is
     switch (td->Tag()) {
       case TD_ARRAY:
-        *argnum = td->u.array.argnum;
-        break;
       case TD_PSTRING_SIZE_IS:
       case TD_PWSTRING_SIZE_IS:
-        *argnum = td->u.pstring_is.argnum;
+        *argnum = td->ArgNum();
         break;
       default:
         NS_ERROR("not a size_is");
@@ -549,16 +501,16 @@ xptiInterfaceEntry::GetInterfaceIsArgNumberForParam(uint16_t methodIndex,
             GetInterfaceIsArgNumberForParam(methodIndex, param, argnum);
 
     if(methodIndex >= mMethodBaseIndex +
-                      mDescriptor->num_methods)
+                      mDescriptor->mNumMethods)
     {
         NS_ERROR("bad index");
         return NS_ERROR_INVALID_ARG;
     }
 
-    const XPTTypeDescriptor *td = &param->type;
+    const XPTTypeDescriptor *td = &param->mType;
 
     while (td->Tag() == TD_ARRAY) {
-        td = &mDescriptor->additional_types[td->u.array.additional_type];
+        td = td->ArrayElementType();
     }
 
     if (td->Tag() != TD_INTERFACE_IS_TYPE) {
@@ -566,7 +518,7 @@ xptiInterfaceEntry::GetInterfaceIsArgNumberForParam(uint16_t methodIndex,
         return NS_ERROR_INVALID_ARG;
     }
 
-    *argnum = td->u.interface_is.argnum;
+    *argnum = td->ArgNum();
     return NS_OK;
 }
 

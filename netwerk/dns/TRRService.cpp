@@ -16,6 +16,7 @@
 static const char kOpenCaptivePortalLoginEvent[] = "captive-portal-login";
 static const char kClearPrivateData[] = "clear-private-data";
 static const char kPurge[] = "browser:purge-session-history";
+static const char kDisableIpv6Pref[] = "network.dns.disableIPv6";
 
 #define TRR_PREF_PREFIX           "network.trr."
 #define TRR_PREF(x)               TRR_PREF_PREFIX x
@@ -44,6 +45,7 @@ TRRService::TRRService()
   , mUseGET(false)
   , mClearTRRBLStorage(false)
   , mConfirmationState(CONFIRM_INIT)
+  , mRetryConfirmInterval(1000)
 {
   MOZ_ASSERT(NS_IsMainThread(), "wrong thread");
 }
@@ -69,6 +71,20 @@ TRRService::Init()
   GetPrefBranch(getter_AddRefs(prefBranch));
   if (prefBranch) {
     prefBranch->AddObserver(TRR_PREF_PREFIX, this, true);
+    prefBranch->AddObserver(kDisableIpv6Pref, this, true);
+  }
+  nsCOMPtr<nsICaptivePortalService> captivePortalService =
+    do_GetService(NS_CAPTIVEPORTAL_CID);
+  if (captivePortalService) {
+    int32_t captiveState;
+    MOZ_ALWAYS_SUCCEEDS(captivePortalService->GetState(&captiveState));
+
+    if ((captiveState == nsICaptivePortalService::UNLOCKED_PORTAL) ||
+        (captiveState == nsICaptivePortalService::NOT_CAPTIVE)) {
+      mCaptiveIsPassed = true;
+    }
+    LOG(("TRRService::Init mCaptiveState=%d mCaptiveIsPassed=%d\n",
+         captiveState, (int)mCaptiveIsPassed));
   }
 
   ReadPrefs(NULL);
@@ -82,12 +98,21 @@ TRRService::Init()
 bool
 TRRService::Enabled()
 {
-  if (mConfirmationState == CONFIRM_INIT && !mWaitForCaptive) {
+  if (mConfirmationState == CONFIRM_INIT &&
+      (!mWaitForCaptive || mCaptiveIsPassed || (mMode == MODE_TRRONLY))) {
+    LOG(("TRRService::Enabled => CONFIRM_TRYING\n"));
     mConfirmationState = CONFIRM_TRYING;
   }
 
   if (mConfirmationState == CONFIRM_TRYING) {
+    LOG(("TRRService::Enabled MaybeConfirm()\n"));
     MaybeConfirm();
+  }
+
+  if (mConfirmationState != CONFIRM_OK) {
+    LOG(("TRRService::Enabled mConfirmationState=%d mCaptiveIsPassed=%d\n",
+         (int)mConfirmationState,
+         (int)mCaptiveIsPassed));
   }
 
   return (mConfirmationState == CONFIRM_OK);
@@ -188,6 +213,18 @@ TRRService::ReadPrefs(const char *name)
       mTRRTimeout = ms;
     }
   }
+  if (!name || !strcmp(name, TRR_PREF("early-AAAA"))) {
+    bool tmp;
+    if (NS_SUCCEEDED(Preferences::GetBool(TRR_PREF("early-AAAA"), &tmp))) {
+      mEarlyAAAA = tmp;
+    }
+  }
+  if (!name || !strcmp(name, kDisableIpv6Pref)) {
+    bool tmp;
+    if (NS_SUCCEEDED(Preferences::GetBool(kDisableIpv6Pref, &tmp))) {
+      mDisableIPv6 = tmp;
+    }
+  }
 
   return NS_OK;
 }
@@ -249,25 +286,30 @@ TRRService::Observe(nsISupports *aSubject,
   } else if (!strcmp(aTopic, NS_CAPTIVE_PORTAL_CONNECTIVITY)) {
     nsAutoCString data = NS_ConvertUTF16toUTF8(aData);
     LOG(("TRRservice captive portal was %s\n", data.get()));
-    if (!mTRRBLStorage) {
-      mTRRBLStorage = DataStorage::Get(DataStorageClass::TRRBlacklist);
-      if (mTRRBLStorage) {
-        bool storageWillPersist = true;
-        if (NS_FAILED(mTRRBLStorage->Init(storageWillPersist))) {
-          mTRRBLStorage = nullptr;
-        }
-        if (mClearTRRBLStorage) {
-          if (mTRRBLStorage) {
-            mTRRBLStorage->Clear();
+    if (data.Equals("clear")) {
+      if (!mTRRBLStorage) {
+        mTRRBLStorage = DataStorage::Get(DataStorageClass::TRRBlacklist);
+        if (mTRRBLStorage) {
+          bool storageWillPersist = true;
+          if (NS_FAILED(mTRRBLStorage->Init(storageWillPersist))) {
+            mTRRBLStorage = nullptr;
           }
-          mClearTRRBLStorage = false;
+          if (mClearTRRBLStorage) {
+            if (mTRRBLStorage) {
+              mTRRBLStorage->Clear();
+            }
+            mClearTRRBLStorage = false;
+          }
         }
       }
+      if (mConfirmationState != CONFIRM_OK) {
+        mConfirmationState = CONFIRM_TRYING;
+        MaybeConfirm();
+      } else {
+        LOG(("TRRservice CP clear when already up!\n"));
+      }
+      mCaptiveIsPassed = true;
     }
-
-    mConfirmationState = CONFIRM_TRYING;
-    MaybeConfirm();
-    mCaptiveIsPassed = true;
 
   } else if (!strcmp(aTopic, kClearPrivateData) ||
              !strcmp(aTopic, kPurge)) {
@@ -284,6 +326,8 @@ TRRService::MaybeConfirm()
 {
   if ((mMode == MODE_NATIVEONLY) || mConfirmer ||
       mConfirmationState != CONFIRM_TRYING) {
+    LOG(("TRRService:MaybeConfirm mode=%d, mConfirmer=%p mConfirmationState=%d\n",
+         (int)mMode, (void *)mConfirmer, (int)mConfirmationState));
     return;
   }
   nsAutoCString host;
@@ -396,8 +440,19 @@ TRRService::IsTRRBlacklisted(const nsACString &aHost, bool privateBrowsing,
       return true;
     } else {
       // the blacklisted entry has expired
-      mTRRBLStorage->Remove(hashkey, privateBrowsing ?
-                            DataStorage_Private : DataStorage_Persistent);
+      RefPtr<DataStorage> storage = mTRRBLStorage;
+      nsCOMPtr<nsIRunnable> runnable =
+        NS_NewRunnableFunction("proxyStorageRemove",
+                               [storage, hashkey, privateBrowsing]() {
+                                 storage->Remove(hashkey, privateBrowsing ?
+                                                 DataStorage_Private :
+                                                 DataStorage_Persistent);
+                               });
+      if (!NS_IsMainThread()) {
+        NS_DispatchToMainThread(runnable);
+      } else {
+        runnable->Run();
+      }
     }
   }
   return false;
@@ -472,6 +527,24 @@ TRRService::TRRBlacklist(const nsACString &aHost, bool privateBrowsing, bool aPa
   }
 }
 
+NS_IMETHODIMP
+TRRService::Notify(nsITimer *aTimer)
+{
+  if (aTimer == mRetryConfirmTimer) {
+    mRetryConfirmTimer = nullptr;
+    if (mConfirmationState == CONFIRM_FAILED) {
+      LOG(("TRRService retry NS of %s\n", mConfirmationNS.get()));
+      mConfirmationState = CONFIRM_TRYING;
+      MaybeConfirm();
+    }
+  } else {
+    MOZ_CRASH("Unknown timer");
+  }
+
+  return NS_OK;
+}
+
+
 AHostResolver::LookupStatus
 TRRService::CompleteLookup(nsHostRecord *rec, nsresult status, AddrInfo *aNewRRSet, bool pb)
 {
@@ -490,6 +563,18 @@ TRRService::CompleteLookup(nsHostRecord *rec, nsresult status, AddrInfo *aNewRRS
     LOG(("TRRService finishing confirmation test %s %d %X\n",
          mPrivateURI.get(), (int)mConfirmationState, (unsigned int)status));
     mConfirmer = nullptr;
+    if ((mConfirmationState == CONFIRM_FAILED) && (mMode == MODE_TRRONLY)) {
+      // in TRR-only mode; retry failed confirmations
+      NS_NewTimerWithCallback(getter_AddRefs(mRetryConfirmTimer),
+                              this, mRetryConfirmInterval,
+                              nsITimer::TYPE_ONE_SHOT);
+      if (mRetryConfirmInterval < 64000) {
+        // double the interval up to this point
+        mRetryConfirmInterval *= 2;
+      }
+    } else {
+      mRetryConfirmInterval = 1000;
+    }
     return LOOKUP_OK;
   }
 

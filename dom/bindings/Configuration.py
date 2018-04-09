@@ -18,18 +18,27 @@ class DescriptorProvider:
         pass
 
 
+def isChildPath(path, basePath):
+    path = os.path.normpath(path)
+    return os.path.commonprefix((path, basePath)) == basePath
+
+
 class Configuration(DescriptorProvider):
     """
     Represents global configuration state based on IDL parse data and
     the configuration file.
     """
-    def __init__(self, filename, parseData, generatedEvents=[]):
+    def __init__(self, filename, webRoots, parseData, generatedEvents=[]):
         DescriptorProvider.__init__(self)
 
         # Read the configuration file.
         glbl = {}
         execfile(filename, glbl)
         config = glbl['DOMInterfaces']
+
+        webRoots = tuple(map(os.path.normpath, webRoots))
+        def isInWebIDLRoot(path):
+            return any(isChildPath(path, root) for root in webRoots)
 
         # Build descriptors for all the interfaces we have in the parse data.
         # This allows callers to specify a subset of interfaces by filtering
@@ -94,6 +103,17 @@ class Configuration(DescriptorProvider):
                             "%s\n"
                             "%s" %
                             (partialIface.location, iface.location))
+                if not (iface.getExtendedAttribute("ChromeOnly") or
+                        not (iface.hasInterfaceObject() or
+                             iface.isNavigatorProperty()) or
+                        isInWebIDLRoot(iface.filename())):
+                    raise TypeError(
+                        "Interfaces which are exposed to the web may only be "
+                        "defined in a DOM WebIDL root %r. Consider marking "
+                        "the interface [ChromeOnly] if you do not want it "
+                        "exposed to the web.\n"
+                        "%s" %
+                        (webRoots, iface.location))
             self.interfaces[iface.identifier.name] = iface
             if iface.identifier.name not in config:
                 # Completely skip consequential interfaces with no descriptor
@@ -378,8 +398,6 @@ class Descriptor(DescriptorProvider):
 
         self.notflattened = desc.get('notflattened', False)
         self.register = desc.get('register', True)
-
-        self.hasXPConnectImpls = desc.get('hasXPConnectImpls', False)
 
         # If we're concrete, we need to crawl our ancestor interfaces and mark
         # them as having a concrete descendant.
@@ -736,16 +754,6 @@ class Descriptor(DescriptorProvider):
                                                        "HTMLEmbedElement"])
     def needsXrayNamedDeleterHook(self):
         return self.operations["NamedDeleter"] is not None
-
-    def needsSpecialGenericOps(self):
-        """
-        Returns true if this descriptor requires generic ops other than
-        GenericBindingMethod/GenericBindingGetter/GenericBindingSetter.
-
-        In practice we need to do this if our this value might be an XPConnect
-        object or if we need to coerce null/undefined to the global.
-        """
-        return self.hasXPConnectImpls or self.interface.isOnGlobalProtoChain()
 
     def isGlobal(self):
         """

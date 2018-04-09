@@ -15,7 +15,6 @@
 // this after nsISupports, to pick up IID
 // so that xpt stuff doesn't try to define it itself...
 #include "xpt_struct.h"
-#include "xpt_xdr.h"
 
 #include "nsIInterfaceInfo.h"
 #include "nsIInterfaceInfoManager.h"
@@ -58,26 +57,11 @@
 
 /***************************************************************************/
 
-#if 0 && defined(DEBUG_jband)
-#define LOG_RESOLVE(x) printf x
-#define LOG_LOAD(x)    printf x
-#define LOG_AUTOREG(x) do{printf x; xptiInterfaceInfoManager::WriteToLog x;}while(0)
-#else
-#define LOG_RESOLVE(x) ((void)0)
-#define LOG_LOAD(x)    ((void)0)
-#define LOG_AUTOREG(x) ((void)0)
-#endif
-
-#if 1 && defined(DEBUG_jband)
-#define SHOW_INFO_COUNT_STATS
-#endif
-
-/***************************************************************************/
-
 class xptiInterfaceInfo;
 class xptiInterfaceEntry;
 class xptiTypelibGuts;
 
+struct XPTArena;
 extern XPTArena* gXPTIStructArena;
 
 /***************************************************************************/
@@ -91,14 +75,12 @@ extern XPTArena* gXPTIStructArena;
 class xptiTypelibGuts
 {
 public:
-    static xptiTypelibGuts* Create(XPTHeader* aHeader);
+    static xptiTypelibGuts* Create();
 
-    XPTHeader*          GetHeader()           {return mHeader;}
-    uint16_t            GetEntryCount() const {return mHeader->num_interfaces;}
+    uint16_t GetEntryCount() const { return XPTHeader::kNumInterfaces; }
 
     void                SetEntryAt(uint16_t i, xptiInterfaceEntry* ptr)
     {
-        NS_ASSERTION(mHeader,"bad state!");
         NS_ASSERTION(i < GetEntryCount(),"bad param!");
         mEntryArray[i] = ptr;
     }
@@ -107,13 +89,10 @@ public:
     const char* GetEntryNameAt(uint16_t i);
 
 private:
-    explicit xptiTypelibGuts(XPTHeader* aHeader)
-        : mHeader(aHeader)
-    { }
+    xptiTypelibGuts() = default;
     ~xptiTypelibGuts();
 
 private:
-    XPTHeader*           mHeader;        // hold pointer into arena
     xptiInterfaceEntry*  mEntryArray[1]; // Always last. Sized to fit.
 };
 
@@ -168,9 +147,7 @@ private:
 class xptiInterfaceEntry
 {
 public:
-    static xptiInterfaceEntry* Create(const char* aName,
-                                      const nsID& aIID,
-                                      XPTInterfaceDescriptor* aDescriptor,
+    static xptiInterfaceEntry* Create(const XPTInterfaceDescriptor* aIface,
                                       xptiTypelibGuts* aTypelib);
 
     enum {
@@ -253,8 +230,6 @@ public:
     nsresult GetMethodInfo(uint16_t index, const nsXPTMethodInfo * *info);
     nsresult GetMethodInfoForName(const char *methodName, uint16_t *index, const nsXPTMethodInfo * *info);
     nsresult GetConstant(uint16_t index, JS::MutableHandleValue, char** constant);
-    nsresult GetInfoForParam(uint16_t methodIndex, const nsXPTParamInfo * param, nsIInterfaceInfo **_retval);
-    nsresult GetIIDForParam(uint16_t methodIndex, const nsXPTParamInfo * param, nsIID * *_retval);
     nsresult GetTypeForParam(uint16_t methodIndex, const nsXPTParamInfo * param, uint16_t dimension, nsXPTType *_retval);
     nsresult GetSizeIsArgNumberForParam(uint16_t methodIndex, const nsXPTParamInfo * param, uint16_t dimension, uint8_t *_retval);
     nsresult GetInterfaceIsArgNumberForParam(uint16_t methodIndex, const nsXPTParamInfo * param, uint8_t *_retval);
@@ -266,9 +241,7 @@ public:
     nsresult GetIIDForParamNoAlloc(uint16_t methodIndex, const nsXPTParamInfo * param, nsIID *iid);
 
 private:
-    xptiInterfaceEntry(const char* aName,
-                       const nsID& aIID,
-                       XPTInterfaceDescriptor* aDescriptor,
+    xptiInterfaceEntry(const XPTInterfaceDescriptor* aIface,
                        xptiTypelibGuts* aTypelib);
     ~xptiInterfaceEntry();
 
@@ -304,7 +277,7 @@ private:
 
 private:
     nsID                    mIID;
-    XPTInterfaceDescriptor* mDescriptor;
+    const XPTInterfaceDescriptor* mDescriptor;
 
     xptiTypelibGuts* mTypelib;
 
@@ -329,7 +302,6 @@ public:
 
     // Use delegation to implement (most!) of nsIInterfaceInfo.
     NS_IMETHOD GetName(char * *aName) override { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->GetName(aName); }
-    NS_IMETHOD GetInterfaceIID(nsIID * *aIID) override { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->GetIID(aIID); }
     NS_IMETHOD IsScriptable(bool *_retval) override { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->IsScriptable(_retval); }
     NS_IMETHOD IsBuiltinClass(bool *_retval) override { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->IsBuiltinClass(_retval); }
     NS_IMETHOD IsMainProcessScriptableOnly(bool *_retval) override { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->IsMainProcessScriptableOnly(_retval); }
@@ -346,8 +318,6 @@ public:
     NS_IMETHOD GetMethodInfo(uint16_t index, const nsXPTMethodInfo * *info) override { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->GetMethodInfo(index, info); }
     NS_IMETHOD GetMethodInfoForName(const char *methodName, uint16_t *index, const nsXPTMethodInfo * *info) override { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->GetMethodInfoForName(methodName, index, info); }
     NS_IMETHOD GetConstant(uint16_t index, JS::MutableHandleValue constant, char** name) override { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->GetConstant(index, constant, name); }
-    NS_IMETHOD GetInfoForParam(uint16_t methodIndex, const nsXPTParamInfo * param, nsIInterfaceInfo **_retval) override { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->GetInfoForParam(methodIndex, param, _retval); }
-    NS_IMETHOD GetIIDForParam(uint16_t methodIndex, const nsXPTParamInfo * param, nsIID * *_retval) override { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->GetIIDForParam(methodIndex, param, _retval); }
     NS_IMETHOD GetTypeForParam(uint16_t methodIndex, const nsXPTParamInfo * param, uint16_t dimension, nsXPTType *_retval) override { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->GetTypeForParam(methodIndex, param, dimension, _retval); }
     NS_IMETHOD GetSizeIsArgNumberForParam(uint16_t methodIndex, const nsXPTParamInfo * param, uint16_t dimension, uint8_t *_retval) override { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->GetSizeIsArgNumberForParam(methodIndex, param, dimension, _retval); }
     NS_IMETHOD GetInterfaceIsArgNumberForParam(uint16_t methodIndex, const nsXPTParamInfo * param, uint8_t *_retval) override { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->GetInterfaceIsArgNumberForParam(methodIndex, param, _retval); }

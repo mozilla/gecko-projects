@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Tests that errors still show up in the Web Console after a page reload.
 // See bug 580030: the error handler fails silently after page reload.
 // https://bugzilla.mozilla.org/show_bug.cgi?id=580030
@@ -14,7 +12,7 @@
 const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
                  "new-console-output/test/mochitest/test-error.html";
 
-add_task(async function () {
+add_task(async function() {
   let hud = await openNewTabAndConsole(TEST_URI);
 
   info("Reload the content window");

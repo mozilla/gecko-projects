@@ -80,12 +80,25 @@ ServiceWorkerRegistrationInfo::Clear()
   NotifyChromeRegistrationListeners();
 }
 
+void
+ServiceWorkerRegistrationInfo::ClearAsCorrupt()
+{
+  mCorrupt = true;
+  Clear();
+}
+
+bool
+ServiceWorkerRegistrationInfo::IsCorrupt() const
+{
+  return mCorrupt;
+}
+
 ServiceWorkerRegistrationInfo::ServiceWorkerRegistrationInfo(
     const nsACString& aScope,
     nsIPrincipal* aPrincipal,
     ServiceWorkerUpdateViaCache aUpdateViaCache)
   : mPrincipal(aPrincipal)
-  , mDescriptor(aPrincipal, aScope, aUpdateViaCache)
+  , mDescriptor(GetNextId(), aPrincipal, aScope, aUpdateViaCache)
   , mControlledClientsCounter(0)
   , mDelayMultiplier(0)
   , mUpdateState(NoUpdate)
@@ -93,6 +106,7 @@ ServiceWorkerRegistrationInfo::ServiceWorkerRegistrationInfo(
   , mCreationTimeStamp(TimeStamp::Now())
   , mLastUpdateTime(0)
   , mPendingUninstall(false)
+  , mCorrupt(false)
 {}
 
 ServiceWorkerRegistrationInfo::~ServiceWorkerRegistrationInfo()
@@ -308,12 +322,6 @@ ServiceWorkerRegistrationInfo::Activate()
   MOZ_DIAGNOSTIC_ASSERT(mActiveWorker);
   swm->UpdateClientControllers(this);
 
-  nsCOMPtr<nsIRunnable> failRunnable = NewRunnableMethod<bool>(
-    "dom::ServiceWorkerRegistrationInfo::FinishActivate",
-    this,
-    &ServiceWorkerRegistrationInfo::FinishActivate,
-    false /* success */);
-
   nsMainThreadPtrHandle<ServiceWorkerRegistrationInfo> handle(
     new nsMainThreadPtrHolder<ServiceWorkerRegistrationInfo>(
       "ServiceWorkerRegistrationInfoProxy", this));
@@ -322,9 +330,14 @@ ServiceWorkerRegistrationInfo::Activate()
   ServiceWorkerPrivate* workerPrivate = mActiveWorker->WorkerPrivate();
   MOZ_ASSERT(workerPrivate);
   nsresult rv = workerPrivate->SendLifeCycleEvent(NS_LITERAL_STRING("activate"),
-                                                  callback, failRunnable);
+                                                  callback);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(failRunnable));
+    nsCOMPtr<nsIRunnable> failRunnable = NewRunnableMethod<bool>(
+      "dom::ServiceWorkerRegistrationInfo::FinishActivate",
+      this,
+      &ServiceWorkerRegistrationInfo::FinishActivate,
+      false /* success */);
+    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(failRunnable.forget()));
     return;
   }
 }
@@ -728,6 +741,15 @@ ServiceWorkerRegistrationInfo::GetUpdateDelay()
   }
 
   return delay;
+}
+
+// static
+uint64_t
+ServiceWorkerRegistrationInfo::GetNextId()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  static uint64_t sNextId = 0;
+  return ++sNextId;
 }
 
 } // namespace dom

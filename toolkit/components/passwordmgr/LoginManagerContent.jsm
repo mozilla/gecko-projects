@@ -384,7 +384,7 @@ var LoginManagerContent = {
       return;
     }
 
-    let pwField = event.target;
+    let pwField = event.originalTarget;
     if (pwField.form) {
       // Fill is handled by onDOMFormHasPassword which is already throttled.
       return;
@@ -892,7 +892,7 @@ var LoginManagerContent = {
         continue;
       }
 
-      if (formRoot instanceof Ci.nsIDOMHTMLFormElement) {
+      if (ChromeUtils.getClassName(formRoot) === "HTMLFormElement") {
         // For now only perform capture upon navigation for FormLike's without
         // a <form> to avoid capture from both an earlyformsubmit and
         // navigation for the same "form".
@@ -1017,7 +1017,7 @@ var LoginManagerContent = {
     clobberPassword = false,
     userTriggered = false,
   } = {}) {
-    if (form instanceof Ci.nsIDOMHTMLFormElement) {
+    if (ChromeUtils.getClassName(form) === "HTMLFormElement") {
       throw new Error("_fillForm should only be called with FormLike objects");
     }
 

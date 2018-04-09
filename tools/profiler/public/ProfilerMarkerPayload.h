@@ -8,6 +8,7 @@
 #define ProfilerMarkerPayload_h
 
 #include "mozilla/Attributes.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtrExtensions.h"
@@ -17,6 +18,7 @@
 
 #include "js/Utility.h"
 #include "gfxASurface.h"
+#include "mozilla/ServoTraversalStatistics.h"
 
 namespace mozilla {
 namespace layers {
@@ -150,11 +152,15 @@ public:
   {}
 
   UserTimingMarkerPayload(const nsAString& aName,
+                          const mozilla::Maybe<nsString>& aStartMark,
+                          const mozilla::Maybe<nsString>& aEndMark,
                           const mozilla::TimeStamp& aStartTime,
                           const mozilla::TimeStamp& aEndTime)
     : ProfilerMarkerPayload(aStartTime, aEndTime)
     , mEntryType("measure")
     , mName(aName)
+    , mStartMark(aStartMark)
+    , mEndMark(aEndMark)
   {}
 
   DECL_STREAM_PAYLOAD
@@ -163,6 +169,8 @@ private:
   // Either "mark" or "measure".
   const char* mEntryType;
   nsString mName;
+  mozilla::Maybe<nsString> mStartMark;
+  mozilla::Maybe<nsString> mEndMark;
 };
 
 // Contains the translation applied to a 2d layer so we can track the layer
@@ -260,6 +268,27 @@ public:
 
   DECL_STREAM_PAYLOAD
 private:
+};
+
+class StyleMarkerPayload : public ProfilerMarkerPayload
+{
+public:
+  StyleMarkerPayload(const mozilla::TimeStamp& aStartTime,
+                     const mozilla::TimeStamp& aEndTime,
+                     UniqueProfilerBacktrace aCause,
+                     const mozilla::ServoTraversalStatistics& aStats)
+    : ProfilerMarkerPayload(aStartTime, aEndTime)
+    , mStats(aStats)
+  {
+    if (aCause) {
+      SetStack(Move(aCause));
+    }
+  }
+
+  DECL_STREAM_PAYLOAD
+
+private:
+  mozilla::ServoTraversalStatistics mStats;
 };
 
 #endif // ProfilerMarkerPayload_h

@@ -43,11 +43,13 @@ class StreamFilterParent final
   : public PStreamFilterParent
   , public nsIStreamListener
   , public nsIThreadRetargetableStreamListener
+  , public nsIRequest
   , public StreamFilterBase
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSISTREAMLISTENER
+  NS_DECL_NSIREQUEST
   NS_DECL_NSIREQUESTOBSERVER
   NS_DECL_NSITHREADRETARGETABLESTREAMLISTENER
 
@@ -93,6 +95,7 @@ protected:
   virtual IPCResult RecvResume() override;
   virtual IPCResult RecvClose() override;
   virtual IPCResult RecvDisconnect() override;
+  virtual IPCResult RecvDestroy() override;
 
   virtual void DeallocPStreamFilterParent() override;
 
@@ -123,6 +126,7 @@ private:
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
   void Broken();
+  void FinishDisconnect();
 
   void
   CheckResult(bool aResult)
@@ -164,6 +168,7 @@ private:
   void RunOnIOThread(already_AddRefed<Runnable>);
 
   nsCOMPtr<nsIChannel> mChannel;
+  nsCOMPtr<nsILoadGroup> mLoadGroup;
   nsCOMPtr<nsIStreamListener> mOrigListener;
 
   nsCOMPtr<nsIEventTarget> mMainThread;
@@ -175,6 +180,7 @@ private:
 
   bool mReceivedStop;
   bool mSentStop;
+  bool mDisconnected = false;
 
   nsCOMPtr<nsISupports> mContext;
   uint64_t mOffset;

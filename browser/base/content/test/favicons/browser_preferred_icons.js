@@ -40,7 +40,7 @@ add_task(async function setup() {
   const URL = ROOT + "discovery.html";
   let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, URL);
   registerCleanupFunction(async function() {
-    await BrowserTestUtils.removeTab(tab);
+    BrowserTestUtils.removeTab(tab);
   });
 });
 
@@ -159,6 +159,31 @@ add_task(async function guess_invalid() {
     { href: "data:text/plain,icon" },
     { href: "file:///icon" },
     { href: "about:icon" },
+  ]);
+  await promise;
+  // Must have at least one test.
+  Assert.ok(true, "The expected icon has been set");
+});
+
+add_task(async function guess_bestSized() {
+  let preferredWidth = 16 * Math.ceil(window.devicePixelRatio);
+  let promise = waitIcon(ROOT + "icon3.png");
+  await createLinks([
+    { href: ROOT + "icon.png",
+      type: "image/png",
+      size: preferredWidth - 1
+    },
+    { href: ROOT + "icon2.png",
+      type: "image/png",
+    },
+    { href: ROOT + "icon3.png",
+      type: "image/png",
+      size: preferredWidth + 1
+    },
+    { href: ROOT + "icon4.png",
+      type: "image/png",
+      size: preferredWidth + 2
+    },
   ]);
   await promise;
   // Must have at least one test.

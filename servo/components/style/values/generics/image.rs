@@ -42,10 +42,8 @@ pub struct Gradient<LineDirection, Length, LengthOrPercentage, Position, Color, 
     /// The color stops and interpolation hints.
     pub items: Vec<GradientItem<Color, LengthOrPercentage>>,
     /// True if this is a repeating gradient.
-    #[compute(clone)]
     pub repeating: bool,
     /// Compatibility mode.
-    #[compute(clone)]
     pub compat_mode: CompatMode,
 }
 
@@ -122,7 +120,7 @@ pub enum GradientItem<Color, LengthOrPercentage> {
 
 /// A color stop.
 /// <https://drafts.csswg.org/css-images/#typedef-color-stop-list>
-#[derive(Clone, Copy, MallocSizeOf, PartialEq, ToComputedValue, ToCss)]
+#[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, ToComputedValue, ToCss)]
 pub struct ColorStop<Color, LengthOrPercentage> {
     /// The color of this stop.
     pub color: Color,
@@ -132,8 +130,8 @@ pub struct ColorStop<Color, LengthOrPercentage> {
 
 /// Specified values for a paint worklet.
 /// <https://drafts.css-houdini.org/css-paint-api/>
-#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "servo", derive(MallocSizeOf))]
+#[derive(Clone, Debug, PartialEq, ToComputedValue)]
 pub struct PaintWorklet {
     /// The name the worklet was registered with.
     pub name: Atom,
@@ -142,8 +140,6 @@ pub struct PaintWorklet {
     #[cfg_attr(feature = "servo", ignore_malloc_size_of = "Arc")]
     pub arguments: Vec<Arc<custom_properties::SpecifiedValue>>,
 }
-
-trivial_to_computed_value!(PaintWorklet);
 
 impl ToCss for PaintWorklet {
     fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
@@ -312,17 +308,5 @@ where
                 length.to_css(dest)
             },
         }
-    }
-}
-
-impl<C, L> fmt::Debug for ColorStop<C, L>
-    where C: fmt::Debug, L: fmt::Debug,
-{
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self.color)?;
-        if let Some(ref pos) = self.position {
-            write!(f, " {:?}", pos)?;
-        }
-        Ok(())
     }
 }

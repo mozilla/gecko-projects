@@ -234,6 +234,7 @@ jit::EnterBaselineAtBranch(JSContext* cx, InterpreterFrame* fp, jsbytecode* pc)
 MethodStatus
 jit::BaselineCompile(JSContext* cx, JSScript* script, bool forceDebugInstrumentation)
 {
+    assertSameCompartment(cx, script);
     MOZ_ASSERT(!script->hasBaselineScript());
     MOZ_ASSERT(script->canBaselineCompile());
     MOZ_ASSERT(IsBaselineEnabled(cx));
@@ -1217,10 +1218,8 @@ jit::MarkActiveBaselineScripts(Zone* zone)
     if (zone->isAtomsZone())
         return;
     JSContext* cx = TlsContext.get();
-    for (const CooperatingContext& target : cx->runtime()->cooperatingContexts()) {
-        for (JitActivationIterator iter(cx, target); !iter.done(); ++iter) {
-            if (iter->compartment()->zone() == zone)
-                MarkActiveBaselineScripts(cx, iter);
-        }
+    for (JitActivationIterator iter(cx); !iter.done(); ++iter) {
+        if (iter->compartment()->zone() == zone)
+            MarkActiveBaselineScripts(cx, iter);
     }
 }

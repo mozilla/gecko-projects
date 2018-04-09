@@ -144,21 +144,6 @@ const SNAPSHOT_SCHEMA = {
         maxContentProcesses: {
           type: "number",
         },
-        styloBuild: {
-          type: "boolean",
-        },
-        styloDefault: {
-          type: "boolean",
-        },
-        styloResult: {
-          type: "boolean",
-        },
-        styloChromeDefault: {
-          type: "boolean",
-        },
-        styloChromeResult: {
-          type: "boolean",
-        },
         policiesStatus: {
           type: "number",
         },
@@ -439,10 +424,6 @@ const SNAPSHOT_SCHEMA = {
         currentMaxAudioChannels: {
           required: true,
           type: "number",
-        },
-        currentPreferredChannelLayout: {
-          required: true,
-          type: "string",
         },
         currentPreferredSampleRate: {
           required: true,

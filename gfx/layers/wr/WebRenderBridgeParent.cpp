@@ -6,7 +6,6 @@
 
 #include "mozilla/layers/WebRenderBridgeParent.h"
 
-#include "apz/src/AsyncPanZoomController.h"
 #include "CompositableHost.h"
 #include "gfxEnv.h"
 #include "gfxPrefs.h"
@@ -16,7 +15,8 @@
 #include "GLContextProvider.h"
 #include "mozilla/Range.h"
 #include "mozilla/layers/AnimationHelper.h"
-#include "mozilla/layers/APZCTreeManager.h"
+#include "mozilla/layers/APZSampler.h"
+#include "mozilla/layers/APZUpdater.h"
 #include "mozilla/layers/Compositor.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/CompositorThread.h"
@@ -178,6 +178,7 @@ WebRenderBridgeParent::WebRenderBridgeParent(CompositorBridgeParentBase* aCompos
   , mPaused(false)
   , mDestroyed(false)
   , mForceRendering(false)
+  , mReceivedDisplayList(false)
 {
   MOZ_ASSERT(mAsyncImageManager);
   MOZ_ASSERT(mAnimStorage);
@@ -198,6 +199,7 @@ WebRenderBridgeParent::WebRenderBridgeParent(const wr::PipelineId& aPipelineId)
   , mPaused(false)
   , mDestroyed(true)
   , mForceRendering(false)
+  , mReceivedDisplayList(false)
 {
 }
 
@@ -510,16 +512,16 @@ WebRenderBridgeParent::UpdateAPZ(bool aUpdateHitTestingTree)
   if (!cbp) {
     return;
   }
-  uint64_t rootLayersId = cbp->RootLayerTreeId();
+  LayersId rootLayersId = cbp->RootLayerTreeId();
   RefPtr<WebRenderBridgeParent> rootWrbp = cbp->GetWebRenderBridgeParent();
   if (!rootWrbp) {
     return;
   }
-  if (RefPtr<APZCTreeManager> apzc = cbp->GetAPZCTreeManager()) {
-    apzc->UpdateFocusState(rootLayersId, GetLayersId(),
-                           mScrollData.GetFocusTarget());
+  if (RefPtr<APZUpdater> apz = cbp->GetAPZUpdater()) {
+    apz->UpdateFocusState(rootLayersId, GetLayersId(),
+                          mScrollData.GetFocusTarget());
     if (aUpdateHitTestingTree) {
-      apzc->UpdateHitTestingTree(rootLayersId, rootWrbp->GetScrollData(),
+      apz->UpdateHitTestingTree(rootLayersId, rootWrbp->GetScrollData(),
           mScrollData.IsFirstPaint(), GetLayersId(),
           mScrollData.GetPaintSequenceNumber());
     }
@@ -534,7 +536,7 @@ WebRenderBridgeParent::PushAPZStateToWR(wr::TransactionBuilder& aTxn,
   if (!cbp) {
     return false;
   }
-  if (RefPtr<APZCTreeManager> apzc = cbp->GetAPZCTreeManager()) {
+  if (RefPtr<APZSampler> apz = cbp->GetAPZSampler()) {
     TimeStamp animationTime = cbp->GetTestingTimeStamp().valueOr(
         mCompositorScheduler->GetLastComposeTime());
     TimeDuration frameInterval = cbp->GetVsyncInterval();
@@ -543,7 +545,7 @@ WebRenderBridgeParent::PushAPZStateToWR(wr::TransactionBuilder& aTxn,
     if (frameInterval != TimeDuration::Forever()) {
       animationTime += frameInterval;
     }
-    return apzc->PushStateToWR(aTxn, animationTime, aTransformArray);
+    return apz->PushStateToWR(aTxn, animationTime, aTransformArray);
   }
   return false;
 }
@@ -581,7 +583,6 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
 
   AUTO_PROFILER_TRACING("Paint", "SetDisplayList");
   UpdateFwdTransactionId(aFwdTransactionId);
-  AutoClearReadLocks clearLocks(mReadLocks);
 
   // This ensures that destroy operations are always processed. It is not safe
   // to early-return from RecvDPEnd without doing so.
@@ -597,6 +598,8 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
   if (!UpdateResources(aResourceUpdates, aSmallShmems, aLargeShmems, txn)) {
     return IPC_FAIL(this, "Failed to deserialize resource updates");
   }
+
+  mReceivedDisplayList = true;
 
   wr::Vec<uint8_t> dlData(Move(dl));
 
@@ -632,7 +635,7 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
     // Pretend we composited since someone is wating for this event,
     // though DisplayList was not pushed to webrender.
     TimeStamp now = TimeStamp::Now();
-    mCompositorBridge->DidComposite(wr::AsUint64(mPipelineId), now, now);
+    mCompositorBridge->DidComposite(GetLayersId(), now, now);
   }
 
   wr::IpcResourceUpdateQueue::ReleaseShmems(this, aSmallShmems);
@@ -659,7 +662,6 @@ WebRenderBridgeParent::RecvEmptyTransaction(const FocusTarget& aFocusTarget,
 
   AUTO_PROFILER_TRACING("Paint", "EmptyTransaction");
   UpdateFwdTransactionId(aFwdTransactionId);
-  AutoClearReadLocks clearLocks(mReadLocks);
 
   // This ensures that destroy operations are always processed. It is not safe
   // to early-return without doing so.
@@ -691,7 +693,7 @@ WebRenderBridgeParent::RecvEmptyTransaction(const FocusTarget& aFocusTarget,
     // send DidComposite now.
     if (sendDidComposite) {
       TimeStamp now = TimeStamp::Now();
-      mCompositorBridge->DidComposite(wr::AsUint64(mPipelineId), now, now);
+      mCompositorBridge->DidComposite(GetLayersId(), now, now);
     }
   }
 
@@ -1016,18 +1018,6 @@ WebRenderBridgeParent::RecvCapture()
   return IPC_OK();
 }
 
-already_AddRefed<AsyncPanZoomController>
-WebRenderBridgeParent::GetTargetAPZC(const FrameMetrics::ViewID& aScrollId)
-{
-  RefPtr<AsyncPanZoomController> apzc;
-  if (CompositorBridgeParent* cbp = GetRootCompositorBridgeParent()) {
-    if (RefPtr<APZCTreeManager> apzctm = cbp->GetAPZCTreeManager()) {
-      apzc = apzctm->GetTargetAPZC(GetLayersId(), aScrollId);
-    }
-  }
-  return apzc.forget();
-}
-
 mozilla::ipc::IPCResult
 WebRenderBridgeParent::RecvSetConfirmedTargetAPZC(const uint64_t& aBlockId,
                                                   nsTArray<ScrollableLayerGuid>&& aTargets)
@@ -1105,11 +1095,7 @@ WebRenderBridgeParent::RecvSetAsyncScrollOffset(const FrameMetrics::ViewID& aScr
   if (mDestroyed) {
     return IPC_OK();
   }
-  RefPtr<AsyncPanZoomController> apzc = GetTargetAPZC(aScrollId);
-  if (!apzc) {
-    return IPC_FAIL_NO_REASON(this);
-  }
-  apzc->SetTestAsyncScrollOffset(CSSPoint(aX, aY));
+  mCompositorBridge->SetTestAsyncScrollOffset(GetLayersId(), aScrollId, CSSPoint(aX, aY));
   return IPC_OK();
 }
 
@@ -1120,11 +1106,7 @@ WebRenderBridgeParent::RecvSetAsyncZoom(const FrameMetrics::ViewID& aScrollId,
   if (mDestroyed) {
     return IPC_OK();
   }
-  RefPtr<AsyncPanZoomController> apzc = GetTargetAPZC(aScrollId);
-  if (!apzc) {
-    return IPC_FAIL_NO_REASON(this);
-  }
-  apzc->SetTestAsyncZoom(LayerToParentLayerScale(aZoom));
+  mCompositorBridge->SetTestAsyncZoom(GetLayersId(), aScrollId, LayerToParentLayerScale(aZoom));
   return IPC_OK();
 }
 
@@ -1201,7 +1183,7 @@ WebRenderBridgeParent::CompositeToTarget(gfx::DrawTarget* aTarget, const gfx::In
   MOZ_ASSERT(aRect == nullptr);
 
   AUTO_PROFILER_TRACING("Paint", "CompositeToTraget");
-  if (mPaused) {
+  if (mPaused || !mReceivedDisplayList) {
     return;
   }
 
@@ -1313,10 +1295,10 @@ WebRenderBridgeParent::FlushTransactionIdsForEpoch(const wr::Epoch& aEpoch, cons
   return id;
 }
 
-uint64_t
+LayersId
 WebRenderBridgeParent::GetLayersId() const
 {
-  return wr::AsUint64(mPipelineId);
+  return wr::AsLayersId(mPipelineId);
 }
 
 void
@@ -1336,9 +1318,9 @@ WebRenderBridgeParent::FlushRendering()
   }
 
   mForceRendering = true;
-  if (mCompositorScheduler->FlushPendingComposite()) {
-    mApi->WaitFlushed();
-  }
+  mCompositorScheduler->FlushPendingComposite();
+  // Always meed to wait flushed, since WebRender might have ongoing tasks.
+  mApi->WaitFlushed();
   mForceRendering = false;
 }
 
@@ -1393,6 +1375,7 @@ WebRenderBridgeParent::ClearResources()
 
   wr::TransactionBuilder txn;
   txn.ClearDisplayList(wr::NewEpoch(wrEpoch), mPipelineId);
+  mReceivedDisplayList = false;
 
   // Schedule generate frame to clean up Pipeline
   ScheduleGenerateFrame();
@@ -1498,18 +1481,6 @@ WebRenderBridgeParent::RecvReleaseCompositable(const CompositableHandle& aHandle
     return IPC_OK();
   }
   ReleaseCompositable(aHandle);
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-WebRenderBridgeParent::RecvInitReadLocks(ReadLockArray&& aReadLocks)
-{
-  if (mDestroyed) {
-    return IPC_OK();
-  }
-  if (!AddReadLocks(Move(aReadLocks))) {
-    return IPC_FAIL_NO_REASON(this);
-  }
   return IPC_OK();
 }
 

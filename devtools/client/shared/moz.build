@@ -6,6 +6,9 @@
 
 BROWSER_CHROME_MANIFESTS += ['test/browser.ini']
 XPCSHELL_TESTS_MANIFESTS += ['test/unit/xpcshell.ini']
+TEST_HARNESS_FILES.xpcshell.devtools.client.shared.test += [
+    'test/shared-redux-head.js',
+]
 
 DIRS += [
     'components',
@@ -33,6 +36,7 @@ DevToolsModules(
     'inplace-editor.js',
     'key-shortcuts.js',
     'keycodes.js',
+    'link.js',
     'natural-sort.js',
     'network-throttling-profiles.js',
     'node-attribute-parser.js',

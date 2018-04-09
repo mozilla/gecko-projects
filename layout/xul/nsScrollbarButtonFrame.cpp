@@ -33,9 +33,9 @@ using namespace mozilla;
 // Creates a new Toolbar frame and returns it
 //
 nsIFrame*
-NS_NewScrollbarButtonFrame (nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewScrollbarButtonFrame (nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsScrollbarButtonFrame(aContext);
+  return new (aPresShell) nsScrollbarButtonFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsScrollbarButtonFrame)
@@ -113,8 +113,8 @@ nsScrollbarButtonFrame::HandleButtonPress(nsPresContext* aPresContext,
   if (scrollbar == nullptr)
     return false;
 
-  static Element::AttrValuesArray strings[] = { &nsGkAtoms::increment,
-                                                &nsGkAtoms::decrement,
+  static Element::AttrValuesArray strings[] = { nsGkAtoms::increment,
+                                                nsGkAtoms::decrement,
                                                 nullptr };
   int32_t index = mContent->AsElement()->FindAttrValueIn(kNameSpaceID_None,
                                                          nsGkAtoms::type,

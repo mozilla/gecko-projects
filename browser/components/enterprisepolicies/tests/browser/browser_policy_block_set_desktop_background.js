@@ -5,7 +5,7 @@
 add_task(async function setup() {
   await setupPolicyEngineWithJson({
     "policies": {
-      "BlockSetDesktopBackground": true
+      "DisableSetDesktopBackground": true
     }
   });
 });
@@ -34,5 +34,5 @@ add_task(async function test_check_set_desktop_background() {
   let promiseContextMenuHidden = BrowserTestUtils.waitForEvent(contextMenu, "popuphidden");
   contextMenu.hidePopup();
   await promiseContextMenuHidden;
-  await BrowserTestUtils.removeTab(tab);
+  BrowserTestUtils.removeTab(tab);
 });

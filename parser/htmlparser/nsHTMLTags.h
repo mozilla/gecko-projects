@@ -6,9 +6,9 @@
 #ifndef nsHTMLTags_h___
 #define nsHTMLTags_h___
 
-#include "nsStaticAtom.h"
 #include "nsString.h"
-#include "plhash.h"
+#include "nsDataHashtable.h"
+#include "nsHashKeys.h"
 
 /*
    Declare the enum list using the magic of preprocessing
@@ -40,7 +40,9 @@ enum nsHTMLTag {
 
 class nsHTMLTags {
 public:
-  static void RegisterAtoms(void);
+  using TagStringHash = nsDataHashtable<nsStringHashKey, nsHTMLTag>;
+  using TagAtomHash = nsDataHashtable<nsPtrHashKey<nsAtom>, nsHTMLTag>;
+
   static nsresult AddRefTable(void);
   static void ReleaseTable(void);
 
@@ -51,23 +53,20 @@ public:
     return StringTagToId(nsDependentAtomString(aTagName));
   }
 
-  static nsHTMLTag CaseSensitiveStringTagToId(const char16_t* aTagName)
+  static nsHTMLTag CaseSensitiveStringTagToId(const nsAString& aTagName)
   {
     NS_ASSERTION(gTagTable, "no lookup table, needs addref");
-    NS_ASSERTION(aTagName, "null tagname!");
 
-    void* tag = PL_HashTableLookupConst(gTagTable, aTagName);
-
-    return tag ? (nsHTMLTag)NS_PTR_TO_INT32(tag) : eHTMLTag_userdefined;
+    nsHTMLTag* tag = gTagTable->GetValue(aTagName);
+    return tag ? *tag : eHTMLTag_userdefined;
   }
   static nsHTMLTag CaseSensitiveAtomTagToId(nsAtom* aTagName)
   {
     NS_ASSERTION(gTagAtomTable, "no lookup table, needs addref");
     NS_ASSERTION(aTagName, "null tagname!");
 
-    void* tag = PL_HashTableLookupConst(gTagAtomTable, aTagName);
-
-    return tag ? (nsHTMLTag)NS_PTR_TO_INT32(tag) : eHTMLTag_userdefined;
+    nsHTMLTag* tag = gTagAtomTable->GetValue(aTagName);
+    return tag ? *tag : eHTMLTag_userdefined;
   }
 
 #ifdef DEBUG
@@ -75,13 +74,11 @@ public:
 #endif
 
 private:
-  // This would use NS_STATIC_ATOM_DECL if it wasn't an array.
-  static nsStaticAtom* sTagAtomTable[eHTMLTag_userdefined - 1];
-  static const char16_t* const sTagUnicodeTable[];
+  static const char16_t* const sTagNames[];
 
   static int32_t gTableRefCount;
-  static PLHashTable* gTagTable;
-  static PLHashTable* gTagAtomTable;
+  static TagStringHash* gTagTable;
+  static TagAtomHash* gTagAtomTable;
 };
 
 #endif /* nsHTMLTags_h___ */

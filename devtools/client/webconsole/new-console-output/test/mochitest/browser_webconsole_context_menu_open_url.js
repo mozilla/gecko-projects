@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Test that the Open URL in new Tab menu item is displayed for network logs and works as
 // expected.
 
@@ -13,7 +11,7 @@
 const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
                  "new-console-output/test/mochitest/test-console.html";
 
-add_task(async function () {
+add_task(async function() {
   // Enable net messages in the console for this test.
   await pushPref("devtools.webconsole.filter.net", true);
 
@@ -57,7 +55,7 @@ add_task(async function () {
   openUrlItem.click();
   await hideContextMenu(hud);
   let newTab = await tabLoaded;
-  let newTabHref = newTab.linkedBrowser._contentWindow.location.href;
+  let newTabHref = newTab.linkedBrowser.currentURI.spec;
   is(newTabHref, TEST_URI, "Tab was opened with the expected URL");
 
   info("Remove the new tab and select the previous tab back");
@@ -70,7 +68,7 @@ add_task(async function () {
  */
 function listenToTabLoad() {
   return new Promise((resolve) => {
-    gBrowser.tabContainer.addEventListener("TabOpen", function (evt) {
+    gBrowser.tabContainer.addEventListener("TabOpen", function(evt) {
       let newTab = evt.target;
       BrowserTestUtils.browserLoaded(newTab.linkedBrowser).then(() => resolve(newTab));
     }, {capture: true, once: true});

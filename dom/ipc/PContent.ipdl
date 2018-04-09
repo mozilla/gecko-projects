@@ -90,6 +90,7 @@ using mozilla::DataStorageType from "ipc/DataStorageIPCUtils.h";
 using mozilla::OriginAttributes from "mozilla/ipc/BackgroundUtils.h";
 using struct mozilla::layers::TextureFactoryIdentifier from "mozilla/layers/CompositorTypes.h";
 using mozilla::layers::CompositorOptions from "mozilla/layers/CompositorOptions.h";
+using mozilla::layers::LayersId from "mozilla/layers/LayersTypes.h";
 using mozilla::Telemetry::HistogramAccumulation from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::KeyedHistogramAccumulation from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::ScalarAction from "mozilla/TelemetryComms.h";
@@ -155,6 +156,12 @@ union MaybePrefValue {
   null_t;
 };
 
+// This serialization form mirrors that used in mozilla::Pref in
+// Preferences.cpp. The two should be kept in sync, e.g. if something is added
+// to one it should also be added to the other.
+//
+// Note: there is no need to pass the isSticky attribute because that's an
+// immutable attribute obtained from file at startup.
 struct Pref {
   nsCString name;
   bool isLocked;
@@ -273,7 +280,6 @@ struct XPCOMInitData
     ClipboardCapabilities clipboardCaps;
     DomainPolicyClone domainPolicy;
     OptionalURIParams userContentSheetURL;
-    Pref[] prefs;
     GfxVarUpdate[] gfxNonDefaultVarUpdates;
     ContentDeviceData contentDeviceData;
     GfxInfoFeatureStatus[] gfxFeatureStatus;
@@ -395,6 +401,7 @@ child:
                               bool anonymize,
                               bool minimizeMemoryUsage,
                               MaybeFileDesc DMDFile);
+    async RequestPerformanceMetrics();
 
     /**
      * Communication between the PuppetBidiKeyboard and the actual
@@ -828,12 +835,17 @@ parent:
     async ConsoleMessage(nsString message);
     async ScriptError(nsString message, nsString sourceName, nsString sourceLine,
                       uint32_t lineNumber, uint32_t colNumber, uint32_t flags,
-                      nsCString category);
+                      nsCString category, bool privateWindow);
+    async ScriptErrorWithStack(nsString message, nsString sourceName, nsString sourceLine,
+                               uint32_t lineNumber, uint32_t colNumber, uint32_t flags,
+                               nsCString category, bool privateWindow,
+                               ClonedMessageData stack);
 
     // Places the items within dataTransfer on the clipboard.
     async SetClipboard(IPCDataTransfer aDataTransfer,
                        bool aIsPrivateData,
                        Principal aRequestingPrincipal,
+                       uint32_t aContentPolicyType,
                        int32_t aWhichClipboard);
 
     // Given a list of supported types, returns the clipboard data for the
@@ -880,8 +892,8 @@ parent:
 
     // Tell the compositor to allocate a layer tree id for nested remote mozbrowsers.
     sync AllocateLayerTreeId(ContentParentId cpId, TabId tabId)
-        returns (uint64_t id);
-    async DeallocateLayerTreeId(ContentParentId cpId, uint64_t id);
+        returns (LayersId id);
+    async DeallocateLayerTreeId(ContentParentId cpId, LayersId id);
 
     /**
      * Notifies the parent about a recording device is starting or shutdown.
@@ -1123,6 +1135,8 @@ parent:
     async MaybeReloadPlugins();
 
     async BHRThreadHang(HangDetails aHangDetails);
+
+    async AddPerformanceMetrics(PerformanceInfo[] aMetrics);
 both:
      async AsyncMessage(nsString aMessage, CpowEntry[] aCpows,
                         Principal aPrincipal, ClonedMessageData aData);

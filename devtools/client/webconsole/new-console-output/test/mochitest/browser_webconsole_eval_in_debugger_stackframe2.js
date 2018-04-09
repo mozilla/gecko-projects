@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Test to make sure that web console commands can fire while paused at a
 // breakpoint that was triggered from a JS call.  Relies on asynchronous js
 // evaluation over the protocol - see Bug 1088861.
@@ -14,7 +12,7 @@
 const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
                  "new-console-output/test/mochitest/test-eval-in-stackframe.html";
 
-add_task(async function () {
+add_task(async function() {
   // Force the old debugger UI since it's directly used (see Bug 1301705).
   await pushPref("devtools.debugger.new-debugger-frontend", false);
 

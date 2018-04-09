@@ -35,7 +35,6 @@
 #include "nsIWidget.h"
 
 class nsFrameLoader;
-class nsIFrameLoader;
 class nsIContent;
 class nsIPrincipal;
 class nsIURI;
@@ -497,11 +496,10 @@ public:
 
   bool SendPasteTransferable(const IPCDataTransfer& aDataTransfer,
                              const bool& aIsPrivateData,
-                             const IPC::Principal& aRequestingPrincipal);
+                             const IPC::Principal& aRequestingPrincipal,
+                             const uint32_t& aContentPolicyType);
 
   static TabParent* GetFrom(nsFrameLoader* aFrameLoader);
-
-  static TabParent* GetFrom(nsIFrameLoader* aFrameLoader);
 
   static TabParent* GetFrom(nsITabParent* aTabParent);
 
@@ -584,7 +582,7 @@ public:
 
   bool SetRenderFrame(PRenderFrameParent* aRFParent);
   bool GetRenderFrameInfo(TextureFactoryIdentifier* aTextureFactoryIdentifier,
-                          uint64_t* aLayersId);
+                          layers::LayersId* aLayersId);
 
   mozilla::ipc::IPCResult RecvEnsureLayersConnected(CompositorOptions* aCompositorOptions) override;
 
@@ -755,9 +753,9 @@ private:
   typedef nsDataHashtable<nsUint64HashKey, TabParent*> LayerToTabParentTable;
   static LayerToTabParentTable* sLayerToTabParentTable;
 
-  static void AddTabParentToTable(uint64_t aLayersId, TabParent* aTabParent);
+  static void AddTabParentToTable(layers::LayersId aLayersId, TabParent* aTabParent);
 
-  static void RemoveTabParentFromTable(uint64_t aLayersId);
+  static void RemoveTabParentFromTable(layers::LayersId aLayersId);
 
   uint64_t mLayerTreeEpoch;
 
@@ -791,7 +789,7 @@ private:
   bool mIsMouseEnterIntoWidgetEventSuppressed;
 
 public:
-  static TabParent* GetTabParentFromLayersId(uint64_t aLayersId);
+  static TabParent* GetTabParentFromLayersId(layers::LayersId aLayersId);
 };
 
 struct MOZ_STACK_CLASS TabParent::AutoUseNewTab final

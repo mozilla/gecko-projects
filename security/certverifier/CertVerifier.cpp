@@ -731,6 +731,15 @@ CertVerifier::VerifyCert(CERTCertificate* cert, SECCertificateUsage usage,
                                             CertPolicyId::anyPolicy,
                                             stapledOCSPResponse,
                                             ocspStaplingStatus);
+          if (rv != Success && !IsFatalError(rv) &&
+              rv != Result::ERROR_REVOKED_CERTIFICATE &&
+              trustDomain.GetIsErrorDueToDistrustedCAPolicy()) {
+            // Bug 1444440 - If there are multiple paths, at least one to a CA
+            // distrusted-by-policy, and none of them ending in a trusted root,
+            // then we might show a different error (UNKNOWN_ISSUER) than we
+            // intend, confusing users.
+            rv = Result::ERROR_ADDITIONAL_POLICY_CONSTRAINT_FAILED;
+          }
           if (rv == Success &&
               sha1ModeConfigurations[j] == SHA1Mode::ImportedRoot) {
             bool isBuiltInRoot = false;
@@ -860,6 +869,26 @@ CertVerifier::VerifyCert(CERTCertificate* cert, SECCertificateUsage usage,
   return Success;
 }
 
+
+static bool
+CertIsSelfSigned(const UniqueCERTCertificate& cert, void* pinarg)
+{
+  if (!SECITEM_ItemsAreEqual(&cert->derIssuer, &cert->derSubject)) {
+    return false;
+  }
+
+  // Check that the certificate is signed with the cert's spki.
+  SECStatus rv = CERT_VerifySignedDataWithPublicKeyInfo(
+    const_cast<CERTSignedData*>(&cert->signatureWrap),
+    const_cast<CERTSubjectPublicKeyInfo*>(&cert->subjectPublicKeyInfo),
+    pinarg);
+  if (rv != SECSuccess) {
+    return false;
+  }
+
+  return true;
+}
+
 Result
 CertVerifier::VerifySSLServerCert(const UniqueCERTCertificate& peerCert,
                      /*optional*/ const SECItem* stapledOCSPResponse,
@@ -899,6 +928,30 @@ CertVerifier::VerifySSLServerCert(const UniqueCERTCertificate& peerCert,
                          keySizeStatus, sha1ModeResult, pinningTelemetryInfo,
                          ctInfo);
   if (rv != Success) {
+    if (rv == Result::ERROR_UNKNOWN_ISSUER &&
+        CertIsSelfSigned(peerCert, pinarg)) {
+      // In this case we didn't find any issuer for the certificate and the
+      // certificate is self-signed.
+      return Result::ERROR_SELF_SIGNED_CERT;
+    }
+    if (rv == Result::ERROR_UNKNOWN_ISSUER) {
+      // In this case we didn't get any valid path for the cert. Let's see if
+      // the issuer is the same as the issuer for our canary probe. If yes, this
+      // connection is connecting via a misconfigured proxy.
+      // Note: The MitM canary might not be set. In this case we consider this
+      // an unknown issuer error.
+      nsCOMPtr<nsINSSComponent> component(
+        do_GetService(PSM_COMPONENT_CONTRACTID));
+      if (!component) {
+        return Result::FATAL_ERROR_LIBRARY_FAILURE;
+      }
+      // IssuerMatchesMitmCanary succeeds if the issuer matches the canary and
+      // the feature is enabled.
+      nsresult rv = component->IssuerMatchesMitmCanary(peerCert->issuerName);
+      if (NS_SUCCEEDED(rv)) {
+        return Result::ERROR_MITM_DETECTED;
+      }
+    }
     return rv;
   }
 

@@ -18,7 +18,7 @@ use values::generics::counters::CounterReset as GenericCounterReset;
 use values::specified::Attr;
 use values::specified::Integer;
 #[cfg(feature = "gecko")]
-use values::specified::url::SpecifiedUrl;
+use values::specified::url::SpecifiedImageUrl;
 
 /// A specified value for the `counter-increment` property.
 pub type CounterIncrement = GenericCounterIncrement<Integer>;
@@ -76,8 +76,21 @@ fn parse_counters<'i, 't>(
 
 #[cfg(feature = "servo")]
 type CounterStyleType = ListStyleType;
+
 #[cfg(feature = "gecko")]
 type CounterStyleType = CounterStyleOrNone;
+
+#[cfg(feature = "servo")]
+#[inline]
+fn is_decimal(counter_type: &CounterStyleType) -> bool {
+    *counter_type == ListStyleType::Decimal
+}
+
+#[cfg(feature = "gecko")]
+#[inline]
+fn is_decimal(counter_type: &CounterStyleType) -> bool {
+    *counter_type == CounterStyleOrNone::decimal()
+}
 
 /// The specified value for the `content` property.
 ///
@@ -92,8 +105,7 @@ pub enum Content {
     #[cfg(feature = "gecko")]
     MozAltContent,
     /// Content items.
-    #[css(iterable)]
-    Items(Box<[ContentItem]>),
+    Items(#[css(iterable)] Box<[ContentItem]>),
 }
 
 /// Items for the `content` property.
@@ -103,10 +115,10 @@ pub enum ContentItem {
     String(Box<str>),
     /// `counter(name, style)`.
     #[css(comma, function)]
-    Counter(CustomIdent, CounterStyleType),
+    Counter(CustomIdent, #[css(skip_if = "is_decimal")] CounterStyleType),
     /// `counters(name, separator, style)`.
     #[css(comma, function)]
-    Counters(CustomIdent, Box<str>, CounterStyleType),
+    Counters(CustomIdent, Box<str>, #[css(skip_if = "is_decimal")] CounterStyleType),
     /// `open-quote`.
     OpenQuote,
     /// `close-quote`.
@@ -120,5 +132,5 @@ pub enum ContentItem {
     Attr(Attr),
     /// `url(url)`
     #[cfg(feature = "gecko")]
-    Url(SpecifiedUrl),
+    Url(SpecifiedImageUrl),
 }

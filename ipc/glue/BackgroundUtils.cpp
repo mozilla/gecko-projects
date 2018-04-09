@@ -404,11 +404,13 @@ LoadInfoToLoadInfoArgs(nsILoadInfo *aLoadInfo,
       static_cast<uint32_t>(aLoadInfo->GetTainting()),
       aLoadInfo->GetUpgradeInsecureRequests(),
       aLoadInfo->GetBrowserUpgradeInsecureRequests(),
+      aLoadInfo->GetBrowserWouldUpgradeInsecureRequests(),
       aLoadInfo->GetVerifySignedContent(),
       aLoadInfo->GetEnforceSRI(),
       aLoadInfo->GetAllowDocumentToBeAgnosticToCSP(),
       aLoadInfo->GetForceAllowDataURI(),
       aLoadInfo->GetAllowInsecureRedirectToDataURI(),
+      aLoadInfo->GetSkipContentPolicyCheckForWebRequest(),
       aLoadInfo->GetForceInheritPrincipalDropped(),
       aLoadInfo->GetInnerWindowID(),
       aLoadInfo->GetOuterWindowID(),
@@ -551,11 +553,13 @@ LoadInfoArgsToLoadInfo(const OptionalLoadInfoArgs& aOptionalLoadInfoArgs,
                           static_cast<LoadTainting>(loadInfoArgs.tainting()),
                           loadInfoArgs.upgradeInsecureRequests(),
                           loadInfoArgs.browserUpgradeInsecureRequests(),
+                          loadInfoArgs.browserWouldUpgradeInsecureRequests(),
                           loadInfoArgs.verifySignedContent(),
                           loadInfoArgs.enforceSRI(),
                           loadInfoArgs.allowDocumentToBeAgnosticToCSP(),
                           loadInfoArgs.forceAllowDataURI(),
                           loadInfoArgs.allowInsecureRedirectToDataURI(),
+                          loadInfoArgs.skipContentPolicyCheckForWebRequest(),
                           loadInfoArgs.forceInheritPrincipalDropped(),
                           loadInfoArgs.innerWindowID(),
                           loadInfoArgs.outerWindowID(),
@@ -580,6 +584,36 @@ LoadInfoArgsToLoadInfo(const OptionalLoadInfoArgs& aOptionalLoadInfoArgs,
 
    loadInfo.forget(outLoadInfo);
    return NS_OK;
+}
+
+void
+LoadInfoToParentLoadInfoForwarder(nsILoadInfo* aLoadInfo,
+                                  ParentLoadInfoForwarderArgs* outLoadInfoChildForwardArgs)
+{
+  if (!aLoadInfo) {
+    return;
+  }
+
+  *outLoadInfoChildForwardArgs = ParentLoadInfoForwarderArgs(
+    aLoadInfo->GetAllowInsecureRedirectToDataURI()
+  );
+}
+
+nsresult
+MergeParentLoadInfoForwarder(ParentLoadInfoForwarderArgs const& outLoadInfoChildForwardArgs,
+                             nsILoadInfo* aLoadInfo)
+{
+  if (!aLoadInfo) {
+    return NS_OK;
+  }
+
+  nsresult rv;
+
+  rv = aLoadInfo->SetAllowInsecureRedirectToDataURI(
+    outLoadInfoChildForwardArgs.allowInsecureRedirectToDataURI());
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  return NS_OK;
 }
 
 } // namespace ipc

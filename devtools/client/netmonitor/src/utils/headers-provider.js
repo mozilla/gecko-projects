@@ -26,7 +26,7 @@ var HeadersProvider = {
     return ObjectProvider.getChildren(object);
   },
 
-  hasChildren: function (object) {
+  hasChildren: function(object) {
     if (object.value instanceof HeaderList) {
       return object.value.headers.length > 0;
     } else if (object instanceof Header) {
@@ -35,14 +35,14 @@ var HeadersProvider = {
     return ObjectProvider.hasChildren(object);
   },
 
-  getLabel: function (object) {
+  getLabel: function(object) {
     if (object instanceof Header) {
       return object.name;
     }
     return ObjectProvider.getLabel(object);
   },
 
-  getValue: function (object) {
+  getValue: function(object) {
     if (object instanceof Header) {
       return object.value;
     }
@@ -56,7 +56,7 @@ var HeadersProvider = {
     return ObjectProvider.getKey(object);
   },
 
-  getType: function (object) {
+  getType: function(object) {
     if (object instanceof Header) {
       return "string";
     }
@@ -68,7 +68,8 @@ var HeadersProvider = {
  * Helper data structures for list of headers.
  */
 function HeaderList(headers) {
-  this.headers = headers;
+  // Clone, so the sort doesn't affect the original array.
+  this.headers = headers.slice(0);
   this.headers.sort((a, b) => {
     return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
   });

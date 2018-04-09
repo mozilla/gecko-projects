@@ -60,11 +60,17 @@
 /******/ 	__webpack_require__.p = "";
 /******/
 /******/ 	// Load entry module and return exports
-/******/ 	return __webpack_require__(__webpack_require__.s = 14);
+/******/ 	return __webpack_require__(__webpack_require__.s = 17);
 /******/ })
 /************************************************************************/
 /******/ ([
 /* 0 */
+/***/ (function(module, exports) {
+
+module.exports = React;
+
+/***/ }),
+/* 1 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -106,7 +112,7 @@ const actionTypes = {};
 /* harmony export (immutable) */ __webpack_exports__["b"] = actionTypes;
 
 
-for (const type of ["ARCHIVE_FROM_POCKET", "BLOCK_URL", "BOOKMARK_URL", "DELETE_BOOKMARK_BY_ID", "DELETE_FROM_POCKET", "DELETE_HISTORY_URL", "DELETE_HISTORY_URL_CONFIRM", "DIALOG_CANCEL", "DIALOG_OPEN", "DISABLE_ONBOARDING", "INIT", "MIGRATION_CANCEL", "MIGRATION_COMPLETED", "MIGRATION_START", "NEW_TAB_INIT", "NEW_TAB_INITIAL_STATE", "NEW_TAB_LOAD", "NEW_TAB_REHYDRATED", "NEW_TAB_STATE_REQUEST", "NEW_TAB_UNLOAD", "OPEN_LINK", "OPEN_NEW_WINDOW", "OPEN_PRIVATE_WINDOW", "PAGE_PRERENDERED", "PLACES_BOOKMARK_ADDED", "PLACES_BOOKMARK_CHANGED", "PLACES_BOOKMARK_REMOVED", "PLACES_HISTORY_CLEARED", "PLACES_LINKS_DELETED", "PLACES_LINK_BLOCKED", "PLACES_SAVED_TO_POCKET", "PREFS_INITIAL_VALUES", "PREF_CHANGED", "RICH_ICON_MISSING", "SAVE_SESSION_PERF_DATA", "SAVE_TO_POCKET", "SCREENSHOT_UPDATED", "SECTION_DEREGISTER", "SECTION_DISABLE", "SECTION_ENABLE", "SECTION_OPTIONS_CHANGED", "SECTION_REGISTER", "SECTION_UPDATE", "SECTION_UPDATE_CARD", "SETTINGS_CLOSE", "SETTINGS_OPEN", "SET_PREF", "SHOW_FIREFOX_ACCOUNTS", "SNIPPETS_BLOCKLIST_UPDATED", "SNIPPETS_DATA", "SNIPPETS_RESET", "SNIPPET_BLOCKED", "SYSTEM_TICK", "TELEMETRY_IMPRESSION_STATS", "TELEMETRY_PERFORMANCE_EVENT", "TELEMETRY_UNDESIRED_EVENT", "TELEMETRY_USER_EVENT", "TOP_SITES_CANCEL_EDIT", "TOP_SITES_EDIT", "TOP_SITES_INSERT", "TOP_SITES_PIN", "TOP_SITES_UNPIN", "TOP_SITES_UPDATED", "TOTAL_BOOKMARKS_REQUEST", "TOTAL_BOOKMARKS_RESPONSE", "UNINIT", "WEBEXT_CLICK", "WEBEXT_DISMISS"]) {
+for (const type of ["ARCHIVE_FROM_POCKET", "BLOCK_URL", "BOOKMARK_URL", "DELETE_BOOKMARK_BY_ID", "DELETE_FROM_POCKET", "DELETE_HISTORY_URL", "DIALOG_CANCEL", "DIALOG_OPEN", "DISABLE_ONBOARDING", "INIT", "MIGRATION_CANCEL", "MIGRATION_COMPLETED", "MIGRATION_START", "NEW_TAB_INIT", "NEW_TAB_INITIAL_STATE", "NEW_TAB_LOAD", "NEW_TAB_REHYDRATED", "NEW_TAB_STATE_REQUEST", "NEW_TAB_UNLOAD", "OPEN_LINK", "OPEN_NEW_WINDOW", "OPEN_PRIVATE_WINDOW", "PAGE_PRERENDERED", "PLACES_BOOKMARK_ADDED", "PLACES_BOOKMARK_REMOVED", "PLACES_HISTORY_CLEARED", "PLACES_LINKS_CHANGED", "PLACES_LINK_BLOCKED", "PLACES_LINK_DELETED", "PLACES_SAVED_TO_POCKET", "PREFS_INITIAL_VALUES", "PREF_CHANGED", "PREVIEW_REQUEST", "PREVIEW_REQUEST_CANCEL", "PREVIEW_RESPONSE", "RICH_ICON_MISSING", "SAVE_SESSION_PERF_DATA", "SAVE_TO_POCKET", "SCREENSHOT_UPDATED", "SECTION_DEREGISTER", "SECTION_DISABLE", "SECTION_ENABLE", "SECTION_MOVE", "SECTION_OPTIONS_CHANGED", "SECTION_REGISTER", "SECTION_UPDATE", "SECTION_UPDATE_CARD", "SETTINGS_CLOSE", "SETTINGS_OPEN", "SET_PREF", "SHOW_FIREFOX_ACCOUNTS", "SNIPPETS_BLOCKLIST_CLEARED", "SNIPPETS_BLOCKLIST_UPDATED", "SNIPPETS_DATA", "SNIPPETS_RESET", "SNIPPET_BLOCKED", "SYSTEM_TICK", "TELEMETRY_IMPRESSION_STATS", "TELEMETRY_PERFORMANCE_EVENT", "TELEMETRY_UNDESIRED_EVENT", "TELEMETRY_USER_EVENT", "THEME_UPDATE", "TOP_SITES_CANCEL_EDIT", "TOP_SITES_EDIT", "TOP_SITES_INSERT", "TOP_SITES_PIN", "TOP_SITES_PREFS_UPDATED", "TOP_SITES_UNPIN", "TOP_SITES_UPDATED", "TOTAL_BOOKMARKS_REQUEST", "TOTAL_BOOKMARKS_RESPONSE", "UNINIT", "UPDATE_SECTION_PREFS", "WEBEXT_CLICK", "WEBEXT_DISMISS"]) {
   actionTypes[type] = type;
 }
 
@@ -351,12 +357,6 @@ var actionUtils = {
 };
 
 /***/ }),
-/* 1 */
-/***/ (function(module, exports) {
-
-module.exports = React;
-
-/***/ }),
 /* 2 */
 /***/ (function(module, exports) {
 
@@ -422,7 +422,7 @@ const MIN_CORNER_FAVICON_SIZE = 16;
 "use strict";
 
 // EXTERNAL MODULE: ./system-addon/common/Actions.jsm
-var Actions = __webpack_require__(0);
+var Actions = __webpack_require__(1);
 
 // CONCATENATED MODULE: ./system-addon/common/Dedupe.jsm
 class Dedupe {
@@ -497,12 +497,12 @@ const INITIAL_STATE = {
     initialized: false,
     values: {}
   },
+  Theme: { className: "" },
   Dialog: {
     visible: false,
     data: {}
   },
-  Sections: [],
-  PreferencesPane: { visible: false }
+  Sections: []
 };
 /* unused harmony export INITIAL_STATE */
 
@@ -558,14 +558,53 @@ function TopSites(prevState = INITIAL_STATE.TopSites, action) {
   let newRows;
   switch (action.type) {
     case Actions["b" /* actionTypes */].TOP_SITES_UPDATED:
-      if (!action.data) {
+      if (!action.data || !action.data.links) {
         return prevState;
       }
-      return Object.assign({}, prevState, { initialized: true, rows: action.data });
+      return Object.assign({}, prevState, { initialized: true, rows: action.data.links }, action.data.pref ? { pref: action.data.pref } : {});
+    case Actions["b" /* actionTypes */].TOP_SITES_PREFS_UPDATED:
+      return Object.assign({}, prevState, { pref: action.data.pref });
     case Actions["b" /* actionTypes */].TOP_SITES_EDIT:
-      return Object.assign({}, prevState, { editForm: { index: action.data.index } });
+      return Object.assign({}, prevState, {
+        editForm: {
+          index: action.data.index,
+          previewResponse: null
+        }
+      });
     case Actions["b" /* actionTypes */].TOP_SITES_CANCEL_EDIT:
       return Object.assign({}, prevState, { editForm: null });
+    case Actions["b" /* actionTypes */].PREVIEW_RESPONSE:
+      if (!prevState.editForm || action.data.url !== prevState.editForm.previewUrl) {
+        return prevState;
+      }
+      return Object.assign({}, prevState, {
+        editForm: {
+          index: prevState.editForm.index,
+          previewResponse: action.data.preview,
+          previewUrl: action.data.url
+        }
+      });
+    case Actions["b" /* actionTypes */].PREVIEW_REQUEST:
+      if (!prevState.editForm) {
+        return prevState;
+      }
+      return Object.assign({}, prevState, {
+        editForm: {
+          index: prevState.editForm.index,
+          previewResponse: null,
+          previewUrl: action.data.url
+        }
+      });
+    case Actions["b" /* actionTypes */].PREVIEW_REQUEST_CANCEL:
+      if (!prevState.editForm) {
+        return prevState;
+      }
+      return Object.assign({}, prevState, {
+        editForm: {
+          index: prevState.editForm.index,
+          previewResponse: null
+        }
+      });
     case Actions["b" /* actionTypes */].SCREENSHOT_UPDATED:
       newRows = prevState.rows.map(row => {
         if (row && row.url === action.data.url) {
@@ -601,6 +640,12 @@ function TopSites(prevState = INITIAL_STATE.TopSites, action) {
         }
         return site;
       });
+      return Object.assign({}, prevState, { rows: newRows });
+    case Actions["b" /* actionTypes */].PLACES_LINK_DELETED:
+      if (!action.data) {
+        return prevState;
+      }
+      newRows = prevState.rows.filter(site => action.data.url !== site.url);
       return Object.assign({}, prevState, { rows: newRows });
     default:
       return prevState;
@@ -649,28 +694,11 @@ function Sections(prevState = INITIAL_STATE.Sections, action) {
         }
         return section;
       });
-
-      // Invariant: Sections array sorted in increasing order of property `order`.
-      // If section doesn't exist in prevState, create a new section object. If
-      // the section has an order, insert it at the correct place in the array.
-      // Otherwise, prepend it and set the order to be minimal.
+      // Otherwise, append it
       if (!hasMatch) {
         const initialized = !!(action.data.rows && action.data.rows.length > 0);
-        let order;
-        let index;
-        if (prevState.length > 0) {
-          order = action.data.order !== undefined ? action.data.order : prevState[0].order - 1;
-          index = newState.findIndex(section => section.order >= order);
-          if (index === -1) {
-            index = newState.length;
-          }
-        } else {
-          order = action.data.order !== undefined ? action.data.order : 0;
-          index = 0;
-        }
-
-        const section = Object.assign({ title: "", rows: [], order, enabled: false }, action.data, { initialized });
-        newState.splice(index, 0, section);
+        const section = Object.assign({ title: "", rows: [], enabled: false }, action.data, { initialized });
+        newState.push(section);
       }
       return newState;
     case Actions["b" /* actionTypes */].SECTION_UPDATE:
@@ -787,9 +815,11 @@ function Sections(prevState = INITIAL_STATE.Sections, action) {
           return item;
         })
       }));
-    case Actions["b" /* actionTypes */].PLACES_LINKS_DELETED:
-      return prevState.map(section => Object.assign({}, section, { rows: section.rows.filter(site => !action.data.includes(site.url)) }));
+    case Actions["b" /* actionTypes */].PLACES_LINK_DELETED:
     case Actions["b" /* actionTypes */].PLACES_LINK_BLOCKED:
+      if (!action.data) {
+        return prevState;
+      }
       return prevState.map(section => Object.assign({}, section, { rows: section.rows.filter(site => site.url !== action.data.url) }));
     case Actions["b" /* actionTypes */].DELETE_FROM_POCKET:
     case Actions["b" /* actionTypes */].ARCHIVE_FROM_POCKET:
@@ -803,6 +833,10 @@ function Snippets(prevState = INITIAL_STATE.Snippets, action) {
   switch (action.type) {
     case Actions["b" /* actionTypes */].SNIPPETS_DATA:
       return Object.assign({}, prevState, { initialized: true }, action.data);
+    case Actions["b" /* actionTypes */].SNIPPET_BLOCKED:
+      return Object.assign({}, prevState, { blockList: prevState.blockList.concat(action.data) });
+    case Actions["b" /* actionTypes */].SNIPPETS_BLOCKLIST_CLEARED:
+      return Object.assign({}, prevState, { blockList: [] });
     case Actions["b" /* actionTypes */].SNIPPETS_RESET:
       return INITIAL_STATE.Snippets;
     default:
@@ -810,27 +844,122 @@ function Snippets(prevState = INITIAL_STATE.Snippets, action) {
   }
 }
 
-function PreferencesPane(prevState = INITIAL_STATE.PreferencesPane, action) {
+function Theme(prevState = INITIAL_STATE.Theme, action) {
   switch (action.type) {
-    case Actions["b" /* actionTypes */].SETTINGS_OPEN:
-      return Object.assign({}, prevState, { visible: true });
-    case Actions["b" /* actionTypes */].SETTINGS_CLOSE:
-      return Object.assign({}, prevState, { visible: false });
+    case Actions["b" /* actionTypes */].THEME_UPDATE:
+      return Object.assign({}, prevState, action.data);
     default:
       return prevState;
   }
 }
 
-var reducers = { TopSites, App, Snippets, Prefs, Dialog, Sections, PreferencesPane };
+var reducers = { TopSites, App, Snippets, Prefs, Dialog, Sections, Theme };
 
 /***/ }),
 /* 7 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
+/* WEBPACK VAR INJECTION */(function(global) {/* harmony export (immutable) */ __webpack_exports__["b"] = initMessageCenter;
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_react__ = __webpack_require__(0);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_0_react__);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react_dom__ = __webpack_require__(8);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react_dom___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_1_react_dom__);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2__templates_SimpleSnippet__ = __webpack_require__(19);
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+
+
+
+
+const INCOMING_MESSAGE_NAME = "MessageCenter:parent-to-child";
+const OUTGOING_MESSAGE_NAME = "MessageCenter:child-to-parent";
+
+const MessageCenterUtils = {
+  addListener(listener) {
+    global.addMessageListener(INCOMING_MESSAGE_NAME, listener);
+  },
+  removeListener(listener) {
+    global.removeMessageListener(INCOMING_MESSAGE_NAME, listener);
+  },
+  sendMessage(action) {
+    global.sendAsyncMessage(OUTGOING_MESSAGE_NAME, action);
+  },
+  blockById(id) {
+    MessageCenterUtils.sendMessage({ type: "BLOCK_MESSAGE_BY_ID", data: { id } });
+  },
+  unblockById(id) {
+    MessageCenterUtils.sendMessage({ type: "UNBLOCK_MESSAGE_BY_ID", data: { id } });
+  },
+  getNextMessage() {
+    MessageCenterUtils.sendMessage({ type: "GET_NEXT_MESSAGE" });
+  }
+};
+/* harmony export (immutable) */ __webpack_exports__["a"] = MessageCenterUtils;
+
+
+class MessageCenterUISurface extends __WEBPACK_IMPORTED_MODULE_0_react___default.a.PureComponent {
+  constructor(props) {
+    super(props);
+    this.onMessageFromParent = this.onMessageFromParent.bind(this);
+    this.state = { message: {} };
+  }
+
+  onBlockById(id) {
+    return () => MessageCenterUtils.blockById(id);
+  }
+
+  onMessageFromParent({ data: action }) {
+    switch (action.type) {
+      case "SET_MESSAGE":
+        this.setState({ message: action.data });
+        break;
+      case "CLEAR_MESSAGE":
+        this.setState({ message: {} });
+        break;
+    }
+  }
+
+  componentWillMount() {
+    MessageCenterUtils.addListener(this.onMessageFromParent);
+    MessageCenterUtils.sendMessage({ type: "CONNECT_UI_REQUEST" });
+  }
+
+  componentWillUnmount() {
+    MessageCenterUtils.removeMessageListener(this.onMessageFromParent);
+  }
+
+  render() {
+    const { message } = this.state;
+    if (!message.id) {
+      return null;
+    }
+
+    return __WEBPACK_IMPORTED_MODULE_0_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_2__templates_SimpleSnippet__["a" /* SimpleSnippet */], _extends({}, message, {
+      getNextMessage: MessageCenterUtils.getNextMessage,
+      onBlock: this.onBlockById(message.id) }));
+  }
+}
+
+function initMessageCenter() {
+  __WEBPACK_IMPORTED_MODULE_1_react_dom___default.a.render(__WEBPACK_IMPORTED_MODULE_0_react___default.a.createElement(MessageCenterUISurface, null), document.getElementById("snippets-container"));
+}
+/* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
+
+/***/ }),
+/* 8 */
+/***/ (function(module, exports) {
+
+module.exports = ReactDOM;
+
+/***/ }),
+/* 9 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_react_intl__ = __webpack_require__(2);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_react_intl___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_0_react_intl__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react__ = __webpack_require__(1);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react__ = __webpack_require__(0);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_1_react__);
 
 
@@ -912,20 +1041,20 @@ class ErrorBoundary extends __WEBPACK_IMPORTED_MODULE_1_react___default.a.PureCo
 ErrorBoundary.defaultProps = { FallbackComponent: ErrorBoundaryFallback };
 
 /***/ }),
-/* 8 */
+/* 10 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 
 // EXTERNAL MODULE: ./system-addon/common/Actions.jsm
-var Actions = __webpack_require__(0);
+var Actions = __webpack_require__(1);
 
 // EXTERNAL MODULE: external "ReactRedux"
 var external__ReactRedux_ = __webpack_require__(4);
 var external__ReactRedux__default = /*#__PURE__*/__webpack_require__.n(external__ReactRedux_);
 
 // EXTERNAL MODULE: ./system-addon/content-src/components/ContextMenu/ContextMenu.jsx
-var ContextMenu = __webpack_require__(9);
+var ContextMenu = __webpack_require__(11);
 
 // EXTERNAL MODULE: external "ReactIntl"
 var external__ReactIntl_ = __webpack_require__(2);
@@ -1006,13 +1135,13 @@ const LinkMenuOptions = {
       action_position: index
     })
   }),
-  DeleteUrl: (site, index, eventSource) => ({
+  DeleteUrl: (site, index, eventSource, isEnabled, siteInfo) => ({
     id: "menu_action_delete",
     icon: "delete",
     action: {
       type: Actions["b" /* actionTypes */].DIALOG_OPEN,
       data: {
-        onConfirm: [Actions["a" /* actionCreators */].AlsoToMain({ type: Actions["b" /* actionTypes */].DELETE_HISTORY_URL, data: { url: site.url, pocket_id: site.pocket_id, forceBlock: site.bookmarkGuid } }), Actions["a" /* actionCreators */].UserEvent({ event: "DELETE", source: eventSource, action_position: index })],
+        onConfirm: [Actions["a" /* actionCreators */].AlsoToMain({ type: Actions["b" /* actionTypes */].DELETE_HISTORY_URL, data: { url: site.url, pocket_id: site.pocket_id, forceBlock: site.bookmarkGuid } }), Actions["a" /* actionCreators */].UserEvent(Object.assign({ event: "DELETE", source: eventSource, action_position: index }, siteInfo))],
         eventSource,
         body_string_id: ["confirm_history_delete_p1", "confirm_history_delete_notice_p2"],
         confirm_button_string_id: "menu_action_delete",
@@ -1084,11 +1213,10 @@ const LinkMenuOptions = {
   CheckPinTopSite: (site, index) => site.isPinned ? LinkMenuOptions.UnpinTopSite(site) : LinkMenuOptions.PinTopSite(site, index),
   CheckSavedToPocket: (site, index) => site.pocket_id ? LinkMenuOptions.DeleteFromPocket(site) : LinkMenuOptions.SaveToPocket(site, index),
   CheckBookmarkOrArchive: site => site.pocket_id ? LinkMenuOptions.ArchiveFromPocket(site) : LinkMenuOptions.CheckBookmark(site),
-  CheckDeleteHistoryOrEmpty: (site, index, eventSource) => site.pocket_id ? LinkMenuOptions.EmptyItem() : LinkMenuOptions.DeleteUrl(site, index, eventSource),
   OpenInPrivateWindow: (site, index, eventSource, isEnabled) => isEnabled ? _OpenInPrivateWindow(site) : LinkMenuOptions.EmptyItem()
 };
 // EXTERNAL MODULE: external "React"
-var external__React_ = __webpack_require__(1);
+var external__React_ = __webpack_require__(0);
 var external__React__default = /*#__PURE__*/__webpack_require__.n(external__React_);
 
 // CONCATENATED MODULE: ./system-addon/content-src/components/LinkMenu/LinkMenu.jsx
@@ -1104,23 +1232,24 @@ const DEFAULT_SITE_MENU_OPTIONS = ["CheckPinTopSite", "EditTopSite", "Separator"
 class LinkMenu__LinkMenu extends external__React__default.a.PureComponent {
   getOptions() {
     const { props } = this;
-    const { site, index, source, isPrivateBrowsingEnabled } = props;
+    const { site, index, source, isPrivateBrowsingEnabled, siteInfo } = props;
 
     // Handle special case of default site
     const propOptions = !site.isDefault ? props.options : DEFAULT_SITE_MENU_OPTIONS;
 
-    const options = propOptions.map(o => LinkMenuOptions[o](site, index, source, isPrivateBrowsingEnabled)).map(option => {
+    const options = propOptions.map(o => LinkMenuOptions[o](site, index, source, isPrivateBrowsingEnabled, siteInfo)).map(option => {
       const { action, impression, id, string_id, type, userEvent } = option;
       if (!type && id) {
         option.label = props.intl.formatMessage({ id: string_id || id });
         option.onClick = () => {
           props.dispatch(action);
           if (userEvent) {
-            props.dispatch(Actions["a" /* actionCreators */].UserEvent({
+            const userEventData = Object.assign({
               event: userEvent,
               source,
               action_position: index
-            }));
+            }, siteInfo);
+            props.dispatch(Actions["a" /* actionCreators */].UserEvent(userEventData));
           }
           if (impression && props.shouldSendImpressionStats) {
             props.dispatch(impression);
@@ -1153,11 +1282,11 @@ const LinkMenu = Object(external__ReactRedux_["connect"])(getState)(Object(exter
 
 
 /***/ }),
-/* 9 */
+/* 11 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
-/* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_react__ = __webpack_require__(1);
+/* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_react__ = __webpack_require__(0);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_0_react__);
 
 
@@ -1165,6 +1294,7 @@ class ContextMenu extends __WEBPACK_IMPORTED_MODULE_0_react___default.a.PureComp
   constructor(props) {
     super(props);
     this.hideContext = this.hideContext.bind(this);
+    this.onClick = this.onClick.bind(this);
   }
 
   hideContext() {
@@ -1181,10 +1311,17 @@ class ContextMenu extends __WEBPACK_IMPORTED_MODULE_0_react___default.a.PureComp
     global.removeEventListener("click", this.hideContext);
   }
 
+  onClick(event) {
+    // Eat all clicks on the context menu so they don't bubble up to window.
+    // This prevents the context menu from closing when clicking disabled items
+    // or the separators.
+    event.stopPropagation();
+  }
+
   render() {
     return __WEBPACK_IMPORTED_MODULE_0_react___default.a.createElement(
       "span",
-      { className: "context-menu" },
+      { className: "context-menu", onClick: this.onClick },
       __WEBPACK_IMPORTED_MODULE_0_react___default.a.createElement(
         "ul",
         { role: "menu", className: "context-menu-list" },
@@ -1233,7 +1370,7 @@ class ContextMenuItem extends __WEBPACK_IMPORTED_MODULE_0_react___default.a.Pure
       { role: "menuitem", className: "context-menu-item" },
       __WEBPACK_IMPORTED_MODULE_0_react___default.a.createElement(
         "a",
-        { onClick: this.onClick, onKeyDown: this.onKeyDown, tabIndex: "0" },
+        { onClick: this.onClick, onKeyDown: this.onKeyDown, tabIndex: "0", className: option.disabled ? "disabled" : "" },
         option.icon && __WEBPACK_IMPORTED_MODULE_0_react___default.a.createElement("span", { className: `icon icon-spacer icon-${option.icon}` }),
         option.label
       )
@@ -1245,17 +1382,19 @@ class ContextMenuItem extends __WEBPACK_IMPORTED_MODULE_0_react___default.a.Pure
 /* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
 
 /***/ }),
-/* 10 */
+/* 12 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_react_intl__ = __webpack_require__(2);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_react_intl___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_0_react_intl__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_common_Actions_jsm__ = __webpack_require__(0);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_content_src_components_ErrorBoundary_ErrorBoundary__ = __webpack_require__(7);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_react__ = __webpack_require__(1);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_common_Actions_jsm__ = __webpack_require__(1);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_content_src_components_ErrorBoundary_ErrorBoundary__ = __webpack_require__(9);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_react__ = __webpack_require__(0);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_3_react__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_content_src_components_SectionMenu_SectionMenu__ = __webpack_require__(20);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_content_src_components_SectionMenu_SectionMenu__ = __webpack_require__(24);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_content_src_lib_section_menu_options__ = __webpack_require__(13);
+
 
 
 
@@ -1272,9 +1411,6 @@ function getFormattedMessage(message) {
     message
   ) : __WEBPACK_IMPORTED_MODULE_3_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_0_react_intl__["FormattedMessage"], message);
 }
-function getCollapsed(props) {
-  return props.prefName in props.Prefs.values ? props.Prefs.values[props.prefName] : false;
-}
 
 class Disclaimer extends __WEBPACK_IMPORTED_MODULE_3_react___default.a.PureComponent {
   constructor(props) {
@@ -1284,7 +1420,7 @@ class Disclaimer extends __WEBPACK_IMPORTED_MODULE_3_react___default.a.PureCompo
 
   onAcknowledge() {
     this.props.dispatch(__WEBPACK_IMPORTED_MODULE_1_common_Actions_jsm__["a" /* actionCreators */].SetPref(this.props.disclaimerPref, false));
-    this.props.dispatch(__WEBPACK_IMPORTED_MODULE_1_common_Actions_jsm__["a" /* actionCreators */].UserEvent({ event: "SECTION_DISCLAIMER_ACKNOWLEDGED", source: this.props.eventSource }));
+    this.props.dispatch(__WEBPACK_IMPORTED_MODULE_1_common_Actions_jsm__["a" /* actionCreators */].UserEvent({ event: "DISCLAIMER_ACKED", source: this.props.eventSource }));
   }
 
   render() {
@@ -1337,7 +1473,7 @@ class _CollapsibleSection extends __WEBPACK_IMPORTED_MODULE_3_react___default.a.
 
   componentWillUpdate(nextProps) {
     // Check if we're about to go from expanded to collapsed
-    if (!getCollapsed(this.props) && getCollapsed(nextProps)) {
+    if (!this.props.collapsed && nextProps.collapsed) {
       // This next line forces a layout flush of the section body, which has a
       // max-height style set, so that the upcoming collapse animation can
       // animate from that height to the collapsed height. Without this, the
@@ -1366,7 +1502,8 @@ class _CollapsibleSection extends __WEBPACK_IMPORTED_MODULE_3_react___default.a.
     // If this.sectionBody is unset, it means that we're in some sort of error
     // state, probably displaying the error fallback, so we won't be able to
     // compute the height, and we don't want to persist the preference.
-    if (!this.sectionBody) {
+    // If props.collapsed is undefined handler shouldn't do anything.
+    if (!this.sectionBody || this.props.collapsed === undefined) {
       return;
     }
 
@@ -1375,7 +1512,12 @@ class _CollapsibleSection extends __WEBPACK_IMPORTED_MODULE_3_react___default.a.
       isAnimating: true,
       maxHeight: `${this.sectionBody.scrollHeight}px`
     });
-    this.props.dispatch(__WEBPACK_IMPORTED_MODULE_1_common_Actions_jsm__["a" /* actionCreators */].SetPref(this.props.prefName, !getCollapsed(this.props)));
+    const { action, userEvent } = __WEBPACK_IMPORTED_MODULE_5_content_src_lib_section_menu_options__["a" /* SectionMenuOptions */].CheckCollapsed(this.props);
+    this.props.dispatch(action);
+    this.props.dispatch(__WEBPACK_IMPORTED_MODULE_1_common_Actions_jsm__["a" /* actionCreators */].UserEvent({
+      event: userEvent,
+      source: this.props.source
+    }));
   }
 
   onTransitionEnd(event) {
@@ -1411,17 +1553,16 @@ class _CollapsibleSection extends __WEBPACK_IMPORTED_MODULE_3_react___default.a.
   }
 
   render() {
-    const isCollapsible = this.props.prefName in this.props.Prefs.values;
-    const isCollapsed = getCollapsed(this.props);
+    const isCollapsible = this.props.collapsed !== undefined;
     const { enableAnimation, isAnimating, maxHeight, menuButtonHover, showContextMenu } = this.state;
-    const { id, eventSource, disclaimer, title, extraMenuOptions, prefName, showPrefName, privacyNoticeURL, dispatch } = this.props;
+    const { id, eventSource, collapsed, disclaimer, title, extraMenuOptions, showPrefName, privacyNoticeURL, dispatch, isFirst, isLast } = this.props;
     const disclaimerPref = `section.${id}.showDisclaimer`;
     const needsDisclaimer = disclaimer && this.props.Prefs.values[disclaimerPref];
     const active = menuButtonHover || showContextMenu;
 
     return __WEBPACK_IMPORTED_MODULE_3_react___default.a.createElement(
       "section",
-      { className: `collapsible-section ${this.props.className}${enableAnimation ? " animation-enabled" : ""}${isCollapsed ? " collapsed" : ""}${active ? " active" : ""}` },
+      { className: `collapsible-section ${this.props.className}${enableAnimation ? " animation-enabled" : ""}${collapsed ? " collapsed" : ""}${active ? " active" : ""}` },
       __WEBPACK_IMPORTED_MODULE_3_react___default.a.createElement(
         "div",
         { className: "section-top-bar" },
@@ -1430,10 +1571,10 @@ class _CollapsibleSection extends __WEBPACK_IMPORTED_MODULE_3_react___default.a.
           { className: "section-title" },
           __WEBPACK_IMPORTED_MODULE_3_react___default.a.createElement(
             "span",
-            { className: "click-target", onClick: isCollapsible && this.onHeaderClick },
+            { className: "click-target", onClick: this.onHeaderClick },
             this.renderIcon(),
-            title,
-            isCollapsible && __WEBPACK_IMPORTED_MODULE_3_react___default.a.createElement("span", { className: `collapsible-arrow icon ${isCollapsed ? "icon-arrowhead-forward-small" : "icon-arrowhead-down-small"}` })
+            getFormattedMessage(title),
+            isCollapsible && __WEBPACK_IMPORTED_MODULE_3_react___default.a.createElement("span", { className: `collapsible-arrow icon ${collapsed ? "icon-arrowhead-forward-small" : "icon-arrowhead-down-small"}` })
           )
         ),
         __WEBPACK_IMPORTED_MODULE_3_react___default.a.createElement(
@@ -1453,13 +1594,15 @@ class _CollapsibleSection extends __WEBPACK_IMPORTED_MODULE_3_react___default.a.
             )
           ),
           showContextMenu && __WEBPACK_IMPORTED_MODULE_3_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_4_content_src_components_SectionMenu_SectionMenu__["a" /* SectionMenu */], {
+            id: id,
             extraOptions: extraMenuOptions,
             eventSource: eventSource,
             showPrefName: showPrefName,
-            collapsePrefName: prefName,
             privacyNoticeURL: privacyNoticeURL,
-            isCollapsed: isCollapsed,
+            collapsed: collapsed,
             onUpdate: this.onMenuUpdate,
+            isFirst: isFirst,
+            isLast: isLast,
             dispatch: dispatch })
         )
       ),
@@ -1472,7 +1615,7 @@ class _CollapsibleSection extends __WEBPACK_IMPORTED_MODULE_3_react___default.a.
             className: `section-body${isAnimating ? " animating" : ""}`,
             onTransitionEnd: this.onTransitionEnd,
             ref: this.onBodyMount,
-            style: isAnimating && !isCollapsed ? { maxHeight } : null },
+            style: isAnimating && !collapsed ? { maxHeight } : null },
           needsDisclaimer && __WEBPACK_IMPORTED_MODULE_3_react___default.a.createElement(DisclaimerIntl, { disclaimerPref: disclaimerPref, disclaimer: disclaimer, eventSource: eventSource, dispatch: this.props.dispatch }),
           this.props.children
         )
@@ -1498,13 +1641,91 @@ const CollapsibleSection = Object(__WEBPACK_IMPORTED_MODULE_0_react_intl__["inje
 /* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
 
 /***/ }),
-/* 11 */
+/* 13 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(0);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_common_PerfService_jsm__ = __webpack_require__(12);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_react__ = __webpack_require__(1);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
+
+
+/**
+ * List of functions that return items that can be included as menu options in a
+ * SectionMenu. All functions take the section as the only parameter.
+ */
+const SectionMenuOptions = {
+  Separator: () => ({ type: "separator" }),
+  MoveUp: section => ({
+    id: "section_menu_action_move_up",
+    icon: "arrowhead-up",
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].OnlyToMain({
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].SECTION_MOVE,
+      data: { id: section.id, direction: -1 }
+    }),
+    userEvent: "MENU_MOVE_UP",
+    disabled: !!section.isFirst
+  }),
+  MoveDown: section => ({
+    id: "section_menu_action_move_down",
+    icon: "arrowhead-down",
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].OnlyToMain({
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].SECTION_MOVE,
+      data: { id: section.id, direction: +1 }
+    }),
+    userEvent: "MENU_MOVE_DOWN",
+    disabled: !!section.isLast
+  }),
+  RemoveSection: section => ({
+    id: "section_menu_action_remove_section",
+    icon: "dismiss",
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].SetPref(section.showPrefName, false),
+    userEvent: "MENU_REMOVE"
+  }),
+  CollapseSection: section => ({
+    id: "section_menu_action_collapse_section",
+    icon: "minimize",
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].OnlyToMain({ type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].UPDATE_SECTION_PREFS, data: { id: section.id, value: { collapsed: true } } }),
+    userEvent: "MENU_COLLAPSE"
+  }),
+  ExpandSection: section => ({
+    id: "section_menu_action_expand_section",
+    icon: "maximize",
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].OnlyToMain({ type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].UPDATE_SECTION_PREFS, data: { id: section.id, value: { collapsed: false } } }),
+    userEvent: "MENU_EXPAND"
+  }),
+  ManageSection: section => ({
+    id: "section_menu_action_manage_section",
+    icon: "settings",
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].OnlyToMain({ type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].SETTINGS_OPEN }),
+    userEvent: "MENU_MANAGE"
+  }),
+  AddTopSite: section => ({
+    id: "section_menu_action_add_topsite",
+    icon: "add",
+    action: { type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].TOP_SITES_EDIT, data: { index: -1 } },
+    userEvent: "MENU_ADD_TOPSITE"
+  }),
+  PrivacyNotice: section => ({
+    id: "section_menu_action_privacy_notice",
+    icon: "info",
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].OnlyToMain({
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].OPEN_LINK,
+      data: { url: section.privacyNoticeURL }
+    }),
+    userEvent: "MENU_PRIVACY_NOTICE"
+  }),
+  CheckCollapsed: section => section.collapsed ? SectionMenuOptions.ExpandSection(section) : SectionMenuOptions.CollapseSection(section)
+};
+/* harmony export (immutable) */ __webpack_exports__["a"] = SectionMenuOptions;
+
+
+/***/ }),
+/* 14 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_common_PerfService_jsm__ = __webpack_require__(15);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_react__ = __webpack_require__(0);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_2_react__);
 
 
@@ -1672,7 +1893,7 @@ class ComponentPerfTimer extends __WEBPACK_IMPORTED_MODULE_2_react___default.a.C
 
 
 /***/ }),
-/* 12 */
+/* 15 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -1806,16 +2027,16 @@ _PerfService.prototype = {
 var perfService = new _PerfService();
 
 /***/ }),
-/* 13 */
+/* 16 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(0);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react_intl__ = __webpack_require__(2);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react_intl___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_1_react_intl__);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_2__TopSitesConstants__ = __webpack_require__(5);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_content_src_components_LinkMenu_LinkMenu__ = __webpack_require__(8);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_react__ = __webpack_require__(1);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_content_src_components_LinkMenu_LinkMenu__ = __webpack_require__(10);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_react__ = __webpack_require__(0);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_4_react__);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_common_Reducers_jsm__ = __webpack_require__(6);
 var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
@@ -1875,7 +2096,7 @@ class TopSiteLink extends __WEBPACK_IMPORTED_MODULE_4_react___default.a.PureComp
   }
 
   render() {
-    const { children, className, isDraggable, link, onClick, title } = this.props;
+    const { children, className, defaultStyle, isDraggable, link, onClick, title } = this.props;
     const topSiteOuterClassName = `top-site-outer${className ? ` ${className}` : ""}${link.isDragged ? " dragged" : ""}`;
     const { tippyTopIcon, faviconSize } = link;
     const [letterFallback] = title;
@@ -1884,7 +2105,17 @@ class TopSiteLink extends __WEBPACK_IMPORTED_MODULE_4_react___default.a.PureComp
     let showSmallFavicon = false;
     let smallFaviconStyle;
     let smallFaviconFallback;
-    if (tippyTopIcon || faviconSize >= __WEBPACK_IMPORTED_MODULE_2__TopSitesConstants__["b" /* MIN_RICH_FAVICON_SIZE */]) {
+    if (defaultStyle) {
+      // force no styles (letter fallback) even if the link has imagery
+      smallFaviconFallback = false;
+    } else if (link.customScreenshotURL) {
+      // assume high quality custom screenshot and use rich icon styles and class names
+      imageClassName = "top-site-icon rich-icon";
+      imageStyle = {
+        backgroundColor: link.backgroundColor,
+        backgroundImage: `url(${link.screenshot})`
+      };
+    } else if (tippyTopIcon || faviconSize >= __WEBPACK_IMPORTED_MODULE_2__TopSitesConstants__["b" /* MIN_RICH_FAVICON_SIZE */]) {
       // styles and class names for top sites with rich icons
       imageClassName = "top-site-icon rich-icon";
       imageStyle = {
@@ -1967,12 +2198,24 @@ class TopSite extends __WEBPACK_IMPORTED_MODULE_4_react___default.a.PureComponen
     this.onMenuUpdate = this.onMenuUpdate.bind(this);
   }
 
+  /**
+   * Report to telemetry additional information about the item.
+   */
+  _getTelemetryInfo() {
+    const value = { icon_type: this.props.link.iconType };
+    // Filter out "not_pinned" type for being the default
+    if (this.props.link.isPinned) {
+      value.card_type = "pinned";
+    }
+    return { value };
+  }
+
   userEvent(event) {
-    this.props.dispatch(__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].UserEvent({
+    this.props.dispatch(__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].UserEvent(Object.assign({
       event,
       source: __WEBPACK_IMPORTED_MODULE_2__TopSitesConstants__["d" /* TOP_SITES_SOURCE */],
       action_position: this.props.index
-    }));
+    }, this._getTelemetryInfo())));
   }
 
   onLinkClick(ev) {
@@ -2015,6 +2258,7 @@ class TopSite extends __WEBPACK_IMPORTED_MODULE_4_react___default.a.PureComponen
           onUpdate: this.onMenuUpdate,
           options: __WEBPACK_IMPORTED_MODULE_2__TopSitesConstants__["c" /* TOP_SITES_CONTEXT_MENU_OPTIONS */],
           site: link,
+          siteInfo: this._getTelemetryInfo(),
           source: __WEBPACK_IMPORTED_MODULE_2__TopSitesConstants__["d" /* TOP_SITES_SOURCE */] })
       )
     );
@@ -2117,7 +2361,15 @@ class _TopSiteList extends __WEBPACK_IMPORTED_MODULE_4_react___default.a.PureCom
           this.dropped = true;
           this.props.dispatch(__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].AlsoToMain({
             type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].TOP_SITES_INSERT,
-            data: { site: { url: this.state.draggedSite.url, label: this.state.draggedTitle }, index, draggedFromIndex: this.state.draggedIndex }
+            data: {
+              site: {
+                url: this.state.draggedSite.url,
+                label: this.state.draggedTitle,
+                customScreenshotURL: this.state.draggedSite.customScreenshotURL
+              },
+              index,
+              draggedFromIndex: this.state.draggedIndex
+            }
           }));
           this.userEvent("DROP", index);
         }
@@ -2198,7 +2450,7 @@ class _TopSiteList extends __WEBPACK_IMPORTED_MODULE_4_react___default.a.PureCom
     const maxNarrowVisibleIndex = props.TopSitesRows * 6;
 
     for (let i = 0, l = topSites.length; i < l; i++) {
-      const link = topSites[i];
+      const link = topSites[i] && Object.assign({}, topSites[i], { iconType: this.props.topSiteIconType(topSites[i]) });
       const slotProps = {
         key: link ? link.url : holeIndex++,
         index: i
@@ -2227,21 +2479,21 @@ const TopSiteList = Object(__WEBPACK_IMPORTED_MODULE_1_react_intl__["injectIntl"
 
 
 /***/ }),
-/* 14 */
+/* 17 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 Object.defineProperty(__webpack_exports__, "__esModule", { value: true });
-/* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(0);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_content_src_lib_snippets__ = __webpack_require__(15);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_content_src_components_Base_Base__ = __webpack_require__(16);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_content_src_lib_detect_user_session_start__ = __webpack_require__(24);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_content_src_lib_init_store__ = __webpack_require__(25);
+/* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_content_src_lib_snippets__ = __webpack_require__(18);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_content_src_components_Base_Base__ = __webpack_require__(20);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_content_src_lib_detect_user_session_start__ = __webpack_require__(28);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_content_src_lib_init_store__ = __webpack_require__(29);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_react_redux__ = __webpack_require__(4);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_react_redux___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_5_react_redux__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_6_react__ = __webpack_require__(1);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_6_react__ = __webpack_require__(0);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_6_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_6_react__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_7_react_dom__ = __webpack_require__(27);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_7_react_dom__ = __webpack_require__(8);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_7_react_dom___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_7_react_dom__);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_8_common_Reducers_jsm__ = __webpack_require__(6);
 
@@ -2278,12 +2530,13 @@ Object(__WEBPACK_IMPORTED_MODULE_1_content_src_lib_snippets__["a" /* addSnippets
 /* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
 
 /***/ }),
-/* 15 */
+/* 18 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony export (immutable) */ __webpack_exports__["a"] = addSnippetsSubscriber;
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(0);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_content_src_message_center_message_center_content__ = __webpack_require__(7);
 const DATABASE_NAME = "snippets_db";
 const DATABASE_VERSION = 1;
 const SNIPPETS_OBJECTSTORE_NAME = "snippets";
@@ -2293,6 +2546,7 @@ const SNIPPETS_UPDATE_INTERVAL_MS = 14400000;
 
 const SNIPPETS_ENABLED_EVENT = "Snippets:Enabled";
 const SNIPPETS_DISABLED_EVENT = "Snippets:Disabled";
+
 
 
 
@@ -2323,6 +2577,7 @@ class SnippetsMap extends Map {
 
   clear() {
     super.clear();
+    this._dispatch(__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].OnlyToMain({ type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].SNIPPETS_BLOCKLIST_CLEARED }));
     return this._dbTransaction(db => db.clear());
   }
 
@@ -2344,7 +2599,7 @@ class SnippetsMap extends Map {
     const { blockList } = this;
     if (!blockList.includes(id)) {
       blockList.push(id);
-      this._dispatch(__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].AlsoToMain({ type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].SNIPPETS_BLOCKLIST_UPDATED, data: blockList }));
+      this._dispatch(__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].AlsoToMain({ type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].SNIPPETS_BLOCKLIST_UPDATED, data: id }));
       await this.set("blockList", blockList);
     }
   }
@@ -2460,7 +2715,9 @@ class SnippetsMap extends Map {
         let cursor = event.target.result;
         // Populate the cache from the persistent storage.
         if (cursor) {
-          this.set(cursor.key, cursor.value);
+          if (cursor.value !== "blockList") {
+            this.set(cursor.key, cursor.value);
+          }
           cursor.continue();
         } else {
           // We are done.
@@ -2563,8 +2820,10 @@ class SnippetsProvider {
 
   _onAction(msg) {
     if (msg.data.type === __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].SNIPPET_BLOCKED) {
-      this.snippetsMap.set("blockList", msg.data.data);
-      document.getElementById("snippets-container").style.display = "none";
+      if (!this.snippetsMap.blockList.includes(msg.data.data)) {
+        this.snippetsMap.set("blockList", this.snippetsMap.blockList.concat(msg.data.data));
+        document.getElementById("snippets-container").style.display = "none";
+      }
     }
   }
 
@@ -2601,7 +2860,11 @@ class SnippetsProvider {
 
     // Cache app data values so they can be accessible from gSnippetsMap
     for (const key of Object.keys(this.appData)) {
-      this.snippetsMap.set(`appData.${key}`, this.appData[key]);
+      if (key === "blockList") {
+        this.snippetsMap.set("blockList", this.appData[key]);
+      } else {
+        this.snippetsMap.set(`appData.${key}`, this.appData[key]);
+      }
     }
 
     // Refresh snippets, if enough time has passed.
@@ -2650,7 +2913,9 @@ function addSnippetsSubscriber(store) {
     // state.Prefs.values["feeds.snippets"]:  Should snippets be shown?
     // state.Snippets.initialized             Is the snippets data initialized?
     // snippets.initialized:                  Is SnippetsProvider currently initialised?
-    if (state.Prefs.values["feeds.snippets"] && !state.Prefs.values.disableSnippets && state.Snippets.initialized && !snippets.initialized &&
+    if (state.Prefs.values["feeds.snippets"] &&
+    // If the message center experiment is enabled, don't show snippets
+    !state.Prefs.values.messageCenterExperimentEnabled && !state.Prefs.values.disableSnippets && state.Snippets.initialized && !snippets.initialized &&
     // Don't call init multiple times
     !initializing) {
       initializing = true;
@@ -2658,6 +2923,10 @@ function addSnippetsSubscriber(store) {
       initializing = false;
     } else if ((state.Prefs.values["feeds.snippets"] === false || state.Prefs.values.disableSnippets === true) && snippets.initialized) {
       snippets.uninit();
+    }
+
+    if (state.Prefs.values.messageCenterExperimentEnabled) {
+      Object(__WEBPACK_IMPORTED_MODULE_1_content_src_message_center_message_center_content__["b" /* initMessageCenter */])();
     }
   });
 
@@ -2667,13 +2936,161 @@ function addSnippetsSubscriber(store) {
 /* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
 
 /***/ }),
-/* 16 */
+/* 19 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+
+// EXTERNAL MODULE: external "React"
+var external__React_ = __webpack_require__(0);
+var external__React__default = /*#__PURE__*/__webpack_require__.n(external__React_);
+
+// CONCATENATED MODULE: ./system-addon/content-src/message-center/components/Button.jsx
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+
+
+const Button_styles = {
+  button: {
+    border: 0,
+    backgroundColor: "#e1e1e2",
+    fontFamily: "inherit",
+    padding: "8px 15px",
+    marginLeft: "15px"
+  }
+};
+
+const Button = props => external__React__default.a.createElement(
+  "button",
+  _extends({ style: Button_styles.button }, props),
+  props.children
+);
+// CONCATENATED MODULE: ./system-addon/content-src/message-center/components/SnippetBase.jsx
+
+
+const defaultStyles = {
+  container: {
+    position: "fixed",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: "20px",
+    backgroundColor: "white",
+    fontSize: "12px",
+    lineHeight: "16px",
+    boxShadow: "0 -1px 4px 0 rgba(12, 12, 13, 0.1)"
+  },
+  innerWrapper: {
+    maxWidth: "992px",
+    margin: "0 auto",
+    display: "flex",
+    alignItems: "center"
+  },
+  blockButton: {
+    background: "none",
+    border: 0,
+    display: "block",
+    position: "absolute",
+    top: "50%",
+    right: "24px",
+    height: "16px",
+    width: "16px",
+    backgroundImage: "url(resource://activity-stream/data/content/assets/glyph-dismiss-16.svg)",
+    opacity: 0.5,
+    marginTop: "-8px",
+    padding: 0
+  }
+};
+
+class SnippetBase_SnippetBase extends external__React__default.a.PureComponent {
+  render() {
+    const { props } = this;
+
+    // Extend default styles
+    const styles = Object.assign({}, defaultStyles);
+    if (props.styles) {
+      Object.keys(props.styles).forEach(key => {
+        styles[key] = Object.assign({}, styles[key], props.styles[key]);
+      });
+    }
+
+    return external__React__default.a.createElement(
+      "div",
+      { style: styles.container },
+      external__React__default.a.createElement(
+        "div",
+        { style: styles.innerWrapper },
+        props.children
+      ),
+      external__React__default.a.createElement("button", { style: styles.blockButton, onClick: props.onBlock })
+    );
+  }
+}
+// CONCATENATED MODULE: ./system-addon/content-src/message-center/templates/SimpleSnippet.jsx
+
+
+
+
+const SimpleSnippet_styles = {
+  title: {
+    display: "inline",
+    fontSize: "inherit",
+    margin: 0
+  },
+  body: {
+    display: "inline",
+    margin: 0
+  },
+  icon: {
+    height: "42px",
+    width: "42px",
+    marginRight: "15px",
+    borderRadius: "6px",
+    backgroundColor: "rgba(0,0,0,0.1)",
+    flexShrink: 0
+  }
+};
+
+const SimpleSnippet = props => external__React__default.a.createElement(
+  SnippetBase_SnippetBase,
+  props,
+  external__React__default.a.createElement("div", { style: SimpleSnippet_styles.icon }),
+  external__React__default.a.createElement(
+    "div",
+    null,
+    external__React__default.a.createElement(
+      "h3",
+      { style: SimpleSnippet_styles.title },
+      props.content.title
+    ),
+    " ",
+    external__React__default.a.createElement(
+      "p",
+      { style: SimpleSnippet_styles.body },
+      props.content.body
+    )
+  ),
+  props.content.button ? external__React__default.a.createElement(
+    "div",
+    null,
+    external__React__default.a.createElement(
+      Button,
+      null,
+      props.content.button.label
+    )
+  ) : null
+);
+/* harmony export (immutable) */ __webpack_exports__["a"] = SimpleSnippet;
+
+
+/***/ }),
+/* 20 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 
 // EXTERNAL MODULE: ./system-addon/common/Actions.jsm
-var Actions = __webpack_require__(0);
+var Actions = __webpack_require__(1);
 
 // EXTERNAL MODULE: external "ReactIntl"
 var external__ReactIntl_ = __webpack_require__(2);
@@ -2684,7 +3101,7 @@ var external__ReactRedux_ = __webpack_require__(4);
 var external__ReactRedux__default = /*#__PURE__*/__webpack_require__.n(external__ReactRedux_);
 
 // EXTERNAL MODULE: external "React"
-var external__React_ = __webpack_require__(1);
+var external__React_ = __webpack_require__(0);
 var external__React__default = /*#__PURE__*/__webpack_require__.n(external__React_);
 
 // CONCATENATED MODULE: ./system-addon/content-src/components/ConfirmDialog/ConfirmDialog.jsx
@@ -2785,7 +3202,7 @@ class ConfirmDialog__ConfirmDialog extends external__React__default.a.PureCompon
 
 const ConfirmDialog = Object(external__ReactRedux_["connect"])(state => state.Dialog)(ConfirmDialog__ConfirmDialog);
 // EXTERNAL MODULE: ./system-addon/content-src/components/ErrorBoundary/ErrorBoundary.jsx
-var ErrorBoundary = __webpack_require__(7);
+var ErrorBoundary = __webpack_require__(9);
 
 // CONCATENATED MODULE: ./system-addon/content-src/components/ManualMigration/ManualMigration.jsx
 
@@ -2847,205 +3264,126 @@ class ManualMigration__ManualMigration extends external__React__default.a.PureCo
 }
 
 const ManualMigration = Object(external__ReactRedux_["connect"])()(ManualMigration__ManualMigration);
-// CONCATENATED MODULE: ./system-addon/content-src/components/PreferencesPane/PreferencesPane.jsx
+// EXTERNAL MODULE: ./system-addon/content-src/message-center/message-center-content.jsx
+var message_center_content = __webpack_require__(7);
+
+// CONCATENATED MODULE: ./system-addon/content-src/components/MessageCenterAdmin/MessageCenterAdmin.jsx
 
 
 
-
-
-const getFormattedMessage = message => typeof message === "string" ? external__React__default.a.createElement(
-  "span",
-  null,
-  message
-) : external__React__default.a.createElement(external__ReactIntl_["FormattedMessage"], message);
-
-const PreferencesInput = props => external__React__default.a.createElement(
-  "section",
-  null,
-  external__React__default.a.createElement("input", { type: "checkbox", id: props.prefName, name: props.prefName, checked: props.value, disabled: props.disabled, onChange: props.onChange, className: props.className }),
-  external__React__default.a.createElement(
-    "label",
-    { htmlFor: props.prefName, className: props.labelClassName },
-    getFormattedMessage(props.titleString)
-  ),
-  props.descString && external__React__default.a.createElement(
-    "p",
-    { className: "prefs-input-description" },
-    getFormattedMessage(props.descString)
-  ),
-  external__React__default.a.Children.map(props.children, child => external__React__default.a.createElement(
-    "div",
-    { className: `options${child.props.disabled ? " disabled" : ""}` },
-    child
-  ))
-);
-
-class PreferencesPane__PreferencesPane extends external__React__default.a.PureComponent {
+class MessageCenterAdmin_MessageCenterAdmin extends external__React__default.a.PureComponent {
   constructor(props) {
     super(props);
-    this.handleClickOutside = this.handleClickOutside.bind(this);
-    this.handlePrefChange = this.handlePrefChange.bind(this);
-    this.handleSectionChange = this.handleSectionChange.bind(this);
-    this.togglePane = this.togglePane.bind(this);
-    this.onWrapperMount = this.onWrapperMount.bind(this);
+    this.onMessage = this.onMessage.bind(this);
+    this.state = {};
   }
 
-  componentDidUpdate(prevProps, prevState) {
-    if (prevProps.PreferencesPane.visible !== this.props.PreferencesPane.visible) {
-      // While the sidebar is open, listen for all document clicks.
-      if (this.isSidebarOpen()) {
-        document.addEventListener("click", this.handleClickOutside);
-      } else {
-        document.removeEventListener("click", this.handleClickOutside);
-      }
+  onMessage({ data: action }) {
+    if (action.type === "ADMIN_SET_STATE") {
+      this.setState(action.data);
     }
   }
 
-  isSidebarOpen() {
-    return this.props.PreferencesPane.visible;
+  componentWillMount() {
+    message_center_content["a" /* MessageCenterUtils */].sendMessage({ type: "ADMIN_CONNECT_STATE" });
+    message_center_content["a" /* MessageCenterUtils */].addListener(this.onMessage);
   }
 
-  handleClickOutside(event) {
-    // if we are showing the sidebar and there is a click outside, close it.
-    if (this.isSidebarOpen() && !this.wrapper.contains(event.target)) {
-      this.togglePane();
+  componentWillUnmount() {
+    message_center_content["a" /* MessageCenterUtils */].removeListener(this.onMessage);
+  }
+
+  handleBlock(id) {
+    return () => message_center_content["a" /* MessageCenterUtils */].blockById(id);
+  }
+
+  handleUnblock(id) {
+    return () => message_center_content["a" /* MessageCenterUtils */].unblockById(id);
+  }
+
+  renderMessageItem(msg) {
+    const isCurrent = msg.id === this.state.currentId;
+    const isBlocked = this.state.blockList[msg.id];
+
+    let itemClassName = "message-item";
+    if (isCurrent) {
+      itemClassName += " current";
     }
-  }
-
-  handlePrefChange({ target: { name, checked } }) {
-    let value = checked;
-    if (name === "topSitesRows") {
-      value = checked ? 2 : 1;
+    if (isBlocked) {
+      itemClassName += " blocked";
     }
-    this.props.dispatch(Actions["a" /* actionCreators */].SetPref(name, value));
-  }
 
-  handleSectionChange({ target }) {
-    const id = target.name;
-    const type = target.checked ? Actions["b" /* actionTypes */].SECTION_ENABLE : Actions["b" /* actionTypes */].SECTION_DISABLE;
-    this.props.dispatch(Actions["a" /* actionCreators */].AlsoToMain({ type, data: id }));
-  }
-
-  togglePane() {
-    if (this.isSidebarOpen()) {
-      this.props.dispatch({ type: Actions["b" /* actionTypes */].SETTINGS_CLOSE });
-      this.props.dispatch(Actions["a" /* actionCreators */].UserEvent({ event: "CLOSE_NEWTAB_PREFS" }));
-    } else {
-      this.props.dispatch({ type: Actions["b" /* actionTypes */].SETTINGS_OPEN });
-      this.props.dispatch(Actions["a" /* actionCreators */].UserEvent({ event: "OPEN_NEWTAB_PREFS" }));
-    }
-  }
-
-  onWrapperMount(wrapper) {
-    this.wrapper = wrapper;
-  }
-
-  render() {
-    const { props } = this;
-    const prefs = props.Prefs.values;
-    const sections = props.Sections;
-    const isVisible = this.isSidebarOpen();
     return external__React__default.a.createElement(
-      "div",
-      { className: "prefs-pane-wrapper", ref: this.onWrapperMount },
+      "tr",
+      { className: itemClassName, key: msg.id },
       external__React__default.a.createElement(
-        "div",
-        { className: "prefs-pane-button" },
-        external__React__default.a.createElement("button", {
-          className: `prefs-button icon ${isVisible ? "icon-dismiss" : "icon-settings"}`,
-          title: props.intl.formatMessage({ id: isVisible ? "settings_pane_done_button" : "settings_pane_button_label" }),
-          onClick: this.togglePane })
+        "td",
+        { className: "message-id" },
+        external__React__default.a.createElement(
+          "span",
+          null,
+          msg.id
+        )
       ),
       external__React__default.a.createElement(
-        "div",
-        { className: "prefs-pane" },
+        "td",
+        null,
         external__React__default.a.createElement(
-          "div",
-          { className: `sidebar ${isVisible ? "" : "hidden"}` },
-          external__React__default.a.createElement(
-            "div",
-            { className: "prefs-modal-inner-wrapper" },
-            external__React__default.a.createElement(
-              "h1",
-              null,
-              external__React__default.a.createElement(external__ReactIntl_["FormattedMessage"], { id: "settings_pane_header" })
-            ),
-            external__React__default.a.createElement(
-              "p",
-              null,
-              external__React__default.a.createElement(external__ReactIntl_["FormattedMessage"], { id: "settings_pane_body2" })
-            ),
-            external__React__default.a.createElement(PreferencesInput, {
-              className: "showSearch",
-              prefName: "showSearch",
-              value: prefs.showSearch,
-              onChange: this.handlePrefChange,
-              titleString: { id: "settings_pane_search_header" },
-              descString: { id: "settings_pane_search_body" } }),
-            external__React__default.a.createElement("hr", null),
-            external__React__default.a.createElement(
-              PreferencesInput,
-              {
-                className: "showTopSites",
-                prefName: "showTopSites",
-                value: prefs.showTopSites,
-                onChange: this.handlePrefChange,
-                titleString: { id: "settings_pane_topsites_header" },
-                descString: { id: "settings_pane_topsites_body" } },
-              external__React__default.a.createElement(PreferencesInput, {
-                className: "showMoreTopSites",
-                prefName: "topSitesRows",
-                disabled: !prefs.showTopSites,
-                value: prefs.topSitesRows === 2,
-                onChange: this.handlePrefChange,
-                titleString: { id: "settings_pane_topsites_options_showmore" },
-                labelClassName: "icon icon-topsites" })
-            ),
-            sections.filter(section => !section.shouldHidePref).map(({ id, title, enabled, pref }) => external__React__default.a.createElement(
-              PreferencesInput,
-              {
-                key: id,
-                className: "showSection",
-                prefName: pref && pref.feed || id,
-                value: enabled,
-                onChange: pref && pref.feed ? this.handlePrefChange : this.handleSectionChange,
-                titleString: pref && pref.titleString || title,
-                descString: pref && pref.descString },
-              pref && pref.nestedPrefs && pref.nestedPrefs.map(nestedPref => external__React__default.a.createElement(PreferencesInput, {
-                key: nestedPref.name,
-                prefName: nestedPref.name,
-                disabled: !enabled,
-                value: prefs[nestedPref.name],
-                onChange: this.handlePrefChange,
-                titleString: nestedPref.titleString,
-                labelClassName: `icon ${nestedPref.icon}` }))
-            )),
-            !prefs.disableSnippets && external__React__default.a.createElement("hr", null),
-            !prefs.disableSnippets && external__React__default.a.createElement(PreferencesInput, { className: "showSnippets", prefName: "feeds.snippets",
-              value: prefs["feeds.snippets"], onChange: this.handlePrefChange,
-              titleString: { id: "settings_pane_snippets_header" },
-              descString: { id: "settings_pane_snippets_body" } })
-          ),
-          external__React__default.a.createElement(
-            "section",
-            { className: "actions" },
-            external__React__default.a.createElement(
-              "button",
-              { className: "done", onClick: this.togglePane },
-              external__React__default.a.createElement(external__ReactIntl_["FormattedMessage"], { id: "settings_pane_done_button" })
-            )
-          )
+          "button",
+          { className: `button ${isBlocked ? "" : " primary"}`, onClick: isBlocked ? this.handleUnblock(msg.id) : this.handleBlock(msg.id) },
+          isBlocked ? "Unblock" : "Block"
+        )
+      ),
+      external__React__default.a.createElement(
+        "td",
+        { className: "message-summary" },
+        external__React__default.a.createElement(
+          "pre",
+          null,
+          JSON.stringify(msg, null, 2)
         )
       )
     );
   }
-}
 
-const PreferencesPane = Object(external__ReactRedux_["connect"])(state => ({
-  Prefs: state.Prefs,
-  PreferencesPane: state.PreferencesPane,
-  Sections: state.Sections
-}))(Object(external__ReactIntl_["injectIntl"])(PreferencesPane__PreferencesPane));
+  renderMessages() {
+    if (!this.state.messages) {
+      return null;
+    }
+    return external__React__default.a.createElement(
+      "table",
+      null,
+      external__React__default.a.createElement(
+        "tbody",
+        null,
+        this.state.messages.map(msg => this.renderMessageItem(msg))
+      )
+    );
+  }
+
+  render() {
+    return external__React__default.a.createElement(
+      "div",
+      { className: "messages-admin outer-wrapper" },
+      external__React__default.a.createElement(
+        "h1",
+        null,
+        "Messages Admin"
+      ),
+      external__React__default.a.createElement(
+        "button",
+        { className: "button primary", onClick: message_center_content["a" /* MessageCenterUtils */].getNextMessage },
+        "Refresh Current Message"
+      ),
+      external__React__default.a.createElement(
+        "h2",
+        null,
+        "Messages"
+      ),
+      this.renderMessages()
+    );
+  }
+}
 // CONCATENATED MODULE: ./system-addon/common/PrerenderData.jsm
 class _PrerenderData {
   constructor(options) {
@@ -3075,17 +3413,25 @@ class _PrerenderData {
         return result;
       } else if (next && next.oneOf) {
         return result.concat(next.oneOf);
+      } else if (next && next.indexedDB) {
+        return result.concat(next.indexedDB);
       }
       throw new Error("Your validation configuration is not properly configured");
     }, []);
   }
 
-  arePrefsValid(getPref) {
+  arePrefsValid(getPref, indexedDBPrefs) {
     for (const prefs of this.validation) {
       // {oneOf: ["foo", "bar"]}
       if (prefs && prefs.oneOf && !prefs.oneOf.some(name => getPref(name) === this.initialPrefs[name])) {
         return false;
 
+        // {indexedDB: ["foo", "bar"]}
+      } else if (indexedDBPrefs && prefs && prefs.indexedDB) {
+        const anyModifiedPrefs = prefs.indexedDB.some(prefName => indexedDBPrefs.some(pref => pref && pref[prefName]));
+        if (anyModifiedPrefs) {
+          return false;
+        }
         // "foo"
       } else if (getPref(prefs) !== this.initialPrefs[prefs]) {
         return false;
@@ -3100,12 +3446,11 @@ var PrerenderData = new _PrerenderData({
     "showTopSites": true,
     "showSearch": true,
     "topSitesRows": 1,
-    "collapseTopSites": false,
-    "section.highlights.collapsed": false,
-    "section.topstories.collapsed": false,
     "feeds.section.topstories": true,
     "feeds.section.highlights": true,
-    "enableWideLayout": true
+    "enableWideLayout": true,
+    "sectionOrder": "topsites,topstories,highlights",
+    "collapsed": false
   },
   // Prefs listed as invalidating will prevent the prerendered version
   // of AS from being used if their value is something other than what is listed
@@ -3113,10 +3458,13 @@ var PrerenderData = new _PrerenderData({
   // too different for the prerendered version to be used. Unfortunately, this
   // will result in users who have modified some of their preferences not being
   // able to get the benefits of prerendering.
-  validation: ["showTopSites", "showSearch", "topSitesRows", "collapseTopSites", "section.highlights.collapsed", "section.topstories.collapsed", "enableWideLayout",
+  validation: ["showTopSites", "showSearch", "topSitesRows", "enableWideLayout", "sectionOrder",
   // This means if either of these are set to their default values,
   // prerendering can be used.
-  { oneOf: ["feeds.section.topstories", "feeds.section.highlights"] }],
+  { oneOf: ["feeds.section.topstories", "feeds.section.highlights"] },
+  // If any component has the following preference set to `true` it will
+  // invalidate the prerendered version.
+  { indexedDB: ["collapsed"] }],
   initialSections: [{
     enabled: true,
     icon: "pocket",
@@ -3132,7 +3480,7 @@ var PrerenderData = new _PrerenderData({
   }]
 });
 // EXTERNAL MODULE: ./system-addon/content-src/lib/constants.js
-var constants = __webpack_require__(17);
+var constants = __webpack_require__(21);
 
 // CONCATENATED MODULE: ./system-addon/content-src/components/Search/Search.jsx
 /* globals ContentSearchUIController */
@@ -3237,10 +3585,7 @@ class Search__Search extends external__React__default.a.PureComponent {
 
 const Search = Object(external__ReactRedux_["connect"])()(Object(external__ReactIntl_["injectIntl"])(Search__Search));
 // EXTERNAL MODULE: ./system-addon/content-src/components/Sections/Sections.jsx
-var Sections = __webpack_require__(18);
-
-// EXTERNAL MODULE: ./system-addon/content-src/components/TopSites/TopSites.jsx
-var TopSites = __webpack_require__(22);
+var Sections = __webpack_require__(22);
 
 // CONCATENATED MODULE: ./system-addon/content-src/components/Base/Base.jsx
 
@@ -3255,6 +3600,11 @@ var TopSites = __webpack_require__(22);
 
 
 
+const PrefsButton = Object(external__ReactIntl_["injectIntl"])(props => external__React__default.a.createElement(
+  "div",
+  { className: "prefs-button" },
+  external__React__default.a.createElement("button", { className: "icon icon-settings", onClick: props.onClick, title: props.intl.formatMessage({ id: "settings_pane_button_label" }) })
+));
 
 // Add the locale data for pluralization and relative-time formatting for now,
 // this just uses english locale data. We can make this more sophisticated if
@@ -3299,6 +3649,10 @@ class Base__Base extends external__React__default.a.PureComponent {
     const { App, locale, strings } = props;
     const { initialized } = App;
 
+    if (props.Prefs.values.messageCenterExperimentEnabled && window.location.hash === "#message-center-admin") {
+      return external__React__default.a.createElement(MessageCenterAdmin_MessageCenterAdmin, null);
+    }
+
     if (!props.isPrerendered && !initialized) {
       return null;
     }
@@ -3318,15 +3672,25 @@ class Base__Base extends external__React__default.a.PureComponent {
 
 
 class Base_BaseContent extends external__React__default.a.PureComponent {
+  constructor(props) {
+    super(props);
+    this.openPreferences = this.openPreferences.bind(this);
+  }
+
+  openPreferences() {
+    this.props.dispatch(Actions["a" /* actionCreators */].OnlyToMain({ type: Actions["b" /* actionTypes */].SETTINGS_OPEN }));
+    this.props.dispatch(Actions["a" /* actionCreators */].UserEvent({ event: "OPEN_NEWTAB_PREFS" }));
+  }
+
   render() {
     const { props } = this;
-    const { App } = props;
+    const { App, Theme } = props;
     const { initialized } = App;
     const prefs = props.Prefs.values;
 
     const shouldBeFixedToTop = PrerenderData.arePrefsValid(name => prefs[name]);
 
-    const outerClassName = `outer-wrapper${shouldBeFixedToTop ? " fixed-to-top" : ""} ${prefs.enableWideLayout ? "wide-layout-enabled" : "wide-layout-disabled"}`;
+    const outerClassName = ["outer-wrapper", Theme.className, shouldBeFixedToTop && "fixed-to-top", prefs.enableWideLayout ? "wide-layout-enabled" : "wide-layout-disabled"].filter(v => v).join(" ");
 
     return external__React__default.a.createElement(
       "div",
@@ -3351,21 +3715,10 @@ class Base_BaseContent extends external__React__default.a.PureComponent {
             { className: "non-collapsible-section" },
             external__React__default.a.createElement(ManualMigration, null)
           ),
-          prefs.showTopSites && external__React__default.a.createElement(TopSites["a" /* TopSites */], null),
-          external__React__default.a.createElement(Sections["a" /* Sections */], null)
+          external__React__default.a.createElement(Sections["a" /* Sections */], null),
+          external__React__default.a.createElement(PrefsButton, { onClick: this.openPreferences })
         ),
         external__React__default.a.createElement(ConfirmDialog, null)
-      ),
-      initialized && external__React__default.a.createElement(
-        "div",
-        { className: "prefs-pane" },
-        external__React__default.a.createElement(
-          ErrorBoundary["a" /* ErrorBoundary */],
-          { className: "sidebar" },
-          " ",
-          external__React__default.a.createElement(PreferencesPane, null),
-          " "
-        )
       )
     );
   }
@@ -3373,12 +3726,12 @@ class Base_BaseContent extends external__React__default.a.PureComponent {
 /* unused harmony export BaseContent */
 
 
-const Base = Object(external__ReactRedux_["connect"])(state => ({ App: state.App, Prefs: state.Prefs }))(Base__Base);
+const Base = Object(external__ReactRedux_["connect"])(state => ({ App: state.App, Prefs: state.Prefs, Theme: state.Theme }))(Base__Base);
 /* harmony export (immutable) */ __webpack_exports__["a"] = Base;
 
 
 /***/ }),
-/* 17 */
+/* 21 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -3388,22 +3741,24 @@ const Base = Object(external__ReactRedux_["connect"])(state => ({ App: state.App
 /* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
 
 /***/ }),
-/* 18 */
+/* 22 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
-/* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_content_src_components_Card_Card__ = __webpack_require__(19);
+/* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_content_src_components_Card_Card__ = __webpack_require__(23);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react_intl__ = __webpack_require__(2);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react_intl___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_1_react_intl__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_common_Actions_jsm__ = __webpack_require__(0);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_content_src_components_CollapsibleSection_CollapsibleSection__ = __webpack_require__(10);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_content_src_components_ComponentPerfTimer_ComponentPerfTimer__ = __webpack_require__(11);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_common_Actions_jsm__ = __webpack_require__(1);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_content_src_components_CollapsibleSection_CollapsibleSection__ = __webpack_require__(12);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_content_src_components_ComponentPerfTimer_ComponentPerfTimer__ = __webpack_require__(14);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_react_redux__ = __webpack_require__(4);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_react_redux___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_5_react_redux__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_6_react__ = __webpack_require__(1);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_6_react__ = __webpack_require__(0);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_6_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_6_react__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_7_content_src_components_Topics_Topics__ = __webpack_require__(21);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_7_content_src_components_Topics_Topics__ = __webpack_require__(25);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_8_content_src_components_TopSites_TopSites__ = __webpack_require__(26);
 var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
 
 
 
@@ -3460,12 +3815,10 @@ class Section extends __WEBPACK_IMPORTED_MODULE_6_react___default.a.PureComponen
         props.document.removeEventListener(VISIBILITY_CHANGE_EVENT, this._onVisibilityChange);
       }
 
-      // When the page becoems visible, send the impression stats ping if the section isn't collapsed.
+      // When the page becomes visible, send the impression stats ping if the section isn't collapsed.
       this._onVisibilityChange = () => {
         if (props.document.visibilityState === VISIBLE) {
-          const { id, Prefs } = this.props;
-          const isCollapsed = Prefs.values[`section.${id}.collapsed`];
-          if (!isCollapsed) {
+          if (!this.props.pref.collapsed) {
             this._dispatchImpressionStats();
           }
           props.document.removeEventListener(VISIBILITY_CHANGE_EVENT, this._onVisibilityChange);
@@ -3476,19 +3829,15 @@ class Section extends __WEBPACK_IMPORTED_MODULE_6_react___default.a.PureComponen
   }
 
   componentDidMount() {
-    const { id, rows, Prefs } = this.props;
-    const isCollapsed = Prefs.values[`section.${id}.collapsed`];
-    if (rows.length && !isCollapsed) {
+    if (this.props.rows.length && !this.props.pref.collapsed) {
       this.sendImpressionStatsOrAddListener();
     }
   }
 
   componentDidUpdate(prevProps) {
     const { props } = this;
-    const { id, Prefs } = props;
-    const isCollapsedPref = `section.${id}.collapsed`;
-    const isCollapsed = Prefs.values[isCollapsedPref];
-    const wasCollapsed = prevProps.Prefs.values[isCollapsedPref];
+    const isCollapsed = props.pref.collapsed;
+    const wasCollapsed = prevProps.pref.collapsed;
     if (
     // Don't send impression stats for the empty state
     props.rows.length && (
@@ -3498,6 +3847,12 @@ class Section extends __WEBPACK_IMPORTED_MODULE_6_react___default.a.PureComponen
     // or if we are expanding a section that was collapsed.
     wasCollapsed && !isCollapsed)) {
       this.sendImpressionStatsOrAddListener();
+    }
+  }
+
+  componentWillUnmount() {
+    if (this._onVisibilityChange) {
+      this.props.document.removeEventListener(VISIBILITY_CHANGE_EVENT, this._onVisibilityChange);
     }
   }
 
@@ -3531,7 +3886,7 @@ class Section extends __WEBPACK_IMPORTED_MODULE_6_react___default.a.PureComponen
       id, eventSource, title, icon, rows,
       emptyState, dispatch, maxRows,
       contextMenuOptions, initialized, disclaimer,
-      pref, privacyNoticeURL
+      pref, privacyNoticeURL, isFirst, isLast
     } = this.props;
     const maxCards = CARDS_PER_ROW * maxRows;
 
@@ -3554,14 +3909,16 @@ class Section extends __WEBPACK_IMPORTED_MODULE_6_react___default.a.PureComponen
       __WEBPACK_IMPORTED_MODULE_6_react___default.a.createElement(
         __WEBPACK_IMPORTED_MODULE_3_content_src_components_CollapsibleSection_CollapsibleSection__["a" /* CollapsibleSection */],
         { className: "section", icon: icon,
-          title: getFormattedMessage(title),
+          title: title,
           id: id,
           eventSource: eventSource,
           disclaimer: disclaimer,
-          prefName: `section.${id}.collapsed`,
+          collapsed: this.props.pref.collapsed,
           showPrefName: pref && pref.feed || id,
           privacyNoticeURL: privacyNoticeURL,
           Prefs: this.props.Prefs,
+          isFirst: isFirst,
+          isLast: isLast,
           dispatch: this.props.dispatch },
         !shouldShowEmptyState && __WEBPACK_IMPORTED_MODULE_6_react___default.a.createElement(
           "ul",
@@ -3596,20 +3953,45 @@ Section.defaultProps = {
   document: global.document,
   rows: [],
   emptyState: {},
+  pref: {},
   title: ""
 };
 
-const SectionIntl = Object(__WEBPACK_IMPORTED_MODULE_1_react_intl__["injectIntl"])(Section);
+const SectionIntl = Object(__WEBPACK_IMPORTED_MODULE_5_react_redux__["connect"])(state => ({ Prefs: state.Prefs }))(Object(__WEBPACK_IMPORTED_MODULE_1_react_intl__["injectIntl"])(Section));
 /* unused harmony export SectionIntl */
 
 
 class _Sections extends __WEBPACK_IMPORTED_MODULE_6_react___default.a.PureComponent {
+  renderSections() {
+    const sections = [];
+    const enabledSections = this.props.Sections.filter(section => section.enabled);
+    const { sectionOrder, showTopSites } = this.props.Prefs.values;
+    // Enabled sections doesn't include Top Sites, so we add it if enabled.
+    const expectedCount = enabledSections.length + ~~showTopSites;
+
+    for (const sectionId of sectionOrder.split(",")) {
+      const commonProps = {
+        key: sectionId,
+        isFirst: sections.length === 0,
+        isLast: sections.length === expectedCount - 1
+      };
+      if (sectionId === "topsites" && showTopSites) {
+        sections.push(__WEBPACK_IMPORTED_MODULE_6_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_8_content_src_components_TopSites_TopSites__["a" /* TopSites */], commonProps));
+      } else {
+        const section = enabledSections.find(s => s.id === sectionId);
+        if (section) {
+          sections.push(__WEBPACK_IMPORTED_MODULE_6_react___default.a.createElement(SectionIntl, _extends({}, section, commonProps)));
+        }
+      }
+    }
+    return sections;
+  }
+
   render() {
-    const sections = this.props.Sections;
     return __WEBPACK_IMPORTED_MODULE_6_react___default.a.createElement(
       "div",
       { className: "sections-list" },
-      sections.filter(section => section.enabled).map(section => __WEBPACK_IMPORTED_MODULE_6_react___default.a.createElement(SectionIntl, _extends({ key: section.id }, section, { Prefs: this.props.Prefs, dispatch: this.props.dispatch })))
+      this.renderSections()
     );
   }
 }
@@ -3622,13 +4004,13 @@ const Sections = Object(__WEBPACK_IMPORTED_MODULE_5_react_redux__["connect"])(st
 /* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
 
 /***/ }),
-/* 19 */
+/* 23 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 
 // EXTERNAL MODULE: ./system-addon/common/Actions.jsm
-var Actions = __webpack_require__(0);
+var Actions = __webpack_require__(1);
 
 // CONCATENATED MODULE: ./system-addon/content-src/components/Card/types.js
 const cardContextTypes = {
@@ -3650,7 +4032,7 @@ const cardContextTypes = {
   },
   pocket: {
     intlID: "type_label_pocket",
-    icon: "pocket-small"
+    icon: "pocket"
   }
 };
 // EXTERNAL MODULE: external "ReactIntl"
@@ -3658,10 +4040,10 @@ var external__ReactIntl_ = __webpack_require__(2);
 var external__ReactIntl__default = /*#__PURE__*/__webpack_require__.n(external__ReactIntl_);
 
 // EXTERNAL MODULE: ./system-addon/content-src/components/LinkMenu/LinkMenu.jsx + 1 modules
-var LinkMenu = __webpack_require__(8);
+var LinkMenu = __webpack_require__(10);
 
 // EXTERNAL MODULE: external "React"
-var external__React_ = __webpack_require__(1);
+var external__React_ = __webpack_require__(0);
 var external__React__default = /*#__PURE__*/__webpack_require__.n(external__React_);
 
 // CONCATENATED MODULE: ./system-addon/content-src/components/Card/Card.jsx
@@ -3735,6 +4117,18 @@ class Card_Card extends external__React__default.a.PureComponent {
     });
   }
 
+  /**
+   * Report to telemetry additional information about the item.
+   */
+  _getTelemetryInfo() {
+    // Filter out "history" type for being the default
+    if (this.props.link.type !== "history") {
+      return { value: { card_type: this.props.link.type } };
+    }
+
+    return null;
+  }
+
   onLinkClick(event) {
     event.preventDefault();
     const { altKey, button, ctrlKey, metaKey, shiftKey } = event;
@@ -3750,11 +4144,11 @@ class Card_Card extends external__React__default.a.PureComponent {
         action_position: this.props.index
       }));
     } else {
-      this.props.dispatch(Actions["a" /* actionCreators */].UserEvent({
+      this.props.dispatch(Actions["a" /* actionCreators */].UserEvent(Object.assign({
         event: "CLICK",
         source: this.props.eventSource,
         action_position: this.props.index
-      }));
+      }, this._getTelemetryInfo())));
 
       if (this.props.shouldSendImpressionStats) {
         this.props.dispatch(Actions["a" /* actionCreators */].ImpressionStats({
@@ -3866,6 +4260,7 @@ class Card_Card extends external__React__default.a.PureComponent {
         onUpdate: this.onMenuUpdate,
         options: link.contextMenuOptions || contextMenuOptions,
         site: link,
+        siteInfo: this._getTelemetryInfo(),
         shouldSendImpressionStats: shouldSendImpressionStats })
     );
   }
@@ -3879,85 +4274,26 @@ const PlaceholderCard = () => external__React__default.a.createElement(Card_Card
 
 
 /***/ }),
-/* 20 */
+/* 24 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
-
-// EXTERNAL MODULE: ./system-addon/common/Actions.jsm
-var Actions = __webpack_require__(0);
-
-// EXTERNAL MODULE: ./system-addon/content-src/components/ContextMenu/ContextMenu.jsx
-var ContextMenu = __webpack_require__(9);
-
-// EXTERNAL MODULE: external "ReactIntl"
-var external__ReactIntl_ = __webpack_require__(2);
-var external__ReactIntl__default = /*#__PURE__*/__webpack_require__.n(external__ReactIntl_);
-
-// EXTERNAL MODULE: external "React"
-var external__React_ = __webpack_require__(1);
-var external__React__default = /*#__PURE__*/__webpack_require__.n(external__React_);
-
-// CONCATENATED MODULE: ./system-addon/content-src/lib/section-menu-options.js
-
-
-/**
- * List of functions that return items that can be included as menu options in a
- * SectionMenu. All functions take the section as the only parameter.
- */
-const SectionMenuOptions = {
-  Separator: () => ({ type: "separator" }),
-  RemoveSection: section => ({
-    id: "section_menu_action_remove_section",
-    icon: "dismiss",
-    action: Actions["a" /* actionCreators */].SetPref(section.showPrefName, false),
-    userEvent: "SECTION_MENU_REMOVE"
-  }),
-  CollapseSection: section => ({
-    id: "section_menu_action_collapse_section",
-    icon: "minimize",
-    action: Actions["a" /* actionCreators */].SetPref(section.collapsePrefName, true),
-    userEvent: "SECTION_MENU_COLLAPSE"
-  }),
-  ExpandSection: section => ({
-    id: "section_menu_action_expand_section",
-    icon: "maximize",
-    action: Actions["a" /* actionCreators */].SetPref(section.collapsePrefName, false),
-    userEvent: "SECTION_MENU_EXPAND"
-  }),
-  ManageSection: section => ({
-    id: "section_menu_action_manage_section",
-    icon: "settings",
-    action: { type: Actions["b" /* actionTypes */].SETTINGS_OPEN },
-    userEvent: "SECTION_MENU_MANAGE"
-  }),
-  AddTopSite: section => ({
-    id: "section_menu_action_add_topsite",
-    icon: "add",
-    action: { type: Actions["b" /* actionTypes */].TOP_SITES_EDIT, data: { index: -1 } },
-    userEvent: "SECTION_MENU_ADD_TOPSITE"
-  }),
-  PrivacyNotice: section => ({
-    id: "section_menu_action_privacy_notice",
-    icon: "info",
-    action: Actions["a" /* actionCreators */].OnlyToMain({
-      type: Actions["b" /* actionTypes */].OPEN_LINK,
-      data: { url: section.privacyNoticeURL }
-    }),
-    userEvent: "SECTION_MENU_PRIVACY_NOTICE"
-  }),
-  CheckCollapsed: section => section.isCollapsed ? SectionMenuOptions.ExpandSection(section) : SectionMenuOptions.CollapseSection(section)
-};
-// CONCATENATED MODULE: ./system-addon/content-src/components/SectionMenu/SectionMenu.jsx
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_content_src_components_ContextMenu_ContextMenu__ = __webpack_require__(11);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_react_intl__ = __webpack_require__(2);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_react_intl___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_2_react_intl__);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_react__ = __webpack_require__(0);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_3_react__);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_content_src_lib_section_menu_options__ = __webpack_require__(13);
 
 
 
 
 
 
-const DEFAULT_SECTION_MENU_OPTIONS = ["RemoveSection", "CheckCollapsed", "Separator", "ManageSection"];
+const DEFAULT_SECTION_MENU_OPTIONS = ["MoveUp", "MoveDown", "Separator", "RemoveSection", "CheckCollapsed", "Separator", "ManageSection"];
 
-class SectionMenu__SectionMenu extends external__React__default.a.PureComponent {
+class _SectionMenu extends __WEBPACK_IMPORTED_MODULE_3_react___default.a.PureComponent {
   getOptions() {
     const { props } = this;
 
@@ -3971,14 +4307,14 @@ class SectionMenu__SectionMenu extends external__React__default.a.PureComponent 
       propOptions.splice(-1, 0, "PrivacyNotice");
     }
 
-    const options = propOptions.map(o => SectionMenuOptions[o](props)).map(option => {
+    const options = propOptions.map(o => __WEBPACK_IMPORTED_MODULE_4_content_src_lib_section_menu_options__["a" /* SectionMenuOptions */][o](props)).map(option => {
       const { action, id, type, userEvent } = option;
       if (!type && id) {
         option.label = props.intl.formatMessage({ id });
         option.onClick = () => {
           props.dispatch(action);
           if (userEvent) {
-            props.dispatch(Actions["a" /* actionCreators */].UserEvent({
+            props.dispatch(__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].UserEvent({
               event: userEvent,
               source: props.source
             }));
@@ -3997,7 +4333,7 @@ class SectionMenu__SectionMenu extends external__React__default.a.PureComponent 
   }
 
   render() {
-    return external__React__default.a.createElement(ContextMenu["a" /* ContextMenu */], {
+    return __WEBPACK_IMPORTED_MODULE_3_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_1_content_src_components_ContextMenu_ContextMenu__["a" /* ContextMenu */], {
       onUpdate: this.props.onUpdate,
       options: this.getOptions() });
   }
@@ -4005,18 +4341,18 @@ class SectionMenu__SectionMenu extends external__React__default.a.PureComponent 
 /* unused harmony export _SectionMenu */
 
 
-const SectionMenu = Object(external__ReactIntl_["injectIntl"])(SectionMenu__SectionMenu);
+const SectionMenu = Object(__WEBPACK_IMPORTED_MODULE_2_react_intl__["injectIntl"])(_SectionMenu);
 /* harmony export (immutable) */ __webpack_exports__["a"] = SectionMenu;
 
 
 /***/ }),
-/* 21 */
+/* 25 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_react_intl__ = __webpack_require__(2);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_react_intl___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_0_react_intl__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react__ = __webpack_require__(1);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react__ = __webpack_require__(0);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_1_react__);
 
 
@@ -4066,23 +4402,24 @@ class Topics extends __WEBPACK_IMPORTED_MODULE_1_react___default.a.PureComponent
 
 
 /***/ }),
-/* 22 */
+/* 26 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
-/* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(0);
+/* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_1__TopSitesConstants__ = __webpack_require__(5);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_content_src_components_CollapsibleSection_CollapsibleSection__ = __webpack_require__(10);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_content_src_components_ComponentPerfTimer_ComponentPerfTimer__ = __webpack_require__(11);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_content_src_components_CollapsibleSection_CollapsibleSection__ = __webpack_require__(12);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_content_src_components_ComponentPerfTimer_ComponentPerfTimer__ = __webpack_require__(14);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_react_redux__ = __webpack_require__(4);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_react_redux___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_4_react_redux__);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_react_intl__ = __webpack_require__(2);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_react_intl___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_5_react_intl__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_6_react__ = __webpack_require__(1);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_6_react__ = __webpack_require__(0);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_6_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_6_react__);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_7_common_Reducers_jsm__ = __webpack_require__(6);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_8__TopSiteForm__ = __webpack_require__(23);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_9__TopSite__ = __webpack_require__(13);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_8__TopSiteForm__ = __webpack_require__(27);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_9__TopSite__ = __webpack_require__(16);
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 
 
 
@@ -4093,6 +4430,26 @@ class Topics extends __WEBPACK_IMPORTED_MODULE_1_react___default.a.PureComponent
 
 
 
+
+
+function topSiteIconType(link) {
+  if (link.customScreenshotURL) {
+    return "custom_screenshot";
+  }
+  if (link.tippyTopIcon || link.faviconRef === "tippytop") {
+    return "tippytop";
+  }
+  if (link.faviconSize >= __WEBPACK_IMPORTED_MODULE_1__TopSitesConstants__["b" /* MIN_RICH_FAVICON_SIZE */]) {
+    return "rich_icon";
+  }
+  if (link.screenshot && link.faviconSize >= __WEBPACK_IMPORTED_MODULE_1__TopSitesConstants__["a" /* MIN_CORNER_FAVICON_SIZE */]) {
+    return "screenshot_with_icon";
+  }
+  if (link.screenshot) {
+    return "screenshot";
+  }
+  return "no_image";
+}
 
 /**
  * Iterates through TopSites and counts types of images.
@@ -4101,22 +4458,12 @@ class Topics extends __WEBPACK_IMPORTED_MODULE_1_react___default.a.PureComponent
  */
 function countTopSitesIconsTypes(topSites) {
   const countTopSitesTypes = (acc, link) => {
-    if (link.tippyTopIcon || link.faviconRef === "tippytop") {
-      acc.tippytop++;
-    } else if (link.faviconSize >= __WEBPACK_IMPORTED_MODULE_1__TopSitesConstants__["b" /* MIN_RICH_FAVICON_SIZE */]) {
-      acc.rich_icon++;
-    } else if (link.screenshot && link.faviconSize >= __WEBPACK_IMPORTED_MODULE_1__TopSitesConstants__["a" /* MIN_CORNER_FAVICON_SIZE */]) {
-      acc.screenshot_with_icon++;
-    } else if (link.screenshot) {
-      acc.screenshot++;
-    } else {
-      acc.no_image++;
-    }
-
+    acc[topSiteIconType(link)]++;
     return acc;
   };
 
   return topSites.reduce(countTopSitesTypes, {
+    "custom_screenshot": 0,
     "screenshot_with_icon": 0,
     "screenshot": 0,
     "tippytop": 0,
@@ -4186,14 +4533,16 @@ class _TopSites extends __WEBPACK_IMPORTED_MODULE_6_react___default.a.PureCompon
         {
           className: "top-sites",
           icon: "topsites",
-          title: props.intl.formatMessage({ id: "header_top_sites" }),
+          id: "topsites",
+          title: { id: "header_top_sites" },
           extraMenuOptions: ["AddTopSite"],
-          prefName: "collapseTopSites",
           showPrefName: "showTopSites",
           eventSource: __WEBPACK_IMPORTED_MODULE_1__TopSitesConstants__["d" /* TOP_SITES_SOURCE */],
-          Prefs: props.Prefs,
+          collapsed: props.TopSites.pref ? props.TopSites.pref.collapsed : undefined,
+          isFirst: props.isFirst,
+          isLast: props.isLast,
           dispatch: props.dispatch },
-        __WEBPACK_IMPORTED_MODULE_6_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_9__TopSite__["b" /* TopSiteList */], { TopSites: props.TopSites, TopSitesRows: props.TopSitesRows, dispatch: props.dispatch, intl: props.intl }),
+        __WEBPACK_IMPORTED_MODULE_6_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_9__TopSite__["b" /* TopSiteList */], { TopSites: props.TopSites, TopSitesRows: props.TopSitesRows, dispatch: props.dispatch, intl: props.intl, topSiteIconType: topSiteIconType }),
         __WEBPACK_IMPORTED_MODULE_6_react___default.a.createElement(
           "div",
           { className: "edit-topsites-wrapper" },
@@ -4204,12 +4553,12 @@ class _TopSites extends __WEBPACK_IMPORTED_MODULE_6_react___default.a.PureCompon
             __WEBPACK_IMPORTED_MODULE_6_react___default.a.createElement(
               "div",
               { className: "modal" },
-              __WEBPACK_IMPORTED_MODULE_6_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_8__TopSiteForm__["a" /* TopSiteForm */], {
+              __WEBPACK_IMPORTED_MODULE_6_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_8__TopSiteForm__["a" /* TopSiteForm */], _extends({
                 site: props.TopSites.rows[editForm.index],
-                index: editForm.index,
                 onClose: this.onFormClose,
                 dispatch: this.props.dispatch,
-                intl: this.props.intl })
+                intl: this.props.intl
+              }, editForm))
             )
           )
         )
@@ -4230,20 +4579,20 @@ const TopSites = Object(__WEBPACK_IMPORTED_MODULE_4_react_redux__["connect"])(st
 /* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
 
 /***/ }),
-/* 23 */
+/* 27 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 
 // EXTERNAL MODULE: ./system-addon/common/Actions.jsm
-var Actions = __webpack_require__(0);
+var Actions = __webpack_require__(1);
 
 // EXTERNAL MODULE: external "ReactIntl"
 var external__ReactIntl_ = __webpack_require__(2);
 var external__ReactIntl__default = /*#__PURE__*/__webpack_require__.n(external__ReactIntl_);
 
 // EXTERNAL MODULE: external "React"
-var external__React_ = __webpack_require__(1);
+var external__React_ = __webpack_require__(0);
 var external__React__default = /*#__PURE__*/__webpack_require__.n(external__React_);
 
 // EXTERNAL MODULE: ./system-addon/content-src/components/TopSites/TopSitesConstants.js
@@ -4256,13 +4605,29 @@ var TopSitesConstants = __webpack_require__(5);
 class TopSiteFormInput_TopSiteFormInput extends external__React__default.a.PureComponent {
   constructor(props) {
     super(props);
+    this.state = { validationError: this.props.validationError };
+    this.onChange = this.onChange.bind(this);
     this.onMount = this.onMount.bind(this);
   }
 
   componentWillReceiveProps(nextProps) {
-    if (nextProps.validationError && !this.props.validationError) {
+    if (nextProps.shouldFocus && !this.props.shouldFocus) {
       this.input.focus();
     }
+    if (nextProps.validationError && !this.props.validationError) {
+      this.setState({ validationError: true });
+    }
+    // If the component is in an error state but the value was cleared by the parent
+    if (this.state.validationError && !nextProps.value) {
+      this.setState({ validationError: false });
+    }
+  }
+
+  onChange(ev) {
+    if (this.state.validationError) {
+      this.setState({ validationError: false });
+    }
+    this.props.onChange(ev);
   }
 
   onMount(input) {
@@ -4271,7 +4636,8 @@ class TopSiteFormInput_TopSiteFormInput extends external__React__default.a.PureC
 
   render() {
     const showClearButton = this.props.value && this.props.onClear;
-    const { validationError, typeUrl } = this.props;
+    const { typeUrl } = this.props;
+    const { validationError } = this.state;
 
     return external__React__default.a.createElement(
       "label",
@@ -4280,12 +4646,18 @@ class TopSiteFormInput_TopSiteFormInput extends external__React__default.a.PureC
       external__React__default.a.createElement(
         "div",
         { className: `field ${typeUrl ? "url" : ""}${validationError ? " invalid" : ""}` },
-        showClearButton && external__React__default.a.createElement("div", { className: "icon icon-clear-input", onClick: this.props.onClear }),
+        this.props.loading ? external__React__default.a.createElement(
+          "div",
+          { className: "loading-container" },
+          external__React__default.a.createElement("div", { className: "loading-animation" })
+        ) : showClearButton && external__React__default.a.createElement("div", { className: "icon icon-clear-input", onClick: this.props.onClear }),
         external__React__default.a.createElement("input", { type: "text",
           value: this.props.value,
           ref: this.onMount,
-          onChange: this.props.onChange,
-          placeholder: this.props.intl.formatMessage({ id: this.props.placeholderId }) }),
+          onChange: this.onChange,
+          placeholder: this.props.intl.formatMessage({ id: this.props.placeholderId }),
+          autoFocus: this.props.shouldFocus,
+          disabled: this.props.loading }),
         validationError && external__React__default.a.createElement(
           "aside",
           { className: "error-tooltip" },
@@ -4302,7 +4674,7 @@ TopSiteFormInput_TopSiteFormInput.defaultProps = {
   validationError: false
 };
 // EXTERNAL MODULE: ./system-addon/content-src/components/TopSites/TopSite.jsx
-var TopSite = __webpack_require__(13);
+var TopSite = __webpack_require__(16);
 
 // CONCATENATED MODULE: ./system-addon/content-src/components/TopSites/TopSiteForm.jsx
 
@@ -4319,13 +4691,20 @@ class TopSiteForm_TopSiteForm extends external__React__default.a.PureComponent {
     this.state = {
       label: site ? site.label || site.hostname : "",
       url: site ? site.url : "",
-      validationError: false
+      validationError: false,
+      customScreenshotUrl: site ? site.customScreenshotURL : "",
+      showCustomScreenshotForm: site ? site.customScreenshotURL : false
     };
+    this.onClearScreenshotInput = this.onClearScreenshotInput.bind(this);
     this.onLabelChange = this.onLabelChange.bind(this);
     this.onUrlChange = this.onUrlChange.bind(this);
     this.onCancelButtonClick = this.onCancelButtonClick.bind(this);
     this.onClearUrlClick = this.onClearUrlClick.bind(this);
     this.onDoneButtonClick = this.onDoneButtonClick.bind(this);
+    this.onCustomScreenshotUrlChange = this.onCustomScreenshotUrlChange.bind(this);
+    this.onPreviewButtonClick = this.onPreviewButtonClick.bind(this);
+    this.onEnableScreenshotUrlForm = this.onEnableScreenshotUrlForm.bind(this);
+    this.validateUrl = this.validateUrl.bind(this);
   }
 
   onLabelChange(event) {
@@ -4346,6 +4725,26 @@ class TopSiteForm_TopSiteForm extends external__React__default.a.PureComponent {
     });
   }
 
+  onEnableScreenshotUrlForm() {
+    this.setState({ showCustomScreenshotForm: true });
+  }
+
+  _updateCustomScreenshotInput(customScreenshotUrl) {
+    this.setState({
+      customScreenshotUrl,
+      validationError: false
+    });
+    this.props.dispatch({ type: Actions["b" /* actionTypes */].PREVIEW_REQUEST_CANCEL });
+  }
+
+  onCustomScreenshotUrlChange(event) {
+    this._updateCustomScreenshotInput(event.target.value);
+  }
+
+  onClearScreenshotInput() {
+    this._updateCustomScreenshotInput("");
+  }
+
   onCancelButtonClick(ev) {
     ev.preventDefault();
     this.props.onClose();
@@ -4361,6 +4760,12 @@ class TopSiteForm_TopSiteForm extends external__React__default.a.PureComponent {
         site.label = this.state.label;
       }
 
+      if (this.state.customScreenshotUrl) {
+        site.customScreenshotURL = this.cleanUrl(this.state.customScreenshotUrl);
+      } else if (this.props.site && this.props.site.customScreenshotURL) {
+        // Used to flag that previously cached screenshot should be removed
+        site.customScreenshotURL = null;
+      }
       this.props.dispatch(Actions["a" /* actionCreators */].AlsoToMain({
         type: Actions["b" /* actionTypes */].TOP_SITES_PIN,
         data: { site, index }
@@ -4375,6 +4780,20 @@ class TopSiteForm_TopSiteForm extends external__React__default.a.PureComponent {
     }
   }
 
+  onPreviewButtonClick(event) {
+    event.preventDefault();
+    if (this.validateForm()) {
+      this.props.dispatch(Actions["a" /* actionCreators */].AlsoToMain({
+        type: Actions["b" /* actionTypes */].PREVIEW_REQUEST,
+        data: { url: this.cleanUrl(this.state.customScreenshotUrl) }
+      }));
+      this.props.dispatch(Actions["a" /* actionCreators */].UserEvent({
+        source: TopSitesConstants["d" /* TOP_SITES_SOURCE */],
+        event: "PREVIEW_REQUEST"
+      }));
+    }
+  }
+
   cleanUrl(url) {
     // If we are missing a protocol, prepend http://
     if (!url.startsWith("http:") && !url.startsWith("https:")) {
@@ -4383,24 +4802,84 @@ class TopSiteForm_TopSiteForm extends external__React__default.a.PureComponent {
     return url;
   }
 
-  validateUrl(url) {
+  _tryParseUrl(url) {
     try {
-      return !!new URL(this.cleanUrl(url));
+      return new URL(url);
     } catch (e) {
-      return false;
+      return null;
     }
   }
 
+  validateUrl(url) {
+    const validProtocols = ["http:", "https:"];
+    const urlObj = this._tryParseUrl(url) || this._tryParseUrl(this.cleanUrl(url));
+
+    return urlObj && validProtocols.includes(urlObj.protocol);
+  }
+
+  validateCustomScreenshotUrl() {
+    const { customScreenshotUrl } = this.state;
+    return !customScreenshotUrl || this.validateUrl(customScreenshotUrl);
+  }
+
   validateForm() {
-    const validate = this.validateUrl(this.state.url);
-    this.setState({ validationError: !validate });
+    const validate = this.validateUrl(this.state.url) && this.validateCustomScreenshotUrl();
+
+    if (!validate) {
+      this.setState({ validationError: true });
+    }
+
     return validate;
   }
 
+  _renderCustomScreenshotInput() {
+    const { customScreenshotUrl } = this.state;
+    const requestFailed = this.props.previewResponse === "";
+    const validationError = this.state.validationError && !this.validateCustomScreenshotUrl() || requestFailed;
+    // Set focus on error if the url field is valid or when the input is first rendered and is empty
+    const shouldFocus = validationError && this.validateUrl(this.state.url) || !customScreenshotUrl;
+    const isLoading = this.props.previewResponse === null && customScreenshotUrl && this.props.previewUrl === this.cleanUrl(customScreenshotUrl);
+
+    if (!this.state.showCustomScreenshotForm) {
+      return external__React__default.a.createElement(
+        "a",
+        { className: "enable-custom-image-input", onClick: this.onEnableScreenshotUrlForm },
+        external__React__default.a.createElement(external__ReactIntl_["FormattedMessage"], { id: "topsites_form_use_image_link" })
+      );
+    }
+    return external__React__default.a.createElement(
+      "div",
+      { className: "custom-image-input-container" },
+      external__React__default.a.createElement(TopSiteFormInput_TopSiteFormInput, {
+        errorMessageId: requestFailed ? "topsites_form_image_validation" : "topsites_form_url_validation",
+        loading: isLoading,
+        onChange: this.onCustomScreenshotUrlChange,
+        onClear: this.onClearScreenshotInput,
+        shouldFocus: shouldFocus,
+        typeUrl: true,
+        value: customScreenshotUrl,
+        validationError: validationError,
+        titleId: "topsites_form_image_url_label",
+        placeholderId: "topsites_form_url_placeholder",
+        intl: this.props.intl })
+    );
+  }
+
   render() {
+    const { customScreenshotUrl } = this.state;
+    const requestFailed = this.props.previewResponse === "";
     // For UI purposes, editing without an existing link is "add"
     const showAsAdd = !this.props.site;
-
+    const previous = this.props.site && this.props.site.customScreenshotURL || "";
+    const changed = customScreenshotUrl && this.cleanUrl(customScreenshotUrl) !== previous;
+    // Preview mode if changes were made to the custom screenshot URL and no preview was received yet
+    // or the request failed
+    const previewMode = changed && !this.props.previewResponse;
+    const previewLink = Object.assign({}, this.props.site);
+    if (this.props.previewResponse) {
+      previewLink.screenshot = this.props.previewResponse;
+      previewLink.customScreenshotURL = this.props.previewUrl;
+    }
     return external__React__default.a.createElement(
       "form",
       { className: "topsite-form" },
@@ -4424,16 +4903,20 @@ class TopSiteForm_TopSiteForm extends external__React__default.a.PureComponent {
               placeholderId: "topsites_form_title_placeholder",
               intl: this.props.intl }),
             external__React__default.a.createElement(TopSiteFormInput_TopSiteFormInput, { onChange: this.onUrlChange,
+              shouldFocus: this.state.validationError && !this.validateUrl(this.state.url),
               value: this.state.url,
               onClear: this.onClearUrlClick,
-              validationError: this.state.validationError,
+              validationError: this.state.validationError && !this.validateUrl(this.state.url),
               titleId: "topsites_form_url_label",
               typeUrl: true,
               placeholderId: "topsites_form_url_placeholder",
               errorMessageId: "topsites_form_url_validation",
-              intl: this.props.intl })
+              intl: this.props.intl }),
+            this._renderCustomScreenshotInput()
           ),
-          external__React__default.a.createElement(TopSite["a" /* TopSiteLink */], { link: this.props.site || {}, title: this.state.label })
+          external__React__default.a.createElement(TopSite["a" /* TopSiteLink */], { link: previewLink,
+            defaultStyle: requestFailed,
+            title: this.state.label })
         )
       ),
       external__React__default.a.createElement(
@@ -4444,7 +4927,11 @@ class TopSiteForm_TopSiteForm extends external__React__default.a.PureComponent {
           { className: "cancel", type: "button", onClick: this.onCancelButtonClick },
           external__React__default.a.createElement(external__ReactIntl_["FormattedMessage"], { id: "topsites_form_cancel_button" })
         ),
-        external__React__default.a.createElement(
+        previewMode ? external__React__default.a.createElement(
+          "button",
+          { className: "done preview", type: "submit", onClick: this.onPreviewButtonClick },
+          external__React__default.a.createElement(external__ReactIntl_["FormattedMessage"], { id: "topsites_form_preview_button" })
+        ) : external__React__default.a.createElement(
           "button",
           { className: "done", type: "submit", onClick: this.onDoneButtonClick },
           external__React__default.a.createElement(external__ReactIntl_["FormattedMessage"], { id: showAsAdd ? "topsites_form_add_button" : "topsites_form_save_button" })
@@ -4457,17 +4944,17 @@ class TopSiteForm_TopSiteForm extends external__React__default.a.PureComponent {
 
 
 TopSiteForm_TopSiteForm.defaultProps = {
-  TopSite: null,
+  site: null,
   index: -1
 };
 
 /***/ }),
-/* 24 */
+/* 28 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
-/* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(0);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_common_PerfService_jsm__ = __webpack_require__(12);
+/* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_common_PerfService_jsm__ = __webpack_require__(15);
 
 
 
@@ -4537,13 +5024,13 @@ class DetectUserSessionStart {
 /* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
 
 /***/ }),
-/* 25 */
+/* 29 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony export (immutable) */ __webpack_exports__["a"] = initStore;
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(0);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_redux__ = __webpack_require__(26);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_redux__ = __webpack_require__(30);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_redux___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_1_redux__);
 /* eslint-env mozilla/frame-script */
 
@@ -4695,16 +5182,10 @@ function initStore(reducers, initialState) {
 /* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
 
 /***/ }),
-/* 26 */
+/* 30 */
 /***/ (function(module, exports) {
 
 module.exports = Redux;
-
-/***/ }),
-/* 27 */
-/***/ (function(module, exports) {
-
-module.exports = ReactDOM;
 
 /***/ })
 /******/ ]);

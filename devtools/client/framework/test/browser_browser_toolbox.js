@@ -2,6 +2,11 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+// There are shutdown issues for which multiple rejections are left uncaught.
+// See bug 1018184 for resolving these issues.
+const { PromiseTestUtils } = scopedCuImport("resource://testing-common/PromiseTestUtils.jsm");
+PromiseTestUtils.whitelistRejectionsGlobally(/File closed/);
+
 // On debug test slave, it takes about 50s to run the test.
 requestLongerTimeout(4);
 
@@ -33,7 +38,7 @@ add_task(async function() {
   // Be careful, this JS function is going to be executed in the addon toolbox,
   // which lives in another process. So do not try to use any scope variable!
   let env = Cc["@mozilla.org/process/environment;1"].getService(Ci.nsIEnvironment);
-  let testScript = function () {
+  let testScript = function() {
     toolbox.selectTool("webconsole")
       .then(console => {
         let { jsterm } = console.hud;

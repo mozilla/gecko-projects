@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Tests that a file with an unsupported CSP directive ('reflected-xss filter')
 // displays the appropriate message to the console. See Bug 1045902.
 
@@ -19,7 +17,7 @@ const TEST_FILE = "http://example.com/browser/devtools/client/webconsole/" +
 const TEST_URI =
   "data:text/html;charset=utf8,Web Console CSP ignoring reflected XSS (bug 1045902)";
 
-add_task(async function () {
+add_task(async function() {
   const hud = await openNewTabAndConsole(TEST_URI);
   await loadDocument(TEST_FILE);
 

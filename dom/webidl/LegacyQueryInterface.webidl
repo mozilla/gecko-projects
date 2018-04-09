@@ -12,17 +12,21 @@ interface IID;
  // that are exposed in workers.
  Exposed=(Window,Worker,System)]
 interface LegacyQueryInterface {
-  // Legacy QueryInterface, only exposed to chrome or XBL code on the
-  // main thread.
-  [Exposed=Window]
-  nsISupports queryInterface(IID iid);
+  // Legacy QueryInterface, only exposed to chrome code on the main thread.
+  [Exposed=(Window,System), ChromeOnly]
+  nsISupports QueryInterface(IID iid);
 };
 
 Attr implements LegacyQueryInterface;
 BarProp implements LegacyQueryInterface;
 BoxObject implements LegacyQueryInterface;
 CaretPosition implements LegacyQueryInterface;
+ChildProcessMessageManager implements LegacyQueryInterface;
+ChromeMessageBroadcaster implements LegacyQueryInterface;
+ChromeMessageSender implements LegacyQueryInterface;
 Comment implements LegacyQueryInterface;
+ContentFrameMessageManager implements LegacyQueryInterface;
+ContentProcessMessageManager implements LegacyQueryInterface;
 Crypto implements LegacyQueryInterface;
 CSSMozDocumentRule implements LegacyQueryInterface;
 CSSPrimitiveValue implements LegacyQueryInterface;

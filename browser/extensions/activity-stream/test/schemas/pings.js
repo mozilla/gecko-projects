@@ -76,19 +76,27 @@ export const UserEventAction = Joi.object().keys({
       "BOOKMARK_DELETE",
       "BOOKMARK_ADD",
       "PIN",
+      "PREVIEW_REQUEST",
       "UNPIN",
       "SAVE_TO_POCKET",
-      "SECTION_MENU_REMOVE",
-      "SECTION_MENU_COLLAPSE",
-      "SECTION_MENU_EXPAND",
-      "SECTION_MENU_MANAGE",
-      "SECTION_MENU_ADD_TOPSITE",
-      "SECTION_MENU_PRIVACY_NOTICE",
+      "MENU_MOVE_UP",
+      "MENU_MOVE_DOWN",
+      "SCREENSHOT_REQUEST",
+      "MENU_REMOVE",
+      "MENU_COLLAPSE",
+      "MENU_EXPAND",
+      "MENU_MANAGE",
+      "MENU_ADD_TOPSITE",
+      "MENU_PRIVACY_NOTICE",
       "DELETE_FROM_POCKET",
       "ARCHIVE_FROM_POCKET"
     ]).required(),
     source: Joi.valid(["TOP_SITES", "TOP_STORIES", "HIGHLIGHTS"]),
-    action_position: Joi.number().integer()
+    action_position: Joi.number().integer(),
+    value: Joi.object().keys({
+      icon_type: Joi.valid(["tippytop", "rich_icon", "screenshot_with_icon", "screenshot", "no_image"]),
+      card_type: Joi.valid(["bookmark", "trending", "pinned", "pocket"])
+    })
   }).required(),
   meta: Joi.object().keys({
     to: Joi.valid(MAIN_MESSAGE_TYPE).required(),
@@ -164,6 +172,7 @@ export const SessionPing = Joi.object().keys(Object.assign({}, baseKeys, {
 
     // Information about the quality of TopSites images and icons.
     topsites_icon_stats: Joi.object().keys({
+      custom_screenshot: Joi.number(),
       rich_icon: Joi.number(),
       screenshot: Joi.number(),
       screenshot_with_icon: Joi.number(),

@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Tests that the autocompletion results contain the names of JSTerm helpers.
 // See Bug 686937.
 
@@ -12,7 +10,7 @@
 
 const TEST_URI = "data:text/html;charset=utf8,<p>test JSTerm Helpers autocomplete";
 
-add_task(async function () {
+add_task(async function() {
   const {jsterm} = await openNewTabAndConsole(TEST_URI);
   await testInspectAutoCompletion(jsterm, "i", true);
   await testInspectAutoCompletion(jsterm, "window.", false);

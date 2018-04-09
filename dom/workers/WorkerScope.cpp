@@ -559,6 +559,29 @@ WorkerGlobalScope::GetController() const
   return mWorkerPrivate->GetController();
 }
 
+RefPtr<ServiceWorkerRegistration>
+WorkerGlobalScope::GetOrCreateServiceWorkerRegistration(const ServiceWorkerRegistrationDescriptor& aDescriptor)
+{
+  mWorkerPrivate->AssertIsOnWorkerThread();
+  RefPtr<ServiceWorkerRegistration> ref;
+  ForEachEventTargetObject([&] (DOMEventTargetHelper* aTarget, bool* aDoneOut) {
+    RefPtr<ServiceWorkerRegistration> swr = do_QueryObject(aTarget);
+    if (!swr || !swr->MatchesDescriptor(aDescriptor)) {
+      return;
+    }
+
+    ref = swr.forget();
+    *aDoneOut = true;
+  });
+
+  if (!ref) {
+    ref = ServiceWorkerRegistration::CreateForWorker(mWorkerPrivate, this,
+                                                     aDescriptor);
+  }
+
+  return ref.forget();
+}
+
 DedicatedWorkerGlobalScope::DedicatedWorkerGlobalScope(WorkerPrivate* aWorkerPrivate,
                                                        const nsString& aName)
   : WorkerGlobalScope(aWorkerPrivate)
@@ -612,10 +635,10 @@ DedicatedWorkerGlobalScope::PostMessage(JSContext* aCx,
 }
 
 void
-DedicatedWorkerGlobalScope::Close(JSContext* aCx)
+DedicatedWorkerGlobalScope::Close()
 {
   mWorkerPrivate->AssertIsOnWorkerThread();
-  mWorkerPrivate->CloseInternal(aCx);
+  mWorkerPrivate->CloseInternal();
 }
 
 SharedWorkerGlobalScope::SharedWorkerGlobalScope(WorkerPrivate* aWorkerPrivate,
@@ -640,10 +663,10 @@ SharedWorkerGlobalScope::WrapGlobalObject(JSContext* aCx,
 }
 
 void
-SharedWorkerGlobalScope::Close(JSContext* aCx)
+SharedWorkerGlobalScope::Close()
 {
   mWorkerPrivate->AssertIsOnWorkerThread();
-  mWorkerPrivate->CloseInternal(aCx);
+  mWorkerPrivate->CloseInternal();
 }
 
 NS_IMPL_CYCLE_COLLECTION_INHERITED(ServiceWorkerGlobalScope, WorkerGlobalScope,
@@ -662,8 +685,7 @@ ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(WorkerPrivate* aWorkerPrivate
   // Eagerly create the registration because we will need to receive updates
   // about the state of the registration.  We can't wait until first access
   // to start receiving these.
-  , mRegistration(ServiceWorkerRegistration::CreateForWorker(aWorkerPrivate,
-                                                             aRegistrationDescriptor))
+  , mRegistration(GetOrCreateServiceWorkerRegistration(aRegistrationDescriptor))
 {
 }
 
@@ -766,18 +788,10 @@ ServiceWorkerGlobalScope::SetOnfetch(mozilla::dom::EventHandlerNonNull* aCallbac
 }
 
 void
-ServiceWorkerGlobalScope::AddEventListener(
-                          const nsAString& aType,
-                          dom::EventListener* aListener,
-                          const dom::AddEventListenerOptionsOrBoolean& aOptions,
-                          const dom::Nullable<bool>& aWantsUntrusted,
-                          ErrorResult& aRv)
+ServiceWorkerGlobalScope::EventListenerAdded(const nsAString& aType)
 {
   MOZ_ASSERT(mWorkerPrivate);
   mWorkerPrivate->AssertIsOnWorkerThread();
-
-  DOMEventTargetHelper::AddEventListener(aType, aListener, aOptions,
-                                         aWantsUntrusted, aRv);
 
   if (!aType.EqualsLiteral("fetch")) {
     return;
@@ -788,9 +802,7 @@ ServiceWorkerGlobalScope::AddEventListener(
     mWorkerPrivate->DispatchToMainThread(r.forget());
   }
 
-  if (!aRv.Failed()) {
-    mWorkerPrivate->SetFetchHandlerWasAdded();
-  }
+  mWorkerPrivate->SetFetchHandlerWasAdded();
 }
 
 namespace {

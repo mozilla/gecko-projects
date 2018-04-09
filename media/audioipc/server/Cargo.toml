@@ -9,14 +9,13 @@ description = "Remote cubeb server"
 
 [dependencies]
 audioipc = { path = "../audioipc" }
-cubeb = "0.4"
+cubeb = "0.5.2"
 bytes = "0.4"
 lazycell = "^0.4"
 libc = "0.2"
 log = "^0.3.6"
 slab = "0.3.0"
-# rayon-core in Gecko uses futures 0.1.13
-futures = "=0.1.13"
+futures = "0.1.18"
 tokio-core = "0.1"
 tokio-uds = "0.1.7"
 

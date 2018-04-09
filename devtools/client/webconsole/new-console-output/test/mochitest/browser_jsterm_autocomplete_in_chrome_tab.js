@@ -3,13 +3,11 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Tests that code completion works properly in chrome tabs, like about:config.
 
 "use strict";
 
-add_task(async function () {
+add_task(async function() {
   const hud = await openNewTabAndConsole("about:config");
   ok(hud, "we have a console");
   ok(hud.iframeWindow, "we have the console UI window");

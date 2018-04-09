@@ -21,7 +21,7 @@ const HTML = `
 `;
 const TEST_URI = "data:text/html;charset=utf-8," + encodeURI(HTML);
 
-add_task(async function () {
+add_task(async function() {
   const hud = await openNewTabAndConsole(TEST_URI);
   const toolbox = gDevTools.getToolbox(hud.target);
 
@@ -43,7 +43,7 @@ add_task(async function () {
 
   info("Unhighlight the node by moving away from the node");
   let onNodeUnhighlight = toolbox.once("node-unhighlight");
-  let btn = toolbox.doc.querySelector(".toolbox-dock-button");
+  let btn = toolbox.doc.getElementById("toolbox-meatball-menu-button");
   EventUtils.synthesizeMouseAtCenter(btn, {type: "mousemove"}, view);
 
   await onNodeUnhighlight;

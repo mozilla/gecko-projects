@@ -177,7 +177,6 @@ class Exception;
 #define XPC_DYING_NATIVE_PROTO_MAP_LENGTH        8
 #define XPC_NATIVE_INTERFACE_MAP_LENGTH         32
 #define XPC_NATIVE_SET_MAP_LENGTH               32
-#define XPC_THIS_TRANSLATOR_MAP_LENGTH           4
 #define XPC_WRAPPER_MAP_LENGTH                   8
 
 /***************************************************************************/
@@ -550,9 +549,6 @@ public:
     NativeSetMap* GetNativeSetMap() const
         {return mNativeSetMap;}
 
-    IID2ThisTranslatorMap* GetThisTranslatorMap() const
-        {return mThisTranslatorMap;}
-
     XPCWrappedNativeProtoMap* GetDyingWrappedNativeProtoMap() const
         {return mDyingWrappedNativeProtoMap;}
 
@@ -654,7 +650,6 @@ private:
     IID2NativeInterfaceMap*  mIID2NativeInterfaceMap;
     ClassInfo2NativeSetMap*  mClassInfo2NativeSetMap;
     NativeSetMap*            mNativeSetMap;
-    IID2ThisTranslatorMap*   mThisTranslatorMap;
     XPCWrappedNativeProtoMap* mDyingWrappedNativeProtoMap;
     bool mGCIsRunning;
     nsTArray<nsISupports*> mNativesToReleaseArray;
@@ -858,21 +853,9 @@ static inline bool IS_PROTO_CLASS(const js::Class* clazz)
            clazz == &XPC_WN_ModsAllowed_Proto_JSClass;
 }
 
-typedef js::HashSet<size_t,
-                    js::DefaultHasher<size_t>,
-                    js::SystemAllocPolicy> InterpositionWhitelist;
-
-struct InterpositionWhitelistPair {
-    nsIAddonInterposition* interposition;
-    InterpositionWhitelist whitelist;
-};
-
-typedef nsTArray<InterpositionWhitelistPair> InterpositionWhitelistArray;
-
 /***************************************************************************/
 // XPCWrappedNativeScope is one-to-one with a JS global object.
 
-class nsIAddonInterposition;
 class nsXPCComponentsBase;
 class XPCWrappedNativeScope final
 {
@@ -938,8 +921,6 @@ public:
     void TraceInside(JSTracer* trc) {
         if (mContentXBLScope)
             mContentXBLScope.trace(trc, "XPCWrappedNativeScope::mXBLScope");
-        for (size_t i = 0; i < mAddonScopes.Length(); i++)
-            mAddonScopes[i].trace(trc, "XPCWrappedNativeScope::mAddonScopes");
         if (mXrayExpandos.initialized())
             mXrayExpandos.trace(trc);
     }
@@ -986,21 +967,10 @@ public:
     static bool
     IsDyingScope(XPCWrappedNativeScope* scope);
 
-    typedef js::HashMap<JSAddonId*,
-                        nsCOMPtr<nsIAddonInterposition>,
-                        js::PointerHasher<JSAddonId*>,
-                        js::SystemAllocPolicy> InterpositionMap;
-
-    typedef js::HashSet<JSAddonId*,
-                        js::PointerHasher<JSAddonId*>,
-                        js::SystemAllocPolicy> AddonSet;
-
     // Gets the appropriate scope object for XBL in this scope. The context
     // must be same-compartment with the global upon entering, and the scope
     // object is wrapped into the compartment of the global.
     JSObject* EnsureContentXBLScope(JSContext* cx);
-
-    JSObject* EnsureAddonScope(JSContext* cx, JSAddonId* addonId);
 
     XPCWrappedNativeScope(JSContext* cx, JS::HandleObject aGlobal);
 
@@ -1013,43 +983,14 @@ public:
     bool UseContentXBLScope() { return mUseContentXBLScope; }
     void ClearContentXBLScope() { mContentXBLScope = nullptr; }
 
-    bool IsAddonScope() { return xpc::IsAddonCompartment(Compartment()); }
-
-    inline bool HasInterposition() { return mInterposition; }
-    nsCOMPtr<nsIAddonInterposition> GetInterposition();
-
-    static bool SetAddonInterposition(JSContext* cx,
-                                      JSAddonId* addonId,
-                                      nsIAddonInterposition* interp);
-
-    static InterpositionWhitelist* GetInterpositionWhitelist(nsIAddonInterposition* interposition);
-    static bool UpdateInterpositionWhitelist(JSContext* cx,
-                                             nsIAddonInterposition* interposition);
-
-    static bool AllowCPOWsInAddon(JSContext* cx, JSAddonId* addonId, bool allow);
-
 protected:
     virtual ~XPCWrappedNativeScope();
 
     XPCWrappedNativeScope() = delete;
 
 private:
-    class ClearInterpositionsObserver final : public nsIObserver {
-        ~ClearInterpositionsObserver() {}
-
-      public:
-        NS_DECL_ISUPPORTS
-        NS_DECL_NSIOBSERVER
-    };
-
     static XPCWrappedNativeScope* gScopes;
     static XPCWrappedNativeScope* gDyingScopes;
-
-    static bool                      gShutdownObserverInitialized;
-    static InterpositionMap*         gInterpositionMap;
-    static AddonSet*                 gAllowCPOWAddonSet;
-
-    static InterpositionWhitelistArray* gInterpositionWhitelists;
 
     Native2WrappedNativeMap*         mWrappedNativeMap;
     ClassInfo2WrappedNativeProtoMap* mWrappedNativeProtoMap;
@@ -1065,13 +1006,6 @@ private:
     // EnsureContentXBLScope() decides whether it needs to be created or not.
     // This reference is wrapped into the compartment of mGlobalJSObject.
     JS::ObjectPtr                    mContentXBLScope;
-
-    // Lazily created sandboxes for addon code.
-    nsTArray<JS::ObjectPtr>          mAddonScopes;
-
-    // This is a service that will be use to interpose on some property accesses on
-    // objects from other scope, for add-on compatibility reasons.
-    nsCOMPtr<nsIAddonInterposition>  mInterposition;
 
     JS::WeakMapPtr<JSObject*, JSObject*> mXrayExpandos;
 
@@ -1820,8 +1754,6 @@ public:
     XPCJSRuntime* GetRuntime() const {return mRuntime;}
     nsIInterfaceInfo* GetInterfaceInfo() const {return mInfo;}
     const char* GetInterfaceName();
-
-    static bool IsWrappedJS(nsISupports* aPtr);
 
     NS_IMETHOD DelegatedQueryInterface(nsXPCWrappedJS* self, REFNSIID aIID,
                                        void** aInstancePtr);
@@ -2647,9 +2579,6 @@ xpc_GetSafeJSContext()
 
 namespace xpc {
 
-JSAddonId*
-NewAddonId(JSContext* cx, const nsACString& id);
-
 // JSNatives to expose atob and btoa in various non-DOM XPConnect scopes.
 bool
 Atob(JSContext* cx, unsigned argc, JS::Value* vp);
@@ -2749,10 +2678,7 @@ public:
         , wantComponents(true)
         , wantExportHelpers(false)
         , isWebExtensionContentScript(false)
-        , waiveInterposition(false)
         , proto(cx)
-        , addonId(cx)
-        , writeToGlobalPrototype(false)
         , sameZoneAs(cx)
         , freshZone(false)
         , isContentXBLScope(false)
@@ -2770,11 +2696,8 @@ public:
     bool wantComponents;
     bool wantExportHelpers;
     bool isWebExtensionContentScript;
-    bool waiveInterposition;
     JS::RootedObject proto;
     nsCString sandboxName;
-    JS::RootedString addonId;
-    bool writeToGlobalPrototype;
     JS::RootedObject sameZoneAs;
     bool freshZone;
     bool isContentXBLScope;
@@ -2924,10 +2847,6 @@ EvalInSandbox(JSContext* cx, JS::HandleObject sandbox, const nsAString& source,
               const nsACString& filename, int32_t lineNo,
               JS::MutableHandleValue rval);
 
-nsresult
-GetSandboxAddonId(JSContext* cx, JS::HandleObject sandboxArg,
-                  JS::MutableHandleValue rval);
-
 // Helper for retrieving metadata stored in a reserved slot. The metadata
 // is set during the sandbox creation using the "metadata" option.
 nsresult
@@ -3021,35 +2940,9 @@ public:
     // more portable to other browser architectures).
     bool allowWaivers;
 
-    // This flag is intended for a very specific use, internal to Gecko. It may
-    // go away or change behavior at any time. It should not be added to any
-    // documentation and it should not be used without consulting the XPConnect
-    // module owner.
-    bool writeToGlobalPrototype;
-
-    // When writeToGlobalPrototype is true, we use this flag to temporarily
-    // disable the writeToGlobalPrototype behavior (when resolving standard
-    // classes, for example).
-    bool skipWriteToGlobalPrototype;
-
     // This compartment corresponds to a WebExtension content script, and
     // receives various bits of special compatibility behavior.
     bool isWebExtensionContentScript;
-
-    // True if wrappers in this compartment will interpose on some property
-    // accesses on objects from other compartments, for add-on compatibility
-    // reasons.
-    bool hasInterposition;
-
-    // Even if an add-on needs interposition, it does not necessary need it
-    // for every compartment. If this flag is set we waive interposition for
-    // this compartment.
-    bool waiveInterposition;
-
-    // If this flag is set, we intercept function calls on vanilla JS function
-    // objects from this compartment if the caller compartment has the
-    // hasInterposition flag set.
-    bool addonCallInterposition;
 
     // If CPOWs are disabled for browser code via the
     // dom.ipc.cpows.forbid-unsafe-from-browser preferences, then only
@@ -3133,8 +3026,6 @@ public:
         locationURI = aLocationURI;
     }
 
-    void SetAddonCallInterposition() { addonCallInterposition = true; }
-
     JSObject2WrappedJSMap* GetWrappedJSMap() const { return mWrappedJSMap; }
     void UpdateWeakPointersAfterGC();
 
@@ -3188,17 +3079,6 @@ public:
         JS::Realm* realm = JS::GetObjectRealmOrNull(object);
         return Get(realm);
     }
-
-    // This flag is intended for a very specific use, internal to Gecko. It may
-    // go away or change behavior at any time. It should not be added to any
-    // documentation and it should not be used without consulting the XPConnect
-    // module owner.
-    bool writeToGlobalPrototype;
-
-    // When writeToGlobalPrototype is true, we use this flag to temporarily
-    // disable the writeToGlobalPrototype behavior (when resolving standard
-    // classes, for example).
-    bool skipWriteToGlobalPrototype;
 
     // The scriptability of this realm.
     Scriptability scriptability;

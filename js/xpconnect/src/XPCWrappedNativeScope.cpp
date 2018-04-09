@@ -13,7 +13,6 @@
 #include "ExpandedPrincipal.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Preferences.h"
-#include "nsIAddonInterposition.h"
 #include "nsIXULRuntime.h"
 #include "mozJSComponentLoader.h"
 
@@ -27,42 +26,6 @@ using namespace JS;
 
 XPCWrappedNativeScope* XPCWrappedNativeScope::gScopes = nullptr;
 XPCWrappedNativeScope* XPCWrappedNativeScope::gDyingScopes = nullptr;
-bool XPCWrappedNativeScope::gShutdownObserverInitialized = false;
-XPCWrappedNativeScope::InterpositionMap* XPCWrappedNativeScope::gInterpositionMap = nullptr;
-InterpositionWhitelistArray* XPCWrappedNativeScope::gInterpositionWhitelists = nullptr;
-XPCWrappedNativeScope::AddonSet* XPCWrappedNativeScope::gAllowCPOWAddonSet = nullptr;
-
-NS_IMPL_ISUPPORTS(XPCWrappedNativeScope::ClearInterpositionsObserver, nsIObserver)
-
-NS_IMETHODIMP
-XPCWrappedNativeScope::ClearInterpositionsObserver::Observe(nsISupports* subject,
-                                                            const char* topic,
-                                                            const char16_t* data)
-{
-    MOZ_ASSERT(strcmp(topic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0);
-
-    // The interposition map holds strong references to interpositions, which
-    // may themselves be involved in cycles. We need to drop these strong
-    // references before the cycle collector shuts down. Otherwise we'll
-    // leak. This observer always runs before CC shutdown.
-    if (gInterpositionMap) {
-        delete gInterpositionMap;
-        gInterpositionMap = nullptr;
-    }
-
-    if (gInterpositionWhitelists) {
-        delete gInterpositionWhitelists;
-        gInterpositionWhitelists = nullptr;
-    }
-
-    if (gAllowCPOWAddonSet) {
-        delete gAllowCPOWAddonSet;
-        gAllowCPOWAddonSet = nullptr;
-    }
-
-    nsContentUtils::UnregisterShutdownObserver(this);
-    return NS_OK;
-}
 
 static bool
 RemoteXULForbidsXBLScope(nsIPrincipal* aPrincipal, HandleObject aGlobal)
@@ -142,37 +105,6 @@ XPCWrappedNativeScope::XPCWrappedNativeScope(JSContext* cx,
     }
     if (mUseContentXBLScope) {
         mUseContentXBLScope = principal && !nsContentUtils::IsSystemPrincipal(principal);
-    }
-
-    JSAddonId* addonId = JS::AddonIdOfObject(aGlobal);
-    if (gInterpositionMap) {
-        bool isSystem = nsContentUtils::IsSystemPrincipal(principal);
-        bool waiveInterposition = priv->waiveInterposition;
-        InterpositionMap::Ptr interposition = gInterpositionMap->lookup(addonId);
-        if (!waiveInterposition && interposition) {
-            MOZ_RELEASE_ASSERT(isSystem);
-            mInterposition = interposition->value();
-            priv->hasInterposition = HasInterposition();
-        }
-        // We also want multiprocessCompatible add-ons to have a default interposition.
-        if (!mInterposition && addonId && isSystem) {
-            bool interpositionEnabled = mozilla::Preferences::GetBool(
-                "extensions.interposition.enabled", false);
-            if (interpositionEnabled) {
-                mInterposition = do_GetService("@mozilla.org/addons/default-addon-shims;1");
-                MOZ_ASSERT(mInterposition);
-                priv->hasInterposition = true;
-                UpdateInterpositionWhitelist(cx, mInterposition);
-            }
-        }
-        MOZ_ASSERT(HasInterposition() == priv->hasInterposition);
-    }
-
-    if (addonId) {
-        // We forbid CPOWs unless they're specifically allowed.
-        priv->allowCPOWs = gAllowCPOWAddonSet ? gAllowCPOWAddonSet->has(addonId) : false;
-        MOZ_ASSERT(!mozJSComponentLoader::Get()->IsLoaderGlobal(aGlobal),
-                   "Don't load addons into the shared JSM global");
     }
 }
 
@@ -287,21 +219,6 @@ XPCWrappedNativeScope::AttachComponentsObject(JSContext* aCx)
     return true;
 }
 
-static bool
-CompartmentPerAddon()
-{
-    static bool initialized = false;
-    static bool pref = false;
-
-    if (!initialized) {
-        pref = Preferences::GetBool("dom.compartment_per_addon", false) ||
-               BrowserTabsRemoteAutostart();
-        initialized = true;
-    }
-
-    return pref;
-}
-
 JSObject*
 XPCWrappedNativeScope::EnsureContentXBLScope(JSContext* cx)
 {
@@ -332,7 +249,7 @@ XPCWrappedNativeScope::EnsureContentXBLScope(JSContext* cx)
     // same-origin Xrays.
     SandboxOptions options;
     options.wantXrays = false;
-    options.wantComponents = true;
+    options.wantComponents = false;
     options.proto = global;
     options.sameZoneAs = global;
     options.isContentXBLScope = true;
@@ -373,41 +290,13 @@ namespace xpc {
 JSObject*
 GetXBLScope(JSContext* cx, JSObject* contentScopeArg)
 {
-    MOZ_ASSERT(!IsInAddonScope(contentScopeArg));
-
     JS::RootedObject contentScope(cx, contentScopeArg);
-    JSCompartment* addonComp = js::GetObjectCompartment(contentScope);
-    JS::Rooted<JS::Realm*> addonRealm(cx, JS::GetRealmForCompartment(addonComp));
-    JSAutoCompartment ac(cx, contentScope);
-    JSObject* scope = RealmPrivate::Get(addonRealm)->scope->EnsureContentXBLScope(cx);
-    NS_ENSURE_TRUE(scope, nullptr); // See bug 858642.
-    scope = js::UncheckedUnwrap(scope);
-    JS::ExposeObjectToActiveJS(scope);
-    return scope;
-}
-
-JSObject*
-GetScopeForXBLExecution(JSContext* cx, HandleObject contentScope, JSAddonId* addonId)
-{
-    MOZ_RELEASE_ASSERT(!IsInAddonScope(contentScope));
-
-    RootedObject global(cx, js::GetGlobalForObjectCrossCompartment(contentScope));
-    if (IsInContentXBLScope(contentScope))
-        return global;
-
     JSAutoCompartment ac(cx, contentScope);
     XPCWrappedNativeScope* nativeScope = RealmPrivate::Get(contentScope)->scope;
-    bool isSystem = nsContentUtils::IsSystemPrincipal(nativeScope->GetPrincipal());
 
-    RootedObject scope(cx);
-    if (nativeScope->UseContentXBLScope())
-        scope = nativeScope->EnsureContentXBLScope(cx);
-    else if (addonId && CompartmentPerAddon() && isSystem)
-        scope = nativeScope->EnsureAddonScope(cx, addonId);
-    else
-        scope = global;
-
+    RootedObject scope(cx, nativeScope->EnsureContentXBLScope(cx));
     NS_ENSURE_TRUE(scope, nullptr); // See bug 858642.
+
     scope = js::UncheckedUnwrap(scope);
     JS::ExposeObjectToActiveJS(scope);
     return scope;
@@ -434,73 +323,6 @@ ClearContentXBLScope(JSObject* global)
 }
 
 } /* namespace xpc */
-
-JSObject*
-XPCWrappedNativeScope::EnsureAddonScope(JSContext* cx, JSAddonId* addonId)
-{
-    JS::RootedObject global(cx, GetGlobalJSObject());
-    MOZ_ASSERT(js::IsObjectInContextCompartment(global, cx));
-    MOZ_ASSERT(!IsContentXBLScope());
-    MOZ_ASSERT(!IsAddonScope());
-    MOZ_ASSERT(addonId);
-    MOZ_ASSERT(nsContentUtils::IsSystemPrincipal(GetPrincipal()));
-
-    // In bug 1092156, we found that add-on scopes don't work correctly when the
-    // window navigates. The add-on global's prototype is an outer window, so,
-    // after the navigation, looking up window properties in the add-on scope
-    // will fail. However, in most cases where the window can be navigated, the
-    // entire window is part of the add-on. To solve the problem, we avoid
-    // returning an add-on scope for a window that is already tagged with the
-    // add-on ID.
-    if (AddonIdOfObject(global) == addonId)
-        return global;
-
-    // If we already have an addon scope object, we know what to use.
-    for (size_t i = 0; i < mAddonScopes.Length(); i++) {
-        if (JS::AddonIdOfObject(js::UncheckedUnwrap(mAddonScopes[i])) == addonId)
-            return mAddonScopes[i];
-    }
-
-    SandboxOptions options;
-    options.wantComponents = true;
-    options.proto = global;
-    options.sameZoneAs = global;
-    options.addonId = JS::StringOfAddonId(addonId);
-    options.writeToGlobalPrototype = true;
-
-    RootedValue v(cx);
-    nsresult rv = CreateSandboxObject(cx, &v, GetPrincipal(), options);
-    NS_ENSURE_SUCCESS(rv, nullptr);
-    mAddonScopes.AppendElement(&v.toObject());
-
-    CompartmentPrivate::Get(js::UncheckedUnwrap(&v.toObject()))->isAddonCompartment = true;
-    return &v.toObject();
-}
-
-JSObject*
-xpc::GetAddonScope(JSContext* cx, JS::HandleObject contentScope, JSAddonId* addonId)
-{
-    MOZ_RELEASE_ASSERT(!IsInAddonScope(contentScope));
-
-    if (!addonId || !CompartmentPerAddon()) {
-        return js::GetGlobalForObjectCrossCompartment(contentScope);
-    }
-
-    JSAutoCompartment ac(cx, contentScope);
-    XPCWrappedNativeScope* nativeScope = RealmPrivate::Get(contentScope)->scope;
-    if (nativeScope->GetPrincipal() != nsXPConnect::SystemPrincipal()) {
-        // This can happen if, for example, Jetpack loads an unprivileged HTML
-        // page from the add-on. It's not clear what to do there, so we just use
-        // the normal global.
-        return js::GetGlobalForObjectCrossCompartment(contentScope);
-    }
-    JSObject* scope = nativeScope->EnsureAddonScope(cx, addonId);
-    NS_ENSURE_TRUE(scope, nullptr);
-
-    scope = js::UncheckedUnwrap(scope);
-    JS::ExposeObjectToActiveJS(scope);
-    return scope;
-}
 
 XPCWrappedNativeScope::~XPCWrappedNativeScope()
 {
@@ -612,8 +434,6 @@ XPCWrappedNativeScope::UpdateWeakPointersAfterGC()
     if (!mGlobalJSObject) {
         JSContext* cx = dom::danger::GetJSContext();
         mContentXBLScope.finalize(cx);
-        for (size_t i = 0; i < mAddonScopes.Length(); i++)
-            mAddonScopes[i].finalize(cx);
         GetWrappedNativeMap()->Clear();
         mWrappedNativeProtoMap->Clear();
         return;
@@ -629,12 +449,6 @@ XPCWrappedNativeScope::UpdateWeakPointersAfterGC()
         mContentXBLScope.updateWeakPointerAfterGC();
         MOZ_ASSERT(prev == mContentXBLScope.unbarrieredGet());
         AssertSameCompartment(comp, mContentXBLScope);
-    }
-    for (size_t i = 0; i < mAddonScopes.Length(); i++) {
-        JSObject* prev = mAddonScopes[i].unbarrieredGet();
-        mAddonScopes[i].updateWeakPointerAfterGC();
-        MOZ_ASSERT(prev == mAddonScopes[i].unbarrieredGet());
-        AssertSameCompartment(comp, mAddonScopes[i]);
     }
 #endif
 
@@ -774,170 +588,6 @@ XPCWrappedNativeScope::SetExpandoChain(JSContext* cx, HandleObject target,
     return mXrayExpandos.put(cx, target, chain);
 }
 
-/* static */ bool
-XPCWrappedNativeScope::SetAddonInterposition(JSContext* cx,
-                                             JSAddonId* addonId,
-                                             nsIAddonInterposition* interp)
-{
-    if (!gInterpositionMap) {
-        gInterpositionMap = new InterpositionMap();
-        bool ok = gInterpositionMap->init();
-        NS_ENSURE_TRUE(ok, false);
-
-        if (!gShutdownObserverInitialized) {
-            gShutdownObserverInitialized = true;
-            nsContentUtils::RegisterShutdownObserver(new ClearInterpositionsObserver());
-        }
-    }
-    if (interp) {
-        bool ok = gInterpositionMap->put(addonId, interp);
-        NS_ENSURE_TRUE(ok, false);
-        UpdateInterpositionWhitelist(cx, interp);
-    } else {
-        gInterpositionMap->remove(addonId);
-    }
-    return true;
-}
-
-/* static */ bool
-XPCWrappedNativeScope::AllowCPOWsInAddon(JSContext* cx,
-                                         JSAddonId* addonId,
-                                         bool allow)
-{
-    if (!gAllowCPOWAddonSet) {
-        gAllowCPOWAddonSet = new AddonSet();
-        bool ok = gAllowCPOWAddonSet->init();
-        NS_ENSURE_TRUE(ok, false);
-
-        if (!gShutdownObserverInitialized) {
-            gShutdownObserverInitialized = true;
-            nsContentUtils::RegisterShutdownObserver(new ClearInterpositionsObserver());
-        }
-    }
-    if (allow) {
-        bool ok = gAllowCPOWAddonSet->put(addonId);
-        NS_ENSURE_TRUE(ok, false);
-    } else {
-        gAllowCPOWAddonSet->remove(addonId);
-    }
-    return true;
-}
-
-nsCOMPtr<nsIAddonInterposition>
-XPCWrappedNativeScope::GetInterposition()
-{
-    return mInterposition;
-}
-
-/* static */ InterpositionWhitelist*
-XPCWrappedNativeScope::GetInterpositionWhitelist(nsIAddonInterposition* interposition)
-{
-    if (!gInterpositionWhitelists)
-        return nullptr;
-
-    InterpositionWhitelistArray& wls = *gInterpositionWhitelists;
-    for (size_t i = 0; i < wls.Length(); i++) {
-        if (wls[i].interposition == interposition)
-            return &wls[i].whitelist;
-    }
-
-    return nullptr;
-}
-
-/* static */ bool
-XPCWrappedNativeScope::UpdateInterpositionWhitelist(JSContext* cx,
-                                                    nsIAddonInterposition* interposition)
-{
-    // We want to set the interpostion whitelist only once.
-    InterpositionWhitelist* whitelist = GetInterpositionWhitelist(interposition);
-    if (whitelist)
-        return true;
-
-    // The hashsets in gInterpositionWhitelists do not have a copy constructor so
-    // a reallocation for the array will lead to a memory corruption. If you
-    // need more interpositions, change the capacity of the array please.
-    static const size_t MAX_INTERPOSITION = 8;
-    if (!gInterpositionWhitelists)
-        gInterpositionWhitelists = new InterpositionWhitelistArray(MAX_INTERPOSITION);
-
-    MOZ_RELEASE_ASSERT(MAX_INTERPOSITION > gInterpositionWhitelists->Length() + 1);
-    InterpositionWhitelistPair* newPair = gInterpositionWhitelists->AppendElement();
-    newPair->interposition = interposition;
-    if (!newPair->whitelist.init()) {
-        JS_ReportOutOfMemory(cx);
-        return false;
-    }
-
-    whitelist = &newPair->whitelist;
-
-    RootedValue whitelistVal(cx);
-    nsresult rv = interposition->GetWhitelist(&whitelistVal);
-    if (NS_FAILED(rv)) {
-        JS_ReportErrorASCII(cx, "Could not get the whitelist from the interposition.");
-        return false;
-    }
-
-    if (!whitelistVal.isObject()) {
-        JS_ReportErrorASCII(cx, "Whitelist must be an array.");
-        return false;
-    }
-
-    // We want to enter the whitelist's compartment to avoid any wrappers.
-    // To be on the safe side let's make sure that it's a system compartment
-    // and we don't accidentally trigger some content function here by parsing
-    // the whitelist object.
-    RootedObject whitelistObj(cx, &whitelistVal.toObject());
-    whitelistObj = js::UncheckedUnwrap(whitelistObj);
-    if (!AccessCheck::isChrome(whitelistObj)) {
-        JS_ReportErrorASCII(cx, "Whitelist must be from system scope.");
-        return false;
-    }
-
-    {
-        JSAutoCompartment ac(cx, whitelistObj);
-
-        bool isArray;
-        if (!JS_IsArrayObject(cx, whitelistObj, &isArray))
-            return false;
-
-        if (!isArray) {
-            JS_ReportErrorASCII(cx, "Whitelist must be an array.");
-            return false;
-        }
-
-        uint32_t length;
-        if (!JS_GetArrayLength(cx, whitelistObj, &length))
-            return false;
-
-        for (uint32_t i = 0; i < length; i++) {
-            RootedValue idval(cx);
-            if (!JS_GetElement(cx, whitelistObj, i, &idval))
-                return false;
-
-            if (!idval.isString()) {
-                JS_ReportErrorASCII(cx, "Whitelist must contain strings only.");
-                return false;
-            }
-
-            RootedString str(cx, idval.toString());
-            str = JS_AtomizeAndPinJSString(cx, str);
-            if (!str) {
-                JS_ReportErrorASCII(cx, "String internization failed.");
-                return false;
-            }
-
-            // By internizing the id's we ensure that they won't get
-            // GCed so we can use them as hash keys.
-            jsid id = INTERNED_STRING_TO_JSID(cx, str);
-            if (!whitelist->put(JSID_BITS(id))) {
-                JS_ReportOutOfMemory(cx);
-                return false;
-            }
-        }
-    }
-
-    return true;
-}
 
 /***************************************************************************/
 

@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Tests to ensure that errors don't appear when the console is closed while a
 // completion is being performed. See Bug 580001.
 
@@ -13,7 +11,7 @@
 const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
                  "new-console-output/test/mochitest/test-console.html";
 
-add_task(async function () {
+add_task(async function() {
   let tab = await addTab(TEST_URI);
   const browser = tab.linkedBrowser;
   const hud = await openConsole();

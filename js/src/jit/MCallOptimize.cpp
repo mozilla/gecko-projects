@@ -7,7 +7,6 @@
 #include "mozilla/Casting.h"
 
 #include "jsmath.h"
-#include "jsstr.h"
 
 #include "builtin/AtomicsObject.h"
 #include "builtin/intl/Collator.h"
@@ -17,6 +16,7 @@
 #include "builtin/intl/RelativeTimeFormat.h"
 #include "builtin/MapObject.h"
 #include "builtin/SIMD.h"
+#include "builtin/String.h"
 #include "builtin/TestingFunctions.h"
 #include "builtin/TypedObject.h"
 #include "jit/BaselineInspector.h"
@@ -26,9 +26,11 @@
 #include "jit/MIR.h"
 #include "jit/MIRGraph.h"
 #include "vm/ArgumentsObject.h"
+#include "vm/ArrayBufferObject.h"
 #include "vm/JSObject.h"
 #include "vm/ProxyObject.h"
 #include "vm/SelfHosting.h"
+#include "vm/SharedArrayObject.h"
 #include "vm/TypedArrayObject.h"
 
 #include "jit/shared/Lowering-shared-inl.h"
@@ -345,10 +347,16 @@ IonBuilder::inlineNativeCall(CallInfo& callInfo, JSFunction* target)
         return inlineGetNextEntryForIterator(callInfo, MGetNextEntryForIterator::Set);
 
       // ArrayBuffer intrinsics.
+      case InlinableNative::IntrinsicIsArrayBuffer:
+        return inlineHasClass(callInfo, &ArrayBufferObject::class_);
       case InlinableNative::IntrinsicArrayBufferByteLength:
         return inlineArrayBufferByteLength(callInfo);
       case InlinableNative::IntrinsicPossiblyWrappedArrayBufferByteLength:
         return inlinePossiblyWrappedArrayBufferByteLength(callInfo);
+
+      // SharedArrayBuffer intrinsics.
+      case InlinableNative::IntrinsicIsSharedArrayBuffer:
+        return inlineHasClass(callInfo, &SharedArrayBufferObject::class_);
 
       // TypedArray intrinsics.
       case InlinableNative::TypedArrayConstructor:
@@ -1871,7 +1879,7 @@ IonBuilder::inlineStrCharCodeAt(CallInfo& callInfo)
     MStringLength* length = MStringLength::New(alloc(), callInfo.thisArg());
     current->add(length);
 
-    index = addBoundsCheck(index, length, BoundsCheckKind::IsLoad);
+    index = addBoundsCheck(index, length);
 
     MCharCodeAt* charCode = MCharCodeAt::New(alloc(), callInfo.thisArg(), index);
     current->add(charCode);
@@ -1981,7 +1989,7 @@ IonBuilder::inlineStrCharAt(CallInfo& callInfo)
     MStringLength* length = MStringLength::New(alloc(), callInfo.thisArg());
     current->add(length);
 
-    index = addBoundsCheck(index, length, BoundsCheckKind::IsLoad);
+    index = addBoundsCheck(index, length);
 
     // String.charAt(x) = String.fromCharCode(String.charCodeAt(x))
     MCharCodeAt* charCode = MCharCodeAt::New(alloc(), callInfo.thisArg(), index);
@@ -3324,7 +3332,7 @@ IonBuilder::inlineAtomicsCompareExchange(CallInfo& callInfo)
 
     MInstruction* elements;
     MDefinition* index;
-    atomicsCheckBounds(callInfo, &elements, &index, BoundsCheckKind::IsLoad);
+    atomicsCheckBounds(callInfo, &elements, &index);
 
     if (requiresCheck)
         addSharedTypedArrayGuard(callInfo.getArg(0));
@@ -3360,7 +3368,7 @@ IonBuilder::inlineAtomicsExchange(CallInfo& callInfo)
 
     MInstruction* elements;
     MDefinition* index;
-    atomicsCheckBounds(callInfo, &elements, &index, BoundsCheckKind::IsLoad);
+    atomicsCheckBounds(callInfo, &elements, &index);
 
     if (requiresCheck)
         addSharedTypedArrayGuard(callInfo.getArg(0));
@@ -3392,7 +3400,7 @@ IonBuilder::inlineAtomicsLoad(CallInfo& callInfo)
 
     MInstruction* elements;
     MDefinition* index;
-    atomicsCheckBounds(callInfo, &elements, &index, BoundsCheckKind::IsLoad);
+    atomicsCheckBounds(callInfo, &elements, &index);
 
     if (requiresCheck)
         addSharedTypedArrayGuard(callInfo.getArg(0));
@@ -3444,7 +3452,7 @@ IonBuilder::inlineAtomicsStore(CallInfo& callInfo)
 
     MInstruction* elements;
     MDefinition* index;
-    atomicsCheckBounds(callInfo, &elements, &index, BoundsCheckKind::IsStore);
+    atomicsCheckBounds(callInfo, &elements, &index);
 
     if (requiresCheck)
         addSharedTypedArrayGuard(callInfo.getArg(0));
@@ -3488,7 +3496,7 @@ IonBuilder::inlineAtomicsBinop(CallInfo& callInfo, InlinableNative target)
 
     MInstruction* elements;
     MDefinition* index;
-    atomicsCheckBounds(callInfo, &elements, &index, BoundsCheckKind::IsLoad);
+    atomicsCheckBounds(callInfo, &elements, &index);
 
     AtomicOp k = AtomicFetchAddOp;
     switch (target) {
@@ -3585,15 +3593,14 @@ IonBuilder::atomicsMeetsPreconditions(CallInfo& callInfo, Scalar::Type* arrayTyp
 }
 
 void
-IonBuilder::atomicsCheckBounds(CallInfo& callInfo, MInstruction** elements, MDefinition** index,
-                               BoundsCheckKind kind)
+IonBuilder::atomicsCheckBounds(CallInfo& callInfo, MInstruction** elements, MDefinition** index)
 {
     // Perform bounds checking and extract the elements vector.
     MDefinition* obj = callInfo.getArg(0);
     MInstruction* length = nullptr;
     *index = callInfo.getArg(1);
     *elements = nullptr;
-    addTypedArrayLengthAndData(obj, DoBoundsCheck, index, &length, elements, kind);
+    addTypedArrayLengthAndData(obj, DoBoundsCheck, index, &length, elements);
 }
 
 IonBuilder::InliningResult
@@ -4308,7 +4315,7 @@ SimdTypeToArrayElementType(SimdType type)
 bool
 IonBuilder::prepareForSimdLoadStore(CallInfo& callInfo, Scalar::Type simdType,
                                     MInstruction** elements, MDefinition** index,
-                                    Scalar::Type* arrayType, BoundsCheckKind boundsCheckKind)
+                                    Scalar::Type* arrayType)
 {
     MDefinition* array = callInfo.getArg(0);
     *index = callInfo.getArg(1);
@@ -4334,20 +4341,20 @@ IonBuilder::prepareForSimdLoadStore(CallInfo& callInfo, Scalar::Type simdType,
     }
 
     MInstruction* length;
-    addTypedArrayLengthAndData(array, SkipBoundsCheck, index, &length, elements, boundsCheckKind);
+    addTypedArrayLengthAndData(array, SkipBoundsCheck, index, &length, elements);
 
     // If the index+size addition overflows, then indexLoadEnd might be
     // in bounds while the actual index isn't, so we need two bounds checks
     // here.
     if (byteLoadSize > 1) {
-        indexLoadEnd = addBoundsCheck(indexLoadEnd, length, BoundsCheckKind::IsLoad);
+        indexLoadEnd = addBoundsCheck(indexLoadEnd, length);
         auto* sub = MSub::New(alloc(), indexLoadEnd, constant(Int32Value(byteLoadSize - 1)));
         sub->setInt32Specialization();
         current->add(sub);
         *index = sub;
     }
 
-    *index = addBoundsCheck(*index, length, boundsCheckKind);
+    *index = addBoundsCheck(*index, length);
 
     return true;
 }
@@ -4364,11 +4371,8 @@ IonBuilder::inlineSimdLoad(CallInfo& callInfo, JSNative native, SimdType type, u
     MDefinition* index = nullptr;
     MInstruction* elements = nullptr;
     Scalar::Type arrayType;
-    if (!prepareForSimdLoadStore(callInfo, elemType, &elements, &index, &arrayType,
-                                 BoundsCheckKind::IsLoad))
-    {
+    if (!prepareForSimdLoadStore(callInfo, elemType, &elements, &index, &arrayType))
         return InliningStatus_NotInlined;
-    }
 
     MLoadUnboxedScalar* load = MLoadUnboxedScalar::New(alloc(), elements, index, arrayType);
     load->setResultType(SimdTypeToMIRType(type));
@@ -4389,11 +4393,8 @@ IonBuilder::inlineSimdStore(CallInfo& callInfo, JSNative native, SimdType type, 
     MDefinition* index = nullptr;
     MInstruction* elements = nullptr;
     Scalar::Type arrayType;
-    if (!prepareForSimdLoadStore(callInfo, elemType, &elements, &index, &arrayType,
-                                 BoundsCheckKind::IsStore))
-    {
+    if (!prepareForSimdLoadStore(callInfo, elemType, &elements, &index, &arrayType))
         return InliningStatus_NotInlined;
-    }
 
     MDefinition* valueToWrite = unboxSimd(callInfo.getArg(2), type);
     MStoreUnboxedScalar* store = MStoreUnboxedScalar::New(alloc(), elements, index,

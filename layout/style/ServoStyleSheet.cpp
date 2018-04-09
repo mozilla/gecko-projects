@@ -7,12 +7,10 @@
 #include "mozilla/ServoStyleSheet.h"
 
 #include "mozilla/css/Rule.h"
-#include "mozilla/StyleBackendType.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/ServoCSSRuleList.h"
 #include "mozilla/ServoImportRule.h"
 #include "mozilla/ServoMediaList.h"
-#include "mozilla/ServoStyleSet.h"
 #include "mozilla/css/GroupRule.h"
 #include "mozilla/dom/CSSRuleList.h"
 #include "mozilla/dom/MediaList.h"
@@ -131,7 +129,7 @@ ServoStyleSheet::ServoStyleSheet(css::SheetParsingMode aParsingMode,
                                  CORSMode aCORSMode,
                                  net::ReferrerPolicy aReferrerPolicy,
                                  const dom::SRIMetadata& aIntegrity)
-  : StyleSheet(StyleBackendType::Servo, aParsingMode)
+  : StyleSheet(aParsingMode)
 {
   mInner = new ServoStyleSheetInner(
     aCORSMode, aReferrerPolicy, aIntegrity, aParsingMode);
@@ -208,7 +206,6 @@ ServoStyleSheet::ParseSheet(css::Loader* aLoader,
 {
   MOZ_ASSERT(mParsePromise.IsEmpty());
   RefPtr<StyleSheetParsePromise> p = mParsePromise.Ensure(__func__);
-  MOZ_ASSERT(!mMedia || mMedia->IsServo());
   Inner()->mURLData = new URLExtraData(aBaseURI, aSheetURI, aSheetPrincipal); // RefPtr
   Inner()->mContents = Servo_StyleSheet_FromUTF8Bytes(aLoader,
                                                       this,
@@ -237,7 +234,6 @@ ServoStyleSheet::ParseSheetSync(css::Loader* aLoader,
                                 nsCompatibility aCompatMode,
                                 css::LoaderReusableStyleSheets* aReusableSheets)
 {
-  MOZ_ASSERT(!mMedia || mMedia->IsServo());
   Inner()->mURLData = new URLExtraData(aBaseURI, aSheetURI, aSheetPrincipal); // RefPtr
 
   Inner()->mContents = Servo_StyleSheet_FromUTF8Bytes(aLoader,
@@ -281,7 +277,7 @@ ServoStyleSheet::ReparseSheet(const nsAString& aInput)
     loader = mDocument->CSSLoader();
     NS_ASSERTION(loader, "Document with no CSS loader!");
   } else {
-    loader = new css::Loader(StyleBackendType::Servo, nullptr);
+    loader = new css::Loader;
   }
 
   mozAutoDocUpdate updateBatch(mDocument, UPDATE_STYLE, true);
@@ -323,7 +319,7 @@ ServoStyleSheet::ReparseSheet(const nsAString& aInput)
     for (uint32_t i = 0; i < ruleCount; ++i) {
       css::Rule* rule = ruleList->GetRule(i);
       MOZ_ASSERT(rule);
-      if (rule->GetType() == css::Rule::IMPORT_RULE &&
+      if (rule->Type() == CSSRuleBinding::IMPORT_RULE &&
           RuleHasPendingChildSheet(rule)) {
         continue; // notify when loaded (see StyleSheetLoaded)
       }
@@ -354,7 +350,7 @@ ServoStyleSheet::ReparseSheet(const nsAString& aInput)
     for (uint32_t i = 0; i < ruleCount; ++i) {
       css::Rule* rule = ruleList->GetRule(i);
       MOZ_ASSERT(rule);
-      if (rule->GetType() == css::Rule::IMPORT_RULE &&
+      if (rule->Type() == CSSRuleBinding::IMPORT_RULE &&
           RuleHasPendingChildSheet(rule)) {
         continue; // notify when loaded (see StyleSheetLoaded)
       }
@@ -375,9 +371,6 @@ ServoStyleSheet::StyleSheetLoaded(StyleSheet* aSheet,
                                   bool aWasAlternate,
                                   nsresult aStatus)
 {
-  MOZ_ASSERT(aSheet->IsServo(),
-             "why we were called back with a CSSStyleSheet?");
-
   ServoStyleSheet* sheet = aSheet->AsServo();
   if (!sheet->GetParentSheet()) {
     return NS_OK; // ignore if sheet has been detached already
@@ -446,7 +439,7 @@ ServoStyleSheet::InsertRuleInternal(const nsAString& aRule,
   // XXX We may not want to get the rule when stylesheet change event
   // is not enabled.
   css::Rule* rule = mRuleList->GetRule(aIndex);
-  if (rule->GetType() != css::Rule::IMPORT_RULE ||
+  if (rule->Type() != CSSRuleBinding::IMPORT_RULE ||
       !RuleHasPendingChildSheet(rule)) {
     RuleAdded(*rule);
   }

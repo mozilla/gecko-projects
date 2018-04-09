@@ -74,6 +74,7 @@ use style::selector_parser::{AttrValue as SelectorAttrValue, NonTSPseudoClass, P
 use style::selector_parser::{PseudoElement, SelectorImpl, extended_filtering};
 use style::shared_lock::{SharedRwLock as StyleSharedRwLock, Locked as StyleLocked};
 use style::str::is_whitespace;
+use style::stylist::CascadeData;
 
 pub unsafe fn drop_style_and_layout_data(data: OpaqueStyleAndLayoutData) {
     let ptr = data.ptr.as_ptr() as *mut StyleData;
@@ -150,10 +151,10 @@ impl<'ln> NodeInfo for ServoLayoutNode<'ln> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum Impossible { }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct ShadowRoot<'lr>(Impossible, PhantomData<&'lr ()>);
 
 impl<'lr> TShadowRoot for ShadowRoot<'lr> {
@@ -164,6 +165,13 @@ impl<'lr> TShadowRoot for ShadowRoot<'lr> {
     }
 
     fn host(&self) -> ServoLayoutElement<'lr> {
+        match self.0 { }
+    }
+
+    fn style_data<'a>(&self) -> &'a CascadeData
+    where
+        Self: 'a,
+    {
         match self.0 { }
     }
 }
@@ -649,6 +657,14 @@ impl<'le> ::selectors::Element for ServoLayoutElement<'le> {
         unsafe {
             self.element.upcast().parent_node_ref().and_then(as_element)
         }
+    }
+
+    fn parent_node_is_shadow_root(&self) -> bool {
+        false
+    }
+
+    fn containing_shadow_host(&self) -> Option<Self> {
+        None
     }
 
     fn first_child_element(&self) -> Option<ServoLayoutElement<'le>> {
@@ -1188,6 +1204,14 @@ impl<'le> ::selectors::Element for ServoThreadSafeLayoutElement<'le> {
 
     fn parent_element(&self) -> Option<Self> {
         warn!("ServoThreadSafeLayoutElement::parent_element called");
+        None
+    }
+
+    fn parent_node_is_shadow_root(&self) -> bool {
+        false
+    }
+
+    fn containing_shadow_host(&self) -> Option<Self> {
         None
     }
 

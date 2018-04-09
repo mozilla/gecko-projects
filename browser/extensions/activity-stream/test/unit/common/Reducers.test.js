@@ -1,5 +1,5 @@
 import {INITIAL_STATE, insertPinned, reducers} from "common/Reducers.jsm";
-const {TopSites, App, Snippets, Prefs, Dialog, Sections, PreferencesPane} = reducers;
+const {TopSites, App, Snippets, Prefs, Dialog, Sections, Theme} = reducers;
 import {actionTypes as at} from "common/Actions.jsm";
 
 describe("Reducers", () => {
@@ -28,12 +28,22 @@ describe("Reducers", () => {
     });
     it("should add top sites on TOP_SITES_UPDATED", () => {
       const newRows = [{url: "foo.com"}, {url: "bar.com"}];
-      const nextState = TopSites(undefined, {type: at.TOP_SITES_UPDATED, data: newRows});
+      const nextState = TopSites(undefined, {type: at.TOP_SITES_UPDATED, data: {links: newRows}});
       assert.equal(nextState.rows, newRows);
     });
     it("should not update state for empty action.data on TOP_SITES_UPDATED", () => {
       const nextState = TopSites(undefined, {type: at.TOP_SITES_UPDATED});
       assert.equal(nextState, INITIAL_STATE.TopSites);
+    });
+    it("should initialize prefs on TOP_SITES_UPDATED", () => {
+      const nextState = TopSites(undefined, {type: at.TOP_SITES_UPDATED, data: {links: [], pref: "foo"}});
+
+      assert.equal(nextState.pref, "foo");
+    });
+    it("should pass prevState.prefs if not present in TOP_SITES_UPDATED", () => {
+      const nextState = TopSites({prefs: "foo"}, {type: at.TOP_SITES_UPDATED, data: {links: []}});
+
+      assert.equal(nextState.prefs, "foo");
     });
     it("should set editForm.site to action.data on TOP_SITES_EDIT", () => {
       const data = {index: 7};
@@ -43,6 +53,48 @@ describe("Reducers", () => {
     it("should set editForm to null on TOP_SITES_CANCEL_EDIT", () => {
       const nextState = TopSites(undefined, {type: at.TOP_SITES_CANCEL_EDIT});
       assert.isNull(nextState.editForm);
+    });
+    it("should preserve the editForm.index", () => {
+      const actionTypes = [at.PREVIEW_RESPONSE, at.PREVIEW_REQUEST, at.PREVIEW_REQUEST_CANCEL];
+      actionTypes.forEach(type => {
+        const oldState = {editForm: {index: 0, previewUrl: "foo"}};
+        const action = {type, data: {url: "foo"}};
+        const nextState = TopSites(oldState, action);
+        assert.equal(nextState.editForm.index, 0);
+      });
+    });
+    it("should set previewResponse on PREVIEW_RESPONSE", () => {
+      const oldState = {editForm: {previewUrl: "url"}};
+      const action = {type: at.PREVIEW_RESPONSE, data: {preview: "data:123", url: "url"}};
+      const nextState = TopSites(oldState, action);
+      assert.propertyVal(nextState.editForm, "previewResponse", "data:123");
+    });
+    it("should return previous state if action url does not match expected", () => {
+      const oldState = {editForm: {previewUrl: "foo"}};
+      const action = {type: at.PREVIEW_RESPONSE, data: {url: "bar"}};
+      const nextState = TopSites(oldState, action);
+      assert.equal(nextState, oldState);
+    });
+    it("should return previous state if editForm is not set", () => {
+      const actionTypes = [at.PREVIEW_RESPONSE, at.PREVIEW_REQUEST, at.PREVIEW_REQUEST_CANCEL];
+      actionTypes.forEach(type => {
+        const oldState = {editForm: null};
+        const action = {type, data: {url: "bar"}};
+        const nextState = TopSites(oldState, action);
+        assert.equal(nextState, oldState, type);
+      });
+    });
+    it("should set previewResponse to null on PREVIEW_REQUEST", () => {
+      const oldState = {editForm: {previewResponse: "foo"}};
+      const action = {type: at.PREVIEW_REQUEST, data: {}};
+      const nextState = TopSites(oldState, action);
+      assert.propertyVal(nextState.editForm, "previewResponse", null);
+    });
+    it("should set previewUrl on PREVIEW_REQUEST", () => {
+      const oldState = {editForm: {}};
+      const action = {type: at.PREVIEW_REQUEST, data: {url: "bar"}};
+      const nextState = TopSites(oldState, action);
+      assert.propertyVal(nextState.editForm, "previewUrl", "bar");
     });
     it("should add screenshots for SCREENSHOT_UPDATED", () => {
       const oldState = {rows: [{url: "foo.com"}, {url: "bar.com"}]};
@@ -106,6 +158,21 @@ describe("Reducers", () => {
     it("should not update state for empty action.data on PLACES_BOOKMARK_REMOVED", () => {
       const nextState = TopSites(undefined, {type: at.PLACES_BOOKMARK_REMOVED});
       assert.equal(nextState, INITIAL_STATE.TopSites);
+    });
+    it("should update prefs on TOP_SITES_PREFS_UPDATED", () => {
+      const state = TopSites({}, {type: at.TOP_SITES_PREFS_UPDATED, data: {pref: "foo"}});
+
+      assert.equal(state.pref, "foo");
+    });
+    it("should not update state for empty action.data on PLACES_LINK_DELETED", () => {
+      const nextState = TopSites(undefined, {type: at.PLACES_LINK_DELETED});
+      assert.equal(nextState, INITIAL_STATE.TopSites);
+    });
+    it("should remove the site on PLACES_LINK_DELETED", () => {
+      const oldState = {rows: [{url: "foo.com"}, {url: "bar.com"}]};
+      const deleteAction = {type: at.PLACES_LINK_DELETED, data: {url: "foo.com"}};
+      const nextState = TopSites(oldState, deleteAction);
+      assert.deepEqual(nextState.rows, [{url: "bar.com"}]);
     });
   });
   describe("Prefs", () => {
@@ -202,47 +269,6 @@ describe("Reducers", () => {
       assert.lengthOf(newState, 6);
       const insertedSection = newState.find(section => section.id === "foo_bar_5");
       assert.propertyVal(insertedSection, "title", action.data.title);
-    });
-    it("should ensure sections are sorted by property `order` (increasing) on SECTION_REGISTER", () => {
-      let newState = [];
-      const state = Object.assign([], oldState);
-      state.forEach(section => {
-        Object.assign(section, {order: 5 - section.order});
-        const action = {type: at.SECTION_REGISTER, data: section};
-        newState = Sections(newState, action);
-      });
-      // Should have been inserted into newState in reverse order
-      assert.deepEqual(newState.map(section => section.id), state.map(section => section.id).reverse());
-      const newSection = {id: "new_section", order: 2.5};
-      const action = {type: at.SECTION_REGISTER, data: newSection};
-      newState = Sections(newState, action);
-      // Should have been inserted at index 2, between second and third section
-      assert.equal(newState[2].id, newSection.id);
-    });
-    it("should insert sections without an `order` at the top on SECTION_REGISTER", () => {
-      const newSection = {id: "new_section"};
-      const action = {type: at.SECTION_REGISTER, data: newSection};
-      const newState = Sections(oldState, action);
-      assert.equal(newState[0].id, newSection.id);
-      assert.ok(newState[0].order < newState[1].order);
-    });
-    it("should insert sections with a 0 `order` at the top on SECTION_REGISTER", () => {
-      const newSection = {id: "new_section", order: 0};
-      const action = {type: at.SECTION_REGISTER, data: newSection};
-      const newState = Sections(oldState, action);
-      assert.equal(newState[0].id, newSection.id);
-    });
-    it("should insert sections with a 1 `order` in the right spot on SECTION_REGISTER", () => {
-      const newSection = {id: "new_section", order: 1};
-      const action = {type: at.SECTION_REGISTER, data: newSection};
-      const newState = Sections(oldState, action);
-      assert.equal(newState[1].id, newSection.id);
-    });
-    it("should insert sections with higher `order` than any existing at the bottom on SECTION_REGISTER", () => {
-      const newSection = {id: "new_section", order: 10000};
-      const action = {type: at.SECTION_REGISTER, data: newSection};
-      const newState = Sections(oldState, action);
-      assert.equal(newState[newState.length - 1].id, newSection.id);
     });
     it("should set newSection.rows === [] if no rows are provided on SECTION_REGISTER", () => {
       const action = {type: at.SECTION_REGISTER, data: {id: "foo_bar_5", title: "Foo Bar 5"}};
@@ -358,21 +384,16 @@ describe("Reducers", () => {
     });
     it("should remove blocked and deleted urls from all rows in all sections", () => {
       const blockAction = {type: at.PLACES_LINK_BLOCKED, data: {url: "www.foo.bar"}};
-      const deleteAction = {type: at.PLACES_LINKS_DELETED, data: ["www.foo.bar"]};
+      const deleteAction = {type: at.PLACES_LINK_DELETED, data: {url: "www.foo.bar"}};
       const newBlockState = Sections(oldState, blockAction);
       const newDeleteState = Sections(oldState, deleteAction);
       newBlockState.concat(newDeleteState).forEach(section => {
         assert.deepEqual(section.rows, [{url: "www.other.url"}]);
       });
     });
-    it("should remove all deleted urls", () => {
-      const deleteAction = {type: at.PLACES_LINKS_DELETED, data: ["www.foo.bar", "www.other.url"]};
-
-      const newState = Sections(oldState, deleteAction);
-
-      newState.forEach(section => {
-        assert.lengthOf(section.rows, 0);
-      });
+    it("should not update state for empty action.data on PLACES_LINK_DELETED", () => {
+      const nextState = Sections(undefined, {type: at.PLACES_LINK_DELETED});
+      assert.equal(nextState, INITIAL_STATE.Sections);
     });
     it("should remove all removed pocket urls", () => {
       const removeAction = {type: at.DELETE_FROM_POCKET, data: {pocket_id: 123}};
@@ -561,20 +582,23 @@ describe("Reducers", () => {
       const state = Snippets({initalized: true, foo: "bar"}, {type: at.SNIPPETS_RESET});
       assert.equal(state, INITIAL_STATE.Snippets);
     });
+    it("should set the new blocklist on SNIPPET_BLOCKED", () => {
+      const state = Snippets({blockList: []}, {type: at.SNIPPET_BLOCKED, data: 1});
+      assert.deepEqual(state.blockList, [1]);
+    });
+    it("should clear the blocklist on SNIPPETS_BLOCKLIST_CLEARED", () => {
+      const state = Snippets({blockList: [1, 2]}, {type: at.SNIPPETS_BLOCKLIST_CLEARED});
+      assert.deepEqual(state.blockList, []);
+    });
   });
-  describe("PreferencesPane", () => {
+  describe("Theme", () => {
     it("should return INITIAL_STATE by default", () => {
-      assert.equal(INITIAL_STATE.PreferencesPane, PreferencesPane(undefined, {type: "non_existent"}));
+      assert.equal(Theme(undefined, {type: "some_action"}), INITIAL_STATE.Theme);
     });
-    it("should toggle visible to true on SETTINGS_OPEN", () => {
-      const action = {type: at.SETTINGS_OPEN};
-      const nextState = PreferencesPane(INITIAL_STATE.PreferencesPane, action);
-      assert.isTrue(nextState.visible);
-    });
-    it("should toggle visible to false on SETTINGS_CLOSE", () => {
-      const action = {type: at.SETTINGS_CLOSE};
-      const nextState = PreferencesPane(INITIAL_STATE.PreferencesPane, action);
-      assert.isFalse(nextState.visible);
+    it("should update Theme data on THEME_UPDATE", () => {
+      const action = {type: at.THEME_UPDATE, data: {className: "new-theme"}};
+      const nextState = Theme(INITIAL_STATE.Theme, action);
+      assert.equal(nextState.className, action.data.className);
     });
   });
 });

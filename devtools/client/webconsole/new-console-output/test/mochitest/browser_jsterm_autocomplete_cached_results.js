@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Tests that the cached autocomplete results are used when the new
 // user input is a subset of the existing completion results.
 
@@ -12,7 +10,7 @@
 
 const TEST_URI = "data:text/html;charset=utf8,<p>test cached autocompletion results";
 
-add_task(async function () {
+add_task(async function() {
   let { jsterm } = await openNewTabAndConsole(TEST_URI);
   const {
     autocompletePopup: popup,

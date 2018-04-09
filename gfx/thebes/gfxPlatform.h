@@ -146,6 +146,14 @@ enum class ForcedDeviceResetReason
   COMPOSITOR_UPDATED,
 };
 
+struct BackendPrefsData
+{
+  uint32_t mCanvasBitmask = 0;
+  mozilla::gfx::BackendType mCanvasDefault = mozilla::gfx::BackendType::NONE;
+  uint32_t mContentBitmask = 0;
+  mozilla::gfx::BackendType mContentDefault = mozilla::gfx::BackendType::NONE;
+};
+
 class gfxPlatform {
     friend class SRGBOverrideObserver;
 
@@ -278,7 +286,7 @@ public:
     /// asking for it, we will examine the commands in the first few seconds
     /// of the canvas usage, and potentially change to accelerated or
     /// non-accelerated canvas.
-    bool AllowOpenGLCanvas();
+    virtual bool AllowOpenGLCanvas();
     virtual void InitializeSkiaCacheLimits();
 
     static bool AsyncPanZoomEnabled();
@@ -740,14 +748,16 @@ protected:
     // Returns a prioritized list of available compositor backends for acceleration.
     virtual void GetAcceleratedCompositorBackends(nsTArray<mozilla::layers::LayersBackend>& aBackends);
 
+    // Returns preferences of canvas and content backends.
+    virtual BackendPrefsData GetBackendPrefs();
+
     /**
      * Initialise the preferred and fallback canvas backends
      * aBackendBitmask specifies the backends which are acceptable to the caller.
      * The backend used is determined by aBackendBitmask and the order specified
      * by the gfx.canvas.azure.backends pref.
      */
-    void InitBackendPrefs(uint32_t aCanvasBitmask, mozilla::gfx::BackendType aCanvasDefault,
-                          uint32_t aContentBitmask, mozilla::gfx::BackendType aContentDefault);
+    void InitBackendPrefs(BackendPrefsData&& aPrefsData);
 
     /**
      * Content-process only. Requests device preferences from the parent process
@@ -787,6 +797,8 @@ protected:
     static mozilla::gfx::BackendType BackendTypeForName(const nsCString& aName);
 
     virtual bool CanUseHardwareVideoDecoding();
+
+    virtual bool CheckVariationFontSupport() = 0;
 
     int8_t  mAllowDownloadableFonts;
     int8_t  mGraphiteShapingEnabled;

@@ -51,14 +51,12 @@ JSCompartment::JSCompartment(Zone* zone, const JS::CompartmentOptions& options =
     isAtomsCompartment_(false),
     isSelfHosting(false),
     marked(true),
-    warnedAboutExprClosure(false),
     warnedAboutStringGenericsMethods(0),
 #ifdef DEBUG
     firedOnNewGlobalObject(false),
 #endif
     global_(nullptr),
     enterCompartmentDepth(0),
-    globalHolds(0),
     performanceMonitoring(runtime_),
     data(nullptr),
     realmData(nullptr),
@@ -73,7 +71,7 @@ JSCompartment::JSCompartment(Zone* zone, const JS::CompartmentOptions& options =
     objectMetadataTable(nullptr),
     innerViews(zone),
     lazyArrayBuffers(nullptr),
-    wasm(zone),
+    wasm(zone->runtimeFromActiveCooperatingThread()),
     nonSyntacticLexicalEnvironments_(nullptr),
     gcIncomingGrayPointers(nullptr),
     debugModeBits(0),
@@ -93,7 +91,6 @@ JSCompartment::JSCompartment(Zone* zone, const JS::CompartmentOptions& options =
     iterResultTemplate_(nullptr),
     lcovOutput()
 {
-    PodArrayZero(sawDeprecatedLanguageExtension);
     runtime_->numCompartments++;
     MOZ_ASSERT_IF(creationOptions_.mergeable(),
                   creationOptions_.invisibleToDebugger());
@@ -101,8 +98,6 @@ JSCompartment::JSCompartment(Zone* zone, const JS::CompartmentOptions& options =
 
 JSCompartment::~JSCompartment()
 {
-    reportTelemetry();
-
     // Write the code coverage information in a file.
     JSRuntime* rt = runtimeFromActiveCooperatingThread();
     if (rt->lcovOutput().isEnabled())
@@ -179,14 +174,12 @@ JSRuntime::createJitRuntime(JSContext* cx)
         return nullptr;
     }
 
-    jit::JitRuntime* jrt = cx->new_<jit::JitRuntime>(cx->runtime());
+    jit::JitRuntime* jrt = cx->new_<jit::JitRuntime>();
     if (!jrt)
         return nullptr;
 
-    // Protect jitRuntime_ from being observed (by InterruptRunningJitCode)
-    // while it is being initialized. Unfortunately, initialization depends on
-    // jitRuntime_ being non-null, so we can't just wait to assign jitRuntime_.
-    JitRuntime::AutoPreventBackedgePatching apbp(cx->runtime(), jrt);
+    // Unfortunately, initialization depends on jitRuntime_ being non-null, so
+    // we can't just wait to assign jitRuntime_.
     jitRuntime_ = jrt;
 
     AutoEnterOOMUnsafeRegion noOOM;
@@ -1337,35 +1330,6 @@ JSCompartment::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
             *scriptCountsMapArg += r.front().value()->sizeOfIncludingThis(mallocSizeOf);
         }
     }
-}
-
-void
-JSCompartment::reportTelemetry()
-{
-    // Only report telemetry for web content, not add-ons or chrome JS.
-    if (creationOptions_.addonIdOrNull() || isSystem_)
-        return;
-
-    // Hazard analysis can't tell that the telemetry callbacks don't GC.
-    JS::AutoSuppressGCAnalysis nogc;
-
-    // Call back into Firefox's Telemetry reporter.
-    for (size_t i = 0; i < size_t(DeprecatedLanguageExtension::Count); i++) {
-        if (sawDeprecatedLanguageExtension[i])
-            runtime_->addTelemetry(JS_TELEMETRY_DEPRECATED_LANGUAGE_EXTENSIONS_IN_CONTENT, i);
-    }
-}
-
-void
-JSCompartment::addTelemetry(const char* filename, DeprecatedLanguageExtension e)
-{
-    // Only report telemetry for web content, not add-ons or chrome JS.
-    if (creationOptions_.addonIdOrNull() || isSystem_)
-        return;
-    if (!filename || strncmp(filename, "http", 4) != 0)
-        return;
-
-    sawDeprecatedLanguageExtension[size_t(e)] = true;
 }
 
 HashNumber

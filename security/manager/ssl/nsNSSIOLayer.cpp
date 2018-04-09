@@ -436,7 +436,7 @@ nsNSSSocketInfo::DriveHandshake()
       return NS_BASE_STREAM_WOULD_BLOCK;
     }
 
-    SetCanceled(errorCode, SSLErrorMessageType::Plain);
+    SetCanceled(errorCode);
     return GetXPCOMFromNSSError(errorCode);
   }
   return NS_OK;
@@ -666,8 +666,7 @@ nsNSSSocketInfo::SetCertVerificationWaiting()
 // attempt to acquire locks that are already held by libssl when it calls
 // callbacks.
 void
-nsNSSSocketInfo::SetCertVerificationResult(PRErrorCode errorCode,
-                                           SSLErrorMessageType errorMessageType)
+nsNSSSocketInfo::SetCertVerificationResult(PRErrorCode errorCode)
 {
   MOZ_ASSERT(mCertVerificationState == waiting_for_cert_verification,
              "Invalid state transition to cert_verification_finished");
@@ -677,7 +676,6 @@ nsNSSSocketInfo::SetCertVerificationResult(PRErrorCode errorCode,
     // Only replace errorCode if there was originally no error
     if (rv != SECSuccess && errorCode == 0) {
       errorCode = PR_GetError();
-      errorMessageType = SSLErrorMessageType::Plain;
       if (errorCode == 0) {
         NS_ERROR("SSL_AuthCertificateComplete didn't set error code");
         errorCode = PR_INVALID_STATE_ERROR;
@@ -687,7 +685,7 @@ nsNSSSocketInfo::SetCertVerificationResult(PRErrorCode errorCode,
 
   if (errorCode) {
     mFailedVerification = true;
-    SetCanceled(errorCode, errorMessageType);
+    SetCanceled(errorCode);
   }
 
   if (mPlaintextBytesRead && !errorCode) {
@@ -719,7 +717,6 @@ void nsSSLIOLayerHelpers::Cleanup()
 
 static void
 nsHandleSSLError(nsNSSSocketInfo* socketInfo,
-                 ::mozilla::psm::SSLErrorMessageType errtype,
                  PRErrorCode err)
 {
   if (!NS_IsMainThread()) {
@@ -737,14 +734,8 @@ nsHandleSSLError(nsNSSSocketInfo* socketInfo,
     return;
   }
 
-  // We must cancel first, which sets the error code.
-  socketInfo->SetCanceled(err, SSLErrorMessageType::Plain);
-  nsAutoString errorString;
-  socketInfo->GetErrorLogMessage(err, errtype, errorString);
-
-  if (!errorString.IsEmpty()) {
-    nsContentUtils::LogSimpleConsoleError(errorString, "SSL");
-  }
+  // We must cancel, which sets the error code.
+  socketInfo->SetCanceled(err);
 }
 
 namespace {
@@ -1074,21 +1065,18 @@ class SSLErrorRunnable : public SyncRunnableBase
 {
  public:
   SSLErrorRunnable(nsNSSSocketInfo* infoObject,
-                   ::mozilla::psm::SSLErrorMessageType errtype,
                    PRErrorCode errorCode)
     : mInfoObject(infoObject)
-    , mErrType(errtype)
     , mErrorCode(errorCode)
   {
   }
 
   virtual void RunOnTargetThread() override
   {
-    nsHandleSSLError(mInfoObject, mErrType, mErrorCode);
+    nsHandleSSLError(mInfoObject, mErrorCode);
   }
 
   RefPtr<nsNSSSocketInfo> mInfoObject;
-  ::mozilla::psm::SSLErrorMessageType mErrType;
   const PRErrorCode mErrorCode;
 };
 
@@ -1302,7 +1290,7 @@ checkHandshake(int32_t bytesTransfered, bool wasReading,
     if (!wantRetry && mozilla::psm::IsNSSErrorCode(err) &&
         !socketInfo->GetErrorCode()) {
       RefPtr<SyncRunnableBase> runnable(
-        new SSLErrorRunnable(socketInfo, SSLErrorMessageType::Plain, err));
+        new SSLErrorRunnable(socketInfo, err));
       (void) runnable->DispatchToMainThreadAndWait();
     }
   } else if (wasReading && 0 == bytesTransfered) {
@@ -1340,7 +1328,7 @@ checkHandshake(int32_t bytesTransfered, bool wasReading,
     // this socket. Note that we use the original error because if we use
     // PR_CONNECT_RESET_ERROR, we'll repeated try to reconnect.
     if (originalError != PR_WOULD_BLOCK_ERROR && !socketInfo->GetErrorCode()) {
-      socketInfo->SetCanceled(originalError, SSLErrorMessageType::Plain);
+      socketInfo->SetCanceled(originalError);
     }
     PR_SetError(err, 0);
   }
@@ -1405,36 +1393,20 @@ nsSSLIOLayerHelpers::nsSSLIOLayerHelpers(uint32_t aTlsFlags)
 {
 }
 
-static int
-_PSM_InvalidInt(void)
+// PSMAvailable and PSMAvailable64 are reachable, but they're unimplemented in
+// PSM, so we set an error and return -1.
+static int32_t
+PSMAvailable(PRFileDesc*)
 {
-  MOZ_ASSERT_UNREACHABLE("I/O method is invalid");
-  PR_SetError(PR_INVALID_METHOD_ERROR, 0);
+  PR_SetError(PR_NOT_IMPLEMENTED_ERROR, 0);
   return -1;
 }
 
 static int64_t
-_PSM_InvalidInt64(void)
+PSMAvailable64(PRFileDesc*)
 {
-  MOZ_ASSERT_UNREACHABLE("I/O method is invalid");
-  PR_SetError(PR_INVALID_METHOD_ERROR, 0);
+  PR_SetError(PR_NOT_IMPLEMENTED_ERROR, 0);
   return -1;
-}
-
-static PRStatus
-_PSM_InvalidStatus(void)
-{
-  MOZ_ASSERT_UNREACHABLE("I/O method is invalid");
-  PR_SetError(PR_INVALID_METHOD_ERROR, 0);
-  return PR_FAILURE;
-}
-
-static PRFileDesc*
-_PSM_InvalidDesc(void)
-{
-  MOZ_ASSERT_UNREACHABLE("I/O method is invalid");
-  PR_SetError(PR_INVALID_METHOD_ERROR, 0);
-  return nullptr;
 }
 
 static PRStatus
@@ -1616,22 +1588,6 @@ PSMConnectcontinue(PRFileDesc* fd, int16_t out_flags)
   return fd->lower->methods->connectcontinue(fd, out_flags);
 }
 
-static int
-PSMAvailable(void)
-{
-  // This is called through PR_Available(), but is not implemented in PSM
-  PR_SetError(PR_NOT_IMPLEMENTED_ERROR, 0);
-  return -1;
-}
-
-static int64_t
-PSMAvailable64(void)
-{
-  // This is called through PR_Available(), but is not implemented in PSM
-  PR_SetError(PR_NOT_IMPLEMENTED_ERROR, 0);
-  return -1;
-}
-
 namespace {
 
 class PrefObserver : public nsIObserver {
@@ -1706,6 +1662,15 @@ nsSSLIOLayerHelpers::~nsSSLIOLayerHelpers()
   }
 }
 
+template <typename R, R return_value, typename... Args>
+static R
+InvalidPRIOMethod(Args...)
+{
+  MOZ_ASSERT_UNREACHABLE("I/O method is invalid");
+  PR_SetError(PR_NOT_IMPLEMENTED_ERROR, 0);
+  return return_value;
+}
+
 nsresult
 nsSSLIOLayerHelpers::Init()
 {
@@ -1713,25 +1678,46 @@ nsSSLIOLayerHelpers::Init()
     MOZ_ASSERT(NS_IsMainThread());
     nsSSLIOLayerInitialized = true;
     nsSSLIOLayerIdentity = PR_GetUniqueIdentity("NSS layer");
-    nsSSLIOLayerMethods  = *PR_GetDefaultIOMethods();
+    nsSSLIOLayerMethods = *PR_GetDefaultIOMethods();
 
-    nsSSLIOLayerMethods.available = (PRAvailableFN) PSMAvailable;
-    nsSSLIOLayerMethods.available64 = (PRAvailable64FN) PSMAvailable64;
-    nsSSLIOLayerMethods.fsync = (PRFsyncFN) _PSM_InvalidStatus;
-    nsSSLIOLayerMethods.seek = (PRSeekFN) _PSM_InvalidInt;
-    nsSSLIOLayerMethods.seek64 = (PRSeek64FN) _PSM_InvalidInt64;
-    nsSSLIOLayerMethods.fileInfo = (PRFileInfoFN) _PSM_InvalidStatus;
-    nsSSLIOLayerMethods.fileInfo64 = (PRFileInfo64FN) _PSM_InvalidStatus;
-    nsSSLIOLayerMethods.writev = (PRWritevFN) _PSM_InvalidInt;
-    nsSSLIOLayerMethods.accept = (PRAcceptFN) _PSM_InvalidDesc;
-    nsSSLIOLayerMethods.listen = (PRListenFN) _PSM_InvalidStatus;
-    nsSSLIOLayerMethods.shutdown = (PRShutdownFN) _PSM_InvalidStatus;
-    nsSSLIOLayerMethods.recvfrom = (PRRecvfromFN) _PSM_InvalidInt;
-    nsSSLIOLayerMethods.sendto = (PRSendtoFN) _PSM_InvalidInt;
-    nsSSLIOLayerMethods.acceptread = (PRAcceptreadFN) _PSM_InvalidInt;
-    nsSSLIOLayerMethods.transmitfile = (PRTransmitfileFN) _PSM_InvalidInt;
-    nsSSLIOLayerMethods.sendfile = (PRSendfileFN) _PSM_InvalidInt;
+    nsSSLIOLayerMethods.fsync =
+      InvalidPRIOMethod<PRStatus, PR_FAILURE, PRFileDesc*>;
+    nsSSLIOLayerMethods.seek =
+      InvalidPRIOMethod<int32_t, -1, PRFileDesc*, int32_t, PRSeekWhence>;
+    nsSSLIOLayerMethods.seek64 =
+      InvalidPRIOMethod<int64_t, -1, PRFileDesc*, int64_t, PRSeekWhence>;
+    nsSSLIOLayerMethods.fileInfo =
+      InvalidPRIOMethod<PRStatus, PR_FAILURE, PRFileDesc*, PRFileInfo*>;
+    nsSSLIOLayerMethods.fileInfo64 =
+      InvalidPRIOMethod<PRStatus, PR_FAILURE, PRFileDesc*, PRFileInfo64*>;
+    nsSSLIOLayerMethods.writev =
+      InvalidPRIOMethod<int32_t, -1, PRFileDesc*, const PRIOVec*, int32_t,
+                        PRIntervalTime>;
+    nsSSLIOLayerMethods.accept =
+      InvalidPRIOMethod<PRFileDesc*, nullptr, PRFileDesc*, PRNetAddr*,
+                        PRIntervalTime>;
+    nsSSLIOLayerMethods.listen =
+      InvalidPRIOMethod<PRStatus, PR_FAILURE, PRFileDesc*, int>;
+    nsSSLIOLayerMethods.shutdown =
+      InvalidPRIOMethod<PRStatus, PR_FAILURE, PRFileDesc*, int>;
+    nsSSLIOLayerMethods.recvfrom =
+      InvalidPRIOMethod<int32_t, -1, PRFileDesc*, void*, int32_t, int,
+                        PRNetAddr*, PRIntervalTime>;
+    nsSSLIOLayerMethods.sendto =
+      InvalidPRIOMethod<int32_t, -1, PRFileDesc*, const void*, int32_t, int,
+                        const PRNetAddr*, PRIntervalTime>;
+    nsSSLIOLayerMethods.acceptread =
+      InvalidPRIOMethod<int32_t, -1, PRFileDesc*, PRFileDesc**, PRNetAddr**,
+                        void*, int32_t, PRIntervalTime>;
+    nsSSLIOLayerMethods.transmitfile =
+      InvalidPRIOMethod<int32_t, -1, PRFileDesc*, PRFileDesc*, const void*,
+                        int32_t, PRTransmitFileFlags, PRIntervalTime>;
+    nsSSLIOLayerMethods.sendfile =
+      InvalidPRIOMethod<int32_t, -1, PRFileDesc*, PRSendFileData*,
+                        PRTransmitFileFlags, PRIntervalTime>;
 
+    nsSSLIOLayerMethods.available = PSMAvailable;
+    nsSSLIOLayerMethods.available64 = PSMAvailable64;
     nsSSLIOLayerMethods.getsockname = PSMGetsockname;
     nsSSLIOLayerMethods.getpeername = PSMGetpeername;
     nsSSLIOLayerMethods.getsocketoption = PSMGetsocketoption;
@@ -1748,7 +1734,7 @@ nsSSLIOLayerHelpers::Init()
     nsSSLIOLayerMethods.poll = nsSSLIOLayerPoll;
 
     nsSSLPlaintextLayerIdentity = PR_GetUniqueIdentity("Plaintxext PSM layer");
-    nsSSLPlaintextLayerMethods  = *PR_GetDefaultIOMethods();
+    nsSSLPlaintextLayerMethods = *PR_GetDefaultIOMethods();
     nsSSLPlaintextLayerMethods.recv = PlaintextRecv;
   }
 

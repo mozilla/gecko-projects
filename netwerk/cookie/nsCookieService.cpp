@@ -1485,7 +1485,7 @@ nsCookieService::InitDBConn()
   mEndInitDBConn = mozilla::TimeStamp::Now();
 
   nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-  if (os && !mReadArray.IsEmpty()) {
+  if (os) {
     os->NotifyObservers(nullptr, "cookie-db-read", nullptr);
     mReadArray.Clear();
   }
@@ -2040,8 +2040,11 @@ nsCookieService::GetCookieStringCommon(nsIURI *aHostURI,
     NS_GetOriginAttributes(aChannel, attrs);
   }
 
+  bool isSafeTopLevelNav = NS_IsSafeTopLevelNav(aChannel);
+  bool isTopLevelForeign = NS_IsTopLevelForeign(aChannel);
   nsAutoCString result;
-  GetCookieStringInternal(aHostURI, isForeign, aHttpBound, attrs, result);
+  GetCookieStringInternal(aHostURI, isForeign, isSafeTopLevelNav, isTopLevelForeign,
+                          aHttpBound, attrs, result);
   *aCookie = result.IsEmpty() ? nullptr : ToNewCString(result);
   return NS_OK;
 }
@@ -3108,6 +3111,8 @@ nsCookieService::PathMatches(nsCookie* aCookie,
 void
 nsCookieService::GetCookiesForURI(nsIURI *aHostURI,
                                   bool aIsForeign,
+                                  bool aIsSafeTopLevelNav,
+                                  bool aIsTopLevelForeign,
                                   bool aHttpBound,
                                   const OriginAttributes& aOriginAttrs,
                                   nsTArray<nsCookie*>& aCookieList)
@@ -3197,6 +3202,21 @@ nsCookieService::GetCookiesForURI(nsIURI *aHostURI,
     if (cookie->IsSecure() && !isSecure)
       continue;
 
+    int32_t sameSiteAttr = 0;
+    cookie->GetSameSite(&sameSiteAttr);
+    if (aIsForeign || aIsTopLevelForeign) {
+      // it if's a cross origin request and the cookie is same site only (strict)
+      // don't send it
+      if (sameSiteAttr == nsICookie2::SAMESITE_STRICT) {
+        continue;
+      }
+      // if it's a cross origin request, the cookie is same site lax, but it's not
+      // a top-level navigation, don't send it
+      if (sameSiteAttr == nsICookie2::SAMESITE_LAX && !aIsSafeTopLevelNav) {
+        continue;
+      }
+    }
+
     // if the cookie is httpOnly and it's not going directly to the HTTP
     // connection, don't send it
     if (cookie->IsHttpOnly() && !aHttpBound)
@@ -3264,12 +3284,15 @@ nsCookieService::GetCookiesForURI(nsIURI *aHostURI,
 void
 nsCookieService::GetCookieStringInternal(nsIURI *aHostURI,
                                          bool aIsForeign,
+                                         bool aIsSafeTopLevelNav,
+                                         bool aIsTopLevelForeign,
                                          bool aHttpBound,
                                          const OriginAttributes& aOriginAttrs,
                                          nsCString &aCookieString)
 {
   AutoTArray<nsCookie*, 8> foundCookieList;
-  GetCookiesForURI(aHostURI, aIsForeign, aHttpBound, aOriginAttrs, foundCookieList);
+  GetCookiesForURI(aHostURI, aIsForeign, aIsSafeTopLevelNav, aIsTopLevelForeign,
+                   aHttpBound, aOriginAttrs, foundCookieList);
 
   nsCookie* cookie;
   for (uint32_t i = 0; i < foundCookieList.Length(); ++i) {
@@ -3888,6 +3911,7 @@ nsCookieService::ParseAttributes(nsDependentCString &aCookieHeader,
   static const char kHttpOnly[]  = "httponly";
   static const char kSameSite[]       = "samesite";
   static const char kSameSiteLax[]    = "lax";
+  static const char kSameSiteStrict[]    = "strict";
 
   nsACString::const_char_iterator tempBegin, tempEnd;
   nsACString::const_char_iterator cookieStart, cookieEnd;
@@ -3949,7 +3973,7 @@ nsCookieService::ParseAttributes(nsDependentCString &aCookieHeader,
     else if (tokenString.LowerCaseEqualsLiteral(kSameSite)) {
       if (tokenValue.LowerCaseEqualsLiteral(kSameSiteLax)) {
         aCookieAttributes.sameSite = nsICookie2::SAMESITE_LAX;
-      } else {
+      } else if (tokenValue.LowerCaseEqualsLiteral(kSameSiteStrict)) {
         aCookieAttributes.sameSite = nsICookie2::SAMESITE_STRICT;
       }
     }

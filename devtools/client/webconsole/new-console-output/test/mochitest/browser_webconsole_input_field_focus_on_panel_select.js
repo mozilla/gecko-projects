@@ -3,34 +3,32 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Test that the JS input field is focused when the user switches back to the
 // web console from other tools, see bug 891581.
 
 "use strict";
 
-const TEST_URI = "data:text/html;charset=utf8,<p>hello";
+const TEST_URI = "data:text/html;charset=utf8,<p>Test console input focus";
 
-add_task(function* () {
-  yield loadTab(TEST_URI);
-  let hud = yield openConsole();
-  hud.jsterm.clearOutput();
+add_task(async function() {
+  let hud = await openNewTabAndConsole(TEST_URI);
 
-  is(hud.jsterm.inputNode.hasAttribute("focused"), true,
-     "inputNode should be focused");
+  let inputNode = hud.jsterm.inputNode;
+  const filterInput = hud.ui.outputNode.querySelector(".text-filter");
 
-  hud.ui.filterBox.focus();
+  info("Focus after console is opened");
+  ok(hasFocus(inputNode), "input node is focused after console is opened");
 
-  is(hud.ui.filterBox.hasAttribute("focused"), true,
-     "filterBox should be focused");
+  filterInput.focus();
+  ok(hasFocus(filterInput), "filter input should be focused");
 
-  is(hud.jsterm.inputNode.hasAttribute("focused"), false,
-     "inputNode shouldn't be focused");
+  is(hasFocus(inputNode), false, "input node is not focused anymore");
 
-  yield openInspector();
-  hud = yield openConsole();
+  info("Go to the inspector panel");
+  await openInspector();
 
-  is(hud.jsterm.inputNode.hasAttribute("focused"), true,
-     "inputNode should be focused");
+  info("Go back to the console");
+  await openConsole();
+
+  ok(hasFocus(inputNode), "input node is focused when coming from a different panel");
 });

@@ -12,10 +12,12 @@ use std::f32::consts::PI;
 use std::fmt::{self, Write};
 use style_traits::{CssWriter, ToCss};
 use values::{Either, None_};
-use values::computed::{Angle, ComputedUrl, Context, Length, LengthOrPercentage, NumberOrPercentage, ToComputedValue};
+use values::computed::{Angle, Context};
+use values::computed::{Length, LengthOrPercentage, NumberOrPercentage, ToComputedValue};
 #[cfg(feature = "gecko")]
 use values::computed::Percentage;
 use values::computed::position::Position;
+use values::computed::url::ComputedImageUrl;
 use values::generics::image::{CompatMode, ColorStop as GenericColorStop, EndingShape as GenericEndingShape};
 use values::generics::image::{Gradient as GenericGradient, GradientItem as GenericGradientItem};
 use values::generics::image::{Image as GenericImage, GradientKind as GenericGradientKind};
@@ -28,7 +30,7 @@ pub type ImageLayer = Either<None_, Image>;
 
 /// Computed values for an image according to CSS-IMAGES.
 /// <https://drafts.csswg.org/css-images/#image-values>
-pub type Image = GenericImage<Gradient, MozImageRect, ComputedUrl>;
+pub type Image = GenericImage<Gradient, MozImageRect, ComputedImageUrl>;
 
 /// Computed values for a CSS gradient.
 /// <https://drafts.csswg.org/css-images/#gradients>
@@ -76,7 +78,7 @@ pub type GradientItem = GenericGradientItem<RGBA, LengthOrPercentage>;
 pub type ColorStop = GenericColorStop<RGBA, LengthOrPercentage>;
 
 /// Computed values for `-moz-image-rect(...)`.
-pub type MozImageRect = GenericMozImageRect<NumberOrPercentage, ComputedUrl>;
+pub type MozImageRect = GenericMozImageRect<NumberOrPercentage, ComputedImageUrl>;
 
 impl GenericLineDirection for LineDirection {
     fn points_downwards(&self, compat_mode: CompatMode) -> bool {

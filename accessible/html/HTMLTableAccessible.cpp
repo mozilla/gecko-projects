@@ -311,8 +311,8 @@ HTMLTableHeaderCellAccessible::NativeRole()
 {
   // Check value of @scope attribute.
   static Element::AttrValuesArray scopeValues[] =
-    { &nsGkAtoms::col, &nsGkAtoms::colgroup,
-      &nsGkAtoms::row, &nsGkAtoms::rowgroup, nullptr };
+    { nsGkAtoms::col, nsGkAtoms::colgroup,
+      nsGkAtoms::row, nsGkAtoms::rowgroup, nullptr };
   int32_t valueIdx =
     mContent->AsElement()->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::scope,
                                            scopeValues, eCaseMatters);
@@ -480,7 +480,7 @@ HTMLTableAccessible::Caption() const
 void
 HTMLTableAccessible::Summary(nsString& aSummary)
 {
-  dom::HTMLTableElement* table = dom::HTMLTableElement::FromContent(mContent);
+  dom::HTMLTableElement* table = dom::HTMLTableElement::FromNode(mContent);
 
   if (table)
     table->GetSummary(aSummary);
@@ -1063,6 +1063,11 @@ HTMLTableAccessible::IsProbablyLayoutTable()
     if (child->Role() == roles::ROW) {
       prevRowColor = rowColor;
       nsIFrame* rowFrame = child->GetFrame();
+      MOZ_ASSERT(rowFrame, "Table hierarchy got screwed up");
+      if (!rowFrame) {
+        RETURN_LAYOUT_ANSWER(false, "Unexpected table hierarchy");
+      }
+
       rowColor = rowFrame->StyleBackground()->BackgroundColor(rowFrame);
 
       if (childIdx > 0 && prevRowColor != rowColor)

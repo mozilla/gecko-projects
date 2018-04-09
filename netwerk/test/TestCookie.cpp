@@ -776,6 +776,10 @@ TEST(TestCookie,TestCookieMain)
     SetACookie(cookieService, "http://samesite.test", nullptr, "unset=yes", nullptr);
     // samesite attribute present but with no value
     SetACookie(cookieService, "http://samesite.test", nullptr, "unspecified=yes; samesite", nullptr);
+    // samesite attribute present but with an empty value
+    SetACookie(cookieService, "http://samesite.test", nullptr, "empty=yes; samesite=", nullptr);
+    // samesite attribute present but with an invalid value
+    SetACookie(cookieService, "http://samesite.test", nullptr, "bogus=yes; samesite=bogus", nullptr);
     // samesite=strict
     SetACookie(cookieService, "http://samesite.test", nullptr, "strict=yes; samesite=strict", nullptr);
     // samesite=lax
@@ -800,7 +804,11 @@ TEST(TestCookie,TestCookieMain)
       if (name.EqualsLiteral("unset")) {
         EXPECT_TRUE(sameSiteAttr == nsICookie2::SAMESITE_UNSET);
       } else if (name.EqualsLiteral("unspecified")) {
-        EXPECT_TRUE(sameSiteAttr == nsICookie2::SAMESITE_STRICT);
+        EXPECT_TRUE(sameSiteAttr == nsICookie2::SAMESITE_UNSET);
+      } else if (name.EqualsLiteral("empty")) {
+        EXPECT_TRUE(sameSiteAttr == nsICookie2::SAMESITE_UNSET);
+      } else if (name.EqualsLiteral("bogus")) {
+        EXPECT_TRUE(sameSiteAttr == nsICookie2::SAMESITE_UNSET);
       } else if (name.EqualsLiteral("strict")) {
         EXPECT_TRUE(sameSiteAttr == nsICookie2::SAMESITE_STRICT);
       } else if (name.EqualsLiteral("lax")) {
@@ -808,7 +816,22 @@ TEST(TestCookie,TestCookieMain)
       }
     }
 
-    EXPECT_TRUE(i == 4);
+    EXPECT_TRUE(i == 6);
+
+    // *** SameSite attribute
+    // Clear the cookies
+    EXPECT_TRUE(NS_SUCCEEDED(cookieMgr->RemoveAll()));
+
+    // please note that the flag aForeign is always set to true using this test setup because no nsIChannel is
+    // passed to SetCookieString(). therefore we can only test that no cookies are sent for cross origin requests
+    // using same-site cookies.
+    SetACookie(cookieService, "http://www.samesite.com", nullptr, "test=sameSiteStrictVal; samesite=strict", nullptr);
+    GetACookie(cookieService, "http://www.notsamesite.com", nullptr, cookie);
+    EXPECT_TRUE(CheckResult(cookie.get(), MUST_BE_NULL));
+
+    SetACookie(cookieService, "http://www.samesite.test", nullptr, "test=sameSiteLaxVal; samesite=lax", nullptr);
+    GetACookie(cookieService, "http://www.notsamesite.com", nullptr, cookie);
+    EXPECT_TRUE(CheckResult(cookie.get(), MUST_BE_NULL));
 
     // XXX the following are placeholders: add these tests please!
     // *** "noncompliant cookie" tests

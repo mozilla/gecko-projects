@@ -66,7 +66,7 @@ public:
     Closed,
     // The channel is being disconnected from the parent, and all further events
     // and data will pass unfiltered. Data received by the child in this state
-    // will be automatically written ot the output stream listener. No data may
+    // will be automatically written to the output stream listener. No data may
     // be explicitly written.
     Disconnecting,
     // The channel has been disconnected from the parent, and all further data
@@ -99,6 +99,7 @@ protected:
   virtual IPCResult RecvStartRequest() override;
   virtual IPCResult RecvData(Data&& data) override;
   virtual IPCResult RecvStopRequest(const nsresult& aStatus) override;
+  virtual IPCResult RecvError(const nsCString& aError) override;
 
   virtual IPCResult RecvClosed() override;
   virtual IPCResult RecvSuspended() override;

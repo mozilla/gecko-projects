@@ -215,6 +215,7 @@ WebGLContext::DestroyResourcesAndContext()
     mBoundCopyWriteBuffer = nullptr;
     mBoundPixelPackBuffer = nullptr;
     mBoundPixelUnpackBuffer = nullptr;
+    mBoundTransformFeedbackBuffer = nullptr;
     mBoundUniformBuffer = nullptr;
     mCurrentProgram = nullptr;
     mActiveProgramLinkInfo = nullptr;
@@ -231,6 +232,10 @@ WebGLContext::DestroyResourcesAndContext()
     mQuerySlot_TimeElapsed = nullptr;
 
     mIndexedUniformBufferBindings.clear();
+
+    if (mAvailabilityRunnable) {
+        mAvailabilityRunnable->Run();
+    }
 
     //////
 
@@ -816,8 +821,7 @@ WebGLContext::ThrowEvent_WebGLContextCreationError(const nsACString& text)
                                                                            eventInit);
     event->SetTrusted(true);
 
-    bool didPreventDefault;
-    target->DispatchEvent(event, &didPreventDefault);
+    target->DispatchEvent(*event);
 
     //////
 
@@ -1792,7 +1796,9 @@ WebGLContext::UpdateContextLossStatus()
             RefPtr<Event> event = new Event(mOffscreenCanvas, nullptr, nullptr);
             event->InitEvent(kEventName, kCanBubble, kIsCancelable);
             event->SetTrusted(true);
-            mOffscreenCanvas->DispatchEvent(event, &useDefaultHandler);
+            useDefaultHandler =
+                mOffscreenCanvas->DispatchEvent(*event, CallerType::System,
+                                                IgnoreErrors());
         }
 
         // We sent the callback, so we're just 'regular lost' now.
@@ -1858,8 +1864,7 @@ WebGLContext::UpdateContextLossStatus()
             RefPtr<Event> event = new Event(mOffscreenCanvas, nullptr, nullptr);
             event->InitEvent(NS_LITERAL_STRING("webglcontextrestored"), true, true);
             event->SetTrusted(true);
-            bool unused;
-            mOffscreenCanvas->DispatchEvent(event, &unused);
+            mOffscreenCanvas->DispatchEvent(*event);
         }
 
         mEmitContextLostErrorOnce = true;
@@ -2451,6 +2456,54 @@ WebGLContext::UpdateMaxDrawBuffers()
     mGLMaxDrawBuffers = std::min(mGLMaxDrawBuffers, mGLMaxColorAttachments);
 }
 
+// --
+
+webgl::AvailabilityRunnable*
+WebGLContext::EnsureAvailabilityRunnable()
+{
+    if (!mAvailabilityRunnable) {
+        RefPtr<webgl::AvailabilityRunnable> runnable = new webgl::AvailabilityRunnable(this);
+
+        nsIDocument* document = GetOwnerDoc();
+        if (document) {
+            document->Dispatch(TaskCategory::Other, runnable.forget());
+        } else {
+            NS_DispatchToCurrentThread(runnable.forget());
+        }
+    }
+    return mAvailabilityRunnable;
+}
+
+webgl::AvailabilityRunnable::AvailabilityRunnable(WebGLContext* const webgl)
+    : Runnable("webgl::AvailabilityRunnable")
+    , mWebGL(webgl)
+{
+    mWebGL->mAvailabilityRunnable = this;
+}
+
+webgl::AvailabilityRunnable::~AvailabilityRunnable()
+{
+    MOZ_ASSERT(mQueries.empty());
+    MOZ_ASSERT(mSyncs.empty());
+}
+
+nsresult
+webgl::AvailabilityRunnable::Run()
+{
+    for (const auto& cur : mQueries) {
+        cur->mCanBeAvailable = true;
+    }
+    mQueries.clear();
+
+    for (const auto& cur : mSyncs) {
+        cur->mCanBeAvailable = true;
+    }
+    mSyncs.clear();
+
+    mWebGL->mAvailabilityRunnable = nullptr;
+    return NS_OK;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // XPCOM goop
 
@@ -2490,6 +2543,7 @@ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(WebGLContext,
   mBoundPixelPackBuffer,
   mBoundPixelUnpackBuffer,
   mBoundTransformFeedback,
+  mBoundTransformFeedbackBuffer,
   mBoundUniformBuffer,
   mCurrentProgram,
   mBoundDrawFramebuffer,

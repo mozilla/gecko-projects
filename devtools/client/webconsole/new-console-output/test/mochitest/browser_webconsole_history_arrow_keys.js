@@ -18,7 +18,7 @@ const TEST_VALUES = [
   "document.location",
 ];
 
-add_task(async function () {
+add_task(async function() {
   let hud = await openNewTabAndConsole(TEST_URI);
   let { jsterm } = hud;
 
@@ -28,7 +28,7 @@ add_task(async function () {
   info("Execute each test value in the console");
   for (let value of TEST_VALUES) {
     jsterm.setInputValue(value);
-    jsterm.execute();
+    await jsterm.execute();
   }
 
   performTests(jsterm);

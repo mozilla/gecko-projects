@@ -1681,7 +1681,7 @@ TypeAnalyzer::adjustInputs(MDefinition* def)
         return true;
 
     MInstruction* ins = def->toInstruction();
-    TypePolicy* policy = ins->typePolicy();
+    const TypePolicy* policy = ins->typePolicy();
     if (policy && !policy->adjustInputs(alloc(), ins))
         return false;
     return true;
@@ -3542,8 +3542,12 @@ PassthroughOperand(MDefinition* def)
         return def->toConvertElementsToDoubles()->elements();
     if (def->isMaybeCopyElementsForWrite())
         return def->toMaybeCopyElementsForWrite()->object();
-    if (def->isConvertUnboxedObjectToNative())
-        return def->toConvertUnboxedObjectToNative()->object();
+    if (!JitOptions.spectreObjectMitigationsMisc) {
+        // If Spectre mitigations are enabled, LConvertUnboxedObjectToNative
+        // needs to have its own def.
+        if (def->isConvertUnboxedObjectToNative())
+            return def->toConvertUnboxedObjectToNative()->object();
+    }
     return nullptr;
 }
 
@@ -4788,6 +4792,7 @@ jit::CreateMIRRootList(IonBuilder& builder)
     return true;
 }
 
+#ifdef JS_JITSPEW
 static void
 DumpDefinition(GenericPrinter& out, MDefinition* def, size_t depth)
 {
@@ -4802,10 +4807,12 @@ DumpDefinition(GenericPrinter& out, MDefinition* def, size_t depth)
         out.printf(")");
     }
 }
+#endif
 
 void
 jit::DumpMIRExpressions(MIRGraph& graph)
 {
+#ifdef JS_JITSPEW
     if (!JitSpewEnabled(JitSpew_MIRExpressions))
         return;
 
@@ -4818,4 +4825,5 @@ jit::DumpMIRExpressions(MIRGraph& graph)
             out.printf("\n");
         }
     }
+#endif
 }

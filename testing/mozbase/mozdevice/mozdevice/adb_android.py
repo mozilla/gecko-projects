@@ -163,6 +163,42 @@ class ADBAndroid(ADBDevice):
                     break
         return percentage
 
+    def get_top_activity(self, timeout=None):
+        """Returns the name of the top activity (focused app) reported by dumpsys
+
+        :param timeout: The maximum time in
+            seconds for any spawned adb process to complete before
+            throwing an ADBTimeoutError.
+            This timeout is per adb call. The total time spent
+            may exceed this value. If it is not specified, the value
+            set in the ADBDevice constructor is used.
+        :type timeout: integer or None
+        :returns: package name of top activity or None (cannot be determined)
+        :raises: * ADBTimeoutError
+                 * ADBError
+        """
+        package = None
+        data = None
+        cmd = "dumpsys window windows"
+        try:
+            data = self.shell_output(cmd, timeout=timeout)
+        except Exception:
+            # dumpsys intermittently fails on some platforms (4.3 arm emulator)
+            return package
+        m = re.search('mFocusedApp(.+)/', data)
+        if not m:
+            # alternative format seen on newer versions of Android
+            m = re.search('FocusedApplication(.+)/', data)
+        if m:
+            line = m.group(0)
+            # Extract package name: string of non-whitespace ending in forward slash
+            m = re.search('(\S+)/$', line)
+            if m:
+                package = m.group(1)
+        if self._verbose:
+            self._logger.debug('get_top_activity: %s' % str(package))
+        return package
+
     # System control methods
 
     def is_device_ready(self, timeout=None):
@@ -256,10 +292,11 @@ class ADBAndroid(ADBDevice):
 
     # Application management methods
 
-    def install_app(self, apk_path, timeout=None):
+    def install_app(self, apk_path, replace=False, timeout=None):
         """Installs an app on the device.
 
         :param str apk_path: The apk file name to be installed.
+        :param bool replace: If True, replace existing application.
         :param timeout: The maximum time in
             seconds for any spawned adb process to complete before
             throwing an ADBTimeoutError.
@@ -273,6 +310,8 @@ class ADBAndroid(ADBDevice):
         cmd = ["install"]
         if self.version >= version_codes.M:
             cmd.append("-g")
+        if replace:
+            cmd.append("-r")
         cmd.append(apk_path)
         data = self.command_output(cmd, timeout=timeout)
         if data.find('Success') == -1:
@@ -341,12 +380,16 @@ class ADBAndroid(ADBDevice):
         if intent:
             acmd.extend(["-a", intent])
 
+        # Note that isinstance(True, int) and isinstance(False, int)
+        # is True. This means we must test the type of the value
+        # against bool prior to testing it against int in order to
+        # prevent falsely identifying a bool value as an int.
         if extras:
             for (key, val) in extras.iteritems():
-                if isinstance(val, int):
-                    extra_type_param = "--ei"
-                elif isinstance(val, bool):
+                if isinstance(val, bool):
                     extra_type_param = "--ez"
+                elif isinstance(val, int):
+                    extra_type_param = "--ei"
                 else:
                     extra_type_param = "--es"
                 acmd.extend([extra_type_param, str(key), str(val)])
@@ -355,6 +398,7 @@ class ADBAndroid(ADBDevice):
             acmd.extend(["-d", url])
 
         cmd = self._escape_command_line(acmd)
+        self._logger.info('launch_application: %s' % cmd)
         self.shell_output(cmd, timeout=timeout)
 
     def launch_fennec(self, app_name, intent="android.intent.action.VIEW",
@@ -400,7 +444,55 @@ class ADBAndroid(ADBDevice):
         if extra_args:
             extras['args'] = " ".join(extra_args)
 
-        self.launch_application(app_name, ".App",
+        self.launch_application(app_name, "org.mozilla.gecko.BrowserApp",
+                                intent, url=url, extras=extras,
+                                wait=wait, fail_if_running=fail_if_running,
+                                timeout=timeout)
+
+    def launch_geckoview_example(self, app_name, intent="android.intent.action.Main",
+                                 moz_env=None, extra_args=None, url=None, e10s=False,
+                                 wait=True, fail_if_running=True, timeout=None):
+        """Convenience method to launch geckoview_example on Android with various
+        debugging arguments
+
+        :param str app_name: Name of application (e.g.
+            `org.mozilla.geckoview_example`)
+        :param str intent: Intent to launch application.
+        :type moz_env: str or None
+        :param extra_args: Extra arguments to be parsed by fennec.
+        :type extra_args: str or None
+        :param url: URL to open
+        :type url: str or None
+        :param bool e10s: If True, run in multiprocess mode.
+        :param bool wait: If True, wait for application to start before
+            returning.
+        :param bool fail_if_running: Raise an exception if instance of
+            application is already running.
+        :param timeout: The maximum time in
+            seconds for any spawned adb process to complete before
+            throwing an ADBTimeoutError.
+            This timeout is per adb call. The total time spent
+            may exceed this value. If it is not specified, the value
+            set in the ADB constructor is used.
+        :type timeout: integer or None
+        :raises: * ADBTimeoutError
+                 * ADBError
+        """
+        extras = {}
+
+        if moz_env:
+            # moz_env is expected to be a dictionary of environment variables:
+            # geckoview_example itself will set them when launched
+            for (env_count, (env_key, env_val)) in enumerate(moz_env.iteritems()):
+                extras["env" + str(env_count)] = env_key + "=" + env_val
+
+        # Additional command line arguments that geckoview_example will read and use (e.g.
+        # with a custom profile)
+        if extra_args:
+            extras['args'] = " ".join(extra_args)
+        extras['use_multiprocess'] = e10s
+        self.launch_application(app_name,
+                                "%s.GeckoViewActivity" % app_name,
                                 intent, url=url, extras=extras,
                                 wait=wait, fail_if_running=fail_if_running,
                                 timeout=timeout)

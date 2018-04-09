@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 "use strict";
 
 // Test that multiple messages are copied into the clipboard and that they are
@@ -12,7 +10,7 @@
 const TEST_URI = "data:text/html,<meta charset=utf8>" +
                  "Test copy multiple messages to clipboard";
 
-add_task(async function () {
+add_task(async function() {
   let hud = await openNewTabAndConsole(TEST_URI);
 
   const messages = Array.from({length: 10}, (_, i) => `Message number ${i + 1}`);

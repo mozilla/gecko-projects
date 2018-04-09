@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Test that user input that is not submitted in the command line input is not
 // lost after navigating in history.
 // See https://bugzilla.mozilla.org/show_bug.cgi?id=817834
@@ -13,12 +11,12 @@
 
 const TEST_URI = "data:text/html;charset=utf-8,Web Console test for bug 817834";
 
-add_task(async function () {
+add_task(async function() {
   let hud = await openNewTabAndConsole(TEST_URI);
-  testEditedInputHistory(hud);
+  await testEditedInputHistory(hud);
 });
 
-function testEditedInputHistory(hud) {
+async function testEditedInputHistory(hud) {
   let jsterm = hud.jsterm;
   let inputNode = jsterm.inputNode;
 
@@ -32,7 +30,7 @@ function testEditedInputHistory(hud) {
   EventUtils.synthesizeKey("KEY_ArrowDown");
   is(jsterm.getInputValue(), '"first item"', "null test history down");
 
-  jsterm.execute();
+  await jsterm.execute();
   is(jsterm.getInputValue(), "", "cleared input line after submit");
 
   jsterm.setInputValue('"editing input 1"');
@@ -43,7 +41,7 @@ function testEditedInputHistory(hud) {
     "test history down restores in-progress input");
 
   jsterm.setInputValue('"second item"');
-  jsterm.execute();
+  await jsterm.execute();
   jsterm.setInputValue('"editing input 2"');
   EventUtils.synthesizeKey("KEY_ArrowUp");
   is(jsterm.getInputValue(), '"second item"', "test history up");

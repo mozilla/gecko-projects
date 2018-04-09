@@ -30,9 +30,14 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
     this._viewAllButton = contents.querySelector("#view-all");
     this._viewAllButton.addEventListener("click", this);
 
+    this._mainContainer = contents.getElementById("main-container");
     this._orderDetailsOverlay = contents.querySelector("#order-details-overlay");
+
     this._shippingTypeLabel = contents.querySelector("#shipping-type-label");
     this._shippingRelatedEls = contents.querySelectorAll(".shipping-related");
+    this._payerRelatedEls = contents.querySelectorAll(".payer-related");
+    this._payerAddressPicker = contents.querySelector("address-picker.payer-related");
+
     this._errorText = contents.querySelector("#error-text");
 
     this._disabledOverlay = contents.getElementById("disabled-overlay");
@@ -69,11 +74,13 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
 
   pay() {
     let {
+      selectedPayerAddress,
       selectedPaymentCard,
       selectedPaymentCardSecurityCode,
     } = this.requestStore.getState();
 
     paymentRequest.pay({
+      selectedPayerAddressGUID: selectedPayerAddress,
       selectedPaymentCardGUID: selectedPaymentCard,
       selectedPaymentCardSecurityCode,
     });
@@ -99,6 +106,7 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
    * @param {object} state - See `PaymentsStore.setState`
    */
   setStateFromParent(state) {
+    let oldSavedAddresses = this.requestStore.getState().savedAddresses;
     this.requestStore.setState(state);
 
     // Check if any foreign-key constraints were invalidated.
@@ -106,15 +114,29 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
     let {
       savedAddresses,
       savedBasicCards,
+      selectedPayerAddress,
       selectedPaymentCard,
       selectedShippingAddress,
       selectedShippingOption,
     } = state;
     let shippingOptions = state.request.paymentDetails.shippingOptions;
+    let shippingAddress = selectedShippingAddress && savedAddresses[selectedShippingAddress];
+    let oldShippingAddress = selectedShippingAddress &&
+                             oldSavedAddresses[selectedShippingAddress];
 
     // Ensure `selectedShippingAddress` never refers to a deleted address and refers
-    // to an address if one exists.
-    if (!savedAddresses[selectedShippingAddress]) {
+    // to an address if one exists. We also compare address timestamps to handle changes
+    // made outside the payments UI.
+    if (shippingAddress) {
+      // invalidate the cached value if the address was modified
+      if (oldShippingAddress &&
+          shippingAddress.guid == oldShippingAddress.guid &&
+          shippingAddress.timeLastModified != oldShippingAddress.timeLastModified) {
+        delete this._cachedState.selectedShippingAddress;
+      }
+    } else {
+      // assign selectedShippingAddress as value if it is undefined,
+      // or if the address it pointed to was removed from storage
       this.requestStore.setState({
         selectedShippingAddress: Object.keys(savedAddresses)[0] || null,
       });
@@ -148,6 +170,14 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
         selectedShippingOption,
       });
     }
+
+    // Ensure `selectedPayerAddress` never refers to a deleted address and refers
+    // to an address if one exists.
+    if (!savedAddresses[selectedPayerAddress]) {
+      this.requestStore.setState({
+        selectedPayerAddress: Object.keys(savedAddresses)[0] || null,
+      });
+    }
   }
 
   _renderPayButton(state) {
@@ -157,6 +187,7 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
       case "processing":
       case "success":
       case "fail":
+      case "unknown":
         break;
       default:
         throw new Error("Invalid completionState");
@@ -196,15 +227,43 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
 
     this._orderDetailsOverlay.hidden = !state.orderDetailsShowing;
     this._errorText.textContent = paymentDetails.error;
+
     let paymentOptions = request.paymentOptions;
     for (let element of this._shippingRelatedEls) {
       element.hidden = !paymentOptions.requestShipping;
     }
+    let payerRequested = paymentOptions.requestPayerName ||
+                         paymentOptions.requestPayerEmail ||
+                         paymentOptions.requestPayerPhone;
+    for (let element of this._payerRelatedEls) {
+      element.hidden = !payerRequested;
+    }
+
+    if (payerRequested) {
+      let fieldNames = new Set(); // default: ["name", "tel", "email"]
+      if (paymentOptions.requestPayerName) {
+        fieldNames.add("name");
+      }
+      if (paymentOptions.requestPayerEmail) {
+        fieldNames.add("email");
+      }
+      if (paymentOptions.requestPayerPhone) {
+        fieldNames.add("tel");
+      }
+      this._payerAddressPicker.setAttribute("address-fields", [...fieldNames].join(" "));
+    } else {
+      this._payerAddressPicker.removeAttribute("address-fields");
+    }
+
     let shippingType = paymentOptions.shippingType || "shipping";
     this._shippingTypeLabel.querySelector("label").textContent =
       this._shippingTypeLabel.dataset[shippingType + "AddressLabel"];
 
     this._renderPayButton(state);
+
+    for (let page of this._mainContainer.querySelectorAll(":scope > .page")) {
+      page.hidden = state.page.id != page.id;
+    }
 
     let {
       changesPrevented,

@@ -34,6 +34,11 @@
 namespace IPC {
 
 template <>
+struct ParamTraits<mozilla::layers::LayersId>
+  : public PlainOldDataSerializer<mozilla::layers::LayersId>
+{};
+
+template <>
 struct ParamTraits<mozilla::layers::LayersBackend>
   : public ContiguousEnumSerializer<
              mozilla::layers::LayersBackend,
@@ -104,19 +109,6 @@ template<>
 struct ParamTraits<mozilla::layers::CompositableHandle>
 {
   typedef mozilla::layers::CompositableHandle paramType;
-
-  static void Write(Message* msg, const paramType& param) {
-    WriteParam(msg, param.mHandle);
-  }
-  static bool Read(const Message* msg, PickleIterator* iter, paramType* result) {
-    return ReadParam(msg, iter, &result->mHandle);
-  }
-};
-
-template<>
-struct ParamTraits<mozilla::layers::ReadLockHandle>
-{
-  typedef mozilla::layers::ReadLockHandle paramType;
 
   static void Write(Message* msg, const paramType& param) {
     WriteParam(msg, param.mHandle);

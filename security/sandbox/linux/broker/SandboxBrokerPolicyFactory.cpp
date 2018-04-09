@@ -14,6 +14,7 @@
 #include "mozilla/SandboxSettings.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/UniquePtrExtensions.h"
+#include "mozilla/SandboxLaunch.h"
 #include "mozilla/dom/ContentChild.h"
 #include "nsPrintfCString.h"
 #include "nsString.h"
@@ -51,6 +52,7 @@ static const int rdonly = SandboxBroker::MAY_READ;
 static const int wronly = SandboxBroker::MAY_WRITE;
 static const int rdwr = rdonly | wronly;
 static const int rdwrcr = rdwr | SandboxBroker::MAY_CREATE;
+static const int access = SandboxBroker::MAY_ACCESS;
 }
 #endif
 
@@ -370,6 +372,21 @@ SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory()
   }
 #endif
 
+  // Allow Primus to contact the Bumblebee daemon to manage GPU
+  // switching on NVIDIA Optimus systems.
+  const char* bumblebeeSocket = PR_GetEnv("BUMBLEBEE_SOCKET");
+  if (bumblebeeSocket == nullptr) {
+    bumblebeeSocket = "/var/run/bumblebee.socket";
+  }
+  policy->AddPath(SandboxBroker::MAY_CONNECT, bumblebeeSocket);
+
+  // Allow local X11 connections, for Primus and VirtualGL to contact
+  // the secondary X server.
+  policy->AddPrefix(SandboxBroker::MAY_CONNECT, "/tmp/.X11-unix/X");
+  if (const auto xauth = PR_GetEnv("XAUTHORITY")) {
+    policy->AddPath(rdonly, xauth);
+  }
+
   mCommonContentPolicy.reset(policy);
 #endif
 }
@@ -507,11 +524,19 @@ SandboxBrokerPolicyFactory::GetContentPolicy(int aPid, bool aFileProcess)
 #endif // MOZ_WIDGET_GTK
 
   if (allowPulse) {
-    // See bug 1384986 comment #1.
-    if (const auto xauth = PR_GetEnv("XAUTHORITY")) {
-      policy->AddPath(rdonly, xauth);
-    }
+    // PulseAudio also needs access to read the $XAUTHORITY file (see
+    // bug 1384986 comment #1), but that's already allowed for hybrid
+    // GPU drivers (see above).
     policy->AddPath(rdonly, "/var/lib/dbus/machine-id");
+  }
+
+  // Bug 1434711 - AMDGPU-PRO crashes if it can't read it's marketing ids
+  // and various other things
+  if (HasAtiDrivers()) {
+    policy->AddDir(rdonly, "/opt/amdgpu/share");
+    policy->AddPath(rdonly, "/sys/module/amdgpu");
+    // AMDGPU-PRO's MESA version likes to readlink a lot of things here
+    policy->AddDir(access, "/sys");
   }
 
   // Return the common policy.

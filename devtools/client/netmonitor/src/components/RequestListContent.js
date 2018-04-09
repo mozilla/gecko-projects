@@ -15,15 +15,14 @@ const { formDataURI } = require("../utils/request-utils");
 const {
   getDisplayedRequests,
   getSelectedRequest,
-  getSortedRequests,
   getWaterfallScale,
 } = require("../selectors/index");
 
-loader.lazyGetter(this, "setImageTooltip", function () {
+loader.lazyGetter(this, "setImageTooltip", function() {
   return require("devtools/client/shared/widgets/tooltip/ImageTooltipHelper")
     .setImageTooltip;
 });
-loader.lazyGetter(this, "getImageDimensions", function () {
+loader.lazyGetter(this, "getImageDimensions", function() {
   return require("devtools/client/shared/widgets/tooltip/ImageTooltipHelper")
     .getImageDimensions;
 });
@@ -50,6 +49,9 @@ class RequestListContent extends Component {
     return {
       connector: PropTypes.object.isRequired,
       columns: PropTypes.object.isRequired,
+      networkDetailsOpen: PropTypes.bool.isRequired,
+      networkDetailsWidth: PropTypes.number,
+      networkDetailsHeight: PropTypes.number,
       cloneSelectedRequest: PropTypes.func.isRequired,
       displayedRequests: PropTypes.array.isRequired,
       firstRequestStartedMillis: PropTypes.number.isRequired,
@@ -62,7 +64,6 @@ class RequestListContent extends Component {
       openStatistics: PropTypes.func.isRequired,
       scale: PropTypes.number,
       selectedRequest: PropTypes.object,
-      sortedRequests: PropTypes.array.isRequired,
       requestFilterTypes: PropTypes.object.isRequired,
     };
   }
@@ -79,12 +80,6 @@ class RequestListContent extends Component {
   }
 
   componentWillMount() {
-    const { connector, cloneSelectedRequest, openStatistics } = this.props;
-    this.contextMenu = new RequestListContextMenu({
-      connector,
-      cloneSelectedRequest,
-      openStatistics,
-    });
     this.tooltip = new HTMLTooltip(window.parent.document, { type: "arrow" });
     window.addEventListener("resize", this.onResize);
   }
@@ -114,6 +109,12 @@ class RequestListContent extends Component {
       // Using maximum scroll height rather than node.scrollHeight to avoid sync reflow.
       node.scrollTop = MAX_SCROLL_HEIGHT;
     }
+    if (prevProps.networkDetailsOpen !== this.props.networkDetailsOpen ||
+      prevProps.networkDetailsWidth !== this.props.networkDetailsWidth ||
+      prevProps.networkDetailsHeight !== this.props.networkDetailsHeight
+    ) {
+      this.onResize();
+    }
   }
 
   componentWillUnmount() {
@@ -126,6 +127,7 @@ class RequestListContent extends Component {
 
   onResize() {
     let parent = this.refs.contentEl.parentNode;
+    this.refs.contentEl.style.width = parent.offsetWidth + "px";
     this.refs.contentEl.style.height = parent.offsetHeight + "px";
   }
 
@@ -235,8 +237,18 @@ class RequestListContent extends Component {
 
   onContextMenu(evt) {
     evt.preventDefault();
-    let { selectedRequest, sortedRequests } = this.props;
-    this.contextMenu.open(evt, selectedRequest, sortedRequests);
+    let { selectedRequest, displayedRequests } = this.props;
+
+    if (!this.contextMenu) {
+      const { connector, cloneSelectedRequest, openStatistics } = this.props;
+      this.contextMenu = new RequestListContextMenu({
+        connector,
+        cloneSelectedRequest,
+        openStatistics,
+      });
+    }
+
+    this.contextMenu.open(evt, selectedRequest, displayedRequests);
   }
 
   /**
@@ -300,11 +312,13 @@ class RequestListContent extends Component {
 module.exports = connect(
   (state) => ({
     columns: state.ui.columns,
+    networkDetailsOpen: state.ui.networkDetailsOpen,
+    networkDetailsWidth: state.ui.networkDetailsWidth,
+    networkDetailsHeight: state.ui.networkDetailsHeight,
     displayedRequests: getDisplayedRequests(state),
     firstRequestStartedMillis: state.requests.firstStartedMillis,
     selectedRequest: getSelectedRequest(state),
     scale: getWaterfallScale(state),
-    sortedRequests: getSortedRequests(state),
     requestFilterTypes: state.filters.requestFilterTypes,
   }),
   (dispatch, props) => ({

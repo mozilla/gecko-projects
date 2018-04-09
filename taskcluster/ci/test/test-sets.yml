@@ -83,25 +83,6 @@ awsy-stylo-sequential:
 ##
 # Limited test sets for specific platforms
 
-stylo-disabled-tests:
-    - cppunit
-    - crashtest
-    - reftest
-    - web-platform-tests
-    - web-platform-tests-reftests
-    - mochitest
-    - mochitest-a11y
-    - mochitest-browser-chrome
-    - browser-screenshots
-    - mochitest-chrome
-    - mochitest-clipboard
-    - mochitest-gpu
-    - mochitest-media
-    - mochitest-webgl
-
-reftest-stylo:
-    - reftest-stylo
-
 linux-qr-talos:
     - talos-chrome
     - talos-dromaeojs
@@ -159,6 +140,7 @@ windows-qr-tests:
     - mochitest-gpu
     - mochitest-media
     - mochitest-webgl
+    - reftest
 
 windows-qr-talos:
     - talos-chrome
@@ -167,7 +149,6 @@ windows-qr-talos:
     - talos-g4
     - talos-perf-reftest
     - talos-perf-reftest-singletons
-    - talos-svgr
     - talos-tp5o
     - talos-speedometer
     - talos-motionmark
@@ -222,6 +203,26 @@ windows-talos:
     - talos-tp5o
     - talos-xperf
     - talos-speedometer
+    - talos-tp6
+    - talos-motionmark
+    - talos-h1
+
+windows-talos-profiling:
+    - talos-chrome-profiling
+    - talos-dromaeojs-profiling
+    - talos-g1-profiling
+    - talos-g2-profiling
+    - talos-g3-profiling
+    - talos-g4-profiling
+    - talos-g5-profiling
+    - talos-motionmark-profiling
+    - talos-other-profiling
+    - talos-perf-reftest-profiling
+    - talos-perf-reftest-singletons-profiling
+    - talos-speedometer-profiling
+    - talos-svgr-profiling
+    - talos-tp5o-profiling
+    - talos-tp6-profiling
 
 macosx64-tests:
     - cppunit
@@ -321,6 +322,7 @@ desktop-instrumentation:
 android-common-tests:
     - cppunit
     - crashtest
+    # - jittest # not ready yet: bug 1098508
     - jsreftest
     - mochitest
     - mochitest-chrome

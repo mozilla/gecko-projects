@@ -308,6 +308,7 @@ NS_IMPL_ISUPPORTS(D3DSharedTexturesReporter, nsIMemoryReporter)
 
 gfxWindowsPlatform::gfxWindowsPlatform()
   : mRenderMode(RENDER_GDI)
+  , mUsingDirectWrite(false)
 {
   /*
    * Initialize COM
@@ -438,21 +439,46 @@ gfxWindowsPlatform::HandleDeviceReset()
   return true;
 }
 
+BackendPrefsData
+gfxWindowsPlatform::GetBackendPrefs()
+{
+  BackendPrefsData data;
+
+  data.mCanvasBitmask = BackendTypeBit(BackendType::CAIRO) |
+                        BackendTypeBit(BackendType::SKIA);
+  data.mContentBitmask = BackendTypeBit(BackendType::CAIRO) |
+                         BackendTypeBit(BackendType::SKIA);
+  data.mCanvasDefault = BackendType::SKIA;
+  data.mContentDefault = BackendType::SKIA;
+
+  if (gfxConfig::IsEnabled(Feature::DIRECT2D)) {
+    data.mCanvasBitmask |= BackendTypeBit(BackendType::DIRECT2D1_1);
+    data.mCanvasDefault = BackendType::DIRECT2D1_1;
+    // We do not use d2d for content when WebRender is used.
+    if (!gfxVars::UseWebRender()) {
+      data.mContentBitmask |= BackendTypeBit(BackendType::DIRECT2D1_1);
+      data.mContentDefault = BackendType::DIRECT2D1_1;
+    }
+  }
+  return mozilla::Move(data);
+}
+
 void
 gfxWindowsPlatform::UpdateBackendPrefs()
 {
-  uint32_t canvasMask = BackendTypeBit(BackendType::CAIRO) |
-                        BackendTypeBit(BackendType::SKIA);
-  uint32_t contentMask = BackendTypeBit(BackendType::CAIRO) |
-                         BackendTypeBit(BackendType::SKIA);
-  BackendType defaultBackend = BackendType::SKIA;
-  if (gfxConfig::IsEnabled(Feature::DIRECT2D) &&
-      Factory::HasD2D1Device() && !gfxVars::UseWebRender()) {
-    contentMask |= BackendTypeBit(BackendType::DIRECT2D1_1);
-    canvasMask |= BackendTypeBit(BackendType::DIRECT2D1_1);
-    defaultBackend = BackendType::DIRECT2D1_1;
+  BackendPrefsData data = GetBackendPrefs();
+  // Remove DIRECT2D1 preference if D2D1Device does not exist.
+  if (!Factory::HasD2D1Device()) {
+    data.mCanvasBitmask &= ~BackendTypeBit(BackendType::DIRECT2D1_1);
+    data.mContentBitmask &= ~BackendTypeBit(BackendType::DIRECT2D1_1);
+    if (data.mCanvasDefault == BackendType::DIRECT2D1_1) {
+      data.mCanvasDefault = BackendType::SKIA;
+    }
+    if (data.mContentDefault == BackendType::DIRECT2D1_1) {
+      data.mContentDefault = BackendType::SKIA;
+    }
   }
-  InitBackendPrefs(canvasMask, defaultBackend, contentMask, defaultBackend);
+  InitBackendPrefs(mozilla::Move(data));
 }
 
 bool
@@ -482,6 +508,13 @@ gfxWindowsPlatform::UpdateRenderMode()
       MOZ_CRASH("GFX: Failed to update reference draw target after device reset");
     }
   }
+}
+
+bool
+gfxWindowsPlatform::AllowOpenGLCanvas()
+{
+  // OpenGL canvas is not supported on windows
+  return false;
 }
 
 mozilla::gfx::BackendType
@@ -529,6 +562,7 @@ gfxWindowsPlatform::CreatePlatformFontList()
     if (IsNotWin7PreRTM() && DWriteEnabled()) {
         pfl = new gfxDWriteFontList();
         if (NS_SUCCEEDED(pfl->InitFontList())) {
+            mUsingDirectWrite = true;
             return pfl;
         }
         // DWrite font initialization failed! Don't know why this would happen,
@@ -539,6 +573,7 @@ gfxWindowsPlatform::CreatePlatformFontList()
                    NS_LITERAL_CSTRING("FEATURE_FAILURE_FONT_FAIL"));
     }
 
+    mUsingDirectWrite = false;
     pfl = new gfxGDIFontList();
 
     if (NS_SUCCEEDED(pfl->InitFontList())) {
@@ -595,7 +630,6 @@ static const char kFontCambriaMath[] = "Cambria Math";
 static const char kFontEbrima[] = "Ebrima";
 static const char kFontEstrangeloEdessa[] = "Estrangelo Edessa";
 static const char kFontEuphemia[] = "Euphemia";
-static const char kFontEmojiOneMozilla[] = "EmojiOne Mozilla";
 static const char kFontGabriola[] = "Gabriola";
 static const char kFontJavaneseText[] = "Javanese Text";
 static const char kFontKhmerUI[] = "Khmer UI";
@@ -622,6 +656,7 @@ static const char kFontSegoeUIEmoji[] = "Segoe UI Emoji";
 static const char kFontSegoeUISymbol[] = "Segoe UI Symbol";
 static const char kFontSylfaen[] = "Sylfaen";
 static const char kFontTraditionalArabic[] = "Traditional Arabic";
+static const char kFontTwemojiMozilla[] = "Twemoji Mozilla";
 static const char kFontUtsaah[] = "Utsaah";
 static const char kFontYuGothic[] = "Yu Gothic";
 
@@ -637,7 +672,7 @@ gfxWindowsPlatform::GetCommonFallbackFonts(uint32_t aCh, uint32_t aNextCh,
             emoji == EmojiPresentation::EmojiDefault)) {
             // if char is followed by VS16, try for a color emoji glyph
             aFontList.AppendElement(kFontSegoeUIEmoji);
-            aFontList.AppendElement(kFontEmojiOneMozilla);
+            aFontList.AppendElement(kFontTwemojiMozilla);
         }
     }
 
@@ -2030,4 +2065,11 @@ gfxWindowsPlatform::SupportsPluginDirectDXGIDrawing()
     return false;
   }
   return true;
+}
+
+bool
+gfxWindowsPlatform::CheckVariationFontSupport()
+{
+  // Variation font support is only on Fall Creators Update or later
+  return mUsingDirectWrite && IsWin10FallCreatorsUpdateOrLater();
 }

@@ -178,11 +178,11 @@
 #include "frontend/TokenKind.h"
 #include "js/UniquePtr.h"
 #include "js/Vector.h"
+#include "util/Unicode.h"
 #include "vm/ErrorReporting.h"
 #include "vm/JSContext.h"
 #include "vm/RegExpShared.h"
-#include "vm/String.h"
-#include "vm/Unicode.h"
+#include "vm/StringType.h"
 
 struct KeywordInfo;
 
@@ -520,8 +520,6 @@ class TokenStreamAnyChars
   private:
     PropertyName* reservedWordToPropertyName(TokenKind tt) const;
 
-    void undoGetChar();
-
   public:
     PropertyName* currentName() const {
         if (isCurrentTokenType(TokenKind::Name))
@@ -748,6 +746,8 @@ class TokenStreamAnyChars
 
   private:
     MOZ_MUST_USE MOZ_ALWAYS_INLINE bool internalUpdateLineInfoForEOL(uint32_t lineStartOffset);
+
+    void undoInternalUpdateLineInfoForEOL();
 
   public:
     const Token& nextToken() const {
@@ -1483,7 +1483,7 @@ class MOZ_STACK_CLASS TokenStreamSpecific
         while (n-- > 0) {
             MOZ_ASSERT(userbuf.hasRawChars());
             mozilla::DebugOnly<int32_t> c = getCharIgnoreEOL();
-            MOZ_ASSERT(c != '\n');
+            MOZ_ASSERT(!TokenBuf::isRawEOLChar(c));
         }
     }
 

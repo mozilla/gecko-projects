@@ -19,11 +19,11 @@
 #include "mozilla/layers/AsyncCompositionManager.h" // for ViewTransform
 #include "mozilla/layers/GeckoContentController.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
-#include "mozilla/layers/APZCTreeManager.h"
 #include "mozilla/layers/LayerMetricsWrapper.h"
 #include "mozilla/layers/APZThreadUtils.h"
 #include "mozilla/TypedEnumBits.h"
 #include "mozilla/UniquePtr.h"
+#include "apz/src/APZCTreeManager.h"
 #include "apz/src/AsyncPanZoomController.h"
 #include "apz/src/HitTestingTreeNode.h"
 #include "base/task.h"
@@ -173,7 +173,7 @@ private:
 class TestAPZCTreeManager : public APZCTreeManager {
 public:
   explicit TestAPZCTreeManager(MockContentControllerDelayed* aMcc)
-    : APZCTreeManager(0)
+    : APZCTreeManager(LayersId{0})
     , mcc(aMcc)
   {}
 
@@ -186,7 +186,7 @@ public:
   }
 
 protected:
-  AsyncPanZoomController* NewAPZCInstance(uint64_t aLayersId,
+  AsyncPanZoomController* NewAPZCInstance(LayersId aLayersId,
                                           GeckoContentController* aController) override;
 
   TimeStamp GetFrameTime() override {
@@ -199,7 +199,7 @@ private:
 
 class TestAsyncPanZoomController : public AsyncPanZoomController {
 public:
-  TestAsyncPanZoomController(uint64_t aLayersId, MockContentControllerDelayed* aMcc,
+  TestAsyncPanZoomController(LayersId aLayersId, MockContentControllerDelayed* aMcc,
                              TestAPZCTreeManager* aTreeManager,
                              GestureBehavior aBehavior = DEFAULT_GESTURES)
     : AsyncPanZoomController(aLayersId, aTreeManager, aTreeManager->GetInputQueue(),
@@ -635,7 +635,7 @@ APZCTesterBase::DoubleTapAndCheckStatus(const RefPtr<InputReceiver>& aTarget,
 }
 
 AsyncPanZoomController*
-TestAPZCTreeManager::NewAPZCInstance(uint64_t aLayersId,
+TestAPZCTreeManager::NewAPZCInstance(LayersId aLayersId,
                                      GeckoContentController* aController)
 {
   MockContentControllerDelayed* mcc = static_cast<MockContentControllerDelayed*>(aController);

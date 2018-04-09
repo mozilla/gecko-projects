@@ -36,7 +36,7 @@ use values::animated::color::RGBA as AnimatedRGBA;
 use values::animated::effects::Filter as AnimatedFilter;
 use values::animated::effects::FilterList as AnimatedFilterList;
 use values::computed::{Angle, CalcLengthOrPercentage};
-use values::computed::{ClipRect, Context, ComputedUrl};
+use values::computed::{ClipRect, Context};
 use values::computed::{Length, LengthOrPercentage, LengthOrPercentageOrAuto};
 use values::computed::{LengthOrPercentageOrNone, MaxLength};
 use values::computed::{NonNegativeNumber, Number, NumberOrPercentage, Percentage};
@@ -48,6 +48,7 @@ use values::computed::transform::Transform as ComputedTransform;
 use values::computed::transform::Rotate as ComputedRotate;
 use values::computed::transform::Translate as ComputedTranslate;
 use values::computed::transform::Scale as ComputedScale;
+use values::computed::url::ComputedUrl;
 use values::generics::transform::{self, Rotate, Translate, Scale, Transform, TransformOperation};
 use values::distance::{ComputeSquaredDistance, SquaredDistance};
 use values::generics::font::{FontSettings as GenericFontSettings, FontTag, VariationValue};
@@ -78,7 +79,7 @@ pub fn nscsspropertyid_is_animatable(property: nsCSSPropertyID) -> bool {
 /// a shorthand with at least one transitionable longhand component, or an unsupported property.
 // NB: This needs to be here because it needs all the longhands generated
 // beforehand.
-#[derive(Clone, Debug, Eq, Hash, MallocSizeOf, PartialEq, ToCss)]
+#[derive(Clone, Debug, Eq, Hash, MallocSizeOf, PartialEq, ToComputedValue, ToCss)]
 pub enum TransitionProperty {
     /// A shorthand.
     Shorthand(ShorthandId),
@@ -88,8 +89,6 @@ pub enum TransitionProperty {
     /// unknown property.
     Unsupported(CustomIdent),
 }
-
-trivial_to_computed_value!(TransitionProperty);
 
 impl TransitionProperty {
     /// Returns `all`.

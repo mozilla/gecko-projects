@@ -22,6 +22,10 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/FakePluginTagInitBinding.h"
 
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
+#include "mozilla/SandboxSettings.h"
+#endif
+
 using mozilla::dom::FakePluginTagInit;
 using namespace mozilla;
 
@@ -223,7 +227,8 @@ uint32_t nsPluginTag::sNextId;
 
 nsPluginTag::nsPluginTag(nsPluginInfo* aPluginInfo,
                          int64_t aLastModifiedTime,
-                         bool fromExtension)
+                         bool fromExtension,
+                         uint32_t aBlocklistState)
   : nsIInternalPluginTag(aPluginInfo->fName, aPluginInfo->fDescription,
                          aPluginInfo->fFileName, aPluginInfo->fVersion),
     mId(sNextId++),
@@ -236,9 +241,8 @@ nsPluginTag::nsPluginTag(nsPluginInfo* aPluginInfo,
     mLastModifiedTime(aLastModifiedTime),
     mSandboxLevel(0),
     mIsSandboxLoggingEnabled(false),
-    mCachedBlocklistState(nsIBlocklistService::STATE_NOT_BLOCKED),
-    mCachedBlocklistStateValid(false),
-    mIsFromExtension(fromExtension)
+    mIsFromExtension(fromExtension),
+    mBlocklistState(aBlocklistState)
 {
   InitMime(aPluginInfo->fMimeTypeArray,
            aPluginInfo->fMimeDescriptionArray,
@@ -260,6 +264,7 @@ nsPluginTag::nsPluginTag(const char* aName,
                          int32_t aVariants,
                          int64_t aLastModifiedTime,
                          bool fromExtension,
+                         uint32_t aBlocklistState,
                          bool aArgsAreUTF8)
   : nsIInternalPluginTag(aName, aDescription, aFileName, aVersion),
     mId(sNextId++),
@@ -272,9 +277,8 @@ nsPluginTag::nsPluginTag(const char* aName,
     mLastModifiedTime(aLastModifiedTime),
     mSandboxLevel(0),
     mIsSandboxLoggingEnabled(false),
-    mCachedBlocklistState(nsIBlocklistService::STATE_NOT_BLOCKED),
-    mCachedBlocklistStateValid(false),
-    mIsFromExtension(fromExtension)
+    mIsFromExtension(fromExtension),
+    mBlocklistState(aBlocklistState)
 {
   InitMime(aMimeTypes, aMimeDescriptions, aExtensions,
            static_cast<uint32_t>(aVariants));
@@ -298,7 +302,7 @@ nsPluginTag::nsPluginTag(uint32_t aId,
                          int64_t aLastModifiedTime,
                          bool aFromExtension,
                          int32_t aSandboxLevel,
-                         uint16_t aBlocklistState)
+                         uint32_t aBlocklistState)
   : nsIInternalPluginTag(aName, aDescription, aFileName, aVersion, aMimeTypes,
                          aMimeDescriptions, aExtensions),
     mId(aId),
@@ -310,9 +314,8 @@ nsPluginTag::nsPluginTag(uint32_t aId,
     mSandboxLevel(aSandboxLevel),
     mIsSandboxLoggingEnabled(false),
     mNiceFileName(),
-    mCachedBlocklistState(aBlocklistState),
-    mCachedBlocklistStateValid(true),
-    mIsFromExtension(aFromExtension)
+    mIsFromExtension(aFromExtension),
+    mBlocklistState(aBlocklistState)
 {
 }
 
@@ -422,22 +425,19 @@ nsPluginTag::InitSandboxLevel()
   if (mIsFlashPlugin && mSandboxLevel < 2) {
     mSandboxLevel = 2;
   }
-#endif
-#endif
+#endif /* defined(_AMD64_) */
 
-#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
-  // At present, the Mac Flash NPAPI plugin sandbox is controlled via
-  // a boolean with no support for different levels. When the sandbox
-  // is enabled, we set the level to 1.
+#elif defined(XP_MACOSX) && defined(MOZ_SANDBOX)
   if (mIsFlashPlugin) {
-    // Allow enabling the sandbox via the pref
-    // security.sandbox.mac.flash.enabled or via the environment variable
-    // MOZ_SANDBOX_MAC_FLASH_FORCE (which is useful while the sandbox is
-    // off by default).
-    if (Preferences::GetBool("security.sandbox.mac.flash.enabled") ||
-        PR_GetEnv("MOZ_SANDBOX_MAC_FLASH_FORCE")) {
-      mSandboxLevel = 1;
+    if (PR_GetEnv("MOZ_DISABLE_NPAPI_SANDBOX") ||
+        NS_FAILED(Preferences::GetInt("dom.ipc.plugins.sandbox-level.flash",
+                                      &mSandboxLevel))) {
+      mSandboxLevel = 0;
+    } else {
+      mSandboxLevel = ClampFlashSandboxLevel(mSandboxLevel);
+    }
 
+    if (mSandboxLevel > 0) {
       // Enable sandbox logging in the plugin process if it has
       // been turned on via prefs or environment variables.
       if (Preferences::GetBool("security.sandbox.logging.enabled") ||
@@ -446,8 +446,14 @@ nsPluginTag::InitSandboxLevel()
             mIsSandboxLoggingEnabled = true;
       }
     }
+  } else {
+    // This isn't the flash plugin. At present, Flash is the only
+    // supported plugin on macOS. Other test plugins are used during
+    // testing and they will use the default plugin sandbox level.
+    mSandboxLevel =
+      Preferences::GetInt("dom.ipc.plugins.sandbox-level.default");
   }
-#endif
+#endif /* defined(XP_MACOSX) && defined(MOZ_SANDBOX) */
 }
 
 #if !defined(XP_WIN) && !defined(XP_MACOSX)
@@ -548,9 +554,7 @@ nsPluginTag::GetDisabled(bool* aDisabled)
 bool
 nsPluginTag::IsBlocklisted()
 {
-  uint32_t blocklistState;
-  nsresult rv = GetBlocklistState(&blocklistState);
-  return NS_FAILED(rv) || blocklistState == nsIBlocklistService::STATE_BLOCKED;
+  return mBlocklistState == nsIBlocklistService::STATE_BLOCKED;
 }
 
 NS_IMETHODIMP
@@ -722,48 +726,20 @@ nsPluginTag::GetNiceName(nsACString & aResult)
 NS_IMETHODIMP
 nsPluginTag::GetBlocklistState(uint32_t *aResult)
 {
-  // If we're in the content process, assume our cache state to always be valid,
-  // as the only way it can be updated is via a plugin list push from the
-  // parent process.
-  if (!XRE_IsParentProcess()) {
-    *aResult = mCachedBlocklistState;
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIBlocklistService> blocklist =
-    do_GetService("@mozilla.org/extensions/blocklist;1");
-
-  if (!blocklist) {
-    *aResult = nsIBlocklistService::STATE_NOT_BLOCKED;
-  }
-  // The EmptyString()s are so we use the currently running application
-  // and toolkit versions
-  else if (NS_FAILED(blocklist->GetPluginBlocklistState(this, EmptyString(),
-                                                   EmptyString(), aResult))) {
-    *aResult = nsIBlocklistService::STATE_NOT_BLOCKED;
-  }
-
-  MOZ_ASSERT(*aResult <= UINT16_MAX);
-  mCachedBlocklistState = (uint16_t) *aResult;
-  mCachedBlocklistStateValid = true;
+  *aResult = mBlocklistState;
   return NS_OK;
 }
 
 void
-nsPluginTag::SetBlocklistState(uint16_t aBlocklistState)
+nsPluginTag::SetBlocklistState(uint32_t aBlocklistState)
 {
-  // We should only ever call this on content processes. Any calls in the parent
-  // process should route through GetBlocklistState since we'll have the
-  // blocklist service there.
-  MOZ_ASSERT(!XRE_IsParentProcess());
-  mCachedBlocklistState = aBlocklistState;
-  mCachedBlocklistStateValid = true;
+  mBlocklistState = aBlocklistState;
 }
 
-void
-nsPluginTag::InvalidateBlocklistState()
+uint32_t
+nsPluginTag::BlocklistState()
 {
-  mCachedBlocklistStateValid = false;
+  return mBlocklistState;
 }
 
 NS_IMETHODIMP

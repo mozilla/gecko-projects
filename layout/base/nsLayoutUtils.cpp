@@ -20,6 +20,7 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/Unused.h"
 #include "nsCharTraits.h"
 #include "nsDocument.h"
@@ -42,7 +43,7 @@
 #include "nsIDOMEvent.h"
 #include "nsDisplayList.h"
 #include "nsRegion.h"
-#include "nsFrameManager.h"
+#include "nsCSSFrameConstructor.h"
 #include "nsBlockFrame.h"
 #include "nsBidiPresUtils.h"
 #include "imgIContainer.h"
@@ -111,14 +112,12 @@
 #include "mozilla/Preferences.h"
 #include "nsFrameSelection.h"
 #include "FrameLayerBuilder.h"
-#include "mozilla/layers/APZCTreeManager.h"
+#include "mozilla/layers/APZUtils.h"    // for apz::CalculatePendingDisplayPort
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/EventDispatcher.h"
-#include "mozilla/RuleNodeCacheConditions.h"
 #include "mozilla/StyleAnimationValue.h"
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
+#include "mozilla/ServoStyleSet.h"
 #include "mozilla/WheelHandlingHelper.h" // for WheelHandlingUtils
 #include "RegionBuilder.h"
 #include "SVGViewportElement.h"
@@ -130,7 +129,6 @@
 #include "DisplayListChecker.h"
 #include "TextDrawTarget.h"
 #include "nsDeckFrame.h"
-#include "mozilla/StylePrefs.h"
 #include "mozilla/dom/InspectorFontFace.h"
 
 #ifdef MOZ_XUL
@@ -141,7 +139,6 @@
 #include "nsAnimationManager.h"
 #include "nsTransitionManager.h"
 #include "mozilla/RestyleManager.h"
-#include "mozilla/RestyleManagerInlines.h"
 #include "LayoutLogging.h"
 
 // Make sure getpid() works.
@@ -196,9 +193,6 @@ typedef nsStyleTransformMatrix::TransformReferenceBox TransformReferenceBox;
 /* static */ bool nsLayoutUtils::sInterruptibleReflowEnabled;
 /* static */ bool nsLayoutUtils::sSVGTransformBoxEnabled;
 /* static */ bool nsLayoutUtils::sTextCombineUprightDigitsEnabled;
-#ifdef MOZ_STYLO
-/* static */ bool nsLayoutUtils::sStyloEnabled;
-#endif
 /* static */ uint32_t nsLayoutUtils::sIdlePeriodDeadlineLimit;
 /* static */ uint32_t nsLayoutUtils::sQuiescentFramesBeforeIdlePeriod;
 
@@ -833,7 +827,7 @@ nsLayoutUtils::FindContentFor(ViewID aId)
   }
 }
 
-nsIFrame*
+static nsIFrame*
 GetScrollFrameFromContent(nsIContent* aContent)
 {
   nsIFrame* frame = aContent->GetPrimaryFrame();
@@ -1316,7 +1310,7 @@ GetDisplayPortImpl(nsIContent* aContent, nsRect* aResult, float aMultiplier,
   return true;
 }
 
-void
+static void
 TranslateFromScrollPortToScrollFrame(nsIContent* aContent, nsRect* aRect)
 {
   MOZ_ASSERT(aRect);
@@ -2267,17 +2261,17 @@ nsLayoutUtils::GetScrolledRect(nsIFrame* aScrolledFrame,
 //static
 bool
 nsLayoutUtils::HasPseudoStyle(nsIContent* aContent,
-                              nsStyleContext* aStyleContext,
+                              ComputedStyle* aComputedStyle,
                               CSSPseudoElementType aPseudoElement,
                               nsPresContext* aPresContext)
 {
   NS_PRECONDITION(aPresContext, "Must have a prescontext");
 
-  RefPtr<nsStyleContext> pseudoContext;
+  RefPtr<ComputedStyle> pseudoContext;
   if (aContent) {
     pseudoContext = aPresContext->StyleSet()->
       ProbePseudoElementStyle(aContent->AsElement(), aPseudoElement,
-                              aStyleContext);
+                              aComputedStyle);
   }
   return pseudoContext != nullptr;
 }
@@ -3275,7 +3269,7 @@ struct AutoNestedPaintCount {
     gPaintCountStack->AppendElement(0);
   }
   ~AutoNestedPaintCount() {
-    gPaintCountStack->RemoveElementAt(gPaintCountStack->Length() - 1);
+    gPaintCountStack->RemoveLastElement();
   }
 };
 
@@ -3421,7 +3415,7 @@ nsLayoutUtils::CalculateAndSetDisplayPortMargins(nsIScrollableFrame* aScrollFram
   MOZ_ASSERT(content);
 
   FrameMetrics metrics = CalculateBasicFrameMetrics(aScrollFrame);
-  ScreenMargin displayportMargins = APZCTreeManager::CalculatePendingDisplayPort(
+  ScreenMargin displayportMargins = apz::CalculatePendingDisplayPort(
       metrics, ParentLayerPoint(0.0f, 0.0f));
   nsIPresShell* presShell = frame->PresContext()->GetPresShell();
   return nsLayoutUtils::SetDisplayPortMargins(
@@ -4208,7 +4202,7 @@ void
 nsLayoutUtils::AddBoxesForFrame(nsIFrame* aFrame,
                                 nsLayoutUtils::BoxCallback* aCallback)
 {
-  nsAtom* pseudoType = aFrame->StyleContext()->GetPseudo();
+  nsAtom* pseudoType = aFrame->Style()->GetPseudo();
 
   if (pseudoType == nsCSSAnonBoxes::tableWrapper) {
     AddBoxesForFrame(aFrame->PrincipalChildList().FirstChild(), aCallback);
@@ -4242,7 +4236,7 @@ nsIFrame*
 nsLayoutUtils::GetFirstNonAnonymousFrame(nsIFrame* aFrame)
 {
   while (aFrame) {
-    nsAtom* pseudoType = aFrame->StyleContext()->GetPseudo();
+    nsAtom* pseudoType = aFrame->Style()->GetPseudo();
 
     if (pseudoType == nsCSSAnonBoxes::tableWrapper) {
       nsIFrame* f = GetFirstNonAnonymousFrame(aFrame->PrincipalChildList().FirstChild());
@@ -4687,9 +4681,9 @@ nsLayoutUtils::ComputeObjectDestRect(const nsRect& aConstraintRect,
 already_AddRefed<nsFontMetrics>
 nsLayoutUtils::GetFontMetricsForFrame(const nsIFrame* aFrame, float aInflation)
 {
-  nsStyleContext* styleContext = aFrame->StyleContext();
+  ComputedStyle* computedStyle = aFrame->Style();
   uint8_t variantWidth = NS_FONT_VARIANT_WIDTH_NORMAL;
-  if (styleContext->IsTextCombined()) {
+  if (computedStyle->IsTextCombined()) {
     MOZ_ASSERT(aFrame->IsTextFrame());
     auto textFrame = static_cast<const nsTextFrame*>(aFrame);
     auto clusters = textFrame->CountGraphemeClusters();
@@ -4701,18 +4695,18 @@ nsLayoutUtils::GetFontMetricsForFrame(const nsIFrame* aFrame, float aInflation)
       variantWidth = NS_FONT_VARIANT_WIDTH_QUARTER;
     }
   }
-  return GetFontMetricsForStyleContext(styleContext, aInflation, variantWidth);
+  return GetFontMetricsForComputedStyle(computedStyle, aInflation, variantWidth);
 }
 
 already_AddRefed<nsFontMetrics>
-nsLayoutUtils::GetFontMetricsForStyleContext(nsStyleContext* aStyleContext,
+nsLayoutUtils::GetFontMetricsForComputedStyle(ComputedStyle* aComputedStyle,
                                              float aInflation,
                                              uint8_t aVariantWidth)
 {
-  nsPresContext* pc = aStyleContext->PresContext();
+  nsPresContext* pc = aComputedStyle->PresContext();
 
-  WritingMode wm(aStyleContext);
-  const nsStyleFont* styleFont = aStyleContext->StyleFont();
+  WritingMode wm(aComputedStyle);
+  const nsStyleFont* styleFont = aComputedStyle->StyleFont();
   nsFontMetrics::Params params;
   params.language = styleFont->mLanguage;
   params.explicitLanguage = styleFont->mExplicitLanguage;
@@ -5828,8 +5822,7 @@ nsLayoutUtils::MarkDescendantsDirty(nsIFrame *aSubtreeRoot)
   // dirty descendants, iterating over subtrees that may include
   // additional subtrees associated with placeholders
   do {
-    nsIFrame *subtreeRoot = subtrees.ElementAt(subtrees.Length() - 1);
-    subtrees.RemoveElementAt(subtrees.Length() - 1);
+    nsIFrame *subtreeRoot = subtrees.PopLastElement();
 
     // Mark all descendants dirty (using an nsTArray stack rather than
     // recursion).
@@ -5839,8 +5832,7 @@ nsLayoutUtils::MarkDescendantsDirty(nsIFrame *aSubtreeRoot)
     stack.AppendElement(subtreeRoot);
 
     do {
-      nsIFrame *f = stack.ElementAt(stack.Length() - 1);
-      stack.RemoveElementAt(stack.Length() - 1);
+      nsIFrame *f = stack.PopLastElement();
 
       f->MarkIntrinsicISizesDirty();
 
@@ -5872,8 +5864,7 @@ nsLayoutUtils::MarkIntrinsicISizesDirtyIfDependentOnBSize(nsIFrame* aFrame)
   stack.AppendElement(aFrame);
 
   do {
-    nsIFrame* f = stack.ElementAt(stack.Length() - 1);
-    stack.RemoveElementAt(stack.Length() - 1);
+    nsIFrame* f = stack.PopLastElement();
 
     if (!f->HasAnyStateBits(
         NS_FRAME_DESCENDANT_INTRINSIC_ISIZE_DEPENDS_ON_BSIZE)) {
@@ -6134,7 +6125,7 @@ nsLayoutUtils::AppUnitWidthOfStringBidi(const char16_t* aString,
   nsPresContext* presContext = aFrame->PresContext();
   if (presContext->BidiEnabled()) {
     nsBidiLevel level =
-      nsBidiPresUtils::BidiLevelFromStyle(aFrame->StyleContext());
+      nsBidiPresUtils::BidiLevelFromStyle(aFrame->Style());
     return nsBidiPresUtils::MeasureTextWidth(aString, aLength, level,
                                              presContext, aContext,
                                              aFontMetrics);
@@ -6198,33 +6189,33 @@ nsLayoutUtils::AppUnitBoundsOfString(const char16_t* aString,
 void
 nsLayoutUtils::DrawString(const nsIFrame*     aFrame,
                           nsFontMetrics&      aFontMetrics,
-                          gfxContext* aContext,
+                          gfxContext*         aContext,
                           const char16_t*     aString,
                           int32_t             aLength,
                           nsPoint             aPoint,
-                          nsStyleContext*     aStyleContext,
+                          ComputedStyle*      aComputedStyle,
                           DrawStringFlags     aFlags)
 {
   nsresult rv = NS_ERROR_FAILURE;
 
-  // If caller didn't pass a style context, use the frame's.
-  if (!aStyleContext) {
-    aStyleContext = aFrame->StyleContext();
+  // If caller didn't pass a style, use the frame's.
+  if (!aComputedStyle) {
+    aComputedStyle = aFrame->Style();
   }
 
   if (aFlags & DrawStringFlags::eForceHorizontal) {
     aFontMetrics.SetVertical(false);
   } else {
-    aFontMetrics.SetVertical(WritingMode(aStyleContext).IsVertical());
+    aFontMetrics.SetVertical(WritingMode(aComputedStyle).IsVertical());
   }
 
   aFontMetrics.SetTextOrientation(
-    aStyleContext->StyleVisibility()->mTextOrientation);
+    aComputedStyle->StyleVisibility()->mTextOrientation);
 
   nsPresContext* presContext = aFrame->PresContext();
   if (presContext->BidiEnabled()) {
     nsBidiLevel level =
-      nsBidiPresUtils::BidiLevelFromStyle(aStyleContext);
+      nsBidiPresUtils::BidiLevelFromStyle(aComputedStyle);
     rv = nsBidiPresUtils::RenderText(aString, aLength, level,
                                      presContext, *aContext,
                                      aContext->GetDrawTarget(), aFontMetrics,
@@ -6589,18 +6580,18 @@ nsLayoutUtils::GetClosestLayer(nsIFrame* aFrame)
   }
   if (layer)
     return layer;
-  return aFrame->PresShell()->FrameManager()->GetRootFrame();
+  return aFrame->PresShell()->GetRootFrame();
 }
 
 SamplingFilter
 nsLayoutUtils::GetSamplingFilterForFrame(nsIFrame* aForFrame)
 {
   SamplingFilter defaultFilter = SamplingFilter::GOOD;
-  nsStyleContext *sc;
+  ComputedStyle *sc;
   if (nsCSSRendering::IsCanvasFrame(aForFrame)) {
     nsCSSRendering::FindBackground(aForFrame, &sc);
   } else {
-    sc = aForFrame->StyleContext();
+    sc = aForFrame->Style();
   }
 
   switch (sc->StyleVisibility()->mImageRendering) {
@@ -7019,6 +7010,7 @@ nsLayoutUtils::DrawSingleUnscaledImage(gfxContext&          aContext,
                                        const SamplingFilter aSamplingFilter,
                                        const nsPoint&       aDest,
                                        const nsRect*        aDirty,
+                                       const Maybe<SVGImageContext>& aSVGContext,
                                        uint32_t             aImageFlags,
                                        const nsRect*        aSourceArea)
 {
@@ -7047,7 +7039,7 @@ nsLayoutUtils::DrawSingleUnscaledImage(gfxContext&          aContext,
   return DrawImageInternal(aContext, aPresContext,
                            aImage, aSamplingFilter,
                            dest, fill, aDest, aDirty ? *aDirty : dest,
-                           /* no SVGImageContext */ Nothing(), aImageFlags);
+                           aSVGContext, aImageFlags);
 }
 
 /* static */ ImgDrawResult
@@ -7181,22 +7173,24 @@ nsLayoutUtils::ComputeImageContainerDrawingParameters(imgIContainer*            
   SamplingFilter samplingFilter =
     nsLayoutUtils::GetSamplingFilterForFrame(aForFrame);
 
-  // Compute our SVG context parameters, if any.
+  // Compute our SVG context parameters, if any. Don't replace the viewport
+  // size if it was already set, prefer what the caller gave.
   SVGImageContext::MaybeStoreContextPaint(aSVGContext, aForFrame, aImage);
   if ((scaleFactors.width != 1.0 || scaleFactors.height != 1.0) &&
-      aImage->GetType() == imgIContainer::TYPE_VECTOR) {
-    if (!aSVGContext) {
-      aSVGContext.emplace();
-    }
-
+      aImage->GetType() == imgIContainer::TYPE_VECTOR &&
+      (!aSVGContext || !aSVGContext->GetViewportSize())) {
     gfxSize gfxDestSize(aDestRect.Width(), aDestRect.Height());
     IntSize viewportSize =
       aImage->OptimalImageSizeForDest(gfxDestSize,
                                       imgIContainer::FRAME_CURRENT,
                                       samplingFilter, aFlags);
 
-    aSVGContext->SetViewportSize(Some(CSSIntSize(viewportSize.width,
-                                                 viewportSize.height)));
+    CSSIntSize cssViewportSize(viewportSize.width, viewportSize.height);
+    if (!aSVGContext) {
+      aSVGContext.emplace(Some(cssViewportSize));
+    } else {
+      aSVGContext->SetViewportSize(Some(cssViewportSize));
+    }
   }
 
   // Attempt to snap pixels, the same as ComputeSnappedImageDrawingParameters.
@@ -7305,7 +7299,7 @@ nsLayoutUtils::DrawBackgroundImage(gfxContext&         aContext,
 
 /* static */ ImgDrawResult
 nsLayoutUtils::DrawImage(gfxContext&         aContext,
-                         nsStyleContext*     aStyleContext,
+                         ComputedStyle*     aComputedStyle,
                          nsPresContext*      aPresContext,
                          imgIContainer*      aImage,
                          const SamplingFilter aSamplingFilter,
@@ -7317,7 +7311,7 @@ nsLayoutUtils::DrawImage(gfxContext&         aContext,
                          float               aOpacity)
 {
   Maybe<SVGImageContext> svgContext;
-  SVGImageContext::MaybeStoreContextPaint(svgContext, aStyleContext, aImage);
+  SVGImageContext::MaybeStoreContextPaint(svgContext, aComputedStyle, aImage);
 
   return DrawImageInternal(aContext, aPresContext, aImage,
                            aSamplingFilter, aDest, aFill, aAnchor,
@@ -7449,7 +7443,7 @@ nsLayoutUtils::GetFrameTransparency(nsIFrame* aBackgroundFrame,
     return eTransparencyOpaque;
   }
 
-  nsStyleContext* bgSC;
+  ComputedStyle* bgSC;
   if (!nsCSSRendering::FindBackground(aBackgroundFrame, &bgSC)) {
     return eTransparencyTransparent;
   }
@@ -7494,7 +7488,7 @@ nsLayoutUtils::GetDisplayRootFrame(nsIFrame* aFrame)
   nsIFrame* f = aFrame;
   for (;;) {
     if (!f->HasAnyStateBits(NS_FRAME_IN_POPUP)) {
-      f = f->PresContext()->FrameManager()->GetRootFrame();
+      f = f->PresShell()->GetRootFrame();
       if (!f) {
         return aFrame;
       }
@@ -7526,7 +7520,7 @@ nsLayoutUtils::GetReferenceFrame(nsIFrame* aFrame)
 }
 
 /* static */ gfx::ShapedTextFlags
-nsLayoutUtils::GetTextRunFlagsForStyle(nsStyleContext* aStyleContext,
+nsLayoutUtils::GetTextRunFlagsForStyle(ComputedStyle* aComputedStyle,
                                        const nsStyleFont* aStyleFont,
                                        const nsStyleText* aStyleText,
                                        nscoord aLetterSpacing)
@@ -7539,33 +7533,33 @@ nsLayoutUtils::GetTextRunFlagsForStyle(nsStyleContext* aStyleContext,
   if (aStyleText->mControlCharacterVisibility == NS_STYLE_CONTROL_CHARACTER_VISIBILITY_HIDDEN) {
     result |= gfx::ShapedTextFlags::TEXT_HIDE_CONTROL_CHARACTERS;
   }
-  switch (aStyleContext->StyleText()->mTextRendering) {
+  switch (aComputedStyle->StyleText()->mTextRendering) {
   case NS_STYLE_TEXT_RENDERING_OPTIMIZESPEED:
     result |= gfx::ShapedTextFlags::TEXT_OPTIMIZE_SPEED;
     break;
   case NS_STYLE_TEXT_RENDERING_AUTO:
     if (aStyleFont->mFont.size <
-        aStyleContext->PresContext()->GetAutoQualityMinFontSize()) {
+        aComputedStyle->PresContext()->GetAutoQualityMinFontSize()) {
       result |= gfx::ShapedTextFlags::TEXT_OPTIMIZE_SPEED;
     }
     break;
   default:
     break;
   }
-  return result | GetTextRunOrientFlagsForStyle(aStyleContext);
+  return result | GetTextRunOrientFlagsForStyle(aComputedStyle);
 }
 
 /* static */ gfx::ShapedTextFlags
-nsLayoutUtils::GetTextRunOrientFlagsForStyle(nsStyleContext* aStyleContext)
+nsLayoutUtils::GetTextRunOrientFlagsForStyle(ComputedStyle* aComputedStyle)
 {
-  uint8_t writingMode = aStyleContext->StyleVisibility()->mWritingMode;
+  uint8_t writingMode = aComputedStyle->StyleVisibility()->mWritingMode;
   switch (writingMode) {
   case NS_STYLE_WRITING_MODE_HORIZONTAL_TB:
     return gfx::ShapedTextFlags::TEXT_ORIENT_HORIZONTAL;
 
   case NS_STYLE_WRITING_MODE_VERTICAL_LR:
   case NS_STYLE_WRITING_MODE_VERTICAL_RL:
-    switch (aStyleContext->StyleVisibility()->mTextOrientation) {
+    switch (aComputedStyle->StyleVisibility()->mTextOrientation) {
     case NS_STYLE_TEXT_ORIENTATION_MIXED:
       return gfx::ShapedTextFlags::TEXT_ORIENT_VERTICAL_MIXED;
     case NS_STYLE_TEXT_ORIENTATION_UPRIGHT:
@@ -7764,7 +7758,7 @@ nsLayoutUtils::SurfaceFromElement(nsIImageLoadingContent* aElement,
 
   int32_t imgWidth, imgHeight;
   nsCOMPtr<nsIContent> content = do_QueryInterface(aElement);
-  HTMLImageElement* element = HTMLImageElement::FromContentOrNull(content);
+  HTMLImageElement* element = HTMLImageElement::FromNodeOrNull(content);
   if (aSurfaceFlags & SFE_USE_ELEMENT_SIZE_IF_VECTOR &&
       element &&
       imgContainer->GetType() == imgIContainer::TYPE_VECTOR) {
@@ -7932,13 +7926,13 @@ nsLayoutUtils::SurfaceFromElement(dom::Element* aElement,
 {
   // If it's a <canvas>, we may be able to just grab its internal surface
   if (HTMLCanvasElement* canvas =
-        HTMLCanvasElement::FromContentOrNull(aElement)) {
+        HTMLCanvasElement::FromNodeOrNull(aElement)) {
     return SurfaceFromElement(canvas, aSurfaceFlags, aTarget);
   }
 
   // Maybe it's <video>?
   if (HTMLVideoElement* video =
-        HTMLVideoElement::FromContentOrNull(aElement)) {
+        HTMLVideoElement::FromNodeOrNull(aElement)) {
     return SurfaceFromElement(video, aSurfaceFlags, aTarget);
   }
 
@@ -8280,21 +8274,6 @@ nsLayoutUtils::Initialize()
                                "svg.transform-box.enabled");
   Preferences::AddBoolVarCache(&sTextCombineUprightDigitsEnabled,
                                "layout.css.text-combine-upright-digits.enabled");
-#ifdef MOZ_STYLO
-#ifdef MOZ_OLD_STYLE
-  if (PR_GetEnv("STYLO_FORCE_ENABLED")) {
-    sStyloEnabled = true;
-  } else if (PR_GetEnv("STYLO_FORCE_DISABLED")) {
-    sStyloEnabled = false;
-  } else {
-    Preferences::AddBoolVarCache(&sStyloEnabled,
-                                 "layout.css.servo.enabled");
-  }
-#else
-  sStyloEnabled = true;
-#endif
-#endif
-
   Preferences::AddUintVarCache(&sIdlePeriodDeadlineLimit,
                                "layout.idle_period.time_limit",
                                DEFAULT_IDLE_PERIOD_TIME_LIMIT);
@@ -8325,44 +8304,6 @@ nsLayoutUtils::Shutdown()
   // so the cached initial quotes array doesn't appear to be a leak
   nsStyleList::Shutdown();
 }
-
-#ifdef MOZ_STYLO
-/* static */
-bool
-nsLayoutUtils::ShouldUseStylo(nsIPrincipal* aPrincipal)
-{
-#ifdef MOZ_OLD_STYLE
-  // Disable stylo for system principal because XUL hasn't been fully
-  // supported. Other principal aren't able to use XUL by default, and
-  // the back door to enable XUL is mostly just for testing, which means
-  // they don't matter, and we shouldn't respect them at the same time.
-  if (!StyloChromeEnabled() &&
-      nsContentUtils::IsSystemPrincipal(aPrincipal)) {
-    return false;
-  }
-#endif
-  return true;
-}
-
-/* static */
-bool
-nsLayoutUtils::StyloChromeEnabled()
-{
-#ifdef MOZ_OLD_STYLE
-  static bool sInitialized = false;
-  static bool sEnabled = false;
-  if (!sInitialized) {
-    // We intentionally don't allow dynamic toggling of this pref
-    // because it is rather risky to mix style backend in XUL.
-    sEnabled = Preferences::GetBool("layout.css.servo.chrome.enabled");
-    sInitialized = true;
-  }
-  return sEnabled;
-#else
-  return true;
-#endif
-}
-#endif
 
 /* static */
 void
@@ -8747,25 +8688,29 @@ nsLayoutUtils::GetBoxShadowRectForFrame(nsIFrame* aFrame,
     return nsRect();
   }
 
-  bool nativeTheme;
+  nsRect inputRect(nsPoint(0, 0), aFrameSize);
+
+  // According to the CSS spec, box-shadow should be based on the border box.
+  // However, that looks broken when the background extends outside the border
+  // box, as can be the case with native theming.  To fix that we expand the
+  // area that we shadow to include the bounds of any native theme drawing.
   const nsStyleDisplay* styleDisplay = aFrame->StyleDisplay();
   nsITheme::Transparency transparency;
   if (aFrame->IsThemed(styleDisplay, &transparency)) {
     // For opaque (rectangular) theme widgets we can take the generic
     // border-box path with border-radius disabled.
-    nativeTheme = transparency != nsITheme::eOpaque;
-  } else {
-    nativeTheme = false;
+    if (transparency != nsITheme::eOpaque) {
+      nsPresContext *presContext = aFrame->PresContext();
+      presContext->GetTheme()->
+        GetWidgetOverflow(presContext->DeviceContext(), aFrame,
+                          styleDisplay->mAppearance, &inputRect);
+    }
   }
-
-  nsRect frameRect = nativeTheme ?
-    aFrame->GetVisualOverflowRectRelativeToSelf() :
-    nsRect(nsPoint(0, 0), aFrameSize);
 
   nsRect shadows;
   int32_t A2D = aFrame->PresContext()->AppUnitsPerDevPixel();
   for (uint32_t i = 0; i < boxShadows->Length(); ++i) {
-    nsRect tmpRect = frameRect;
+    nsRect tmpRect = inputRect;
     nsCSSShadowItem* shadow = boxShadows->ShadowAt(i);
 
     // inset shadows are never painted outside the frame
@@ -9506,7 +9451,11 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
   if (gfxPrefs::APZPrintTree() || gfxPrefs::APZTestLoggingEnabled()) {
     if (nsIContent* content = frameForCompositionBoundsCalculation->GetContent()) {
       nsAutoString contentDescription;
-      content->Describe(contentDescription);
+      if (content->IsElement()) {
+        content->AsElement()->Describe(contentDescription);
+      } else {
+        contentDescription.AssignLiteral("(not an element)");
+      }
       metadata.SetContentDescription(NS_LossyConvertUTF16toASCII(contentDescription));
       if (IsAPZTestLoggingEnabled()) {
         LogTestDataForPaint(aLayerManager, scrollId, "contentDescription",
@@ -9531,7 +9480,7 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
       metadata.SetBackgroundColor(Color::FromABGR(
         presShell->GetCanvasBackground()));
     } else {
-      nsStyleContext* backgroundStyle;
+      ComputedStyle* backgroundStyle;
       if (nsCSSRendering::FindBackground(aScrollFrame, &backgroundStyle)) {
         nscolor backgroundColor = backgroundStyle->
           StyleBackground()->BackgroundColor(backgroundStyle);
@@ -10181,7 +10130,7 @@ nsLayoutUtils::ComputeOffsetToUserSpace(nsDisplayListBuilder* aBuilder,
 /* static */ uint8_t
 nsLayoutUtils::ControlCharVisibilityDefault()
 {
-  return StylePrefs::sControlCharVisibility
+  return StaticPrefs::layout_css_control_characters_visible()
     ? NS_STYLE_CONTROL_CHARACTER_VISIBILITY_VISIBLE
     : NS_STYLE_CONTROL_CHARACTER_VISIBILITY_HIDDEN;
 }
@@ -10410,4 +10359,33 @@ nsLayoutUtils::ParseFontLanguageOverride(const nsAString& aLangTag)
     result = (result << 8) + 0x20;
   }
   return result;
+}
+
+/* static */ nscoord
+nsLayoutUtils::ResolveGapToLength(const nsStyleCoord& aCoord,
+                                  nscoord aPercentageBasis)
+{
+  switch (aCoord.GetUnit()) {
+    case eStyleUnit_Normal:
+      return nscoord(0);
+    case eStyleUnit_Coord:
+      return aCoord.GetCoordValue();
+    case eStyleUnit_Percent:
+      if (aPercentageBasis == NS_UNCONSTRAINEDSIZE) {
+        return nscoord(0);
+      }
+      return NSToCoordFloorClamped(aPercentageBasis *
+                                   aCoord.GetPercentValue());
+    case eStyleUnit_Calc: {
+      nsStyleCoord::Calc* calc = aCoord.GetCalcValue();
+      if (aPercentageBasis == NS_UNCONSTRAINEDSIZE) {
+        return std::max(nscoord(0), calc->mLength);
+      }
+      return std::max(nscoord(0), calc->mLength +
+        NSToCoordFloorClamped(aPercentageBasis * calc->mPercent));
+    }
+    default:
+      MOZ_ASSERT_UNREACHABLE("Unexpected unit!");
+      return nscoord(0);
+  }
 }

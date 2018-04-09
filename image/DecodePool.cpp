@@ -117,6 +117,12 @@ public:
     }
   }
 
+  bool IsShuttingDown() const
+  {
+    MonitorAutoLock lock(mMonitor);
+    return mShuttingDown;
+  }
+
   /// Pushes a new decode work item.
   void PushWork(IDecodingTask* aTask)
   {
@@ -227,8 +233,7 @@ private:
   {
     Work work;
     work.mType = Work::Type::TASK;
-    work.mTask = aQueue.LastElement().forget();
-    aQueue.RemoveElementAt(aQueue.Length() - 1);
+    work.mTask = aQueue.PopLastElement();
 
     return work;
   }
@@ -243,7 +248,7 @@ private:
   nsThreadPoolNaming mThreadNaming;
 
   // mMonitor guards everything below.
-  Monitor mMonitor;
+  mutable Monitor mMonitor;
   nsTArray<RefPtr<IDecodingTask>> mHighPriorityQueue;
   nsTArray<RefPtr<IDecodingTask>> mLowPriorityQueue;
   nsTArray<nsCOMPtr<nsIThread>> mThreads;
@@ -309,7 +314,8 @@ bool DecodePoolImpl::CreateThread()
   nsCOMPtr<nsIRunnable> worker = new DecodePoolWorker(this, shutdownIdle);
   nsCOMPtr<nsIThread> thread;
   nsresult rv = NS_NewNamedThread(mThreadNaming.GetNextThreadName("ImgDecoder"),
-                                  getter_AddRefs(thread), worker);
+                                  getter_AddRefs(thread), worker,
+                                  nsIThreadManager::kThreadPoolStackSize);
   if (NS_FAILED(rv) || !thread) {
     MOZ_ASSERT_UNREACHABLE("Should successfully create image decoding threads");
     return false;
@@ -430,6 +436,12 @@ DecodePool::Observe(nsISupports*, const char* aTopic, const char16_t*)
   }
 
   return NS_OK;
+}
+
+bool
+DecodePool::IsShuttingDown() const
+{
+  return mImpl->IsShuttingDown();
 }
 
 void

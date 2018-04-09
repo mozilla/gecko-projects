@@ -89,82 +89,24 @@ NS_GetContentList(nsINode* aRootNode,
 
 // Element-specific flags
 enum {
-  // These four bits are shared by Gecko's and Servo's restyle systems for
-  // different purposes. They should not be accessed directly, and access to
-  // them should be properly guarded by asserts.
-  ELEMENT_SHARED_RESTYLE_BIT_1 = ELEMENT_FLAG_BIT(0),
-  ELEMENT_SHARED_RESTYLE_BIT_2 = ELEMENT_FLAG_BIT(1),
-  ELEMENT_SHARED_RESTYLE_BIT_3 = ELEMENT_FLAG_BIT(2),
-  ELEMENT_SHARED_RESTYLE_BIT_4 = ELEMENT_FLAG_BIT(3),
-
-  ELEMENT_SHARED_RESTYLE_BITS = ELEMENT_SHARED_RESTYLE_BIT_1 |
-                                ELEMENT_SHARED_RESTYLE_BIT_2 |
-                                ELEMENT_SHARED_RESTYLE_BIT_3 |
-                                ELEMENT_SHARED_RESTYLE_BIT_4,
-
   // Whether this node has dirty descendants for Servo's style system.
-  ELEMENT_HAS_DIRTY_DESCENDANTS_FOR_SERVO = ELEMENT_SHARED_RESTYLE_BIT_1,
-
+  ELEMENT_HAS_DIRTY_DESCENDANTS_FOR_SERVO = ELEMENT_FLAG_BIT(0),
   // Whether this node has dirty descendants for animation-only restyle for
   // Servo's style system.
-  ELEMENT_HAS_ANIMATION_ONLY_DIRTY_DESCENDANTS_FOR_SERVO =
-    ELEMENT_SHARED_RESTYLE_BIT_2,
+  ELEMENT_HAS_ANIMATION_ONLY_DIRTY_DESCENDANTS_FOR_SERVO = ELEMENT_FLAG_BIT(1),
 
   // Whether the element has been snapshotted due to attribute or state changes
   // by the Servo restyle manager.
-  ELEMENT_HAS_SNAPSHOT = ELEMENT_SHARED_RESTYLE_BIT_3,
+  ELEMENT_HAS_SNAPSHOT = ELEMENT_FLAG_BIT(2),
 
   // Whether the element has already handled its relevant snapshot.
   //
   // Used by the servo restyle process in order to accurately track whether the
   // style of an element is up-to-date, even during the same restyle process.
-  ELEMENT_HANDLED_SNAPSHOT = ELEMENT_SHARED_RESTYLE_BIT_4,
-
-  // Set if the element has a pending style change.
-  ELEMENT_HAS_PENDING_RESTYLE = ELEMENT_SHARED_RESTYLE_BIT_1,
-
-  // Set if the element is a potential restyle root (that is, has a style
-  // change pending _and_ that style change will attempt to restyle
-  // descendants).
-  ELEMENT_IS_POTENTIAL_RESTYLE_ROOT = ELEMENT_SHARED_RESTYLE_BIT_2,
-
-  // Set if the element has a pending animation-only style change as
-  // part of an animation-only style update (where we update styles from
-  // animation to the current refresh tick, but leave everything else as
-  // it was).
-  ELEMENT_HAS_PENDING_ANIMATION_ONLY_RESTYLE = ELEMENT_SHARED_RESTYLE_BIT_3,
-
-  // Set if the element is a potential animation-only restyle root (that
-  // is, has an animation-only style change pending _and_ that style
-  // change will attempt to restyle descendants).
-  ELEMENT_IS_POTENTIAL_ANIMATION_ONLY_RESTYLE_ROOT = ELEMENT_SHARED_RESTYLE_BIT_4,
-
-  // Set if this element has a pending restyle with an eRestyle_SomeDescendants
-  // restyle hint.
-  ELEMENT_IS_CONDITIONAL_RESTYLE_ANCESTOR = ELEMENT_FLAG_BIT(4),
-
-  // Set if a child element has later-sibling restyle hint. This is needed for
-  // nsComputedDOMStyle to decide when should we need to flush style (only used
-  // in Gecko).
-  ELEMENT_HAS_CHILD_WITH_LATER_SIBLINGS_HINT = ELEMENT_FLAG_BIT(5),
-
-  // Just the HAS_PENDING bits, for convenience
-  ELEMENT_PENDING_RESTYLE_FLAGS =
-    ELEMENT_HAS_PENDING_RESTYLE |
-    ELEMENT_HAS_PENDING_ANIMATION_ONLY_RESTYLE,
-
-  // Just the IS_POTENTIAL bits, for convenience
-  ELEMENT_POTENTIAL_RESTYLE_ROOT_FLAGS =
-    ELEMENT_IS_POTENTIAL_RESTYLE_ROOT |
-    ELEMENT_IS_POTENTIAL_ANIMATION_ONLY_RESTYLE_ROOT,
-
-  // All of the restyle bits together, for convenience.
-  ELEMENT_ALL_RESTYLE_FLAGS = ELEMENT_PENDING_RESTYLE_FLAGS |
-                              ELEMENT_POTENTIAL_RESTYLE_ROOT_FLAGS |
-                              ELEMENT_IS_CONDITIONAL_RESTYLE_ANCESTOR,
+  ELEMENT_HANDLED_SNAPSHOT = ELEMENT_FLAG_BIT(3),
 
   // Remaining bits are for subclasses
-  ELEMENT_TYPE_SPECIFIC_BITS_OFFSET = NODE_TYPE_SPECIFIC_BITS_OFFSET + 6
+  ELEMENT_TYPE_SPECIFIC_BITS_OFFSET = NODE_TYPE_SPECIFIC_BITS_OFFSET + 4
 };
 
 #undef ELEMENT_FLAG_BIT
@@ -454,12 +396,6 @@ public:
   virtual nsChangeHint GetAttributeChangeHint(const nsAtom* aAttribute,
                                               int32_t aModType) const;
 
-#ifdef MOZ_OLD_STYLE
-  NS_IMETHOD WalkContentStyleRules(nsRuleWalker* aRuleWalker)
-  {
-    return NS_OK;
-  }
-#endif
 
   inline Directionality GetDirectionality() const {
     if (HasFlag(NODE_HAS_DIRECTION_RTL)) {
@@ -533,32 +469,26 @@ public:
 
   bool HasDirtyDescendantsForServo() const
   {
-    MOZ_ASSERT(IsStyledByServo());
     return HasFlag(ELEMENT_HAS_DIRTY_DESCENDANTS_FOR_SERVO);
   }
 
   void SetHasDirtyDescendantsForServo() {
-    MOZ_ASSERT(IsStyledByServo());
     SetFlags(ELEMENT_HAS_DIRTY_DESCENDANTS_FOR_SERVO);
   }
 
   void UnsetHasDirtyDescendantsForServo() {
-    MOZ_ASSERT(IsStyledByServo());
     UnsetFlags(ELEMENT_HAS_DIRTY_DESCENDANTS_FOR_SERVO);
   }
 
   bool HasAnimationOnlyDirtyDescendantsForServo() const {
-    MOZ_ASSERT(IsStyledByServo());
     return HasFlag(ELEMENT_HAS_ANIMATION_ONLY_DIRTY_DESCENDANTS_FOR_SERVO);
   }
 
   void SetHasAnimationOnlyDirtyDescendantsForServo() {
-    MOZ_ASSERT(IsStyledByServo());
     SetFlags(ELEMENT_HAS_ANIMATION_ONLY_DIRTY_DESCENDANTS_FOR_SERVO);
   }
 
   void UnsetHasAnimationOnlyDirtyDescendantsForServo() {
-    MOZ_ASSERT(IsStyledByServo());
     UnsetFlags(ELEMENT_HAS_ANIMATION_ONLY_DIRTY_DESCENDANTS_FOR_SERVO);
   }
 
@@ -793,7 +723,8 @@ public:
    * Get the current value of the attribute. This returns a form that is
    * suitable for passing back into SetAttr.
    *
-   * @param aNameSpaceID the namespace of the attr
+   * @param aNameSpaceID the namespace of the attr (defaults to
+                         kNameSpaceID_None in the overload that omits this arg)
    * @param aName the name of the attr
    * @param aResult the value (may legitimately be the empty string) [OUT]
    * @returns true if the attribute was set (even when set to empty string)
@@ -803,14 +734,26 @@ public:
    */
   bool GetAttr(int32_t aNameSpaceID, nsAtom* aName, nsAString& aResult) const;
 
+  bool GetAttr(nsAtom* aName, nsAString& aResult) const
+  {
+    return GetAttr(kNameSpaceID_None, aName, aResult);
+  }
+
   /**
    * Determine if an attribute has been set (empty string or otherwise).
    *
-   * @param aNameSpaceId the namespace id of the attribute
+   * @param aNameSpaceId the namespace id of the attribute (defaults to
+                         kNameSpaceID_None in the overload that omits this arg)
    * @param aAttr the attribute name
    * @return whether an attribute exists
    */
   inline bool HasAttr(int32_t aNameSpaceID, nsAtom* aName) const;
+
+  bool HasAttr(nsAtom* aAttr) const
+  {
+    return HasAttr(kNameSpaceID_None, aAttr);
+  }
+
   /**
    * Test whether this Element's given attribute has the given value.  If the
    * attribute is not set at all, this will return false.
@@ -860,7 +803,7 @@ public:
    * @return ATTR_MISSING, ATTR_VALUE_NO_MATCH or the non-negative index
    * indicating the first value of aValues that matched
    */
-  typedef nsStaticAtom* const* const AttrValuesArray;
+  typedef nsStaticAtom* const AttrValuesArray;
   int32_t FindAttrValueIn(int32_t aNameSpaceID,
                                   nsAtom* aName,
                                   AttrValuesArray* aValues,
@@ -1011,13 +954,17 @@ public:
   void ListAttributes(FILE* out) const;
 #endif
 
-  void Describe(nsAString& aOutDescription) const override;
+  /**
+   * Append to aOutDescription a short (preferably one line) string
+   * describing the element.
+   */
+  void Describe(nsAString& aOutDescription) const;
 
   /*
    * Attribute Mapping Helpers
    */
   struct MappedAttributeEntry {
-    nsStaticAtom** attribute;
+    const nsStaticAtom* const attribute;
   };
 
   /**
@@ -1034,7 +981,7 @@ public:
     return FindAttributeDependence(aAttribute, aMaps, N);
   }
 
-  static nsStaticAtom*** HTMLSVGPropertiesToTraverseAndUnlink();
+  static nsStaticAtom* const* HTMLSVGPropertiesToTraverseAndUnlink();
 
 private:
   void DescribeAttribute(uint32_t index, nsAString& aOutDescription) const;
@@ -1418,7 +1365,7 @@ public:
                                     CSSPseudoElementType aPseudoType,
                                     nsTArray<RefPtr<Animation>>& aAnimations);
 
-  NS_IMETHOD GetInnerHTML(nsAString& aInnerHTML);
+  virtual void GetInnerHTML(nsAString& aInnerHTML, OOMReporter& aError);
   virtual void SetInnerHTML(const nsAString& aInnerHTML, nsIPrincipal* aSubjectPrincipal, ErrorResult& aError);
   void UnsafeSetInnerHTML(const nsAString& aInnerHTML, ErrorResult& aError);
   void GetOuterHTML(nsAString& aOuterHTML);
@@ -1972,7 +1919,7 @@ protected:
   /**
    * Handle status bar updates before they can be cancelled.
    */
-  nsresult GetEventTargetParentForLinks(EventChainPreVisitor& aVisitor);
+  void GetEventTargetParentForLinks(EventChainPreVisitor& aVisitor);
 
   /**
    * Handle default actions for link event if the event isn't consumed yet.
@@ -2086,14 +2033,6 @@ inline const mozilla::dom::Element* nsINode::AsElement() const
 {
   MOZ_ASSERT(IsElement());
   return static_cast<const mozilla::dom::Element*>(this);
-}
-
-inline void nsINode::UnsetRestyleFlagsIfGecko()
-{
-  if (IsElement() && !AsElement()->IsStyledByServo()) {
-    UnsetFlags(ELEMENT_ALL_RESTYLE_FLAGS |
-               ELEMENT_HAS_CHILD_WITH_LATER_SIBLINGS_HINT);
-  }
 }
 
 /**

@@ -9,7 +9,6 @@
 
 // Keep others in (case-insensitive) order:
 #include "mozilla/RestyleManager.h"
-#include "mozilla/RestyleManagerInlines.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsISupportsImpl.h"
 #include "nsSVGClipPathFrame.h"
@@ -423,7 +422,7 @@ nsSVGMaskProperty::ResolveImage(uint32_t aIndex)
     mozilla::css::ImageLoader* imageLoader =
       mFrame->PresContext()->Document()->StyleImageLoader();
     if (imgRequestProxy* req = image.GetImageData()) {
-      imageLoader->AssociateRequestToFrame(req, mFrame);
+      imageLoader->AssociateRequestToFrame(req, mFrame, 0);
     }
   }
 }

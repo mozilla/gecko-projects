@@ -5,6 +5,7 @@
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 const {actionTypes: at, actionCreators: ac} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm", {});
+const {ActivityStreamStorage} = ChromeUtils.import("resource://activity-stream/lib/ActivityStreamStorage.jsm", {});
 
 ChromeUtils.defineModuleGetter(this, "AddonManager",
   "resource://gre/modules/AddonManager.jsm");
@@ -38,6 +39,7 @@ this.SnippetsFeed = class SnippetsFeed {
     this._refresh = this._refresh.bind(this);
     this._totalBookmarks = null;
     this._totalBookmarksLastUpdated = null;
+    this._storage = new ActivityStreamStorage("snippets");
   }
 
   get snippetsURL() {
@@ -126,6 +128,19 @@ this.SnippetsFeed = class SnippetsFeed {
     this.store.dispatch(ac.BroadcastToContent({type: at.SNIPPETS_DATA, data}));
   }
 
+  async _saveBlockedSnippet(snippetId) {
+    const blockList = await this._getBlockList() || [];
+    return this._storage.set("blockList", blockList.concat([snippetId]));
+  }
+
+  _getBlockList() {
+    return this._storage.get("blockList");
+  }
+
+  _clearBlockList() {
+    return this._storage.set("blockList", []);
+  }
+
   async _refresh() {
     const profileInfo = await this.getProfileInfo();
     const data = {
@@ -139,7 +154,9 @@ this.SnippetsFeed = class SnippetsFeed {
       selectedSearchEngine: await this.getSelectedSearchEngine(),
       defaultBrowser: this.isDefaultBrowser(),
       isDevtoolsUser: this.isDevtoolsUser(),
-      addonInfo: await this.getAddonInfo()
+      addonInfo: await this.getAddonInfo(),
+      blockList: await this._getBlockList() || [],
+      previousSessionEnd: this._previousSessionEnd
     };
     this._dispatchChanges(data);
   }
@@ -152,15 +169,17 @@ this.SnippetsFeed = class SnippetsFeed {
   }
 
   async init() {
+    Services.obs.addObserver(this, SEARCH_ENGINE_OBSERVER_TOPIC);
+    this._previousSessionEnd = await this._storage.get("previousSessionEnd");
     await this._refresh();
     Services.prefs.addObserver(ONBOARDING_FINISHED_PREF, this._refresh);
     Services.prefs.addObserver(SNIPPETS_URL_PREF, this._refresh);
     Services.prefs.addObserver(TELEMETRY_PREF, this._refresh);
     Services.prefs.addObserver(FXA_USERNAME_PREF, this._refresh);
-    Services.obs.addObserver(this, SEARCH_ENGINE_OBSERVER_TOPIC);
   }
 
   uninit() {
+    this._storage.set("previousSessionEnd", Date.now());
     Services.prefs.removeObserver(ONBOARDING_FINISHED_PREF, this._refresh);
     Services.prefs.removeObserver(SNIPPETS_URL_PREF, this._refresh);
     Services.prefs.removeObserver(TELEMETRY_PREF, this._refresh);
@@ -187,7 +206,11 @@ this.SnippetsFeed = class SnippetsFeed {
         this.showFirefoxAccounts(action._target.browser);
         break;
       case at.SNIPPETS_BLOCKLIST_UPDATED:
+        this._saveBlockedSnippet(action.data);
         this.store.dispatch(ac.BroadcastToContent({type: at.SNIPPET_BLOCKED, data: action.data}));
+        break;
+      case at.SNIPPETS_BLOCKLIST_CLEARED:
+        this._clearBlockList();
         break;
       case at.TOTAL_BOOKMARKS_REQUEST:
         this.getTotalBookmarksCount(action._target.browser);

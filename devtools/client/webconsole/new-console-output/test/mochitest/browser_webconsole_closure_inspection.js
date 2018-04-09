@@ -3,7 +3,8 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
+// XXX Remove this when the file is migrated to the new frontend.
+/* eslint-disable no-undef */
 
 // Check that inspecting a closure in the variables view sidebar works when
 // execution is paused.
@@ -17,7 +18,7 @@ var gWebConsole, gJSTerm, gVariablesView;
 
 // Force the old debugger UI since it's directly used (see Bug 1301705)
 Services.prefs.setBoolPref("devtools.debugger.new-debugger-frontend", false);
-registerCleanupFunction(function* () {
+registerCleanupFunction(function() {
   Services.prefs.clearUserPref("devtools.debugger.new-debugger-frontend");
 });
 

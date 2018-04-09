@@ -304,16 +304,16 @@ static int32_t sPlatformDisabledState = 0;
 // Markup maps array.
 
 #define Attr(name, value) \
-  { &nsGkAtoms::name, &nsGkAtoms::value }
+  { nsGkAtoms::name, nsGkAtoms::value }
 
 #define AttrFromDOM(name, DOMAttrName) \
-  { &nsGkAtoms::name, nullptr, &nsGkAtoms::DOMAttrName }
+  { nsGkAtoms::name, nullptr, nsGkAtoms::DOMAttrName }
 
 #define AttrFromDOMIf(name, DOMAttrName, DOMAttrValue) \
-  { &nsGkAtoms::name, nullptr,  &nsGkAtoms::DOMAttrName, &nsGkAtoms::DOMAttrValue }
+  { nsGkAtoms::name, nullptr,  nsGkAtoms::DOMAttrName, nsGkAtoms::DOMAttrValue }
 
 #define MARKUPMAP(atom, new_func, r, ... ) \
-  { &nsGkAtoms::atom, new_func, static_cast<a11y::role>(r), { __VA_ARGS__ } },
+  { nsGkAtoms::atom, new_func, static_cast<a11y::role>(r), { __VA_ARGS__ } },
 
 static const HTMLMarkupMapInfo sHTMLMarkupMapList[] = {
   #include "MarkupMap.h"
@@ -323,7 +323,7 @@ static const HTMLMarkupMapInfo sHTMLMarkupMapList[] = {
 
 #ifdef MOZ_XUL
 #define XULMAP(atom, ...) \
-  { &nsGkAtoms::atom, __VA_ARGS__ },
+  { nsGkAtoms::atom, __VA_ARGS__ },
 
 #define XULMAP_TYPE(atom, new_type) \
 XULMAP( \
@@ -631,7 +631,6 @@ nsAccessibilityService::DeckPanelSwitched(nsIPresShell* aPresShell,
 
 void
 nsAccessibilityService::ContentRangeInserted(nsIPresShell* aPresShell,
-                                             nsIContent* aContainer,
                                              nsIContent* aStartChild,
                                              nsIContent* aEndChild)
 {
@@ -639,7 +638,7 @@ nsAccessibilityService::ContentRangeInserted(nsIPresShell* aPresShell,
 #ifdef A11Y_LOG
   if (logging::IsEnabled(logging::eTree)) {
     logging::MsgBegin("TREE", "content inserted; doc: %p", document);
-    logging::Node("container", aContainer);
+    logging::Node("container", aStartChild->GetParent());
     for (nsIContent* child = aStartChild; child != aEndChild;
          child = child->GetNextSibling()) {
       logging::Node("content", child);
@@ -650,7 +649,7 @@ nsAccessibilityService::ContentRangeInserted(nsIPresShell* aPresShell,
 #endif
 
   if (document) {
-    document->ContentInserted(aContainer, aStartChild, aEndChild);
+    document->ContentInserted(aStartChild->GetParent(), aStartChild, aEndChild);
   }
 }
 
@@ -802,7 +801,7 @@ nsAccessibilityService::GetStringRole(uint32_t aRole, nsAString& aString)
 #define ROLE(geckoRole, stringRole, atkRole, \
              macRole, msaaRole, ia2Role, nameRule) \
   case roles::geckoRole: \
-    CopyUTF8toUTF16(stringRole, aString); \
+    aString.AssignLiteral(stringRole); \
     return;
 
   switch (aRole) {
@@ -992,7 +991,7 @@ nsAccessibilityService::GetStringEventType(uint32_t aEventType,
     return;
   }
 
-  CopyUTF8toUTF16(kEventTypeNames[aEventType], aString);
+  aString.AssignASCII(kEventTypeNames[aEventType]);
 }
 
 void
@@ -1350,11 +1349,11 @@ nsAccessibilityService::Init()
   eventListenerService->AddListenerChangeListener(this);
 
   for (uint32_t i = 0; i < ArrayLength(sHTMLMarkupMapList); i++)
-    mHTMLMarkupMap.Put(*sHTMLMarkupMapList[i].tag, &sHTMLMarkupMapList[i]);
+    mHTMLMarkupMap.Put(sHTMLMarkupMapList[i].tag, &sHTMLMarkupMapList[i]);
 
 #ifdef MOZ_XUL
   for (uint32_t i = 0; i < ArrayLength(sXULMarkupMapList); i++)
-    mXULMarkupMap.Put(*sXULMarkupMapList[i].tag, &sXULMarkupMapList[i]);
+    mXULMarkupMap.Put(sXULMarkupMapList[i].tag, &sXULMarkupMapList[i]);
 #endif
 
 #ifdef A11Y_LOG
@@ -1616,10 +1615,10 @@ nsAccessibilityService::MarkupAttributes(const nsIContent* aContent,
       if (info->DOMAttrValue) {
         if (aContent->IsElement() &&
             aContent->AsElement()->AttrValueIs(kNameSpaceID_None,
-                                               *info->DOMAttrName,
-                                               *info->DOMAttrValue,
+                                               info->DOMAttrName,
+                                               info->DOMAttrValue,
                                                eCaseMatters)) {
-          nsAccUtils::SetAccAttr(aAttributes, *info->name, *info->DOMAttrValue);
+          nsAccUtils::SetAccAttr(aAttributes, info->name, info->DOMAttrValue);
         }
         continue;
       }
@@ -1627,16 +1626,16 @@ nsAccessibilityService::MarkupAttributes(const nsIContent* aContent,
       nsAutoString value;
 
       if (aContent->IsElement()) {
-        aContent->AsElement()->GetAttr(kNameSpaceID_None, *info->DOMAttrName, value);
+        aContent->AsElement()->GetAttr(kNameSpaceID_None, info->DOMAttrName, value);
       }
 
       if (!value.IsEmpty())
-        nsAccUtils::SetAccAttr(aAttributes, *info->name, value);
+        nsAccUtils::SetAccAttr(aAttributes, info->name, value);
 
       continue;
     }
 
-    nsAccUtils::SetAccAttr(aAttributes, *info->name, *info->value);
+    nsAccUtils::SetAccAttr(aAttributes, info->name, info->value);
   }
 }
 
@@ -1687,13 +1686,15 @@ nsAccessibilityService::HasAccessible(nsIDOMNode* aDOMNode)
 // nsAccessibilityService private (DON'T put methods here)
 
 void
-nsAccessibilityService::SetConsumers(uint32_t aConsumers) {
+nsAccessibilityService::SetConsumers(uint32_t aConsumers, bool aNotify) {
   if (gConsumers & aConsumers) {
     return;
   }
 
   gConsumers |= aConsumers;
-  NotifyOfConsumersChange();
+  if (aNotify) {
+    NotifyOfConsumersChange();
+  }
 }
 
 void
@@ -1763,14 +1764,20 @@ MaybeShutdownAccService(uint32_t aFormerConsumer)
   nsAccessibilityService* accService =
     nsAccessibilityService::gAccessibilityService;
 
-  if (!accService || accService->IsShutdown()) {
+  if (!accService || nsAccessibilityService::IsShutdown()) {
     return;
   }
 
+  // Still used by XPCOM
   if (nsCoreUtils::AccEventObserversExist() ||
       xpcAccessibilityService::IsInUse() ||
       accService->HasXPCDocuments()) {
-    // Still used by XPCOM
+    // In case the XPCOM flag was unset (possibly because of the shutdown
+    // timer in the xpcAccessibilityService) ensure it is still present. Note:
+    // this should be fixed when all the consumer logic is taken out as a
+    // separate class.
+    accService->SetConsumers(nsAccessibilityService::eXPCOM, false);
+
     if (aFormerConsumer != nsAccessibilityService::eXPCOM) {
       // Only unset non-XPCOM consumers.
       accService->UnsetConsumers(aFormerConsumer);
@@ -1855,7 +1862,7 @@ PrefChanged(const char* aPref, void* aClosure)
   if (ReadPlatformDisabledState() == ePlatformIsDisabled) {
     // Force shut down accessibility.
     nsAccessibilityService* accService = nsAccessibilityService::gAccessibilityService;
-    if (accService && !accService->IsShutdown()) {
+    if (accService && !nsAccessibilityService::IsShutdown()) {
       accService->Shutdown();
     }
   }

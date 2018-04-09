@@ -7,7 +7,9 @@
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
+
+ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
+                               "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "RecentWindow",
                                "resource:///modules/RecentWindow.jsm");
@@ -81,10 +83,20 @@ function doGetProtocolFlags(aURI) {
          handler.protocolFlags;
 }
 
-/* openUILink handles clicks on UI elements that cause URLs to load.
+/**
+ * openUILink handles clicks on UI elements that cause URLs to load.
  *
  * As the third argument, you may pass an object with the same properties as
  * accepted by openUILinkIn, plus "ignoreButton" and "ignoreAlt".
+ *
+ * @param url {string}
+ * @param event {Event | Object} Event or JSON object representing an Event
+ * @param {Boolean | Object} aIgnoreButton
+ * @param {Boolean} aIgnoreButton
+ * @param {Boolean} aIgnoreAlt
+ * @param {Boolean} aAllowThirdPartyFixup
+ * @param {Object} aPostData
+ * @param {nsIURI} aReferrerURI
  */
 function openUILink(url, event, aIgnoreButton, aIgnoreAlt, aAllowThirdPartyFixup,
                     aPostData, aReferrerURI) {
@@ -113,7 +125,8 @@ function openUILink(url, event, aIgnoreButton, aIgnoreAlt, aAllowThirdPartyFixup
 }
 
 
-/* whereToOpenLink() looks at an event to decide where to open a link.
+/**
+ * whereToOpenLink() looks at an event to decide where to open a link.
  *
  * The event may be a mouse event (click, double-click, middle-click) or keypress event (enter).
  *
@@ -131,6 +144,11 @@ function openUILink(url, event, aIgnoreButton, aIgnoreAlt, aAllowThirdPartyFixup
  * - Alt is hard to use in context menus, because pressing Alt closes the menu.
  * - Alt can't be used on the bookmarks toolbar because Alt is used for "treat this as something draggable".
  * - The button is ignored for the middle-click-paste-URL feature, since it's always a middle-click.
+ *
+ * @param e {Event|Object} Event or JSON Object
+ * @param ignoreButton {Boolean}
+ * @param ignoreAlt {Boolean}
+ * @returns {"current" | "tabshifted" | "tab" | "save" | "window"}
  */
 function whereToOpenLink(e, ignoreButton, ignoreAlt) {
   // This method must treat a null event like a left click without modifier keys (i.e.
@@ -446,7 +464,7 @@ function openLinkIn(url, where, params) {
       targetBrowser.createAboutBlankContentViewer(aPrincipal);
     }
 
-    targetBrowser.loadURIWithFlags(url, {
+    targetBrowser.loadURI(url, {
       triggeringPrincipal: aTriggeringPrincipal,
       flags,
       referrerURI: aNoReferrer ? null : aReferrerURI,
@@ -829,6 +847,12 @@ function openTourPage() {
 }
 
 function buildHelpMenu() {
+  document.getElementById("feedbackPage")
+          .disabled = !Services.policies.isAllowed("feedbackCommands");
+
+  document.getElementById("helpSafeMode")
+          .disabled = !Services.policies.isAllowed("safeMode");
+
   // Enable/disable the "Report Web Forgery" menu item.
   if (typeof gSafeBrowsing != "undefined") {
     gSafeBrowsing.setReportPhishingMenu();

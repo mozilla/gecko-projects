@@ -16,6 +16,7 @@
 #include "nsIPrincipal.h"
 #include "MediaTrackConstraints.h"
 #include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/RelativeTimeline.h"
 #include "PrincipalChangeObserver.h"
 
 // X11 has a #define for CurrentTime. Unbelievable :-(.
@@ -202,7 +203,8 @@ protected:
  *                                                     (pointing to t2 in A')
  */
 class DOMMediaStream : public DOMEventTargetHelper,
-                       public dom::PrincipalChangeObserver<dom::MediaStreamTrack>
+                       public dom::PrincipalChangeObserver<dom::MediaStreamTrack>,
+                       public RelativeTimeline
 {
   friend class DOMLocalMediaStream;
   friend class dom::MediaStreamTrack;
@@ -331,7 +333,6 @@ public:
                  MediaStreamTrackSourceGetter* aTrackSourceGetter);
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(DOMEventTargetHelper)
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(DOMMediaStream,
                                            DOMEventTargetHelper)
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_DOMMEDIASTREAM_IID)

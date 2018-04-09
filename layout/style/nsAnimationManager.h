@@ -17,11 +17,11 @@
 #include "nsISupportsImpl.h"
 
 class nsIGlobalObject;
-class nsStyleContext;
 class ServoComputedData;
 struct nsStyleDisplay;
 
 namespace mozilla {
+class ComputedStyle;
 namespace css {
 class Declaration;
 } /* namespace css */
@@ -30,8 +30,8 @@ class KeyframeEffectReadOnly;
 class Promise;
 } /* namespace dom */
 
-class GeckoStyleContext;
-class ServoStyleContext;
+class GeckoComputedStyle;
+class ComputedStyle;
 enum class CSSPseudoElementType : uint8_t;
 struct NonOwningAnimationTarget;
 
@@ -290,18 +290,6 @@ public:
   typedef nsTArray<RefPtr<mozilla::dom::CSSAnimation>>
     OwningCSSAnimationPtrArray;
 
-#ifdef MOZ_OLD_STYLE
-  /**
-   * Update the set of animations on |aElement| based on |aStyleContext|.
-   * If necessary, this will notify the corresponding EffectCompositor so
-   * that it can update its animation rule.
-   *
-   * aStyleContext may be a style context for aElement or for its
-   * :before or :after pseudo-element.
-   */
-  void UpdateAnimations(mozilla::GeckoStyleContext* aStyleContext,
-                        mozilla::dom::Element* aElement);
-#endif
 
   /**
    * This function does the same thing as the above UpdateAnimations()
@@ -310,7 +298,7 @@ public:
   void UpdateAnimations(
     mozilla::dom::Element* aElement,
     mozilla::CSSPseudoElementType aPseudoType,
-    const mozilla::ServoStyleContext* aComputedValues);
+    const mozilla::ComputedStyle* aComputedValues);
 
   // Utility function to walk through |aIter| to find the Keyframe with
   // matching offset and timing function but stopping as soon as the offset

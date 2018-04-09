@@ -13,10 +13,10 @@ use euclid::{Point2D, Size2D};
 use smallvec::SmallVec;
 use values::computed::Angle as ComputedAngle;
 use values::computed::BorderCornerRadius as ComputedBorderCornerRadius;
-#[cfg(feature = "servo")]
-use values::computed::ComputedUrl;
 use values::computed::MaxLength as ComputedMaxLength;
 use values::computed::MozLength as ComputedMozLength;
+#[cfg(feature = "servo")]
+use values::computed::url::ComputedUrl;
 use values::specified::url::SpecifiedUrl;
 
 pub mod color;
@@ -35,6 +35,9 @@ pub mod effects;
 ///
 /// If the two values are not similar, an error is returned unless a fallback
 /// function has been specified through `#[animate(fallback)]`.
+///
+/// Trait bounds for type parameter `Foo` can be opted out of with
+/// `#[animation(no_bound(Foo))]` on the type definition.
 pub trait Animate: Sized {
     /// Animate a value towards another one, given an animation procedure.
     fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()>;
@@ -78,6 +81,9 @@ pub trait ToAnimatedValue {
 ///
 /// If a variant is annotated with `#[animation(error)]`, the corresponding
 /// `match` arm is not generated.
+///
+/// Trait bounds for type parameter `Foo` can be opted out of with
+/// `#[animation(no_bound(Foo))]` on the type definition.
 pub trait ToAnimatedZero: Sized {
     /// Returns a value that, when added with an underlying value, will produce the underlying
     /// value. This is used for SMIL animation's "by-animation" where SMIL first interpolates from
@@ -159,7 +165,7 @@ impl Animate for Au {
 
 impl<T> Animate for Size2D<T>
 where
-    T: Animate + Copy,
+    T: Animate,
 {
     #[inline]
     fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()> {
@@ -172,7 +178,7 @@ where
 
 impl<T> Animate for Point2D<T>
 where
-    T: Animate + Copy,
+    T: Animate,
 {
     #[inline]
     fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()> {

@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Load a page with tracking elements that get blocked and make sure that a
 // 'learn more' link shows up in the webconsole.
 
@@ -18,7 +16,7 @@ const LEARN_MORE_URI = "https://developer.mozilla.org/Firefox/Privacy/" +
 
 const {UrlClassifierTestUtils} = ChromeUtils.import("resource://testing-common/UrlClassifierTestUtils.jsm", {});
 
-registerCleanupFunction(function () {
+registerCleanupFunction(function() {
   UrlClassifierTestUtils.cleanupTestTrackers();
 });
 

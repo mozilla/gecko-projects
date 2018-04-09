@@ -41,7 +41,7 @@ let SHOULD_EXECUTE = [
   {input: "{2,}" },
 ];
 
-add_task(async function () {
+add_task(async function() {
   let hud = await openNewTabAndConsole(TEST_URI);
   let { inputNode } = hud.jsterm;
 
@@ -60,6 +60,8 @@ add_task(async function () {
   for (let {input, shiftKey} of SHOULD_EXECUTE) {
     hud.jsterm.setInputValue(input);
     EventUtils.synthesizeKey("VK_RETURN", { shiftKey });
+
+    await waitFor(() => !hud.jsterm.getInputValue());
 
     let inputValue = hud.jsterm.getInputValue();
     is(inputNode.selectionStart, 0, "selection starts/ends at 0");

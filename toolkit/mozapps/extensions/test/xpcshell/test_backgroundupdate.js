@@ -7,20 +7,15 @@
 // The test extension uses an insecure update url.
 Services.prefs.setBoolPref(PREF_EM_CHECK_UPDATE_SECURITY, false);
 
-ChromeUtils.import("resource://testing-common/httpd.js");
-var testserver = new HttpServer();
-testserver.start(-1);
-gPort = testserver.identity.primaryPort;
+var testserver = AddonTestUtils.createHttpServer({hosts: ["example.com"]});
 const profileDir = gProfD.clone();
 profileDir.append("extensions");
-
-// register static files with server and interpolate port numbers in them
-mapFile("/data/test_backgroundupdate.rdf", testserver);
 
 function run_test() {
   createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1.9.2");
 
   testserver.registerDirectory("/addons/", do_get_file("addons"));
+  testserver.registerDirectory("/data/", do_get_file("data"));
 
   startupManager();
 
@@ -29,7 +24,7 @@ function run_test() {
 }
 
 function end_test() {
-  testserver.stop(do_test_finished);
+  do_test_finished();
 }
 
 // Verify that with no add-ons installed the background update notifications get
@@ -55,7 +50,8 @@ function run_test_2() {
   writeInstallRDFForExtension({
     id: "addon1@tests.mozilla.org",
     version: "1.0",
-    updateURL: "http://localhost:" + gPort + "/data/test_backgroundupdate.rdf",
+    updateURL: "http://example.com/data/test_backgroundupdate.json",
+    bootstrap: true,
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "1",
@@ -67,7 +63,8 @@ function run_test_2() {
   writeInstallRDFForExtension({
     id: "addon2@tests.mozilla.org",
     version: "1.0",
-    updateURL: "http://localhost:" + gPort + "/data/test_backgroundupdate.rdf",
+    updateURL: "http://example.com/data/test_backgroundupdate.json",
+    bootstrap: true,
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "1",
@@ -79,6 +76,7 @@ function run_test_2() {
   writeInstallRDFForExtension({
     id: "addon3@tests.mozilla.org",
     version: "1.0",
+    bootstrap: true,
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "1",
@@ -92,7 +90,7 @@ function run_test_2() {
 
   // Background update uses a different pref, if set
   Services.prefs.setCharPref("extensions.update.background.url",
-                             "http://localhost:" + gPort + "/data/test_backgroundupdate.rdf");
+                             "http://example.com/data/test_backgroundupdate.json");
 
   restartManager();
 

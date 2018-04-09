@@ -634,6 +634,8 @@ public abstract class GeckoApp extends GeckoActivity
         outState.putBoolean(SAVED_STATE_IN_BACKGROUND, isApplicationInBackground());
     }
 
+    public void addTab(int flags) { }
+
     public void addTab() { }
 
     public void addPrivateTab() { }
@@ -899,7 +901,11 @@ public abstract class GeckoApp extends GeckoActivity
     @Override
     public void onContextMenu(final GeckoSession session, final int screenX,
                               final int screenY, final String uri,
-                              final String elementSrc) {
+                              int elementType, final String elementSrc) {
+    }
+
+    @Override
+    public void onExternalResponse(final GeckoSession session, final GeckoSession.WebResponseInfo request) {
     }
 
     protected void setFullScreen(final boolean fullscreen) {
@@ -969,11 +975,6 @@ public abstract class GeckoApp extends GeckoActivity
 
         earlyStartJavaSampler(intent);
 
-        // GeckoLoader wants to dig some environment variables out of the
-        // incoming intent, so pass it in here. GeckoLoader will do its
-        // business later and dispose of the reference.
-        GeckoLoader.setLastIntent(intent);
-
         // Workaround for <http://code.google.com/p/android/issues/detail?id=20915>.
         try {
             Class.forName("android.os.AsyncTask");
@@ -1012,12 +1013,12 @@ public abstract class GeckoApp extends GeckoActivity
 
         } else {
             final String action = intent.getAction();
-            final String args = GeckoApplication.addDefaultGeckoArgs(
-                    intent.getStringExtra("args"));
+            final String[] args = GeckoApplication.getDefaultGeckoArgs();
             final int flags = ACTION_DEBUG.equals(action) ? GeckoThread.FLAG_DEBUGGING : 0;
 
             sAlreadyLoaded = true;
-            GeckoThread.initMainProcess(/* profile */ null, args, flags);
+            GeckoThread.initMainProcess(/* profile */ null, args,
+                                        intent.getExtras(), flags);
 
             // Speculatively pre-fetch the profile in the background.
             ThreadUtils.postToBackgroundThread(new Runnable() {
@@ -1080,7 +1081,7 @@ public abstract class GeckoApp extends GeckoActivity
         final GeckoSession session = new GeckoSession();
         // If the view already has a session, we need to ensure it is closed.
         if (mLayerView.getSession() != null) {
-            mLayerView.getSession().closeWindow();
+            mLayerView.getSession().close();
         }
         mLayerView.setSession(session);
         mLayerView.setOverScrollMode(View.OVER_SCROLL_NEVER);

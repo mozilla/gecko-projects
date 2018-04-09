@@ -729,7 +729,8 @@ exports.CSS_PROPERTIES = {
       "column-gap"
     ],
     "supports": [
-      6
+      6,
+      8
     ],
     "values": [
       "calc",
@@ -2081,6 +2082,7 @@ exports.CSS_PROPERTIES = {
       "-moz-min-content",
       "auto",
       "calc",
+      "content",
       "inherit",
       "initial",
       "unset"
@@ -2102,6 +2104,7 @@ exports.CSS_PROPERTIES = {
       "-moz-min-content",
       "auto",
       "calc",
+      "content",
       "inherit",
       "initial",
       "unset"
@@ -5118,7 +5121,8 @@ exports.CSS_PROPERTIES = {
       "column-gap"
     ],
     "supports": [
-      6
+      6,
+      8
     ],
     "values": [
       "calc",
@@ -5547,6 +5551,7 @@ exports.CSS_PROPERTIES = {
       "-moz-min-content",
       "auto",
       "calc",
+      "content",
       "inherit",
       "initial",
       "unset"
@@ -5568,6 +5573,7 @@ exports.CSS_PROPERTIES = {
       "-moz-min-content",
       "auto",
       "calc",
+      "content",
       "inherit",
       "initial",
       "unset"
@@ -5867,6 +5873,20 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "font-optical-sizing": {
+    "isInherited": true,
+    "subproperties": [
+      "font-optical-sizing"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "inherit",
+      "initial",
+      "none",
+      "unset"
+    ]
+  },
   "font-size": {
     "isInherited": true,
     "subproperties": [
@@ -6114,6 +6134,18 @@ exports.CSS_PROPERTIES = {
       "normal",
       "sub",
       "super",
+      "unset"
+    ]
+  },
+  "font-variation-settings": {
+    "isInherited": true,
+    "subproperties": [
+      "font-variation-settings"
+    ],
+    "supports": [],
+    "values": [
+      "inherit",
+      "initial",
       "unset"
     ]
   },

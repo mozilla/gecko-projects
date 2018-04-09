@@ -92,6 +92,7 @@ EXPORTS += [
     'AudioBufferUtils.h',
     'AudioChannelFormat.h',
     'AudioCompactor.h',
+    'AudioConfig.h',
     'AudioConverter.h',
     'AudioMixer.h',
     'AudioPacketizer.h',
@@ -208,6 +209,7 @@ UNIFIED_SOURCES += [
     'AudioCaptureStream.cpp',
     'AudioChannelFormat.cpp',
     'AudioCompactor.cpp',
+    'AudioConfig.cpp',
     'AudioConverter.cpp',
     'AudioDeviceInfo.cpp',
     'AudioSegment.cpp',
@@ -312,6 +314,7 @@ EXTRA_JS_MODULES.media += [
 
 LOCAL_INCLUDES += [
     '/caps',
+    '/docshell/base',
     '/dom/base',
     '/layout/generic',
     '/layout/xul',

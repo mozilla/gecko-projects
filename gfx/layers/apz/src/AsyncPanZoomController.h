@@ -9,8 +9,6 @@
 
 #include "CrossProcessMutex.h"
 #include "mozilla/layers/GeckoContentController.h"
-#include "mozilla/layers/APZCTreeManager.h"
-#include "mozilla/layers/AsyncPanZoomAnimation.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/Monitor.h"
@@ -43,6 +41,7 @@ class SharedMemoryBasic;
 namespace layers {
 
 class AsyncDragMetrics;
+class APZCTreeManager;
 struct ScrollableLayerGuid;
 class CompositorController;
 class MetricsSharingController;
@@ -52,9 +51,11 @@ class AsyncPanZoomAnimation;
 class AndroidFlingAnimation;
 class GenericFlingAnimation;
 class InputBlockState;
+struct FlingHandoffState;
 class TouchBlockState;
 class PanGestureBlockState;
 class OverscrollHandoffChain;
+struct OverscrollHandoffState;
 class StateChangeNotificationBlocker;
 class CheckerboardEvent;
 class OverscrollEffectBase;
@@ -66,15 +67,15 @@ struct KeyboardScrollAction;
 // Base class for grouping platform-specific APZC state variables.
 class PlatformSpecificStateBase {
 public:
-  virtual ~PlatformSpecificStateBase() {}
+  virtual ~PlatformSpecificStateBase() = default;
   virtual AndroidSpecificState* AsAndroidSpecificState() { return nullptr; }
 };
 
 /*
  * Represents a transform from the ParentLayer coordinate space of an APZC
  * to the ParentLayer coordinate space of its parent APZC.
- * Each layer along the way contributes to the transform. We track 
- * contributions that are perspective transforms separately, as sometimes 
+ * Each layer along the way contributes to the transform. We track
+ * contributions that are perspective transforms separately, as sometimes
  * these require special handling.
  */
 struct AncestorTransform {
@@ -152,6 +153,11 @@ public:
   };
 
   /**
+   * Gets the DPI from the tree manager.
+   */
+  float GetDPI() const;
+
+  /**
    * Constant describing the tolerance in distance we use, multiplied by the
    * device DPI, before we start panning the screen. This is to prevent us from
    * accidentally processing taps as touch moves, and from very short/accidental
@@ -159,15 +165,21 @@ public:
    * Note: It's an abuse of the 'Coord' class to use it to represent a 2D
    *       distance, but it's the closest thing we currently have.
    */
-  static ScreenCoord GetTouchStartTolerance();
+  ScreenCoord GetTouchStartTolerance() const;
+  /**
+   * Same as GetTouchStartTolerance, but the tolerance for how far the touch
+   * has to move before it starts allowing touchmove events to be dispatched
+   * to content, for non-scrollable content.
+   */
+  ScreenCoord GetTouchMoveTolerance() const;
   /**
    * Same as GetTouchStartTolerance, but the tolerance for how close the second
    * tap has to be to the first tap in order to be counted as part of a multi-tap
    * gesture (double-tap or one-touch-pinch).
    */
-  static ScreenCoord GetSecondTapTolerance();
+  ScreenCoord GetSecondTapTolerance() const;
 
-  AsyncPanZoomController(uint64_t aLayersId,
+  AsyncPanZoomController(LayersId aLayersId,
                          APZCTreeManager* aTreeManager,
                          const RefPtr<InputQueue>& aInputQueue,
                          GeckoContentController* aController,
@@ -227,6 +239,10 @@ public:
 
   bool UpdateAnimation(const TimeStamp& aSampleTime,
                        nsTArray<RefPtr<Runnable>>* aOutDeferredTasks);
+
+  // --------------------------------------------------------------------------
+  // These methods must only be called on the updater thread.
+  //
 
   /**
    * A shadow layer update has arrived. |aScrollMetdata| is the new ScrollMetadata
@@ -471,6 +487,10 @@ public:
 
   // Return whether or not a scroll delta will be able to scroll in either
   // direction.
+  bool CanScroll(const ParentLayerPoint& aDelta) const;
+
+  // Return whether or not a scroll delta will be able to scroll in either
+  // direction with wheel.
   bool CanScrollWithWheel(const ParentLayerPoint& aDelta) const;
 
   // Return whether or not there is room to scroll this APZC
@@ -737,6 +757,9 @@ protected:
    */
   APZCTreeManager* GetApzcTreeManager() const;
 
+  void AssertOnSamplerThread() const;
+  void AssertOnUpdaterThread() const;
+
   /**
    * Convert ScreenPoint relative to the screen to LayoutDevicePoint relative
    * to the parent document. This excludes the transient compositor transform.
@@ -770,13 +793,13 @@ protected:
   // Common processing at the end of a touch block.
   void OnTouchEndOrCancel();
 
-  uint64_t mLayersId;
+  LayersId mLayersId;
   RefPtr<CompositorController> mCompositorController;
   RefPtr<MetricsSharingController> mMetricsSharingController;
 
   /* Access to the following two fields is protected by the mRefPtrMonitor,
      since they are accessed on the UI thread but can be cleared on the
-     sampler thread. */
+     updater thread. */
   RefPtr<GeckoContentController> mGeckoContentController;
   RefPtr<GestureEventListener> mGestureEventListener;
   mutable Monitor mRefPtrMonitor;
@@ -1350,7 +1373,7 @@ public:
     return mAsyncTransformAppliedToContent;
   }
 
-  uint64_t GetLayersId() const
+  LayersId GetLayersId() const
   {
     return mLayersId;
   }

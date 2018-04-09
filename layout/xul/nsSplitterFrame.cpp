@@ -21,25 +21,20 @@
 #include "nsNameSpaceManager.h"
 #include "nsScrollbarButtonFrame.h"
 #include "nsIDOMEventListener.h"
-#include "nsIDOMMouseEvent.h"
 #include "nsIPresShell.h"
 #include "nsFrameList.h"
 #include "nsHTMLParts.h"
-#include "nsStyleContext.h"
+#include "mozilla/ComputedStyle.h"
 #include "nsBoxLayoutState.h"
 #include "nsIServiceManager.h"
 #include "nsContainerFrame.h"
 #include "nsContentCID.h"
-#ifdef MOZ_OLD_STYLE
-#include "mozilla/GeckoStyleContext.h"
-#endif
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
 #include "nsLayoutUtils.h"
 #include "nsDisplayList.h"
 #include "nsContentUtils.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h"
+#include "mozilla/dom/MouseEvent.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/UniquePtr.h"
 #include "nsBindingManager.h"
@@ -141,7 +136,7 @@ nsSplitterFrameInner::ResizeType
 nsSplitterFrameInner::GetResizeBefore()
 {
   static Element::AttrValuesArray strings[] =
-    {&nsGkAtoms::farthest, &nsGkAtoms::flex, nullptr};
+    {nsGkAtoms::farthest, nsGkAtoms::flex, nullptr};
   switch (SplitterElement()->FindAttrValueIn(kNameSpaceID_None,
                                              nsGkAtoms::resizebefore,
                                              strings, eCaseMatters)) {
@@ -159,7 +154,7 @@ nsSplitterFrameInner::ResizeType
 nsSplitterFrameInner::GetResizeAfter()
 {
   static Element::AttrValuesArray strings[] =
-    {&nsGkAtoms::farthest, &nsGkAtoms::flex, &nsGkAtoms::grow, nullptr};
+    {nsGkAtoms::farthest, nsGkAtoms::flex, nsGkAtoms::grow, nullptr};
   switch (SplitterElement()->FindAttrValueIn(kNameSpaceID_None,
                                              nsGkAtoms::resizeafter,
                                              strings, eCaseMatters)) {
@@ -174,9 +169,9 @@ nsSplitterFrameInner::State
 nsSplitterFrameInner::GetState()
 {
   static Element::AttrValuesArray strings[] =
-    {&nsGkAtoms::dragging, &nsGkAtoms::collapsed, nullptr};
+    {nsGkAtoms::dragging, nsGkAtoms::collapsed, nullptr};
   static Element::AttrValuesArray strings_substate[] =
-    {&nsGkAtoms::before, &nsGkAtoms::after, nullptr};
+    {nsGkAtoms::before, nsGkAtoms::after, nullptr};
   switch (SplitterElement()->FindAttrValueIn(kNameSpaceID_None,
                                              nsGkAtoms::state,
                                              strings, eCaseMatters)) {
@@ -203,15 +198,15 @@ nsSplitterFrameInner::GetState()
 // Creates a new Toolbar frame and returns it
 //
 nsIFrame*
-NS_NewSplitterFrame (nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewSplitterFrame (nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsSplitterFrame(aContext);
+  return new (aPresShell) nsSplitterFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSplitterFrame)
 
-nsSplitterFrame::nsSplitterFrame(nsStyleContext* aContext)
-: nsBoxFrame(aContext, kClassID),
+nsSplitterFrame::nsSplitterFrame(ComputedStyle* aStyle)
+: nsBoxFrame(aStyle, kClassID),
   mInner(0)
 {
 }
@@ -252,15 +247,7 @@ nsSplitterFrame::AttributeChanged(int32_t aNameSpaceID,
 {
   nsresult rv = nsBoxFrame::AttributeChanged(aNameSpaceID, aAttribute,
                                              aModType);
-  // if the alignment changed. Let the grippy know
-  if (aAttribute == nsGkAtoms::align) {
-    // tell the slider its attribute changed so it can
-    // update itself
-    nsIFrame* grippy = nullptr;
-    nsScrollbarButtonFrame::GetChildWithTag(nsGkAtoms::grippy, this, grippy);
-    if (grippy)
-      grippy->AttributeChanged(aNameSpaceID, aAttribute, aModType);
-  } else if (aAttribute == nsGkAtoms::state) {
+  if (aAttribute == nsGkAtoms::state) {
     mInner->UpdateState();
   }
 
@@ -292,20 +279,6 @@ nsSplitterFrame::Init(nsIContent*       aContent,
                                            nsGkAtoms::orient)) {
         aContent->AsElement()->SetAttr(kNameSpaceID_None, nsGkAtoms::orient,
                                        NS_LITERAL_STRING("vertical"), false);
-        if (StyleContext()->IsGecko()) {
-#ifdef MOZ_OLD_STYLE
-          // FIXME(emilio): Even if we did this in Servo, this just won't
-          // work, and we'd need a specific "really re-resolve the style" API...
-          GeckoStyleContext* parentStyleContext =
-            StyleContext()->AsGecko()->GetParent();
-          RefPtr<nsStyleContext> newContext = PresContext()->StyleSet()->
-            ResolveStyleFor(aContent->AsElement(), parentStyleContext,
-                            LazyComputeBehavior::Allow);
-          SetStyleContextWithoutNotification(newContext);
-#else
-          MOZ_CRASH("old style system disabled");
-#endif
-        }
       }
     }
   }
@@ -443,7 +416,7 @@ nsSplitterFrameInner::MouseUp(nsPresContext* aPresContext,
     // if we dragged then fire a command event.
     if (mDidDrag) {
       RefPtr<nsXULElement> element =
-        nsXULElement::FromContent(mOuter->GetContent());
+        nsXULElement::FromNode(mOuter->GetContent());
       element->DoCommand();
     }
 
@@ -625,15 +598,13 @@ nsresult
 nsSplitterFrameInner::MouseDown(nsIDOMEvent* aMouseEvent)
 {
   NS_ENSURE_TRUE(mOuter, NS_OK);
-  nsCOMPtr<nsIDOMMouseEvent> mouseEvent(do_QueryInterface(aMouseEvent));
-  if (!mouseEvent)
+  dom::MouseEvent* mouseEvent = aMouseEvent->InternalDOMEvent()->AsMouseEvent();
+  if (!mouseEvent) {
     return NS_OK;
-
-  int16_t button = 0;
-  mouseEvent->GetButton(&button);
+  }
 
   // only if left button
-  if (button != 0)
+  if (mouseEvent->Button() != 0)
      return NS_OK;
 
   if (SplitterElement()->AttrValueIs(kNameSpaceID_None, nsGkAtoms::disabled,
@@ -696,9 +667,9 @@ nsSplitterFrameInner::MouseDown(nsIDOMEvent* aMouseEvent)
         nsSize maxSize = nsBox::BoundsCheckMinMax(minSize, childBox->GetXULMaxSize(state));
         prefSize = nsBox::BoundsCheck(minSize, prefSize, maxSize);
 
-        mOuter->AddMargin(childBox, minSize);
-        mOuter->AddMargin(childBox, prefSize);
-        mOuter->AddMargin(childBox, maxSize);
+        nsSplitterFrame::AddMargin(childBox, minSize);
+        nsSplitterFrame::AddMargin(childBox, prefSize);
+        nsSplitterFrame::AddMargin(childBox, maxSize);
 
         nscoord flex = childBox->GetXULFlex();
 
@@ -771,7 +742,7 @@ nsSplitterFrameInner::MouseDown(nsIDOMEvent* aMouseEvent)
      mChildInfosAfterCount = 0;
 
   int32_t c;
-  nsPoint pt = nsLayoutUtils::GetDOMEventCoordinatesRelativeTo(mouseEvent->AsEvent(),
+  nsPoint pt = nsLayoutUtils::GetDOMEventCoordinatesRelativeTo(mouseEvent,
                                                                mParentBox);
   if (isHorizontal) {
      c = pt.x;
@@ -828,7 +799,7 @@ nsSplitterFrameInner::SupportsCollapseDirection
 )
 {
   static Element::AttrValuesArray strings[] =
-    {&nsGkAtoms::before, &nsGkAtoms::after, &nsGkAtoms::both, nullptr};
+    {nsGkAtoms::before, nsGkAtoms::after, nsGkAtoms::both, nullptr};
 
   switch (SplitterElement()->FindAttrValueIn(kNameSpaceID_None,
                                              nsGkAtoms::collapse,

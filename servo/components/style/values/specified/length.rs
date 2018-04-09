@@ -601,17 +601,20 @@ impl Length {
 
     /// Parse a non-negative length
     #[inline]
-    pub fn parse_non_negative<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
-                                      -> Result<Length, ParseError<'i>> {
+    pub fn parse_non_negative<'i, 't>(
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<Self, ParseError<'i>> {
         Self::parse_non_negative_quirky(context, input, AllowQuirks::No)
     }
 
     /// Parse a non-negative length, allowing quirks.
     #[inline]
-    pub fn parse_non_negative_quirky<'i, 't>(context: &ParserContext,
-                                             input: &mut Parser<'i, 't>,
-                                             allow_quirks: AllowQuirks)
-                                             -> Result<Length, ParseError<'i>> {
+    pub fn parse_non_negative_quirky<'i, 't>(
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+        allow_quirks: AllowQuirks,
+    ) -> Result<Self, ParseError<'i>> {
         Self::parse_internal(context, input, AllowedNumericType::NonNegative, allow_quirks)
     }
 
@@ -630,10 +633,11 @@ impl Parse for Length {
 
 impl Length {
     /// Parses a length, with quirks.
-    pub fn parse_quirky<'i, 't>(context: &ParserContext,
-                                input: &mut Parser<'i, 't>,
-                                allow_quirks: AllowQuirks)
-                                -> Result<Self, ParseError<'i>> {
+    pub fn parse_quirky<'i, 't>(
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+        allow_quirks: AllowQuirks,
+    ) -> Result<Self, ParseError<'i>> {
         Self::parse_internal(context, input, AllowedNumericType::All, allow_quirks)
     }
 }
@@ -678,9 +682,6 @@ impl NonNegativeLength {
         Length::from_px(px_value.max(0.)).into()
     }
 }
-
-/// Either a NonNegativeLength or the `normal` keyword.
-pub type NonNegativeLengthOrNormal = Either<NonNegativeLength, Normal>;
 
 /// Either a NonNegativeLength or the `auto` keyword.
 pub type NonNegativeLengthOrAuto = Either<NonNegativeLength, Auto>;
@@ -917,6 +918,16 @@ impl LengthOrPercentageOrAuto {
     pub fn zero_percent() -> Self {
         LengthOrPercentageOrAuto::Percentage(computed::Percentage::zero())
     }
+
+    /// Parses, with quirks.
+    #[inline]
+    pub fn parse_quirky<'i, 't>(
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+        allow_quirks: AllowQuirks,
+    ) -> Result<Self, ParseError<'i>> {
+        Self::parse_internal(context, input, AllowedNumericType::All, allow_quirks)
+    }
 }
 
 impl Parse for LengthOrPercentageOrAuto {
@@ -926,14 +937,33 @@ impl Parse for LengthOrPercentageOrAuto {
     }
 }
 
-impl LengthOrPercentageOrAuto {
-    /// Parses, with quirks.
+/// A wrapper of LengthOrPercentageOrAuto, whose value must be >= 0.
+pub type NonNegativeLengthOrPercentageOrAuto = NonNegative<LengthOrPercentageOrAuto>;
+
+impl NonNegativeLengthOrPercentageOrAuto {
+    /// 0
     #[inline]
-    pub fn parse_quirky<'i, 't>(context: &ParserContext,
-                                input: &mut Parser<'i, 't>,
-                                allow_quirks: AllowQuirks)
-                                -> Result<Self, ParseError<'i>> {
-        Self::parse_internal(context, input, AllowedNumericType::All, allow_quirks)
+    pub fn zero() -> Self {
+        NonNegative(LengthOrPercentageOrAuto::zero())
+    }
+
+    /// 0%
+    #[inline]
+    pub fn zero_percent() -> Self {
+        NonNegative(LengthOrPercentageOrAuto::zero_percent())
+    }
+
+    /// `auto`
+    #[inline]
+    pub fn auto() -> Self {
+        NonNegative(LengthOrPercentageOrAuto::Auto)
+    }
+}
+
+impl Parse for NonNegativeLengthOrPercentageOrAuto {
+    #[inline]
+    fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
+        Ok(NonNegative(LengthOrPercentageOrAuto::parse_non_negative(context, input)?))
     }
 }
 
@@ -1020,6 +1050,12 @@ impl Parse for LengthOrPercentageOrNone {
 /// A wrapper of LengthOrPercentage, whose value must be >= 0.
 pub type NonNegativeLengthOrPercentage = NonNegative<LengthOrPercentage>;
 
+/// Either a computed NonNegativeLength or the `normal` keyword.
+pub type NonNegativeLengthOrNormal = Either<NonNegativeLength, Normal>;
+
+/// Either a NonNegativeLengthOrPercentage or the `normal` keyword.
+pub type NonNegativeLengthOrPercentageOrNormal = Either<NonNegativeLengthOrPercentage, Normal>;
+
 impl From<NoCalcLength> for NonNegativeLengthOrPercentage {
     #[inline]
     fn from(len: NoCalcLength) -> Self {
@@ -1087,8 +1123,11 @@ impl LengthOrNumber {
 }
 
 /// A value suitable for a `min-width` or `min-height` property.
-/// Unlike `max-width` or `max-height` properties, a MozLength can be
-/// `auto`, and cannot be `none`.
+///
+/// Unlike `max-width` or `max-height` properties, a MozLength can be `auto`,
+/// and cannot be `none`.
+///
+/// Note that it only accepts non-negative values.
 #[allow(missing_docs)]
 #[derive(Clone, Debug, MallocSizeOf, PartialEq, ToCss)]
 pub enum MozLength {

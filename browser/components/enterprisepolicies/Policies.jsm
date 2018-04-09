@@ -11,7 +11,11 @@ XPCOMUtils.defineLazyServiceGetter(this, "gXulStore",
                                    "nsIXULStore");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
+  AddonManager: "resource://gre/modules/AddonManager.jsm",
   BookmarksPolicies: "resource:///modules/policies/BookmarksPolicies.jsm",
+  CustomizableUI: "resource:///modules/CustomizableUI.jsm",
+  ProxyPolicies: "resource:///modules/policies/ProxyPolicies.jsm",
+  WebsiteFilter: "resource:///modules/policies/WebsiteFilter.jsm",
 });
 
 const PREF_LOGLEVEL           = "browser.policies.loglevel";
@@ -57,6 +61,20 @@ var EXPORTED_SYMBOLS = ["Policies"];
  * The callbacks will be bound to their parent policy object.
  */
 var Policies = {
+  "Authentication": {
+    onBeforeAddons(manager, param) {
+      if ("SPNEGO" in param) {
+        setAndLockPref("network.negotiate-auth.trusted-uris", param.SPNEGO.join(", "));
+      }
+      if ("Delegated" in param) {
+        setAndLockPref("network.negotiate-auth.delegation-uris", param.Delegated.join(", "));
+      }
+      if ("NTLM" in param) {
+        setAndLockPref("network.automatic-ntlm-auth.trusted-uris", param.NTLM.join(", "));
+      }
+    }
+  },
+
   "BlockAboutAddons": {
     onBeforeUIStartup(manager, param) {
       if (param) {
@@ -90,30 +108,73 @@ var Policies = {
     }
   },
 
-  "BlockSetDesktopBackground": {
-    onBeforeUIStartup(manager, param) {
-      if (param) {
-        manager.disallowFeature("setDesktopBackground", true);
-      }
-    }
-  },
-
   "Bookmarks": {
     onAllWindowsRestored(manager, param) {
       BookmarksPolicies.processBookmarks(param);
     }
   },
 
-  "Cookies": {
-    onBeforeUIStartup(manager, param) {
-      addAllowDenyPermissions("cookie", param.Allow, param.Block);
+  "Certificates": {
+    onBeforeAddons(manager, param) {
+      if ("ImportEnterpriseRoots" in param) {
+        setAndLockPref("security.enterprise_roots.enabled", true);
+      }
     }
   },
 
-  "CreateMasterPassword": {
+  "Cookies": {
     onBeforeUIStartup(manager, param) {
-      if (!param) {
-        manager.disallowFeature("createMasterPassword");
+      addAllowDenyPermissions("cookie", param.Allow, param.Block);
+
+      if (param.Block) {
+        const hosts = param.Block.map(uri => uri.host).sort().join("\n");
+        runOncePerModification("clearCookiesForBlockedHosts", hosts, () => {
+          for (let blocked of param.Block) {
+            Services.cookies.removeCookiesWithOriginAttributes("{}", blocked.host);
+          }
+        });
+      }
+
+      if (param.Default !== undefined ||
+          param.AcceptThirdParty !== undefined ||
+          param.Locked) {
+        const ACCEPT_COOKIES = 0;
+        const REJECT_THIRD_PARTY_COOKIES = 1;
+        const REJECT_ALL_COOKIES = 2;
+        const REJECT_UNVISITED_THIRD_PARTY = 3;
+
+        let newCookieBehavior = ACCEPT_COOKIES;
+        if (param.Default !== undefined && !param.Default) {
+          newCookieBehavior = REJECT_ALL_COOKIES;
+        } else if (param.AcceptThirdParty) {
+          if (param.AcceptThirdParty == "never") {
+            newCookieBehavior = REJECT_THIRD_PARTY_COOKIES;
+          } else if (param.AcceptThirdParty == "from-visited") {
+            newCookieBehavior = REJECT_UNVISITED_THIRD_PARTY;
+          }
+        }
+
+        if (param.Locked) {
+          setAndLockPref("network.cookie.cookieBehavior", newCookieBehavior);
+        } else {
+          setDefaultPref("network.cookie.cookieBehavior", newCookieBehavior);
+        }
+      }
+
+      const KEEP_COOKIES_UNTIL_EXPIRATION = 0;
+      const KEEP_COOKIES_UNTIL_END_OF_SESSION = 2;
+
+      if (param.ExpireAtSessionEnd !== undefined || param.Locked) {
+        let newLifetimePolicy = KEEP_COOKIES_UNTIL_EXPIRATION;
+        if (param.ExpireAtSessionEnd) {
+          newLifetimePolicy = KEEP_COOKIES_UNTIL_END_OF_SESSION;
+        }
+
+        if (param.Locked) {
+          setAndLockPref("network.cookie.lifetimePolicy", newLifetimePolicy);
+        } else {
+          setDefaultPref("network.cookie.lifetimePolicy", newLifetimePolicy);
+        }
       }
     }
   },
@@ -122,6 +183,14 @@ var Policies = {
     onBeforeAddons(manager, param) {
       if (param) {
         manager.disallowFeature("appUpdate");
+      }
+    }
+  },
+
+  "DisableBuiltinPDFViewer": {
+    onBeforeUIStartup(manager, param) {
+      if (param) {
+        manager.disallowFeature("PDF.js");
       }
     }
   },
@@ -136,6 +205,14 @@ var Policies = {
         manager.disallowFeature("about:devtools");
         manager.disallowFeature("about:debugging");
         manager.disallowFeature("about:devtools-toolbox");
+      }
+    }
+  },
+
+  "DisableFeedbackCommands": {
+    onBeforeUIStartup(manager, param) {
+      if (param) {
+        manager.disallowFeature("feedbackCommands");
       }
     }
   },
@@ -164,10 +241,26 @@ var Policies = {
     }
   },
 
+  "DisableForgetButton": {
+    onProfileAfterChange(manager, param) {
+      if (param) {
+        setAndLockPref("privacy.panicButton.enabled", false);
+      }
+    }
+  },
+
   "DisableFormHistory": {
     onBeforeUIStartup(manager, param) {
       if (param) {
         setAndLockPref("browser.formfill.enable", false);
+      }
+    }
+  },
+
+  "DisableMasterPasswordCreation": {
+    onBeforeUIStartup(manager, param) {
+      if (param) {
+        manager.disallowFeature("createMasterPassword");
       }
     }
   },
@@ -190,29 +283,91 @@ var Policies = {
     }
   },
 
-  "DisplayBookmarksToolbar": {
+  "DisableProfileImport": {
     onBeforeUIStartup(manager, param) {
       if (param) {
-        // This policy is meant to change the default behavior, not to force it.
-        // If this policy was alreay applied and the user chose to re-hide the
-        // bookmarks toolbar, do not show it again.
-        runOnce("displayBookmarksToolbar", () => {
-          gXulStore.setValue(BROWSER_DOCUMENT_URL, "PersonalToolbar", "collapsed", "false");
-        });
+        manager.disallowFeature("profileImport");
+        setAndLockPref("browser.newtabpage.activity-stream.migrationExpired", true);
       }
+    }
+  },
+
+  "DisableProfileRefresh": {
+    onBeforeUIStartup(manager, param) {
+      if (param) {
+        manager.disallowFeature("profileRefresh");
+        setAndLockPref("browser.disableResetPrompt", true);
+      }
+    }
+  },
+
+  "DisableSafeMode": {
+    onBeforeUIStartup(manager, param) {
+      if (param) {
+        manager.disallowFeature("safeMode");
+      }
+    }
+  },
+
+  "DisableSecurityBypass": {
+    onBeforeUIStartup(manager, param) {
+      if ("InvalidCertificate" in param) {
+        setAndLockPref("security.certerror.hideAddException", param.InvalidCertificate);
+      }
+
+      if ("SafeBrowsing" in param) {
+        setAndLockPref("browser.safebrowsing.allowOverride", !param.SafeBrowsing);
+      }
+    }
+  },
+
+  "DisableSetDesktopBackground": {
+    onBeforeUIStartup(manager, param) {
+      if (param) {
+        manager.disallowFeature("setDesktopBackground", true);
+      }
+    }
+  },
+
+  "DisableSystemAddonUpdate": {
+    onBeforeAddons(manager, param) {
+      if (param) {
+        manager.disallowFeature("SysAddonUpdate");
+      }
+    }
+  },
+
+  "DisableTelemetry": {
+    onBeforeAddons(manager, param) {
+      if (param) {
+        setAndLockPref("datareporting.healthreport.uploadEnabled", false);
+        setAndLockPref("datareporting.policy.dataSubmissionEnabled", false);
+        manager.disallowFeature("about:telemetry");
+      }
+    }
+  },
+
+  "DisplayBookmarksToolbar": {
+    onBeforeUIStartup(manager, param) {
+      let value = (!param).toString();
+      // This policy is meant to change the default behavior, not to force it.
+      // If this policy was alreay applied and the user chose to re-hide the
+      // bookmarks toolbar, do not show it again.
+      runOncePerModification("displayBookmarksToolbar", value, () => {
+        gXulStore.setValue(BROWSER_DOCUMENT_URL, "PersonalToolbar", "collapsed", value);
+      });
     }
   },
 
   "DisplayMenuBar": {
     onBeforeUIStartup(manager, param) {
-      if (param) {
+      let value = (!param).toString();
         // This policy is meant to change the default behavior, not to force it.
         // If this policy was alreay applied and the user chose to re-hide the
         // menu bar, do not show it again.
-        runOnce("displayMenuBar", () => {
-          gXulStore.setValue(BROWSER_DOCUMENT_URL, "toolbar-menubar", "autohide", "false");
-        });
-      }
+      runOncePerModification("displayMenuBar", value, () => {
+        gXulStore.setValue(BROWSER_DOCUMENT_URL, "toolbar-menubar", "autohide", value);
+      });
     }
   },
 
@@ -222,9 +377,122 @@ var Policies = {
     }
   },
 
+  "EnableTrackingProtection": {
+    onBeforeUIStartup(manager, param) {
+      if (param.Value) {
+        if (param.Locked) {
+          setAndLockPref("privacy.trackingprotection.enabled", true);
+          setAndLockPref("privacy.trackingprotection.pbmode.enabled", true);
+        } else {
+          setDefaultPref("privacy.trackingprotection.enabled", true);
+          setDefaultPref("privacy.trackingprotection.pbmode.enabled", true);
+        }
+      } else {
+        setAndLockPref("privacy.trackingprotection.enabled", false);
+        setAndLockPref("privacy.trackingprotection.pbmode.enabled", false);
+      }
+    }
+  },
+
+  "Extensions": {
+    onBeforeUIStartup(manager, param) {
+      if ("Install" in param) {
+        runOncePerModification("extensionsInstall", JSON.stringify(param.Install), () => {
+          for (let location of param.Install) {
+            let url;
+            if (location.includes("://")) {
+              // Assume location is an URI
+              url = location;
+            } else {
+              // Assume location is a file path
+              let xpiFile = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+              try {
+                xpiFile.initWithPath(location);
+              } catch (e) {
+                log.error(`Invalid extension path location - ${location}`);
+                continue;
+              }
+              url = Services.io.newFileURI(xpiFile).spec;
+            }
+            AddonManager.getInstallForURL(url, null, "application/x-xpinstall").then(install => {
+              if (install.addon && install.addon.appDisabled) {
+                log.error(`Incompatible add-on - ${location}`);
+                install.cancel();
+                return;
+              }
+              let listener = {
+              /* eslint-disable-next-line no-shadow */
+                onDownloadEnded: (install) => {
+                  if (install.addon && install.addon.appDisabled) {
+                    log.error(`Incompatible add-on - ${location}`);
+                    install.removeListener(listener);
+                    install.cancel();
+                  }
+                },
+                onDownloadFailed: () => {
+                  install.removeListener(listener);
+                  log.error(`Download failed - ${location}`);
+                },
+                onInstallFailed: () => {
+                  install.removeListener(listener);
+                  log.error(`Installation failed - ${location}`);
+                },
+                onInstallEnded: () => {
+                  install.removeListener(listener);
+                  log.debug(`Installation succeeded - ${location}`);
+                }
+              };
+              install.addListener(listener);
+              install.install();
+            });
+          }
+        });
+      }
+      if ("Uninstall" in param) {
+        runOncePerModification("extensionsUninstall", JSON.stringify(param.Uninstall), () => {
+          AddonManager.getAddonsByIDs(param.Uninstall, (addons) => {
+            for (let addon of addons) {
+              if (addon) {
+                try {
+                  addon.uninstall();
+                } catch (e) {
+                  // This can fail for add-ons that can't be uninstalled.
+                  // Just ignore.
+                }
+              }
+            }
+          });
+        });
+      }
+      if ("Locked" in param) {
+        for (let ID of param.Locked) {
+          manager.disallowFeature(`modify-extension:${ID}`);
+        }
+      }
+    }
+  },
+
   "FlashPlugin": {
     onBeforeUIStartup(manager, param) {
       addAllowDenyPermissions("plugin:flash", param.Allow, param.Block);
+
+      const FLASH_NEVER_ACTIVATE = 0;
+      const FLASH_ASK_TO_ACTIVATE = 1;
+      const FLASH_ALWAYS_ACTIVATE = 2;
+
+      let flashPrefVal;
+      if (param.Default === undefined) {
+        flashPrefVal = FLASH_ASK_TO_ACTIVATE;
+      } else if (param.Default) {
+        flashPrefVal = FLASH_ALWAYS_ACTIVATE;
+      } else {
+        flashPrefVal = FLASH_NEVER_ACTIVATE;
+      }
+      if (param.Locked) {
+        setAndLockPref("plugin.state.flash", flashPrefVal);
+      } else if (param.Default !== undefined) {
+        setDefaultPref("plugin.state.flash", flashPrefVal);
+      }
     }
   },
 
@@ -244,31 +512,190 @@ var Policies = {
         setAndLockPref("pref.browser.homepage.disable_button.bookmark_page", true);
         setAndLockPref("pref.browser.homepage.disable_button.restore_default", true);
       } else {
+        // The default pref for homepage is actually a complex pref. We need to
+        // set it in a special way such that it works properly
+        let homepagePrefVal = "data:text/plain,browser.startup.homepage=" +
+                               homepages;
+        setDefaultPref("browser.startup.homepage", homepagePrefVal);
+        setDefaultPref("browser.startup.page", 1);
         runOncePerModification("setHomepage", homepages, () => {
-          Services.prefs.setStringPref("browser.startup.homepage", homepages);
-          Services.prefs.setIntPref("browser.startup.page", 1);
+          Services.prefs.clearUserPref("browser.startup.homepage");
+          Services.prefs.clearUserPref("browser.startup.page");
         });
       }
     }
   },
 
-  "InstallAddons": {
+  "InstallAddonsPermission": {
     onBeforeUIStartup(manager, param) {
-      addAllowDenyPermissions("install", param.Allow, null);
+      if ("Allow" in param) {
+        addAllowDenyPermissions("install", param.Allow, null);
+      }
+      if ("Default" in param) {
+        setAndLockPref("xpinstall.enabled", param.Default);
+        if (!param.Default) {
+          manager.disallowFeature("about:debugging");
+        }
+      }
     }
   },
 
-  "Popups": {
-    onBeforeUIStartup(manager, param) {
-      addAllowDenyPermissions("popup", param.Allow, null);
+  "NoDefaultBookmarks": {
+    onProfileAfterChange(manager, param) {
+      if (param) {
+        manager.disallowFeature("defaultBookmarks");
+      }
     }
   },
 
-  "RememberPasswords": {
+  "OfferToSaveLogins": {
     onBeforeUIStartup(manager, param) {
       setAndLockPref("signon.rememberSignons", param);
     }
   },
+
+  "OverrideFirstRunPage": {
+    onProfileAfterChange(manager, param) {
+      let url = param ? param.spec : "";
+      setAndLockPref("startup.homepage_welcome_url", url);
+    }
+  },
+
+  "OverridePostUpdatePage": {
+    onProfileAfterChange(manager, param) {
+      let url = param ? param.spec : "";
+      setAndLockPref("startup.homepage_override_url", url);
+      // The pref startup.homepage_override_url is only used
+      // as a fallback when the update.xml file hasn't provided
+      // a specific post-update URL.
+      manager.disallowFeature("postUpdateCustomPage");
+    }
+  },
+
+  "PopupBlocking": {
+    onBeforeUIStartup(manager, param) {
+      addAllowDenyPermissions("popup", param.Allow, null);
+
+      if (param.Locked) {
+        let blockValue = true;
+        if (param.Default !== undefined && !param.Default) {
+          blockValue = false;
+        }
+        setAndLockPref("dom.disable_open_during_load", blockValue);
+      } else if (param.Default !== undefined) {
+        setDefaultPref("dom.disable_open_during_load", !!param.Default);
+      }
+    }
+  },
+
+  "Proxy": {
+    onBeforeAddons(manager, param) {
+      if (param.Locked) {
+        manager.disallowFeature("changeProxySettings");
+        ProxyPolicies.configureProxySettings(param, setAndLockPref);
+      } else {
+        ProxyPolicies.configureProxySettings(param, setDefaultPref);
+      }
+    }
+  },
+
+  "SanitizeOnShutdown": {
+    onBeforeUIStartup(manager, param) {
+      setAndLockPref("privacy.sanitize.sanitizeOnShutdown", param);
+      if (param) {
+        setAndLockPref("privacy.clearOnShutdown.cache", true);
+        setAndLockPref("privacy.clearOnShutdown.cookies", true);
+        setAndLockPref("privacy.clearOnShutdown.downloads", true);
+        setAndLockPref("privacy.clearOnShutdown.formdata", true);
+        setAndLockPref("privacy.clearOnShutdown.history", true);
+        setAndLockPref("privacy.clearOnShutdown.sessions", true);
+        setAndLockPref("privacy.clearOnShutdown.siteSettings", true);
+        setAndLockPref("privacy.clearOnShutdown.offlineApps", true);
+      }
+    }
+  },
+
+  "SearchBar": {
+    onAllWindowsRestored(manager, param) {
+      // This policy is meant to change the default behavior, not to force it.
+      // If this policy was already applied and the user chose move the search
+      // bar, don't move it again.
+      runOncePerModification("searchInNavBar", param, () => {
+        if (param == "separate") {
+          CustomizableUI.addWidgetToArea("search-container", CustomizableUI.AREA_NAVBAR,
+          CustomizableUI.getPlacementOfWidget("urlbar-container").position + 1);
+        } else if (param == "unified") {
+          CustomizableUI.removeWidgetFromArea("search-container");
+        }
+      });
+    }
+  },
+
+  "SearchEngines": {
+    onBeforeUIStartup(manager, param) {
+      if (param.PreventInstalls) {
+        manager.disallowFeature("installSearchEngine", true);
+      }
+    },
+    onAllWindowsRestored(manager, param) {
+      Services.search.init(() => {
+        if (param.Add) {
+          // Only rerun if the list of engine names has changed.
+          let engineNameList = param.Add.map(engine => engine.Name);
+          runOncePerModification("addSearchEngines",
+                                 JSON.stringify(engineNameList),
+                                 () => {
+            for (let newEngine of param.Add) {
+              let newEngineParameters = {
+                template:    newEngine.URLTemplate,
+                iconURL:     newEngine.IconURL,
+                alias:       newEngine.Alias,
+                description: newEngine.Description,
+                method:      newEngine.Method,
+                suggestURL:  newEngine.SuggestURLTemplate,
+                extensionID: "set-via-policy"
+              };
+              try {
+                Services.search.addEngineWithDetails(newEngine.Name,
+                                                     newEngineParameters);
+              } catch (ex) {
+                log.error("Unable to add search engine", ex);
+              }
+            }
+          });
+        }
+        if (param.Default) {
+          runOnce("setDefaultSearchEngine", () => {
+            let defaultEngine;
+            try {
+              defaultEngine = Services.search.getEngineByName(param.Default);
+              if (!defaultEngine) {
+                throw "No engine by that name could be found";
+              }
+            } catch (ex) {
+              log.error(`Search engine lookup failed when attempting to set ` +
+                        `the default engine. Requested engine was ` +
+                        `"${param.Default}".`, ex);
+            }
+            if (defaultEngine) {
+              try {
+                Services.search.currentEngine = defaultEngine;
+              } catch (ex) {
+                log.error("Unable to set the default search engine", ex);
+              }
+            }
+          });
+        }
+      });
+    }
+  },
+
+  "WebsiteFilter": {
+    onBeforeUIStartup(manager, param) {
+      this.filter = new WebsiteFilter(param.Block || [], param.Exceptions || []);
+    }
+  },
+
 };
 
 /*
@@ -297,6 +724,23 @@ function setAndLockPref(prefName, prefValue) {
     Services.prefs.unlockPref(prefName);
   }
 
+  setDefaultPref(prefName, prefValue);
+
+  Services.prefs.lockPref(prefName);
+}
+
+/**
+ * setDefaultPref
+ *
+ * Sets the _default_ value of a pref.
+ * The value is only changed in memory, and not stored to disk.
+ *
+ * @param {string} prefName
+ *        The pref to be changed
+ * @param {boolean,number,string} prefValue
+ *        The value to set
+ */
+function setDefaultPref(prefName, prefValue) {
   let defaults = Services.prefs.getDefaultBranch("");
 
   switch (typeof(prefValue)) {
@@ -316,8 +760,6 @@ function setAndLockPref(prefName, prefValue) {
       defaults.setStringPref(prefName, prefValue);
       break;
   }
-
-  Services.prefs.lockPref(prefName);
 }
 
 /**
@@ -362,6 +804,7 @@ function addAllowDenyPermissions(permissionName, allowList, blockList) {
  * @param {Functon} callback
  *        The callback to run only once.
  */
+ // eslint-disable-next-line no-unused-vars
 function runOnce(actionName, callback) {
   let prefName = `browser.policies.runonce.${actionName}`;
   if (Services.prefs.getBoolPref(prefName, false)) {

@@ -22,7 +22,7 @@
 #include "nsCSSPropertyID.h"
 #include "mozilla/dom/CSSValue.h"
 #include "nsWrapperCache.h"
-#include "nsString.h"
+#include "nsStringFwd.h"
 #include "mozilla/ErrorResult.h"
 #include "nsCOMPtr.h"
 
@@ -69,6 +69,14 @@ public:
     if (!found) {
       aReturn.Truncate();
     }
+  }
+
+  virtual void
+  GetCSSImageURLs(const nsAString& aPropertyName,
+                  nsTArray<nsString>& aImageURLs,
+                  mozilla::ErrorResult& aRv)
+  {
+    aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
   }
 
   // WebIDL interface for CSSStyleDeclaration

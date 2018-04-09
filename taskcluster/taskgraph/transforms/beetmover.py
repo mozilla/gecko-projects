@@ -154,8 +154,6 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
     'android-x86-nightly': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US,
     'android-aarch64-nightly': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US,
     'android-api-16-nightly': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US,
-    'android-x86-old-id-nightly': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US,
-    'android-api-16-old-id-nightly': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US,
     'macosx64-nightly': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
         "host/bin/mar",
         "host/bin/mbsdiff",
@@ -185,11 +183,9 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
     'linux-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
     'linux-devedition-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
     'android-x86-nightly-multi': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_MULTI,
-    'android-x86-old-id-nightly-multi': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_MULTI,
     'android-aarch64-nightly-multi': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_MULTI,
     'android-api-16-nightly-l10n': [],
     'android-api-16-nightly-multi': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_MULTI,
-    'android-api-16-old-id-nightly-multi': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_MULTI,
     'macosx64-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
     'macosx64-devedition-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
     'win32-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
@@ -233,8 +229,6 @@ UPSTREAM_ARTIFACT_SIGNED_PATHS = {
     'android-x86-nightly': ["en-US/target.apk"],
     'android-aarch64-nightly': ["en-US/target.apk"],
     'android-api-16-nightly': ["en-US/target.apk"],
-    'android-x86-old-id-nightly': ["en-US/target.apk"],
-    'android-api-16-old-id-nightly': ["en-US/target.apk"],
     'macosx64-nightly': _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_EN_US + [
         "target.dmg",
         "target.dmg.asc",
@@ -272,11 +266,9 @@ UPSTREAM_ARTIFACT_SIGNED_PATHS = {
         "target.tar.bz2.asc",
     ],
     'android-x86-nightly-multi': ["target.apk"],
-    'android-x86-old-id-nightly-multi': ["target.apk"],
     'android-aarch64-nightly-multi': ["target.apk"],
     'android-api-16-nightly-l10n': ["target.apk"],
     'android-api-16-nightly-multi': ["target.apk"],
-    'android-api-16-old-id-nightly-multi': ["target.apk"],
     'macosx64-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_L10N + [
         "target.dmg",
         "target.dmg.asc",
@@ -461,10 +453,16 @@ def craft_release_properties(config, job):
     else:
         build_platform = build_platform.replace('-source', '')
 
-    app_name = 'Fennec' if 'android' in job['label'] or 'fennec' in job['label'] else 'Firefox'
+    # XXX This should be explicitly set via build attributes or something
+    if 'android' in job['label'] or 'fennec' in job['label']:
+        app_name = 'Fennec'
+    elif config.graph_config['trust-domain'] == 'comm':
+        app_name = 'Thunderbird'
+    else:
+        # XXX Even DevEdition is called Firefox
+        app_name = 'Firefox'
 
     return {
-        # XXX Even DevEdition is called Firefox
         'app-name': app_name,
         'app-version': str(params['app_version']),
         'branch': params['project'],

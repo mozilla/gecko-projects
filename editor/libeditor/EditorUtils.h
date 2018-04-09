@@ -14,13 +14,11 @@
 #include "mozilla/GuardObjects.h"
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
-#include "nsIDOMNode.h"
 #include "nsIEditor.h"
 #include "nscore.h"
 
 class nsAtom;
 class nsIContentIterator;
-class nsIDOMDocument;
 class nsIDOMEvent;
 class nsISimpleEnumerator;
 class nsITransferable;
@@ -221,7 +219,7 @@ public:
       return EditorRawDOMPoint();
     }
     if (mGivenSplitPoint.IsSet()) {
-      return mGivenSplitPoint.AsRaw();
+      return EditorRawDOMPoint(mGivenSplitPoint);
     }
     if (!mPreviousNode) {
       return EditorRawDOMPoint(mNextNode);
@@ -544,18 +542,6 @@ public:
   static bool IsDescendantOf(const nsINode& aNode,
                              const nsINode& aParent,
                              EditorDOMPoint* aOutPoint);
-};
-
-class EditorHookUtils final
-{
-public:
-  static bool DoInsertionHook(nsIDOMDocument* aDoc, nsIDOMEvent* aEvent,
-                              nsITransferable* aTrans);
-
-private:
-  static nsresult GetHookEnumeratorFromDocument(
-                    nsIDOMDocument*aDoc,
-                    nsISimpleEnumerator** aEnumerator);
 };
 
 } // namespace mozilla

@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Test that makes sure web console eval works while the js debugger paused the
 // page, and while the inspector is active. See bug 886137.
 
@@ -13,7 +11,7 @@
 const TEST_URI = "https://example.com/browser/devtools/client/webconsole/" +
                  "new-console-output/test/mochitest/test-eval-in-stackframe.html";
 
-add_task(async function () {
+add_task(async function() {
   // Force the old debugger UI since it's directly used (see Bug 1301705)
   await pushPref("devtools.debugger.new-debugger-frontend", false);
   let hud = await openNewTabAndConsole(TEST_URI);
@@ -55,14 +53,14 @@ add_task(async function () {
   // The object inspector now looks like:
   // {...}
   // |  testProp2: "testValue2"
-  // |  __proto__: Object { ... }
+  // |  <prototype>: Object { ... }
 
   let oiNodes = oi.querySelectorAll(".node");
   is(oiNodes.length, 3, "There is the expected number of nodes in the tree");
 
   ok(oiNodes[0].textContent.includes(`{\u2026}`));
   ok(oiNodes[1].textContent.includes(`testProp2: "testValue2"`));
-  ok(oiNodes[2].textContent.includes(`__proto__: Object { \u2026 }`));
+  ok(oiNodes[2].textContent.includes(`<prototype>: Object { \u2026 }`));
 });
 
 async function waitForFrameAdded() {
@@ -73,7 +71,7 @@ async function waitForFrameAdded() {
   info("Waiting for framesadded");
   await new Promise(resolve => {
     thread.addOneTimeListener("framesadded", resolve);
-    ContentTask.spawn(gBrowser.selectedBrowser, {}, function* () {
+    ContentTask.spawn(gBrowser.selectedBrowser, {}, async function() {
       content.wrappedJSObject.firstCall();
     });
   });

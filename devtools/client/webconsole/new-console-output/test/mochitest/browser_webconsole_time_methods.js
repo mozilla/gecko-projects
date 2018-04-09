@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Tests that the Console API implements the time() and timeEnd() methods.
 
 "use strict";
@@ -21,7 +19,7 @@ const TEST_URI3 = "data:text/html;charset=utf-8,<script>" +
 const TEST_URI4 = "data:text/html;charset=utf-8," +
                   "<script>console.timeEnd('bTimer');</script>";
 
-add_task(async function () {
+add_task(async function() {
   // Calling console.time('aTimer') followed by console.timeEnd('aTimer')
   // should result in the aTimer being ended, and a message like aTimer: 123ms
   // printed to the console

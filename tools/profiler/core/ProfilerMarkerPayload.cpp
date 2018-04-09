@@ -9,6 +9,7 @@
 #include "gfxASurface.h"
 #include "Layers.h"
 #include "mozilla/Sprintf.h"
+#include "mozilla/Maybe.h"
 
 using namespace mozilla;
 
@@ -75,6 +76,17 @@ UserTimingMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
   StreamCommonProps("UserTiming", aWriter, aProcessStartTime, aUniqueStacks);
   aWriter.StringProperty("name", NS_ConvertUTF16toUTF8(mName).get());
   aWriter.StringProperty("entryType", mEntryType);
+
+  if (mStartMark.isSome()) {
+    aWriter.StringProperty("startMark", NS_ConvertUTF16toUTF8(mStartMark.value()).get());
+  } else {
+    aWriter.NullProperty("startMark");
+  }
+  if (mEndMark.isSome()) {
+    aWriter.StringProperty("endMark", NS_ConvertUTF16toUTF8(mEndMark.value()).get());
+  } else {
+    aWriter.NullProperty("endMark");
+  }
 }
 
 void
@@ -164,4 +176,18 @@ HangMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
                                  UniqueStacks& aUniqueStacks)
 {
   StreamCommonProps("BHR-detected hang", aWriter, aProcessStartTime, aUniqueStacks);
+}
+
+void
+StyleMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
+                                  const TimeStamp& aProcessStartTime,
+                                  UniqueStacks& aUniqueStacks)
+{
+  StreamCommonProps("Styles", aWriter, aProcessStartTime, aUniqueStacks);
+  aWriter.StringProperty("category", "Paint");
+  aWriter.IntProperty("elementsTraversed", mStats.mElementsTraversed);
+  aWriter.IntProperty("elementsStyled", mStats.mElementsStyled);
+  aWriter.IntProperty("elementsMatched", mStats.mElementsMatched);
+  aWriter.IntProperty("stylesShared", mStats.mStylesShared);
+  aWriter.IntProperty("stylesReused", mStats.mStylesReused);
 }

@@ -8,6 +8,8 @@
  * Communicates with privileged code via DOM Events.
  */
 
+/* import-globals-from unprivileged-fallbacks.js */
+
 "use strict";
 
 var paymentRequest = {
@@ -56,6 +58,7 @@ var paymentRequest = {
   },
 
   sendMessageToChrome(messageType, detail = {}) {
+    log.debug("sendMessageToChrome: ", messageType, detail);
     let event = new CustomEvent("paymentContentToChrome", {
       bubbles: true,
       detail: Object.assign({
@@ -67,6 +70,7 @@ var paymentRequest = {
 
   onChromeToContent({detail}) {
     let {messageType} = detail;
+    log.debug("onChromeToContent: ", messageType);
 
     switch (messageType) {
       case "responseSent": {
@@ -88,6 +92,7 @@ var paymentRequest = {
   },
 
   onPaymentRequestLoad(requestId) {
+    log.debug("onPaymentRequestLoad:", requestId);
     window.addEventListener("unload", this, {once: true});
     this.sendMessageToChrome("paymentDialogReady");
 
@@ -99,8 +104,10 @@ var paymentRequest = {
 
   async onShowPaymentRequest(detail) {
     // Handle getting called before the DOM is ready.
+    log.debug("onShowPaymentRequest:", detail);
     await this.domReadyPromise;
 
+    log.debug("onShowPaymentRequest: domReadyPromise resolved");
     document.querySelector("payment-dialog").setStateFromParent({
       request: detail.request,
       savedAddresses: detail.savedAddresses,
@@ -122,6 +129,31 @@ var paymentRequest = {
 
   changeShippingOption(data) {
     this.sendMessageToChrome("changeShippingOption", data);
+  },
+
+  /**
+   * Add/update an autofill storage record.
+   *
+   * If the the `guid` argument is provided update the record; otherwise, add it.
+   * @param {string} collectionName The autofill collection that record belongs to.
+   * @param {object} record The autofill record to add/update
+   * @param {string} [guid] The guid of the autofill record to update
+   */
+  updateAutofillRecord(collectionName, record, guid, {
+    errorStateChange,
+    preserveOldProperties,
+    selectedStateKey,
+    successStateChange,
+  }) {
+    this.sendMessageToChrome("updateAutofillRecord", {
+      collectionName,
+      guid,
+      record,
+      errorStateChange,
+      preserveOldProperties,
+      selectedStateKey,
+      successStateChange,
+    });
   },
 
   onPaymentRequestUnload() {

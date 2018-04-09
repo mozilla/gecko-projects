@@ -165,7 +165,7 @@ XPCOMUtils.defineLazyServiceGetters(this, {
 XPCOMUtils.defineLazyModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.jsm",
   AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
-  DevToolsShim: "chrome://devtools-shim/content/DevToolsShim.jsm",
+  DevToolsShim: "chrome://devtools-startup/content/DevToolsShim.jsm",
   GlobalState: "resource:///modules/sessionstore/GlobalState.jsm",
   PrivacyFilter: "resource:///modules/sessionstore/PrivacyFilter.jsm",
   PromiseUtils: "resource://gre/modules/PromiseUtils.jsm",
@@ -301,16 +301,16 @@ var SessionStore = {
     SessionStoreInternal.deleteWindowValue(aWindow, aKey);
   },
 
-  getTabValue: function ss_getTabValue(aTab, aKey) {
-    return SessionStoreInternal.getTabValue(aTab, aKey);
+  getCustomTabValue(aTab, aKey) {
+    return SessionStoreInternal.getCustomTabValue(aTab, aKey);
   },
 
-  setTabValue: function ss_setTabValue(aTab, aKey, aStringValue) {
-    SessionStoreInternal.setTabValue(aTab, aKey, aStringValue);
+  setCustomTabValue(aTab, aKey, aStringValue) {
+    SessionStoreInternal.setCustomTabValue(aTab, aKey, aStringValue);
   },
 
-  deleteTabValue: function ss_deleteTabValue(aTab, aKey) {
-    SessionStoreInternal.deleteTabValue(aTab, aKey);
+  deleteCustomTabValue(aTab, aKey) {
+    SessionStoreInternal.deleteCustomTabValue(aTab, aKey);
   },
 
   getLazyTabValue(aTab, aKey) {
@@ -451,7 +451,7 @@ var SessionStoreInternal = {
   // they get restored).
   _crashedBrowsers: new WeakSet(),
 
-  // A map (xul:browser -> nsIFrameLoader) that maps a browser to the last
+  // A map (xul:browser -> FrameLoader) that maps a browser to the last
   // associated frameLoader we heard about.
   _lastKnownFrameLoader: new WeakMap(),
 
@@ -2334,6 +2334,9 @@ var SessionStoreInternal = {
   },
 
   getTabState: function ssi_getTabState(aTab) {
+    if (!aTab || !aTab.ownerGlobal) {
+      throw Components.Exception("Need a valid tab", Cr.NS_ERROR_INVALID_ARG);
+    }
     if (!aTab.ownerGlobal.__SSi) {
       throw Components.Exception("Default view is not tracked", Cr.NS_ERROR_INVALID_ARG);
     }
@@ -2360,7 +2363,7 @@ var SessionStoreInternal = {
     }
 
     let window = aTab.ownerGlobal;
-    if (!("__SSi" in window)) {
+    if (!window || !("__SSi" in window)) {
       throw Components.Exception("Window is not tracked", Cr.NS_ERROR_INVALID_ARG);
     }
 
@@ -2375,6 +2378,9 @@ var SessionStoreInternal = {
   },
 
   duplicateTab: function ssi_duplicateTab(aWindow, aTab, aDelta = 0, aRestoreImmediately = true) {
+    if (!aTab || !aTab.ownerGlobal) {
+      throw Components.Exception("Need a valid tab", Cr.NS_ERROR_INVALID_ARG);
+    }
     if (!aTab.ownerGlobal.__SSi) {
       throw Components.Exception("Default view is not tracked", Cr.NS_ERROR_INVALID_ARG);
     }
@@ -2589,13 +2595,13 @@ var SessionStoreInternal = {
     this.saveStateDelayed(aWindow);
   },
 
-  getTabValue: function ssi_getTabValue(aTab, aKey) {
+  getCustomTabValue(aTab, aKey) {
     return (aTab.__SS_extdata || {})[aKey] || "";
   },
 
-  setTabValue: function ssi_setTabValue(aTab, aKey, aStringValue) {
+  setCustomTabValue(aTab, aKey, aStringValue) {
     if (typeof aStringValue != "string") {
-      throw new TypeError("setTabValue only accepts string values");
+      throw new TypeError("setCustomTabValue only accepts string values");
     }
 
     // If the tab hasn't been restored, then set the data there, otherwise we
@@ -2608,7 +2614,7 @@ var SessionStoreInternal = {
     this.saveStateDelayed(aTab.ownerGlobal);
   },
 
-  deleteTabValue: function ssi_deleteTabValue(aTab, aKey) {
+  deleteCustomTabValue(aTab, aKey) {
     if (aTab.__SS_extdata && aKey in aTab.__SS_extdata) {
       delete aTab.__SS_extdata[aKey];
       this.saveStateDelayed(aTab.ownerGlobal);
@@ -2901,7 +2907,7 @@ var SessionStoreInternal = {
     // a flash of the about:tabcrashed page after selecting
     // the revived tab.
     aTab.removeAttribute("crashed");
-    browser.loadURI("about:blank", null, null);
+    browser.loadURI("about:blank");
 
     let data = TabState.collect(aTab);
     this.restoreTab(aTab, data, {
@@ -3426,7 +3432,8 @@ var SessionStoreInternal = {
                                   skipAnimation: true,
                                   noInitialLabel: true,
                                   userContextId,
-                                  skipBackgroundNotify: true });
+                                  skipBackgroundNotify: true,
+                                  bulkOrderedOpen: true });
 
         if (select) {
           let leftoverTab = tabbrowser.selectedTab;
@@ -3507,10 +3514,6 @@ var SessionStoreInternal = {
     arrowScrollbox.smoothScroll = smoothScroll;
 
     TelemetryStopwatch.finish("FX_SESSION_RESTORE_RESTORE_WINDOW_MS");
-    if (Services.prefs.getIntPref("browser.tabs.restorebutton") != 0 ) {
-      Services.telemetry.scalarAdd("browser.session.restore.number_of_tabs", winData.tabs.length);
-      Services.telemetry.scalarAdd("browser.session.restore.number_of_win", 1);
-    }
 
     this._setWindowStateReady(aWindow);
 
@@ -3547,7 +3550,7 @@ var SessionStoreInternal = {
    *        a tab to speculatively connect on mouse hover.
    */
   speculativeConnectOnTabHover(tab) {
-    if (this._restore_on_demand && !tab.__SS_connectionPrepared && tab.hasAttribute("pending")) {
+    if (tab.__SS_lazyData && !tab.__SS_connectionPrepared) {
       let url = this.getLazyTabValue(tab, "url");
       let prepared = this.prepareConnectionToHost(url);
       // This is used to test if a connection has been made beforehand.
@@ -4342,23 +4345,41 @@ var SessionStoreInternal = {
       }
     }
 
-    var dimension;
-    switch (aAttribute) {
-    case "width":
-      dimension = aWindow.outerWidth;
-      break;
-    case "height":
-      dimension = aWindow.outerHeight;
-      break;
-    default:
-      dimension = aAttribute in aWindow ? aWindow[aAttribute] : "";
-      break;
+    // We want to persist the size / position in normal state, so that
+    // we can restore to them even if the window is currently maximized
+    // or minimized. However, attributes on window object only reflect
+    // the current state of the window, so when it isn't in the normal
+    // sizemode, their values aren't what we want the window to restore
+    // to. In that case, try to read from the attributes of the root
+    // element first instead.
+    if (aWindow.windowState != aWindow.STATE_NORMAL) {
+      let docElem = aWindow.document.documentElement;
+      let attr = parseInt(docElem.getAttribute(aAttribute), 10);
+      if (attr) {
+        if (aAttribute != "width" && aAttribute != "height") {
+          return attr;
+        }
+        // Width and height attribute report the inner size, but we want
+        // to store the outer size, so add the difference.
+        let xulWin = aWindow.getInterface(Ci.nsIDocShell)
+                            .treeOwner
+                            .QueryInterface(Ci.nsIInterfaceRequestor)
+                            .getInterface(Ci.nsIXULWindow);
+        let diff = aAttribute == "width"
+          ? xulWin.outerToInnerWidthDifferenceInCSSPixels
+          : xulWin.outerToInnerHeightDifferenceInCSSPixels;
+        return attr + diff;
+      }
     }
 
-    if (aWindow.windowState == aWindow.STATE_NORMAL) {
-      return dimension;
+    switch (aAttribute) {
+    case "width":
+      return aWindow.outerWidth;
+    case "height":
+      return aWindow.outerHeight;
+    default:
+      return aAttribute in aWindow ? aWindow[aAttribute] : "";
     }
-    return aWindow.document.documentElement.getAttribute(aAttribute) || dimension;
   },
 
   /**

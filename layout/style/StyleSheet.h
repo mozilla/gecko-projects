@@ -10,7 +10,6 @@
 #include "mozilla/css/SheetParsingMode.h"
 #include "mozilla/dom/CSSStyleSheetBinding.h"
 #include "mozilla/net/ReferrerPolicy.h"
-#include "mozilla/StyleBackendType.h"
 #include "mozilla/CORSMode.h"
 #include "mozilla/ServoUtils.h"
 #include "nsICSSLoaderObserver.h"
@@ -24,8 +23,8 @@ class nsCSSRuleProcessor;
 namespace mozilla {
 
 class CSSStyleSheet;
+class ServoStyleSet;
 class ServoStyleSheet;
-class StyleSetHandle;
 struct StyleSheetInfo;
 struct CSSStyleSheetInner;
 
@@ -33,6 +32,7 @@ namespace dom {
 class CSSImportRule;
 class CSSRuleList;
 class MediaList;
+class ShadowRoot;
 class SRIMetadata;
 } // namespace dom
 
@@ -48,7 +48,7 @@ class StyleSheet : public nsICSSLoaderObserver
                  , public nsWrapperCache
 {
 protected:
-  StyleSheet(StyleBackendType aType, css::SheetParsingMode aParsingMode);
+  explicit StyleSheet(css::SheetParsingMode aParsingMode);
   StyleSheet(const StyleSheet& aCopy,
              StyleSheet* aParentToUse,
              dom::CSSImportRule* aOwnerRuleToUse,
@@ -260,8 +260,8 @@ public:
   // it's owning media rule, plus it's used for the stylesheet media itself.
   void RuleChanged(css::Rule*);
 
-  void AddStyleSet(const StyleSetHandle& aStyleSet);
-  void DropStyleSet(const StyleSetHandle& aStyleSet);
+  void AddStyleSet(ServoStyleSet* aStyleSet);
+  void DropStyleSet(ServoStyleSet* aStyleSet);
 
   nsresult DeleteRuleFromGroup(css::GroupRule* aGroup, uint32_t aIndex);
   nsresult InsertRuleIntoGroup(const nsAString& aRule,
@@ -278,6 +278,8 @@ public:
   }
 
 private:
+  dom::ShadowRoot* GetContainingShadow() const;
+
   // Get a handle to the various stylesheet bits which live on the 'inner' for
   // gecko stylesheets and live on the StyleSheet for Servo stylesheets.
   inline StyleSheetInfo& SheetInfo();
@@ -296,6 +298,8 @@ protected:
 
   // Called when a rule is added to the sheet from CSSOM.
   void RuleRemoved(css::Rule&);
+
+  void ApplicableStateChanged(bool aApplicable);
 
   // Called from SetEnabled when the enabled state changed.
   void EnabledStateChanged();
@@ -348,7 +352,6 @@ protected:
   // and/or useful in user sheets.
   css::SheetParsingMode mParsingMode;
 
-  const StyleBackendType mType;
   bool                  mDisabled;
 
   enum dirtyFlagAttributes {
@@ -366,7 +369,7 @@ protected:
   // StyleSheet clones.
   StyleSheetInfo* mInner;
 
-  nsTArray<StyleSetHandle> mStyleSets;
+  nsTArray<ServoStyleSet*> mStyleSets;
 
   friend class ::nsCSSRuleProcessor;
 

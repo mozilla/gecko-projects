@@ -110,7 +110,8 @@ AST_MATCHER(QualType, isFloat) { return Node->isRealFloatingType(); }
 /// This matcher will match locations in system headers.  This is adopted from
 /// isExpansionInSystemHeader in newer clangs, but modified in order to work
 /// with old clangs that we use on infra.
-AST_MATCHER(BinaryOperator, isInSystemHeader) {
+AST_POLYMORPHIC_MATCHER(isInSystemHeader,                                      \
+                        AST_POLYMORPHIC_SUPPORTED_TYPES(Decl, Stmt)) {
   return ASTIsInSystemHeader(Finder->getASTContext(), Node);
 }
 
@@ -180,7 +181,7 @@ AST_MATCHER(CXXConstructorDecl, isInterestingImplicitCtor) {
       !ASTIsInSystemHeader(Declaration->getASTContext(), *Declaration) &&
       // Skip ignored namespaces and paths
       !isInIgnoredNamespaceForImplicitCtor(Declaration) &&
-      !isIgnoredPathForImplicitCtor(Declaration) &&
+      !inThirdPartyPath(Declaration) &&
       // We only want Converting constructors
       Declaration->isConvertingConstructor(false) &&
       // We don't want copy of move constructors, as those are allowed to be

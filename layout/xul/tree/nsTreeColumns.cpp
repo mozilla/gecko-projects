@@ -10,8 +10,7 @@
 #include "nsIBoxObject.h"
 #include "nsTreeColumns.h"
 #include "nsTreeUtils.h"
-#include "nsStyleContext.h"
-#include "nsDOMClassInfoID.h"
+#include "mozilla/ComputedStyle.h"
 #include "nsContentUtils.h"
 #include "nsTreeBodyFrame.h"
 #include "mozilla/dom/Element.h"
@@ -320,8 +319,7 @@ nsTreeColumn::Invalidate()
   // Figure out our column type. Default type is text.
   mType = nsITreeColumn::TYPE_TEXT;
   static Element::AttrValuesArray typestrings[] =
-    {&nsGkAtoms::checkbox, &nsGkAtoms::password,
-     nullptr};
+    {nsGkAtoms::checkbox, nsGkAtoms::password, nullptr};
   switch (mContent->AsElement()->FindAttrValueIn(kNameSpaceID_None,
                                                  nsGkAtoms::type,
                                                  typestrings,
@@ -333,7 +331,7 @@ nsTreeColumn::Invalidate()
   // Fetch the crop style.
   mCropStyle = 0;
   static Element::AttrValuesArray cropstrings[] =
-    {&nsGkAtoms::center, &nsGkAtoms::left, &nsGkAtoms::start, nullptr};
+    {nsGkAtoms::center, nsGkAtoms::left, nsGkAtoms::start, nullptr};
   switch (mContent->AsElement()->FindAttrValueIn(kNameSpaceID_None,
                                                  nsGkAtoms::crop, cropstrings,
                                                  eCaseMatters)) {

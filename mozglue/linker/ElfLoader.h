@@ -454,7 +454,7 @@ protected:
   const char *lastError;
 
 private:
-  ElfLoader() : expect_shutdown(true)
+  ElfLoader() : expect_shutdown(true), lastError(nullptr)
   {
     pthread_mutex_init(&handlesMutex, nullptr);
   }
@@ -609,7 +609,7 @@ private:
 
     void Init(AuxVector *auvx);
 
-    operator bool()
+    explicit operator bool()
     {
       return dbg;
     }
@@ -643,7 +643,7 @@ private:
       }
     protected:
       friend class DebuggerHelper;
-      iterator(const link_map *item): item(item) { }
+      explicit iterator(const link_map *item): item(item) { }
 
     private:
       const link_map *item;

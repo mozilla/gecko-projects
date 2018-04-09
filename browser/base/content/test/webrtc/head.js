@@ -2,6 +2,9 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource:///modules/SitePermissions.jsm");
 
 const PREF_PERMISSION_FAKE = "media.navigator.permission.fake";
+const PREF_AUDIO_LOOPBACK = "media.audio_loopback_dev";
+const PREF_VIDEO_LOOPBACK = "media.video_loopback_dev";
+const PREF_FAKE_STREAMS = "media.navigator.streams.fake";
 const CONTENT_SCRIPT_HELPER = getRootDirectory(gTestPath) + "get_user_media_content_script.js";
 
 const STATE_CAPTURE_ENABLED = Ci.nsIMediaManagerService.STATE_CAPTURE_ENABLED;
@@ -475,6 +478,10 @@ async function checkSharingUI(aExpected, aWin = window, aExpectedGlobal = null) 
   let sharing = identityBox.getAttribute("sharing");
   if (aExpected.screen)
     is(sharing, "screen", "showing screen icon in the identity block");
+  else if (aExpected.video == STATE_CAPTURE_ENABLED)
+    is(sharing, "camera", "showing camera icon in the identity block");
+  else if (aExpected.audio == STATE_CAPTURE_ENABLED)
+    is(sharing, "microphone", "showing mic icon in the identity block");
   else if (aExpected.video)
     is(sharing, "camera", "showing camera icon in the identity block");
   else if (aExpected.audio)
@@ -559,7 +566,17 @@ async function runTests(tests, options = {}) {
   ok(gIdentityHandler._identityPopup.hidden,
      "should start the test with the control center hidden");
 
-  await SpecialPowers.pushPrefEnv({"set": [[PREF_PERMISSION_FAKE, true]]});
+  // Set prefs so that permissions prompts are shown and loopback devices
+  // are not used. To test the chrome we want prompts to be shown, and
+  // these tests are flakey when using loopback devices (though it would
+  // be desirable to make them work with loopback in future).
+  let prefs = [
+    [PREF_PERMISSION_FAKE, true],
+    [PREF_AUDIO_LOOPBACK, ""],
+    [PREF_VIDEO_LOOPBACK, ""],
+    [PREF_FAKE_STREAMS, true]
+  ];
+  await SpecialPowers.pushPrefEnv({"set": prefs});
 
   for (let testCase of tests) {
     info(testCase.desc);
@@ -568,5 +585,5 @@ async function runTests(tests, options = {}) {
   }
 
   // Some tests destroy the original tab and leave a new one in its place.
-  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  BrowserTestUtils.removeTab(gBrowser.selectedTab);
 }

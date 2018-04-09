@@ -59,6 +59,12 @@
         ], 
         "revision": "default"
     }, 
+    "bs": {
+        "platforms": [
+            "android-multilocale"
+        ], 
+        "revision": "default"
+    }, 
     "ca": {
         "platforms": [
             "android-multilocale"
@@ -486,6 +492,12 @@
         "revision": "default"
     }, 
     "tr": {
+        "platforms": [
+            "android-multilocale"
+        ], 
+        "revision": "default"
+    }, 
+    "trs": {
         "platforms": [
             "android-multilocale"
         ], 

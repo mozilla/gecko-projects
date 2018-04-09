@@ -584,6 +584,27 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin,
         """VirtualenvMixin.create_virtualenv() assuemes we're using
         self.config['virtualenv_modules']. Since we are installing
         talos from its source, we have to wrap that method here."""
+        # if virtualenv already exists, just add to path and don't re-install, need it
+        # in path so can import jsonschema later when validating output for perfherder
+        _virtualenv_path = self.config.get("virtualenv_path")
+
+        if self.run_local and os.path.exists(_virtualenv_path):
+            self.info("Virtualenv already exists, skipping creation")
+            _python_interp = self.config.get('exes')['python']
+
+            if 'win' in self.platform_name():
+                _path = os.path.join(_virtualenv_path,
+                                     'Lib',
+                                     'site-packages')
+            else:
+                _path = os.path.join(_virtualenv_path,
+                                     'lib',
+                                     os.path.basename(_python_interp),
+                                     'site-packages')
+            sys.path.append(_path)
+            return
+
+        # virtualenv doesn't already exist so create it
         # install mozbase first, so we use in-tree versions
         if not self.run_local:
             mozbase_requirements = os.path.join(
@@ -612,8 +633,6 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin,
             requirements=[os.path.join(self.talos_path,
                                        'requirements.txt')]
         )
-        # install jsonschema for perfherder validation
-        self.install_module(module="jsonschema")
 
     def _validate_treeherder_data(self, parser):
         # late import is required, because install is done in create_virtualenv
@@ -692,10 +711,6 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin,
             if 'qr' in platform:
                 env['MOZ_WEBRENDER'] = '1'
                 env['MOZ_ACCELERATED'] = '1'
-            if 'stylo' in platform and 'stylo_disabled' not in platform:
-                env['STYLO_FORCE_ENABLED'] = '1'
-            if 'stylo_disabled' in platform:
-                env['STYLO_FORCE_DISABLED'] = '1'
             if 'styloseq' in platform:
                 env['STYLO_THREADS'] = '1'
 

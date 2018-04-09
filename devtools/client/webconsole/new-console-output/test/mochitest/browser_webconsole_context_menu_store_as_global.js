@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Test the "Store as global variable" menu item of the webconsole is enabled only when
 // clicking on messages that are associated with an object actor.
 
@@ -22,7 +20,7 @@ const TEST_URI = `data:text/html;charset=utf-8,<script>
   console.log("foo", window.symbol);
 </script>`;
 
-add_task(async function () {
+add_task(async function() {
   let hud = await openNewTabAndConsole(TEST_URI);
 
   let messages = await waitFor(() => findMessages(hud, "foo"));

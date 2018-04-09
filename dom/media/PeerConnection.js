@@ -68,9 +68,8 @@ class GlobalPCList {
     Services.obs.addObserver(this, "gmp-plugin-crash", true);
     Services.obs.addObserver(this, "PeerConnection:response:allow", true);
     Services.obs.addObserver(this, "PeerConnection:response:deny", true);
-    if (Cc["@mozilla.org/childprocessmessagemanager;1"]) {
-      let mm = Cc["@mozilla.org/childprocessmessagemanager;1"].getService(Ci.nsIMessageListenerManager);
-      mm.addMessageListener("gmp-plugin-crash", this);
+    if (Services.cpmm) {
+      Services.cpmm.addMessageListener("gmp-plugin-crash", this);
     }
   }
 
@@ -205,7 +204,6 @@ class GlobalPCList {
 }
 setupPrototype(GlobalPCList, {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
-                                         Ci.nsIMessageListener,
                                          Ci.nsISupportsWeakReference]),
   classID: PC_MANAGER_CID,
   _xpcom_factory: {
@@ -792,10 +790,6 @@ class RTCPeerConnection {
       options = optionsOrOnSucc;
     }
 
-    // Spec language implies that this needs to happen as if it were called
-    // before createOffer, so we do this as early as possible.
-    this._ensureTransceiversForOfferToReceive(options);
-
     // This entry-point handles both new and legacy call sig. Decipher which one
     if (onSuccess) {
       return this._legacy(onSuccess, onErr, () => this._createOffer(options));
@@ -846,6 +840,7 @@ class RTCPeerConnection {
 
   async _createOffer(options) {
     this._checkClosed();
+    this._ensureTransceiversForOfferToReceive(options);
     this._syncTransceivers();
     let origin = Cu.getWebIDLCallerPrincipal().origin;
     return this._chain(async () => {
@@ -1067,9 +1062,11 @@ class RTCPeerConnection {
     });
   }
 
-  setIdentityProvider(provider, protocol, username) {
+  setIdentityProvider(provider,
+                      {protocol, usernameHint, peerIdentity} = {}) {
     this._checkClosed();
-    this._localIdp.setIdentityProvider(provider, protocol, username);
+    this._localIdp.setIdentityProvider(provider,
+                                       protocol, usernameHint, peerIdentity);
   }
 
   async _getIdentityAssertion(origin) {

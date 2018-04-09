@@ -18,9 +18,16 @@
       <h1>Requests</h1>
       <button id="setRequest1">Request 1</button>
       <button id="setRequest2">Request 2</button>
-      <button id="setRequestContactNoShipping">Contact &amp; No Shipping</button>
+      <fieldset id="paymentOptions">
+        <legend>Payment Options</legend>
+        <label><input type="checkbox" autocomplete="off" name="requestPayerName" id="setRequestPayerName">requestPayerName</label>
+        <label><input type="checkbox" autocomplete="off" name="requestPayerEmail" id="setRequestPayerEmail">requestPayerEmail</label>
+        <label><input type="checkbox" autocomplete="off" name="requestPayerPhone" id="setRequestPayerPhone">requestPayerPhone</label>
+        <label><input type="checkbox" autocomplete="off" name="requestShipping" id="setRequestShipping">requestShipping</label>
+      </fieldset>
       <h1>Addresses</h1>
       <button id="setAddresses1">Set Addreses 1</button>
+      <button id="setDupesAddresses">Set Duped Addresses</button>
       <button id="delete1Address">Delete 1 Address</button>
       <h1>Payment Methods</h1>
       <button id="setBasicCards1">Set Basic Cards 1</button>
@@ -33,6 +40,7 @@
       <button id="setStateProcessing">Processing</button>
       <button id="setStateSuccess">Success</button>
       <button id="setStateFail">Fail</button>
+      <button id="setStateUnknown">Unknown</button>
     </div>
   </body>
 </html>

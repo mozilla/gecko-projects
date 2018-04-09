@@ -7,7 +7,6 @@ package org.mozilla.gecko.customtabs;
 
 import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
-import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
@@ -18,7 +17,6 @@ import android.os.Bundle;
 import android.provider.Browser;
 import android.support.annotation.ColorInt;
 import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
 import android.support.design.widget.Snackbar;
 import android.support.v4.util.SparseArrayCompat;
 import android.support.v7.app.ActionBar;
@@ -31,7 +29,6 @@ import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
-import android.widget.ListView;
 import android.widget.ProgressBar;
 
 import org.mozilla.gecko.ActivityHandlerHelper;
@@ -51,8 +48,6 @@ import org.mozilla.gecko.menu.GeckoMenu;
 import org.mozilla.gecko.menu.GeckoMenuInflater;
 import org.mozilla.gecko.mozglue.SafeIntent;
 import org.mozilla.gecko.permissions.Permissions;
-import org.mozilla.gecko.prompts.Prompt;
-import org.mozilla.gecko.prompts.PromptListItem;
 import org.mozilla.gecko.prompts.PromptService;
 import org.mozilla.gecko.text.TextSelection;
 import org.mozilla.gecko.util.ActivityUtils;
@@ -60,7 +55,6 @@ import org.mozilla.gecko.util.ColorUtil;
 import org.mozilla.gecko.util.GeckoBundle;
 import org.mozilla.gecko.util.IntentUtils;
 import org.mozilla.gecko.util.PackageUtil;
-import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.webapps.WebApps;
 import org.mozilla.gecko.widget.ActionModePresenter;
 import org.mozilla.gecko.widget.GeckoPopupMenu;
@@ -179,7 +173,7 @@ public class CustomTabsActivity extends AppCompatActivity
 
     @Override
     public void onDestroy() {
-        mGeckoSession.closeWindow();
+        mGeckoSession.close();
         mTextSelection.destroy();
         mFormAssistPopup.destroy();
         mDoorHangerPopup.destroy();
@@ -611,17 +605,20 @@ public class CustomTabsActivity extends AppCompatActivity
     }
 
     @Override
-    public boolean onLoadUri(final GeckoSession session, final String urlStr,
-                             final TargetWindow where) {
-        if (where != TargetWindow.NEW) {
-            return false;
+    public void onLoadRequest(final GeckoSession session, final String urlStr,
+                                 final int target,
+                                 final GeckoSession.Response<Boolean> response) {
+        if (target != GeckoSession.NavigationDelegate.TARGET_WINDOW_NEW) {
+            response.respond(false);
+            return;
         }
 
         final Uri uri = Uri.parse(urlStr);
         if (uri == null) {
             // We can't handle this, so deny it.
             Log.w(LOGTAG, "Failed to parse URL for navigation: " + urlStr);
-            return true;
+            response.respond(true);
+            return;
         }
 
         // Always use Fennec for these schemes.
@@ -646,13 +643,13 @@ public class CustomTabsActivity extends AppCompatActivity
             }
         }
 
-        return true;
+        response.respond(true);
     }
 
     @Override
     public void onNewSession(final GeckoSession session, final String uri,
                              final GeckoSession.Response<GeckoSession> response) {
-        // We should never get here because we abort loads that need a new session in onLoadUri()
+        // We should never get here because we abort loads that need a new session in onLoadRequest()
         throw new IllegalStateException("Unexpected new session");
     }
 
@@ -710,7 +707,8 @@ public class CustomTabsActivity extends AppCompatActivity
 
     @Override
     public void onContextMenu(GeckoSession session, int screenX, int screenY,
-                              final String uri, final String elementSrc) {
+                              final String uri, int elementType,
+                              final String elementSrc) {
 
         final String content = uri != null ? uri : elementSrc != null ? elementSrc : "";
         final Uri validUri = WebApps.getValidURL(content);
@@ -726,6 +724,9 @@ public class CustomTabsActivity extends AppCompatActivity
         });
     }
 
+    @Override
+    public void onExternalResponse(final GeckoSession session, final GeckoSession.WebResponseInfo request) {
+    }
 
     @Override // ActionModePresenter
     public void startActionMode(final ActionMode.Callback callback) {

@@ -1,8 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Tests that errors about invalid HPKP security headers are logged to the web console.
 
 "use strict";
@@ -15,7 +13,7 @@ const LEARN_MORE_URI = "https://developer.mozilla.org/docs/Web/HTTP/" +
 const NON_BUILTIN_ROOT_PREF =
   "security.cert_pinning.process_headers_from_non_builtin_roots";
 
-add_task(async function () {
+add_task(async function() {
   registerCleanupFunction(() => {
     Services.prefs.clearUserPref(NON_BUILTIN_ROOT_PREF);
   });

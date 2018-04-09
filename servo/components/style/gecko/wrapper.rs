@@ -32,7 +32,6 @@ use gecko_bindings::bindings;
 use gecko_bindings::bindings::{Gecko_ConstructStyleChildrenIterator, Gecko_DestroyStyleChildrenIterator};
 use gecko_bindings::bindings::{Gecko_ElementState, Gecko_GetDocumentLWTheme};
 use gecko_bindings::bindings::{Gecko_GetLastChild, Gecko_GetNextStyleChild};
-use gecko_bindings::bindings::{Gecko_IsRootElement, Gecko_MatchesElement};
 use gecko_bindings::bindings::{Gecko_SetNodeFlags, Gecko_UnsetNodeFlags};
 use gecko_bindings::bindings::Gecko_ClassOrClassList;
 use gecko_bindings::bindings::Gecko_ElementHasAnimations;
@@ -135,6 +134,13 @@ impl<'ld> TDocument for GeckoDocument<'ld> {
 #[derive(Clone, Copy)]
 pub struct GeckoShadowRoot<'lr>(pub &'lr structs::ShadowRoot);
 
+impl<'lr> PartialEq for GeckoShadowRoot<'lr> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.0 as *const _ == other.0 as *const _
+    }
+}
+
 impl<'lr> TShadowRoot for GeckoShadowRoot<'lr> {
     type ConcreteNode = GeckoNode<'lr>;
 
@@ -146,6 +152,31 @@ impl<'lr> TShadowRoot for GeckoShadowRoot<'lr> {
     #[inline]
     fn host(&self) -> GeckoElement<'lr> {
         GeckoElement(unsafe { &*self.0._base.mHost.mRawPtr })
+    }
+
+    #[inline]
+    fn style_data<'a>(&self) -> &'a CascadeData
+    where
+        Self: 'a,
+    {
+        debug_assert!(!self.0.mServoStyles.mPtr.is_null());
+
+        let author_styles = unsafe {
+            &*(self.0.mServoStyles.mPtr
+                as *const structs::RawServoAuthorStyles
+                as *const bindings::RawServoAuthorStyles)
+        };
+
+        let author_styles =
+            AuthorStyles::<GeckoStyleSheet>::from_ffi(author_styles);
+
+        debug_assert!(!author_styles.stylesheets.dirty());
+        debug_assert!(
+            author_styles.quirks_mode == self.as_node().owner_doc().quirks_mode() ||
+            author_styles.stylesheets.is_empty()
+        );
+
+        &author_styles.data
     }
 }
 
@@ -592,7 +623,8 @@ impl<'le> GeckoElement<'le> {
             return None;
         }
 
-        unsafe { bindings::Gecko_GetXBLBinding(self.0).map(GeckoXBLBinding) }
+        let slots = self.extended_slots()?;
+        unsafe { slots.mXBLBinding.mRawPtr.as_ref().map(GeckoXBLBinding) }
     }
 
     #[inline]
@@ -779,6 +811,21 @@ impl<'le> GeckoElement<'le> {
     fn is_in_anonymous_subtree(&self) -> bool {
         self.is_in_native_anonymous_subtree() ||
         (!self.as_node().is_in_shadow_tree() && self.has_xbl_binding_parent())
+    }
+
+    /// Returns true if this node is the shadow root of an use-element shadow tree.
+    #[inline]
+    fn is_root_of_use_element_shadow_tree(&self) -> bool {
+        if !self.is_root_of_anonymous_subtree() {
+            return false
+        }
+        match self.parent_element() {
+            Some(e) => {
+                e.local_name() == &*local_name!("use") &&
+                    e.namespace() == &*ns!("http://www.w3.org/2000/svg")
+            },
+            None => false,
+        }
     }
 
     fn css_transitions_info(&self) -> FnvHashMap<LonghandId, Arc<AnimationValue>> {
@@ -1015,29 +1062,6 @@ impl<'le> TElement for GeckoElement<'le> {
         self.before_or_after_pseudo(/* is_before = */ false)
     }
 
-    /// Ensure this accurately represents the rules that an element may ever
-    /// match, even in the native anonymous content case.
-    fn style_scope(&self) -> Self::ConcreteNode {
-        if self.implemented_pseudo_element().is_some() {
-            return self.closest_non_native_anonymous_ancestor().unwrap().style_scope();
-        }
-
-        if self.is_in_native_anonymous_subtree() {
-            return self.as_node().owner_doc().as_node();
-        }
-
-        if self.xbl_binding().is_some() || self.shadow_root().is_some() {
-            return self.as_node();
-        }
-
-        if let Some(parent) = self.xbl_binding_parent() {
-            return parent.as_node();
-        }
-
-        self.as_node().owner_doc().as_node()
-    }
-
-
     #[inline]
     fn is_html_element(&self) -> bool {
         self.namespace_id() == (structs::root::kNameSpaceID_XHTML as i32)
@@ -1083,12 +1107,24 @@ impl<'le> TElement for GeckoElement<'le> {
         unsafe { slots._base.mContainingShadow.mRawPtr.as_ref().map(GeckoShadowRoot) }
     }
 
-    /// Execute `f` for each anonymous content child element (apart from
-    /// ::before and ::after) whose originating element is `self`.
+    fn has_same_xbl_proto_binding_as(&self, other: Self) -> bool {
+        match (self.xbl_binding(), other.xbl_binding()) {
+            (None, None) => true,
+            (Some(a), Some(b)) => {
+                a.0.mPrototypeBinding == b.0.mPrototypeBinding
+            }
+            _ => false,
+        }
+    }
+
     fn each_anonymous_content_child<F>(&self, mut f: F)
     where
         F: FnMut(Self),
     {
+        if !self.may_have_anonymous_children() {
+            return;
+        }
+
         let array: *mut structs::nsTArray<*mut nsIContent> =
             unsafe { bindings::Gecko_GetAnonymousContentForElement(self.0) };
 
@@ -1158,7 +1194,6 @@ impl<'le> TElement for GeckoElement<'le> {
             let base_declaration: &structs::DeclarationBlock =
                 slots.mSMILOverrideStyleDeclaration.mRawPtr.as_ref()?;
 
-            assert_eq!(base_declaration.mType, structs::StyleBackendType_Servo);
             let declaration: &structs::ServoDeclarationBlock =
                 mem::transmute(base_declaration);
 
@@ -1457,26 +1492,6 @@ impl<'le> TElement for GeckoElement<'le> {
         // rule_hash_target, that is, our originating element.
         let mut current = Some(self.rule_hash_target());
         while let Some(element) = current {
-            // TODO(emilio): Deal with Shadow DOM separately than with XBL
-            // (right now we still rely on get_xbl_binding_parent()).
-            //
-            // That will allow to clean up a bunch in
-            // push_applicable_declarations.
-            if let Some(shadow) = element.shadow_root() {
-                debug_assert!(!shadow.0.mServoStyles.mPtr.is_null());
-                let author_styles = unsafe {
-                    &*(shadow.0.mServoStyles.mPtr
-                        as *const structs::RawServoAuthorStyles
-                        as *const bindings::RawServoAuthorStyles)
-                };
-
-                let author_styles: &'a _ = AuthorStyles::<GeckoStyleSheet>::from_ffi(author_styles);
-                f(&author_styles.data, author_styles.quirks_mode);
-                if element != *self {
-                    break;
-                }
-            }
-
             if let Some(binding) = element.xbl_binding() {
                 binding.each_xbl_cascade_data(&mut f);
 
@@ -1825,10 +1840,19 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
 
     #[inline]
     fn parent_element(&self) -> Option<Self> {
-        // FIXME(emilio): This will need to jump across if the parent node is a
-        // shadow root to get the shadow host.
         let parent_node = self.as_node().parent_node();
         parent_node.and_then(|n| n.as_element())
+    }
+
+    #[inline]
+    fn parent_node_is_shadow_root(&self) -> bool {
+        self.as_node().parent_node().map_or(false, |p| p.is_shadow_root())
+    }
+
+    #[inline]
+    fn containing_shadow_host(&self) -> Option<Self> {
+        let shadow = self.containing_shadow()?;
+        Some(shadow.host())
     }
 
     #[inline]
@@ -1974,7 +1998,7 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
         }
 
         unsafe {
-            Gecko_IsRootElement(self.0)
+            bindings::Gecko_IsRootElement(self.0)
         }
     }
 
@@ -2096,11 +2120,17 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
                 }
                 true
             }
-            NonTSPseudoClass::MozTableBorderNonzero |
-            NonTSPseudoClass::MozBrowserFrame |
-            NonTSPseudoClass::MozNativeAnonymous |
-            NonTSPseudoClass::MozUseShadowTreeRoot => unsafe {
-                Gecko_MatchesElement(pseudo_class.to_gecko_pseudoclasstype().unwrap(), self.0)
+            NonTSPseudoClass::MozNativeAnonymous => {
+                self.is_in_native_anonymous_subtree()
+            }
+            NonTSPseudoClass::MozUseShadowTreeRoot => {
+                self.is_root_of_use_element_shadow_tree()
+            }
+            NonTSPseudoClass::MozTableBorderNonzero => unsafe {
+                bindings::Gecko_IsTableBorderNonzero(self.0)
+            }
+            NonTSPseudoClass::MozBrowserFrame => unsafe {
+                bindings::Gecko_IsBrowserFrame(self.0)
             },
             NonTSPseudoClass::MozIsHTML => {
                 self.is_html_element_in_html_document()
@@ -2228,20 +2258,10 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
 
     #[inline]
     fn blocks_ancestor_combinators(&self) -> bool {
-        if !self.is_root_of_anonymous_subtree() {
-            return false
-        }
-
-        match self.parent_element() {
-            Some(e) => {
-                // If this element is the shadow root of an use-element shadow
-                // tree, according to the spec, we should not match rules
-                // cross the shadow DOM boundary.
-                e.local_name() == &*local_name!("use") &&
-                e.namespace() == &*ns!("http://www.w3.org/2000/svg")
-            },
-            None => false,
-        }
+        // If this element is the shadow root of an use-element shadow tree,
+        // according to the spec, we should not match rules cross the shadow
+        // DOM boundary.
+        self.is_root_of_use_element_shadow_tree()
     }
 }
 

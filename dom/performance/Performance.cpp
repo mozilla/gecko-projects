@@ -49,6 +49,7 @@ NS_IMPL_RELEASE_INHERITED(Performance, DOMEventTargetHelper)
 
 /* static */ already_AddRefed<Performance>
 Performance::CreateForMainThread(nsPIDOMWindowInner* aWindow,
+                                 nsIPrincipal* aPrincipal,
                                  nsDOMNavigationTiming* aDOMTiming,
                                  nsITimedChannel* aChannel)
 {
@@ -56,6 +57,7 @@ Performance::CreateForMainThread(nsPIDOMWindowInner* aWindow,
 
   RefPtr<Performance> performance =
     new PerformanceMainThread(aWindow, aDOMTiming, aChannel);
+  performance->mSystemPrincipal = nsContentUtils::IsSystemPrincipal(aPrincipal);
   return performance.forget();
 }
 
@@ -66,6 +68,7 @@ Performance::CreateForWorker(WorkerPrivate* aWorkerPrivate)
   aWorkerPrivate->AssertIsOnWorkerThread();
 
   RefPtr<Performance> performance = new PerformanceWorker(aWorkerPrivate);
+  performance->mSystemPrincipal = aWorkerPrivate->UsesSystemPrincipal();
   return performance.forget();
 }
 
@@ -88,10 +91,23 @@ Performance::~Performance()
 {}
 
 DOMHighResTimeStamp
-Performance::Now() const
+Performance::Now()
+{
+  DOMHighResTimeStamp rawTime = NowUnclamped();
+  if (mSystemPrincipal) {
+    return rawTime;
+  }
+
+  const double maxResolutionMs = 0.020;
+  DOMHighResTimeStamp minimallyClamped = floor(rawTime / maxResolutionMs) * maxResolutionMs;
+  return nsRFPService::ReduceTimePrecisionAsMSecs(minimallyClamped, GetRandomTimelineSeed());
+}
+
+DOMHighResTimeStamp
+Performance::NowUnclamped() const
 {
   TimeDuration duration = TimeStamp::Now() - CreationTimeStamp();
-  return RoundTime(duration.ToMilliseconds());
+  return duration.ToMilliseconds();
 }
 
 DOMHighResTimeStamp
@@ -102,8 +118,13 @@ Performance::TimeOrigin()
   }
 
   MOZ_ASSERT(mPerformanceService);
-  return nsRFPService::ReduceTimePrecisionAsMSecs(
-    mPerformanceService->TimeOrigin(CreationTimeStamp()));
+  DOMHighResTimeStamp rawTimeOrigin = mPerformanceService->TimeOrigin(CreationTimeStamp());
+  if (mSystemPrincipal) {
+    return rawTimeOrigin;
+  }
+
+  // Time Origin is an absolute timestamp, so we supply a 0 context mix-in
+  return nsRFPService::ReduceTimePrecisionAsMSecs(rawTimeOrigin, 0);
 }
 
 JSObject*
@@ -206,17 +227,6 @@ Performance::ClearResourceTimings()
   mResourceEntries.Clear();
 }
 
-DOMHighResTimeStamp
-Performance::RoundTime(double aTime) const
-{
-  // Round down to the nearest 20us, because if the timer is too accurate people
-  // can do nasty timing attacks with it.
-  const double maxResolutionMs = 0.020;
-  return nsRFPService::ReduceTimePrecisionAsMSecs(
-    floor(aTime / maxResolutionMs) * maxResolutionMs);
-}
-
-
 void
 Performance::Mark(const nsAString& aName, ErrorResult& aRv)
 {
@@ -254,7 +264,6 @@ Performance::ResolveTimestampFromName(const nsAString& aName,
                                       ErrorResult& aRv)
 {
   AutoTArray<RefPtr<PerformanceEntry>, 1> arr;
-  DOMHighResTimeStamp ts;
   Optional<nsAString> typeParam;
   nsAutoString str;
   str.AssignLiteral("mark");
@@ -269,7 +278,7 @@ Performance::ResolveTimestampFromName(const nsAString& aName,
     return 0;
   }
 
-  ts = GetPerformanceTimingFromString(aName);
+  DOMHighResTimeStamp ts = GetPerformanceTimingFromString(aName);
   if (!ts) {
     aRv.Throw(NS_ERROR_DOM_INVALID_ACCESS_ERR);
     return 0;
@@ -291,11 +300,6 @@ Performance::Measure(const nsAString& aName,
 
   DOMHighResTimeStamp startTime;
   DOMHighResTimeStamp endTime;
-
-  if (IsPerformanceTimingAttribute(aName)) {
-    aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
-    return;
-  }
 
   if (aStartMark.WasPassed()) {
     startTime = ResolveTimestampFromName(aStartMark.Value(), aRv);
@@ -328,9 +332,22 @@ Performance::Measure(const nsAString& aName,
                                TimeDuration::FromMilliseconds(startTime);
     TimeStamp endTimeStamp = CreationTimeStamp() +
                              TimeDuration::FromMilliseconds(endTime);
+
+    // Convert to Maybe values so that Optional types do not need to be used in
+    // the profiler.
+    Maybe<nsString> startMark;
+    if (aStartMark.WasPassed()) {
+      startMark.emplace(aStartMark.Value());
+    }
+    Maybe<nsString> endMark;
+    if (aEndMark.WasPassed()) {
+      endMark.emplace(aEndMark.Value());
+    }
+
     profiler_add_marker(
       "UserTiming",
-      MakeUnique<UserTimingMarkerPayload>(aName, startTimeStamp, endTimeStamp));
+      MakeUnique<UserTimingMarkerPayload>(aName, startMark, endMark,
+                                          startTimeStamp, endTimeStamp));
   }
 #endif
 }
@@ -372,8 +389,7 @@ Performance::TimingNotification(PerformanceEntry* aEntry,
 
   nsCOMPtr<EventTarget> et = do_QueryInterface(GetOwner());
   if (et) {
-    bool dummy = false;
-    et->DispatchEvent(perfEntryEvent, &dummy);
+    et->DispatchEvent(*perfEntryEvent);
   }
 }
 

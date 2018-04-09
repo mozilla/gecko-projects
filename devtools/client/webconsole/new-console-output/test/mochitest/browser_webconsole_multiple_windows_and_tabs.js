@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Tests that the Web Console doesn't leak when multiple tabs and windows are
 // opened and then closed. See Bug 595350.
 
@@ -12,7 +10,7 @@
 
 const TEST_URI = "data:text/html;charset=utf-8,Web Console test for bug 595350";
 
-add_task(async function () {
+add_task(async function() {
   requestLongerTimeout(3);
 
   const win1 = window;
@@ -37,12 +35,14 @@ add_task(async function () {
   for (let tab of tabs) {
     // Open the console in tab${i}.
     let hud = await openConsole(tab);
-    let tabWindow = hud.target.tab.linkedBrowser.contentWindowAsCPOW;
+    let browser = hud.target.tab.linkedBrowser;
     let message = "message for tab " + tabs.indexOf(tab);
 
     // Log a message in the newly opened console.
     let onMessage = waitForMessage(hud, message);
-    tabWindow.console.log(message);
+    await ContentTask.spawn(browser, message, function(msg) {
+      content.console.log(msg);
+    });
     await onMessage;
   }
 

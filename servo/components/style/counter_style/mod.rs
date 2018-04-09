@@ -8,20 +8,20 @@
 
 use Atom;
 use cssparser::{AtRuleParser, DeclarationListParser, DeclarationParser};
-use cssparser::{Parser, Token, CowRcStr};
+use cssparser::{Parser, Token, CowRcStr, SourceLocation};
 use error_reporting::{ContextualParseError, ParseErrorReporter};
-#[cfg(feature = "gecko")] use gecko::rules::CounterStyleDescriptors;
-#[cfg(feature = "gecko")] use gecko_bindings::structs::{ nsCSSCounterDesc, nsCSSValue };
 use parser::{ParserContext, ParserErrorContext, Parse};
 use selectors::parser::SelectorParseErrorKind;
 use shared_lock::{SharedRwLockReadGuard, ToCssWithGuard};
-use std::borrow::Cow;
 use std::fmt::{self, Write};
+use std::mem;
+use std::num::Wrapping;
 use std::ops::Range;
 use str::CssStringWriter;
 use style_traits::{Comma, CssWriter, OneOrMoreSeparated, ParseError};
 use style_traits::{StyleParseErrorKind, ToCss};
 use values::CustomIdent;
+use values::specified::Integer;
 
 /// Parse a counter style name reference.
 ///
@@ -55,13 +55,17 @@ pub fn parse_counter_style_name<'i, 't>(
     include!("predefined.rs")
 }
 
+fn is_valid_name_definition(ident: &CustomIdent) -> bool {
+    ident.0 != atom!("decimal") && ident.0 != atom!("disc")
+}
+
 /// Parse the prelude of an @counter-style rule
 pub fn parse_counter_style_name_definition<'i, 't>(
     input: &mut Parser<'i, 't>
 ) -> Result<CustomIdent, ParseError<'i>> {
     parse_counter_style_name(input)
         .and_then(|ident| {
-            if ident.0 == atom!("decimal") || ident.0 == atom!("disc") {
+            if !is_valid_name_definition(&ident) {
                 Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
             } else {
                 Ok(ident)
@@ -70,15 +74,17 @@ pub fn parse_counter_style_name_definition<'i, 't>(
 }
 
 /// Parse the body (inside `{}`) of an @counter-style rule
-pub fn parse_counter_style_body<'i, 't, R>(name: CustomIdent,
-                                           context: &ParserContext,
-                                           error_context: &ParserErrorContext<R>,
-                                           input: &mut Parser<'i, 't>)
-                                           -> Result<CounterStyleRuleData, ParseError<'i>>
+pub fn parse_counter_style_body<'i, 't, R>(
+    name: CustomIdent,
+    context: &ParserContext,
+    error_context: &ParserErrorContext<R>,
+    input: &mut Parser<'i, 't>,
+    location: SourceLocation,
+) -> Result<CounterStyleRuleData, ParseError<'i>>
     where R: ParseErrorReporter
 {
     let start = input.current_source_location();
-    let mut rule = CounterStyleRuleData::empty(name);
+    let mut rule = CounterStyleRuleData::empty(name, location);
     {
         let parser = CounterStyleRuleParser {
             context: context,
@@ -93,7 +99,7 @@ pub fn parse_counter_style_body<'i, 't, R>(name: CustomIdent,
             }
         }
     }
-    let error = match *rule.system() {
+    let error = match *rule.resolved_system() {
         ref system @ System::Cyclic |
         ref system @ System::Fixed { .. } |
         ref system @ System::Symbolic |
@@ -141,68 +147,60 @@ impl<'a, 'b, 'i> AtRuleParser<'i> for CounterStyleRuleParser<'a, 'b> {
     type Error = StyleParseErrorKind<'i>;
 }
 
-macro_rules! accessor {
-    (#[$doc: meta] $name: tt $ident: ident: $ty: ty = !) => {
-        #[$doc]
-        pub fn $ident(&self) -> Option<&$ty> {
-            self.$ident.as_ref()
+macro_rules! checker {
+    ($self:ident._($value:ident)) => {};
+    ($self:ident.$checker:ident($value:ident)) => {
+        if !$self.$checker(&$value) {
+            return false;
         }
     };
-
-    (#[$doc: meta] $name: tt $ident: ident: $ty: ty = $initial: expr) => {
-        #[$doc]
-        pub fn $ident(&self) -> Cow<$ty> {
-            if let Some(ref value) = self.$ident {
-                Cow::Borrowed(value)
-            } else {
-                Cow::Owned($initial)
-            }
-        }
-    }
 }
 
 macro_rules! counter_style_descriptors {
     (
-        $( #[$doc: meta] $name: tt $ident: ident / $gecko_ident: ident: $ty: ty = $initial: tt )+
+        $( #[$doc: meta] $name: tt $ident: ident / $setter: ident [$checker: tt]: $ty: ty, )+
     ) => {
         /// An @counter-style rule
         #[derive(Clone, Debug)]
         pub struct CounterStyleRuleData {
             name: CustomIdent,
+            generation: Wrapping<u32>,
             $(
                 #[$doc]
                 $ident: Option<$ty>,
             )+
+            /// Line and column of the @counter-style rule source code.
+            pub source_location: SourceLocation,
         }
 
         impl CounterStyleRuleData {
-            fn empty(name: CustomIdent) -> Self {
+            fn empty(name: CustomIdent, source_location: SourceLocation) -> Self {
                 CounterStyleRuleData {
                     name: name,
+                    generation: Wrapping(0),
                     $(
                         $ident: None,
                     )+
+                    source_location,
                 }
             }
 
-            /// Get the name of the counter style rule.
-            pub fn name(&self) -> &CustomIdent {
-                &self.name
-            }
-
             $(
-                accessor!(#[$doc] $name $ident: $ty = $initial);
+                #[$doc]
+                pub fn $ident(&self) -> Option<&$ty> {
+                    self.$ident.as_ref()
+                }
             )+
 
-            /// Convert to Gecko types
-            #[cfg(feature = "gecko")]
-            pub fn set_descriptors(self, descriptors: &mut CounterStyleDescriptors) {
-                $(
-                    if let Some(value) = self.$ident {
-                        descriptors[nsCSSCounterDesc::$gecko_ident as usize].set_from(value)
-                    }
-                )*
-            }
+            $(
+                #[$doc]
+                pub fn $setter(&mut self, value: $ty) -> bool {
+                    checker!(self.$checker(value));
+                    self.$ident = Some(value);
+                    self.generation += Wrapping(1);
+                    true
+                }
+            )+
         }
 
         impl<'a, 'b, 'i> DeclarationParser<'i> for CounterStyleRuleParser<'a, 'b> {
@@ -243,79 +241,95 @@ macro_rules! counter_style_descriptors {
                 dest.write_str("}")
             }
         }
-
-        /// Parse a descriptor into an `nsCSSValue`.
-        #[cfg(feature = "gecko")]
-        pub fn parse_counter_style_descriptor<'i, 't>(
-            context: &ParserContext,
-            input: &mut Parser<'i, 't>,
-            descriptor: nsCSSCounterDesc,
-            value: &mut nsCSSValue
-        ) -> Result<(), ParseError<'i>> {
-            match descriptor {
-                $(
-                    nsCSSCounterDesc::$gecko_ident => {
-                        let v: $ty =
-                            input.parse_entirely(|i| Parse::parse(context, i))?;
-                        value.set_from(v);
-                    }
-                )*
-                nsCSSCounterDesc::eCSSCounterDesc_COUNT |
-                nsCSSCounterDesc::eCSSCounterDesc_UNKNOWN => {
-                    panic!("invalid counter descriptor");
-                }
-            }
-            Ok(())
-        }
     }
 }
 
 counter_style_descriptors! {
     /// <https://drafts.csswg.org/css-counter-styles/#counter-style-system>
-    "system" system / eCSSCounterDesc_System: System = {
-        System::Symbolic
-    }
+    "system" system / set_system [check_system]: System,
 
     /// <https://drafts.csswg.org/css-counter-styles/#counter-style-negative>
-    "negative" negative / eCSSCounterDesc_Negative: Negative = {
-        Negative(Symbol::String("-".to_owned()), None)
-    }
+    "negative" negative / set_negative [_]: Negative,
 
     /// <https://drafts.csswg.org/css-counter-styles/#counter-style-prefix>
-    "prefix" prefix / eCSSCounterDesc_Prefix: Symbol = {
-        Symbol::String("".to_owned())
-    }
+    "prefix" prefix / set_prefix [_]: Symbol,
 
     /// <https://drafts.csswg.org/css-counter-styles/#counter-style-suffix>
-    "suffix" suffix / eCSSCounterDesc_Suffix: Symbol = {
-        Symbol::String(". ".to_owned())
-    }
+    "suffix" suffix / set_suffix [_]: Symbol,
 
     /// <https://drafts.csswg.org/css-counter-styles/#counter-style-range>
-    "range" range / eCSSCounterDesc_Range: Ranges = {
-        Ranges(Vec::new())  // Empty Vec represents 'auto'
-    }
+    "range" range / set_range [_]: Ranges,
 
     /// <https://drafts.csswg.org/css-counter-styles/#counter-style-pad>
-    "pad" pad / eCSSCounterDesc_Pad: Pad = {
-        Pad(0, Symbol::String("".to_owned()))
-    }
+    "pad" pad / set_pad [_]: Pad,
 
     /// <https://drafts.csswg.org/css-counter-styles/#counter-style-fallback>
-    "fallback" fallback / eCSSCounterDesc_Fallback: Fallback = {
-        // FIXME https://bugzilla.mozilla.org/show_bug.cgi?id=1359323 use atom!()
-        Fallback(CustomIdent(Atom::from("decimal")))
-    }
+    "fallback" fallback / set_fallback [_]: Fallback,
 
     /// <https://drafts.csswg.org/css-counter-styles/#descdef-counter-style-symbols>
-    "symbols" symbols / eCSSCounterDesc_Symbols: Symbols = !
+    "symbols" symbols / set_symbols [check_symbols]: Symbols,
 
     /// <https://drafts.csswg.org/css-counter-styles/#descdef-counter-style-additive-symbols>
-    "additive-symbols" additive_symbols / eCSSCounterDesc_AdditiveSymbols: AdditiveSymbols = !
+    "additive-symbols" additive_symbols /
+        set_additive_symbols [check_additive_symbols]: AdditiveSymbols,
 
     /// <https://drafts.csswg.org/css-counter-styles/#counter-style-speak-as>
-    "speak-as" speak_as / eCSSCounterDesc_SpeakAs: SpeakAs = {
-        SpeakAs::Auto
+    "speak-as" speak_as / set_speak_as [_]: SpeakAs,
+}
+
+// Implements the special checkers for some setters.
+// See <https://drafts.csswg.org/css-counter-styles/#the-csscounterstylerule-interface>
+impl CounterStyleRuleData {
+    /// Check that the system is effectively not changed. Only params
+    /// of system descriptor is changeable.
+    fn check_system(&self, value: &System) -> bool {
+        mem::discriminant(self.resolved_system()) == mem::discriminant(value)
+    }
+
+    fn check_symbols(&self, value: &Symbols) -> bool {
+        match *self.resolved_system() {
+            // These two systems require at least two symbols.
+            System::Numeric | System::Alphabetic => value.0.len() >= 2,
+            // No symbols should be set for extends system.
+            System::Extends(_) => false,
+            _ => true,
+        }
+    }
+
+    fn check_additive_symbols(&self, _value: &AdditiveSymbols) -> bool {
+        match *self.resolved_system() {
+            // No additive symbols should be set for extends system.
+            System::Extends(_) => false,
+            _ => true,
+        }
+    }
+}
+
+impl CounterStyleRuleData {
+    /// Get the name of the counter style rule.
+    pub fn name(&self) -> &CustomIdent {
+        &self.name
+    }
+
+    /// Set the name of the counter style rule. Caller must ensure that
+    /// the name is valid.
+    pub fn set_name(&mut self, name: CustomIdent) {
+        debug_assert!(is_valid_name_definition(&name));
+        self.name = name;
+    }
+
+    /// Get the current generation of the counter style rule.
+    pub fn generation(&self) -> u32 {
+        self.generation.0
+    }
+
+    /// Get the system of this counter style rule, default to
+    /// `symbolic` if not specified.
+    pub fn resolved_system(&self) -> &System {
+        match self.system {
+            Some(ref system) => system,
+            None => &System::Symbolic,
+        }
     }
 }
 
@@ -335,14 +349,14 @@ pub enum System {
     /// 'fixed <integer>?'
     Fixed {
         /// '<integer>?'
-        first_symbol_value: Option<i32>
+        first_symbol_value: Option<Integer>
     },
     /// 'extends <counter-style-name>'
     Extends(CustomIdent),
 }
 
 impl Parse for System {
-    fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
+    fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
         try_match_ident_ignore_ascii_case! { input,
             "cyclic" => Ok(System::Cyclic),
             "numeric" => Ok(System::Numeric),
@@ -350,7 +364,7 @@ impl Parse for System {
             "symbolic" => Ok(System::Symbolic),
             "additive" => Ok(System::Additive),
             "fixed" => {
-                let first_symbol_value = input.try(|i| i.expect_integer()).ok();
+                let first_symbol_value = input.try(|i| Integer::parse(context, i)).ok();
                 Ok(System::Fixed { first_symbol_value: first_symbol_value })
             }
             "extends" => {
@@ -450,21 +464,19 @@ pub struct Ranges(pub Vec<Range<CounterBound>>);
 #[derive(Clone, Copy, Debug, ToCss)]
 pub enum CounterBound {
     /// An integer bound.
-    ///
-    /// FIXME(https://github.com/servo/servo/issues/20197)
-    Integer(i32),
+    Integer(Integer),
     /// The infinite bound.
     Infinite,
 }
 
 impl Parse for Ranges {
-    fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
+    fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
         if input.try(|input| input.expect_ident_matching("auto")).is_ok() {
             Ok(Ranges(Vec::new()))
         } else {
             input.parse_comma_separated(|input| {
-                let opt_start = parse_bound(input)?;
-                let opt_end = parse_bound(input)?;
+                let opt_start = parse_bound(context, input)?;
+                let opt_end = parse_bound(context, input)?;
                 if let (CounterBound::Integer(start), CounterBound::Integer(end)) = (opt_start, opt_end) {
                     if start > end {
                         return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
@@ -477,18 +489,13 @@ impl Parse for Ranges {
 }
 
 fn parse_bound<'i, 't>(
-    input: &mut Parser<'i, 't>,
+    context: &ParserContext, input: &mut Parser<'i, 't>,
 ) -> Result<CounterBound, ParseError<'i>> {
-    let location = input.current_source_location();
-    match *input.next()? {
-        Token::Number { int_value: Some(v), .. } => {
-            Ok(CounterBound::Integer(v))
-        }
-        Token::Ident(ref ident) if ident.eq_ignore_ascii_case("infinite") => {
-            Ok(CounterBound::Infinite)
-        }
-        ref t => Err(location.new_unexpected_token_error(t.clone())),
+    if let Ok(integer) = input.try(|input| Integer::parse(context, input)) {
+        return Ok(CounterBound::Integer(integer));
     }
+    input.expect_ident_matching("infinite")?;
+    Ok(CounterBound::Infinite)
 }
 
 impl ToCss for Ranges {
@@ -521,17 +528,14 @@ where
 
 /// <https://drafts.csswg.org/css-counter-styles/#counter-style-pad>
 #[derive(Clone, Debug, ToCss)]
-pub struct Pad(pub u32, pub Symbol);
+pub struct Pad(pub Integer, pub Symbol);
 
 impl Parse for Pad {
     fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
         let pad_with = input.try(|input| Symbol::parse(context, input));
-        let min_length = input.expect_integer()?;
-        if min_length < 0 {
-            return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
-        }
+        let min_length = Integer::parse_non_negative(context, input)?;
         let pad_with = pad_with.or_else(|_| Symbol::parse(context, input))?;
-        Ok(Pad(min_length as u32, pad_with))
+        Ok(Pad(min_length, pad_with))
     }
 }
 
@@ -547,9 +551,8 @@ impl Parse for Fallback {
 
 /// <https://drafts.csswg.org/css-counter-styles/#descdef-counter-style-symbols>
 #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[css(iterable)]
 #[derive(Clone, Debug, Eq, PartialEq, ToComputedValue, ToCss)]
-pub struct Symbols(pub Vec<Symbol>);
+pub struct Symbols(#[css(iterable)] pub Vec<Symbol>);
 
 impl Parse for Symbols {
     fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
@@ -587,7 +590,7 @@ impl Parse for AdditiveSymbols {
 #[derive(Clone, Debug, ToCss)]
 pub struct AdditiveTuple {
     /// <integer>
-    pub weight: u32,
+    pub weight: Integer,
     /// <symbol>
     pub symbol: Symbol,
 }
@@ -599,13 +602,10 @@ impl OneOrMoreSeparated for AdditiveTuple {
 impl Parse for AdditiveTuple {
     fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
         let symbol = input.try(|input| Symbol::parse(context, input));
-        let weight = input.expect_integer()?;
-        if weight < 0 {
-            return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
-        }
+        let weight = Integer::parse_non_negative(context, input)?;
         let symbol = symbol.or_else(|_| Symbol::parse(context, input))?;
         Ok(AdditiveTuple {
-            weight: weight as u32,
+            weight: weight,
             symbol: symbol,
         })
     }

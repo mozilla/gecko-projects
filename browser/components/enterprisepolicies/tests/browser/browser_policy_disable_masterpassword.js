@@ -37,7 +37,6 @@ async function checkDeviceManager({buttonIsDisabled}) {
 
 async function checkAboutPreferences({checkboxIsDisabled}) {
   await BrowserTestUtils.withNewTab("about:preferences#privacy", async browser => {
-  // eslint-disable-next-line mozilla/no-cpows-in-tests
   is(browser.contentDocument.getElementById("useMasterPassword").disabled, checkboxIsDisabled,
     "Master Password checkbox is in the correct state: " + checkboxIsDisabled);
 });
@@ -54,11 +53,11 @@ add_task(async function test_policy_disable_masterpassword() {
 
   await setupPolicyEngineWithJson({
     "policies": {
-      "CreateMasterPassword": false
+      "DisableMasterPasswordCreation": true
     }
   });
 
-  // With the `CreateMasterPassword: false` policy active, the
+  // With the `DisableMasterPasswordCreation: true` policy active, the
   // UI entry points for creating a Master Password should be disabled.
   await checkDeviceManager({buttonIsDisabled: true});
   await checkAboutPreferences({checkboxIsDisabled: true});

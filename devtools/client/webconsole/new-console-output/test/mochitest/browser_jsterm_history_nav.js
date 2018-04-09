@@ -11,16 +11,16 @@
 const TEST_URI = "data:text/html;charset=utf-8,<p>bug 660806 - history " +
                  "navigation must not show the autocomplete popup";
 
-add_task(async function () {
+add_task(async function() {
   let { jsterm } = await openNewTabAndConsole(TEST_URI);
   let popup = jsterm.autocompletePopup;
 
   // The autocomplete popup should never be displayed during the test.
-  let onShown = function () {
+  let onShown = function() {
     ok(false, "popup shown");
   };
 
-  jsterm.execute(`window.foobarBug660806 = {
+  await jsterm.execute(`window.foobarBug660806 = {
     'location': 'value0',
     'locationbar': 'value1'
   }`);
@@ -35,6 +35,9 @@ add_task(async function () {
      "lastInputValue is correct");
 
   EventUtils.synthesizeKey("KEY_Enter");
+
+  // Wait for the execution to complete and clear the value.
+  await waitFor(() => !jsterm.lastInputValue);
 
   let onSetInputValue = jsterm.once("set-input-value");
   EventUtils.synthesizeKey("KEY_ArrowUp");

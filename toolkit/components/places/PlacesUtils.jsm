@@ -96,6 +96,34 @@ async function notifyKeywordChange(url, keyword, source) {
 }
 
 /**
+ * Synchonously fetches all annotations for an item, including all properties of
+ * each annotation which would be required to recreate it.
+ * @note The async version (PlacesUtils.promiseAnnotationsForItem) should be
+ *       used, unless there's absolutely no way to make the caller async.
+ * @param aItemId
+ *        The identifier of the itme for which annotations are to be
+ *        retrieved.
+ * @return Array of objects, each containing the following properties:
+ *         name, flags, expires, mimeType, type, value
+ */
+function getAnnotationsForItem(aItemId) {
+  var annos = [];
+  var annoNames = PlacesUtils.annotations.getItemAnnotationNames(aItemId);
+  for (let name of annoNames) {
+    let value = {}, flags = {}, exp = {}, storageType = {};
+    PlacesUtils.annotations.getItemAnnotationInfo(aItemId, name, value,
+                                                  flags, exp, storageType);
+    annos.push({
+      name,
+      flags: flags.value,
+      expires: exp.value,
+      value: value.value
+    });
+  }
+  return annos;
+}
+
+/**
  * Serializes the given node in JSON format.
  *
  * @param aNode
@@ -107,7 +135,11 @@ function serializeNode(aNode, aIsLivemark) {
   let data = {};
 
   data.title = aNode.title;
+  // The id is no longer used for copying within the same instance/session of
+  // Firefox as of at least 61. However, we keep the id for now to maintain
+  // backwards compat of drag and drop with older Firefox versions.
   data.id = aNode.itemId;
+  data.itemGuid = aNode.bookmarkGuid;
   data.livemark = aIsLivemark;
   // Add an instanceId so we can tell which instance of an FF session the data
   // is coming from.
@@ -118,10 +150,8 @@ function serializeNode(aNode, aIsLivemark) {
 
   // Some nodes, e.g. the unfiled/menu/toolbar ones can have a virtual guid, so
   // we ignore any that are a folder shortcut. These will be handled below.
-  if (guid && !PlacesUtils.bookmarks.isVirtualRootItem(guid)) {
-    // TODO: Really guid should be set on everything, however currently this upsets
-    // the drag 'n' drop / cut/copy/paste operations.
-    data.itemGuid = guid;
+  if (guid && !PlacesUtils.bookmarks.isVirtualRootItem(guid) &&
+      !PlacesUtils.isVirtualLeftPaneItem(guid)) {
     if (aNode.parent) {
       data.parent = aNode.parent.itemId;
       data.parentGuid = aNode.parent.bookmarkGuid;
@@ -135,7 +165,7 @@ function serializeNode(aNode, aIsLivemark) {
     data.dateAdded = aNode.dateAdded;
     data.lastModified = aNode.lastModified;
 
-    let annos = PlacesUtils.getAnnotationsForItem(data.id);
+    let annos = getAnnotationsForItem(data.id);
     if (annos.length > 0)
       data.annos = annos;
   }
@@ -322,12 +352,11 @@ var PlacesUtils = {
   // Used to track the action that populated the clipboard.
   TYPE_X_MOZ_PLACE_ACTION: "text/x-moz-place-action",
 
-  EXCLUDE_FROM_BACKUP_ANNO: "places/excludeFromBackup",
   LMANNO_FEEDURI: "livemark/feedURI",
   LMANNO_SITEURI: "livemark/siteURI",
-  POST_DATA_ANNO: "bookmarkProperties/POSTData",
   READ_ONLY_ANNO: "placesInternal/READ_ONLY",
   CHARSET_ANNO: "URIProperties/characterSet",
+  // Deprecated: This is only used for supporting import from older datasets.
   MOBILE_ROOT_ANNO: "mobile/bookmarksRoot",
 
   TOPIC_SHUTDOWN: "places-shutdown",
@@ -342,6 +371,29 @@ var PlacesUtils = {
   TOPIC_BOOKMARKS_RESTORE_FAILED: "bookmarks-restore-failed",
 
   ACTION_SCHEME: "moz-action:",
+
+  /**
+    * GUIDs associated with virtual queries that are used for displaying the
+    * top-level folders in the left pane.
+    */
+  virtualAllBookmarksGuid: "allbms_____v",
+  virtualHistoryGuid: "history____v",
+  virtualDownloadsGuid: "downloads__v",
+  virtualTagsGuid: "tags_______v",
+
+  /**
+   * Checks if a guid is a virtual left-pane root.
+   *
+   * @param {String} guid The guid of the item to look for.
+   * @returns {Boolean} true if guid is a virtual root, false otherwise.
+   */
+  isVirtualLeftPaneItem(guid) {
+    return guid == PlacesUtils.virtualAllBookmarksGuid ||
+           guid == PlacesUtils.virtualHistoryGuid ||
+           guid == PlacesUtils.virtualDownloadsGuid ||
+           guid == PlacesUtils.virtualTagsGuid;
+  },
+
 
   asContainer: aNode => asContainer(aNode),
   asQuery: aNode => asQuery(aNode),
@@ -729,9 +781,20 @@ var PlacesUtils = {
    * @returns true if the node is a tag container, false otherwise
    */
   nodeIsTagQuery: function PU_nodeIsTagQuery(aNode) {
-    return aNode.type == Ci.nsINavHistoryResultNode.RESULT_TYPE_QUERY &&
-           asQuery(aNode).queryOptions.resultType ==
-             Ci.nsINavHistoryQueryOptions.RESULTS_AS_TAG_CONTENTS;
+    if (aNode.type != Ci.nsINavHistoryResultNode.RESULT_TYPE_QUERY)
+      return false;
+    // Direct child of RESULTS_AS_TAGS_ROOT.
+    let parent = aNode.parent;
+    if (parent && PlacesUtils.asQuery(parent).queryOptions.resultType ==
+                    Ci.nsINavHistoryQueryOptions.RESULTS_AS_TAGS_ROOT)
+      return true;
+    // We must also support the right pane of the Library, when the tag query
+    // is the root node. Unfortunately this is also valid for any tag query
+    // selected in the left pane that is not a direct child of RESULTS_AS_TAGS_ROOT.
+    if (!parent && aNode == aNode.parentResult.root &&
+        PlacesUtils.asQuery(aNode).query.tags.length == 1)
+      return true;
+    return false;
   },
 
   /**
@@ -769,16 +832,8 @@ var PlacesUtils = {
    * node.itemId, but for folder-shortcuts that's node.folderItemId.
    */
   getConcreteItemId: function PU_getConcreteItemId(aNode) {
-    if (aNode.type == Ci.nsINavHistoryResultNode.RESULT_TYPE_FOLDER_SHORTCUT)
-      return asQuery(aNode).folderItemId;
-    else if (PlacesUtils.nodeIsTagQuery(aNode)) {
-      // RESULTS_AS_TAG_CONTENTS queries are similar to folder shortcuts
-      // so we can still get the concrete itemId for them.
-      var queries = aNode.getQueries();
-      var folders = queries[0].getFolders();
-      return folders[0];
-    }
-    return aNode.itemId;
+    return aNode.type == Ci.nsINavHistoryResultNode.RESULT_TYPE_FOLDER_SHORTCUT ?
+             asQuery(aNode).folderItemId : aNode.itemId;
   },
 
   /**
@@ -923,6 +978,11 @@ var PlacesUtils = {
       case this.TYPE_X_MOZ_URL: {
         if (aFeedURI || PlacesUtils.nodeIsURI(aNode))
           return (aFeedURI || aNode.uri) + NEWLINE + aNode.title;
+        if (PlacesUtils.nodeIsContainer(aNode)) {
+          return PlacesUtils.getURLsForContainerNode(aNode)
+            .map(item => item.uri + "\n" + item.title)
+            .join("\n");
+        }
         return "";
       }
       case this.TYPE_HTML: {
@@ -1149,26 +1209,33 @@ var PlacesUtils = {
   /**
    * Fetch all annotations for an item, including all properties of each
    * annotation which would be required to recreate it.
-   * @param aItemId
+   * @param itemId
    *        The identifier of the itme for which annotations are to be
    *        retrieved.
    * @return Array of objects, each containing the following properties:
    *         name, flags, expires, mimeType, type, value
    */
-  getAnnotationsForItem: function PU_getAnnotationsForItem(aItemId) {
-    var annosvc = this.annotations;
-    var annos = [], val = null;
-    var annoNames = annosvc.getItemAnnotationNames(aItemId);
-    for (var i = 0; i < annoNames.length; i++) {
-      var flags = {}, exp = {}, storageType = {};
-      annosvc.getItemAnnotationInfo(aItemId, annoNames[i], flags, exp, storageType);
-      val = annosvc.getItemAnnotation(aItemId, annoNames[i]);
-      annos.push({name: annoNames[i],
-                  flags: flags.value,
-                  expires: exp.value,
-                  value: val});
+  async promiseAnnotationsForItem(itemId) {
+    let db =  await PlacesUtils.promiseDBConnection();
+    let rows = await db.executeCached(
+      `SELECT n.name, a.content, a.expiration, a.flags
+       FROM moz_items_annos a
+       JOIN moz_anno_attributes n ON a.anno_attribute_id = n.id
+       WHERE a.item_id = :itemId
+      `, { itemId });
+
+    let result = [];
+    for (let row of rows) {
+      let anno = {
+        name: row.getResultByName("name"),
+        value: row.getResultByName("content"),
+        expires: row.getResultByName("expiration"),
+        flags: row.getResultByName("flags"),
+      };
+      result.push(anno);
     }
-    return annos;
+
+    return result;
   },
 
   /**
@@ -1286,13 +1353,11 @@ var PlacesUtils = {
       return aNode;
 
     // Otherwise, get contents manually.
-    var queries = {}, options = {};
-    this.history.queryStringToQueries(aNode.uri, queries, {}, options);
+    var query = {}, options = {};
+    this.history.queryStringToQuery(aNode.uri, query, options);
     options.value.excludeItems = aExcludeItems;
     options.value.expandQueries = aExpandQueries;
-    return this.history.executeQueries(queries.value,
-                                       queries.value.length,
-                                       options.value).root;
+    return this.history.executeQuery(query.value, options.value).root;
   },
 
   /**
@@ -1361,7 +1426,11 @@ var PlacesUtils = {
     for (let i = 0; i < root.childCount; ++i) {
       let child = root.getChild(i);
       if (this.nodeIsURI(child))
-        urls.push({uri: child.uri, isBookmark: this.nodeIsBookmark(child)});
+        urls.push({
+          uri: child.uri,
+          isBookmark: this.nodeIsBookmark(child),
+          title: child.title,
+        });
     }
 
     if (!wasOpen) {
@@ -1680,14 +1749,14 @@ var PlacesUtils = {
       // Add annotations.
       if (aRow.getResultByName("has_annos")) {
         try {
-          item.annos = PlacesUtils.getAnnotationsForItem(itemId);
+          item.annos = await PlacesUtils.promiseAnnotationsForItem(itemId);
         } catch (ex) {
           Cu.reportError("Unexpected error while reading annotations " + ex);
         }
       }
 
       switch (type) {
-        case Ci.nsINavBookmarksService.TYPE_BOOKMARK:
+        case PlacesUtils.bookmarks.TYPE_BOOKMARK:
           item.type = PlacesUtils.TYPE_X_MOZ_PLACE;
           // If this throws due to an invalid url, the item will be skipped.
           item.uri = NetUtil.newURI(aRow.getResultByName("url")).spec;
@@ -1698,7 +1767,7 @@ var PlacesUtils = {
             item.postData = entry.postData;
           }
           break;
-        case Ci.nsINavBookmarksService.TYPE_FOLDER:
+        case PlacesUtils.bookmarks.TYPE_FOLDER:
           item.type = PlacesUtils.TYPE_X_MOZ_PLACE_CONTAINER;
           // Mark root folders.
           if (itemId == PlacesUtils.placesRootId)
@@ -1712,11 +1781,11 @@ var PlacesUtils = {
           else if (itemId == PlacesUtils.mobileFolderId)
             item.root = "mobileFolder";
           break;
-        case Ci.nsINavBookmarksService.TYPE_SEPARATOR:
+        case PlacesUtils.bookmarks.TYPE_SEPARATOR:
           item.type = PlacesUtils.TYPE_X_MOZ_PLACE_SEPARATOR;
           break;
         default:
-          Cu.reportError("Unexpected bookmark type");
+          Cu.reportError(`Unexpected bookmark type ${type}`);
           break;
       }
       return item;
@@ -1971,6 +2040,111 @@ XPCOMUtils.defineLazyGetter(this, "gAsyncDBWrapperPromised",
 );
 
 /**
+ * The metadata API allows consumers to store simple key-value metadata in
+ * Places. Keys are strings, values can be any type that SQLite supports:
+ * numbers (integers and doubles), Booleans, strings, and blobs. Values are
+ * cached in memory for faster lookups.
+ *
+ * Since some consumers set metadata as part of an existing operation or active
+ * transaction, the API also exposes a `*withConnection` variant for each
+ * method that takes an open database connection.
+ */
+PlacesUtils.metadata = {
+  cache: new Map(),
+
+  /**
+   * Returns the value associated with a metadata key.
+   *
+   * @param  {String} key
+   *         The metadata key to look up.
+   * @return {*}
+   *         The value associated with the key, or `null` if not set.
+   */
+  get(key) {
+    return PlacesUtils.withConnectionWrapper("PlacesUtils.metadata.get",
+      db => this.getWithConnection(db, key));
+  },
+
+  /**
+   * Sets the value for a metadata key.
+   *
+   * @param {String} key
+   *        The metadata key to update.
+   * @param {*}
+   *        The value to associate with the key.
+   */
+  set(key, value) {
+    return PlacesUtils.withConnectionWrapper("PlacesUtils.metadata.set",
+      db => this.setWithConnection(db, key, value));
+  },
+
+  /**
+   * Removes the values for the given metadata keys.
+   *
+   * @param {String...}
+   *        One or more metadata keys to remove.
+   */
+  delete(...keys) {
+    return PlacesUtils.withConnectionWrapper("PlacesUtils.metadata.delete",
+      db => this.deleteWithConnection(db, ...keys));
+  },
+
+  async getWithConnection(db, key) {
+    key = this.canonicalizeKey(key);
+    if (this.cache.has(key)) {
+      return this.cache.get(key);
+    }
+    let rows = await db.executeCached(`
+      SELECT value FROM moz_meta WHERE key = :key`,
+      { key });
+    let value = null;
+    if (rows.length) {
+      let row = rows[0];
+      let rawValue = row.getResultByName("value");
+      // Convert blobs back to `Uint8Array`s.
+      value = row.getTypeOfIndex(0) == row.VALUE_TYPE_BLOB ?
+              new Uint8Array(rawValue) : rawValue;
+    }
+    this.cache.set(key, value);
+    return value;
+  },
+
+  async setWithConnection(db, key, value) {
+    if (value === null) {
+      await this.deleteWithConnection(db, key);
+      return;
+    }
+    key = this.canonicalizeKey(key);
+    await db.executeCached(`
+      REPLACE INTO moz_meta (key, value)
+      VALUES (:key, :value)`,
+      { key, value });
+    this.cache.set(key, value);
+  },
+
+  async deleteWithConnection(db, ...keys) {
+    keys = keys.map(this.canonicalizeKey);
+    if (!keys.length) {
+      return;
+    }
+    await db.execute(`
+      DELETE FROM moz_meta
+      WHERE key IN (${new Array(keys.length).fill("?").join(",")})`,
+      keys);
+    for (let key of keys) {
+      this.cache.delete(key);
+    }
+  },
+
+  canonicalizeKey(key) {
+    if (typeof key != "string" || !/^[a-zA-Z0-9\/]+$/.test(key)) {
+      throw new TypeError("Invalid metadata key: " + key);
+    }
+    return key.toLowerCase();
+  },
+};
+
+/**
  * Keywords management API.
  * Sooner or later these keywords will merge with search aliases, this is an
  * interim API that should then be replaced by a unified one.
@@ -2151,11 +2325,11 @@ PlacesUtils.keywords = {
               `INSERT INTO moz_keywords (keyword, place_id, post_data)
                VALUES (:keyword, (SELECT id FROM moz_places WHERE url_hash = hash(:url) AND url = :url), :post_data)
               `, { url: url.href, keyword, post_data: postData });
+
+            await PlacesSyncUtils.bookmarks.addSyncChangesForBookmarksWithURL(
+              db, url, PlacesSyncUtils.bookmarks.determineSyncChangeDelta(source));
           });
         }
-
-        await PlacesSyncUtils.bookmarks.addSyncChangesForBookmarksWithURL(
-          db, url, PlacesSyncUtils.bookmarks.determineSyncChangeDelta(source));
 
         cache.set(keyword, { keyword, url, postData: postData || null });
 
@@ -2195,11 +2369,13 @@ PlacesUtils.keywords = {
       let { url } = cache.get(keyword);
       cache.delete(keyword);
 
-      await db.execute(`DELETE FROM moz_keywords WHERE keyword = :keyword`,
-                       { keyword });
+      await db.executeTransaction(async function() {
+        await db.execute(`DELETE FROM moz_keywords WHERE keyword = :keyword`,
+                         { keyword });
 
-      await PlacesSyncUtils.bookmarks.addSyncChangesForBookmarksWithURL(
-        db, url, PlacesSyncUtils.bookmarks.determineSyncChangeDelta(source));
+        await PlacesSyncUtils.bookmarks.addSyncChangesForBookmarksWithURL(
+          db, url, PlacesSyncUtils.bookmarks.determineSyncChangeDelta(source));
+      });
 
       // Notify bookmarks about the removal.
       await notifyKeywordChange(url.href, "", source);

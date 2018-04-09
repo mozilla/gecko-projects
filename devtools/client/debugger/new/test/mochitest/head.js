@@ -34,10 +34,13 @@
 
 // shared-head.js handles imports, constants, and utility functions
 Services.scriptloader.loadSubScript(
-  "chrome://mochitests/content/browser/devtools/client/framework/test/shared-head.js",
+  "chrome://mochitests/content/browser/devtools/client/shared/test/shared-head.js",
   this
 );
+
 var { Toolbox } = require("devtools/client/framework/toolbox");
+var { Task } = require("devtools/shared/task");
+
 const sourceUtils = {
   isLoaded: source => source.get("loadedState") === "loaded"
 };
@@ -174,10 +177,11 @@ function waitForState(dbg, predicate, msg) {
     }
 
     const unsubscribe = dbg.store.subscribe(() => {
-      if (predicate(dbg.store.getState())) {
+      const result = predicate(dbg.store.getState())
+      if (result) {
         info(`Finished waiting for state change: ${msg || ""}`);
         unsubscribe();
-        resolve();
+        resolve(result);
       }
     });
   });
@@ -192,26 +196,26 @@ function waitForState(dbg, predicate, msg) {
  * @return {Promise}
  * @static
  */
-function waitForSources(dbg, ...sources) {
+async function waitForSources(dbg, ...sources) {
+  const { selectors: { getSources }, store } = dbg;
   if (sources.length === 0) {
     return Promise.resolve();
   }
 
   info(`Waiting on sources: ${sources.join(", ")}`);
-  const { selectors: { getSources }, store } = dbg;
-  return Promise.all(
+  await Promise.all(
     sources.map(url => {
-      function sourceExists(state) {
-        return getSources(state).some(s => {
-          return (s.get("url") || "").includes(url);
-        });
-      }
-
-      if (!sourceExists(store.getState())) {
-        return waitForState(dbg, sourceExists, `source ${url}`);
+      if (!sourceExists(dbg, url)) {
+        return waitForState(
+          dbg,
+          () => sourceExists(dbg, url),
+          `source ${url} exists`
+        );
       }
     })
   );
+
+  info(`Finished waiting on sources: ${sources.join(", ")}`);
 }
 
 /**
@@ -227,7 +231,7 @@ function waitForSource(dbg, url) {
   return waitForState(dbg, state => {
     const sources = dbg.selectors.getSources(state);
     return sources.find(s => (s.get("url") || "").includes(url));
-  });
+  }, `source exists`);
 }
 
 async function waitForElement(dbg, name) {
@@ -255,12 +259,15 @@ function waitForSelectedSource(dbg, url) {
       }
 
       const newSource = findSource(dbg, url, { silent: true });
-      if (newSource.id != source.get("id")) {
+      if (newSource.id != source.id) {
         return false;
       }
 
       // wait for async work to be done
-      return dbg.selectors.hasSymbols(state, source.toJS());
+      const hasSymbols = dbg.selectors.hasSymbols(state, source);
+      const hasSourceMetaData = dbg.selectors.hasSourceMetaData(state, source.id);
+      const hasPausePoints = dbg.selectors.hasPausePoints(state, source.id);
+      return hasSymbols && hasSourceMetaData && hasPausePoints;
     },
     "selected source"
   );
@@ -275,6 +282,12 @@ function assertNotPaused(dbg) {
   ok(!isPaused(dbg), "client is not paused");
 }
 
+function getVisibleSelectedFrameLine(dbg) {
+  const { selectors: { getVisibleSelectedFrame }, getState } = dbg;
+  const frame = getVisibleSelectedFrame(getState());
+  return frame && frame.location.line;
+}
+
 /**
  * Assert that the debugger is paused at the correct location.
  *
@@ -285,10 +298,7 @@ function assertNotPaused(dbg) {
  * @static
  */
 function assertPausedLocation(dbg) {
-  const {
-    selectors: { getSelectedSource, getVisibleSelectedFrame },
-    getState
-  } = dbg;
+  const { selectors: { getSelectedSource }, getState } = dbg;
 
   ok(
     isSelectedFrameSelected(dbg, getState()),
@@ -296,8 +306,7 @@ function assertPausedLocation(dbg) {
   );
 
   // Check the pause location
-  const frame = getVisibleSelectedFrame(getState());
-  const pauseLine = frame && frame.location.line;
+  const pauseLine = getVisibleSelectedFrameLine(dbg);
   assertDebugLine(dbg, pauseLine);
 
   ok(isVisibleInEditor(dbg, getCM(dbg).display.gutters), "gutter is visible");
@@ -307,12 +316,18 @@ function assertDebugLine(dbg, line) {
   // Check the debug line
   const lineInfo = getCM(dbg).lineInfo(line - 1);
   const source = dbg.selectors.getSelectedSource(dbg.getState());
-  if (source && source.get("loadedState") == "loading") {
-    const url = source.get("url");
+  if (source && source.loadedState == "loading") {
+    const url = source.url;
     ok(
       false,
       `Looks like the source ${url} is still loading. Try adding waitForLoadedSource in the test.`
     );
+    return;
+  }
+
+  if (!lineInfo.wrapClass) {
+    const pauseLine = getVisibleSelectedFrameLine(dbg);
+    ok(false, `Expected pause line on line ${line}, it is on ${pauseLine}`);
     return;
   }
 
@@ -397,8 +412,8 @@ function isPaused(dbg) {
 async function waitForLoadedScopes(dbg) {
   const scopes = await waitForElement(dbg, "scopes");
   // Since scopes auto-expand, we can assume they are loaded when there is a tree node
-  // with the aria-level attribute equal to "1".
-  await waitUntil(() => scopes.querySelector(`.tree-node[aria-level="1"]`));
+  // with the aria-level attribute equal to "2".
+  await waitUntil(() => scopes.querySelector(`.tree-node[aria-level="2"]`));
 }
 
 /**
@@ -408,21 +423,17 @@ async function waitForLoadedScopes(dbg) {
  * @param {Object} dbg
  * @static
  */
-async function waitForPaused(dbg) {
+async function waitForPaused(dbg, url) {
   const { getSelectedScope } = dbg.selectors;
 
-  const onScopesLoaded = waitForLoadedScopes(dbg);
-  const onStateChanged = waitForState(
+  await waitForState(
     dbg,
-    state => {
-      const paused = isPaused(dbg);
-      const scope = !!getSelectedScope(state);
-      return paused && scope;
-    },
+    state => isPaused(dbg) && !!getSelectedScope(state),
     "paused"
   );
 
-  await Promise.all([onStateChanged, onScopesLoaded]);
+  await waitForLoadedScopes(dbg);
+  await waitForSelectedSource(dbg, url);
 }
 
 /*
@@ -460,7 +471,7 @@ function isSelectedFrameSelected(dbg, state) {
     return false;
   }
 
-  return source.get("id") == sourceId;
+  return source.id == sourceId;
 }
 
 function createDebuggerContext(toolbox) {
@@ -558,6 +569,10 @@ function findSource(dbg, url, { silent } = { silent: false }) {
   return source.toJS();
 }
 
+function sourceExists(dbg, url) {
+  return !!findSource(dbg, url, { silent: true });
+}
+
 function waitForLoadedSource(dbg, url) {
   return waitForState(
     dbg,
@@ -589,9 +604,10 @@ function waitForLoadedSources(dbg) {
  * @return {Promise}
  * @static
  */
-function selectSource(dbg, url, line) {
+async function selectSource(dbg, url, line) {
   const source = findSource(dbg, url);
-  return dbg.actions.selectLocation({ sourceId: source.id, line });
+  await dbg.actions.selectLocation({ sourceId: source.id, line });
+  return waitForSelectedSource(dbg, url);
 }
 
 function closeTab(dbg, url) {
@@ -608,6 +624,8 @@ function closeTab(dbg, url) {
  * @static
  */
 async function stepOver(dbg) {
+  const pauseLine = getVisibleSelectedFrameLine(dbg);
+  info(`Stepping over from ${pauseLine}`);
   await dbg.actions.stepOver();
   return waitForPaused(dbg);
 }
@@ -621,7 +639,8 @@ async function stepOver(dbg) {
  * @static
  */
 async function stepIn(dbg) {
-  info("Stepping in");
+  const pauseLine = getVisibleSelectedFrameLine(dbg);
+  info(`Stepping in from ${pauseLine}`);
   await dbg.actions.stepIn();
   return waitForPaused(dbg);
 }
@@ -635,7 +654,8 @@ async function stepIn(dbg) {
  * @static
  */
 async function stepOut(dbg) {
-  info("Stepping out");
+  const pauseLine = getVisibleSelectedFrameLine(dbg);
+  info(`Stepping out from ${pauseLine}`);
   await dbg.actions.stepOut();
   return waitForPaused(dbg);
 }
@@ -649,7 +669,8 @@ async function stepOut(dbg) {
  * @static
  */
 function resume(dbg) {
-  info("Resuming");
+  const pauseLine = getVisibleSelectedFrameLine(dbg);
+  info(`Resuming from ${pauseLine}`);
   return dbg.actions.resume();
 }
 
@@ -667,10 +688,11 @@ function deleteExpression(dbg, input) {
  * @return {Promise}
  * @static
  */
-function reload(dbg, ...sources) {
-  return dbg.client
-    .reload()
-    .then(() => waitForSources(dbg, ...sources), "reloaded");
+async function reload(dbg, ...sources) {
+  const navigated = waitForDispatch(dbg, "NAVIGATE")
+  await dbg.client.reload()
+  await navigated;
+  return waitForSources(dbg, ...sources);
 }
 
 /**
@@ -683,8 +705,8 @@ function reload(dbg, ...sources) {
  * @return {Promise}
  * @static
  */
-function navigate(dbg, url, ...sources) {
-  dbg.client.navigate(url);
+async function navigate(dbg, url, ...sources) {
+  await dbg.client.navigate(url);
   return waitForSources(dbg, ...sources);
 }
 
@@ -779,7 +801,7 @@ function invokeInTab(fnc, ...args) {
     fnc,
     args
   }) {
-    content.wrappedJSObject[fnc](...args); // eslint-disable-line mozilla/no-cpows-in-tests, max-len
+    content.wrappedJSObject[fnc](...args);
   });
 }
 
@@ -948,9 +970,11 @@ const selectors = {
   fileMatch: ".managed-tree .result",
   popup: ".popover",
   tooltip: ".tooltip",
+  previewPopup: ".preview-popup",
   outlineItem: i =>
     `.outline-list__element:nth-child(${i}) .function-signature`,
-  outlineItems: ".outline-list__element"
+  outlineItems: ".outline-list__element",
+  conditionalPanelInput: ".conditional-breakpoint-panel input"
 };
 
 function getSelector(elementName, ...args) {
@@ -1082,6 +1106,62 @@ function toggleObjectInspectorNode(node) {
 function getCM(dbg) {
   const el = dbg.win.document.querySelector(".CodeMirror");
   return el.CodeMirror;
+}
+
+function getCoordsFromPosition(cm, { line, ch }) {
+  return cm.charCoords({ line: ~~line, ch: ~~ch });
+}
+
+function hoverAtPos(dbg, { line, ch }) {
+  const cm = getCM(dbg);
+
+  // Ensure the line is visible with margin because the bar at the bottom of
+  // the editor overlaps into what the editor things is its own space, blocking
+  // the click event below.
+  cm.scrollIntoView({ line: line - 1, ch  }, 100);
+
+  const coords = getCoordsFromPosition(cm, { line: line - 1, ch });
+  const tokenEl = dbg.win.document.elementFromPoint(coords.left, coords.top);
+  tokenEl.dispatchEvent(
+    new MouseEvent("mouseover", {
+      bubbles: true,
+      cancelable: true,
+      view: dbg.win
+    })
+  );
+}
+
+async function assertPreviewTextValue(dbg, { text, expression }) {
+  const previewEl = await waitForElement(dbg, "previewPopup");;
+
+  is(previewEl.innerText, text, "Preview text shown to user");
+
+  const preview = dbg.selectors.getPreview(dbg.getState());
+  is(preview.updating, false, "Preview.updating");
+  is(preview.expression, expression, "Preview.expression");
+}
+
+async function assertPreviewTooltip(dbg, { result, expression }) {
+  const previewEl = await waitForElement(dbg, "tooltip");
+  is(previewEl.innerText, result, "Preview text shown to user");
+
+  const preview = dbg.selectors.getPreview(dbg.getState());
+  is(`${preview.result}`, result, "Preview.result");
+  is(preview.updating, false, "Preview.updating");
+  is(preview.expression, expression, "Preview.expression");
+}
+
+async function assertPreviewPopup(dbg, { field, value, expression }) {
+  const previewEl = await waitForElement(dbg, "popup");
+  const preview = dbg.selectors.getPreview(dbg.getState());
+
+  is(
+    `${preview.result.preview.ownProperties[field].value}`,
+    value,
+    "Preview.result"
+  );
+  is(preview.updating, false, "Preview.updating");
+  is(preview.expression, expression, "Preview.expression");
 }
 
 // NOTE: still experimental, the screenshots might not be exactly correct

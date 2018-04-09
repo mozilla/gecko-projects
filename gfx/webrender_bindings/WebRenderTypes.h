@@ -194,6 +194,14 @@ inline PipelineId AsPipelineId(const uint64_t& aId) {
   return pipeline;
 }
 
+inline mozilla::layers::LayersId AsLayersId(const PipelineId& aId) {
+  return mozilla::layers::LayersId { AsUint64(aId) };
+}
+
+inline PipelineId AsPipelineId(const mozilla::layers::LayersId& aId) {
+  return AsPipelineId(uint64_t(aId));
+}
+
 inline ImageRendering ToImageRendering(gfx::SamplingFilter aFilter)
 {
   return aFilter == gfx::SamplingFilter::POINT ? ImageRendering::Pixelated
@@ -339,6 +347,12 @@ static inline wr::DeviceUintRect ToDeviceUintRect(const mozilla::ImageIntRect& r
 static inline wr::LayoutRect ToLayoutRect(const mozilla::LayoutDeviceIntRect& rect)
 {
   return ToLayoutRect(IntRectToRect(rect));
+}
+
+static inline wr::LayoutRect ToRoundedLayoutRect(const mozilla::LayoutDeviceRect& aRect) {
+  auto rect = aRect;
+  rect.Round();
+  return wr::ToLayoutRect(rect);
 }
 
 static inline wr::LayoutSize ToLayoutSize(const mozilla::LayoutDeviceSize& size)
@@ -775,6 +789,8 @@ struct WrScrollId {
   bool operator!=(const WrScrollId& other) const {
     return id != other.id;
   }
+
+  static WrScrollId RootScrollNode();
 };
 
 // Corresponds to a clip id for a position:sticky clip in webrender. Similar

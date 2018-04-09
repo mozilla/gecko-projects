@@ -2,10 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-extern crate angle;
+extern crate mozangle;
 extern crate webrender;
 
-use angle::hl::{BuiltInResources, Output, ShaderSpec, ShaderValidator};
+use mozangle::shaders::{BuiltInResources, Output, ShaderSpec, ShaderValidator};
 
 // from glslang
 const FRAGMENT_SHADER: u32 = 0x8B30;
@@ -33,16 +33,20 @@ const SHADERS: &[Shader] = &[
         features: CLIP_FEATURES,
     },
     Shader {
+        name: "cs_clip_box_shadow",
+        features: CLIP_FEATURES,
+    },
+    Shader {
         name: "cs_clip_border",
+        features: CLIP_FEATURES,
+    },
+    Shader {
+        name: "cs_clip_line",
         features: CLIP_FEATURES,
     },
     // Cache shaders
     Shader {
         name: "cs_blur",
-        features: CACHE_FEATURES,
-    },
-    Shader {
-        name: "cs_text_run",
         features: CACHE_FEATURES,
     },
     // Prim shaders
@@ -52,10 +56,6 @@ const SHADERS: &[Shader] = &[
     },
     Shader {
         name: "ps_border_edge",
-        features: PRIM_FEATURES,
-    },
-    Shader {
-        name: "ps_hardware_composite",
         features: PRIM_FEATURES,
     },
     Shader {
@@ -76,27 +76,19 @@ const SHADERS: &[Shader] = &[
         features: &["", "YUV_NV12", "YUV_PLANAR", "YUV_INTERLEAVED", "YUV_NV12,TEXTURE_RECT"],
     },
     Shader {
-        name: "brush_mask",
-        features: &[],
-    },
-    Shader {
         name: "brush_solid",
         features: &[],
     },
     Shader {
-        name: "brush_picture",
-        features: &[],
+        name: "brush_image",
+        features: &["", "ALPHA_PASS"],
     },
     Shader {
         name: "brush_blend",
         features: &[],
     },
     Shader {
-        name: "brush_composite",
-        features: &[],
-    },
-    Shader {
-        name: "brush_line",
+        name: "brush_mix_blend",
         features: &[],
     },
     Shader {
@@ -113,7 +105,7 @@ const VERSION_STRING: &str = "#version 300 es\n";
 
 #[test]
 fn validate_shaders() {
-    angle::hl::initialize().unwrap();
+    mozangle::shaders::initialize().unwrap();
 
     let resources = BuiltInResources::default();
     let vs_validator =

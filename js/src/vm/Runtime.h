@@ -49,13 +49,8 @@
 #include "vm/SharedImmutableStringsCache.h"
 #include "vm/Stack.h"
 #include "vm/Stopwatch.h"
-#include "vm/Symbol.h"
-#include "wasm/WasmSignalHandlers.h"
-
-#ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable:4100) /* Silence unreferenced formal parameter warnings */
-#endif
+#include "vm/SymbolType.h"
+#include "wasm/WasmTypes.h"
 
 namespace js {
 
@@ -110,33 +105,18 @@ class Simulator;
 
 // JS Engine Threading
 //
-// Multiple threads may interact with a JS runtime. JS has run-to-completion
-// semantics, which means that scripts cannot observe changes in behavior
-// due to activities performed on other threads (there is an exception to this
-// for shared array buffers and related APIs).
-//
-// The main way we ensure that run-to-completion semantics are preserved is
-// by dividing content into zone groups. Pieces of web content will be in the
-// the same zone group if they have the same tab/origin or can otherwise
-// observe changes in each other via Window.opener and so forth. When a thread
-// executes JS in a zone group, it acquires that group --- including exclusive
-// access to most of the group's content --- and does not relinquish control of
-// the zone group until the script finishes executing.
-//
 // Threads interacting with a runtime are divided into two categories:
 //
-// - Cooperating threads are capable of running JS. At most one cooperating
-//   thread may be |active| at a time in a runtime, but they may yield control
-//   to each other so that their execution is interleaved. As described above,
-//   each thread owns the zone groups it is operating on so that this
-//   interleaving does not cause observable changes in a script's behavior.
+// - The main thread is capable of running JS. There's at most one main thread
+//   per runtime.
 //
 // - Helper threads do not run JS, and are controlled or triggered by activity
-//   in the cooperating threads. Helper threads may have exclusive access to
-//   zone groups created for them, for parsing and similar tasks, but their
-//   activities do not cause observable changes in script behaviors. Activity
-//   on helper threads may be referred to as happening 'off thread' or on a
-//   background thread in some parts of the VM.
+//   on the main thread (or main threads, since all runtimes in a process share
+//   helper threads). Helper threads may have exclusive access to zone groups
+//   created for them, for parsing and similar tasks, but their activities do
+//   not cause observable changes in script behaviors. Activity on helper
+//   threads may be referred to as happening 'off thread' or on a background
+//   thread in some parts of the VM.
 
 } /* namespace js */
 
@@ -283,69 +263,15 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
     js::WriteOnceData<bool> initialized_;
 #endif
 
-    // The context for the thread which currently has exclusive access to most
-    // contents of the runtime. When execution on the runtime is cooperatively
-    // scheduled, this is the thread which is currently running.
-    mozilla::Atomic<JSContext*, mozilla::ReleaseAcquire> activeContext_;
-
-    // All contexts participating in cooperative scheduling. All threads other
-    // than |activeContext_| are suspended.
-    js::ActiveThreadData<js::Vector<js::CooperatingContext, 4, js::SystemAllocPolicy>> cooperatingContexts_;
-
-    // Count of AutoProhibitActiveContextChange instances on the active context.
-    js::ActiveThreadData<size_t> activeContextChangeProhibited_;
-
-    // Count of beginSingleThreadedExecution() calls that have occurred with no
-    // matching endSingleThreadedExecution().
-    js::ActiveThreadData<size_t> singleThreadedExecutionRequired_;
-
-    // Whether some thread has called beginSingleThreadedExecution() and we are
-    // in the associated callback (which may execute JS on other threads).
-    js::ActiveThreadData<bool> startingSingleThreadedExecution_;
+    // The JSContext* for the runtime's main thread. Immutable after this is set
+    // in JSRuntime::init.
+    JSContext* mainContext_;
 
   public:
-    JSContext* activeContext() const { return activeContext_; }
-    const void* addressOfActiveContext() { return &activeContext_; }
+    JSContext* mainContextFromAnyThread() const { return mainContext_; }
+    const void* addressOfMainContext() { return &mainContext_; }
 
-    void setActiveContext(JSContext* cx);
-    void setNewbornActiveContext(JSContext* cx);
-    void deleteActiveContext(JSContext* cx);
-
-    inline JSContext* activeContextFromOwnThread();
-
-    js::Vector<js::CooperatingContext, 4, js::SystemAllocPolicy>& cooperatingContexts() {
-        return cooperatingContexts_.ref();
-    }
-
-    class MOZ_RAII AutoProhibitActiveContextChange
-    {
-        JSRuntime* rt;
-
-      public:
-        explicit AutoProhibitActiveContextChange(JSRuntime* rt)
-          : rt(rt)
-        {
-            rt->activeContextChangeProhibited_++;
-        }
-
-        ~AutoProhibitActiveContextChange()
-        {
-            rt->activeContextChangeProhibited_--;
-        }
-    };
-
-    bool activeContextChangeProhibited() { return activeContextChangeProhibited_; }
-    bool singleThreadedExecutionRequired() { return singleThreadedExecutionRequired_; }
-
-    js::ActiveThreadData<JS::BeginSingleThreadedExecutionCallback> beginSingleThreadedExecutionCallback;
-    js::ActiveThreadData<JS::EndSingleThreadedExecutionCallback> endSingleThreadedExecutionCallback;
-
-    // Ensure there is only a single thread interacting with this runtime.
-    // beginSingleThreadedExecution() returns false if some context has already
-    // started forcing this runtime to be single threaded. Calls to these
-    // functions must be balanced.
-    bool beginSingleThreadedExecution(JSContext* cx);
-    void endSingleThreadedExecution(JSContext* cx);
+    inline JSContext* mainContextFromOwnThread();
 
     /*
      * The start of the range stored in the profiler sample buffer, as measured
@@ -568,13 +494,17 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
 
 #ifdef DEBUG
     bool currentThreadHasExclusiveAccess() const {
-        return (!hasHelperThreadZones() && activeThreadHasExclusiveAccess) ||
-            exclusiveAccessLock.ownedByCurrentThread();
+        if (!hasHelperThreadZones())
+            return CurrentThreadCanAccessRuntime(this) && activeThreadHasExclusiveAccess;
+
+        return exclusiveAccessLock.ownedByCurrentThread();
     }
 
     bool currentThreadHasScriptDataAccess() const {
-        return (!hasHelperThreadZones() && activeThreadHasScriptDataAccess) ||
-            scriptDataLock.ownedByCurrentThread();
+        if (!hasHelperThreadZones())
+            return CurrentThreadCanAccessRuntime(this) && activeThreadHasScriptDataAccess;
+
+        return scriptDataLock.ownedByCurrentThread();
     }
 #endif
 
@@ -999,18 +929,10 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
   public:
     js::RuntimeCaches& caches() { return caches_.ref(); }
 
-    // When wasm traps or is interrupted, the signal handler records some data
-    // for unwinding purposes. Wasm code can't interrupt or trap reentrantly.
-    js::ActiveThreadData<
-        mozilla::MaybeOneOf<js::wasm::TrapData, js::wasm::InterruptData>
-    > wasmUnwindData;
-
-    js::wasm::TrapData& wasmTrapData() {
-        return wasmUnwindData.ref().ref<js::wasm::TrapData>();
-    }
-    js::wasm::InterruptData& wasmInterruptData() {
-        return wasmUnwindData.ref().ref<js::wasm::InterruptData>();
-    }
+    // List of all the live wasm::Instances in the runtime. Equal to the union
+    // of all instances registered in all JSCompartments. Accessed from watchdog
+    // threads for purposes of wasm::InterruptRunningCode().
+    js::ExclusiveData<js::wasm::InstanceVector> wasmInstances;
 
   public:
 #if defined(NIGHTLY_BUILD)
@@ -1235,9 +1157,5 @@ ZoneGroup::storeBuffer()
 extern mozilla::Atomic<JS::LargeAllocationFailureCallback> OnLargeAllocationFailure;
 
 } /* namespace js */
-
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif
 
 #endif /* vm_Runtime_h */

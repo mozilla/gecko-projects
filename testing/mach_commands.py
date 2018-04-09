@@ -64,7 +64,7 @@ class TestConfig(object):
         level_desc = "The default log level to use when running tests with `mach test`."
         level_choices = [l.lower() for l in log_levels]
         return [
-            ('test.format', 'string', format_desc, 'tbpl', {'choices': format_choices}),
+            ('test.format', 'string', format_desc, 'mach', {'choices': format_choices}),
             ('test.level', 'string', level_desc, 'info', {'choices': level_choices}),
         ]
 
@@ -122,10 +122,13 @@ class Test(MachCommandBase):
             return 1
 
         # Create shared logger
+        format_args = {'level': self._mach_context.settings['test']['level']}
+        if not run_suites and len(run_tests) == 1:
+            format_args['verbose'] = True
+            format_args['compact'] = False
+
         default_format = self._mach_context.settings['test']['format']
-        default_level = self._mach_context.settings['test']['level']
-        log = setup_logging('mach-test', log_args, {default_format: sys.stdout},
-                            {'level': default_level})
+        log = setup_logging('mach-test', log_args, {default_format: sys.stdout}, format_args)
         for handler in log.handlers:
             if isinstance(handler, StreamHandler):
                 handler.formatter.inner.summary_on_shutdown = True

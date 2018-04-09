@@ -11,7 +11,7 @@ use values::{CSSFloat, serialize_percentage};
 /// A computed percentage.
 #[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
 #[derive(Animate, Clone, ComputeSquaredDistance, Copy, Debug, Default, MallocSizeOf)]
-#[derive(PartialEq, PartialOrd, ToAnimatedZero)]
+#[derive(PartialEq, PartialOrd, ToAnimatedZero, ToComputedValue)]
 pub struct Percentage(pub CSSFloat);
 
 impl Percentage {
@@ -31,6 +31,12 @@ impl Percentage {
     #[inline]
     pub fn abs(&self) -> Self {
         Percentage(self.0.abs())
+    }
+
+    /// Clamps this percentage to a non-negative percentage.
+    #[inline]
+    pub fn clamp_to_non_negative(self) -> Self {
+        Percentage(self.0.max(0.))
     }
 }
 

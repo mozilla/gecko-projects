@@ -14,8 +14,8 @@
 #include "nsWindow.h"
 #include "nsWindowDefs.h"
 #include "KeyboardLayout.h"
-#include "nsIDOMMouseEvent.h"
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/DataSurfaceHelpers.h"
 #include "mozilla/HangMonitor.h"
@@ -1078,11 +1078,12 @@ WinUtils::GetNativeMessage(UINT aInternalMessage)
 uint16_t
 WinUtils::GetMouseInputSource()
 {
-  int32_t inputSource = nsIDOMMouseEvent::MOZ_SOURCE_MOUSE;
+  int32_t inputSource = dom::MouseEventBinding::MOZ_SOURCE_MOUSE;
   LPARAM lParamExtraInfo = ::GetMessageExtraInfo();
   if ((lParamExtraInfo & TABLET_INK_SIGNATURE) == TABLET_INK_CHECK) {
     inputSource = (lParamExtraInfo & TABLET_INK_TOUCH) ?
-      nsIDOMMouseEvent::MOZ_SOURCE_TOUCH : nsIDOMMouseEvent::MOZ_SOURCE_PEN;
+      dom::MouseEventBinding::MOZ_SOURCE_TOUCH :
+      dom::MouseEventBinding::MOZ_SOURCE_PEN;
   }
   return static_cast<uint16_t>(inputSource);
 }
@@ -1703,12 +1704,12 @@ WinUtils::GetShellItemPath(IShellItem* aItem,
 }
 
 /* static */
-nsIntRegion
+LayoutDeviceIntRegion
 WinUtils::ConvertHRGNToRegion(HRGN aRgn)
 {
   NS_ASSERTION(aRgn, "Don't pass NULL region here");
 
-  nsIntRegion rgn;
+  LayoutDeviceIntRegion rgn;
 
   DWORD size = ::GetRegionData(aRgn, 0, nullptr);
   AutoTArray<uint8_t,100> buffer;
@@ -1732,12 +1733,12 @@ WinUtils::ConvertHRGNToRegion(HRGN aRgn)
   return rgn;
 }
 
-nsIntRect
+LayoutDeviceIntRect
 WinUtils::ToIntRect(const RECT& aRect)
 {
-  return nsIntRect(aRect.left, aRect.top,
-                   aRect.right - aRect.left,
-                   aRect.bottom - aRect.top);
+  return LayoutDeviceIntRect(aRect.left, aRect.top,
+                             aRect.right - aRect.left,
+                             aRect.bottom - aRect.top);
 }
 
 /* static */
@@ -1862,6 +1863,28 @@ WinUtils::ResolveJunctionPointsAndSymLinks(nsIFile* aPath)
   }
 
   return true;
+}
+
+/* static */
+bool
+WinUtils::RunningFromANetworkDrive()
+{
+  wchar_t exePath[MAX_PATH];
+  if (!::GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
+    return false;
+  }
+
+  std::wstring exeString(exePath);
+  if (!widget::WinUtils::ResolveJunctionPointsAndSymLinks(exeString)) {
+    return false;
+  }
+
+  wchar_t volPath[MAX_PATH];
+  if (!::GetVolumePathNameW(exeString.c_str(), volPath, MAX_PATH)) {
+    return false;
+  }
+
+  return (::GetDriveTypeW(volPath) == DRIVE_REMOTE);
 }
 
 /* static */

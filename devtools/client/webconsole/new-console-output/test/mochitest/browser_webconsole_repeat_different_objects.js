@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Test that makes sure messages are not considered repeated when console.log()
 // is invoked with different objects, see bug 865288.
 
@@ -12,7 +10,7 @@
 
 const TEST_URI = "data:text/html,Test repeated objects";
 
-add_task(async function () {
+add_task(async function() {
   const hud = await openNewTabAndConsole(TEST_URI);
 
   const onMessages = waitForMessages({

@@ -224,6 +224,12 @@ nsHostRecord::Cancel()
 }
 
 void
+nsHostRecord::Invalidate()
+{
+    mDoomed = true;
+}
+
+void
 nsHostRecord::SetExpiration(const mozilla::TimeStamp& now, unsigned int valid, unsigned int grace)
 {
     mValidStart = now;
@@ -737,8 +743,9 @@ nsHostResolver::ResolveHost(const char             *host,
     NS_ENSURE_TRUE(host && *host, NS_ERROR_UNEXPECTED);
     NS_ENSURE_TRUE(netInterface, NS_ERROR_UNEXPECTED);
 
-    LOG(("Resolving host [%s%s%s]%s.\n", LOG_HOST(host, netInterface),
-         flags & RES_BYPASS_CACHE ? " - bypassing cache" : ""));
+    LOG(("Resolving host [%s%s%s]%s%s.\n", LOG_HOST(host, netInterface),
+         flags & RES_BYPASS_CACHE ? " - bypassing cache" : "",
+         flags & RES_REFRESH_CACHE ? " - refresh cache" : ""));
 
     // ensure that we are working with a valid hostname before proceeding.  see
     // bug 304904 for details.
@@ -882,7 +889,9 @@ nsHostResolver::ResolveHost(const char             *host,
                                     if (!rec->addr_info) {
                                         rec->addr_info = new AddrInfo(
                                             unspecRec->addr_info->mHostName,
-                                            unspecRec->addr_info->mCanonicalName);
+                                            unspecRec->addr_info->mCanonicalName,
+                                            unspecRec->addr_info->IsTRR()
+                                          );
                                         rec->CopyExpirationTimesAndFlagsFrom(unspecRec);
                                     }
                                     rec->addr_info->AddAddress(
@@ -921,6 +930,10 @@ nsHostResolver::ResolveHost(const char             *host,
                 if (!result) {
                     LOG(("  No usable address in cache for host [%s%s%s].",
                          LOG_HOST(host, netInterface)));
+
+                    if (flags & RES_REFRESH_CACHE) {
+                        rec->Invalidate();
+                    }
 
                     // Add callback to the list of pending callbacks.
                     rec->mCallbacks.insertBack(callback);
@@ -1123,6 +1136,9 @@ nsHostResolver::TrrLookup(nsHostRecord *aRec, TRR *pushedTRR)
     bool madeQuery = false;
     do {
         sendAgain = false;
+        if ((TRRTYPE_AAAA == rectype) && gTRRService && gTRRService->DisableIPv6()) {
+            break;
+        }
         LOG(("TRR Resolve %s type %d\n", rec->host.get(), (int)rectype));
         RefPtr<TRR> trr;
         MutexAutoLock trrlock(rec->mTrrLock);
@@ -1421,6 +1437,10 @@ different_rrset(AddrInfo *rrset1, AddrInfo *rrset2)
     nsTArray<NetAddr> orderedSet1;
     nsTArray<NetAddr> orderedSet2;
 
+    if (rrset1->IsTRR() != rrset2->IsTRR()) {
+        return true;
+    }
+
     for (NetAddrElement *element = rrset1->mAddresses.getFirst();
          element; element = element->getNext()) {
         if (LOG_ENABLED()) {
@@ -1506,12 +1526,8 @@ nsHostResolver::CompleteLookup(nsHostRecord* rec, nsresult status, AddrInfo* aNe
         }
 
         if (NS_SUCCEEDED(status)) {
-            if (rec->mTRRSuccess == 0) { // first one
-                rec->mTrrDuration = TimeStamp::Now() - rec->mTrrStart;
-            }
             rec->mTRRSuccess++;
         }
-
         if (TRROutstanding()) {
             if (NS_FAILED(status)) {
                 return LOOKUP_OK; // wait for outstanding
@@ -1524,6 +1540,13 @@ nsHostResolver::CompleteLookup(nsHostRecord* rec, nsresult status, AddrInfo* aNe
             MOZ_ASSERT(rec->mFirstTRR && !newRRSet);
 
             if (rec->mDidCallbacks || rec->mResolverMode == MODE_SHADOW) {
+                return LOOKUP_OK;
+            }
+
+            if (rec->mTrrA && (!gTRRService || !gTRRService->EarlyAAAA())) {
+                // This is an early AAAA with a pending A response. Allowed
+                // only by pref.
+                LOG(("CompleteLookup: avoiding early use of TRR AAAA!\n"));
                 return LOOKUP_OK;
             }
 
@@ -1558,6 +1581,12 @@ nsHostResolver::CompleteLookup(nsHostRecord* rec, nsresult status, AddrInfo* aNe
             }
             // continue
         }
+
+        if (NS_SUCCEEDED(status) && (rec->mTRRSuccess == 1)) {
+            // store the duration on first (used) TRR response
+            rec->mTrrDuration = TimeStamp::Now() - rec->mTrrStart;
+        }
+
     } else { // native resolve completed
         if (rec->usingAnyThread) {
             mActiveAnyThreadCount--;
@@ -1838,6 +1867,17 @@ nsHostResolver::ThreadFunc(void *arg)
     resolver->mThreadCount--;
     resolver = nullptr;
     LOG(("DNS lookup thread - queue empty, thread finished.\n"));
+}
+
+void
+nsHostResolver::SetCacheLimits(uint32_t aMaxCacheEntries,
+                               uint32_t aDefaultCacheEntryLifetime,
+                               uint32_t aDefaultGracePeriod)
+{
+    MutexAutoLock lock(mLock);
+    mMaxCacheEntries = aMaxCacheEntries;
+    mDefaultCacheLifetime = aDefaultCacheEntryLifetime;
+    mDefaultGracePeriod = aDefaultGracePeriod;
 }
 
 nsresult

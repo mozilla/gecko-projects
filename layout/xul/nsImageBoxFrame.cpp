@@ -14,7 +14,7 @@
 #include "gfxContext.h"
 #include "nsImageBoxFrame.h"
 #include "nsGkAtoms.h"
-#include "nsStyleContext.h"
+#include "mozilla/ComputedStyle.h"
 #include "nsStyleConsts.h"
 #include "nsStyleUtil.h"
 #include "nsCOMPtr.h"
@@ -106,8 +106,7 @@ nsImageBoxFrameEvent::Run()
 // cache the notifications come back synchronously, but if the image
 // is loaded from the network the notifications come back
 // asynchronously.
-
-void
+static void
 FireImageDOMEvent(nsIContent* aContent, EventMessage aMessage)
 {
   NS_ASSERTION(aMessage == eLoad || aMessage == eLoadError,
@@ -127,9 +126,9 @@ FireImageDOMEvent(nsIContent* aContent, EventMessage aMessage)
 // Creates a new image frame and returns it
 //
 nsIFrame*
-NS_NewImageBoxFrame (nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewImageBoxFrame (nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsImageBoxFrame(aContext);
+  return new (aPresShell) nsImageBoxFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsImageBoxFrame)
@@ -153,8 +152,8 @@ nsImageBoxFrame::AttributeChanged(int32_t aNameSpaceID,
   return rv;
 }
 
-nsImageBoxFrame::nsImageBoxFrame(nsStyleContext* aContext)
-  : nsLeafBoxFrame(aContext, kClassID)
+nsImageBoxFrame::nsImageBoxFrame(ComputedStyle* aStyle)
+  : nsLeafBoxFrame(aStyle, kClassID)
   , mIntrinsicSize(0, 0)
   , mLoadFlags(nsIRequest::LOAD_NORMAL)
   , mRequestRegistered(false)
@@ -301,7 +300,7 @@ void
 nsImageBoxFrame::UpdateLoadFlags()
 {
   static Element::AttrValuesArray strings[] =
-    {&nsGkAtoms::always, &nsGkAtoms::never, nullptr};
+    {nsGkAtoms::always, nsGkAtoms::never, nullptr};
   switch (mContent->AsElement()->FindAttrValueIn(kNameSpaceID_None,
                                                  nsGkAtoms::validate, strings,
                                                  eCaseMatters)) {
@@ -464,9 +463,9 @@ nsImageBoxFrame::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuild
                                                                       aBuilder, aResources,
                                                                       aSc, size, Nothing());
   if (key.isNothing()) {
-    return ImgDrawResult::BAD_IMAGE;
+    return ImgDrawResult::NOT_READY;
   }
-  wr::LayoutRect fill = aSc.ToRelativeLayoutRect(fillRect);
+  wr::LayoutRect fill = wr::ToRoundedLayoutRect(fillRect);
 
   LayoutDeviceSize gapSize(0, 0);
   SamplingFilter sampleFilter = nsLayoutUtils::GetSamplingFilterForFrame(aItem->Frame());
@@ -539,26 +538,6 @@ void nsDisplayXULImage::Paint(nsDisplayListBuilder* aBuilder,
     PaintImage(*aCtx, mVisibleRect, ToReferenceFrame(), flags);
 
   nsDisplayItemGenericImageGeometry::UpdateDrawResult(this, result);
-}
-
-LayerState
-nsDisplayXULImage::GetLayerState(nsDisplayListBuilder* aBuilder,
-                                 LayerManager* aManager,
-                                 const ContainerLayerParameters& aParameters)
-{
-  if (ShouldUseAdvancedLayer(aManager, gfxPrefs::LayersAllowImageLayers) &&
-      CanOptimizeToImageLayer(aManager, aBuilder)) {
-    return LAYER_ACTIVE;
-  }
-  return LAYER_NONE;
-}
-
-already_AddRefed<Layer>
-nsDisplayXULImage::BuildLayer(nsDisplayListBuilder* aBuilder,
-                           LayerManager* aManager,
-                           const ContainerLayerParameters& aContainerParameters)
-{
-  return BuildDisplayItemLayer(aBuilder, aManager, aContainerParameters);
 }
 
 bool
@@ -661,14 +640,15 @@ nsImageBoxFrame::CanOptimizeToImageLayer()
 }
 
 //
-// DidSetStyleContext
+// DidSetComputedStyle
 //
-// When the style context changes, make sure that all of our image is up to date.
+// When the ComputedStyle changes, make sure that all of our image is up to
+// date.
 //
 /* virtual */ void
-nsImageBoxFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
+nsImageBoxFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
 {
-  nsLeafBoxFrame::DidSetStyleContext(aOldStyleContext);
+  nsLeafBoxFrame::DidSetComputedStyle(aOldComputedStyle);
 
   // Fetch our subrect.
   const nsStyleList* myList = StyleList();
@@ -696,7 +676,7 @@ nsImageBoxFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
     return;
 
   UpdateImage();
-} // DidSetStyleContext
+} // DidSetComputedStyle
 
 void
 nsImageBoxFrame::GetImageSize()

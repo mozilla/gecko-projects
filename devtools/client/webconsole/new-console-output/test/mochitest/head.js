@@ -2,20 +2,21 @@
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
-/* import-globals-from ../../../../framework/test/shared-head.js */
 /* eslint no-unused-vars: [2, {"vars": "local"}] */
 
 "use strict";
 
 // Import helpers registering the test-actor in remote targets
+/* globals registerTestActor, getTestActor, Task, openToolboxForTab, gBrowser */
 Services.scriptloader.loadSubScript(
   "chrome://mochitests/content/browser/devtools/client/shared/test/test-actor-registry.js",
   this);
 
 // shared-head.js handles imports, constants, and utility functions
 // Load the shared-head file first.
+/* import-globals-from ../../../../shared/test/shared-head.js */
 Services.scriptloader.loadSubScript(
-  "chrome://mochitests/content/browser/devtools/client/framework/test/shared-head.js",
+  "chrome://mochitests/content/browser/devtools/client/shared/test/shared-head.js",
   this);
 
 var {HUDService} = require("devtools/client/webconsole/hudservice");
@@ -34,7 +35,7 @@ const STATUS_CODES_GA_PARAMS = `?${new URLSearchParams({
 const wcActions = require("devtools/client/webconsole/new-console-output/actions/index");
 
 Services.prefs.setBoolPref("devtools.browserconsole.new-frontend-enabled", true);
-registerCleanupFunction(async function () {
+registerCleanupFunction(async function() {
   Services.prefs.clearUserPref("devtools.browserconsole.new-frontend-enabled");
   Services.prefs.clearUserPref("devtools.webconsole.ui.filterbar");
 
@@ -434,6 +435,17 @@ async function openDebugger(options = {}) {
   return {target, toolbox, panel};
 }
 
+async function openInspector(options = {}) {
+  if (!options.tab) {
+    options.tab = gBrowser.selectedTab;
+  }
+
+  const target = TargetFactory.forTab(options.tab);
+  const toolbox = await gDevTools.showToolbox(target, "inspector");
+
+  return toolbox.getCurrentPanel();
+}
+
 /**
  * Open the Web Console for the given tab, or the current one if none given.
  *
@@ -489,7 +501,7 @@ function simulateLinkClick(element, clickEventProps) {
   let oldOpenUILinkIn = window.openUILinkIn;
 
   const onOpenLink = new Promise((resolve) => {
-    window.openUILinkIn = function (link, where) {
+    window.openUILinkIn = function(link, where) {
       window.openUILinkIn = oldOpenUILinkIn;
       resolve({link: link, where});
     };
@@ -505,7 +517,7 @@ function simulateLinkClick(element, clickEventProps) {
 
   // Declare a timeout Promise that we can use to make sure openUILinkIn was not called.
   let timeoutId;
-  const onTimeout = new Promise(function (resolve) {
+  const onTimeout = new Promise(function(resolve) {
     timeoutId = setTimeout(() => {
       window.openUILinkIn = oldOpenUILinkIn;
       timeoutId = null;
@@ -525,11 +537,12 @@ function simulateLinkClick(element, clickEventProps) {
  * Open a new browser window and return a promise that resolves when the new window has
  * fired the "browser-delayed-startup-finished" event.
  *
+ * @param {Object} options: An options object that will be passed to OpenBrowserWindow.
  * @returns Promise
  *          A Promise that resolves when the window is ready.
  */
-function openNewBrowserWindow() {
-  let win = OpenBrowserWindow();
+function openNewBrowserWindow(options) {
+  let win = OpenBrowserWindow(options);
   return new Promise(resolve => {
     Services.obs.addObserver(function observer(subject, topic) {
       if (win == subject) {

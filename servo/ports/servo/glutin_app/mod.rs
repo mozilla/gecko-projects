@@ -4,15 +4,11 @@
 
 //! A simple application that uses glutin to open a window for Servo to display in.
 
+pub mod keyutils;
 pub mod window;
 
-use compositing::windowing::WindowEvent;
-use servo_config::opts;
+use servo::servo_config::opts;
 use std::rc::Rc;
-
-pub trait NestedEventLoopListener {
-    fn handle_event_from_nested_event_loop(&mut self, event: WindowEvent) -> bool;
-}
 
 pub fn create_window() -> Rc<window::Window> {
     // Read command-line options.

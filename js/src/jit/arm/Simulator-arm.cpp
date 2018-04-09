@@ -282,6 +282,9 @@ class SimInstruction {
     // Test for a nop instruction, which falls under type 1.
     inline bool isNopType1() const { return bits(24, 0) == 0x0120F000; }
 
+    // Test for a nop instruction, which falls under type 1.
+    inline bool isCsdbType1() const { return bits(24, 0) == 0x0120F014; }
+
     // Test for a stop instruction.
     inline bool isStop() const {
         return typeValue() == 7 && bit(24) == 1 && svcValue() >= kStopCode;
@@ -403,8 +406,6 @@ class AutoLockSimulatorCache : public LockGuard<Mutex>
 
 mozilla::Atomic<size_t, mozilla::ReleaseAcquire>
     SimulatorProcess::ICacheCheckingDisableCount(1); // Checking is disabled by default.
-mozilla::Atomic<bool, mozilla::ReleaseAcquire>
-    SimulatorProcess::cacheInvalidatedBySignalHandler_(false);
 SimulatorProcess* SimulatorProcess::singleton_ = nullptr;
 
 int64_t Simulator::StopSimAt = -1L;
@@ -869,7 +870,11 @@ ArmDebugger::debug()
 #endif
             } else if (strcmp(cmd, "gdb") == 0) {
                 printf("relinquishing control to gdb\n");
+#ifdef _MSC_VER
+                __debugbreak();
+#else
                 asm("int $3");
+#endif
                 printf("regaining control from gdb\n");
             } else if (strcmp(cmd, "break") == 0) {
                 if (argc == 2) {
@@ -1086,25 +1091,11 @@ SimulatorProcess::checkICacheLocked(SimInstruction* instr)
     bool cache_hit = (*cache_valid_byte == CachePage::LINE_VALID);
     char* cached_line = cache_page->cachedData(offset & ~CachePage::kLineMask);
 
-    // Read all state before considering signal handler effects.
-    int cmpret = 0;
     if (cache_hit) {
         // Check that the data in memory matches the contents of the I-cache.
-        cmpret = memcmp(reinterpret_cast<void*>(instr),
-                        cache_page->cachedData(offset),
-                        SimInstruction::kInstrSize);
-    }
-
-    // Check for signal handler interruption between reading state and asserting.
-    // It is safe for the signal to arrive during the !cache_hit path, since it
-    // will be cleared the next time this function is called.
-    if (cacheInvalidatedBySignalHandler_) {
-        icache().clear();
-        cacheInvalidatedBySignalHandler_ = false;
-        return;
-    }
-
-    if (cache_hit) {
+        int cmpret = memcmp(reinterpret_cast<void*>(instr),
+                            cache_page->cachedData(offset),
+                            SimInstruction::kInstrSize);
         MOZ_ASSERT(cmpret == 0);
     } else {
         // Cache miss. Load memory into the cache.
@@ -1157,7 +1148,6 @@ Simulator::Simulator(JSContext* cx)
     stackLimit_ = 0;
     pc_modified_ = false;
     icount_ = 0L;
-    wasm_interrupt_ = false;
     break_pc_ = nullptr;
     break_instr_ = 0;
     single_stepping_ = false;
@@ -1591,29 +1581,6 @@ Simulator::registerState()
     return state;
 }
 
-// The signal handler only redirects the PC to the interrupt stub when the PC is
-// in function code. However, this guard is racy for the ARM simulator since the
-// signal handler samples PC in the middle of simulating an instruction and thus
-// the current PC may have advanced once since the signal handler's guard. So we
-// re-check here.
-void
-Simulator::handleWasmInterrupt()
-{
-    if (!wasm::CodeExists)
-        return;
-
-    uint8_t* pc = (uint8_t*)get_pc();
-
-    const wasm::ModuleSegment* ms = nullptr;
-    if (!wasm::InInterruptibleCode(cx_, pc, &ms))
-        return;
-
-    if (!cx_->activation()->asJit()->startWasmInterrupt(registerState()))
-        return;
-
-    set_pc(int32_t(ms->interruptCode()));
-}
-
 static inline JitActivation*
 GetJitActivation(JSContext* cx)
 {
@@ -1654,17 +1621,16 @@ Simulator::handleWasmSegFault(int32_t addr, unsigned numBytes)
     if (!instance->memoryAccessInGuardRegion((uint8_t*)addr, numBytes))
         return false;
 
-    const wasm::MemoryAccess* memoryAccess = instance->code().lookupMemoryAccess(pc);
-    if (!memoryAccess) {
-        MOZ_ALWAYS_TRUE(act->asJit()->startWasmInterrupt(registerState()));
-        if (!instance->code().containsCodePC(pc))
-            MOZ_CRASH("Cannot map PC to trap handler");
+    wasm::Trap trap;
+    wasm::BytecodeOffset bytecode;
+    if (!moduleSegment->code().lookupTrap(pc, &trap, &bytecode)) {
+        act->startWasmTrap(wasm::Trap::OutOfBounds, 0, registerState());
         set_pc(int32_t(moduleSegment->outOfBoundsCode()));
         return true;
     }
 
-    MOZ_ASSERT(memoryAccess->hasTrapOutOfLineCode());
-    set_pc(int32_t(memoryAccess->trapOutOfLineCode(moduleSegment->base())));
+    act->startWasmTrap(wasm::Trap::OutOfBounds, bytecode.offset(), registerState());
+    set_pc(int32_t(moduleSegment->trapCode()));
     return true;
 }
 
@@ -1687,7 +1653,7 @@ Simulator::handleWasmIllFault()
     if (!moduleSegment->code().lookupTrap(pc, &trap, &bytecode))
         return false;
 
-    act->startWasmTrap(trap, bytecode.offset, registerState());
+    act->startWasmTrap(trap, bytecode.offset(), registerState());
     set_pc(int32_t(moduleSegment->trapCode()));
     return true;
 }
@@ -3387,6 +3353,8 @@ Simulator::decodeType01(SimInstruction* instr)
         }
     } else if ((type == 1) && instr->isNopType1()) {
         // NOP.
+    } else if ((type == 1) && instr->isCsdbType1()) {
+        // Speculation barrier. (No-op for the simulator)
     } else {
         int rd = instr->rdValue();
         int rn = instr->rnValue();
@@ -4920,19 +4888,6 @@ Simulator::disable_single_stepping()
     single_step_callback_arg_ = nullptr;
 }
 
-static void
-FakeInterruptHandler()
-{
-    JSContext* cx = TlsContext.get();
-    uint8_t* pc = cx->simulator()->get_pc_as<uint8_t*>();
-
-    const wasm::ModuleSegment* ms= nullptr;
-    if (!wasm::InInterruptibleCode(cx, pc, &ms))
-        return;
-
-    cx->simulator()->trigger_wasm_interrupt();
-}
-
 template<bool EnableStopSimAt>
 void
 Simulator::execute()
@@ -4952,16 +4907,9 @@ Simulator::execute()
         } else {
             if (single_stepping_)
                 single_step_callback_(single_step_callback_arg_, this, (void*)program_counter);
-            if (MOZ_UNLIKELY(JitOptions.simulatorAlwaysInterrupt))
-                FakeInterruptHandler();
             SimInstruction* instr = reinterpret_cast<SimInstruction*>(program_counter);
             instructionDecode(instr);
             icount_++;
-
-            if (MOZ_UNLIKELY(wasm_interrupt_)) {
-                handleWasmInterrupt();
-                wasm_interrupt_ = false;
-            }
         }
         program_counter = get_pc();
     }

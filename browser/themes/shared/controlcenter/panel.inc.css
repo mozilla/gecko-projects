@@ -181,6 +181,11 @@
 .identity-popup-connection-secure {
   color: #058B00;
 }
+
+:root[lwt-popup-brighttext] .identity-popup-connection-secure {
+  color: #30e60b;
+}
+
 .identity-popup-connection-not-secure {
   color: #d74345;
 }
@@ -382,6 +387,8 @@ description#identity-popup-content-verifier,
   min-width: 0;
   padding: 2px;
   background-color: transparent;
+  color: inherit;
+  opacity: 0.6;
 }
 
 .identity-popup-permission-remove-button > .button-box {
@@ -394,7 +401,7 @@ description#identity-popup-content-verifier,
   height: 16px;
   list-style-image: url(chrome://browser/skin/panel-icon-cancel.svg);
   -moz-context-properties: fill;
-  fill: graytext;
+  fill: currentColor;
 }
 
 .identity-popup-permission-remove-button > .button-box > .button-text {
@@ -403,13 +410,13 @@ description#identity-popup-content-verifier,
 
 /* swap foreground / background colors on hover */
 .identity-popup-permission-remove-button:not(:-moz-focusring):hover {
-  background-color: graytext;
+  background-color: currentColor;
 }
 
 .identity-popup-permission-remove-button:not(:-moz-focusring):hover > .button-box > .button-icon {
-  fill: -moz-field;
+  fill: var(--arrowpanel-background);
 }
 
 .identity-popup-permission-remove-button:not(:-moz-focusring):hover:active {
-  background-color: -moz-fieldtext;
+  opacity: 0.8;
 }

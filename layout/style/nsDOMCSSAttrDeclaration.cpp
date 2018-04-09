@@ -8,10 +8,6 @@
 
 #include "nsDOMCSSAttrDeclaration.h"
 
-#ifdef MOZ_OLD_STYLE
-#include "mozilla/css/Declaration.h"
-#include "mozilla/css/StyleRule.h"
-#endif
 #include "mozilla/DeclarationBlock.h"
 #include "mozilla/DeclarationBlockInlines.h"
 #include "mozilla/dom/Element.h"
@@ -142,17 +138,7 @@ nsDOMCSSAttributeDeclaration::GetCSSDeclaration(Operation aOperation)
   }
 
   // cannot fail
-  RefPtr<DeclarationBlock> decl;
-  if (mElement->IsStyledByServo()) {
-    decl = new ServoDeclarationBlock();
-  } else {
-#ifdef MOZ_OLD_STYLE
-    decl = new css::Declaration();
-    decl->AsGecko()->InitializeEmpty();
-#else
-    MOZ_CRASH("old style system disabled");
-#endif
-  }
+  RefPtr<DeclarationBlock> decl = new ServoDeclarationBlock();
 
   // this *can* fail (inside SetAttrAndNotify, at least).
   nsresult rv;

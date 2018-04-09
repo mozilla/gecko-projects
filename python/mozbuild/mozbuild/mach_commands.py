@@ -62,8 +62,8 @@ not enough available memory to perform the build. It's also possible some
 other system activity during the build is to blame.
 
 If you feel this message is not appropriate for your machine configuration,
-please file a Core :: Build Config bug at
-https://bugzilla.mozilla.org/enter_bug.cgi?product=Core&component=Build%20Config
+please file a Firefox Build System :: General bug at
+https://bugzilla.mozilla.org/enter_bug.cgi?product=Firefox%20Build%20System&component=General
 and tell us about your machine and build configuration so we can adjust the
 warning heuristic.
 ===================
@@ -341,6 +341,26 @@ class Clobber(MachCommandBase):
     @CommandArgument('--full', action='store_true',
         help='Perform a full clobber')
     def clobber(self, what, full=False):
+        """Clean up the source and object directories.
+
+        Performing builds and running various commands generate various files.
+
+        Sometimes it is necessary to clean up these files in order to make
+        things work again. This command can be used to perform that cleanup.
+
+        By default, this command removes most files in the current object
+        directory (where build output is stored). Some files (like Visual
+        Studio project files) are not removed by default. If you would like
+        to remove the object directory in its entirety, run with `--full`.
+
+        The `python` target will clean up various generated Python files from
+        the source directory and will remove untracked files from well-known
+        directories containing Python packages. Run this to remove .pyc files,
+        compiled C extensions, etc. Note: all files not tracked or ignored by
+        version control in well-known Python package directories will be
+        deleted. Run the `status` command of your VCS to see if any untracked
+        files you haven't committed yet will be deleted.
+        """
         invalid = set(what) - set(self.CLOBBER_CHOICES)
         if invalid:
             print('Unknown clobber target(s): {}'.format(', '.join(invalid)))
@@ -362,11 +382,16 @@ class Clobber(MachCommandBase):
 
         if 'python' in what:
             if conditions.is_hg(self):
-                cmd = ['hg', 'purge', '--all', '-I', 'glob:**.py[co]']
+                cmd = ['hg', 'purge', '--all', '-I', 'glob:**.py[cdo]',
+                       '-I', 'path:python/', '-I', 'path:third_party/python/']
             elif conditions.is_git(self):
-                cmd = ['git', 'clean', '-f', '-x', '*.py[co]']
+                cmd = ['git', 'clean', '-f', '-x', '*.py[cdo]', 'python/',
+                       'third_party/python/']
             else:
-                cmd = ['find', '.', '-type', 'f', '-name', '*.py[co]', '-delete']
+                # We don't know what is tracked/untracked if we don't have VCS.
+                # So we can't clean python/ and third_party/python/.
+                cmd = ['find', '.', '-type', 'f', '-name', '*.py[cdo]',
+                       '-delete']
             ret = subprocess.call(cmd, cwd=self.topsrcdir)
         return ret
 
@@ -1147,16 +1172,13 @@ class PackageFrontend(MachCommandBase):
         state_dir = self._mach_context.state_dir
         cache_dir = os.path.join(state_dir, 'package-frontend')
 
-        here = os.path.abspath(os.path.dirname(__file__))
-        build_obj = MozbuildObject.from_environment(cwd=here)
-
         hg = None
-        if conditions.is_hg(build_obj):
-            hg = build_obj.substs['HG']
+        if conditions.is_hg(self):
+            hg = self.substs['HG']
 
         git = None
-        if conditions.is_git(build_obj):
-            git = build_obj.substs['GIT']
+        if conditions.is_git(self):
+            git = self.substs['GIT']
 
         from mozbuild.artifacts import Artifacts
         artifacts = Artifacts(tree, self.substs, self.defines, job,
@@ -1592,7 +1614,8 @@ class StaticAnalysis(MachCommandBase):
                           'the diff mode.')
     @CommandArgument('--checks', '-c', default='-*', metavar='checks',
                      help='Static analysis checks to enable.  By default, this enables only '
-                     'custom Mozilla checks, but can be any clang-tidy checks syntax.')
+                     'checks that are published here: https://mzl.la/2DRHeTh, but can be any '
+                     'clang-tidy checks syntax.')
     @CommandArgument('--jobs', '-j', default='0', metavar='jobs', type=int,
                      help='Number of concurrent jobs to run. Default is the number of CPUs.')
     @CommandArgument('--strip', '-p', default='1', metavar='NUM',
@@ -1706,7 +1729,7 @@ class StaticAnalysis(MachCommandBase):
         rc = self._get_clang_tools(verbose=verbose)
         if rc != 0:
             return rc
-        args = [self._clang_tidy_path, '-list-checks', '-checks=-*,mozilla-*']
+        args = [self._clang_tidy_path, '-list-checks', '-checks=%s' % self._get_checks()]
         return self._run_command_in_objdir(args=args, pass_thru=True)
 
     @Command('clang-format',  category='misc', description='Run clang-format on current changes')

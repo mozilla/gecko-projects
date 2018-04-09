@@ -104,7 +104,7 @@ protected:
 
   nsresult FillNoCheckRangeFromAnchor(mozInlineSpellWordUtil& aWordUtil);
 
-  already_AddRefed<nsIDocument> GetDocument();
+  nsIDocument* GetDocument() const;
   already_AddRefed<nsRange> PositionToCollapsedRange(nsINode* aNode,
                                                      uint32_t aOffset);
 };
@@ -232,7 +232,8 @@ public:
 
   nsresult RemoveRange(mozilla::dom::Selection *aSpellCheckSelection,
                        nsRange *aRange);
-  nsresult AddRange(nsISelection *aSpellCheckSelection, nsIDOMRange * aRange);
+  nsresult AddRange(mozilla::dom::Selection *aSpellCheckSelection,
+                    nsRange* aRange);
   bool     SpellCheckSelectionIsFull() { return mNumWordsInSpellSelection >= mMaxNumWordsInSpellSelection; }
 
   nsresult MakeSpellCheckRange(nsIDOMNode* aStartNode, int32_t aStartOffset,

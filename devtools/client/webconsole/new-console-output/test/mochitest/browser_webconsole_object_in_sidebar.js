@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Test that the ObjectInspector is rendered correctly in the sidebar.
 
 "use strict";
@@ -13,7 +11,7 @@ const TEST_URI =
   "data:text/html;charset=utf8," +
   "<script>console.log({a:1,b:2,c:3});</script>";
 
-add_task(async function () {
+add_task(async function() {
   // Should be removed when sidebar work is complete
   await pushPref("devtools.webconsole.sidebarToggle", true);
 
@@ -41,7 +39,7 @@ add_task(async function () {
   is(oiNodes.length, 5, "There is the expected number of nodes in the tree");
   let propertiesNodes = [...objectInspector.querySelectorAll(".object-label")]
     .map(el => el.textContent);
-  const arrayPropertiesNames = ["a", "b", "c", "__proto__"];
+  const arrayPropertiesNames = ["a", "b", "c", "<prototype>"];
   is(JSON.stringify(propertiesNodes), JSON.stringify(arrayPropertiesNames));
 });
 

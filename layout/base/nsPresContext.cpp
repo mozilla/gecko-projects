@@ -6,6 +6,8 @@
 
 /* a presentation of a document, part 1 */
 
+#include "nsPresContext.h"
+
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Encoding.h"
@@ -15,14 +17,13 @@
 #include "base/basictypes.h"
 
 #include "nsCOMPtr.h"
-#include "nsPresContext.h"
+#include "nsCSSFrameConstructor.h"
 #include "nsIPresShell.h"
 #include "nsIPresShellInlines.h"
 #include "nsDocShell.h"
 #include "nsIContentViewer.h"
 #include "nsPIDOMWindow.h"
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
+#include "mozilla/ServoStyleSet.h"
 #include "nsIContent.h"
 #include "nsIFrame.h"
 #include "nsIDocument.h"
@@ -34,23 +35,12 @@
 #include "nsHTMLDocument.h"
 #include "nsIWeakReferenceUtils.h"
 #include "nsThreadUtils.h"
-#include "nsFrameManager.h"
 #include "nsLayoutUtils.h"
 #include "nsViewManager.h"
-#ifdef MOZ_OLD_STYLE
-#include "mozilla/GeckoRestyleManager.h"
-#endif
 #include "mozilla/RestyleManager.h"
-#include "mozilla/RestyleManagerInlines.h"
 #include "SurfaceCacheUtils.h"
 #include "nsMediaFeatures.h"
-#ifdef MOZ_OLD_STYLE
-#include "nsRuleNode.h"
-#endif
 #include "gfxPlatform.h"
-#ifdef MOZ_OLD_STYLE
-#include "nsCSSRules.h"
-#endif
 #include "nsFontFaceLoader.h"
 #include "mozilla/AnimationEventDispatcher.h"
 #include "mozilla/EffectCompositor.h"
@@ -78,7 +68,6 @@
 #include "gfxPrefs.h"
 #include "nsIDOMChromeWindow.h"
 #include "nsFrameLoader.h"
-#include "mozilla/dom/FontFaceSet.h"
 #include "nsContentUtils.h"
 #include "nsPIWindowRoot.h"
 #include "mozilla/Preferences.h"
@@ -126,66 +115,15 @@ public:
   nsPresContext* mPresContext;
 };
 
-#ifdef MOZ_OLD_STYLE
-
-namespace {
-
-class CharSetChangingRunnable : public Runnable
-{
-public:
-  CharSetChangingRunnable(nsPresContext* aPresContext,
-                          NotNull<const Encoding*> aCharSet)
-    : Runnable("CharSetChangingRunnable"),
-      mPresContext(aPresContext),
-      mCharSet(aCharSet)
-  {
-  }
-
-  NS_IMETHOD Run() override
-  {
-    mPresContext->DoChangeCharSet(mCharSet);
-    return NS_OK;
-  }
-
-private:
-  RefPtr<nsPresContext> mPresContext;
-  NotNull<const Encoding*> mCharSet;
-};
-
-} // namespace
-
-#endif
 
 nscolor
 nsPresContext::MakeColorPref(const nsString& aColor)
 {
-  bool ok;
+  ServoStyleSet* styleSet = mShell ? mShell->StyleSet() : nullptr;
+
   nscolor result;
-
-  ServoStyleSet* servoStyleSet = mShell && mShell->StyleSet()
-    ? mShell->StyleSet()->GetAsServo()
-    : nullptr;
-
-  bool useServoParser =
-#ifdef MOZ_OLD_STYLE
-    servoStyleSet;
-#else
-    true;
-#endif
-
-  if (useServoParser) {
-    ok = ServoCSSParser::ComputeColor(servoStyleSet, NS_RGB(0, 0, 0), aColor,
-                                      &result);
-  } else {
-#ifdef MOZ_OLD_STYLE
-    nsCSSParser parser;
-    nsCSSValue value;
-    ok = parser.ParseColorString(aColor, nullptr, 0, value) &&
-         nsRuleNode::ComputeColor(value, this, nullptr, result);
-#else
-    MOZ_CRASH("old style system disabled");
-#endif
-  }
+  bool ok = ServoCSSParser::
+    ComputeColor(styleSet, NS_RGB(0, 0, 0), aColor, &result);
 
   if (!ok) {
     // Any better choices?
@@ -218,19 +156,10 @@ nsPresContext::PrefChangedCallback(const char* aPrefName, void* instance_data)
   RefPtr<nsPresContext>  presContext =
     static_cast<nsPresContext*>(instance_data);
 
-  NS_ASSERTION(nullptr != presContext, "bad instance data");
-  if (nullptr != presContext) {
+  NS_ASSERTION(presContext, "bad instance data");
+  if (presContext) {
     presContext->PreferenceChanged(aPrefName);
   }
-}
-
-void
-nsPresContext::PrefChangedUpdateTimerCallback(nsITimer *aTimer, void *aClosure)
-{
-  nsPresContext*  presContext = (nsPresContext*)aClosure;
-  NS_ASSERTION(presContext != nullptr, "bad instance data");
-  if (presContext)
-    presContext->UpdateAfterPreferencesChanged();
 }
 
 void
@@ -377,12 +306,6 @@ nsPresContext::Destroy()
     mEventManager = nullptr;
   }
 
-  if (mPrefChangedTimer)
-  {
-    mPrefChangedTimer->Cancel();
-    mPrefChangedTimer = nullptr;
-  }
-
   // Unregister preference callbacks
   Preferences::UnregisterPrefixCallback(nsPresContext::PrefChangedCallback,
                                         "font.",
@@ -475,7 +398,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsPresContext)
   // NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTheme); // a service
   // NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLangService); // a service
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPrintSettings);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPrefChangedTimer);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsPresContext)
@@ -730,8 +652,7 @@ nsPresContext::InvalidatePaintedLayers()
 {
   if (!mShell)
     return;
-  nsIFrame* rootFrame = mShell->FrameManager()->GetRootFrame();
-  if (rootFrame) {
+  if (nsIFrame* rootFrame = mShell->GetRootFrame()) {
     // FrameLayerBuilder caches invalidation-related values that depend on the
     // appunits-per-dev-pixel ratio, so ensure that all PaintedLayer drawing
     // is completely flushed.
@@ -823,21 +744,16 @@ nsPresContext::PreferenceChanged(const char* aPrefName)
     // Changes to font_rendering prefs need to trigger a reflow
     mPrefChangePendingNeedsReflow = true;
   }
-  // we use a zero-delay timer to coalesce multiple pref updates
-  if (!mPrefChangedTimer)
-  {
-    // We will end up calling InvalidatePreferenceSheets one from each pres
-    // context, but all it's doing is clearing its cached sheet pointers,
-    // so it won't be wastefully recreating the sheet multiple times.
-    // The first pres context that has its mPrefChangedTimer called will
-    // be the one to cause the reconstruction of the pref style sheet.
-    nsLayoutStylesheetCache::InvalidatePreferenceSheets();
-    mPrefChangedTimer = CreateTimer(PrefChangedUpdateTimerCallback,
-                                    "PrefChangedUpdateTimerCallback", 0);
-    if (!mPrefChangedTimer) {
-      return;
-    }
-  }
+
+  // We will end up calling InvalidatePreferenceSheets one from each pres
+  // context, but all it's doing is clearing its cached sheet pointers, so it
+  // won't be wastefully recreating the sheet multiple times.
+  //
+  // The first pres context that has its pref changed runnable called will
+  // be the one to cause the reconstruction of the pref style sheet.
+  nsLayoutStylesheetCache::InvalidatePreferenceSheets();
+  DispatchPrefChangedRunnableIfNeeded();
+
   if (prefName.EqualsLiteral("nglayout.debug.paint_flashing") ||
       prefName.EqualsLiteral("nglayout.debug.paint_flashing_chrome")) {
     mPaintFlashingInitialized = false;
@@ -846,9 +762,29 @@ nsPresContext::PreferenceChanged(const char* aPrefName)
 }
 
 void
+nsPresContext::DispatchPrefChangedRunnableIfNeeded()
+{
+  if (mPostedPrefChangedRunnable) {
+    return;
+  }
+
+  nsCOMPtr<nsIRunnable> runnable =
+    NewRunnableMethod("nsPresContext::UpdateAfterPreferencesChanged",
+                      this,
+                      &nsPresContext::UpdateAfterPreferencesChanged);
+  nsresult rv = Document()->Dispatch(TaskCategory::Other, runnable.forget());
+  if (NS_SUCCEEDED(rv)) {
+    mPostedPrefChangedRunnable = true;
+  }
+}
+
+void
 nsPresContext::UpdateAfterPreferencesChanged()
 {
-  mPrefChangedTimer = nullptr;
+  mPostedPrefChangedRunnable = false;
+  if (!mShell) {
+    return;
+  }
 
   if (!mContainer) {
     // Delay updating until there is a container
@@ -865,9 +801,7 @@ nsPresContext::UpdateAfterPreferencesChanged()
   GetUserPreferences();
 
   // update the presShell: tell it to set the preference style rules up
-  if (mShell) {
-    mShell->UpdatePreferenceStyles();
-  }
+  mShell->UpdatePreferenceStyles();
 
   InvalidatePaintedLayers();
   mDeviceContext->FlushFontCache();
@@ -899,11 +833,9 @@ nsPresContext::Init(nsDeviceContext* aDeviceContext)
   // most of the time.
   //
   // FIXME(emilio): I'm pretty sure this doesn't happen after bug 1414999.
-  if (mDocument->IsStyledByServo()) {
-    Element* root = mDocument->GetRootElement();
-    if (root && root->HasServoData()) {
-      ServoRestyleManager::ClearServoDataFromSubtree(root);
-    }
+  Element* root = mDocument->GetRootElement();
+  if (root && root->HasServoData()) {
+    RestyleManager::ClearServoDataFromSubtree(root);
   }
 
   if (mDeviceContext->SetFullZoom(mFullZoom))
@@ -1026,20 +958,12 @@ nsPresContext::Init(nsDeviceContext* aDeviceContext)
 // Note: We don't hold a reference on the shell; it has a reference to
 // us
 void
-nsPresContext::AttachShell(nsIPresShell* aShell, StyleBackendType aBackendType)
+nsPresContext::AttachShell(nsIPresShell* aShell)
 {
   MOZ_ASSERT(!mShell);
   mShell = aShell;
 
-  if (aBackendType == StyleBackendType::Servo) {
-    mRestyleManager = new ServoRestyleManager(this);
-  } else {
-#ifdef MOZ_OLD_STYLE
-    mRestyleManager = new GeckoRestyleManager(this);
-#else
-    MOZ_CRASH("old style system disabled");
-#endif
-  }
+  mRestyleManager = new mozilla::RestyleManager(this);
 
   // Since CounterStyleManager is also the name of a method of
   // nsPresContext, it is necessary to prefix the class with the mozilla
@@ -1133,12 +1057,13 @@ nsPresContext::DoChangeCharSet(NotNull<const Encoding*> aCharSet)
 {
   UpdateCharSet(aCharSet);
   mDeviceContext->FlushFontCache();
-  // In Stylo, if a document contains one or more <script> elements, frame
-  // construction might happen earlier than the UpdateCharSet(), so we need to
-  // restyle descendants to make their style data up-to-date.
-  RebuildAllStyleData(NS_STYLE_HINT_REFLOW,
-                      mDocument->IsStyledByServo()
-                      ? eRestyle_ForceDescendants : nsRestyleHint(0));
+
+  // If a document contains one or more <script> elements, frame construction
+  // might happen earlier than the UpdateCharSet(), so we need to restyle
+  // descendants to make their style data up-to-date.
+  //
+  // FIXME(emilio): Revisit whether this is true after bug 1438911.
+  RebuildAllStyleData(NS_STYLE_HINT_REFLOW, eRestyle_ForceDescendants);
 }
 
 void
@@ -1173,14 +1098,6 @@ nsPresContext::UpdateCharSet(NotNull<const Encoding*> aCharSet)
 void
 nsPresContext::DispatchCharSetChange(NotNull<const Encoding*> aEncoding)
 {
-#ifdef MOZ_OLD_STYLE
-  if (!Document()->IsStyledByServo()) {
-    RefPtr<CharSetChangingRunnable> runnable =
-      new CharSetChangingRunnable(this, aEncoding);
-    Document()->Dispatch(TaskCategory::Other, runnable.forget());
-    return;
-  }
-#endif
   // In Servo RebuildAllStyleData is async, so no need to do the runnable dance.
   DoChangeCharSet(aEncoding);
 }
@@ -1272,10 +1189,8 @@ nsPresContext::CompatibilityModeChanged()
     return;
   }
 
-  StyleSetHandle styleSet = mShell->StyleSet();
-  if (styleSet->IsServo()) {
-    styleSet->AsServo()->CompatibilityModeChanged();
-  }
+  ServoStyleSet* styleSet = mShell->StyleSet();
+  styleSet->CompatibilityModeChanged();
 
   if (doc->IsSVGDocument()) {
     // SVG documents never load quirk.css.
@@ -1287,17 +1202,17 @@ nsPresContext::CompatibilityModeChanged()
     return;
   }
 
-  auto cache = nsLayoutStylesheetCache::For(styleSet->BackendType());
+  auto cache = nsLayoutStylesheetCache::Singleton();
   StyleSheet* sheet = cache->QuirkSheet();
 
   if (needsQuirkSheet) {
     // quirk.css needs to come after html.css; we just keep it at the end.
     DebugOnly<nsresult> rv =
-      styleSet->AppendStyleSheet(SheetType::Agent, sheet);
+      styleSet->AppendStyleSheet(SheetType::Agent, sheet->AsServo());
     NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "failed to insert quirk.css");
   } else {
     DebugOnly<nsresult> rv =
-      styleSet->RemoveStyleSheet(SheetType::Agent, sheet);
+      styleSet->RemoveStyleSheet(SheetType::Agent, sheet->AsServo());
     NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "failed to remove quirk.css");
   }
 
@@ -1542,8 +1457,8 @@ GetPropagatedScrollbarStylesForViewport(nsPresContext* aPresContext,
   }
 
   // Check the style on the document root element
-  StyleSetHandle styleSet = aPresContext->StyleSet();
-  RefPtr<nsStyleContext> rootStyle =
+  ServoStyleSet* styleSet = aPresContext->StyleSet();
+  RefPtr<ComputedStyle> rootStyle =
     styleSet->ResolveStyleFor(docElement, nullptr, LazyComputeBehavior::Allow);
   if (CheckOverflow(rootStyle->StyleDisplay(), aStyles)) {
     // tell caller we stole the overflow style from the root element
@@ -1570,7 +1485,7 @@ GetPropagatedScrollbarStylesForViewport(nsPresContext* aPresContext,
   MOZ_ASSERT(bodyElement->IsHTMLElement(nsGkAtoms::body),
              "GetBodyElement returned something bogus");
 
-  RefPtr<nsStyleContext> bodyStyle =
+  RefPtr<ComputedStyle> bodyStyle =
     styleSet->ResolveStyleFor(bodyElement, rootStyle,
                               LazyComputeBehavior::Allow);
 
@@ -1637,10 +1552,7 @@ nsPresContext::SetContainer(nsIDocShell* aDocShell)
                  "Should only need pref update if mContainer is null.");
     mContainer = static_cast<nsDocShell*>(aDocShell);
     if (mNeedsPrefUpdate) {
-      if (!mPrefChangedTimer) {
-        mPrefChangedTimer = CreateTimer(PrefChangedUpdateTimerCallback,
-                                        "PrefChangedUpdateTimerCallback", 0);
-      }
+      DispatchPrefChangedRunnableIfNeeded();
       mNeedsPrefUpdate = false;
     }
   } else {
@@ -1833,8 +1745,7 @@ nsPresContext::ThemeChanged()
       NewRunnableMethod("nsPresContext::ThemeChangedInternal",
                         this,
                         &nsPresContext::ThemeChangedInternal);
-    nsresult rv = Document()->Dispatch(TaskCategory::Other,
-                                       ev.forget());
+    nsresult rv = Document()->Dispatch(TaskCategory::Other, ev.forget());
     if (NS_SUCCEEDED(rv)) {
       mPendingThemeChanged = true;
     }
@@ -1875,8 +1786,10 @@ nsPresContext::ThemeChangedInternal()
 
   // Recursively notify all remote leaf descendants that the
   // system theme has changed.
-  nsContentUtils::CallOnAllRemoteChildren(mDocument->GetWindow(),
-                                          NotifyThemeChanged, nullptr);
+  if (nsPIDOMWindowOuter* window = mDocument->GetWindow()) {
+    nsContentUtils::CallOnAllRemoteChildren(window,
+                                            NotifyThemeChanged, nullptr);
+  }
 }
 
 void
@@ -1888,8 +1801,7 @@ nsPresContext::SysColorChanged()
       NewRunnableMethod("nsPresContext::SysColorChangedInternal",
                         this,
                         &nsPresContext::SysColorChangedInternal);
-    nsresult rv = Document()->Dispatch(TaskCategory::Other,
-                                       ev.forget());
+    nsresult rv = Document()->Dispatch(TaskCategory::Other, ev.forget());
     if (NS_SUCCEEDED(rv)) {
       mPendingSysColorChanged = true;
     }
@@ -2084,18 +1996,11 @@ nsPresContext::RebuildAllStyleData(nsChangeHint aExtraHint,
   // here if there's no restyle hint? That looks pretty bogus.
   mUsesRootEMUnits = false;
   mUsesExChUnits = false;
-  if (mShell->StyleSet()->IsGecko()) {
-#ifdef MOZ_OLD_STYLE
-    mShell->StyleSet()->AsGecko()->SetUsesViewportUnits(false);
-#else
-    MOZ_CRASH("old style system disabled");
-#endif
-  }
 
   // TODO(emilio): It's unclear to me why would these three calls below be
   // needed. In particular, RebuildAllStyleData doesn't rebuild rules or
   // specified style information and such (note the comment in
-  // ServoRestyleManager::RebuildAllStyleData re. the funny semantics), so I
+  // RestyleManager::RebuildAllStyleData re. the funny semantics), so I
   // don't know why should we rebuild the user font set / counter styles /
   // etc...
   mDocument->MarkUserFontSetDirty();
@@ -2214,9 +2119,11 @@ NotifyTabSizeModeChanged(TabParent* aTab, void* aArg)
 void
 nsPresContext::SizeModeChanged(nsSizeMode aSizeMode)
 {
-  nsContentUtils::CallOnAllRemoteChildren(mDocument->GetWindow(),
-                                          NotifyTabSizeModeChanged,
-                                          &aSizeMode);
+  if (nsPIDOMWindowOuter* window = mDocument->GetWindow()) {
+    nsContentUtils::CallOnAllRemoteChildren(window,
+                                            NotifyTabSizeModeChanged,
+                                            &aSizeMode);
+  }
   MediaFeatureValuesChangedAllDocuments({ MediaFeatureChangeReason::SizeModeChange });
 }
 
@@ -2284,17 +2191,6 @@ bool
 nsPresContext::HasAuthorSpecifiedRules(const nsIFrame* aFrame,
                                        uint32_t aRuleTypeMask) const
 {
-  if (aFrame->StyleContext()->IsGecko()) {
-#ifdef MOZ_OLD_STYLE
-    auto* geckoStyleContext = aFrame->StyleContext()->AsGecko();
-    return
-      nsRuleNode::HasAuthorSpecifiedRules(geckoStyleContext,
-                                          aRuleTypeMask,
-                                          UseDocumentColors());
-#else
-    MOZ_CRASH("old style system disabled");
-#endif
-  }
   Element* elem = aFrame->GetContent()->AsElement();
 
   // We need to handle non-generated content pseudos too, so we use
@@ -2308,15 +2204,15 @@ nsPresContext::HasAuthorSpecifiedRules(const nsIFrame* aFrame,
     return false;
   }
 
-  nsStyleContext* styleContext = aFrame->StyleContext();
-  CSSPseudoElementType pseudoType = styleContext->GetPseudoType();
+  ComputedStyle* computedStyle = aFrame->Style();
+  CSSPseudoElementType pseudoType = computedStyle->GetPseudoType();
   // Anonymous boxes are more complicated, and we just assume that they
   // cannot have any author-specified rules here.
   if (pseudoType == CSSPseudoElementType::InheritingAnonBox ||
       pseudoType == CSSPseudoElementType::NonInheritingAnonBox) {
     return false;
   }
-  return Servo_HasAuthorSpecifiedRules(styleContext->AsServo(),
+  return Servo_HasAuthorSpecifiedRules(computedStyle,
                                        elem, pseudoType,
                                        aRuleTypeMask,
                                        UseDocumentColors());
@@ -2887,15 +2783,6 @@ nsPresContext::HavePendingInputEvent()
   }
 }
 
-void
-nsPresContext::NotifyFontFaceSetOnRefresh()
-{
-  FontFaceSet* set = mDocument->GetFonts();
-  if (set) {
-    set->DidRefresh();
-  }
-}
-
 bool
 nsPresContext::HasPendingRestyleOrReflow()
 {
@@ -3126,7 +3013,7 @@ nsPresContext::FlushFontFeatureValues()
   }
 
   if (mFontFeatureValuesDirty) {
-    StyleSetHandle styleSet = mShell->StyleSet();
+    ServoStyleSet* styleSet = mShell->StyleSet();
     mFontFeatureValuesLookup = styleSet->BuildFontFeatureValueSet();
     mFontFeatureValuesDirty = false;
   }
@@ -3193,7 +3080,7 @@ nsRootPresContext::ComputePluginGeometryUpdates(nsIFrame* aFrame,
 
   if (aBuilder) {
     MOZ_ASSERT(aList);
-    nsIFrame* rootFrame = FrameManager()->GetRootFrame();
+    nsIFrame* rootFrame = mShell->GetRootFrame();
 
     if (rootFrame && aBuilder->ContainsPluginItem()) {
       aBuilder->SetForPluginGeometry(true);

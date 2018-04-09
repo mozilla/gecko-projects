@@ -203,6 +203,12 @@ function checkPayloadInfo(data) {
               f + " must have the correct type and valid data " + data[f]);
   }
 
+  // Check for a valid revision.
+  if (data.revision != "") {
+    const revisionUrlRegEx = /^http[s]?:\/\/hg.mozilla.org(\/[a-z\S]+)+(\/rev\/[0-9a-z]+)$/g;
+    Assert.ok(revisionUrlRegEx.test(data.revision));
+  }
+
   // Previous buildId is not mandatory.
   if (data.previousBuildId) {
     Assert.ok(stringCheck(data.previousBuildId));
@@ -1343,9 +1349,6 @@ add_task(async function test_experimentAnnotations_subsession() {
 add_task(async function test_savedPingsOnShutdown() {
   await TelemetryController.testReset();
 
-  // On desktop, we expect both "saved-session" and "shutdown" pings. We only expect
-  // the former on Android.
-  const expectedPingCount = (gIsAndroid) ? 1 : 2;
   // Assure that we store the ping properly when saving sessions on shutdown.
   // We make the TelemetryController shutdown to trigger a session save.
   const dir = TelemetryStorage.pingDirectoryPath;
@@ -1356,18 +1359,14 @@ add_task(async function test_savedPingsOnShutdown() {
   PingServer.clearRequests();
   await TelemetryController.testReset();
 
-  const pings = await PingServer.promiseNextPings(expectedPingCount);
+  const ping = await PingServer.promiseNextPing();
 
-  for (let ping of pings) {
-    Assert.ok("type" in ping);
+  let expectedType   = gIsAndroid ? PING_TYPE_SAVED_SESSION : PING_TYPE_MAIN;
+  let expectedReason = gIsAndroid ? REASON_SAVED_SESSION : REASON_SHUTDOWN;
 
-    let expectedReason =
-      (ping.type == PING_TYPE_SAVED_SESSION) ? REASON_SAVED_SESSION : REASON_SHUTDOWN;
-
-    checkPingFormat(ping, ping.type, true, true);
-    Assert.equal(ping.payload.info.reason, expectedReason);
-    Assert.equal(ping.clientId, gClientID);
-  }
+  checkPingFormat(ping, expectedType, true, true);
+  Assert.equal(ping.payload.info.reason, expectedReason);
+  Assert.equal(ping.clientId, gClientID);
 });
 
 add_task(async function test_sendShutdownPing() {
@@ -1382,18 +1381,11 @@ add_task(async function test_sendShutdownPing() {
 
   let checkPendingShutdownPing = async function() {
     let pendingPings = await TelemetryStorage.loadPendingPingList();
-    Assert.equal(pendingPings.length, 2,
-                 "We expect 2 pending pings: shutdown and saved-session.");
+    Assert.equal(pendingPings.length, 1,
+                 "We expect 1 pending ping: shutdown.");
     // Load the pings off the disk.
-    const pings = [
-      await TelemetryStorage.loadPendingPing(pendingPings[0].id),
-      await TelemetryStorage.loadPendingPing(pendingPings[1].id)
-    ];
-    // Find the shutdown main ping and check that it contains the right data.
-    const shutdownPing = pings.find(p => p.type == "main");
+    const shutdownPing = await TelemetryStorage.loadPendingPing(pendingPings[0].id);
     Assert.ok(shutdownPing, "The 'shutdown' ping must be saved to disk.");
-    Assert.ok(pings.find(p => p.type == "saved-session"),
-              "The 'saved-session' ping must be saved to disk.");
     Assert.equal("shutdown", shutdownPing.payload.info.reason,
                  "The 'shutdown' ping must be saved to disk.");
   };
@@ -2111,7 +2103,7 @@ add_task(async function test_pingExtendedStats() {
   Assert.ok(!("addonManager" in ping.payload.simpleMeasurements),
             "addonManager must not be sent if the extended set is off.");
   Assert.ok(!("UITelemetry" in ping.payload.simpleMeasurements),
-            "UITelemetry must not be sent if the extended set is off.");
+            "UITelemetry must not be sent.");
 
   // Restore the preference.
   Telemetry.canRecordExtended = true;
@@ -2129,8 +2121,8 @@ add_task(async function test_pingExtendedStats() {
 
   Assert.ok("addonManager" in ping.payload.simpleMeasurements,
             "addonManager must be sent if the extended set is on.");
-  Assert.ok("UITelemetry" in ping.payload.simpleMeasurements,
-            "UITelemetry must be sent if the extended set is on.");
+  Assert.ok(!("UITelemetry" in ping.payload.simpleMeasurements),
+            "UITelemetry must not be sent.");
 
   await TelemetryController.testShutdown();
 });

@@ -13,7 +13,7 @@ const InspectorUtils = require("InspectorUtils");
 const lazyContainer = {};
 
 loader.lazyRequireGetter(lazyContainer, "CssLogic",
-  "devtools/server/css-logic", true);
+  "devtools/server/actors/inspector/css-logic", true);
 exports.getComputedStyle = (node) =>
   lazyContainer.CssLogic.getComputedStyle(node);
 
@@ -254,7 +254,7 @@ CanvasFrameAnonymousContentHelper.prototype = {
     }
 
     // For now highlighters.css is injected in content as a ua sheet because
-    // <style scoped> doesn't work inside anonymous content (see bug 1086532).
+    // we no longer support scoped style sheets (see bug 1345702).
     // If it did, highlighters.css would be injected as an anonymous content
     // node using CanvasFrameAnonymousContentHelper instead.
     loadSheet(this.highlighterEnv.window, STYLESHEET_URI);

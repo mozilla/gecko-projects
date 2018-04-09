@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Tests that the autocomplete input is being blurred and focused when selecting a value.
 // This will help screen-readers notify users of the value that was set in the input.
 
@@ -12,7 +10,7 @@
 
 const TEST_URI = "data:text/html;charset=utf8,<p>test code completion";
 
-add_task(async function () {
+add_task(async function() {
   let hud = await openNewTabAndConsole(TEST_URI);
 
   let jsterm = hud.jsterm;

@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Make sure that the Web Console output does not break after we try to call
 // console.dir() for objects that are not inspectable.
 
@@ -14,7 +12,7 @@ const TEST_URI = "data:text/html;charset=utf8,test console.dir on uninspectable 
 const FIRST_LOG_MESSAGE = "fooBug773466a";
 const SECOND_LOG_MESSAGE = "fooBug773466b";
 
-add_task(async function () {
+add_task(async function() {
   const hud = await openNewTabAndConsole(TEST_URI);
   const {jsterm} = hud;
 

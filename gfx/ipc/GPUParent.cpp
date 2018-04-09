@@ -8,6 +8,7 @@
 #endif
 #include "GPUParent.h"
 #include "gfxConfig.h"
+#include "gfxCrashReporterUtils.h"
 #include "gfxPlatform.h"
 #include "gfxPrefs.h"
 #include "GPUProcessHost.h"
@@ -21,8 +22,9 @@
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/ipc/CrashReporterClient.h"
 #include "mozilla/ipc/ProcessChild.h"
+#include "mozilla/layers/APZInputBridgeParent.h"
 #include "mozilla/layers/APZThreadUtils.h"
-#include "mozilla/layers/APZCTreeManager.h"
+#include "mozilla/layers/APZUtils.h"    // for apz::InitializeGlobalState
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/CompositorManagerParent.h"
 #include "mozilla/layers/CompositorThread.h"
@@ -125,8 +127,8 @@ GPUParent::Init(base::ProcessId aParentPid,
   CompositorThreadHolder::Start();
   // TODO: Bug 1406327, Start VRListenerThreadHolder when loading VR content.
   VRListenerThreadHolder::Start();
-  APZThreadUtils::SetControllerThread(CompositorThreadHolder::Loop());
-  APZCTreeManager::InitializeGlobalState();
+  APZThreadUtils::SetControllerThread(MessageLoop::current());
+  apz::InitializeGlobalState();
   LayerTreeOwnerTracker::Initialize();
   mozilla::ipc::SetThisProcessName("GPU Process");
 #ifdef XP_WIN
@@ -162,6 +164,22 @@ GPUParent::NotifyDeviceReset()
   Unused << SendNotifyDeviceReset(data);
 }
 
+PAPZInputBridgeParent*
+GPUParent::AllocPAPZInputBridgeParent(const LayersId& aLayersId)
+{
+  APZInputBridgeParent* parent = new APZInputBridgeParent(aLayersId);
+  parent->AddRef();
+  return parent;
+}
+
+bool
+GPUParent::DeallocPAPZInputBridgeParent(PAPZInputBridgeParent* aActor)
+{
+  APZInputBridgeParent* parent = static_cast<APZInputBridgeParent*>(aActor);
+  parent->Release();
+  return true;
+}
+
 mozilla::ipc::IPCResult
 GPUParent::RecvInit(nsTArray<GfxPrefSetting>&& prefs,
                     nsTArray<GfxVarUpdate>&& vars,
@@ -184,6 +202,14 @@ GPUParent::RecvInit(nsTArray<GfxPrefSetting>&& prefs,
   gfxConfig::Inherit(Feature::ADVANCED_LAYERS, devicePrefs.advancedLayers());
   gfxConfig::Inherit(Feature::DIRECT2D, devicePrefs.useD2D1());
 
+  { // Let the crash reporter know if we've got WR enabled or not. For other
+    // processes this happens in gfxPlatform::InitWebRenderConfig.
+    ScopedGfxFeatureReporter reporter("WR", gfxPlatform::WebRenderPrefEnabled());
+    if (gfxVars::UseWebRender()) {
+      reporter.SetSuccessful();
+    }
+  }
+
   for (const LayerTreeIdMapping& map : aMappings) {
     LayerTreeOwnerTracker::Get()->Map(map.layersId(), map.ownerId());
   }
@@ -193,6 +219,7 @@ GPUParent::RecvInit(nsTArray<GfxPrefSetting>&& prefs,
     DeviceManagerDx::Get()->CreateCompositorDevices();
   }
   if (gfxVars::UseWebRender()) {
+    DeviceManagerDx::Get()->CreateDirectCompositionDevice();
     // Ensure to initialize GfxInfo
     nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
     Unused << gfxInfo;
@@ -277,7 +304,7 @@ GPUParent::RecvInitVRManager(Endpoint<PVRManagerParent>&& aEndpoint)
 }
 
 mozilla::ipc::IPCResult
-GPUParent::RecvInitUiCompositorController(const uint64_t& aRootLayerTreeId, Endpoint<PUiCompositorControllerParent>&& aEndpoint)
+GPUParent::RecvInitUiCompositorController(const LayersId& aRootLayerTreeId, Endpoint<PUiCompositorControllerParent>&& aEndpoint)
 {
   UiCompositorControllerParent::Start(aRootLayerTreeId, Move(aEndpoint));
   return IPC_OK();

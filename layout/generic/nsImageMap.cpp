@@ -756,7 +756,7 @@ nsImageMap::SearchForAreas(nsIContent* aParent)
   for (nsIContent* child = aParent->GetFirstChild();
        child;
        child = child->GetNextSibling()) {
-    if (auto* area = HTMLAreaElement::FromContent(child)) {
+    if (auto* area = HTMLAreaElement::FromNode(child)) {
       AddArea(area);
 
       // Continue to next child. This stops mConsiderWholeSubtree from
@@ -793,10 +793,10 @@ void
 nsImageMap::AddArea(HTMLAreaElement* aArea)
 {
   static Element::AttrValuesArray strings[] =
-    {&nsGkAtoms::rect, &nsGkAtoms::rectangle,
-     &nsGkAtoms::circle, &nsGkAtoms::circ,
-     &nsGkAtoms::_default,
-     &nsGkAtoms::poly, &nsGkAtoms::polygon,
+    {nsGkAtoms::rect, nsGkAtoms::rectangle,
+     nsGkAtoms::circle, nsGkAtoms::circ,
+     nsGkAtoms::_default,
+     nsGkAtoms::poly, nsGkAtoms::polygon,
      nullptr};
 
   UniquePtr<Area> area;
@@ -947,7 +947,7 @@ nsImageMap::ContentRemoved(nsIContent* aChild,
     return;
   }
 
-  auto* areaElement = HTMLAreaElement::FromContent(aChild);
+  auto* areaElement = HTMLAreaElement::FromNode(aChild);
   if (!areaElement) {
     return;
   }

@@ -7,3 +7,6 @@
 #include mobile.js
 
 pref("privacy.trackingprotection.pbmode.enabled", false);
+pref("dom.ipc.processCount", 1);
+pref("dom.ipc.keepProcessesAlive.web", 1);
+pref("dom.ipc.processPrelaunch.enabled", false);

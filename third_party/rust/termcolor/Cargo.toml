@@ -12,7 +12,7 @@
 
 [package]
 name = "termcolor"
-version = "0.3.5"
+version = "0.3.6"
 authors = ["Andrew Gallant <jamslam@gmail.com>"]
 description = "A simple cross platform library for writing colored text to a terminal.\n"
 homepage = "https://github.com/BurntSushi/ripgrep/tree/master/termcolor"

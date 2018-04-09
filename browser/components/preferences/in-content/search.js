@@ -40,10 +40,15 @@ var gSearchPane = {
     document.getElementById("engineList").view = gEngineView;
     this.buildDefaultEngineDropDown();
 
-    let addEnginesLink = document.getElementById("addEngines");
-    let searchEnginesURL = Services.wm.getMostRecentWindow("navigator:browser")
-                                      .BrowserSearch.searchEnginesURL;
-    addEnginesLink.setAttribute("href", searchEnginesURL);
+    if (Services.policies &&
+        !Services.policies.isAllowed("installSearchEngine")) {
+      document.getElementById("addEnginesBox").hidden = true;
+    } else {
+      let addEnginesLink = document.getElementById("addEngines");
+      let searchEnginesURL = Services.wm.getMostRecentWindow("navigator:browser")
+                                        .BrowserSearch.searchEnginesURL;
+      addEnginesLink.setAttribute("href", searchEnginesURL);
+    }
 
     window.addEventListener("click", this);
     window.addEventListener("command", this);
@@ -66,7 +71,7 @@ var gSearchPane = {
     urlbarSuggestsPref.on("change", updateSuggestionCheckboxes);
     let urlbarSuggests = document.getElementById("urlBarSuggestion");
     urlbarSuggests.addEventListener("command", () => {
-      urlbarSuggestsPref.value = !urlbarSuggests.checked;
+      urlbarSuggestsPref.value = urlbarSuggests.checked;
     });
 
     this._initShowSearchSuggestionsFirst();
@@ -356,12 +361,16 @@ var gSearchPane = {
 
       // Notify the user if they have chosen an existing engine/bookmark keyword
       if (eduplicate || bduplicate) {
-        let strings = document.getElementById("engineManagerBundle");
-        let dtitle = strings.getString("duplicateTitle");
-        let bmsg = strings.getString("duplicateBookmarkMsg");
-        let emsg = strings.getFormattedString("duplicateEngineMsg", [dupName]);
+        let msgids = [["search-keyword-warning-title"]];
+        if (eduplicate) {
+          msgids.push(["search-keyword-warning-engine", { name: dupName }]);
+        } else {
+          msgids.push(["search-keyword-warning-bookmark"]);
+        }
 
-        Services.prompt.alert(window, dtitle, eduplicate ? emsg : bmsg);
+        let [dtitle, msg] = await document.l10n.formatValues(msgids);
+
+        Services.prompt.alert(window, dtitle, msg);
         return false;
       }
     }

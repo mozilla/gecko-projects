@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Tests that the Web Console CSP messages for two META policies
 // are correctly displayed. See Bug 1247459.
 
@@ -17,7 +15,7 @@ const CSP_VIOLATION_MSG = "Content Security Policy: The page\u2019s settings " +
                           "blocked the loading of a resource at " +
                           "http://some.example.com/test.png (\u201cimg-src\u201d).";
 
-add_task(async function () {
+add_task(async function() {
   let hud = await openNewTabAndConsole(TEST_URI);
   hud.jsterm.clearOutput();
 

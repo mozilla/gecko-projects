@@ -218,7 +218,7 @@ var DebuggerView = {
     });
 
     // Relay events from the VariablesView.
-    this.Variables.on("fetched", (aEvent, aType) => {
+    this.Variables.on("fetched", aType => {
       switch (aType) {
         case "scopes":
           window.emit(EVENTS.FETCHED_SCOPES);
@@ -274,7 +274,7 @@ var DebuggerView = {
       callback();
     });
 
-    this.editor.on("gutterClick", (ev, line, button) => {
+    this.editor.on("gutterClick", (line, button) => {
       // A right-click shouldn't do anything but keep track of where
       // it was clicked.
       if (button == 2) {

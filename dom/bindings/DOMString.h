@@ -217,13 +217,14 @@ public:
     MOZ_ASSERT(!mStringBuffer, "Setting stringbuffer twice?");
     MOZ_ASSERT(aAtom || aNullHandling != eNullNotExpected);
     if (aNullHandling == eNullNotExpected || aAtom) {
-      if (aAtom->IsStaticAtom()) {
+      if (aAtom->IsStatic()) {
         // Static atoms are backed by literals.
         SetLiteralInternal(aAtom->GetUTF16String(), aAtom->GetLength());
       } else {
         // Dynamic atoms always have a string buffer and never have 0 length,
         // because nsGkAtoms::_empty is a static atom.
-        SetKnownLiveStringBuffer(aAtom->GetStringBuffer(), aAtom->GetLength());
+        SetKnownLiveStringBuffer(
+          aAtom->AsDynamic()->GetStringBuffer(), aAtom->GetLength());
       }
     } else if (aNullHandling == eTreatNullAsNull) {
       SetNull();

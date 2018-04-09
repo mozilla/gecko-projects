@@ -13,8 +13,6 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "ConsoleAPI",
                                "resource://gre/modules/Console.jsm");
 
-Cu.importGlobalProperties(["crypto", "TextDecoder", "TextEncoder"]);
-
 function getConsole() {
   return new ConsoleAPI({
     maxLogLevelPref: "extensions.webextensions.log.level",
@@ -23,13 +21,6 @@ function getConsole() {
 }
 
 XPCOMUtils.defineLazyGetter(this, "console", getConsole);
-
-XPCOMUtils.defineLazyGetter(this, "utf8Encoder", () => {
-  return new TextEncoder("utf-8");
-});
-XPCOMUtils.defineLazyGetter(this, "utf8Decoder", () => {
-  return new TextDecoder("utf-8");
-});
 
 // xpcshell doesn't handle idle callbacks well.
 XPCOMUtils.defineLazyGetter(this, "idleTimeout",
@@ -479,12 +470,15 @@ function defineLazyGetter(object, prop, getter) {
 class MessageManagerProxy {
   constructor(target) {
     this.listeners = new DefaultMap(() => new Map());
+    this.closed = false;
 
     if (target instanceof Ci.nsIMessageSender) {
       this.messageManager = target;
     } else {
       this.addListeners(target);
     }
+
+    Services.obs.addObserver(this, "message-manager-close");
   }
 
   /**
@@ -501,6 +495,16 @@ class MessageManagerProxy {
       this.eventTarget = null;
     }
     this.messageManager = null;
+
+    Services.obs.removeObserver(this, "message-manager-close");
+  }
+
+  observe(subject, topic, data) {
+    if (topic === "message-manager-close") {
+      if (subject === this.messageManager) {
+        this.closed = true;
+      }
+    }
   }
 
   /**
@@ -509,7 +513,7 @@ class MessageManagerProxy {
    *
    * @param {nsIMessageSender|MessageManagerProxy|Element} target
    *        The message manager, MessageManagerProxy, or <browser>
-   *        element agaisnt which to match.
+   *        element against which to match.
    * @param {nsIMessageSender} messageManager
    *        The message manager against which to match `target`.
    *
@@ -546,7 +550,7 @@ class MessageManagerProxy {
   }
 
   get isDisconnected() {
-    return !this.messageManager;
+    return this.closed || !this.messageManager;
   }
 
   /**
@@ -661,21 +665,6 @@ function checkLoadURL(url, principal, options) {
   return true;
 }
 
-/**
- * Return the cryptographic hash given a string of text (using MD5 by default).
- *
- * @param {string} text
- *   The string of text to hash.
- * @param {string} [algo]
- *   An optional algorithm to be re-used to generate the hash ("SHA-1" by default).
- * @returns {string} text
- *   The hashed string.
- */
-async function stringToCryptoHash(text, algo = "SHA-1") {
-  const buffer = await crypto.subtle.digest(algo, utf8Encoder.encode(text));
-  return utf8Decoder.decode(buffer);
-}
-
 var ExtensionUtils = {
   checkLoadURL,
   defineLazyGetter,
@@ -694,7 +683,6 @@ var ExtensionUtils = {
   promiseEvent,
   promiseObserved,
   runSafeSyncWithoutClone,
-  stringToCryptoHash,
   withHandlingUserInput,
   DefaultMap,
   DefaultWeakMap,

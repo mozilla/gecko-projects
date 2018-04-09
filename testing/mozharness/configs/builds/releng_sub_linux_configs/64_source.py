@@ -1,8 +1,5 @@
 config = {
-    'default_actions': [
-        'clobber',
-        'package-source',
-    ],
+    'default_actions': ['package-source'],
     'objdir': 'obj-firefox',
     'stage_platform': 'source',  # Not used, but required by the script
     'buildbot_json_path': 'buildprops.json',

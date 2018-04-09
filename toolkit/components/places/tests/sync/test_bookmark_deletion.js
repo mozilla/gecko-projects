@@ -2,7 +2,15 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 add_task(async function test_complex_orphaning() {
-  let buf = await openMirror("complex_orphaning");
+  let mergeTelemetryEvents = [];
+  let buf = await openMirror("complex_orphaning", {
+    recordTelemetryEvent(object, method, value, extra) {
+      equal(object, "mirror", "Wrong object for telemetry event");
+      if (method == "merge") {
+        mergeTelemetryEvents.push({ value, extra });
+      }
+    },
+  });
 
   // On iOS, the mirror exists as a separate table. On Desktop, we have a
   // shadow mirror of synced local bookmarks without new changes.
@@ -104,6 +112,10 @@ add_task(async function test_complex_orphaning() {
   info("Apply remote");
   let changesToUpload = await buf.apply();
   deepEqual(await buf.fetchUnmergedGuids(), [], "Should merge all items");
+  deepEqual(mergeTelemetryEvents, [{
+    value: "structure",
+    extra: { new: "2", localDeletes: "1", remoteDeletes: "1" },
+  }], "Should record telemetry with structure change counts");
 
   let idsToUpload = inspectChangeRecords(changesToUpload);
   deepEqual(idsToUpload, {
@@ -179,7 +191,15 @@ add_task(async function test_complex_orphaning() {
 });
 
 add_task(async function test_locally_modified_remotely_deleted() {
-  let buf = await openMirror("locally_modified_remotely_deleted");
+  let mergeTelemetryEvents = [];
+  let buf = await openMirror("locally_modified_remotely_deleted", {
+    recordTelemetryEvent(object, method, value, extra) {
+      equal(object, "mirror", "Wrong object for telemetry event");
+      if (method == "merge") {
+        mergeTelemetryEvents.push({ value, extra });
+      }
+    },
+  });
 
   info("Set up mirror");
   await PlacesUtils.bookmarks.insertTree({
@@ -284,6 +304,10 @@ add_task(async function test_locally_modified_remotely_deleted() {
   info("Apply remote");
   let changesToUpload = await buf.apply();
   deepEqual(await buf.fetchUnmergedGuids(), [], "Should merge all items");
+  deepEqual(mergeTelemetryEvents, [{
+    value: "structure",
+    extra: { new: "1", localRevives: "1", remoteDeletes: "2" },
+  }], "Should record telemetry for local item and remote folder deletions");
 
   let idsToUpload = inspectChangeRecords(changesToUpload);
   deepEqual(idsToUpload, {
@@ -323,7 +347,15 @@ add_task(async function test_locally_modified_remotely_deleted() {
 });
 
 add_task(async function test_locally_deleted_remotely_modified() {
-  let buf = await openMirror("locally_deleted_remotely_modified");
+  let mergeTelemetryEvents = [];
+  let buf = await openMirror("locally_deleted_remotely_modified", {
+    recordTelemetryEvent(object, method, value, extra) {
+      equal(object, "mirror", "Wrong object for telemetry event");
+      if (method == "merge") {
+        mergeTelemetryEvents.push({ value, extra });
+      }
+    },
+  });
 
   info("Set up mirror");
   await PlacesUtils.bookmarks.insertTree({
@@ -419,6 +451,10 @@ add_task(async function test_locally_deleted_remotely_modified() {
   info("Apply remote");
   let changesToUpload = await buf.apply();
   deepEqual(await buf.fetchUnmergedGuids(), [], "Should merge all items");
+  deepEqual(mergeTelemetryEvents, [{
+    value: "structure",
+    extra: { new: "1", remoteRevives: "1", localDeletes: "2" },
+  }], "Should record telemetry for remote item and local folder deletions");
 
   let idsToUpload = inspectChangeRecords(changesToUpload);
   deepEqual(idsToUpload, {
@@ -587,13 +623,6 @@ add_task(async function test_nonexistent_on_one_side() {
   let buf = await openMirror("nonexistent_on_one_side");
 
   info("Set up empty mirror");
-  // Previous tests change the menu's date added time; reset it to a predictable
-  // value.
-  let menuDateAdded = new Date();
-  await PlacesUtils.bookmarks.update({
-    guid: PlacesUtils.bookmarks.menuGuid,
-    dateAdded: menuDateAdded,
-  });
   await PlacesTestUtils.markBookmarksAsSynced();
 
   // A doesn't exist in the mirror.
@@ -605,7 +634,7 @@ add_task(async function test_nonexistent_on_one_side() {
     url: "http://example.com/a",
     // Pretend a bookmark restore added A, so that we'll write a tombstone when
     // we remove it.
-    source: PlacesUtils.bookmarks.SOURCES.IMPORT_REPLACE,
+    source: PlacesUtils.bookmarks.SOURCES.RESTORE,
   });
   await PlacesUtils.bookmarks.remove("bookmarkAAAA");
 
@@ -622,6 +651,9 @@ add_task(async function test_nonexistent_on_one_side() {
   deepEqual(await buf.fetchUnmergedGuids(), ["bookmarkBBBB"],
     "Should leave B unmerged");
 
+  let menuInfo = await PlacesUtils.bookmarks.fetch(
+    PlacesUtils.bookmarks.menuGuid);
+
   // We should still upload a record for the menu, since we changed its
   // children when we added then removed A.
   deepEqual(changesToUpload, {
@@ -635,7 +667,7 @@ add_task(async function test_nonexistent_on_one_side() {
         parentid: "places",
         hasDupe: true,
         parentName: "",
-        dateAdded: menuDateAdded.getTime(),
+        dateAdded: menuInfo.dateAdded.getTime(),
         title: BookmarksMenuTitle,
         children: [],
       },

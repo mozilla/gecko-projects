@@ -149,6 +149,9 @@ BasicTextureImage::DirectUpdate(gfx::DataSourceSurface* aSurf, const nsIntRegion
                                &uploadSize,
                                needInit,
                                aFrom);
+    if (mTextureFormat == SurfaceFormat::UNKNOWN) {
+        return false;
+    }
 
     if (uploadSize > 0) {
         UpdateUploadSize(uploadSize);
@@ -460,7 +463,7 @@ void TiledTextureImage::Resize(const gfx::IntSize& aSize)
     // Prune any unused tiles at the end of the store.
     unsigned int length = mImages.Length();
     for (; i < length; i++)
-      mImages.RemoveElementAt(mImages.Length()-1);
+      mImages.RemoveLastElement();
 
     // Reset tile-store properties.
     mRows = rows;

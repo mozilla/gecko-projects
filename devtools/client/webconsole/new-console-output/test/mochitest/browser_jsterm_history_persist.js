@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Test that console command input is persisted across toolbox loads.
 // See Bug 943306.
 
@@ -16,7 +14,7 @@ const TEST_URI = "data:text/html;charset=utf-8,Web Console test for " +
                  "persisting history - bug 943306";
 const INPUT_HISTORY_COUNT = 10;
 
-add_task(async function () {
+add_task(async function() {
   info("Setting custom input history pref to " + INPUT_HISTORY_COUNT);
   Services.prefs.setIntPref("devtools.webconsole.inputHistoryCount", INPUT_HISTORY_COUNT);
 
@@ -51,7 +49,7 @@ add_task(async function () {
   // Set input value separately from execute so UP arrow accurately navigates
   // history.
   hud3.jsterm.setInputValue('"hello from third tab"');
-  hud3.jsterm.execute();
+  await hud3.jsterm.execute();
 
   is(JSON.stringify(hud1.jsterm.history),
      '["0","1","2","3","4","5","6","7","8","9"]',

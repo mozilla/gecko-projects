@@ -217,6 +217,7 @@ HttpBaseChannel::HttpBaseChannel()
   , mRequireCORSPreflight(false)
   , mReportCollector(new ConsoleReportCollector())
   , mAltDataLength(0)
+  , mAltDataForChild(false)
   , mForceMainDocumentChannel(false)
   , mIsTrackingResource(false)
   , mLastRedirectFlags(0)
@@ -2206,6 +2207,7 @@ HttpBaseChannel::RedirectTo(nsIURI *targetURI)
   nsAutoCString spec;
   targetURI->GetAsciiSpec(spec);
   LOG(("HttpBaseChannel::RedirectTo [this=%p, uri=%s]", this, spec.get()));
+  LogCallingScriptLocation(this);
 
   // We cannot redirect after OnStartRequest of the listener
   // has been called, since to redirect we have to switch channels
@@ -3222,7 +3224,7 @@ HttpBaseChannel::CloneLoadInfoForRedirect(nsIURI * newURI, uint32_t redirectFlag
   nsContentPolicyType contentPolicyType = mLoadInfo->GetExternalContentPolicyType();
   if (contentPolicyType == nsIContentPolicy::TYPE_DOCUMENT ||
       contentPolicyType == nsIContentPolicy::TYPE_SUBDOCUMENT) {
-    nsCOMPtr<nsIPrincipal> nullPrincipalToInherit = NullPrincipal::Create();
+    nsCOMPtr<nsIPrincipal> nullPrincipalToInherit = NullPrincipal::CreateWithoutOriginAttributes();
     newLoadInfo->SetPrincipalToInherit(nullPrincipalToInherit);
   }
 
@@ -3630,6 +3632,11 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
   rv = httpChannel->SetTopLevelOuterContentWindowId(mTopLevelOuterContentWindowId);
   MOZ_ASSERT(NS_SUCCEEDED(rv));
 
+  // Not setting this flag would break carrying permissions down to the child process
+  // when the channel is artificially forced to be a main document load.
+  rv = httpChannel->SetIsMainDocumentChannel(mForceMainDocumentChannel);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
+
   // Preserve the loading order
   nsCOMPtr<nsISupportsPriority> p = do_QueryInterface(newChannel);
   if (p) {
@@ -3688,6 +3695,8 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
     // Preserve Integrity metadata.
     rv = httpInternal->SetIntegrityMetadata(mIntegrityMetadata);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
+
+    httpInternal->SetAltDataForChild(mAltDataForChild);
   }
 
   // transfer application cache information
@@ -4435,6 +4444,12 @@ HttpBaseChannel::SetCorsPreflightParameters(const nsTArray<nsCString>& aUnsafeHe
 
   mRequireCORSPreflight = true;
   mUnsafeHeaders = aUnsafeHeaders;
+}
+
+void
+HttpBaseChannel::SetAltDataForChild(bool aIsForChild)
+{
+  mAltDataForChild = aIsForChild;
 }
 
 NS_IMETHODIMP

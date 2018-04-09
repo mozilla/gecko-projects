@@ -4,47 +4,21 @@
 
 "use strict";
 
-function bytesToBase64(u8a){
-  let CHUNK_SZ = 0x8000;
-  let c = [];
-  for (let i = 0; i < u8a.length; i += CHUNK_SZ) {
-    c.push(String.fromCharCode.apply(null, u8a.subarray(i, i + CHUNK_SZ)));
-  }
-  return window.btoa(c.join(""));
-}
+let exports = this;
 
-function bytesToBase64UrlSafe(buf) {
-  return bytesToBase64(buf)
-                 .replace(/\+/g, "-")
-                 .replace(/\//g, "_")
-                 .replace(/=/g, "");
-}
+const scripts = [
+  "pkijs/common.js",
+  "pkijs/asn1.js",
+  "pkijs/x509_schema.js",
+  "pkijs/x509_simpl.js",
+  "browser/cbor.js",
+  "browser/u2futil.js",
+];
 
-function base64ToBytes(b64encoded) {
-  return new Uint8Array(window.atob(b64encoded).split("").map(function(c) {
-    return c.charCodeAt(0);
-  }));
-}
-
-function base64ToBytesUrlSafe(str) {
-  if (!str || str.length % 4 == 1) {
-    throw "Improper b64 string";
-  }
-
-  var b64 = str.replace(/\-/g, "+").replace(/\_/g, "/");
-  while (b64.length % 4 != 0) {
-    b64 += "=";
-  }
-  return base64ToBytes(b64);
-}
-
-function buffer2string(buf) {
-  let str = "";
-  if (!(buf.constructor === Uint8Array)) {
-    buf = new Uint8Array(buf);
-  }
-  buf.map(function(x){ return str += String.fromCharCode(x) });
-  return str;
+for (let script of scripts) {
+  Services.scriptloader.loadSubScript(
+    `chrome://mochitests/content/browser/dom/webauthn/tests/${script}`,
+    this, "utf-8");
 }
 
 function memcmp(x, y) {

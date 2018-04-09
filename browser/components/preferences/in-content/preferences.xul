@@ -18,9 +18,6 @@
 
 <!DOCTYPE page [
 <!ENTITY % brandDTD SYSTEM "chrome://branding/locale/brand.dtd">
-<!ENTITY % globalPreferencesDTD SYSTEM "chrome://global/locale/preferences.dtd">
-<!ENTITY % preferencesDTD SYSTEM
-  "chrome://browser/locale/preferences/preferences.dtd">
 <!ENTITY % selectBookmarkDTD SYSTEM
   "chrome://browser/locale/preferences/selectBookmark.dtd">
 <!ENTITY % languagesDTD SYSTEM "chrome://browser/locale/preferences/languages.dtd">
@@ -37,24 +34,15 @@
 <!ENTITY % clearSiteDataDTD SYSTEM
   "chrome://browser/locale/preferences/clearSiteData.dtd" >
 <!ENTITY % privacyDTD SYSTEM "chrome://browser/locale/preferences/privacy.dtd">
-<!ENTITY % searchDTD SYSTEM "chrome://browser/locale/preferences/search.dtd">
 <!ENTITY % syncBrandDTD SYSTEM "chrome://browser/locale/syncBrand.dtd">
 <!ENTITY % syncDTD SYSTEM "chrome://browser/locale/preferences/sync.dtd">
-<!ENTITY % securityDTD SYSTEM
-  "chrome://browser/locale/preferences/security.dtd">
-<!ENTITY % containersDTD SYSTEM
-  "chrome://browser/locale/preferences/containers.dtd">
 <!ENTITY % sanitizeDTD SYSTEM "chrome://browser/locale/sanitize.dtd">
 <!ENTITY % mainDTD SYSTEM "chrome://browser/locale/preferences/main.dtd">
 <!ENTITY % aboutHomeDTD SYSTEM "chrome://browser/locale/aboutHome.dtd">
 <!ENTITY % contentDTD SYSTEM "chrome://browser/locale/preferences/content.dtd">
-<!ENTITY % advancedDTD SYSTEM
-  "chrome://browser/locale/preferences/advanced.dtd">
 <!ENTITY % aboutDialogDTD SYSTEM "chrome://browser/locale/aboutDialog.dtd" >
 %aboutDialogDTD;
 %brandDTD;
-%globalPreferencesDTD;
-%preferencesDTD;
 %selectBookmarkDTD;
 %languagesDTD;
 %fontDTD;
@@ -68,16 +56,12 @@
 %siteDataSettingsDTD;
 %clearSiteDataDTD;
 %privacyDTD;
-%searchDTD;
 %syncBrandDTD;
 %syncDTD;
-%securityDTD;
-%containersDTD;
 %sanitizeDTD;
 %mainDTD;
 %aboutHomeDTD;
 %contentDTD;
-%advancedDTD;
 ]>
 
 #ifdef XP_WIN
@@ -138,6 +122,18 @@
                       align="center">
           <image class="category-icon"/>
           <label class="category-name" flex="1" data-l10n-id="pane-general-title"></label>
+        </richlistitem>
+
+        <richlistitem id="category-home"
+                      class="category"
+                      value="paneHome"
+                      helpTopic="prefs-home"
+                      data-l10n-id="category-home"
+                      data-l10n-attrs="tooltiptext"
+                      align="center"
+                      hidden="false">
+          <image class="category-icon"/>
+          <label class="category-name" flex="1" data-l10n-id="pane-home-title"></label>
         </richlistitem>
 
         <richlistitem id="category-search"
@@ -210,13 +206,14 @@
           </hbox>
           <textbox
             type="search" id="searchInput"
-            data-l10n-id="search-input"
+            data-l10n-id="search-input-box"
             data-l10n-attrs="style"
             hidden="true" clickSelectsAll="true"/>
         </hbox>
         <vbox id="mainPrefPane" class="prefpane prefwindow">
 #include searchResults.xul
 #include main.xul
+#include home.xul
 #include search.xul
 #include privacy.xul
 #include containers.xul

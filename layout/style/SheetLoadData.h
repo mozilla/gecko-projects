@@ -11,7 +11,6 @@
 #include "mozilla/css/SheetParsingMode.h"
 #include "mozilla/Encoding.h"
 #include "mozilla/NotNull.h"
-#include "nsIUnicharStreamLoader.h"
 #include "nsIThreadInternal.h"
 
 namespace mozilla {
@@ -37,7 +36,6 @@ static_assert(eAuthorSheetFeatures == 0 && eUserSheetFeatures == 1 &&
 
 class SheetLoadData final
   : public nsIRunnable
-  , public nsIUnicharStreamLoaderObserver
   , public nsIThreadObserver
 {
 protected:
@@ -77,7 +75,7 @@ public:
 
   already_AddRefed<nsIURI> GetReferrerURI();
 
-  void ScheduleLoadEventIfNeeded(nsresult aStatus);
+  void ScheduleLoadEventIfNeeded();
 
   NotNull<const Encoding*> DetermineNonBOMEncoding(nsACString const& aSegment,
                                                    nsIChannel* aChannel);
@@ -89,7 +87,6 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIRUNNABLE
   NS_DECL_NSITHREADOBSERVER
-  NS_DECL_NSIUNICHARSTREAMLOADEROBSERVER
 
   // Hold a ref to the CSSLoader so we can call back to it to let it
   // know the load finished
@@ -177,6 +174,10 @@ public:
   // https://www.w3.org/TR/resource-timing/#processing-model
   bool mBlockResourceTiming : 1;
 
+  // Boolean flag indicating whether the load has failed.  This will be set
+  // to true if this load, or the load of any descendant import, fails.
+  bool mLoadFailed : 1;
+
   // This is the element that imported the sheet.  Needed to get the
   // charset set on it and to fire load/error events.
   nsCOMPtr<nsIStyleSheetLinkingElement> mOwningElement;
@@ -193,12 +194,6 @@ public:
   // The encoding to use for preloading Must be empty if mOwningElement
   // is non-null.
   const Encoding* mPreloadEncoding;
-
-  // The status our load ended up with; this determines whether we
-  // should fire error events or load events.  This gets initialized
-  // by ScheduleLoadEventIfNeeded, and is only used after that has
-  // been called.
-  MOZ_INIT_OUTSIDE_CTOR nsresult mStatus;
 
 private:
   void FireLoadEvent(nsIThreadInternal* aThread);

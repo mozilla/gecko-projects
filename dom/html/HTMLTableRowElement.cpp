@@ -66,12 +66,12 @@ HTMLTableRowElement::GetTable() const
   }
 
   // We may not be in a section
-  HTMLTableElement* table = HTMLTableElement::FromContent(parent);
+  HTMLTableElement* table = HTMLTableElement::FromNode(parent);
   if (table) {
     return table;
   }
 
-  return HTMLTableElement::FromContentOrNull(parent->GetParent());
+  return HTMLTableElement::FromNodeOrNull(parent->GetParent());
 }
 
 int32_t
@@ -273,9 +273,9 @@ NS_IMETHODIMP_(bool)
 HTMLTableRowElement::IsAttributeMapped(const nsAtom* aAttribute) const
 {
   static const MappedAttributeEntry attributes[] = {
-    { &nsGkAtoms::align },
-    { &nsGkAtoms::valign },
-    { &nsGkAtoms::height },
+    { nsGkAtoms::align },
+    { nsGkAtoms::valign },
+    { nsGkAtoms::height },
     { nullptr }
   };
 

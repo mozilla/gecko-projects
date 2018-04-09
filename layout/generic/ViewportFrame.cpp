@@ -11,7 +11,8 @@
 
 #include "mozilla/ViewportFrame.h"
 
-#include "mozilla/ServoRestyleManager.h"
+#include "mozilla/ComputedStyleInlines.h"
+#include "mozilla/RestyleManager.h"
 #include "nsGkAtoms.h"
 #include "nsIScrollableFrame.h"
 #include "nsSubDocumentFrame.h"
@@ -20,15 +21,14 @@
 #include "GeckoProfiler.h"
 #include "nsIMozBrowserFrame.h"
 #include "nsPlaceholderFrame.h"
-#include "mozilla/ServoStyleContextInlines.h"
 
 using namespace mozilla;
 typedef nsAbsoluteContainingBlock::AbsPosReflowFlags AbsPosReflowFlags;
 
 ViewportFrame*
-NS_NewViewportFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewViewportFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) ViewportFrame(aContext);
+  return new (aPresShell) ViewportFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(ViewportFrame)
@@ -425,19 +425,18 @@ ViewportFrame::ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas)
 void
 ViewportFrame::UpdateStyle(ServoRestyleState& aRestyleState)
 {
-  ServoStyleContext* oldContext = StyleContext()->AsServo();
-  nsAtom* pseudo = oldContext->GetPseudo();
-  RefPtr<ServoStyleContext> newContext =
+ nsAtom* pseudo = Style()->GetPseudo();
+  RefPtr<ComputedStyle> newStyle =
     aRestyleState.StyleSet().ResolveInheritingAnonymousBoxStyle(pseudo, nullptr);
 
   // We're special because we have a null GetContent(), so don't call things
   // like UpdateStyleOfOwnedChildFrame that try to append changes for the
   // content to the change list.  Nor do we computed a changehint, since we have
   // no way to apply it anyway.
-  newContext->ResolveSameStructsAs(oldContext);
+  newStyle->ResolveSameStructsAs(Style());
 
   MOZ_ASSERT(!GetNextContinuation(), "Viewport has continuations?");
-  SetStyleContext(newContext);
+  SetComputedStyle(newStyle);
 
   UpdateStyleOfOwnedAnonBoxes(aRestyleState);
 }

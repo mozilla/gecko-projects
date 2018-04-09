@@ -5,9 +5,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ImageDocument.h"
+#include "mozilla/ComputedStyle.h"
 #include "mozilla/dom/DOMPrefs.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/dom/ImageDocumentBinding.h"
 #include "mozilla/dom/HTMLImageElement.h"
+#include "mozilla/dom/MouseEvent.h"
 #include "nsRect.h"
 #include "nsIImageLoadingContent.h"
 #include "nsGenericHTMLElement.h"
@@ -15,7 +18,6 @@
 #include "nsIDocumentInlines.h"
 #include "nsDOMTokenList.h"
 #include "nsIDOMEvent.h"
-#include "nsIDOMMouseEvent.h"
 #include "nsIDOMEventListener.h"
 #include "nsIFrame.h"
 #include "nsGkAtoms.h"
@@ -25,7 +27,6 @@
 #include "imgINotificationObserver.h"
 #include "nsIPresShell.h"
 #include "nsPresContext.h"
-#include "nsStyleContext.h"
 #include "nsIChannel.h"
 #include "nsIContentPolicy.h"
 #include "nsContentPolicyUtils.h"
@@ -38,7 +39,6 @@
 #include "nsThreadUtils.h"
 #include "nsIScrollableFrame.h"
 #include "nsContentUtils.h"
-#include "mozilla/dom/Element.h"
 #include "mozilla/Preferences.h"
 #include <algorithm>
 
@@ -94,22 +94,30 @@ ImageListener::OnStartRequest(nsIRequest* request, nsISupports *ctxt)
   nsAutoCString mimeType;
   channel->GetContentType(mimeType);
 
-  nsIScriptSecurityManager* secMan = nsContentUtils::GetSecurityManager();
-  nsCOMPtr<nsIPrincipal> channelPrincipal;
-  if (secMan) {
-    secMan->GetChannelResultPrincipal(channel, getter_AddRefs(channelPrincipal));
+  nsCOMPtr<nsILoadInfo> loadInfo = channel->GetLoadInfo();
+  // query the corresponding arguments for the channel loadinfo and pass
+  // it on to the temporary loadinfo used for content policy checks.
+  nsCOMPtr<nsINode> requestingNode = domWindow->GetFrameElementInternal();
+  nsCOMPtr<nsIPrincipal> loadingPrincipal;
+  if (requestingNode) {
+    loadingPrincipal = requestingNode->NodePrincipal();
+  }
+  else {
+    nsContentUtils::GetSecurityManager()->
+      GetChannelResultPrincipal(channel, getter_AddRefs(loadingPrincipal));
   }
 
-  nsCOMPtr<nsILoadInfo> loadInfo = channel->GetLoadInfo();
+  nsCOMPtr<nsILoadInfo> secCheckLoadInfo =
+    new net::LoadInfo(loadingPrincipal,
+                      loadInfo ? loadInfo->TriggeringPrincipal() : nullptr,
+                      requestingNode,
+                      nsILoadInfo::SEC_ONLY_FOR_EXPLICIT_CONTENTSEC_CHECK,
+                      nsIContentPolicy::TYPE_INTERNAL_IMAGE);
 
   int16_t decision = nsIContentPolicy::ACCEPT;
-  nsresult rv = NS_CheckContentProcessPolicy(nsIContentPolicy::TYPE_INTERNAL_IMAGE,
-                                             channelURI,
-                                             channelPrincipal,
-                                             loadInfo ? loadInfo->TriggeringPrincipal() : nullptr,
-                                             domWindow->GetFrameElementInternal(),
+  nsresult rv = NS_CheckContentProcessPolicy(channelURI,
+                                             secCheckLoadInfo,
                                              mimeType,
-                                             nullptr,
                                              &decision,
                                              nsContentUtils::GetContentPolicy());
 
@@ -361,7 +369,7 @@ ImageDocument::ShrinkToFit()
     // displayed image height by getting .height on the HTMLImageElement.
     //
     // Hold strong ref, because Height() can run script.
-    RefPtr<HTMLImageElement> img = HTMLImageElement::FromContent(mImageContent);
+    RefPtr<HTMLImageElement> img = HTMLImageElement::FromNode(mImageContent);
     uint32_t imageHeight = img->Height();
     nsDOMTokenList* classList = img->ClassList();
     ErrorResult ignored;
@@ -382,7 +390,7 @@ ImageDocument::ShrinkToFit()
 #endif
 
   // Keep image content alive while changing the attributes.
-  RefPtr<HTMLImageElement> image = HTMLImageElement::FromContent(mImageContent);
+  RefPtr<HTMLImageElement> image = HTMLImageElement::FromNode(mImageContent);
 
   uint32_t newWidth = std::max(1, NSToCoordFloor(GetRatio() * mImageWidth));
   uint32_t newHeight = std::max(1, NSToCoordFloor(GetRatio() * mImageHeight));
@@ -636,14 +644,12 @@ ImageDocument::HandleEvent(nsIDOMEvent* aEvent)
     mShouldResize = true;
     if (mImageIsResized) {
       int32_t x = 0, y = 0;
-      nsCOMPtr<nsIDOMMouseEvent> event(do_QueryInterface(aEvent));
+      MouseEvent* event = aEvent->InternalDOMEvent()->AsMouseEvent();
       if (event) {
-        event->GetClientX(&x);
-        event->GetClientY(&y);
         RefPtr<HTMLImageElement> img =
-          HTMLImageElement::FromContent(mImageContent);
-        x -= img->OffsetLeft();
-        y -= img->OffsetTop();
+          HTMLImageElement::FromNode(mImageContent);
+        x = event->ClientX() - img->OffsetLeft();
+        y = event->ClientY() - img->OffsetTop();
       }
       mShouldResize = false;
       RestoreImageTo(x, y);
@@ -734,7 +740,7 @@ ImageDocument::CreateSyntheticDocument()
 nsresult
 ImageDocument::CheckOverflowing(bool changeState)
 {
-  /* Create a scope so that the style context gets destroyed before we might
+  /* Create a scope so that the ComputedStyle gets destroyed before we might
    * call RebuildStyleData.  Also, holding onto pointers to the
    * presentation through style resolution is potentially dangerous.
    */

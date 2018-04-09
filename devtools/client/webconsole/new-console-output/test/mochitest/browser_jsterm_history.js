@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Tests the console history feature accessed via the up and down arrow keys.
 
 "use strict";
@@ -14,7 +12,7 @@ const HISTORY_BACK = -1;
 const HISTORY_FORWARD = 1;
 const COMMANDS = ["document", "window", "window.location"];
 
-add_task(async function () {
+add_task(async function() {
   const { jsterm } = await openNewTabAndConsole(TEST_URI);
   const { inputNode } = jsterm;
   jsterm.clearOutput();

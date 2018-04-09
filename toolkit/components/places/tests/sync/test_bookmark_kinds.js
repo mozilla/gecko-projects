@@ -257,8 +257,69 @@ add_task(async function test_livemarks() {
   await PlacesSyncUtils.bookmarks.reset();
 });
 
+add_task(async function test_queries() {
+  try {
+    let buf = await openMirror("queries");
+
+    info("Set up places");
+
+    // create a tag and grab the local folder ID.
+    let tag = await PlacesUtils.bookmarks.insert({
+      type: PlacesUtils.bookmarks.TYPE_FOLDER,
+      parentGuid: PlacesUtils.bookmarks.tagsGuid,
+      title: "a-tag",
+    });
+
+    await PlacesTestUtils.markBookmarksAsSynced();
+
+    await PlacesUtils.bookmarks.insertTree({
+      guid: PlacesUtils.bookmarks.menuGuid,
+      children: [
+        {
+          // this entry has a tag= query param for a tag that exists.
+          guid: "queryAAAAAAA",
+          type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
+          title: "TAG_QUERY query",
+          url: `place:tag=a-tag&&sort=14&maxResults=10`,
+        },
+        {
+          // this entry has a tag= query param for a tag that doesn't exist.
+          guid: "queryBBBBBBB",
+          type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
+          title: "TAG_QUERY query but invalid folder id",
+          url: `place:tag=b-tag&sort=14&maxResults=10`,
+        },
+        {
+          // this entry has no tag= query param.
+          guid: "queryCCCCCCC",
+          type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
+          title: "TAG_QUERY without a folder at all",
+          url: "place:sort=14&maxResults=10",
+        },
+        {
+          // this entry has only a tag= query.
+          guid: "queryDDDDDDD",
+          type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
+          title: "TAG_QUERY without a folder at all",
+          url: "place:tag=a-tag",
+        },
+      ],
+    });
+
+    info("Create records to upload");
+    let changes = await buf.apply();
+    Assert.strictEqual(changes.queryAAAAAAA.cleartext.folderName, tag.title);
+    Assert.strictEqual(changes.queryBBBBBBB.cleartext.folderName, "b-tag");
+    Assert.strictEqual(changes.queryCCCCCCC.cleartext.folderName, undefined);
+    Assert.strictEqual(changes.queryDDDDDDD.cleartext.folderName, tag.title);
+  } finally {
+    await PlacesUtils.bookmarks.eraseEverything();
+    await PlacesSyncUtils.bookmarks.reset();
+  }
+});
+
 // Bug 632287.
-add_task(async function test_mismatched_types() {
+add_task(async function test_mismatched_but_compatible_folder_types() {
   let buf = await openMirror("mismatched_types");
 
   info("Set up mirror");
@@ -301,4 +362,176 @@ add_task(async function test_mismatched_types() {
   await buf.finalize();
   await PlacesUtils.bookmarks.eraseEverything();
   await PlacesSyncUtils.bookmarks.reset();
+});
+
+add_task(async function test_mismatched_but_incompatible_folder_types() {
+  let sawMismatchEvent = false;
+  let recordTelemetryEvent = (object, method, value, extra) => {
+    // expecting to see a kind-mismatch event.
+    if (value == "kind-mismatch" &&
+        extra.local && typeof extra.local == "string" &&
+        extra.local == "livemark" &&
+        extra.remote && typeof extra.remote == "string" &&
+        extra.remote == "folder") {
+      sawMismatchEvent = true;
+    }
+  };
+  let buf = await openMirror("mismatched_incompatible_types",
+                             {recordTelemetryEvent});
+  try {
+    info("Set up mirror");
+    await PlacesUtils.bookmarks.insertTree({
+      guid: PlacesUtils.bookmarks.menuGuid,
+      children: [{
+        guid: "livemarkAAAA",
+        type: PlacesUtils.bookmarks.TYPE_FOLDER,
+        title: "LiveMark",
+        annos: [{
+          name: PlacesUtils.LMANNO_FEEDURI,
+          value: "http://example.com/feed/a",
+        }],
+      }],
+    });
+    await PlacesTestUtils.markBookmarksAsSynced();
+
+    info("Make remote changes");
+    await buf.store([{
+      "id": "livemarkAAAA",
+      "type": "folder",
+      "title": "not really a Livemark",
+      "description": null,
+      "parentid": "menu"
+    }]);
+
+    info("Apply remote, should fail");
+    await Assert.rejects(buf.apply(), /Can't merge different item kinds/);
+    Assert.ok(sawMismatchEvent, "saw the correct mismatch event");
+  } finally {
+    await buf.finalize();
+    await PlacesUtils.bookmarks.eraseEverything();
+    await PlacesSyncUtils.bookmarks.reset();
+  }
+});
+
+add_task(async function test_different_but_compatible_bookmark_types() {
+  try {
+    let buf = await openMirror("partial_queries");
+
+    await PlacesUtils.bookmarks.insertTree({
+      guid: PlacesUtils.bookmarks.menuGuid,
+      children: [
+        {
+          guid: "bookmarkAAAA",
+          type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
+          title: "not yet a query",
+          url: "about:blank",
+        },
+        {
+          guid: "bookmarkBBBB",
+          type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
+          title: "a query",
+          url: "place:foo",
+
+        }
+      ],
+    });
+
+    let changes = await buf.apply();
+    // We should have an outgoing record for bookmarkA with type=bookmark
+    // and bookmarkB with type=query.
+    Assert.equal(changes.bookmarkAAAA.cleartext.type, "bookmark");
+    Assert.equal(changes.bookmarkBBBB.cleartext.type, "query");
+
+    // Now pretend that same records are already on the server.
+    await buf.store([{
+      id: "menu",
+      type: "folder",
+      children: ["bookmarkAAAA", "bookmarkBBBB"],
+    }, {
+      id: "bookmarkAAAA",
+      parentid: "menu",
+      type: "bookmark",
+      title: "not yet a query",
+      bmkUri: "about:blank",
+    }, {
+      id: "bookmarkBBBB",
+      parentid: "menu",
+      type: "query",
+      title: "a query",
+      bmkUri: "place:foo",
+
+    }], { needsMerge: false });
+    await PlacesTestUtils.markBookmarksAsSynced();
+
+    // change the url of bookmarkA to be a "real" query and of bookmarkB to
+    // no longer be a query.
+    await PlacesUtils.bookmarks.update({
+      guid: "bookmarkAAAA",
+      url: "place:type=6&sort=14&maxResults=10",
+    });
+    await PlacesUtils.bookmarks.update({
+      guid: "bookmarkBBBB",
+      url: "about:robots",
+    });
+
+    changes = await buf.apply();
+    // We should have an outgoing record for bookmarkA with type=query and
+    // for bookmarkB with type=bookmark
+    Assert.equal(changes.bookmarkAAAA.cleartext.type, "query");
+    Assert.equal(changes.bookmarkBBBB.cleartext.type, "bookmark");
+  } finally {
+    await PlacesUtils.bookmarks.eraseEverything();
+    await PlacesSyncUtils.bookmarks.reset();
+  }
+});
+
+add_task(async function test_incompatible_types() {
+  let sawMismatchEvent = false;
+  let recordTelemetryEvent = (object, method, value, extra) => {
+    // expecting to see a kind-mismatch event.
+    if (value == "kind-mismatch" &&
+        extra.local && typeof extra.local == "string" &&
+        extra.local == "bookmark" &&
+        extra.remote && typeof extra.remote == "string" &&
+        extra.remote == "folder") {
+      sawMismatchEvent = true;
+    }
+  };
+  try {
+    let buf = await openMirror("partial_queries", {recordTelemetryEvent});
+
+    await PlacesUtils.bookmarks.insertTree({
+      guid: PlacesUtils.bookmarks.menuGuid,
+      children: [
+        {
+          guid: "AAAAAAAAAAAA",
+          type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
+          title: "a bookmark",
+          url: "about:blank",
+        },
+      ],
+    });
+
+    await buf.apply();
+
+    // Now pretend that same records are already on the server with incompatible
+    // types.
+    await buf.store([{
+      id: "menu",
+      type: "folder",
+      children: ["AAAAAAAAAAAA"],
+    }, {
+      id: "AAAAAAAAAAAA",
+      parentId: PlacesSyncUtils.bookmarks.guidToRecordId(PlacesUtils.bookmarks.menuGuid),
+      type: "folder",
+      title: "conflicting folder",
+    }], { needsMerge: true });
+    await PlacesTestUtils.markBookmarksAsSynced();
+
+    await Assert.rejects(buf.apply(), /Can't merge different item kinds/);
+    Assert.ok(sawMismatchEvent, "saw expected mismatch event");
+  } finally {
+    await PlacesUtils.bookmarks.eraseEverything();
+    await PlacesSyncUtils.bookmarks.reset();
+  }
 });

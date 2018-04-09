@@ -6,7 +6,7 @@ use attr::{ParsedAttrSelectorOperation, AttrSelectorOperation, NamespaceConstrai
 use bloom::{BLOOM_HASH_MASK, BloomFilter};
 use nth_index_cache::NthIndexCacheInner;
 use parser::{AncestorHashes, Combinator, Component, LocalName};
-use parser::{Selector, SelectorImpl, SelectorIter, SelectorList};
+use parser::{Selector, SelectorImpl, SelectorIter, SelectorList, NonTSPseudoClass};
 use std::borrow::Borrow;
 use std::iter;
 use tree::Element;
@@ -249,23 +249,52 @@ where
         matches_hover_and_active_quirk: MatchesHoverAndActiveQuirk::No,
     };
 
+    // Find the end of the selector or the next combinator, then match
+    // backwards, so that we match in the same order as
+    // matches_complex_selector, which is usually faster.
+    let start_offset = from_offset;
     for component in selector.iter_raw_parse_order_from(from_offset) {
         if matches!(*component, Component::Combinator(..)) {
             debug_assert_ne!(from_offset, 0, "Selector started with a combinator?");
-            return CompoundSelectorMatchingResult::Matched {
-                next_combinator_offset: from_offset,
-            }
+            break;
         }
 
+        from_offset += 1;
+    }
+
+    debug_assert!(from_offset >= 1);
+    debug_assert!(from_offset <= selector.len());
+
+    let iter = selector.iter_from(selector.len() - from_offset);
+    debug_assert!(
+        iter.clone().next().is_some() || (
+            from_offset != selector.len() && matches!(
+                selector.combinator_at_parse_order(from_offset),
+                Combinator::SlotAssignment | Combinator::PseudoElement
+            )
+        ),
+        "Got the math wrong: {:?} | {:?} | {} {}",
+        selector,
+        selector.iter_raw_match_order().as_slice(),
+        from_offset,
+        start_offset
+    );
+
+    for component in iter {
         if !matches_simple_selector(
             component,
             element,
             &mut local_context,
-            &mut |_, _| {}) {
+            &mut |_, _| {}
+        ) {
             return CompoundSelectorMatchingResult::NotMatched;
         }
+    }
 
-        from_offset += 1;
+    if from_offset != selector.len() {
+        return CompoundSelectorMatchingResult::Matched {
+            next_combinator_offset: from_offset,
+        }
     }
 
     CompoundSelectorMatchingResult::FullyMatched
@@ -375,7 +404,7 @@ fn matches_hover_and_active_quirk<Impl: SelectorImpl>(
             Component::LastOfType |
             Component::OnlyOfType => false,
             Component::NonTSPseudoClass(ref pseudo_class) => {
-                Impl::is_active_or_hover(pseudo_class)
+                pseudo_class.is_active_or_hover()
             },
             _ => true,
         }
@@ -398,6 +427,7 @@ enum Rightmost {
 fn next_element_for_combinator<E>(
     element: &E,
     combinator: Combinator,
+    selector: &SelectorIter<E::Impl>,
 ) -> Option<E>
 where
     E: Element,
@@ -413,7 +443,42 @@ where
                 return None;
             }
 
-            element.parent_element()
+            match element.parent_element() {
+                Some(e) => return Some(e),
+                None => {}
+            }
+
+            if !element.parent_node_is_shadow_root() {
+                return None;
+            }
+
+            // https://drafts.csswg.org/css-scoping/#host-element-in-tree:
+            //
+            //   For the purpose of Selectors, a shadow host also appears in
+            //   its shadow tree, with the contents of the shadow tree treated
+            //   as its children. (In other words, the shadow host is treated as
+            //   replacing the shadow root node.)
+            //
+            // and also:
+            //
+            //   When considered within its own shadow trees, the shadow host is
+            //   featureless. Only the :host, :host(), and :host-context()
+            //   pseudo-classes are allowed to match it.
+            //
+            // Since we know that the parent is a shadow root, we necessarily
+            // are in a shadow tree of the host.
+            let all_selectors_could_match = selector.clone().all(|component| {
+                match *component {
+                    Component::NonTSPseudoClass(ref pc) => pc.is_host(),
+                    _ => false,
+                }
+            });
+
+            if !all_selectors_could_match {
+                return None;
+            }
+
+            element.containing_shadow_host()
         }
         Combinator::SlotAssignment => {
             debug_assert!(element.assigned_slot().map_or(true, |s| s.is_html_slot_element()));
@@ -473,7 +538,8 @@ where
         }
     };
 
-    let mut next_element = next_element_for_combinator(element, combinator);
+    let mut next_element =
+        next_element_for_combinator(element, combinator, &selector_iter);
 
     // Stop matching :visited as soon as we find a link, or a combinator for
     // something that isn't an ancestor.
@@ -536,7 +602,8 @@ where
             visited_handling = VisitedHandlingMode::AllLinksUnvisited;
         }
 
-        next_element = next_element_for_combinator(&element, combinator);
+        next_element =
+            next_element_for_combinator(&element, combinator, &selector_iter);
     }
 }
 
@@ -724,7 +791,7 @@ where
         Component::NonTSPseudoClass(ref pc) => {
             if context.matches_hover_and_active_quirk == MatchesHoverAndActiveQuirk::Yes &&
                !context.shared.is_nested() &&
-               E::Impl::is_active_or_hover(pc) &&
+               pc.is_active_or_hover() &&
                !element.is_link()
             {
                 return false;

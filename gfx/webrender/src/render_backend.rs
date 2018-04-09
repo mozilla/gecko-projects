@@ -73,7 +73,7 @@ struct SceneData {
     removed_pipelines: Vec<PipelineId>,
 }
 
-#[derive(Copy, Clone, PartialEq, PartialOrd, Debug, Eq, Ord)]
+#[derive(Copy, Clone, Hash, PartialEq, PartialOrd, Debug, Eq, Ord)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct FrameId(pub u32);
@@ -172,13 +172,58 @@ impl Document {
 
     // TODO: We will probably get rid of this soon and always forward to the scene building thread.
     fn build_scene(&mut self, resource_cache: &mut ResourceCache) {
-        let frame_builder = self.create_frame_builder(resource_cache);
+        let max_texture_size = resource_cache.max_texture_size();
+
+        if self.view.window_size.width == 0 ||
+           self.view.window_size.height == 0 ||
+           self.view.window_size.width > max_texture_size ||
+           self.view.window_size.height > max_texture_size {
+            error!("ERROR: Invalid window dimensions {}x{}. Please call api.set_window_size()",
+                self.view.window_size.width,
+                self.view.window_size.height,
+            );
+
+            return;
+        }
+
+        let old_builder = self.frame_builder.take().unwrap_or_else(FrameBuilder::empty);
+        let root_pipeline_id = match self.pending.scene.root_pipeline_id {
+            Some(root_pipeline_id) => root_pipeline_id,
+            None => return,
+        };
+
+        if !self.pending.scene.pipelines.contains_key(&root_pipeline_id) {
+            return;
+        }
+
+        // The DisplayListFlattener will re-create the up-to-date current scene's pipeline epoch
+        // map and clip scroll tree from the information in the pending scene.
+        self.current.scene.pipeline_epochs.clear();
+        let old_scrolling_states = self.clip_scroll_tree.drain();
+
+        let frame_builder = DisplayListFlattener::create_frame_builder(
+            old_builder,
+            &self.pending.scene,
+            &mut self.clip_scroll_tree,
+            resource_cache.get_font_instances(),
+            resource_cache.get_tiled_image_map(),
+            &self.view,
+            &self.output_pipelines,
+            &self.frame_builder_config,
+            &mut self.current.scene,
+        );
+
+        self.clip_scroll_tree.finalize_and_apply_pending_scroll_offsets(old_scrolling_states);
+
         if !self.current.removed_pipelines.is_empty() {
             warn!("Built the scene several times without rendering it.");
         }
+
         self.current.removed_pipelines.extend(self.pending.removed_pipelines.drain(..));
         self.frame_builder = Some(frame_builder);
-        self.current.scene = self.pending.scene.clone();
+
+        // Advance to the next frame.
+        self.frame_id.0 += 1;
     }
 
     fn forward_transaction_to_scene_builder(
@@ -312,48 +357,6 @@ impl Document {
         // Advance to the next frame.
         self.frame_id.0 += 1;
     }
-
-    // When changing this, please make the same modification to build_scene,
-    // which will soon replace this method completely.
-    pub fn create_frame_builder(&mut self, resource_cache: &mut ResourceCache) -> FrameBuilder {
-        if self.view.window_size.width == 0 || self.view.window_size.height == 0 {
-            error!("ERROR: Invalid window dimensions! Please call api.set_window_size()");
-        }
-
-        let old_builder = self.frame_builder.take().unwrap_or_else(FrameBuilder::empty);
-        let root_pipeline_id = match self.pending.scene.root_pipeline_id {
-            Some(root_pipeline_id) => root_pipeline_id,
-            None => return old_builder,
-        };
-
-        if !self.pending.scene.pipelines.contains_key(&root_pipeline_id) {
-            return old_builder;
-        }
-
-        // The DisplayListFlattener will re-create the up-to-date current scene's pipeline epoch
-        // map and clip scroll tree from the information in the pending scene.
-        self.current.scene.pipeline_epochs.clear();
-        let old_scrolling_states = self.clip_scroll_tree.drain();
-
-        let frame_builder = DisplayListFlattener::create_frame_builder(
-            old_builder,
-            &self.pending.scene,
-            &mut self.clip_scroll_tree,
-            resource_cache.get_font_instances(),
-            resource_cache.get_tiled_image_map(),
-            &self.view,
-            &self.output_pipelines,
-            &self.frame_builder_config,
-            &mut self.current.scene.pipeline_epochs,
-        );
-
-        self.clip_scroll_tree.finalize_and_apply_pending_scroll_offsets(old_scrolling_states);
-
-        // Advance to the next frame.
-        self.frame_id.0 += 1;
-
-        frame_builder
-    }
 }
 
 struct DocumentOps {
@@ -376,6 +379,13 @@ impl DocumentOps {
     fn build() -> Self {
         DocumentOps {
             build: true,
+            ..DocumentOps::nop()
+        }
+    }
+
+    fn render() -> Self {
+        DocumentOps {
+            render: true,
             ..DocumentOps::nop()
         }
     }
@@ -674,7 +684,7 @@ impl RenderBackend {
             }
             FrameMsg::UpdateDynamicProperties(property_bindings) => {
                 doc.dynamic_properties.set_properties(property_bindings);
-                DocumentOps::build()
+                DocumentOps::render()
             }
         }
     }
@@ -685,8 +695,9 @@ impl RenderBackend {
 
     pub fn run(&mut self, mut profile_counters: BackendProfileCounters) {
         let mut frame_counter: u32 = 0;
+        let mut keep_going = true;
 
-        loop {
+        while keep_going {
             profile_scope!("handle_msg");
 
             while let Ok(msg) = self.scene_rx.try_recv() {
@@ -730,7 +741,7 @@ impl RenderBackend {
                 }
             }
 
-            let keep_going = match self.api_rx.recv() {
+            keep_going = match self.api_rx.recv() {
                 Ok(msg) => {
                     if let Some(ref mut r) = self.recorder {
                         r.write_msg(frame_counter, &msg);
@@ -739,13 +750,10 @@ impl RenderBackend {
                 }
                 Err(..) => { false }
             };
-
-            if !keep_going {
-                let _ = self.scene_tx.send(SceneBuilderRequest::Stop);
-                self.notifier.shut_down();
-                break;
-            }
         }
+
+        let _ = self.scene_tx.send(SceneBuilderRequest::Stop);
+        self.notifier.shut_down();
     }
 
     fn process_api_msg(
@@ -939,19 +947,7 @@ impl RenderBackend {
             &mut profile_counters.resources,
         );
 
-        // If we get a generate_frame message after getting a root pipeline set,
-        // but that pipeline id hasn't been propagated to the current scene, then
-        // we should force that to happen. Otherwise we will skip a render that
-        // the caller is expecting to happen, and in Gecko's case, that will
-        // leave it wedged permanently.
-        let force_build = if transaction_msg.generate_frame {
-            let doc = self.documents.get_mut(&document_id).unwrap();
-            doc.pending.scene.root_pipeline_id.is_some() && !doc.current.scene.root_pipeline_id.is_some()
-        } else {
-            false
-        };
-
-        if op.build || force_build {
+        if op.build {
             let doc = self.documents.get_mut(&document_id).unwrap();
             let _timer = profile_counters.total_time.timer();
             profile_scope!("build scene");
@@ -967,14 +963,6 @@ impl RenderBackend {
 
         let doc = self.documents.get_mut(&document_id).unwrap();
 
-        if !doc.can_render() {
-            // TODO: this happens if we are building the first scene asynchronously and
-            // scroll at the same time. we should keep track of the fact that we skipped
-            // composition here and do it as soon as we receive the scene.
-            op.render = false;
-            op.composite = false;
-        }
-
         if transaction_msg.generate_frame {
             if let Some(ref mut ros) = doc.render_on_scroll {
                 *ros = true;
@@ -984,6 +972,14 @@ impl RenderBackend {
                 op.render = true;
                 op.composite = true;
             }
+        }
+
+        if !doc.can_render() {
+            // TODO: this happens if we are building the first scene asynchronously and
+            // scroll at the same time. we should keep track of the fact that we skipped
+            // composition here and do it as soon as we receive the scene.
+            op.render = false;
+            op.composite = false;
         }
 
         debug_assert!(op.render || !op.composite);
@@ -1161,10 +1157,15 @@ impl RenderBackend {
         bits: CaptureBits,
         profile_counters: &mut BackendProfileCounters,
     ) -> DebugOutput {
+        use std::fs;
         use capture::CaptureConfig;
 
         debug!("capture: saving {:?}", root);
-        let (resources, deferred) = self.resource_cache.save_capture(&root);
+        if !root.is_dir() {
+            if let Err(e) = fs::create_dir_all(&root) {
+                panic!("Unable to create capture dir: {:?}", e);
+            }
+        }
         let config = CaptureConfig::new(root, bits);
 
         for (&id, doc) in &mut self.documents {
@@ -1186,6 +1187,9 @@ impl RenderBackend {
                 config.serialize(&rendered_document.frame, file_name);
             }
         }
+
+        debug!("\tresource cache");
+        let (resources, deferred) = self.resource_cache.save_capture(&config.root);
 
         info!("\tbackend");
         let backend = PlainRenderBackend {

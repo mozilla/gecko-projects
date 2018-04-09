@@ -102,7 +102,6 @@ private:
   DECL_MEDIA_PREF("accessibility.monoaudio.enable",           MonoAudio, bool, false);
   DECL_MEDIA_PREF("media.resampling.enabled",                 AudioSinkResampling, bool, false);
 #if defined(XP_WIN) || defined(XP_DARWIN) || defined(MOZ_PULSEAUDIO)
-  // libcubeb backend implement .get_preferred_channel_layout
   DECL_MEDIA_PREF("media.forcestereo.enabled",                AudioSinkForceStereo, bool, false);
 #else
   DECL_MEDIA_PREF("media.forcestereo.enabled",                AudioSinkForceStereo, bool, true);
@@ -134,6 +133,9 @@ private:
 #endif
 #ifdef MOZ_FFVPX
   DECL_MEDIA_PREF("media.ffvpx.enabled",                      PDMFFVPXEnabled, bool, true);
+#endif
+#ifdef MOZ_AV1
+  DECL_MEDIA_PREF("media.av1.enabled",                        AV1Enabled, bool, false);
 #endif
 #ifdef XP_WIN
   DECL_MEDIA_PREF("media.wmf.enabled",                        PDMWMFEnabled, bool, true);
@@ -182,9 +184,6 @@ private:
   // Hls
   DECL_MEDIA_PREF("media.hls.enabled",                        HLSEnabled, bool, false);
 
-  // Both rust/stagefright will be enabled when this is true regardless of 'media.rust.mp4parser'.
-  DECL_MEDIA_PREF("media.rust.test_mode",                     RustTestMode, bool, false);
-
   // True, it enables rust parser and fallback to stagefright if rust parser fails.
   // False, it uses stagefright only.
   DECL_MEDIA_PREF("media.rust.mp4parser",                     EnableRustMP4Parser, bool, true);
@@ -193,14 +192,10 @@ private:
 
   // Error/warning handling, Decoder Doctor
   DECL_MEDIA_PREF("media.playback.warnings-as-errors",        MediaWarningsAsErrors, bool, false);
-  DECL_MEDIA_PREF("media.playback.warnings-as-errors.stagefright-vs-rust",
-                                                              MediaWarningsAsErrorsStageFrightVsRust, bool, false);
 
   // resume background video decoding when the cursor is hovering over the tab.
   DECL_MEDIA_PREF("media.resume-bkgnd-video-on-tabhover",     ResumeVideoDecodingOnTabHover, bool, false);
 
-  // Enable sandboxing support for cubeb
-  DECL_MEDIA_PREF("media.cubeb.sandbox",                      CubebSandbox, bool, false);
   DECL_MEDIA_PREF("media.videocontrols.lock-video-orientation",  VideoOrientationLockEnabled, bool, false);
 
   // Media Seamless Looping

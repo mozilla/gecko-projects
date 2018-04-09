@@ -6,7 +6,6 @@
 
 #include "LayerTransactionParent.h"
 #include <vector>                       // for vector
-#include "apz/src/AsyncPanZoomController.h"
 #include "CompositableHost.h"           // for CompositableParent, Get, etc
 #include "ImageLayers.h"                // for ImageLayer
 #include "Layers.h"                     // for Layer, ContainerLayer, etc
@@ -49,7 +48,7 @@ namespace layers {
 LayerTransactionParent::LayerTransactionParent(HostLayerManager* aManager,
                                                CompositorBridgeParentBase* aBridge,
                                                CompositorAnimationStorage* aAnimStorage,
-                                               uint64_t aId)
+                                               LayersId aId)
   : mLayerManager(aManager)
   , mCompositorBridge(aBridge)
   , mAnimStorage(aAnimStorage)
@@ -60,6 +59,7 @@ LayerTransactionParent::LayerTransactionParent(HostLayerManager* aManager,
   , mDestroyed(false)
   , mIPCOpen(false)
 {
+  MOZ_ASSERT(mId.IsValid());
 }
 
 LayerTransactionParent::~LayerTransactionParent()
@@ -157,15 +157,6 @@ LayerTransactionParent::RecvPaintTime(const uint64_t& aTransactionId,
 }
 
 mozilla::ipc::IPCResult
-LayerTransactionParent::RecvInitReadLocks(ReadLockArray&& aReadLocks)
-{
-  if (!AddReadLocks(Move(aReadLocks))) {
-    return IPC_FAIL_NO_REASON(this);
-  }
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
 LayerTransactionParent::RecvUpdate(const TransactionInfo& aInfo)
 {
   AUTO_PROFILER_TRACING("Paint", "LayerTransaction");
@@ -176,7 +167,6 @@ LayerTransactionParent::RecvUpdate(const TransactionInfo& aInfo)
   MOZ_LAYERS_LOG(("[ParentSide] received txn with %zu edits", aInfo.cset().Length()));
 
   UpdateFwdTransactionId(aInfo.fwdTransactionId());
-  AutoClearReadLocks clearLocks(mReadLocks);
 
   if (mDestroyed || !mLayerManager || mLayerManager->IsDestroyed()) {
     for (const auto& op : aInfo.toDestroy()) {
@@ -751,25 +741,6 @@ LayerTransactionParent::RecvGetAnimationTransform(const uint64_t& aCompositorAni
   return IPC_OK();
 }
 
-static AsyncPanZoomController*
-GetAPZCForViewID(Layer* aLayer, FrameMetrics::ViewID aScrollID)
-{
-  AsyncPanZoomController* resultApzc = nullptr;
-  ForEachNode<ForwardIterator>(
-      aLayer,
-      [aScrollID, &resultApzc] (Layer* layer)
-      {
-        for (uint32_t i = 0; i < layer->GetScrollMetadataCount(); i++) {
-          if (layer->GetFrameMetrics(i).GetScrollId() == aScrollID) {
-            resultApzc = layer->GetAsyncPanZoomController(i);
-            return TraversalFlag::Abort;
-          }
-        }
-        return TraversalFlag::Continue;
-      });
-  return resultApzc;
-}
-
 mozilla::ipc::IPCResult
 LayerTransactionParent::RecvSetAsyncScrollOffset(const FrameMetrics::ViewID& aScrollID,
                                                  const float& aX, const float& aY)
@@ -778,11 +749,7 @@ LayerTransactionParent::RecvSetAsyncScrollOffset(const FrameMetrics::ViewID& aSc
     return IPC_FAIL_NO_REASON(this);
   }
 
-  AsyncPanZoomController* controller = GetAPZCForViewID(mRoot, aScrollID);
-  if (!controller) {
-    return IPC_FAIL_NO_REASON(this);
-  }
-  controller->SetTestAsyncScrollOffset(CSSPoint(aX, aY));
+  mCompositorBridge->SetTestAsyncScrollOffset(GetId(), aScrollID, CSSPoint(aX, aY));
   return IPC_OK();
 }
 
@@ -794,11 +761,7 @@ LayerTransactionParent::RecvSetAsyncZoom(const FrameMetrics::ViewID& aScrollID,
     return IPC_FAIL_NO_REASON(this);
   }
 
-  AsyncPanZoomController* controller = GetAPZCForViewID(mRoot, aScrollID);
-  if (!controller) {
-    return IPC_FAIL_NO_REASON(this);
-  }
-  controller->SetTestAsyncZoom(LayerToParentLayerScale(aValue));
+  mCompositorBridge->SetTestAsyncZoom(GetId(), aScrollID, LayerToParentLayerScale(aValue));
   return IPC_OK();
 }
 

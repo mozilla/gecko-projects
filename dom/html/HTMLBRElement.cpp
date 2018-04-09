@@ -55,14 +55,11 @@ void
 HTMLBRElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
                                      GenericSpecifiedValues* aData)
 {
-  if (aData->ShouldComputeStyleStruct(NS_STYLE_INHERIT_BIT(Display))) {
-    if (!aData->PropertyIsSet(eCSSProperty_clear)) {
-      const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::clear);
-      if (value && value->Type() == nsAttrValue::eEnum)
-        aData->SetKeywordValue(eCSSProperty_clear, value->GetEnumValue());
-    }
+  if (!aData->PropertyIsSet(eCSSProperty_clear)) {
+    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::clear);
+    if (value && value->Type() == nsAttrValue::eEnum)
+      aData->SetKeywordValue(eCSSProperty_clear, value->GetEnumValue());
   }
-
   nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
 }
 
@@ -70,7 +67,7 @@ NS_IMETHODIMP_(bool)
 HTMLBRElement::IsAttributeMapped(const nsAtom* aAttribute) const
 {
   static const MappedAttributeEntry attributes[] = {
-    { &nsGkAtoms::clear },
+    { nsGkAtoms::clear },
     { nullptr }
   };
 

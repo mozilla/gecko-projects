@@ -406,6 +406,8 @@ public class BrowserApp extends GeckoApp
 
     private final TabEditingState mLastTabEditingState = new TabEditingState();
 
+    private boolean mSuppressNextKeyUp;
+
     // The animator used to toggle HomePager visibility has a race where if the HomePager is shown
     // (starting the animation), the HomePager is hidden, and the HomePager animation completes,
     // both the web content and the HomePager will be hidden. This flag is used to prevent the
@@ -580,6 +582,10 @@ public class BrowserApp extends GeckoApp
         // Global onKey handler. This is called if the focused UI doesn't
         // handle the key event, and before Gecko swallows the events.
         if (event.getAction() != KeyEvent.ACTION_DOWN) {
+            if (mSuppressNextKeyUp && event.getAction() == KeyEvent.ACTION_UP) {
+                mSuppressNextKeyUp = false;
+                return true;
+            }
             return false;
         }
 
@@ -627,7 +633,7 @@ public class BrowserApp extends GeckoApp
                     return true;
 
                 case KeyEvent.KEYCODE_R:
-                    tab.doReload(event.isShiftPressed() ? true : false);
+                    tab.doReload(event.isShiftPressed());
                     return true;
 
                 case KeyEvent.KEYCODE_PERIOD:
@@ -635,8 +641,23 @@ public class BrowserApp extends GeckoApp
                     return true;
 
                 case KeyEvent.KEYCODE_T:
-                    addTab();
+                    int flags = Tabs.LOADURL_START_EDITING;
+                    if (tab.isPrivate()) {
+                        flags |= Tabs.LOADURL_PRIVATE;
+                    }
+                    addTab(flags);
                     return true;
+
+                case KeyEvent.KEYCODE_N:
+                    addTab(Tabs.LOADURL_START_EDITING);
+                    return true;
+
+                case KeyEvent.KEYCODE_P:
+                    if (event.isShiftPressed()) {
+                        addTab(Tabs.LOADURL_PRIVATE | Tabs.LOADURL_START_EDITING);
+                        return true;
+                    }
+                    break;
 
                 case KeyEvent.KEYCODE_W:
                     Tabs.getInstance().closeTab(tab);
@@ -1391,8 +1412,13 @@ public class BrowserApp extends GeckoApp
 
         mBrowserToolbar.setOnCommitListener(new BrowserToolbar.OnCommitListener() {
             @Override
-            public void onCommit() {
-                commitEditingMode();
+            public void onCommitByKey() {
+                if (commitEditingMode()) {
+                    // We're committing in response to a key-down event. Since we'll be hiding the
+                    // ToolbarEditLayout, the corresponding key-up event will end up being sent to
+                    // Gecko which we don't want, as this messes up tracking of the last user input.
+                    mSuppressNextKeyUp = true;
+                }
             }
         });
 
@@ -2312,9 +2338,16 @@ public class BrowserApp extends GeckoApp
     }
 
     @Override
+    public void addTab(final int flags) {
+        if ((flags & Tabs.LOADURL_PRIVATE) == 0) {
+            MmaDelegate.track(NEW_TAB);
+        }
+        Tabs.getInstance().addTab(flags);
+    }
+
+    @Override
     public void addTab() {
-        MmaDelegate.track(NEW_TAB);
-        Tabs.getInstance().addTab();
+        addTab(Tabs.LOADURL_NONE);
     }
 
     @Override
@@ -2681,9 +2714,12 @@ public class BrowserApp extends GeckoApp
         Telemetry.startUISession(TelemetryContract.Session.AWESOMESCREEN);
     }
 
-    private void commitEditingMode() {
+    /**
+     * @return True if editing mode was successfully committed.
+     */
+    private boolean commitEditingMode() {
         if (!mBrowserToolbar.isEditing()) {
-            return;
+            return false;
         }
 
         Telemetry.stopUISession(TelemetryContract.Session.AWESOMESCREEN,
@@ -2705,6 +2741,8 @@ public class BrowserApp extends GeckoApp
         hideHomePager(url);
         loadUrlOrKeywordSearch(url);
         clearSelectedTabApplicationId();
+
+        return true;
     }
 
     private void clearSelectedTabApplicationId() {

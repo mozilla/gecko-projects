@@ -3,8 +3,6 @@
 /* eslint-disable mozilla/no-arbitrary-setTimeout */
 "use strict";
 
-ChromeUtils.import("resource://testing-common/PromiseTestUtils.jsm");
-
 PromiseTestUtils.whitelistRejectionsGlobally(/Message manager disconnected/);
 
 add_task(async function test_alarm_without_permissions() {
@@ -92,6 +90,7 @@ add_task(async function test_alarm_fires_with_when() {
     },
   });
 
+  Services.prefs.setBoolPref("privacy.resistFingerprinting.reduceTimerPrecision.jitter", false);
   await extension.startup();
   await extension.awaitFinish("alarm-when");
 
@@ -99,6 +98,7 @@ add_task(async function test_alarm_fires_with_when() {
   // reply finishes.
   await new Promise(resolve => setTimeout(resolve, 0));
   await extension.unload();
+  Services.prefs.clearUserPref("privacy.resistFingerprinting.reduceTimerPrecision.jitter");
 });
 
 add_task(async function test_alarm_clear_non_matching_name() {

@@ -50,8 +50,6 @@ class nsIStreamLoader;
 class nsIStreamLoaderObserver;
 class nsIIncrementalStreamLoader;
 class nsIIncrementalStreamLoaderObserver;
-class nsIUnicharStreamLoader;
-class nsIUnicharStreamLoaderObserver;
 
 namespace mozilla {
 class Encoding;
@@ -426,9 +424,6 @@ NS_NewStreamLoader(nsIStreamLoader        **outStream,
                    nsLoadFlags              aLoadFlags = nsIRequest::LOAD_NORMAL,
                    nsIURI                  *aReferrer = nullptr);
 
-nsresult NS_NewUnicharStreamLoader(nsIUnicharStreamLoader        **result,
-                                   nsIUnicharStreamLoaderObserver *observer);
-
 nsresult NS_NewSyncStreamListener(nsIStreamListener **result,
                                   nsIInputStream    **stream);
 
@@ -683,6 +678,16 @@ bool NS_GetOriginAttributes(nsIChannel *aChannel,
  * URLs that it was redirected through.
  */
 bool NS_HasBeenCrossOrigin(nsIChannel* aChannel, bool aReport = false);
+
+/**
+ * Returns true if the channel is a safe top-level navigation.
+ */
+bool NS_IsSafeTopLevelNav(nsIChannel* aChannel);
+
+/**
+ * Returns true if the channel is a foreign navigation.
+ */
+bool NS_IsTopLevelForeign(nsIChannel* aChannel);
 
 // Constants duplicated from nsIScriptSecurityManager so we avoid having necko
 // know about script security manager.

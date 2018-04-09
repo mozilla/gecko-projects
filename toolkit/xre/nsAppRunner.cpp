@@ -16,6 +16,7 @@
 #include "mozilla/Poison.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Printf.h"
+#include "mozilla/ResultExtensions.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Services.h"
 #include "mozilla/Telemetry.h"
@@ -235,9 +236,12 @@ extern void InstallSignalHandlers(const char *ProgramName);
 
 #define FILE_COMPATIBILITY_INFO NS_LITERAL_CSTRING("compatibility.ini")
 #define FILE_INVALIDATE_CACHES NS_LITERAL_CSTRING(".purgecaches")
+#define FILE_STARTUP_INCOMPLETE NS_LITERAL_STRING(".startup-incomplete")
 
 int    gArgc;
 char **gArgv;
+
+#include "buildid.h"
 
 static const char gToolkitVersion[] = NS_STRINGIFY(GRE_MILESTONE);
 static const char gToolkitBuildID[] = NS_STRINGIFY(MOZ_BUILDID);
@@ -269,12 +273,6 @@ nsString gAbsoluteArgv0Path;
 #include <fontconfig/fontconfig.h>
 #endif
 #include "BinaryPath.h"
-#ifndef MOZ_BUILDID
-// See comment in Makefile.in why we want to avoid including buildid.h.
-// Still include it when MOZ_BUILDID is not set, which can happen with some
-// build backends.
-#include "buildid.h"
-#endif
 
 #ifdef MOZ_LINKER
 extern "C" MFBT_API bool IsSignalHandlingBroken();
@@ -299,6 +297,7 @@ int (*RunGTest)(int*, char**) = 0;
 } // namespace mozilla
 
 using namespace mozilla;
+using namespace mozilla::startup;
 using mozilla::Unused;
 using mozilla::scache::StartupCache;
 using mozilla::dom::ContentParent;
@@ -1249,6 +1248,7 @@ nsXULAppInfo::SetEnabled(bool aEnabled)
 NS_IMETHODIMP
 nsXULAppInfo::GetServerURL(nsIURL** aServerURL)
 {
+  NS_ENSURE_ARG_POINTER(aServerURL);
   if (!CrashReporter::GetEnabled())
     return NS_ERROR_NOT_INITIALIZED;
 
@@ -1715,7 +1715,12 @@ DumpHelp()
          "                     --new-instance.\n"
          "  --new-instance     Open new instance, not a new window in running instance.\n"
          "  --UILocale <locale> Start with <locale> resources as UI Locale.\n"
-         "  --safe-mode        Disables extensions and themes for this session.\n", (const char*) gAppData->name);
+         "  --safe-mode        Disables extensions and themes for this session.\n"
+         "  -MOZ_LOG <modules> Treated as MOZ_LOG=<modules> environment variable, overrides it.\n"
+         "  -MOZ_LOG_FILE <file> Treated as MOZ_LOG_FILE=<file> environment variable, overrides it.\n"
+         "                     If MOZ_LOG_FILE is not specified as an argument or as an environment variable,\n"
+         "                     logging will be written to stdout.\n"
+         , (const char*)gAppData->name);
 
 #if defined(XP_WIN)
   printf("  --console          Start %s with a debugging console.\n", (const char*) gAppData->name);
@@ -3123,6 +3128,8 @@ public:
   int XRE_mainStartup(bool* aExitFlag);
   nsresult XRE_mainRun();
 
+  Result<bool, nsresult> CheckLastStartupWasCrash();
+
   nsCOMPtr<nsINativeAppSupport> mNativeApp;
   nsCOMPtr<nsIToolkitProfileService> mProfileSvc;
   nsCOMPtr<nsIFile> mProfD;
@@ -3152,6 +3159,99 @@ public:
 #endif
 };
 
+#ifdef XP_WIN
+namespace {
+
+bool PolicyHasRegValue(HKEY aKey, LPCTSTR aName, DWORD* aValue)
+{
+  HKEY hkey = NULL;
+  LONG ret = RegOpenKeyExW(aKey,
+    L"SOFTWARE\\Policies\\Mozilla\\Firefox", 0, KEY_READ, &hkey);
+  if (ret != ERROR_SUCCESS) {
+     return false;
+  }
+  nsAutoRegKey key(hkey);
+  DWORD len = sizeof(aValue);
+  ret = RegQueryValueExW(hkey, aName, 0, NULL, (LPBYTE)aValue, &len);
+  RegCloseKey(key);
+  return ret == ERROR_SUCCESS;
+}
+
+bool SafeModeBlockedByPolicy()
+{
+  LPCTSTR policyName = L"DisableSafeMode";
+  DWORD value;
+  if (PolicyHasRegValue(HKEY_LOCAL_MACHINE, policyName, &value)) {
+    return value == 1;
+  }
+  if (PolicyHasRegValue(HKEY_CURRENT_USER, policyName, &value)) {
+    return value == 1;
+  }
+  return false;
+}
+
+} // anonymous namespace
+#endif // XP_WIN
+
+#if defined(XP_UNIX) && !defined(ANDROID)
+static SmprintfPointer
+FormatUid(uid_t aId)
+{
+  if (const auto pw = getpwuid(aId)) {
+    return mozilla::Smprintf("%s", pw->pw_name);
+  }
+  return mozilla::Smprintf("uid %d", static_cast<int>(aId));
+}
+
+// Bug 1323302: refuse to run under sudo or similar.
+static bool
+CheckForUserMismatch()
+{
+  static char const * const kVars[] = {
+    "HOME",
+#ifdef MOZ_WIDGET_GTK
+    "XDG_RUNTIME_DIR",
+#endif
+#ifdef MOZ_X11
+    "XAUTHORITY",
+#endif
+  };
+
+  const uid_t euid = geteuid();
+  if (euid != 0) {
+    // On Linux it's possible to have superuser capabilities with a
+    // nonzero uid, but anyone who knows enough to make that happen
+    // probably knows enough to debug the resulting problems.
+    // Otherwise, a non-root user can't cause the problems we're
+    // concerned about.
+    return false;
+  }
+
+  for (const auto var : kVars) {
+    if (const auto path = PR_GetEnv(var)) {
+      struct stat st;
+      if (stat(path, &st) == 0) {
+        if (st.st_uid != euid) {
+          const auto owner = FormatUid(st.st_uid);
+          Output(true, "Running " MOZ_APP_DISPLAYNAME " as root in a regular"
+                 " user's session is not supported.  ($%s is %s which is"
+                 " owned by %s.)\n",
+                 var, path, owner.get());
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+#else // !XP_UNIX || ANDROID
+static bool
+CheckForUserMismatch()
+{
+  return false;
+}
+#endif
+
 /*
  * XRE_mainInit - Initial setup and command line parameter processing.
  * Main() will exit early if either return value != 0 or if aExitFlag is
@@ -3170,6 +3270,10 @@ XREMain::XRE_mainInit(bool* aExitFlag)
   });
 
   StartupTimeline::Record(StartupTimeline::MAIN);
+
+  if (CheckForUserMismatch()) {
+    return 1;
+  }
 
   if (PR_GetEnv("MOZ_CHAOSMODE")) {
     ChaosFeature feature = ChaosFeature::Any;
@@ -3336,7 +3440,7 @@ XREMain::XRE_mainInit(bool* aExitFlag)
       NS_SUCCEEDED(
         CrashReporter::SetExceptionHandler(xreBinDirectory))) {
     nsCOMPtr<nsIFile> file;
-    rv = mDirProvider.GetUserAppDataDirectory(getter_AddRefs(file));
+    rv = nsXREDirProvider::GetUserAppDataDirectory(getter_AddRefs(file));
     if (NS_SUCCEEDED(rv)) {
       CrashReporter::SetUserAppDataDirectory(file);
     }
@@ -3488,12 +3592,6 @@ XREMain::XRE_mainInit(bool* aExitFlag)
   gRestartArgv[gRestartArgc] = nullptr;
 
 
-  if (EnvHasValue("MOZ_SAFE_MODE_RESTART")) {
-    gSafeMode = true;
-    // unset the env variable
-    SaveToEnv("MOZ_SAFE_MODE_RESTART=");
-  }
-
   ar = CheckArg("safe-mode", true);
   if (ar == ARG_BAD) {
     PR_fprintf(PR_STDERR, "Error: argument --safe-mode is invalid when argument --osint is specified\n");
@@ -3522,6 +3620,20 @@ XREMain::XRE_mainInit(bool* aExitFlag)
       !EnvHasValue("MOZ_DISABLE_SAFE_MODE_KEY"))
     gSafeMode = true;
 #endif
+
+#ifdef XP_WIN
+if (gSafeMode && SafeModeBlockedByPolicy()) {
+    gSafeMode = false;
+  }
+#endif
+
+  // The Safe Mode Policy should not be enforced for the env var case
+  // (used by updater and crash-recovery).
+  if (EnvHasValue("MOZ_SAFE_MODE_RESTART")) {
+    gSafeMode = true;
+    // unset the env variable
+    SaveToEnv("MOZ_SAFE_MODE_RESTART=");
+  }
 
 #ifdef XP_WIN
   {
@@ -3786,6 +3898,51 @@ static void SetShutdownChecks() {
     }
   }
 
+}
+
+namespace mozilla {
+namespace startup {
+  Result<nsCOMPtr<nsIFile>, nsresult>
+  GetIncompleteStartupFile(nsIFile* aProfLD)
+  {
+    nsCOMPtr<nsIFile> crashFile;
+    MOZ_TRY(aProfLD->Clone(getter_AddRefs(crashFile)));
+    MOZ_TRY(crashFile->Append(FILE_STARTUP_INCOMPLETE));
+    return Move(crashFile);
+  }
+}
+}
+
+// Check whether the last startup attempt resulted in a crash within the
+// last 6 hours.
+// Note that this duplicates the logic in nsAppStartup::TrackStartupCrashBegin,
+// which runs too late for our purposes.
+Result<bool, nsresult>
+XREMain::CheckLastStartupWasCrash()
+{
+  constexpr int32_t MAX_TIME_SINCE_STARTUP = 6 * 60 * 60 * 1000;
+
+  nsCOMPtr<nsIFile> crashFile;
+  MOZ_TRY_VAR(crashFile, GetIncompleteStartupFile(mProfLD));
+
+  // Attempt to create the incomplete startup canary file. If the file already
+  // exists, this fails, and we know the last startup was a success. If it
+  // doesn't already exist, it is created, and will be removed at the end of
+  // the startup crash detection window.
+  AutoFDClose fd;
+  Unused << crashFile->OpenNSPRFileDesc(PR_WRONLY | PR_CREATE_FILE | PR_EXCL,
+                                        0666, &fd.rwget());
+  if (fd) {
+    return false;
+  }
+
+  PRTime lastModifiedTime;
+  MOZ_TRY(crashFile->GetLastModifiedTime(&lastModifiedTime));
+
+  // If the file exists, and was created within the appropriate time window,
+  // the last startup was recent and resulted in a crash.
+  PRTime now = PR_Now() / PR_USEC_PER_MSEC;
+  return now - lastModifiedTime <= MAX_TIME_SINCE_STARTUP;
 }
 
 /*
@@ -4204,13 +4361,10 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
   // If we see .purgecaches, that means someone did a make.
   // Re-register components to catch potential changes.
   nsCOMPtr<nsIFile> flagFile;
-
   rv = NS_ERROR_FILE_NOT_FOUND;
-  nsCOMPtr<nsIFile> fFlagFile;
   if (mAppData->directory) {
-    rv = mAppData->directory->Clone(getter_AddRefs(fFlagFile));
+    rv = mAppData->directory->Clone(getter_AddRefs(flagFile));
   }
-  flagFile = do_QueryInterface(fFlagFile);
   if (flagFile) {
     flagFile->AppendNative(FILE_INVALIDATE_CACHES);
   }
@@ -4220,10 +4374,11 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
                                       mDirProvider.GetGREDir(),
                                       mAppData->directory, flagFile,
                                       &cachesOK);
-  if (CheckArg("purgecaches")) {
-    cachesOK = false;
-  }
-  if (PR_GetEnv("MOZ_PURGE_CACHES")) {
+
+  bool lastStartupWasCrash = CheckLastStartupWasCrash().unwrapOr(false);
+
+  if (CheckArg("purgecaches") || PR_GetEnv("MOZ_PURGE_CACHES") ||
+      lastStartupWasCrash) {
     cachesOK = false;
   }
 
@@ -4696,7 +4851,7 @@ XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig)
 {
   ScopedLogging log;
 
-  mozilla::LogModule::Init();
+  mozilla::LogModule::Init(argc, argv);
 
 #ifdef MOZ_CODE_COVERAGE
   CodeCoverageHandler::Init();
@@ -4794,6 +4949,16 @@ XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig)
   int result = XRE_mainInit(&exit);
   if (result != 0 || exit)
     return result;
+
+  // If we exit gracefully, remove the startup crash canary file.
+  auto cleanup = MakeScopeExit([&] () -> nsresult {
+    if (mProfLD) {
+      nsCOMPtr<nsIFile> crashFile;
+      MOZ_TRY_VAR(crashFile, GetIncompleteStartupFile(mProfLD));
+      crashFile->Remove(false);
+    }
+    return NS_OK;
+  });
 
   // startup
   result = XRE_mainStartup(&exit);

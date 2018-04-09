@@ -9,7 +9,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
 
-#include "jsstr.h"
+#include "builtin/String.h"
 #ifdef DEBUG
 #include "jsutil.h"
 #endif
@@ -21,12 +21,13 @@
 #include "irregexp/RegExpBytecode.h"
 #endif
 #include "irregexp/RegExpParser.h"
+#include "util/StringBuffer.h"
 #include "vm/MatchPairs.h"
 #include "vm/RegExpStatics.h"
-#include "vm/StringBuffer.h"
+#include "vm/StringType.h"
 #include "vm/TraceLogging.h"
 #ifdef DEBUG
-#include "vm/Unicode.h"
+#include "util/Unicode.h"
 #endif
 #include "vm/Xdr.h"
 
@@ -1431,7 +1432,7 @@ js::ParseRegExpFlags(JSContext* cx, JSString* flagStr, RegExpFlag* flagsOut)
 }
 
 template<XDRMode mode>
-bool
+XDRResult
 js::XDRScriptRegExpObject(XDRState<mode>* xdr, MutableHandle<RegExpObject*> objp)
 {
     /* NB: Keep this in sync with CloneScriptRegExpObject. */
@@ -1445,23 +1446,23 @@ js::XDRScriptRegExpObject(XDRState<mode>* xdr, MutableHandle<RegExpObject*> objp
         source = reobj.getSource();
         flagsword = reobj.getFlags();
     }
-    if (!XDRAtom(xdr, &source) || !xdr->codeUint32(&flagsword))
-        return false;
+    MOZ_TRY(XDRAtom(xdr, &source));
+    MOZ_TRY(xdr->codeUint32(&flagsword));
     if (mode == XDR_DECODE) {
         RegExpObject* reobj = RegExpObject::create(xdr->cx(), source, RegExpFlag(flagsword),
                                                    xdr->lifoAlloc(), TenuredObject);
         if (!reobj)
-            return false;
+            return xdr->fail(JS::TranscodeResult_Throw);
 
         objp.set(reobj);
     }
-    return true;
+    return Ok();
 }
 
-template bool
+template XDRResult
 js::XDRScriptRegExpObject(XDRState<XDR_ENCODE>* xdr, MutableHandle<RegExpObject*> objp);
 
-template bool
+template XDRResult
 js::XDRScriptRegExpObject(XDRState<XDR_DECODE>* xdr, MutableHandle<RegExpObject*> objp);
 
 JSObject*

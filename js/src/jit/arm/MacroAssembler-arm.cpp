@@ -10,6 +10,7 @@
 #include "mozilla/Casting.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MathAlgorithms.h"
+#include "mozilla/Maybe.h"
 
 #include "jit/arm/Simulator-arm.h"
 #include "jit/AtomicOp.h"
@@ -28,6 +29,7 @@ using namespace jit;
 using mozilla::Abs;
 using mozilla::BitwiseCast;
 using mozilla::IsPositiveZero;
+using mozilla::Maybe;
 
 bool
 isValueDTRDCandidate(ValueOperand& val)
@@ -1363,12 +1365,6 @@ BufferOffset
 MacroAssemblerARM::ma_b(Label* dest, Assembler::Condition c)
 {
     return as_b(dest, c);
-}
-
-BufferOffset
-MacroAssemblerARM::ma_b(wasm::OldTrapDesc target, Assembler::Condition c)
-{
-    return as_b(target, c);
 }
 
 void
@@ -4112,10 +4108,10 @@ MacroAssemblerARMCompat::roundf(FloatRegister input, Register output, Label* bai
 }
 
 CodeOffsetJump
-MacroAssemblerARMCompat::jumpWithPatch(RepatchLabel* label, Condition cond, Label* documentation)
+MacroAssemblerARMCompat::jumpWithPatch(RepatchLabel* label)
 {
     ARMBuffer::PoolEntry pe;
-    BufferOffset bo = as_BranchPool(0xdeadbeef, label, refLabel(documentation), &pe, cond);
+    BufferOffset bo = as_BranchPool(0xdeadbeef, label, LabelDoc(), &pe);
     // Fill in a new CodeOffset with both the load and the pool entry that the
     // instruction loads from.
     CodeOffsetJump ret(bo.getOffset(), pe.index());
@@ -4482,45 +4478,10 @@ MacroAssembler::patchFarJump(CodeOffset farJump, uint32_t targetOffset)
     *u32 = (targetOffset - addOffset) - 8;
 }
 
-void
-MacroAssembler::repatchFarJump(uint8_t* code, uint32_t farJumpOffset, uint32_t targetOffset)
-{
-    uint32_t* u32 = reinterpret_cast<uint32_t*>(code + farJumpOffset);
-
-    uint32_t addOffset = farJumpOffset - 4;
-    MOZ_ASSERT(reinterpret_cast<Instruction*>(code + addOffset)->is<InstALU>());
-
-    *u32 = (targetOffset - addOffset) - 8;
-}
-
-CodeOffset
-MacroAssembler::nopPatchableToNearJump()
-{
-    // Inhibit pools so that the offset points precisely to the nop.
-    AutoForbidPools afp(this, 1);
-
-    CodeOffset offset(currentOffset());
-    ma_nop();
-    return offset;
-}
-
-void
-MacroAssembler::patchNopToNearJump(uint8_t* jump, uint8_t* target)
-{
-    MOZ_ASSERT(reinterpret_cast<Instruction*>(jump)->is<InstNOP>());
-    new (jump) InstBImm(BOffImm(target - jump), Assembler::Always);
-}
-
-void
-MacroAssembler::patchNearJumpToNop(uint8_t* jump)
-{
-    MOZ_ASSERT(reinterpret_cast<Instruction*>(jump)->is<InstBImm>());
-    new (jump) InstNOP();
-}
-
 CodeOffset
 MacroAssembler::nopPatchableToCall(const wasm::CallSiteDesc& desc)
 {
+    AutoForbidPools afp(this, /* max number of instructions in scope = */ 1);
     CodeOffset offset(currentOffset());
     ma_nop();
     append(desc, CodeOffset(currentOffset()));
@@ -4700,6 +4661,12 @@ MacroAssembler::pushFakeReturnAddress(Register scratch)
 
     MOZ_ASSERT_IF(!oom(), pseudoReturnOffset - offsetBeforePush == 8);
     return pseudoReturnOffset;
+}
+
+void
+MacroAssembler::enterFakeExitFrameForWasm(Register cxreg, Register scratch, ExitFrameType type)
+{
+    enterFakeExitFrame(cxreg, scratch, type);
 }
 
 // ===============================================================
@@ -4910,6 +4877,27 @@ CodeOffset
 MacroAssembler::wasmTrapInstruction()
 {
     return CodeOffset(as_illegal_trap().getOffset());
+}
+
+void
+MacroAssembler::wasmBoundsCheck(Condition cond, Register index, Register boundsCheckLimit, Label* label)
+{
+    as_cmp(index, O2Reg(boundsCheckLimit));
+    as_b(label, cond);
+    if (JitOptions.spectreIndexMasking)
+        ma_mov(boundsCheckLimit, index, LeaveCC, cond);
+}
+
+void
+MacroAssembler::wasmBoundsCheck(Condition cond, Register index, Address boundsCheckLimit, Label* label)
+{
+    ScratchRegisterScope scratch(*this);
+    MOZ_ASSERT(boundsCheckLimit.offset == offsetof(wasm::TlsData, boundsCheckLimit));
+    ma_ldr(DTRAddr(boundsCheckLimit.base, DtrOffImm(boundsCheckLimit.offset)), scratch);
+    as_cmp(index, O2Reg(scratch));
+    as_b(label, cond);
+    if (JitOptions.spectreIndexMasking)
+        ma_mov(scratch, index, LeaveCC, cond);
 }
 
 void
@@ -5785,6 +5773,17 @@ MacroAssembler::convertUInt64ToDouble(Register64 src, FloatRegister dest, Regist
     addDouble(scratchDouble, dest);
 }
 
+// ========================================================================
+// Spectre Mitigations.
+
+void
+MacroAssembler::speculationBarrier()
+{
+    // Spectre mitigation recommended by ARM for cases where csel/cmov cannot be
+    // used.
+    as_csdb();
+}
+
 //}}} check_macroassembler_style
 
 void
@@ -5963,22 +5962,21 @@ MacroAssemblerARM::wasmLoadImpl(const wasm::MemoryAccessDesc& access, Register m
 
     asMasm().memoryBarrierBefore(access.sync());
 
-    uint32_t framePushed = asMasm().framePushed();
     BufferOffset load;
     if (out64 != Register64::Invalid()) {
         if (type == Scalar::Int64) {
             MOZ_ASSERT(INT64LOW_OFFSET == 0);
 
             load = ma_dataTransferN(IsLoad, 32, /* signed = */ false, memoryBase, ptr, out64.low);
-            append(access, load.getOffset(), framePushed);
+            append(access, load.getOffset());
 
             as_add(ptr, ptr, Imm8(INT64HIGH_OFFSET));
 
             load = ma_dataTransferN(IsLoad, 32, isSigned, memoryBase, ptr, out64.high);
-            append(access, load.getOffset(), framePushed);
+            append(access, load.getOffset());
         } else {
             load = ma_dataTransferN(IsLoad, byteSize * 8, isSigned, memoryBase, ptr, out64.low);
-            append(access, load.getOffset(), framePushed);
+            append(access, load.getOffset());
 
             if (isSigned)
                 ma_asr(Imm32(31), out64.low, out64.high);
@@ -5993,10 +5991,10 @@ MacroAssemblerARM::wasmLoadImpl(const wasm::MemoryAccessDesc& access, Register m
             ma_add(memoryBase, ptr, scratch);
 
             load = ma_vldr(Operand(Address(scratch, 0)).toVFPAddr(), output.fpu());
-            append(access, load.getOffset(), framePushed);
+            append(access, load.getOffset());
         } else {
             load = ma_dataTransferN(IsLoad, byteSize * 8, isSigned, memoryBase, ptr, output.gpr());
-            append(access, load.getOffset(), framePushed);
+            append(access, load.getOffset());
         }
     }
 
@@ -6025,21 +6023,19 @@ MacroAssemblerARM::wasmStoreImpl(const wasm::MemoryAccessDesc& access, AnyRegist
 
     asMasm().memoryBarrierAfter(access.sync());
 
-    uint32_t framePushed = asMasm().framePushed();
-
     BufferOffset store;
     if (type == Scalar::Int64) {
         MOZ_ASSERT(INT64LOW_OFFSET == 0);
 
         store = ma_dataTransferN(IsStore, 32 /* bits */, /* signed */ false, memoryBase, ptr,
                                  val64.low);
-        append(access, store.getOffset(), framePushed);
+        append(access, store.getOffset());
 
         as_add(ptr, ptr, Imm8(INT64HIGH_OFFSET));
 
         store = ma_dataTransferN(IsStore, 32 /* bits */, /* signed */ true, memoryBase, ptr,
                                  val64.high);
-        append(access, store.getOffset(), framePushed);
+        append(access, store.getOffset());
     } else {
         if (value.isFloat()) {
             ScratchRegisterScope scratch(asMasm());
@@ -6048,14 +6044,14 @@ MacroAssemblerARM::wasmStoreImpl(const wasm::MemoryAccessDesc& access, AnyRegist
             ma_add(memoryBase, ptr, scratch);
 
             store = ma_vstr(val, Operand(Address(scratch, 0)).toVFPAddr());
-            append(access, store.getOffset(), framePushed);
+            append(access, store.getOffset());
         } else {
             bool isSigned = type == Scalar::Uint32 || type == Scalar::Int32; // see AsmJSStoreHeap;
             Register val = value.gpr();
 
             store = ma_dataTransferN(IsStore, 8 * byteSize /* bits */, isSigned, memoryBase, ptr,
                                      val);
-            append(access, store.getOffset(), framePushed);
+            append(access, store.getOffset());
         }
     }
 

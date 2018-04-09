@@ -3,12 +3,12 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from shared-head.js */
+/* import-globals-from ../../shared/test/shared-head.js */
 
 // shared-head.js handles imports, constants, and utility functions
-Services.scriptloader.loadSubScript("chrome://mochitests/content/browser/devtools/client/framework/test/shared-head.js", this);
+Services.scriptloader.loadSubScript("chrome://mochitests/content/browser/devtools/client/shared/test/shared-head.js", this);
 
-const EventEmitter = require("devtools/shared/old-event-emitter");
+const EventEmitter = require("devtools/shared/event-emitter");
 
 function toggleAllTools(state) {
   for (let [, tool] of gDevTools._tools) {
@@ -23,8 +23,7 @@ function toggleAllTools(state) {
   }
 }
 
-function getChromeActors(callback)
-{
+function getChromeActors(callback) {
   let { DebuggerServer } = require("devtools/server/main");
   let { DebuggerClient } = require("devtools/shared/client/debugger-client");
 
@@ -55,14 +54,14 @@ function getSourceActor(aSources, aURL) {
  * @return nsIDOMWindow
  *         The new window object that holds Scratchpad.
  */
-function* openScratchpadWindow() {
+async function openScratchpadWindow() {
   let { promise: p, resolve } = defer();
   let win = ScratchpadManager.openScratchpad();
 
-  yield once(win, "load");
+  await once(win, "load");
 
   win.Scratchpad.addObserver({
-    onReady: function () {
+    onReady: function() {
       win.Scratchpad.removeObserver(this);
       resolve(win);
     }
@@ -109,9 +108,8 @@ function executeInContent(name, data = {}, objects = {}, expectResponse = true) 
   mm.sendAsyncMessage(name, data, objects);
   if (expectResponse) {
     return waitForContentMessage(name);
-  } else {
-    return promise.resolve();
   }
+  return promise.resolve();
 }
 
 /**
@@ -156,14 +154,16 @@ function checkHostType(toolbox, hostType, previousHostType) {
  */
 function createScript(url) {
   info(`Creating script: ${url}`);
-  let mm = getFrameScript();
+  // This is not ideal if called multiple times, as it loads the frame script
+  // separately each time.  See bug 1443680.
+  loadFrameScriptUtils();
   let command = `
     let script = document.createElement("script");
     script.setAttribute("src", "${url}");
     document.body.appendChild(script);
     null;
   `;
-  return evalInDebuggee(mm, command);
+  return evalInDebuggee(command);
 }
 
 /**
@@ -178,7 +178,7 @@ function waitForSourceLoad(toolbox, url) {
   return new Promise(resolve => {
     let target = toolbox.target;
 
-    function sourceHandler(_, sourceEvent) {
+    function sourceHandler(sourceEvent) {
       if (sourceEvent && sourceEvent.source && sourceEvent.source.url === url) {
         resolve();
         target.off("source-updated", sourceHandler);
@@ -205,7 +205,7 @@ function DevToolPanel(iframeWindow, toolbox) {
 }
 
 DevToolPanel.prototype = {
-  open: function () {
+  open: function() {
     let deferred = defer();
 
     executeSoon(() => {
@@ -235,7 +235,7 @@ DevToolPanel.prototype = {
 
   _isReady: false,
 
-  destroy: function () {
+  destroy: function() {
     return defer(null);
   },
 };

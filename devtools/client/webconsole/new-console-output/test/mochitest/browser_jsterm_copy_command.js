@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Tests that the `copy` console helper works as intended.
 
 "use strict";
@@ -28,7 +26,7 @@ const TEST_URI = `data:text/html;charset=utf-8,
   <div><p></p></div>
 </body>`;
 
-add_task(async function () {
+add_task(async function() {
   let {jsterm} = await openNewTabAndConsole(TEST_URI);
   const random = Math.random();
   let string = "Text: " + random;
@@ -39,7 +37,7 @@ add_task(async function () {
   await testCopy(jsterm, obj.toSource(), JSON.stringify(obj, null, "  "));
 
   const outerHTML = await ContentTask.spawn(gBrowser.selectedBrowser, id,
-    function (elementId) {
+    function(elementId) {
       return content.document.getElementById(elementId).outerHTML;
     }
   );

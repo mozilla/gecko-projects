@@ -13,6 +13,8 @@
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/mozalloc.h"
+#include "mozilla/dom/MouseEvent.h"
+#include "mozilla/dom/EventTarget.h"
 #include "nsAString.h"
 #include "nsAlgorithm.h"
 #include "nsCOMPtr.h"
@@ -22,12 +24,8 @@
 #include "nsAtom.h"
 #include "nsIContent.h"
 #include "nsID.h"
-#include "nsIDOMDocument.h"
 #include "nsIDOMElement.h"
 #include "nsIDOMEvent.h"
-#include "nsIDOMEventTarget.h"
-#include "nsIDOMMouseEvent.h"
-#include "nsIDOMNode.h"
 #include "nsIDocument.h"
 #include "nsIPresShell.h"
 #include "nsISupportsUtils.h"
@@ -80,7 +78,7 @@ ResizerMouseMotionListener::ResizerMouseMotionListener(HTMLEditor& aHTMLEditor)
 NS_IMETHODIMP
 ResizerMouseMotionListener::HandleEvent(nsIDOMEvent* aMouseEvent)
 {
-  nsCOMPtr<nsIDOMMouseEvent> mouseEvent = do_QueryInterface(aMouseEvent);
+  MouseEvent* mouseEvent = aMouseEvent->InternalDOMEvent()->AsMouseEvent();
   if (!mouseEvent) {
     //non-ui event passed in.  bad things.
     return NS_OK;
@@ -114,9 +112,8 @@ HTMLEditor::CreateResizer(int16_t aLocation,
   }
 
   // add the mouse listener so we can detect a click on a resizer
-  nsCOMPtr<nsIDOMEventTarget> evtTarget = do_QueryInterface(ret);
-  evtTarget->AddEventListener(NS_LITERAL_STRING("mousedown"), mEventListener,
-                              true);
+  ret->AddEventListener(NS_LITERAL_STRING("mousedown"), mEventListener,
+                        true);
 
   nsAutoString locationStr;
   switch (aLocation) {
@@ -342,7 +339,7 @@ HTMLEditor::ShowResizersInner(Element& aResizedElement)
   nsCOMPtr<nsIDocument> doc = GetDocument();
   NS_ENSURE_TRUE(doc, NS_ERROR_NULL_POINTER);
 
-  nsCOMPtr<nsIDOMEventTarget> target = do_QueryInterface(doc->GetWindow());
+  nsCOMPtr<EventTarget> target = do_QueryInterface(doc->GetWindow());
   if (!target) {
     return NS_ERROR_NULL_POINTER;
   }
@@ -414,13 +411,12 @@ HTMLEditor::HideResizers()
 
   // don't forget to remove the listeners !
 
-  nsCOMPtr<nsIDOMEventTarget> target = GetDOMEventTarget();
+  // nsCOMPtr so we can do_QueryInterface into it.
+  nsCOMPtr<EventTarget> target = GetDOMEventTarget();
 
   if (target && mMouseMotionListenerP) {
-    DebugOnly<nsresult> rv =
-      target->RemoveEventListener(NS_LITERAL_STRING("mousemove"),
-                                  mMouseMotionListenerP, true);
-    NS_ASSERTION(NS_SUCCEEDED(rv), "failed to remove mouse motion listener");
+    target->RemoveEventListener(NS_LITERAL_STRING("mousemove"),
+                                mMouseMotionListenerP, true);
   }
   mMouseMotionListenerP = nullptr;
 
@@ -434,10 +430,8 @@ HTMLEditor::HideResizers()
   }
 
   if (mResizeEventListenerP) {
-    DebugOnly<nsresult> rv =
-      target->RemoveEventListener(NS_LITERAL_STRING("resize"),
-                                  mResizeEventListenerP, false);
-    NS_ASSERTION(NS_SUCCEEDED(rv), "failed to remove resize event listener");
+    target->RemoveEventListener(NS_LITERAL_STRING("resize"),
+                                mResizeEventListenerP, false);
   }
   mResizeEventListenerP = nullptr;
 
@@ -512,7 +506,7 @@ HTMLEditor::StartResizing(nsIDOMElement* aHandle)
       return NS_ERROR_OUT_OF_MEMORY;
     }
 
-    nsIDOMEventTarget* target = GetDOMEventTarget();
+    EventTarget* target = GetDOMEventTarget();
     NS_ENSURE_TRUE(target, NS_ERROR_FAILURE);
 
     result = target->AddEventListener(NS_LITERAL_STRING("mousemove"),
@@ -782,16 +776,15 @@ HTMLEditor::GetNewResizingHeight(int32_t aX,
 }
 
 nsresult
-HTMLEditor::OnMouseMove(nsIDOMMouseEvent* aMouseEvent)
+HTMLEditor::OnMouseMove(MouseEvent* aMouseEvent)
 {
   MOZ_ASSERT(aMouseEvent);
 
   if (mIsResizing) {
     // we are resizing and the mouse pointer's position has changed
     // we have to resdisplay the shadow
-    int32_t clientX, clientY;
-    aMouseEvent->GetClientX(&clientX);
-    aMouseEvent->GetClientY(&clientY);
+    int32_t clientX = aMouseEvent->ClientX();
+    int32_t clientY = aMouseEvent->ClientY();
 
     int32_t newX = GetNewResizingX(clientX, clientY);
     int32_t newY = GetNewResizingY(clientX, clientY);
@@ -811,9 +804,8 @@ HTMLEditor::OnMouseMove(nsIDOMMouseEvent* aMouseEvent)
   }
 
   if (mGrabberClicked) {
-    int32_t clientX, clientY;
-    aMouseEvent->GetClientX(&clientX);
-    aMouseEvent->GetClientY(&clientY);
+    int32_t clientX = aMouseEvent->ClientX();
+    int32_t clientY = aMouseEvent->ClientY();
 
     int32_t xThreshold =
       LookAndFeel::GetInt(LookAndFeel::eIntID_DragThresholdX, 1);
@@ -823,13 +815,12 @@ HTMLEditor::OnMouseMove(nsIDOMMouseEvent* aMouseEvent)
     if (DeprecatedAbs(clientX - mOriginalX) * 2 >= xThreshold ||
         DeprecatedAbs(clientY - mOriginalY) * 2 >= yThreshold) {
       mGrabberClicked = false;
-      StartMoving(nullptr);
+      StartMoving();
     }
   }
   if (mIsMoving) {
-    int32_t clientX, clientY;
-    aMouseEvent->GetClientX(&clientX);
-    aMouseEvent->GetClientY(&clientY);
+    int32_t clientX = aMouseEvent->ClientX();
+    int32_t clientY = aMouseEvent->ClientY();
 
     int32_t newX = mPositionedObjectX + clientX - mOriginalX;
     int32_t newY = mPositionedObjectY + clientY - mOriginalY;

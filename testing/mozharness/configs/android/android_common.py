@@ -148,7 +148,6 @@ config = {
                 "--log-raw=%(raw_log_file)s",
                 "--log-errorsummary=%(error_summary_file)s",
                 "--robocop-apk=../../robocop.apk",
-                "--robocop-ini=robocop.ini",
             ],
         },
         "reftest": {
@@ -185,6 +184,21 @@ config = {
                 "--suite=crashtest",
             ],
             "tests": ["tests/testing/crashtest/crashtests.list",],
+        },
+        "jittest": {
+            "run_filename": "jit_test.py",
+            "testsdir": "jit-test/jit-test",
+            "options": [
+                "../../bin/js",
+                "--remote",
+                "-j",
+                "1",
+                "--localLib=../../bin",
+                "--no-slow",
+                "--no-progress",
+                "--format=automation",
+                "--jitflags=all",
+            ],
         },
         "jsreftest": {
             "run_filename": "remotereftest.py",

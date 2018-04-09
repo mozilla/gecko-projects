@@ -23,10 +23,6 @@
 #include "nsError.h"
 #include "nsIPresShell.h"
 #include "nsGkAtoms.h"
-#ifdef MOZ_OLD_STYLE
-#include "nsRuleWalker.h"
-#include "mozilla/css/Declaration.h"
-#endif
 #include "nsCSSProps.h"
 #include "nsCSSParser.h"
 #include "mozilla/EventListenerManager.h"
@@ -61,7 +57,6 @@
 #include "mozilla/DeclarationBlockInlines.h"
 #include "mozilla/Unused.h"
 #include "mozilla/RestyleManager.h"
-#include "mozilla/RestyleManagerInlines.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -122,10 +117,8 @@ nsSVGElement::DidAnimateClass()
   nsIPresShell* shell = OwnerDoc()->GetShell();
   if (shell) {
     nsPresContext* presContext = shell->GetPresContext();
-    if (presContext && presContext->RestyleManager()->IsServo()) {
-      presContext->RestyleManager()
-                 ->AsServo()
-                 ->ClassAttributeWillBeChangedBySMIL(this);
+    if (presContext) {
+      presContext->RestyleManager()->ClassAttributeWillBeChangedBySMIL(this);
     }
   }
 
@@ -308,9 +301,7 @@ nsSVGElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
   // just delete the style rule and lazily reconstruct it as needed).
   if (aNamespaceID == kNameSpaceID_None && IsAttributeMapped(aName)) {
     mContentDeclarationBlock = nullptr;
-    if (OwnerDoc()->GetStyleBackendType() == StyleBackendType::Servo) {
-      OwnerDoc()->ScheduleSVGForPresAttrEvaluation(this);
-    }
+    OwnerDoc()->ScheduleSVGForPresAttrEvaluation(this);
   }
 
   if (IsEventAttributeName(aName) && aValue) {
@@ -925,26 +916,6 @@ nsSVGElement::NodeInfoChanged(nsIDocument* aOldDoc)
   OwnerDoc()->ScheduleSVGForPresAttrEvaluation(this);
 }
 
-#ifdef MOZ_OLD_STYLE
-NS_IMETHODIMP
-nsSVGElement::WalkContentStyleRules(nsRuleWalker* aRuleWalker)
-{
-#ifdef DEBUG
-//  printf("nsSVGElement(%p)::WalkContentStyleRules()\n", this);
-#endif
-  if (!mContentDeclarationBlock) {
-    UpdateContentDeclarationBlock(StyleBackendType::Gecko);
-  }
-
-  if (mContentDeclarationBlock) {
-    css::Declaration* declaration = mContentDeclarationBlock->AsGecko();
-    declaration->SetImmutable();
-    aRuleWalker->Forward(declaration);
-  }
-
-  return NS_OK;
-}
-#endif
 
 NS_IMETHODIMP_(bool)
 nsSVGElement::IsAttributeMapped(const nsAtom* name) const
@@ -958,38 +929,38 @@ nsSVGElement::IsAttributeMapped(const nsAtom* name) const
 // PresentationAttributes-FillStroke
 /* static */ const Element::MappedAttributeEntry
 nsSVGElement::sFillStrokeMap[] = {
-  { &nsGkAtoms::fill },
-  { &nsGkAtoms::fill_opacity },
-  { &nsGkAtoms::fill_rule },
-  { &nsGkAtoms::paint_order },
-  { &nsGkAtoms::stroke },
-  { &nsGkAtoms::stroke_dasharray },
-  { &nsGkAtoms::stroke_dashoffset },
-  { &nsGkAtoms::stroke_linecap },
-  { &nsGkAtoms::stroke_linejoin },
-  { &nsGkAtoms::stroke_miterlimit },
-  { &nsGkAtoms::stroke_opacity },
-  { &nsGkAtoms::stroke_width },
-  { &nsGkAtoms::vector_effect },
+  { nsGkAtoms::fill },
+  { nsGkAtoms::fill_opacity },
+  { nsGkAtoms::fill_rule },
+  { nsGkAtoms::paint_order },
+  { nsGkAtoms::stroke },
+  { nsGkAtoms::stroke_dasharray },
+  { nsGkAtoms::stroke_dashoffset },
+  { nsGkAtoms::stroke_linecap },
+  { nsGkAtoms::stroke_linejoin },
+  { nsGkAtoms::stroke_miterlimit },
+  { nsGkAtoms::stroke_opacity },
+  { nsGkAtoms::stroke_width },
+  { nsGkAtoms::vector_effect },
   { nullptr }
 };
 
 // PresentationAttributes-Graphics
 /* static */ const Element::MappedAttributeEntry
 nsSVGElement::sGraphicsMap[] = {
-  { &nsGkAtoms::clip_path },
-  { &nsGkAtoms::clip_rule },
-  { &nsGkAtoms::colorInterpolation },
-  { &nsGkAtoms::cursor },
-  { &nsGkAtoms::display },
-  { &nsGkAtoms::filter },
-  { &nsGkAtoms::image_rendering },
-  { &nsGkAtoms::mask },
-  { &nsGkAtoms::opacity },
-  { &nsGkAtoms::pointer_events },
-  { &nsGkAtoms::shape_rendering },
-  { &nsGkAtoms::text_rendering },
-  { &nsGkAtoms::visibility },
+  { nsGkAtoms::clip_path },
+  { nsGkAtoms::clip_rule },
+  { nsGkAtoms::colorInterpolation },
+  { nsGkAtoms::cursor },
+  { nsGkAtoms::display },
+  { nsGkAtoms::filter },
+  { nsGkAtoms::image_rendering },
+  { nsGkAtoms::mask },
+  { nsGkAtoms::opacity },
+  { nsGkAtoms::pointer_events },
+  { nsGkAtoms::shape_rendering },
+  { nsGkAtoms::text_rendering },
+  { nsGkAtoms::visibility },
   { nullptr }
 };
 
@@ -997,90 +968,90 @@ nsSVGElement::sGraphicsMap[] = {
 /* static */ const Element::MappedAttributeEntry
 nsSVGElement::sTextContentElementsMap[] = {
   // Properties that we don't support are commented out.
-  // { &nsGkAtoms::alignment_baseline },
-  // { &nsGkAtoms::baseline_shift },
-  { &nsGkAtoms::direction },
-  { &nsGkAtoms::dominant_baseline },
-  { &nsGkAtoms::letter_spacing },
-  { &nsGkAtoms::text_anchor },
-  { &nsGkAtoms::text_decoration },
-  { &nsGkAtoms::unicode_bidi },
-  { &nsGkAtoms::word_spacing },
-  { &nsGkAtoms::writing_mode },
+  // { nsGkAtoms::alignment_baseline },
+  // { nsGkAtoms::baseline_shift },
+  { nsGkAtoms::direction },
+  { nsGkAtoms::dominant_baseline },
+  { nsGkAtoms::letter_spacing },
+  { nsGkAtoms::text_anchor },
+  { nsGkAtoms::text_decoration },
+  { nsGkAtoms::unicode_bidi },
+  { nsGkAtoms::word_spacing },
+  { nsGkAtoms::writing_mode },
   { nullptr }
 };
 
 // PresentationAttributes-FontSpecification
 /* static */ const Element::MappedAttributeEntry
 nsSVGElement::sFontSpecificationMap[] = {
-  { &nsGkAtoms::font_family },
-  { &nsGkAtoms::font_size },
-  { &nsGkAtoms::font_size_adjust },
-  { &nsGkAtoms::font_stretch },
-  { &nsGkAtoms::font_style },
-  { &nsGkAtoms::font_variant },
-  { &nsGkAtoms::fontWeight },
+  { nsGkAtoms::font_family },
+  { nsGkAtoms::font_size },
+  { nsGkAtoms::font_size_adjust },
+  { nsGkAtoms::font_stretch },
+  { nsGkAtoms::font_style },
+  { nsGkAtoms::font_variant },
+  { nsGkAtoms::fontWeight },
   { nullptr }
 };
 
 // PresentationAttributes-GradientStop
 /* static */ const Element::MappedAttributeEntry
 nsSVGElement::sGradientStopMap[] = {
-  { &nsGkAtoms::stop_color },
-  { &nsGkAtoms::stop_opacity },
+  { nsGkAtoms::stop_color },
+  { nsGkAtoms::stop_opacity },
   { nullptr }
 };
 
 // PresentationAttributes-Viewports
 /* static */ const Element::MappedAttributeEntry
 nsSVGElement::sViewportsMap[] = {
-  { &nsGkAtoms::overflow },
-  { &nsGkAtoms::clip },
+  { nsGkAtoms::overflow },
+  { nsGkAtoms::clip },
   { nullptr }
 };
 
 // PresentationAttributes-Makers
 /* static */ const Element::MappedAttributeEntry
 nsSVGElement::sMarkersMap[] = {
-  { &nsGkAtoms::marker_end },
-  { &nsGkAtoms::marker_mid },
-  { &nsGkAtoms::marker_start },
+  { nsGkAtoms::marker_end },
+  { nsGkAtoms::marker_mid },
+  { nsGkAtoms::marker_start },
   { nullptr }
 };
 
 // PresentationAttributes-Color
 /* static */ const Element::MappedAttributeEntry
 nsSVGElement::sColorMap[] = {
-  { &nsGkAtoms::color },
+  { nsGkAtoms::color },
   { nullptr }
 };
 
 // PresentationAttributes-Filters
 /* static */ const Element::MappedAttributeEntry
 nsSVGElement::sFiltersMap[] = {
-  { &nsGkAtoms::colorInterpolationFilters },
+  { nsGkAtoms::colorInterpolationFilters },
   { nullptr }
 };
 
 // PresentationAttributes-feFlood
 /* static */ const Element::MappedAttributeEntry
 nsSVGElement::sFEFloodMap[] = {
-  { &nsGkAtoms::flood_color },
-  { &nsGkAtoms::flood_opacity },
+  { nsGkAtoms::flood_color },
+  { nsGkAtoms::flood_opacity },
   { nullptr }
 };
 
 // PresentationAttributes-LightingEffects
 /* static */ const Element::MappedAttributeEntry
 nsSVGElement::sLightingEffectsMap[] = {
-  { &nsGkAtoms::lighting_color },
+  { nsGkAtoms::lighting_color },
   { nullptr }
 };
 
 // PresentationAttributes-mask
 /* static */ const Element::MappedAttributeEntry
 nsSVGElement::sMaskMap[] = {
-  { &nsGkAtoms::mask_type },
+  { nsGkAtoms::mask_type },
   { nullptr }
 };
 
@@ -1145,8 +1116,7 @@ nsSVGElement::IsSVGFocusable(bool* aIsFocusable, int32_t* aTabIndex)
   }
 
   // If a tabindex is specified at all, or the default tabindex is 0, we're focusable
-  *aIsFocusable =
-    tabIndex >= 0 || HasAttr(kNameSpaceID_None, nsGkAtoms::tabindex);
+  *aIsFocusable = tabIndex >= 0 || HasAttr(nsGkAtoms::tabindex);
 
   return false;
 }
@@ -1169,8 +1139,7 @@ public:
   MappedAttrParser(css::Loader* aLoader,
                    nsIURI* aDocURI,
                    already_AddRefed<nsIURI> aBaseURI,
-                   nsSVGElement* aElement,
-                   StyleBackendType aBackend);
+                   nsSVGElement* aElement);
   ~MappedAttrParser();
 
   // Parses a mapped attribute value.
@@ -1186,9 +1155,6 @@ private:
   // MEMBER DATA
   // -----------
   css::Loader*      mLoader;
-#ifdef MOZ_OLD_STYLE
-  nsCSSParser       mParser;
-#endif
 
   // Arguments for nsCSSParser::ParseProperty
   nsIURI*           mDocURI;
@@ -1199,23 +1165,16 @@ private:
 
   // For reporting use counters
   nsSVGElement*     mElement;
-
-  StyleBackendType mBackend;
 };
 
 MappedAttrParser::MappedAttrParser(css::Loader* aLoader,
                                    nsIURI* aDocURI,
                                    already_AddRefed<nsIURI> aBaseURI,
-                                   nsSVGElement* aElement,
-                                   StyleBackendType aBackend)
+                                   nsSVGElement* aElement)
   : mLoader(aLoader)
-#ifdef MOZ_OLD_STYLE
-  , mParser(aLoader)
-#endif
   , mDocURI(aDocURI)
   , mBaseURI(aBaseURI)
   , mElement(aElement)
-  , mBackend(aBackend)
 {
 }
 
@@ -1231,16 +1190,7 @@ MappedAttrParser::ParseMappedAttrValue(nsAtom* aMappedAttrName,
                                        const nsAString& aMappedAttrValue)
 {
   if (!mDecl) {
-    if (mBackend == StyleBackendType::Gecko) {
-#ifdef MOZ_OLD_STYLE
-      mDecl = new css::Declaration();
-      mDecl->AsGecko()->InitializeEmpty();
-#else
-      MOZ_CRASH("old style system disabled");
-#endif
-    } else {
-      mDecl = new ServoDeclarationBlock();
-    }
+    mDecl = new ServoDeclarationBlock();
   }
 
   // Get the nsCSSPropertyID ID for our mapped attribute.
@@ -1249,22 +1199,13 @@ MappedAttrParser::ParseMappedAttrValue(nsAtom* aMappedAttrName,
                                CSSEnabledState::eForAllContent);
   if (propertyID != eCSSProperty_UNKNOWN) {
     bool changed = false; // outparam for ParseProperty.
-    if (mBackend == StyleBackendType::Gecko) {
-#ifdef MOZ_OLD_STYLE
-      mParser.ParseProperty(propertyID, aMappedAttrValue, mDocURI, mBaseURI,
-                            mElement->NodePrincipal(), mDecl->AsGecko(), &changed, false, true);
-#else
-      MOZ_CRASH("old style system disabled");
-#endif
-    } else {
-      NS_ConvertUTF16toUTF8 value(aMappedAttrValue);
-      // FIXME (bug 1343964): Figure out a better solution for sending the base uri to servo
-      RefPtr<URLExtraData> data = new URLExtraData(mBaseURI, mDocURI,
-                                                   mElement->NodePrincipal());
-      changed = Servo_DeclarationBlock_SetPropertyById(
-        mDecl->AsServo()->Raw(), propertyID, &value, false, data,
-        ParsingMode::AllowUnitlessLength, mElement->OwnerDoc()->GetCompatibilityMode(), mLoader);
-    }
+    NS_ConvertUTF16toUTF8 value(aMappedAttrValue);
+    // FIXME (bug 1343964): Figure out a better solution for sending the base uri to servo
+    RefPtr<URLExtraData> data = new URLExtraData(mBaseURI, mDocURI,
+                                                 mElement->NodePrincipal());
+    changed = Servo_DeclarationBlock_SetPropertyById(
+      mDecl->AsServo()->Raw(), propertyID, &value, false, data,
+      ParsingMode::AllowUnitlessLength, mElement->OwnerDoc()->GetCompatibilityMode(), mLoader);
 
     if (changed) {
       // The normal reporting of use counters by the nsCSSParser won't happen
@@ -1291,21 +1232,8 @@ MappedAttrParser::ParseMappedAttrValue(nsAtom* aMappedAttrName,
   // nsCSSParser doesn't know about 'lang', so we need to handle it specially.
   if (aMappedAttrName == nsGkAtoms::lang) {
     propertyID = eCSSProperty__x_lang;
-    if (mBackend == StyleBackendType::Gecko) {
-#ifdef MOZ_OLD_STYLE
-      nsCSSExpandedDataBlock block;
-      mDecl->AsGecko()->ExpandTo(&block);
-      nsCSSValue cssValue(PromiseFlatString(aMappedAttrValue), eCSSUnit_Ident);
-      block.AddLonghandProperty(propertyID, cssValue);
-      mDecl->AsGecko()->ValueAppended(propertyID);
-      mDecl->AsGecko()->CompressFrom(&block);
-#else
-      MOZ_CRASH("old style system disabled");
-#endif
-    } else {
-      RefPtr<nsAtom> atom = NS_Atomize(aMappedAttrValue);
-      Servo_DeclarationBlock_SetIdentStringValue(mDecl->AsServo()->Raw(), propertyID, atom);
-    }
+    RefPtr<nsAtom> atom = NS_Atomize(aMappedAttrValue);
+    Servo_DeclarationBlock_SetIdentStringValue(mDecl->AsServo()->Raw(), propertyID, atom);
   }
 }
 
@@ -1321,7 +1249,7 @@ MappedAttrParser::GetDeclarationBlock()
 // Implementation Helpers:
 
 void
-nsSVGElement::UpdateContentDeclarationBlock(mozilla::StyleBackendType aBackend)
+nsSVGElement::UpdateContentDeclarationBlock()
 {
   NS_ASSERTION(!mContentDeclarationBlock,
                "we already have a content declaration block");
@@ -1334,7 +1262,7 @@ nsSVGElement::UpdateContentDeclarationBlock(mozilla::StyleBackendType aBackend)
 
   nsIDocument* doc = OwnerDoc();
   MappedAttrParser mappedAttrParser(doc->CSSLoader(), doc->GetDocumentURI(),
-                                    GetBaseURI(), this, aBackend);
+                                    GetBaseURI(), this);
 
   for (uint32_t i = 0; i < attrCount; ++i) {
     const nsAttrName* attrName = mAttrsAndChildren.AttrNameAt(i);
@@ -2532,7 +2460,7 @@ nsSVGElement::RecompileScriptEventListeners()
     }
 
     nsAutoString value;
-    GetAttr(kNameSpaceID_None, attr, value);
+    GetAttr(attr, value);
     SetEventHandler(GetEventNameForAttr(attr), value, true);
   }
 }

@@ -7,6 +7,7 @@
 #include "nsIGlobalObject.h"
 
 #include "mozilla/dom/ServiceWorker.h"
+#include "mozilla/dom/ServiceWorkerRegistration.h"
 #include "nsContentUtils.h"
 #include "nsThreadUtils.h"
 #include "nsHostObjectProtocolHandler.h"
@@ -17,6 +18,8 @@ using mozilla::DOMEventTargetHelper;
 using mozilla::dom::ClientInfo;
 using mozilla::dom::ServiceWorker;
 using mozilla::dom::ServiceWorkerDescriptor;
+using mozilla::dom::ServiceWorkerRegistration;
+using mozilla::dom::ServiceWorkerRegistrationDescriptor;
 
 nsIGlobalObject::~nsIGlobalObject()
 {
@@ -154,6 +157,11 @@ nsIGlobalObject::ForEachEventTargetObject(const std::function<void(DOMEventTarge
   // Iterate the target list and call the function on each one.
   bool done = false;
   for (auto target : targetList) {
+    // Check to see if a previous iteration's callback triggered the removal
+    // of this target as a side-effect.  If it did, then just ignore it.
+    if (!mEventTargetObjects.Contains(target)) {
+      continue;
+    }
     aFunc(target, &done);
     if (done) {
       break;
@@ -193,6 +201,13 @@ RefPtr<ServiceWorker>
 nsIGlobalObject::GetOrCreateServiceWorker(const ServiceWorkerDescriptor& aDescriptor)
 {
   MOZ_DIAGNOSTIC_ASSERT(false, "this global should not have any service workers");
+  return nullptr;
+}
+
+RefPtr<ServiceWorkerRegistration>
+nsIGlobalObject::GetOrCreateServiceWorkerRegistration(const ServiceWorkerRegistrationDescriptor& aDescriptor)
+{
+  MOZ_DIAGNOSTIC_ASSERT(false, "this global should not have any service worker registrations");
   return nullptr;
 }
 

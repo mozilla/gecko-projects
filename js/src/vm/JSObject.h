@@ -15,7 +15,7 @@
 #include "js/HeapAPI.h"
 #include "vm/Printer.h"
 #include "vm/Shape.h"
-#include "vm/String.h"
+#include "vm/StringType.h"
 #include "vm/Xdr.h"
 
 namespace JS {
@@ -1253,7 +1253,7 @@ ToObjectFromStack(JSContext* cx, HandleValue vp)
 }
 
 template<XDRMode mode>
-bool
+XDRResult
 XDRObjectLiteral(XDRState<mode>* xdr, MutableHandleObject obj);
 
 /*

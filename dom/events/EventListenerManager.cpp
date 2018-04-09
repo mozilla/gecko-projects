@@ -7,7 +7,6 @@
 // Microsoft's API Name hackery sucks
 #undef CreateEvent
 
-#include "mozilla/AddonPathService.h"
 #include "mozilla/BasicEvents.h"
 #include "mozilla/CycleCollectedJSRuntime.h"
 #include "mozilla/DOMEventTargetHelper.h"
@@ -691,15 +690,32 @@ void
 EventListenerManager::AddEventListenerByType(
                         EventListenerHolder aListenerHolder,
                         const nsAString& aType,
-                        const EventListenerFlags& aFlags)
+                        const EventListenerFlags& aFlags,
+                        const Optional<bool>& aPassive)
 {
   RefPtr<nsAtom> atom;
   EventMessage message = mIsMainThreadELM ?
     nsContentUtils::GetEventMessageAndAtomForListener(aType,
                                                       getter_AddRefs(atom)) :
     eUnidentifiedEvent;
+
+  EventListenerFlags flags = aFlags;
+  if (aPassive.WasPassed()) {
+    flags.mPassive = aPassive.Value();
+  } else if (message == eTouchStart || message == eTouchMove) {
+    nsCOMPtr<nsINode> node;
+    nsCOMPtr<nsPIDOMWindowInner> win;
+    if ((win = GetTargetAsInnerWindow()) ||
+        ((node = do_QueryInterface(mTarget)) &&
+         (node == node->OwnerDoc() ||
+          node == node->OwnerDoc()->GetRootElement() ||
+          node == node->OwnerDoc()->GetBody()))) {
+      flags.mPassive = true;
+    }
+  }
+
   AddEventListenerInternal(Move(aListenerHolder),
-                           message, atom, aType, aFlags);
+                           message, atom, aType, flags);
 }
 
 void
@@ -987,8 +1003,6 @@ EventListenerManager::CompileEventHandlerInternal(Listener* aListener,
                                    typeAtom, win,
                                    &argCount, &argNames);
 
-  JSAddonId *addonId = MapURIToAddonID(uri);
-
   // Wrap the event target, so that we can use it as the scope for the event
   // handler. Note that mTarget is different from aElement in the <body> case,
   // where mTarget is a Window.
@@ -1006,20 +1020,6 @@ EventListenerManager::CompileEventHandlerInternal(Listener* aListener,
     }
   }
 
-  if (addonId) {
-    JS::Rooted<JSObject*> vObj(cx, &v.toObject());
-    JS::Rooted<JSObject*> addonScope(cx, xpc::GetAddonScope(cx, vObj, addonId));
-    if (!addonScope) {
-      return NS_ERROR_FAILURE;
-    }
-    JSAutoCompartment ac(cx, addonScope);
-
-    // Wrap our event target into the addon scope, since that's where we want to
-    // do all our work.
-    if (!JS_WrapValue(cx, &v)) {
-      return NS_ERROR_FAILURE;
-    }
-  }
   JS::Rooted<JSObject*> target(cx, &v.toObject());
   JSAutoCompartment ac(cx, target);
 
@@ -1382,17 +1382,20 @@ EventListenerManager::AddEventListener(
                         bool aWantsUntrusted)
 {
   EventListenerFlags flags;
+  Optional<bool> passive;
   if (aOptions.IsBoolean()) {
     flags.mCapture = aOptions.GetAsBoolean();
   } else {
     const auto& options = aOptions.GetAsAddEventListenerOptions();
     flags.mCapture = options.mCapture;
     flags.mInSystemGroup = options.mMozSystemGroup;
-    flags.mPassive = options.mPassive;
     flags.mOnce = options.mOnce;
+    if (options.mPassive.WasPassed()) {
+      passive.Construct(options.mPassive.Value());
+    }
   }
   flags.mAllowUntrustedEvents = aWantsUntrusted;
-  return AddEventListenerByType(Move(aListenerHolder), aType, flags);
+  return AddEventListenerByType(Move(aListenerHolder), aType, flags, passive);
 }
 
 void
@@ -1488,7 +1491,7 @@ EventListenerManager::MutationListenerBits()
 }
 
 bool
-EventListenerManager::HasListenersFor(const nsAString& aEventName)
+EventListenerManager::HasListenersFor(const nsAString& aEventName) const
 {
   if (mIsMainThreadELM) {
     RefPtr<nsAtom> atom = NS_Atomize(NS_LITERAL_STRING("on") + aEventName);
@@ -1497,7 +1500,7 @@ EventListenerManager::HasListenersFor(const nsAString& aEventName)
 
   uint32_t count = mListeners.Length();
   for (uint32_t i = 0; i < count; ++i) {
-    Listener* listener = &mListeners.ElementAt(i);
+    const Listener* listener = &mListeners.ElementAt(i);
     if (listener->mTypeString == aEventName) {
       return true;
     }
@@ -1506,7 +1509,7 @@ EventListenerManager::HasListenersFor(const nsAString& aEventName)
 }
 
 bool
-EventListenerManager::HasListenersFor(nsAtom* aEventNameWithOn)
+EventListenerManager::HasListenersFor(nsAtom* aEventNameWithOn) const
 {
 #ifdef DEBUG
   nsAutoString name;
@@ -1516,7 +1519,7 @@ EventListenerManager::HasListenersFor(nsAtom* aEventNameWithOn)
                "Event name does not start with 'on'");
   uint32_t count = mListeners.Length();
   for (uint32_t i = 0; i < count; ++i) {
-    Listener* listener = &mListeners.ElementAt(i);
+    const Listener* listener = &mListeners.ElementAt(i);
     if (listener->mTypeAtom == aEventNameWithOn) {
       return true;
     }
@@ -1525,7 +1528,7 @@ EventListenerManager::HasListenersFor(nsAtom* aEventNameWithOn)
 }
 
 bool
-EventListenerManager::HasListeners()
+EventListenerManager::HasListeners() const
 {
   return !mListeners.IsEmpty();
 }

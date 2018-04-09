@@ -18,18 +18,18 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "MasterPassword",
                                "resource://formautofill/MasterPassword.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "profileStorage", () => {
-  let profileStorage;
+XPCOMUtils.defineLazyGetter(this, "formAutofillStorage", () => {
+  let formAutofillStorage;
   try {
-    profileStorage = ChromeUtils.import("resource://formautofill/FormAutofillStorage.jsm", {})
-                                .profileStorage;
-    profileStorage.initialize();
+    formAutofillStorage = ChromeUtils.import("resource://formautofill/FormAutofillStorage.jsm", {})
+                                .formAutofillStorage;
+    formAutofillStorage.initialize();
   } catch (ex) {
-    profileStorage = null;
+    formAutofillStorage = null;
     Cu.reportError(ex);
   }
 
-  return profileStorage;
+  return formAutofillStorage;
 });
 
 var paymentDialogWrapper = {
@@ -44,13 +44,40 @@ var paymentDialogWrapper = {
   ]),
 
   /**
-   * Note: This method is async because profileStorage plans to become async.
+   * Note: This method is async because formAutofillStorage plans to become async.
+   *
+   * @param {string} guid
+   * @returns {object} containing only the requested payer values.
+   */
+  async _convertProfileAddressToPayerData(guid) {
+    let addressData = formAutofillStorage.addresses.get(guid);
+    if (!addressData) {
+      throw new Error(`Payer address not found: ${guid}`);
+    }
+
+    let {
+      requestPayerName,
+      requestPayerEmail,
+      requestPayerPhone,
+    } = this.request.paymentOptions;
+
+    let payerData = {
+      payerName: requestPayerName ? addressData.name : "",
+      payerEmail: requestPayerEmail ? addressData.email : "",
+      payerPhone: requestPayerPhone ? addressData.tel : "",
+    };
+
+    return payerData;
+  },
+
+  /**
+   * Note: This method is async because formAutofillStorage plans to become async.
    *
    * @param {string} guid
    * @returns {nsIPaymentAddress}
    */
   async _convertProfileAddressToPaymentAddress(guid) {
-    let addressData = profileStorage.addresses.get(guid);
+    let addressData = formAutofillStorage.addresses.get(guid);
     if (!addressData) {
       throw new Error(`Shipping address not found: ${guid}`);
     }
@@ -77,7 +104,7 @@ var paymentDialogWrapper = {
    *                                      master password dialog was cancelled);
    */
   async _convertProfileBasicCardToPaymentMethodData(guid, cardSecurityCode) {
-    let cardData = profileStorage.creditCards.get(guid);
+    let cardData = formAutofillStorage.creditCards.get(guid);
     if (!cardData) {
       throw new Error(`Basic card not found in storage: ${guid}`);
     }
@@ -222,7 +249,7 @@ var paymentDialogWrapper = {
 
   fetchSavedAddresses() {
     let savedAddresses = {};
-    for (let address of profileStorage.addresses.getAll()) {
+    for (let address of formAutofillStorage.addresses.getAll()) {
       savedAddresses[address.guid] = address;
     }
     return savedAddresses;
@@ -230,7 +257,7 @@ var paymentDialogWrapper = {
 
   fetchSavedPaymentCards() {
     let savedBasicCards = {};
-    for (let card of profileStorage.creditCards.getAll()) {
+    for (let card of formAutofillStorage.creditCards.getAll()) {
       savedBasicCards[card.guid] = card;
       // Filter out the encrypted card number since the dialog content is
       // considered untrusted and runs in a content process.
@@ -375,6 +402,7 @@ var paymentDialogWrapper = {
   },
 
   async onPay({
+    selectedPayerAddressGUID: payerGUID,
     selectedPaymentCardGUID: paymentCardGUID,
     selectedPaymentCardSecurityCode: cardSecurityCode,
   }) {
@@ -388,9 +416,18 @@ var paymentDialogWrapper = {
       return;
     }
 
+    let {
+      payerName,
+      payerEmail,
+      payerPhone,
+    } = await this._convertProfileAddressToPayerData(payerGUID);
+
     this.pay({
       methodName: "basic-card",
       methodData,
+      payerName,
+      payerEmail,
+      payerPhone,
     });
   },
 
@@ -424,6 +461,43 @@ var paymentDialogWrapper = {
     // deleting the request and making the requestId invalid. Unclear
     // why we aren't seeing the same issue with onChangeShippingAddress.
     paymentSrv.changeShippingOption(this.request.requestId, optionID);
+  },
+
+  async onUpdateAutofillRecord(collectionName, record, guid, {
+    errorStateChange,
+    preserveOldProperties,
+    selectedStateKey,
+    successStateChange,
+  }) {
+    if (collectionName == "creditCards" && !guid) {
+      // We need to be logged in so we can encrypt the credit card number and
+      // that's only supported when we're adding a new record.
+      // TODO: "MasterPassword.ensureLoggedIn" can be removed after the storage
+      // APIs are refactored to be async functions (bug 1399367).
+      if (!await MasterPassword.ensureLoggedIn()) {
+        Cu.reportError("User canceled master password entry");
+        return;
+      }
+    }
+
+    try {
+      if (guid) {
+        await formAutofillStorage[collectionName].update(guid, record, preserveOldProperties);
+      } else {
+        guid = await formAutofillStorage[collectionName].add(record);
+      }
+
+      // Select the new record
+      if (selectedStateKey) {
+        Object.assign(successStateChange, {
+          [selectedStateKey]: guid,
+        });
+      }
+
+      this.sendMessageToContent("updateState", successStateChange);
+    } catch (ex) {
+      this.sendMessageToContent("updateState", errorStateChange);
+    }
   },
 
   /**
@@ -470,6 +544,15 @@ var paymentDialogWrapper = {
       }
       case "pay": {
         this.onPay(data);
+        break;
+      }
+      case "updateAutofillRecord": {
+        this.onUpdateAutofillRecord(data.collectionName, data.record, data.guid, {
+          errorStateChange: data.errorStateChange,
+          preserveOldProperties: data.preserveOldProperties,
+          selectedStateKey: data.selectedStateKey,
+          successStateChange: data.successStateChange,
+        });
         break;
       }
     }

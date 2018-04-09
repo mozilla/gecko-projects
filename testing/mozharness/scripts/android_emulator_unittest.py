@@ -116,6 +116,8 @@ class AndroidEmulatorTest(TestingMixin, EmulatorMixin, BaseScript, MozbaseMixin)
         dirs = {}
         dirs['abs_test_install_dir'] = os.path.join(
             abs_dirs['abs_work_dir'], 'tests')
+        dirs['abs_test_bin_dir'] = os.path.join(
+            abs_dirs['abs_work_dir'], 'tests', 'bin')
         dirs['abs_xre_dir'] = os.path.join(
             abs_dirs['abs_work_dir'], 'hostutils')
         dirs['abs_modules_dir'] = os.path.join(
@@ -824,13 +826,9 @@ class AndroidEmulatorTest(TestingMixin, EmulatorMixin, BaseScript, MozbaseMixin)
                     self.buildbot_status(tbpl_status, level=log_level)
                     self.log_verify_status(verify_args[-1], tbpl_status, log_level)
                 else:
-                    self._dump_emulator_log()
                     self.buildbot_status(tbpl_status, level=log_level)
                     self.log("The %s suite: %s ran with return status: %s" %
                              (suite_category, suite, tbpl_status), level=log_level)
-
-        if len(verify_args) > 0:
-            self._dump_emulator_log()
 
     @PostScriptAction('run-tests')
     def stop_emulator(self, action, success=None):

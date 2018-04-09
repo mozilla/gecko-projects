@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Check that cached messages from nested iframes are displayed in the
 // Web/Browser Console.
 
@@ -22,7 +20,7 @@ const expectedMessages = [
 
 const expectedDupedMessage = "iframe 1";
 
-add_task(async function () {
+add_task(async function() {
   // On e10s, the exception is triggered in child process
   // and is ignored by test harness
   if (!Services.appinfo.browserTabsRemoteAutostart) {

@@ -3,11 +3,11 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from ../../framework/test/shared-head.js */
+/* import-globals-from ../../shared/test/shared-head.js */
 "use strict";
 
 // shared-head.js handles imports, constants, and utility functions
-Services.scriptloader.loadSubScript("chrome://mochitests/content/browser/devtools/client/framework/test/shared-head.js", this);
+Services.scriptloader.loadSubScript("chrome://mochitests/content/browser/devtools/client/shared/test/shared-head.js", this);
 
 var {Utils: WebConsoleUtils} = require("devtools/client/webconsole/utils");
 var {Messages} = require("devtools/client/webconsole/console-output");
@@ -44,6 +44,11 @@ const DOCS_GA_PARAMS = "?utm_source=mozilla" +
                        "&utm_campaign=default";
 
 flags.testing = true;
+
+Services.prefs.setBoolPref("devtools.browserconsole.new-frontend-enabled", false);
+registerCleanupFunction(async function () {
+  Services.prefs.clearUserPref("devtools.browserconsole.new-frontend-enabled");
+});
 
 function loadTab(url, preferredRemoteType) {
   return addTab(url, { preferredRemoteType }).then( tab => {
@@ -122,6 +127,25 @@ function afterAllTabsLoaded(callback, win) {
   if (!stillToLoad) {
     callback();
   }
+}
+
+/**
+ * Wait for a predicate to return a result.
+ *
+ * @param function condition
+ *        Invoked once in a while until it returns a truthy value. This should be an
+ *        idempotent function, since we have to run it a second time after it returns
+ *        true in order to return the value.
+ * @param string message [optional]
+ *        A message to output if the condition fails.
+ * @param number interval [optional]
+ *        How often the predicate is invoked, in milliseconds.
+ * @return object
+ *         A promise that is resolved with the result of the condition.
+ */
+async function waitFor(condition, message = "waitFor", interval = 10, maxTries = 500) {
+  await BrowserTestUtils.waitForCondition(condition, message, interval, maxTries);
+  return condition();
 }
 
 /**
@@ -1663,7 +1687,8 @@ function checkDomElementHighlightingForInputs(hud, inputs) {
 
     info("Unhighlight the node by moving away from the markup view");
     let onNodeUnhighlight = toolbox.once("node-unhighlight");
-    let btn = inspector.toolbox.doc.querySelector(".toolbox-dock-button");
+    let btn =
+      inspector.toolbox.doc.getElementById("toolbox-meatball-menu-button");
     EventUtils.synthesizeMouseAtCenter(btn, {type: "mousemove"},
       inspector.toolbox.win);
     yield onNodeUnhighlight;

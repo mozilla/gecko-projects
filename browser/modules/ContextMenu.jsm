@@ -376,18 +376,17 @@ class ContextMenu {
 
   // Returns a "url"-type computed style attribute value, with the url() stripped.
   _getComputedURL(aElem, aProp) {
-    let url = aElem.ownerGlobal.getComputedStyle(aElem).getPropertyCSSValue(aProp);
+    let urls = aElem.ownerGlobal.getComputedStyle(aElem).getCSSImageURLs(aProp);
 
-    if (url instanceof this.content.CSSValueList) {
-      if (url.length != 1) {
-        throw "found multiple URLs";
-      }
-
-      url = url[0];
+    if (!urls.length) {
+      return null;
     }
 
-    return url.primitiveType == this.content.CSSPrimitiveValue.CSS_URI ?
-           url.getStringValue() : null;
+    if (urls.length != 1) {
+      throw "found multiple URLs";
+    }
+
+    return urls[0];
   }
 
   _makeURLAbsolute(aBase, aUrl) {
@@ -461,22 +460,27 @@ class ContextMenu {
   }
 
   /**
-   * Retrieve the array of CSS selectors corresponding to the provided node. The first item
-   * of the array is the selector of the node in its owner document. Additional items are
-   * used if the node is inside a frame, each representing the CSS selector for finding the
-   * frame element in its parent document.
+   * Retrieve the array of CSS selectors corresponding to the provided node.
+   *
+   * The selectors are ordered starting with the root document and ending with the deepest
+   * nested frame. Additional items are used if the node is inside a frame, each
+   * representing the CSS selector for finding the frame element in its parent document.
    *
    * This format is expected by DevTools in order to handle the Inspect Node context menu
    * item.
    *
    * @param  {aNode}
    *         The node for which the CSS selectors should be computed
-   * @return {Array} array of css selectors (strings).
+   * @return {Array}
+   *         An array of CSS selectors to find the target node. Several selectors can be
+   *         needed if the element is nested in frames and not directly in the root
+   *         document. The selectors are ordered starting with the root document and
+   *         ending with the deepest nested frame.
    */
   _getNodeSelectors(aNode) {
     let selectors = [];
     while (aNode) {
-      selectors.push(findCssSelector(aNode));
+      selectors.unshift(findCssSelector(aNode));
       aNode = aNode.ownerGlobal.frameElement;
     }
 

@@ -1645,6 +1645,12 @@ impl PropertyId {
         }
     }
 
+    /// Returns true if the property is a shorthand or shorthand alias.
+    #[inline]
+    pub fn is_shorthand(&self) -> bool {
+        self.as_shorthand().is_ok()
+    }
+
     /// Given this property id, get it either as a shorthand or as a
     /// `PropertyDeclarationId`.
     pub fn as_shorthand(&self) -> Result<ShorthandId, PropertyDeclarationId> {
@@ -1707,57 +1713,33 @@ impl PropertyId {
 
 /// A declaration using a CSS-wide keyword.
 #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, ToCss)]
 pub struct WideKeywordDeclaration {
+    #[css(skip)]
     id: LonghandId,
     keyword: CSSWideKeyword,
 }
 
-impl ToCss for WideKeywordDeclaration {
-    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
-    where
-        W: fmt::Write,
-    {
-        self.keyword.to_css(dest)
-    }
-}
-
 /// An unparsed declaration that contains `var()` functions.
 #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, ToCss)]
 pub struct VariableDeclaration {
+    #[css(skip)]
     id: LonghandId,
     #[cfg_attr(feature = "gecko", ignore_malloc_size_of = "XXX: how to handle this?")]
     value: Arc<UnparsedValue>,
 }
 
-impl ToCss for VariableDeclaration {
-    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
-    where
-        W: fmt::Write,
-    {
-        self.value.to_css(dest)
-    }
-}
-
 /// A custom property declaration with the property name and the declared value.
 #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, ToCss)]
 pub struct CustomDeclaration {
     /// The name of the custom property.
+    #[css(skip)]
     pub name: ::custom_properties::Name,
     /// The value of the custom property.
     #[cfg_attr(feature = "gecko", ignore_malloc_size_of = "XXX: how to handle this?")]
     pub value: DeclaredValueOwned<Arc<::custom_properties::SpecifiedValue>>,
-}
-
-impl ToCss for CustomDeclaration {
-    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
-    where
-        W: fmt::Write,
-    {
-        self.value.to_css(dest)
-    }
 }
 
 impl fmt::Debug for PropertyDeclaration {
@@ -2440,10 +2422,11 @@ pub struct ComputedValuesInner {
 pub struct ComputedValues {
     /// The actual computed values
     ///
-    /// In Gecko the outer ComputedValues is actually a style context,
-    /// whereas ComputedValuesInner is the core set of computed values.
+    /// In Gecko the outer ComputedValues is actually a ComputedStyle, whereas
+    /// ComputedValuesInner is the core set of computed values.
     ///
-    /// We maintain this distinction in servo to reduce the amount of special casing.
+    /// We maintain this distinction in servo to reduce the amount of special
+    /// casing.
     inner: ComputedValuesInner,
 }
 

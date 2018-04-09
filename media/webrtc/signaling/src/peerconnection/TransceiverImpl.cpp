@@ -124,7 +124,7 @@ TransceiverImpl::UpdateSinkIdentity(const dom::MediaStreamTrack* aTrack,
                                     nsIPrincipal* aPrincipal,
                                     const PeerIdentity* aSinkIdentity)
 {
-  if (mJsepTransceiver->IsStopped()) {
+  if (!(mJsepTransceiver->mJsDirection & sdp::kSend)) {
     return NS_OK;
   }
 
@@ -861,6 +861,15 @@ TransceiverImpl::UpdateVideoConduit()
               " Setting remote SSRC " <<
               mJsepTransceiver->mRecvTrack.GetSsrcs().front());
     conduit->SetRemoteSSRC(mJsepTransceiver->mRecvTrack.GetSsrcs().front());
+  }
+
+  // TODO (bug 1423041) once we pay attention to receiving MID's in RTP packets
+  // (see bug 1405495) we could make this depending on the presence of MID in
+  // the RTP packets instead of relying on the signaling.
+  if (mJsepTransceiver->HasBundleLevel() &&
+      (!mJsepTransceiver->mRecvTrack.GetNegotiatedDetails() ||
+       !mJsepTransceiver->mRecvTrack.GetNegotiatedDetails()->GetExt(webrtc::RtpExtension::kMIdUri))) {
+    conduit->DisableSsrcChanges();
   }
 
   if (mJsepTransceiver->mRecvTrack.GetNegotiatedDetails() &&

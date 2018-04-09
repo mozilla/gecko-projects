@@ -81,13 +81,12 @@ SVGAElement::ElementHasHref() const
 //----------------------------------------------------------------------
 // nsINode methods
 
-nsresult
+void
 SVGAElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
-  nsresult rv = Element::GetEventTargetParent(aVisitor);
-  NS_ENSURE_SUCCESS(rv, rv);
+  Element::GetEventTargetParent(aVisitor);
 
-  return GetEventTargetParentForLinks(aVisitor);
+  GetEventTargetParentForLinks(aVisitor);
 }
 
 nsresult
@@ -108,15 +107,15 @@ SVGAElement::Target()
 }
 
 void
-SVGAElement::GetDownload(nsAString & aDownload)
+SVGAElement::GetDownload(nsAString& aDownload)
 {
-  GetAttr(kNameSpaceID_None, nsGkAtoms::download, aDownload);
+  GetAttr(nsGkAtoms::download, aDownload);
 }
 
 void
-SVGAElement::SetDownload(const nsAString & aDownload, ErrorResult& rv)
+SVGAElement::SetDownload(const nsAString& aDownload, ErrorResult& rv)
 {
-  rv = SetAttr(kNameSpaceID_None, nsGkAtoms::download, aDownload, true);
+  SetAttr(nsGkAtoms::download, aDownload, rv);
 }
 
 //----------------------------------------------------------------------
@@ -263,13 +262,13 @@ SVGAElement::IsLink(nsIURI** aURI) const
   // result is poorly specified. Either way, we return false.
 
   static Element::AttrValuesArray sTypeVals[] =
-    { &nsGkAtoms::_empty, &nsGkAtoms::simple, nullptr };
+    { nsGkAtoms::_empty, nsGkAtoms::simple, nullptr };
 
   static Element::AttrValuesArray sShowVals[] =
-    { &nsGkAtoms::_empty, &nsGkAtoms::_new, &nsGkAtoms::replace, nullptr };
+    { nsGkAtoms::_empty, nsGkAtoms::_new, nsGkAtoms::replace, nullptr };
 
   static Element::AttrValuesArray sActuateVals[] =
-    { &nsGkAtoms::_empty, &nsGkAtoms::onRequest, nullptr };
+    { nsGkAtoms::_empty, nsGkAtoms::onRequest, nullptr };
 
   // Optimization: check for href first for early return
   bool useBareHref = mStringAttributes[HREF].IsExplicitlySet();
@@ -305,7 +304,7 @@ SVGAElement::GetLinkTarget(nsAString& aTarget)
   if (aTarget.IsEmpty()) {
 
     static Element::AttrValuesArray sShowVals[] =
-      { &nsGkAtoms::_new, &nsGkAtoms::replace, nullptr };
+      { nsGkAtoms::_new, nsGkAtoms::replace, nullptr };
 
     switch (FindAttrValueIn(kNameSpaceID_XLink, nsGkAtoms::show,
                             sShowVals, eCaseMatters)) {

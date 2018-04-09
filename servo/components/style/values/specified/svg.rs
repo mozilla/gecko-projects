@@ -12,8 +12,9 @@ use style_traits::{StyleParseErrorKind, ToCss};
 use values::CustomIdent;
 use values::generics::svg as generic;
 use values::specified::{LengthOrPercentage, NonNegativeLengthOrPercentage, NonNegativeNumber};
-use values::specified::{Number, Opacity, SpecifiedUrl};
+use values::specified::{Number, Opacity};
 use values::specified::color::RGBAColor;
+use values::specified::url::SpecifiedUrl;
 
 /// Specified SVG Paint value
 pub type SVGPaint = generic::SVGPaint<RGBAColor, SpecifiedUrl>;
@@ -28,7 +29,7 @@ fn is_context_value_enabled() -> bool {
     // to read whenever we are on the main thread or the main thread is
     // blocked.
     use gecko_bindings::structs::mozilla;
-    unsafe { mozilla::StylePrefs_sOpentypeSVGEnabled }
+    unsafe { mozilla::StaticPrefs_sVarCache_gfx_font_rendering_opentype_svg_enabled }
 }
 #[cfg(not(feature = "gecko"))]
 fn is_context_value_enabled() -> bool {

@@ -30,17 +30,9 @@ FORCE_STATIC_LIB = True
 STATIC_LIBRARY_NAME = 'js_static'
 
 if CONFIG['ENABLE_INTL_API']:
-    if not CONFIG['MOZ_ICU_DATA_ARCHIVE']:
-        USE_LIBS += [
-            'icu',
-        ]
-    else:
-        # Linking 'icu' will pull in the stubdata library,
-        # which the shell doesn't want, so link the other bits.
-        USE_LIBS += [
-            'icui18n',
-            'icuuc',
-        ]
+    USE_LIBS += [
+        'icu',
+    ]
 
 USE_LIBS += [
     'nspr',
@@ -69,6 +61,9 @@ if CONFIG['OS_ARCH'] == 'SunOS':
         'nsl',
         'socket',
     ]
+
+if CONFIG['MOZ_NEEDS_LIBATOMIC']:
+    OS_LIBS += ['atomic']
 
 OS_LIBS += CONFIG['REALTIME_LIBS']
 

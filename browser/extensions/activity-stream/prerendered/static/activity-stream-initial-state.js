@@ -19,12 +19,11 @@ window.gActivityStreamPrerenderedState = {
       "showTopSites": true,
       "showSearch": true,
       "topSitesRows": 1,
-      "collapseTopSites": false,
-      "section.highlights.collapsed": false,
-      "section.topstories.collapsed": false,
       "feeds.section.topstories": true,
       "feeds.section.highlights": true,
-      "enableWideLayout": true
+      "enableWideLayout": true,
+      "sectionOrder": "topsites,topstories,highlights",
+      "collapsed": false
     }
   },
   "Dialog": {
@@ -40,10 +39,10 @@ window.gActivityStreamPrerenderedState = {
         }
       },
       "rows": [],
-      "order": 1,
       "enabled": true,
       "icon": "pocket",
       "id": "topstories",
+      "order": 1,
       "initialized": false
     },
     {
@@ -51,14 +50,14 @@ window.gActivityStreamPrerenderedState = {
         "id": "header_highlights"
       },
       "rows": [],
-      "order": 2,
       "enabled": true,
       "id": "highlights",
       "icon": "highlights",
+      "order": 2,
       "initialized": false
     }
   ],
-  "PreferencesPane": {
-    "visible": false
+  "Theme": {
+    "className": ""
   }
 };

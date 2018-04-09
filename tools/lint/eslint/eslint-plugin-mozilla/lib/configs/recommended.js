@@ -22,7 +22,10 @@ module.exports = {
     "Cr": false,
     "Cu": false,
     "DOMRequest": false,
+    "Debugger": false,
     "DedicatedWorkerGlobalScope": false,
+    "DominatorTree": false,
+    "HeapSnapshot": false,
     "IDBFileRequest": false,
     "IDBLocaleAwareKeyRange": false,
     "IDBMutableFile": false,
@@ -53,6 +56,7 @@ module.exports = {
     "console": true,
     "dump": true,
     "openDialog": false,
+    "saveStack": false,
     "sizeToContent": false,
     // Specific to Firefox
     // eslint-disable-next-line max-len
@@ -78,8 +82,7 @@ module.exports = {
       "mozilla/mark-exported-symbols-as-used": "error",
       "no-unused-vars": ["error", {
         "args": "none",
-        "vars": "all",
-        "varsIgnorePattern": "^EXPORTED_SYMBOLS$"
+        "vars": "all"
       }]
     }
   }],
@@ -355,8 +358,7 @@ module.exports = {
     // No declaring variables that are never used
     "no-unused-vars": ["error", {
       "args": "none",
-      "vars": "local",
-      "varsIgnorePattern": "^EXPORTED_SYMBOLS$"
+      "vars": "local"
     }],
 
     // No using variables before defined

@@ -22,6 +22,7 @@ namespace mozilla {
 namespace layers {
 
 struct FrameMetrics;
+class APZCTreeManager;
 class CompositorOGL;
 
 /*
@@ -51,8 +52,9 @@ class CompositorOGL;
 class AndroidDynamicToolbarAnimator {
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(AndroidDynamicToolbarAnimator);
-  AndroidDynamicToolbarAnimator();
-  void Initialize(uint64_t aRootLayerTreeId);
+  explicit AndroidDynamicToolbarAnimator(APZCTreeManager* aApz);
+  void Initialize(LayersId aRootLayerTreeId);
+  void ClearTreeManager();
   // Used to intercept events to determine if the event affects the toolbar.
   // May apply translation to touch events if the toolbar is visible.
   // Returns nsEventStatus_eIgnore when the event is not consumed and
@@ -166,7 +168,8 @@ protected:
   void QueueMessage(int32_t aMessage);
 
   // Read only Compositor and Controller threads after Initialize()
-  uint64_t mRootLayerTreeId;
+  LayersId mRootLayerTreeId;
+  MOZ_NON_OWNING_REF APZCTreeManager* mApz;
 
   // Read/Write Compositor Thread, Read only Controller thread
   Atomic<StaticToolbarState> mToolbarState; // Current toolbar state.

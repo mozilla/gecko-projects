@@ -4,43 +4,45 @@
 
 "use strict";
 
-ChromeUtils.defineModuleGetter(this, "FileTestUtils",
-                               "resource://testing-common/FileTestUtils.jsm");
+const {
+  EnterprisePolicyTesting,
+  PoliciesPrefTracker,
+} = ChromeUtils.import("resource://testing-common/EnterprisePolicyTesting.jsm", {});
+
+PoliciesPrefTracker.start();
 
 async function setupPolicyEngineWithJson(json, customSchema) {
-  let filePath;
-  if (typeof(json) == "object") {
-    filePath = FileTestUtils.getTempFile("policies.json").path;
-
-    // This file gets automatically deleted by FileTestUtils
-    // at the end of the test run.
-    await OS.File.writeAtomic(filePath, JSON.stringify(json), {
-      encoding: "utf-8",
-    });
-  } else {
-    filePath = getTestFilePath(json ? json : "non-existing-file.json");
+  PoliciesPrefTracker.restoreDefaultValues();
+  if (typeof(json) != "object") {
+    let filePath = getTestFilePath(json ? json : "non-existing-file.json");
+    return EnterprisePolicyTesting.setupPolicyEngineWithJson(filePath, customSchema);
   }
+  return EnterprisePolicyTesting.setupPolicyEngineWithJson(json, customSchema);
+}
 
-  Services.prefs.setStringPref("browser.policies.alternatePath", filePath);
+function checkLockedPref(prefName, prefValue) {
+  EnterprisePolicyTesting.checkPolicyPref(prefName, prefValue, true);
+}
 
-  let resolve = null;
-  let promise = new Promise((r) => resolve = r);
+function checkUnlockedPref(prefName, prefValue) {
+  EnterprisePolicyTesting.checkPolicyPref(prefName, prefValue, false);
+}
 
-  Services.obs.addObserver(function observer() {
-    Services.obs.removeObserver(observer, "EnterprisePolicies:AllPoliciesApplied");
-    resolve();
-  }, "EnterprisePolicies:AllPoliciesApplied");
-
-  // Clear any previously used custom schema
-  Cu.unload("resource:///modules/policies/schema.jsm");
-
-  if (customSchema) {
-    let schemaModule = ChromeUtils.import("resource:///modules/policies/schema.jsm", {});
-    schemaModule.schema = customSchema;
-  }
-
-  Services.obs.notifyObservers(null, "EnterprisePolicies:Restart");
-  return promise;
+// Checks that a page was blocked by seeing if it was replaced with about:neterror
+async function checkBlockedPage(url, expectedBlocked) {
+  await BrowserTestUtils.withNewTab({
+    gBrowser,
+    url,
+    waitForLoad: false,
+    waitForStateStop: true,
+  }, async function() {
+    await BrowserTestUtils.waitForCondition(async function() {
+      let blocked = await ContentTask.spawn(gBrowser.selectedBrowser, null, async function() {
+        return content.document.documentURI.startsWith("about:neterror");
+      });
+      return blocked == expectedBlocked;
+    }, `Page ${url} block was correct (expected=${expectedBlocked}).`);
+  });
 }
 
 add_task(async function policies_headjs_startWithCleanSlate() {
@@ -55,4 +57,7 @@ registerCleanupFunction(async function policies_headjs_finishWithCleanSlate() {
     await setupPolicyEngineWithJson("");
   }
   is(Services.policies.status, Ci.nsIEnterprisePolicies.INACTIVE, "Engine is inactive at the end of the test");
+
+  EnterprisePolicyTesting.resetRunOnceState();
+  PoliciesPrefTracker.stop();
 });

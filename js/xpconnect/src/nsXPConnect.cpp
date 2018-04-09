@@ -26,6 +26,7 @@
 #include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/Exceptions.h"
 #include "mozilla/dom/Promise.h"
+#include "mozilla/dom/ResolveSystemBinding.h"
 
 #include "nsDOMMutationObserver.h"
 #include "nsICycleCollectorListener.h"
@@ -120,6 +121,12 @@ nsXPConnect::~nsXPConnect()
 void
 nsXPConnect::InitStatics()
 {
+#ifdef NS_BUILD_REFCNT_LOGGING
+    // These functions are used for reporting leaks, so we register them as early
+    // as possible to avoid missing any classes' creations.
+    js::SetLogCtorDtorFunctions(NS_LogCtor, NS_LogDtor);
+#endif
+
     gSelf = new nsXPConnect();
     gOnceAliveNowDead = false;
 
@@ -395,21 +402,6 @@ nsXPConnect::GetInfoForIID(const nsIID * aIID, nsIInterfaceInfo** info)
 }
 
 void
-xpc_MarkInCCGeneration(nsISupports* aVariant, uint32_t aGeneration)
-{
-    nsCOMPtr<XPCVariant> variant = do_QueryInterface(aVariant);
-    if (variant) {
-        variant->SetCCGeneration(aGeneration);
-        variant->GetJSVal(); // Unmarks gray JSObject.
-        XPCVariant* weak = variant.get();
-        variant = nullptr;
-        if (weak->IsPurple()) {
-          weak->RemovePurple();
-        }
-    }
-}
-
-void
 xpc_TryUnmarkWrappedGrayObject(nsISupports* aWrappedJS)
 {
     // QIing to nsIXPConnectWrappedJSUnmarkGray may have side effects!
@@ -508,6 +500,7 @@ InitGlobalObjectOptions(JS::CompartmentOptions& aOptions,
     if (isSystem) {
         // Make sure [SecureContext] APIs are visible:
         aOptions.creationOptions().setSecureContext(true);
+        aOptions.creationOptions().setClampAndJitterTime(false);
     }
 
     if (shouldDiscardSystemSource) {
@@ -560,6 +553,10 @@ InitClassesWithNewWrappedGlobal(JSContext* aJSContext,
     // We pass null for the 'extra' pointer during global object creation, so
     // we need to have a principal.
     MOZ_ASSERT(aPrincipal);
+
+    if (!SystemBindingInitIds(aJSContext)) {
+      return NS_ERROR_FAILURE;
+    }
 
     InitGlobalObjectOptions(aOptions, aPrincipal);
 
@@ -754,16 +751,6 @@ xpc::UnwrapReflectorToISupports(JSObject* reflector)
     nsCOMPtr<nsISupports> canonical =
         do_QueryInterface(mozilla::dom::UnwrapDOMObjectToISupports(reflector));
     return canonical.forget();
-}
-
-NS_IMETHODIMP
-nsXPConnect::SetFunctionThisTranslator(const nsIID & aIID,
-                                       nsIXPCFunctionThisTranslator* aTranslator)
-{
-    XPCJSRuntime* rt = GetRuntimeInstance();
-    IID2ThisTranslatorMap* map = rt->GetThisTranslatorMap();
-    map->Add(aIID, aTranslator);
-    return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1128,12 +1115,15 @@ nsXPConnect::ReadFunction(nsIObjectInputStream* stream, JSContext* cx, JSObject*
 
 /* These are here to be callable from a debugger */
 extern "C" {
-JS_EXPORT_API(void) DumpJSStack()
+
+MOZ_EXPORT void
+DumpJSStack()
 {
     xpc_DumpJSStack(true, true, false);
 }
 
-JS_EXPORT_API(void) DumpCompleteHeap()
+MOZ_EXPORT void
+DumpCompleteHeap()
 {
     nsCOMPtr<nsICycleCollectorListener> listener =
       do_CreateInstance("@mozilla.org/cycle-collector-logger;1");
@@ -1180,45 +1170,6 @@ bool
 IsXrayWrapper(JSObject* obj)
 {
     return WrapperFactory::IsXrayWrapper(obj);
-}
-
-JSAddonId*
-NewAddonId(JSContext* cx, const nsACString& id)
-{
-    JS::RootedString str(cx, JS_NewStringCopyN(cx, id.BeginReading(), id.Length()));
-    if (!str)
-        return nullptr;
-    return JS::NewAddonId(cx, str);
-}
-
-bool
-SetAddonInterposition(const nsACString& addonIdStr, nsIAddonInterposition* interposition)
-{
-    JSAddonId* addonId;
-    // We enter the junk scope just to allocate a string, which actually will go
-    // in the system zone.
-    AutoJSAPI jsapi;
-    if (!jsapi.Init(xpc::PrivilegedJunkScope()))
-        return false;
-    addonId = NewAddonId(jsapi.cx(), addonIdStr);
-    if (!addonId)
-        return false;
-    return XPCWrappedNativeScope::SetAddonInterposition(jsapi.cx(), addonId, interposition);
-}
-
-bool
-AllowCPOWsInAddon(const nsACString& addonIdStr, bool allow)
-{
-    JSAddonId* addonId;
-    // We enter the junk scope just to allocate a string, which actually will go
-    // in the system zone.
-    AutoJSAPI jsapi;
-    if (!jsapi.Init(xpc::PrivilegedJunkScope()))
-        return false;
-    addonId = NewAddonId(jsapi.cx(), addonIdStr);
-    if (!addonId)
-        return false;
-    return XPCWrappedNativeScope::AllowCPOWsInAddon(jsapi.cx(), addonId, allow);
 }
 
 } // namespace xpc

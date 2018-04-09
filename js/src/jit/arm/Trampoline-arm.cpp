@@ -263,8 +263,10 @@ JitRuntime::generateEnterJIT(JSContext* cx, MacroAssembler& masm)
         masm.ma_lsl(Imm32(3), numStackValues, scratch);
         masm.subPtr(scratch, framePtr);
         {
-            masm.ma_sub(sp, Imm32(WINDOWS_BIG_FRAME_TOUCH_INCREMENT), scratch);
-
+            ScratchRegisterScope asmScratch(masm);
+            masm.ma_sub(sp, Imm32(WINDOWS_BIG_FRAME_TOUCH_INCREMENT), scratch, asmScratch);
+        }
+        {
             Label touchFrameLoop;
             Label touchFrameLoopEnd;
             masm.bind(&touchFrameLoop);
@@ -878,6 +880,12 @@ JitRuntime::generateVMWrapper(JSContext* cx, MacroAssembler& masm, const VMFunct
         MOZ_ASSERT(f.outParam == Type_Void);
         break;
     }
+
+    // Until C++ code is instrumented against Spectre, prevent speculative
+    // execution from returning any private data.
+    if (f.returnsData() && JitOptions.spectreJitToCxxCalls)
+        masm.speculationBarrier();
+
     masm.leaveExitFrame();
     masm.retn(Imm32(sizeof(ExitFrameLayout) +
                     f.explicitStackSlots() * sizeof(void*) +
@@ -944,7 +952,7 @@ static const VMFunction HandleDebugTrapInfo =
 JitCode*
 JitRuntime::generateDebugTrapHandler(JSContext* cx)
 {
-    MacroAssembler masm;
+    StackMacroAssembler masm;
 
     Register scratch1 = r0;
     Register scratch2 = r1;

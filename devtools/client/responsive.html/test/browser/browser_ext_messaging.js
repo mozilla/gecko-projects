@@ -9,10 +9,11 @@ const TEST_URL = "http://example.com/";
 
 // These allowed rejections are copied from
 // browser/components/extensions/test/browser/head.js.
+const { PromiseTestUtils } = scopedCuImport("resource://testing-common/PromiseTestUtils.jsm");
 PromiseTestUtils.whitelistRejectionsGlobally(/Message manager disconnected/);
 PromiseTestUtils.whitelistRejectionsGlobally(/Receiving end does not exist/);
 
-add_task(async function () {
+add_task(async function() {
   let tab = await addTab(TEST_URL);
   await openRDM(tab);
 
@@ -82,7 +83,7 @@ add_task(async function () {
     },
 
     files: {
-      "content-script.js": async function () {
+      "content-script.js": async function() {
         browser.test.log("Content script init");
 
         browser.test.log("Listen to background");

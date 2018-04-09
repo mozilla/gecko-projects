@@ -1,15 +1,12 @@
 "use strict";
 
-// Disable CPOW checks because they have false-positives from use of ContentTask in a helper.
-/* eslint-disable mozilla/no-cpows-in-tests */
-
 const methodData = [PTU.MethodData.basicCard];
 const details = PTU.Details.total60USD;
 
 add_task(async function test_initial_state() {
   let onChanged = TestUtils.topicObserved("formautofill-storage-changed",
                                           (subject, data) => data == "add");
-  let address1GUID = profileStorage.addresses.add({
+  let address1GUID = formAutofillStorage.addresses.add({
     "given-name": "Timothy",
     "additional-name": "John",
     "family-name": "Berners-Lee",
@@ -26,7 +23,7 @@ add_task(async function test_initial_state() {
 
   onChanged = TestUtils.topicObserved("formautofill-storage-changed",
                                       (subject, data) => data == "add");
-  let card1GUID = profileStorage.creditCards.add({
+  let card1GUID = formAutofillStorage.creditCards.add({
     "cc-name": "John Doe",
     "cc-number": "1234567812345678",
     "cc-exp-month": 4,
@@ -72,7 +69,7 @@ add_task(async function test_initial_state() {
     let onChanged = TestUtils.topicObserved("formautofill-storage-changed",
                                             (subject, data) => data == "add");
     info("adding an address");
-    let address2GUID = profileStorage.addresses.add({
+    let address2GUID = formAutofillStorage.addresses.add({
       "given-name": "John",
       "additional-name": "",
       "family-name": "Smith",
@@ -114,7 +111,7 @@ add_task(async function test_initial_state() {
     onChanged = TestUtils.topicObserved("formautofill-storage-changed",
                                         (subject, data) => data == "update");
     info("updating the credit expiration");
-    profileStorage.creditCards.update(card1GUID, {
+    formAutofillStorage.creditCards.update(card1GUID, {
       "cc-exp-month": 6,
       "cc-exp-year": 2029,
     }, true);
@@ -152,7 +149,7 @@ add_task(async function test_initial_state() {
     onChanged = TestUtils.topicObserved("formautofill-storage-changed",
                                         (subject, data) => data == "remove");
     info("removing the first address");
-    profileStorage.addresses.remove(address1GUID);
+    formAutofillStorage.addresses.remove(address1GUID);
     await onChanged;
 
     await spawnPaymentDialogTask(frame, async function checkRemove({

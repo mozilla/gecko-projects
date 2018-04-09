@@ -459,16 +459,6 @@ WidgetEvent::IsAllowedToDispatchDOMEvent() const
 {
   switch (mClass) {
     case eMouseEventClass:
-      // When content PreventDefault on ePointerDown, we will stop dispatching
-      // the subsequent mouse events (eMouseDown, eMouseUp, eMouseMove). But we
-      // still need the mouse events to be handled in EventStateManager to
-      // generate other events (e.g. eMouseClick). So we only stop dispatching
-      // them to DOM.
-      if (DefaultPreventedByContent() &&
-          (mMessage == eMouseMove || mMessage == eMouseDown ||
-           mMessage == eMouseUp)) {
-        return false;
-      }
       if (mMessage == eMouseTouchDrag) {
         return false;
       }
@@ -536,7 +526,7 @@ WidgetEvent::IsBlockedForFingerprintingResistance() const
  ******************************************************************************/
 
 static dom::EventTarget*
-GetTargetForDOMEvent(nsIDOMEventTarget* aTarget)
+GetTargetForDOMEvent(dom::EventTarget* aTarget)
 {
   return aTarget ? aTarget->GetTargetForDOMEvent() : nullptr;
 }
@@ -1438,6 +1428,8 @@ WidgetKeyboardEvent::ComputeKeyCodeFromKeyNameIndex(KeyNameIndex aKeyNameIndex)
       return dom::KeyboardEventBinding::DOM_VK_META;
     case KEY_NAME_INDEX_AltGraph:
       return dom::KeyboardEventBinding::DOM_VK_ALTGR;
+    case KEY_NAME_INDEX_Process:
+      return dom::KeyboardEventBinding::DOM_VK_PROCESSKEY;
     case KEY_NAME_INDEX_Attn:
       return dom::KeyboardEventBinding::DOM_VK_ATTN;
     case KEY_NAME_INDEX_CrSel:

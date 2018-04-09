@@ -592,12 +592,17 @@ void
 TextureClient::EnableReadLock()
 {
   if (!mReadLock) {
-    mReadLock = NonBlockingTextureReadLock::Create(mAllocator);
+    if (mAllocator->GetTileLockAllocator()) {
+      mReadLock = NonBlockingTextureReadLock::Create(mAllocator);
+    } else {
+      // IPC is down
+      gfxCriticalError() << "TextureClient::EnableReadLock IPC is down";
+    }
   }
 }
 
 bool
-TextureClient::SerializeReadLock(ReadLockDescriptor& aDescriptor)
+TextureClient::OnForwardedToHost()
 {
   if (mData) {
     mData->OnForwardedToHost();
@@ -608,12 +613,9 @@ TextureClient::SerializeReadLock(ReadLockDescriptor& aDescriptor)
     // after the shared data is available again for drawing.
     mReadLock->ReadLock();
     mUpdated = false;
-    if (mReadLock->Serialize(aDescriptor, GetAllocator()->GetParentPid())) {
-      return true;
-    }
+    return true;
   }
 
-  aDescriptor = null_t();
   return false;
 }
 
@@ -928,8 +930,14 @@ TextureClient::InitIPDLActor(CompositableForwarder* aForwarder)
     target = forwarder->GetEventTarget();
   }
 
+  ReadLockDescriptor readLockDescriptor = null_t();
+  if (mReadLock) {
+    mReadLock->Serialize(readLockDescriptor, GetAllocator()->GetParentPid());
+  }
+
   PTextureChild* actor = aForwarder->GetTextureForwarder()->CreateTexture(
     desc,
+    readLockDescriptor,
     aForwarder->GetCompositorBackendType(),
     GetFlags(),
     mSerial,
@@ -990,8 +998,14 @@ TextureClient::InitIPDLActor(KnowsCompositor* aForwarder)
   // Try external image id allocation.
   mExternalImageId = aForwarder->GetTextureForwarder()->GetNextExternalImageId();
 
+  ReadLockDescriptor readLockDescriptor = null_t();
+  if (mReadLock) {
+    mReadLock->Serialize(readLockDescriptor, GetAllocator()->GetParentPid());
+  }
+
   PTextureChild* actor = fwd->CreateTexture(
     desc,
+    readLockDescriptor,
     aForwarder->GetCompositorBackendType(),
     GetFlags(),
     mSerial,
@@ -1350,6 +1364,14 @@ TextureClient::TextureClient(TextureData* aData,
 {
   mData->FillInfo(mInfo);
   mFlags |= mData->GetTextureFlags();
+
+  if (mFlags & TextureFlags::NON_BLOCKING_READ_LOCK) {
+    MOZ_ASSERT(!(mFlags & TextureFlags::BLOCKING_READ_LOCK));
+    EnableReadLock();
+  } else if (mFlags & TextureFlags::BLOCKING_READ_LOCK) {
+    MOZ_ASSERT(!(mFlags & TextureFlags::NON_BLOCKING_READ_LOCK));
+    EnableBlockingReadLock();
+  }
 }
 
 bool TextureClient::CopyToTextureClient(TextureClient* aTarget,
@@ -1513,9 +1535,11 @@ class CrossProcessSemaphoreReadLock : public TextureReadLock
 public:
   CrossProcessSemaphoreReadLock()
     : mSemaphore(CrossProcessSemaphore::Create("TextureReadLock", 1))
+    , mShared(false)
   {}
   explicit CrossProcessSemaphoreReadLock(CrossProcessSemaphoreHandle aHandle)
     : mSemaphore(CrossProcessSemaphore::Create(aHandle))
+    , mShared(false)
   {}
 
   virtual bool ReadLock() override
@@ -1547,6 +1571,7 @@ public:
   virtual LockType GetType() override { return TYPE_CROSS_PROCESS_SEMAPHORE; }
 
   UniquePtr<CrossProcessSemaphore> mSemaphore;
+  bool mShared;
 };
 
 // static
@@ -1659,6 +1684,7 @@ ShmemTextureReadLock::ShmemTextureReadLock(LayersIPCChannel* aAllocator)
 {
   MOZ_COUNT_CTOR(ShmemTextureReadLock);
   MOZ_ASSERT(mClientAllocator);
+  MOZ_ASSERT(mClientAllocator->GetTileLockAllocator());
 #define MOZ_ALIGN_WORD(x) (((x) + 3) & ~3)
   if (mClientAllocator->GetTileLockAllocator()->AllocShmemSection(
       MOZ_ALIGN_WORD(sizeof(ShmReadLockInfo)), &mShmemSection)) {
@@ -1728,11 +1754,13 @@ ShmemTextureReadLock::GetReadCount() {
 bool
 CrossProcessSemaphoreReadLock::Serialize(ReadLockDescriptor& aOutput, base::ProcessId aOther)
 {
-  if (IsValid()) {
+  if (!mShared && IsValid()) {
     aOutput = ReadLockDescriptor(CrossProcessSemaphoreDescriptor(mSemaphore->ShareToProcess(aOther)));
+    mSemaphore->CloseHandle();
+    mShared = true;
     return true;
   } else {
-    return false;
+    return mShared;
   }
 }
 

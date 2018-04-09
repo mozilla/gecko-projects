@@ -259,8 +259,7 @@ void nsPluginArray::NotifyHiddenPluginTouched(nsPluginElement* aHiddenElement)
   event->SetTarget(doc);
   event->SetTrusted(true);
   event->WidgetEventPtr()->mFlags.mOnlyChromeDispatch = true;
-  bool dummy;
-  doc->DispatchEvent(event, &dummy);
+  doc->DispatchEvent(*event);
 }
 
 uint32_t
@@ -397,7 +396,8 @@ nsPluginArray::EnsurePlugins()
 
   if (mPlugins.Length() == 0 && mCTPPlugins.Length() != 0) {
     nsCOMPtr<nsPluginTag> hiddenTag = new nsPluginTag("Hidden Plugin", nullptr, "dummy.plugin", nullptr, nullptr,
-                                                      nullptr, nullptr, nullptr, 0, 0, false);
+                                                      nullptr, nullptr, nullptr, 0, 0, false,
+                                                      nsIBlocklistService::STATE_NOT_BLOCKED);
     mPlugins.AppendElement(new nsPluginElement(mWindow, hiddenTag));
   }
 

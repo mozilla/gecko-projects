@@ -176,7 +176,7 @@ impl Device {
             context.mMedium
         };
 
-        MediaType(CustomIdent(Atom::from(medium_to_use)))
+        MediaType(CustomIdent(unsafe { Atom::from_raw(medium_to_use) }))
     }
 
     /// Returns the current viewport size in app units.
@@ -262,7 +262,7 @@ impl ToCss for Expression {
         }
 
         // NB: CssStringWriter not needed, feature names are under control.
-        write!(dest, "{}", Atom::from(unsafe { *self.feature.mName }))?;
+        write!(dest, "{}", unsafe { Atom::from_static(*self.feature.mName) })?;
 
         if let Some(ref val) = self.value {
             dest.write_str(": ")?;
@@ -394,9 +394,9 @@ impl MediaExpressionValue {
             }
             nsMediaFeature_ValueType::eIdent => {
                 debug_assert_eq!(css_value.mUnit, nsCSSUnit::eCSSUnit_AtomIdent);
-                Some(MediaExpressionValue::Ident(Atom::from(unsafe {
-                    *css_value.mValue.mAtom.as_ref()
-                })))
+                Some(MediaExpressionValue::Ident(unsafe {
+                    Atom::from_raw(*css_value.mValue.mAtom.as_ref())
+                }))
             }
             nsMediaFeature_ValueType::eIntRatio => {
                 let array = unsafe { css_value.array_unchecked() };
@@ -610,11 +610,11 @@ impl Expression {
                 let result = {
                     let mut feature_name = &**ident;
 
-                    if unsafe { structs::StylePrefs_sWebkitPrefixedAliasesEnabled } &&
+                    if unsafe { structs::StaticPrefs_sVarCache_layout_css_prefixes_webkit } &&
                        starts_with_ignore_ascii_case(feature_name, "-webkit-") {
                         feature_name = &feature_name[8..];
                         flags |= structs::nsMediaFeature_RequirementFlags_eHasWebkitPrefix;
-                        if unsafe { structs::StylePrefs_sWebkitDevicePixelRatioEnabled } {
+                        if unsafe { structs::StaticPrefs_sVarCache_layout_css_prefixes_device_pixel_ratio_webkit } {
                             flags |= structs::nsMediaFeature_RequirementFlags_eWebkitDevicePixelRatioPrefEnabled;
                         }
                     }

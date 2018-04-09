@@ -119,6 +119,8 @@ public:
                    bool aHidden, uint32_t aVisitCount,
                    uint32_t aTyped, const nsAString& aLastKnownTitle);
 
+  nsresult GetBookmarkURI(int64_t aItemId, nsIURI** _URI);
+
   nsresult ResultNodeForContainer(int64_t aID,
                                   nsNavHistoryQueryOptions* aOptions,
                                   nsNavHistoryResultNode** aNode);
@@ -382,10 +384,6 @@ private:
 
   // Used to enable and disable the observer notifications.
   bool mCanNotify;
-
-  // Tracks whether we are in batch mode.
-  // Note: this is only tracking bookmarks batches, not history ones.
-  bool mBatching;
 };
 
 #endif // nsNavBookmarks_h_

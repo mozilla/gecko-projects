@@ -21,6 +21,7 @@
 #include "mozilla/TimeStamp.h"          // for TimeStamp
 #include "nsString.h"
 #include "nsStyleCoord.h"               // for nsStyleCoord
+#include "PLDHashTable.h"               // for PLDHashNumber
 
 namespace IPC {
 template <typename T> struct ParamTraits;
@@ -1039,18 +1040,18 @@ private:
  * mScrollId corresponds to the actual frame that is scrollable.
  */
 struct ScrollableLayerGuid {
-  uint64_t mLayersId;
+  LayersId mLayersId;
   uint32_t mPresShellId;
   FrameMetrics::ViewID mScrollId;
 
   ScrollableLayerGuid()
-    : mLayersId(0)
+    : mLayersId{0}
     , mPresShellId(0)
     , mScrollId(0)
   {
   }
 
-  ScrollableLayerGuid(uint64_t aLayersId, uint32_t aPresShellId,
+  ScrollableLayerGuid(LayersId aLayersId, uint32_t aPresShellId,
                       FrameMetrics::ViewID aScrollId)
     : mLayersId(aLayersId)
     , mPresShellId(aPresShellId)
@@ -1058,7 +1059,7 @@ struct ScrollableLayerGuid {
   {
   }
 
-  ScrollableLayerGuid(uint64_t aLayersId, const FrameMetrics& aMetrics)
+  ScrollableLayerGuid(LayersId aLayersId, const FrameMetrics& aMetrics)
     : mLayersId(aLayersId)
     , mPresShellId(aMetrics.GetPresShellId())
     , mScrollId(aMetrics.GetScrollId())
@@ -1106,13 +1107,13 @@ struct ScrollableLayerGuid {
 
   PLDHashNumber Hash() const
   {
-    return HashGeneric(mLayersId, mPresShellId, mScrollId);
+    return HashGeneric(uint64_t(mLayersId), mPresShellId, mScrollId);
   }
 };
 
 template <int LogLevel>
 gfx::Log<LogLevel>& operator<<(gfx::Log<LogLevel>& log, const ScrollableLayerGuid& aGuid) {
-  return log << '(' << aGuid.mLayersId << ',' << aGuid.mPresShellId << ',' << aGuid.mScrollId << ')';
+  return log << '(' << uint64_t(aGuid.mLayersId) << ',' << aGuid.mPresShellId << ',' << aGuid.mScrollId << ')';
 }
 
 struct ZoomConstraints {

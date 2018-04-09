@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Check that message persistence works - bug 705921 / bug 1307881
 
 "use strict";
@@ -16,7 +14,7 @@ registerCleanupFunction(() => {
   Services.prefs.clearUserPref("devtools.webconsole.persistlog");
 });
 
-add_task(async function () {
+add_task(async function() {
   info("Testing that messages disappear on a refresh if logs aren't persisted");
   let hud = await openNewTabAndConsole(TEST_URI);
 
@@ -34,7 +32,7 @@ add_task(async function () {
   await closeToolbox();
 });
 
-add_task(async function () {
+add_task(async function() {
   info("Testing that messages persist on a refresh if logs are persisted");
 
   let hud = await openNewTabAndConsole(TEST_URI);

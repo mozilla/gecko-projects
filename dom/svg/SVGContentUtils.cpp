@@ -28,7 +28,7 @@
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/Types.h"
 #include "mozilla/FloatingPoint.h"
-#include "nsStyleContext.h"
+#include "mozilla/ComputedStyle.h"
 #include "nsSVGPathDataParser.h"
 #include "SVGPathData.h"
 #include "SVGPathElement.h"
@@ -82,7 +82,7 @@ GetStrokeDashData(SVGContentUtils::AutoStrokeOptions* aStrokeOptions,
   Float pathScale = 1.0;
 
   if (aContextPaint && aStyleSVG->StrokeDasharrayFromObject()) {
-    const FallibleTArray<gfxFloat>& dashSrc = aContextPaint->GetStrokeDashArray();
+    const FallibleTArray<Float>& dashSrc = aContextPaint->GetStrokeDashArray();
     dashArrayLength = dashSrc.Length();
     if (dashArrayLength <= 0) {
       return eContinuousStroke;
@@ -104,9 +104,9 @@ GetStrokeDashData(SVGContentUtils::AutoStrokeOptions* aStrokeOptions,
     if (dashArrayLength <= 0) {
       return eContinuousStroke;
     }
-    if (aElement->IsSVGElement(nsGkAtoms::path)) {
-      pathScale = static_cast<SVGPathElement*>(aElement)->
-        GetPathLengthScale(SVGPathElement::eForStroking);
+    if (aElement->IsNodeOfType(nsINode::eSHAPE)) {
+      pathScale = static_cast<SVGGeometryElement*>(aElement)->
+        GetPathLengthScale(SVGGeometryElement::eForStroking);
       if (pathScale <= 0) {
         return eContinuousStroke;
       }
@@ -171,23 +171,23 @@ GetStrokeDashData(SVGContentUtils::AutoStrokeOptions* aStrokeOptions,
 void
 SVGContentUtils::GetStrokeOptions(AutoStrokeOptions* aStrokeOptions,
                                   nsSVGElement* aElement,
-                                  nsStyleContext* aStyleContext,
+                                  ComputedStyle* aComputedStyle,
                                   SVGContextPaint* aContextPaint,
                                   StrokeOptionFlags aFlags)
 {
-  RefPtr<nsStyleContext> styleContext;
-  if (aStyleContext) {
-    styleContext = aStyleContext;
+  RefPtr<ComputedStyle> computedStyle;
+  if (aComputedStyle) {
+    computedStyle = aComputedStyle;
   } else {
-    styleContext =
-      nsComputedDOMStyle::GetStyleContextNoFlush(aElement, nullptr);
+    computedStyle =
+      nsComputedDOMStyle::GetComputedStyleNoFlush(aElement, nullptr);
   }
 
-  if (!styleContext) {
+  if (!computedStyle) {
     return;
   }
 
-  const nsStyleSVG* styleSVG = styleContext->StyleSVG();
+  const nsStyleSVG* styleSVG = computedStyle->StyleSVG();
 
   bool checkedDashAndStrokeIsDashed = false;
   if (aFlags != eIgnoreStrokeDashing) {
@@ -207,7 +207,7 @@ SVGContentUtils::GetStrokeOptions(AutoStrokeOptions* aStrokeOptions,
   }
 
   aStrokeOptions->mLineWidth =
-    GetStrokeWidth(aElement, styleContext, aContextPaint);
+    GetStrokeWidth(aElement, computedStyle, aContextPaint);
 
   aStrokeOptions->mMiterLimit = Float(styleSVG->mStrokeMiterlimit);
 
@@ -245,22 +245,22 @@ SVGContentUtils::GetStrokeOptions(AutoStrokeOptions* aStrokeOptions,
 
 Float
 SVGContentUtils::GetStrokeWidth(nsSVGElement* aElement,
-                                nsStyleContext* aStyleContext,
+                                ComputedStyle* aComputedStyle,
                                 SVGContextPaint* aContextPaint)
 {
-  RefPtr<nsStyleContext> styleContext;
-  if (aStyleContext) {
-    styleContext = aStyleContext;
+  RefPtr<ComputedStyle> computedStyle;
+  if (aComputedStyle) {
+    computedStyle = aComputedStyle;
   } else {
-    styleContext =
-      nsComputedDOMStyle::GetStyleContextNoFlush(aElement, nullptr);
+    computedStyle =
+      nsComputedDOMStyle::GetComputedStyleNoFlush(aElement, nullptr);
   }
 
-  if (!styleContext) {
+  if (!computedStyle) {
     return 0.0f;
   }
 
-  const nsStyleSVG* styleSVG = styleContext->StyleSVG();
+  const nsStyleSVG* styleSVG = computedStyle->StyleSVG();
 
   if (aContextPaint && styleSVG->StrokeWidthFromObject()) {
     return aContextPaint->GetStrokeWidth();
@@ -275,33 +275,33 @@ SVGContentUtils::GetFontSize(Element *aElement)
   if (!aElement)
     return 1.0f;
 
-  RefPtr<nsStyleContext> styleContext =
-    nsComputedDOMStyle::GetStyleContextNoFlush(aElement, nullptr);
-  if (!styleContext) {
+  RefPtr<ComputedStyle> computedStyle =
+    nsComputedDOMStyle::GetComputedStyleNoFlush(aElement, nullptr);
+  if (!computedStyle) {
     // ReportToConsole
-    NS_WARNING("Couldn't get style context for content in GetFontStyle");
+    NS_WARNING("Couldn't get ComputedStyle for content in GetFontStyle");
     return 1.0f;
   }
 
-  return GetFontSize(styleContext);
+  return GetFontSize(computedStyle);
 }
 
 float
 SVGContentUtils::GetFontSize(nsIFrame *aFrame)
 {
   MOZ_ASSERT(aFrame, "NULL frame in GetFontSize");
-  return GetFontSize(aFrame->StyleContext());
+  return GetFontSize(aFrame->Style());
 }
 
 float
-SVGContentUtils::GetFontSize(nsStyleContext *aStyleContext)
+SVGContentUtils::GetFontSize(ComputedStyle *aComputedStyle)
 {
-  MOZ_ASSERT(aStyleContext, "NULL style context in GetFontSize");
+  MOZ_ASSERT(aComputedStyle, "NULL ComputedStyle in GetFontSize");
 
-  nsPresContext *presContext = aStyleContext->PresContext();
+  nsPresContext *presContext = aComputedStyle->PresContext();
   MOZ_ASSERT(presContext, "NULL pres context in GetFontSize");
 
-  nscoord fontSize = aStyleContext->StyleFont()->mSize;
+  nscoord fontSize = aComputedStyle->StyleFont()->mSize;
   return nsPresContext::AppUnitsToFloatCSSPixels(fontSize) /
          presContext->EffectiveTextZoom();
 }
@@ -312,34 +312,34 @@ SVGContentUtils::GetFontXHeight(Element *aElement)
   if (!aElement)
     return 1.0f;
 
-  RefPtr<nsStyleContext> styleContext =
-    nsComputedDOMStyle::GetStyleContextNoFlush(aElement, nullptr);
-  if (!styleContext) {
+  RefPtr<ComputedStyle> computedStyle =
+    nsComputedDOMStyle::GetComputedStyleNoFlush(aElement, nullptr);
+  if (!computedStyle) {
     // ReportToConsole
-    NS_WARNING("Couldn't get style context for content in GetFontStyle");
+    NS_WARNING("Couldn't get ComputedStyle for content in GetFontStyle");
     return 1.0f;
   }
 
-  return GetFontXHeight(styleContext);
+  return GetFontXHeight(computedStyle);
 }
 
 float
 SVGContentUtils::GetFontXHeight(nsIFrame *aFrame)
 {
   MOZ_ASSERT(aFrame, "NULL frame in GetFontXHeight");
-  return GetFontXHeight(aFrame->StyleContext());
+  return GetFontXHeight(aFrame->Style());
 }
 
 float
-SVGContentUtils::GetFontXHeight(nsStyleContext *aStyleContext)
+SVGContentUtils::GetFontXHeight(ComputedStyle *aComputedStyle)
 {
-  MOZ_ASSERT(aStyleContext, "NULL style context in GetFontXHeight");
+  MOZ_ASSERT(aComputedStyle, "NULL ComputedStyle in GetFontXHeight");
 
-  nsPresContext *presContext = aStyleContext->PresContext();
+  nsPresContext *presContext = aComputedStyle->PresContext();
   MOZ_ASSERT(presContext, "NULL pres context in GetFontXHeight");
 
   RefPtr<nsFontMetrics> fontMetrics =
-    nsLayoutUtils::GetFontMetricsForStyleContext(aStyleContext);
+    nsLayoutUtils::GetFontMetricsForComputedStyle(aComputedStyle);
 
   if (!fontMetrics) {
     // ReportToConsole

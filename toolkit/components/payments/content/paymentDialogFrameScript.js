@@ -21,6 +21,9 @@
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
+ChromeUtils.defineModuleGetter(this, "FormAutofillUtils",
+                               "resource://formautofill/FormAutofillUtils.jsm");
+
 let PaymentFrameScript = {
   init() {
     XPCOMUtils.defineLazyGetter(this, "log", () => {
@@ -44,8 +47,41 @@ let PaymentFrameScript = {
     this.sendToContent(messageType, data);
   },
 
+  setupContentConsole() {
+    let privilegedLogger = content.window.console.createInstance({
+      maxLogLevelPref: "dom.payments.loglevel",
+      prefix: "paymentDialogContent",
+    });
+
+    let contentLogObject = Cu.waiveXrays(content).log;
+    for (let name of ["error", "warn", "info", "debug"]) {
+      Cu.exportFunction(privilegedLogger[name].bind(privilegedLogger), contentLogObject, {
+        defineAs: name,
+      });
+    }
+  },
+
+  /**
+   * Expose privileged utility functions to the unprivileged page.
+   */
+  exposeUtilityFunctions() {
+    let PaymentDialogUtils = {
+      isCCNumber(value) {
+        return FormAutofillUtils.isCCNumber(value);
+      },
+    };
+    let waivedContent = Cu.waiveXrays(content);
+    waivedContent.PaymentDialogUtils = Cu.cloneInto(PaymentDialogUtils, waivedContent, {
+      cloneFunctions: true,
+    });
+  },
+
   sendToChrome({detail}) {
     let {messageType} = detail;
+    if (messageType == "initializeRequest") {
+      this.setupContentConsole();
+      this.exposeUtilityFunctions();
+    }
     this.log.debug("sendToChrome:", messageType, detail);
     this.sendMessageToChrome(messageType, detail);
   },

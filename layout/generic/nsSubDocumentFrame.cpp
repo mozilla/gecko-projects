@@ -59,8 +59,8 @@ GetDocumentFromView(nsView* aView)
   return ps ? ps->GetDocument() : nullptr;
 }
 
-nsSubDocumentFrame::nsSubDocumentFrame(nsStyleContext* aContext)
-  : nsAtomicContainerFrame(aContext, kClassID)
+nsSubDocumentFrame::nsSubDocumentFrame(ComputedStyle* aStyle)
+  : nsAtomicContainerFrame(aStyle, kClassID)
   , mOuterView(nullptr)
   , mInnerView(nullptr)
   , mIsInline(false)
@@ -248,8 +248,7 @@ nsSubDocumentFrame::GetSubdocumentPresShellForPainting(uint32_t aFlags)
       // If we don't have a frame we use this roundabout way to get the pres shell.
       if (!mFrameLoader)
         return nullptr;
-      nsCOMPtr<nsIDocShell> docShell;
-      mFrameLoader->GetDocShell(getter_AddRefs(docShell));
+      nsIDocShell* docShell = mFrameLoader->GetDocShell(IgnoreErrors());
       if (!docShell)
         return nullptr;
       presShell = docShell->GetPresShell();
@@ -929,9 +928,9 @@ nsSubDocumentFrame::AttributeChanged(int32_t aNameSpaceID,
 }
 
 nsIFrame*
-NS_NewSubDocumentFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewSubDocumentFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsSubDocumentFrame(aContext);
+  return new (aPresShell) nsSubDocumentFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSubDocumentFrame)
@@ -1036,7 +1035,7 @@ CSSIntSize
 nsSubDocumentFrame::GetMarginAttributes()
 {
   CSSIntSize result(-1, -1);
-  nsGenericHTMLElement *content = nsGenericHTMLElement::FromContent(mContent);
+  nsGenericHTMLElement *content = nsGenericHTMLElement::FromNode(mContent);
   if (content) {
     const nsAttrValue* attr = content->GetParsedAttr(nsGkAtoms::marginwidth);
     if (attr && attr->Type() == nsAttrValue::eInteger)
@@ -1066,13 +1065,14 @@ nsSubDocumentFrame::FrameLoader()
 
 // XXX this should be called ObtainDocShell or something like that,
 // to indicate that it could have side effects
-nsresult
-nsSubDocumentFrame::GetDocShell(nsIDocShell **aDocShell)
+nsIDocShell*
+nsSubDocumentFrame::GetDocShell()
 {
-  *aDocShell = nullptr;
-
-  NS_ENSURE_STATE(FrameLoader());
-  return mFrameLoader->GetDocShell(aDocShell);
+  // How can FrameLoader() return null???
+  if (NS_WARN_IF(!FrameLoader())) {
+    return nullptr;
+  }
+  return mFrameLoader->GetDocShell(IgnoreErrors());
 }
 
 static void
@@ -1297,8 +1297,7 @@ nsSubDocumentFrame::ObtainIntrinsicSizeFrame()
     // Try to get an nsIFrame for our sub-document's document element
     nsIFrame* subDocRoot = nullptr;
 
-    nsCOMPtr<nsIDocShell> docShell;
-    GetDocShell(getter_AddRefs(docShell));
+    nsIDocShell* docShell = GetDocShell();
     if (docShell) {
       nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
       if (presShell) {

@@ -187,10 +187,6 @@ DefaultJitOptions::DefaultJitOptions()
     // pc-relative jump and call instructions.
     SET_DEFAULT(jumpThreshold, UINT32_MAX);
 
-    // Whether the (ARM) simulators should always interrupt before executing any
-    // instruction.
-    SET_DEFAULT(simulatorAlwaysInterrupt, false);
-
     // Branch pruning heuristic is based on a scoring system, which is look at
     // different metrics and provide a score. The score is computed as a
     // projection where each factor defines the weight of each metric. Then this
@@ -236,8 +232,10 @@ DefaultJitOptions::DefaultJitOptions()
 
     SET_DEFAULT(spectreIndexMasking, true);
     SET_DEFAULT(spectreObjectMitigationsBarriers, true);
+    SET_DEFAULT(spectreObjectMitigationsMisc, true);
     SET_DEFAULT(spectreStringMitigations, true);
     SET_DEFAULT(spectreValueMasking, true);
+    SET_DEFAULT(spectreJitToCxxCalls, true);
 
     // Toggles whether unboxed plain objects can be created by the VM.
     SET_DEFAULT(disableUnboxedObjects, false);
@@ -249,15 +247,17 @@ DefaultJitOptions::DefaultJitOptions()
     // included in the bounds check.
     SET_DEFAULT(wasmFoldOffsets, true);
 
+    // Controls whether two-tiered compilation should be requested when
+    // compiling a new wasm module, independently of other heuristics, and
+    // should be delayed to test both baseline and ion paths in compiled code,
+    // as well as the transition from one tier to the other.
+    SET_DEFAULT(wasmDelayTier2, false);
+
     // Until which wasm bytecode size should we accumulate functions, in order
     // to compile efficiently on helper threads. Baseline code compiles much
     // faster than Ion code so use scaled thresholds (see also bug 1320374).
     SET_DEFAULT(wasmBatchBaselineThreshold, 10000);
     SET_DEFAULT(wasmBatchIonThreshold, 1100);
-
-    // Determines whether we suppress using signal handlers
-    // for interrupting jit-ed code. This is used only for testing.
-    SET_DEFAULT(ionInterruptWithoutSignals, false);
 }
 
 bool

@@ -46,7 +46,6 @@ NS_IMETHODIMP
 TRR::Notify(nsITimer *aTimer)
 {
   if (aTimer == mTimeout) {
-    LOG(("TRR request for %s timed out\n", mHost.get()));
     mTimeout = nullptr;
     Cancel();
   } else {
@@ -623,6 +622,7 @@ TRR::DohDecode()
       if (mCname.IsEmpty()) {
         uint8_t clength = 0;
         unsigned int cindex = index;
+        unsigned int loop = 128; // a valid DNS name can never loop this much
         do {
           if (cindex >= mBodySize) {
             LOG(("TRR: bad cname packet\n"));
@@ -655,7 +655,12 @@ TRR::DohDecode()
             mCname.Append((const char *)(&mResponse[cindex]), clength);
             cindex += clength; // skip label
           }
-        } while (clength);
+        } while (clength && --loop);
+
+        if (!loop) {
+          LOG(("TRR::DohDecode pointer loop error\n"));
+          return NS_ERROR_ILLEGAL_VALUE;
+        }
 
         LOG(("TRR::DohDecode CNAME host %s => %s\n",
              host.get(), mCname.get()));

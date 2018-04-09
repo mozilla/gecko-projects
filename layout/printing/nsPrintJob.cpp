@@ -13,6 +13,7 @@
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/CustomEvent.h"
+#include "mozilla/dom/ScriptSettings.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsPIDOMWindow.h"
 #include "nsIDocShell.h"
@@ -79,7 +80,6 @@ static const char kPrintingPromptService[] = "@mozilla.org/embedcomp/printingpro
 #include "nsIDocumentObserver.h"
 #include "nsISelectionListener.h"
 #include "nsISelectionPrivate.h"
-#include "nsIDOMRange.h"
 #include "nsContentCID.h"
 #include "nsLayoutCID.h"
 #include "nsContentUtils.h"
@@ -119,8 +119,7 @@ static const char kPrintingPromptService[] = "@mozilla.org/embedcomp/printingpro
 #include "nsIChannel.h"
 #include "xpcpublic.h"
 #include "nsVariant.h"
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
+#include "mozilla/ServoStyleSet.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -1630,14 +1629,17 @@ nsPrintJob::FirePrintingErrorEvent(nsresult aPrintError)
     NS_NewDOMCustomEvent(doc, nullptr, nullptr);
 
   MOZ_ASSERT(event);
-  nsCOMPtr<nsIWritableVariant> resultVariant = new nsVariant();
-  // nsresults are Uint32_t's, but XPConnect will interpret it as a double
-  // when any JS attempts to access it, and will therefore interpret it
-  // incorrectly. We preempt this by casting and setting as a double.
-  resultVariant->SetAsDouble(static_cast<double>(aPrintError));
 
-  event->InitCustomEvent(NS_LITERAL_STRING("PrintingError"), false, false,
-                         resultVariant);
+  AutoJSAPI jsapi;
+  if (!jsapi.Init(event->GetParentObject())) {
+    return;
+  }
+  JSContext* cx = jsapi.cx();
+
+  JS::Rooted<JS::Value> detail(cx,
+    JS::NumberValue(static_cast<double>(aPrintError)));
+  event->InitCustomEvent(cx, NS_LITERAL_STRING("PrintingError"), false, false,
+                         detail);
   event->SetTrusted(true);
 
   RefPtr<AsyncEventDispatcher> asyncDispatcher =
@@ -2162,13 +2164,13 @@ nsPrintJob::UpdateSelectionAndShrinkPrintObject(nsPrintObject* aPO,
   // Reset all existing selection ranges that might have been added by calling
   // this function before.
   if (selectionPS) {
-    selectionPS->RemoveAllRanges();
+    selectionPS->RemoveAllRanges(IgnoreErrors());
   }
   if (selection && selectionPS) {
     int32_t cnt = selection->RangeCount();
     int32_t inx;
     for (inx = 0; inx < cnt; ++inx) {
-        selectionPS->AddRange(selection->GetRangeAt(inx));
+      selectionPS->AddRange(*selection->GetRangeAt(inx), IgnoreErrors());
     }
   }
 
@@ -2342,19 +2344,20 @@ nsPrintJob::ReflowPrintObject(const UniquePtr<nsPrintObject>& aPO)
   rv = aPO->mViewManager->Init(printData->mPrintDC);
   NS_ENSURE_SUCCESS(rv,rv);
 
-  StyleSetHandle styleSet = mDocViewerPrint->CreateStyleSet(aPO->mDocument);
+  UniquePtr<ServoStyleSet> styleSet =
+    mDocViewerPrint->CreateStyleSet(aPO->mDocument);
 
   if (aPO->mDocument->IsSVGDocument()) {
     // The SVG document only loads minimal-xul.css, so it doesn't apply other
     // styles. We should add ua.css for applying style which related to print.
-    auto cache = nsLayoutStylesheetCache::For(aPO->mDocument->GetStyleBackendType());
-    styleSet->PrependStyleSheet(SheetType::Agent, cache->UASheet());
+    auto cache = nsLayoutStylesheetCache::Singleton();
+    styleSet->PrependStyleSheet(SheetType::Agent, cache->UASheet()->AsServo());
   }
 
   aPO->mPresShell = aPO->mDocument->CreateShell(aPO->mPresContext,
-                                                aPO->mViewManager, styleSet);
+                                                aPO->mViewManager,
+                                                Move(styleSet));
   if (!aPO->mPresShell) {
-    styleSet->Delete();
     return NS_ERROR_FAILURE;
   }
 
@@ -2366,7 +2369,7 @@ nsPrintJob::ReflowPrintObject(const UniquePtr<nsPrintObject>& aPO)
     DeleteUnselectedNodes(aPO->mDocument->GetOriginalDocument(), aPO->mDocument);
   }
 
-  styleSet->EndUpdate();
+  aPO->mPresShell->StyleSet()->EndUpdate();
 
   // The pres shell now owns the style set object.
 
@@ -2429,7 +2432,7 @@ nsPrintJob::ReflowPrintObject(const UniquePtr<nsPrintObject>& aPO)
       FILE * fd = fopen(filename, "w");
       if (fd) {
         nsIFrame *theRootFrame =
-          aPO->mPresShell->FrameManager()->GetRootFrame();
+          aPO->mPresShell->GetRootFrame();
         fprintf(fd, "Title: %s\n", docStr.get());
         fprintf(fd, "URL:   %s\n", urlStr.get());
         fprintf(fd, "--------------- Frames ----------------\n");
@@ -2589,13 +2592,13 @@ DeleteUnselectedNodes(nsIDocument* aOrigDoc, nsIDocument* aDoc)
                                        endOffset, getter_AddRefs(range));
 
     if (NS_SUCCEEDED(rv) && !range->Collapsed()) {
-      selection->AddRange(range);
+      selection->AddRange(*range, IgnoreErrors());
 
       // Unless we've already added an ellipsis at the start, if we ended mid
       // text node then add ellipsis.
       Text* text = endNode->GetAsText();
       if (!ellipsisOffset && text && endOffset && endOffset < text->Length()) {
-        text->InsertData(endOffset, kEllipsis);
+        text->InsertData(endOffset, kEllipsis, IgnoreErrors());
         ellipsisOffset += kEllipsis.Length();
       }
     }
@@ -2613,7 +2616,7 @@ DeleteUnselectedNodes(nsIDocument* aOrigDoc, nsIDocument* aDoc)
     // If the next node will start mid text node then add ellipsis.
     Text* text = startNode ? startNode->GetAsText() : nullptr;
     if (text && startOffset && startOffset < text->Length()) {
-      text->InsertData(startOffset, kEllipsis);
+      text->InsertData(startOffset, kEllipsis, IgnoreErrors());
       startOffset += kEllipsis.Length();
       ellipsisOffset += kEllipsis.Length();
     }
@@ -2625,7 +2628,7 @@ DeleteUnselectedNodes(nsIDocument* aOrigDoc, nsIDocument* aDoc)
                                      bodyNode->GetChildCount(),
                                      getter_AddRefs(lastRange));
   if (NS_SUCCEEDED(rv) && !lastRange->Collapsed()) {
-    selection->AddRange(lastRange);
+    selection->AddRange(*lastRange, IgnoreErrors());
   }
 
   selection->DeleteFromDocument();
@@ -2665,7 +2668,7 @@ nsPrintJob::DoPrint(const UniquePtr<nsPrintObject>& aPO)
     printData->mPreparingForPrint = false;
 
 #ifdef EXTENDED_DEBUG_PRINTING
-    nsIFrame* rootFrame = poPresShell->FrameManager()->GetRootFrame();
+    nsIFrame* rootFrame = poPresShell->GetRootFrame();
     if (aPO->IsPrintable()) {
       nsAutoCString docStr;
       nsAutoCString urlStr;
@@ -2761,7 +2764,7 @@ DocHasPrintCallbackCanvas(nsIDocument* aDoc, void* aData)
                                                        NS_LITERAL_STRING("canvas"));
   uint32_t canvasCount = canvases->Length(true);
   for (uint32_t i = 0; i < canvasCount; ++i) {
-    HTMLCanvasElement* canvas = HTMLCanvasElement::FromContentOrNull(canvases->Item(i, false));
+    HTMLCanvasElement* canvas = HTMLCanvasElement::FromNodeOrNull(canvases->Item(i, false));
     if (canvas && canvas->GetMozPrintCallback()) {
       // This subdocument has a print callback. Set result and return false to
       // stop iteration.
@@ -3659,7 +3662,7 @@ static void RootFrameList(nsPresContext* aPresContext, FILE* out,
 
   nsIPresShell *shell = aPresContext->GetPresShell();
   if (shell) {
-    nsIFrame* frame = shell->FrameManager()->GetRootFrame();
+    nsIFrame* frame = shell->GetRootFrame();
     if (frame) {
       frame->List(out, aPrefix);
     }
@@ -3815,7 +3818,7 @@ static void DumpPrintObjectsList(const nsTArray<nsPrintObject*>& aDocList)
     NS_ASSERTION(po, "nsPrintObject can't be null!");
     nsIFrame* rootFrame = nullptr;
     if (po->mPresShell) {
-      rootFrame = po->mPresShell->FrameManager()->GetRootFrame();
+      rootFrame = po->mPresShell->GetRootFrame();
       while (rootFrame != nullptr) {
         nsIPageSequenceFrame * sqf = do_QueryFrame(rootFrame);
         if (sqf) {
@@ -3891,7 +3894,7 @@ static void DumpPrintObjectsTreeLayout(const UniquePtr<nsPrintObject>& aPO,
   if (fd) {
     nsIFrame* rootFrame = nullptr;
     if (aPO->mPresShell) {
-      rootFrame = aPO->mPresShell->FrameManager()->GetRootFrame();
+      rootFrame = aPO->mPresShell->GetRootFrame();
     }
     for (int32_t k=0;k<aLevel;k++) fprintf(fd, "  ");
     fprintf(fd, "%s %p %p\n", types[aPO->mFrameType], aPO.get(),

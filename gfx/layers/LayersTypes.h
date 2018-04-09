@@ -47,6 +47,53 @@ class TextureHost;
 #undef NONE
 #undef OPAQUE
 
+struct LayersId {
+  uint64_t mId;
+
+  bool IsValid() const {
+    return mId != 0;
+  }
+
+  // Allow explicit cast to a uint64_t for now
+  explicit operator uint64_t() const
+  {
+    return mId;
+  }
+
+  // Implement some operators so this class can be used as a key in
+  // stdlib classes.
+  bool operator<(const LayersId& aOther) const
+  {
+    return mId < aOther.mId;
+  }
+
+  bool operator==(const LayersId& aOther) const
+  {
+    return mId == aOther.mId;
+  }
+
+  bool operator!=(const LayersId& aOther) const
+  {
+    return !(*this == aOther);
+  }
+
+  // Helper operators that allow this class to be used as a key in
+  // std::unordered_map like so:
+  //   std::unordered_map<LayersId, ValueType, LayersId::HashFn, LayersId::EqualFn> myMap;
+  struct HashFn {
+    std::size_t operator()(const LayersId& aKey) const
+    {
+      return std::hash<uint64_t>{}(aKey.mId);
+    }
+  };
+  struct EqualFn {
+    bool operator()(const LayersId& lhs, const LayersId& rhs) const
+    {
+      return lhs.mId == rhs.mId;
+    }
+  };
+};
+
 enum class LayersBackend : int8_t {
   LAYERS_NONE = 0,
   LAYERS_BASIC,
@@ -251,6 +298,8 @@ enum TextureDumpMode {
   DoNotCompress  // dump texture uncompressed
 };
 
+typedef uint32_t TouchBehaviorFlags;
+
 // Some specialized typedefs of Matrix4x4Typed.
 typedef gfx::Matrix4x4Typed<LayerPixel, CSSTransformedLayerPixel> CSSTransformMatrix;
 // Several different async transforms can contribute to a layer's transform
@@ -324,32 +373,6 @@ public:
     return IsValid();
   }
   bool operator ==(const CompositableHandle& aOther) const {
-    return mHandle == aOther.mHandle;
-  }
-  uint64_t Value() const {
-    return mHandle;
-  }
-private:
-  uint64_t mHandle;
-};
-
-class ReadLockHandle
-{
-  friend struct IPC::ParamTraits<mozilla::layers::ReadLockHandle>;
-public:
-  ReadLockHandle() : mHandle(0)
-  {}
-  ReadLockHandle(const ReadLockHandle& aOther) : mHandle(aOther.mHandle)
-  {}
-  explicit ReadLockHandle(uint64_t aHandle) : mHandle(aHandle)
-  {}
-  bool IsValid() const {
-    return mHandle != 0;
-  }
-  explicit operator bool() const {
-    return IsValid();
-  }
-  bool operator ==(const ReadLockHandle& aOther) const {
     return mHandle == aOther.mHandle;
   }
   uint64_t Value() const {

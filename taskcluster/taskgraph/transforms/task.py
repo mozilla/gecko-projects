@@ -30,8 +30,6 @@ from taskgraph.util.schema import (
 )
 from taskgraph.util.scriptworker import (
     BALROG_ACTIONS,
-    get_balrog_action_scope,
-    get_balrog_server_scope,
     get_release_config,
 )
 from voluptuous import Any, Required, Optional, Extra
@@ -155,7 +153,7 @@ task_description_schema = Schema({
     # The `run_on_projects` attribute, defaulting to "all".  This dictates the
     # projects on which this task should be included in the target task set.
     # See the attributes documentation for details.
-    Optional('run-on-projects'): [basestring],
+    Optional('run-on-projects'): optionally_keyed_by('build-platform', [basestring]),
 
     # The `shipping_phase` attribute, defaulting to None. This specifies the
     # release promotion phase that this task belongs to.
@@ -585,31 +583,31 @@ V2_ROUTE_TEMPLATES = [
     "index.{trust-domain}.v2.{project}.latest.{product}.{job-name}",
     "index.{trust-domain}.v2.{project}.pushdate.{build_date_long}.{product}.{job-name}",
     "index.{trust-domain}.v2.{project}.pushlog-id.{pushlog_id}.{product}.{job-name}",
-    "index.{trust-domain}.v2.{project}.revision.{head_rev}.{product}.{job-name}",
+    "index.{trust-domain}.v2.{project}.revision.{branch_rev}.{product}.{job-name}",
 ]
 
 # {central, inbound, autoland} write to a "trunk" index prefix. This facilitates
 # walking of tasks with similar configurations.
 V2_TRUNK_ROUTE_TEMPLATES = [
-    "index.{trust-domain}.v2.trunk.revision.{head_rev}.{product}.{job-name}",
+    "index.{trust-domain}.v2.trunk.revision.{branch_rev}.{product}.{job-name}",
 ]
 
 V2_NIGHTLY_TEMPLATES = [
     "index.{trust-domain}.v2.{project}.nightly.latest.{product}.{job-name}",
-    "index.{trust-domain}.v2.{project}.nightly.{build_date}.revision.{head_rev}.{product}.{job-name}",  # noqa - too long
+    "index.{trust-domain}.v2.{project}.nightly.{build_date}.revision.{branch_rev}.{product}.{job-name}",  # noqa - too long
     "index.{trust-domain}.v2.{project}.nightly.{build_date}.latest.{product}.{job-name}",
-    "index.{trust-domain}.v2.{project}.nightly.revision.{head_rev}.{product}.{job-name}",
+    "index.{trust-domain}.v2.{project}.nightly.revision.{branch_rev}.{product}.{job-name}",
 ]
 
 V2_NIGHTLY_L10N_TEMPLATES = [
     "index.{trust-domain}.v2.{project}.nightly.latest.{product}-l10n.{job-name}.{locale}",
-    "index.{trust-domain}.v2.{project}.nightly.{build_date}.revision.{head_rev}.{product}-l10n.{job-name}.{locale}",  # noqa - too long
+    "index.{trust-domain}.v2.{project}.nightly.{build_date}.revision.{branch_rev}.{product}-l10n.{job-name}.{locale}",  # noqa - too long
     "index.{trust-domain}.v2.{project}.nightly.{build_date}.latest.{product}-l10n.{job-name}.{locale}",  # noqa - too long
-    "index.{trust-domain}.v2.{project}.nightly.revision.{head_rev}.{product}-l10n.{job-name}.{locale}",  # noqa - too long
+    "index.{trust-domain}.v2.{project}.nightly.revision.{branch_rev}.{product}-l10n.{job-name}.{locale}",  # noqa - too long
 ]
 
 V2_L10N_TEMPLATES = [
-    "index.{trust-domain}.v2.{project}.revision.{head_rev}.{product}-l10n.{job-name}.{locale}",
+    "index.{trust-domain}.v2.{project}.revision.{branch_rev}.{product}-l10n.{job-name}.{locale}",
     "index.{trust-domain}.v2.{project}.pushdate.{build_date_long}.{product}-l10n.{job-name}.{locale}",  # noqa - too long
     "index.{trust-domain}.v2.{project}.latest.{product}-l10n.{job-name}.{locale}",
 ]
@@ -627,6 +625,16 @@ BRANCH_REV_PARAM = {
     'comm-aurora': 'comm_head_rev',
     'try-comm-central': 'comm_head_rev',
 }
+
+
+def get_branch_rev(config):
+    return config.params[
+        BRANCH_REV_PARAM.get(
+            config.params['project'],
+            DEFAULT_BRANCH_REV_PARAM
+        )
+    ]
+
 
 COALESCE_KEY = '{project}.{job-identifier}'
 SUPERSEDER_URL = 'https://coalesce.mozilla-releng.net/v1/list/{age}/{size}/{key}'
@@ -1043,10 +1051,6 @@ def build_balrog_payload(config, task, task_def):
     worker = task['worker']
     release_config = get_release_config(config)
 
-    server_scope = get_balrog_server_scope(config)
-    action_scope = get_balrog_action_scope(config, action=worker['balrog-action'])
-    task_def['scopes'] = [server_scope, action_scope]
-
     if worker['balrog-action'] == 'submit-locale':
         task_def['payload'] = {
             'upstreamArtifacts':  worker['upstream-artifacts']
@@ -1315,6 +1319,7 @@ def add_generic_index_routes(config, task):
                                             time.gmtime(config.params['build_date']))
     subs['product'] = index['product']
     subs['trust-domain'] = config.graph_config['trust-domain']
+    subs['branch_rev'] = get_branch_rev(config)
 
     project = config.params.get('project')
 
@@ -1345,6 +1350,7 @@ def add_nightly_index_routes(config, task):
                                        time.gmtime(config.params['build_date']))
     subs['product'] = index['product']
     subs['trust-domain'] = config.graph_config['trust-domain']
+    subs['branch_rev'] = get_branch_rev(config)
 
     for tpl in V2_NIGHTLY_TEMPLATES:
         routes.append(tpl.format(**subs))
@@ -1367,6 +1373,7 @@ def add_release_index_routes(config, task):
     subs['underscore_version'] = release_config['version'].replace('.', '_')
     subs['product'] = index['product']
     subs['trust-domain'] = config.graph_config['trust-domain']
+    subs['branch_rev'] = get_branch_rev(config)
     subs['branch'] = subs['project']
     if 'channel' in index:
         resolve_keyed_by(
@@ -1402,6 +1409,7 @@ def add_l10n_index_routes(config, task, force_locale=None):
                                             time.gmtime(config.params['build_date']))
     subs['product'] = index['product']
     subs['trust-domain'] = config.graph_config['trust-domain']
+    subs['branch_rev'] = get_branch_rev(config)
 
     locales = task['attributes'].get('chunk_locales',
                                      task['attributes'].get('all_locales'))
@@ -1441,6 +1449,7 @@ def add_nightly_l10n_index_routes(config, task, force_locale=None):
                                             time.gmtime(config.params['build_date']))
     subs['product'] = index['product']
     subs['trust-domain'] = config.graph_config['trust-domain']
+    subs['branch_rev'] = get_branch_rev(config)
 
     locales = task['attributes'].get('chunk_locales',
                                      task['attributes'].get('all_locales'))
@@ -1534,15 +1543,12 @@ def build_task(config, tasks):
             treeherder['jobKind'] = task_th['kind']
             treeherder['tier'] = task_th['tier']
 
-            treeherder_rev = config.params[
-                BRANCH_REV_PARAM.get(
-                    config.params['project'],
-                    DEFAULT_BRANCH_REV_PARAM)]
+            branch_rev = get_branch_rev(config)
 
             routes.append(
                 '{}.v2.{}.{}.{}'.format(TREEHERDER_ROUTE_ROOT,
                                         config.params['project'],
-                                        treeherder_rev,
+                                        branch_rev,
                                         config.params['pushlog_id'])
             )
 
@@ -1593,7 +1599,7 @@ def build_task(config, tasks):
         if task_th:
             # link back to treeherder in description
             th_push_link = 'https://treeherder.mozilla.org/#/jobs?repo={}&revision={}'.format(
-                config.params['project'], treeherder_rev)
+                config.params['project'], branch_rev)
             task_def['metadata']['description'] += ' ([Treeherder push]({}))'.format(
                 th_push_link)
 
@@ -1601,6 +1607,10 @@ def build_task(config, tasks):
         payload_builders[task['worker']['implementation']](config, task, task_def)
 
         attributes = task.get('attributes', {})
+        # Resolve run-on-projects
+        build_platform = attributes.get('build_platform')
+        resolve_keyed_by(task, 'run-on-projects', item_name=task['label'],
+                         **{'build-platform': build_platform})
         attributes['run_on_projects'] = task.get('run-on-projects', ['all'])
         attributes['always_target'] = task['always-target']
         # This logic is here since downstream tasks don't always match their

@@ -3,7 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from shared-head.js */
 "use strict";
 
 const TEST_URL = "data:text/html;charset=utf8,test for dynamically " +
@@ -46,7 +45,7 @@ function testSelectTool(devtoolsToolbox) {
 
   toolbox = devtoolsToolbox;
   doc = toolbox.doc;
-  toolbox.once("options-selected", (event, tool) => {
+  toolbox.once("options-selected", tool => {
     ok(true, "Options panel selected via selectTool method");
     panelWin = tool.panelWin;
     deferred.resolve();
@@ -148,7 +147,7 @@ function getBoolPref(key) {
 }
 
 function cleanup() {
-  toolbox.destroy().then(function () {
+  toolbox.destroy().then(function() {
     gBrowser.removeCurrentTab();
     for (let pref of modifiedPrefs) {
       Services.prefs.clearUserPref(pref);

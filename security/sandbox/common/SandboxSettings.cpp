@@ -27,10 +27,7 @@ int GetEffectiveContentSandboxLevel() {
 #endif
 #ifdef XP_LINUX
   // Level 4 and up will break direct access to audio.
-  // Bug 1438391: also VirtualGL lazily connecting to X.
-  if (level > 3 &&
-      (!Preferences::GetBool("media.cubeb.sandbox") ||
-       PR_GetEnv("VGL_ISACTIVE") != nullptr)) {
+  if (level > 3 && !Preferences::GetBool("media.cubeb.sandbox")) {
     level = 3;
   }
 #endif
@@ -41,6 +38,22 @@ int GetEffectiveContentSandboxLevel() {
 bool IsContentSandboxEnabled() {
   return GetEffectiveContentSandboxLevel() > 0;
 }
+
+#if defined(XP_MACOSX)
+int ClampFlashSandboxLevel(const int aLevel) {
+  const int minLevel = 0;
+  const int maxLevel = 2;
+
+  if (aLevel < minLevel) {
+    return minLevel;
+  }
+
+  if (aLevel > maxLevel) {
+    return maxLevel;
+  }
+  return aLevel;
+}
+#endif
 
 class SandboxSettings final : public mozISandboxSettings
 {

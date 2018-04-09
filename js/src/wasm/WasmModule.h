@@ -42,7 +42,6 @@ struct CompileArgs;
 
 struct LinkDataTierCacheablePod
 {
-    uint32_t interruptOffset;
     uint32_t outOfBoundsOffset;
     uint32_t unalignedAccessOffset;
     uint32_t trapOffset;
@@ -150,11 +149,13 @@ class Module : public JS::WasmModule
     bool instantiateTable(JSContext* cx,
                           MutableHandleWasmTableObject table,
                           SharedTableVector* tables) const;
+    bool instantiateGlobals(JSContext* cx, const ValVector& globalImportValues,
+                            WasmGlobalObjectVector& globalObjs) const;
     bool initSegments(JSContext* cx,
                       HandleWasmInstanceObject instance,
                       Handle<FunctionVector> funcImports,
                       HandleWasmMemoryObject memory,
-                      const ValVector& globalImports) const;
+                      const ValVector& globalImportValues) const;
 
     class Tier2GeneratorTaskImpl;
     void notifyCompilationListeners();
@@ -202,7 +203,8 @@ class Module : public JS::WasmModule
                      Handle<FunctionVector> funcImports,
                      HandleWasmTableObject tableImport,
                      HandleWasmMemoryObject memoryImport,
-                     const ValVector& globalImports,
+                     const ValVector& globalImportValues,
+                     WasmGlobalObjectVector& globalObjs,
                      HandleObject instanceProto,
                      MutableHandleWasmInstanceObject instanceObj) const;
 

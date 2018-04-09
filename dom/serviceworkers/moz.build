@@ -66,6 +66,10 @@ include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
 
+LOCAL_INCLUDES += [
+    '/js/xpconnect/loader',
+]
+
 MOCHITEST_MANIFESTS += [
     'test/mochitest.ini',
 ]
@@ -78,3 +82,5 @@ BROWSER_CHROME_MANIFESTS += [
     'test/browser.ini',
     'test/isolated/multi-e10s-update/browser.ini',
 ]
+
+TEST_DIRS += ['test/gtest']

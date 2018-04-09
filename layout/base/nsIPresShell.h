@@ -13,9 +13,10 @@
 #include "mozilla/EventForwards.h"
 #include "mozilla/FlushType.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/ServoStyleSet.h"
 #include "mozilla/StaticPtr.h"
-#include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSheet.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/WeakPtr.h"
 #include "GeckoProfiler.h"
 #include "gfxPoint.h"
@@ -28,7 +29,7 @@
 #include "nsStringFwd.h"
 #include "nsCoord.h"
 #include "nsColor.h"
-#include "nsFrameManagerBase.h"
+#include "nsFrameManager.h"
 #include "nsRect.h"
 #include "nsRegionFwd.h"
 #include "nsWeakReference.h"
@@ -56,7 +57,7 @@ class nsCanvasFrame;
 class nsCaret;
 namespace mozilla {
 class AccessibleCaretEventHub;
-class CSSStyleSheet;
+class ServoStyleSheet;
 } // namespace mozilla
 class nsFrameSelection;
 class nsFrameManager;
@@ -95,6 +96,7 @@ class EventStates;
 
 namespace dom {
 class Element;
+class HTMLSlotElement;
 class Touch;
 class Selection;
 class ShadowRoot;
@@ -278,16 +280,9 @@ public:
   }
 #endif
 
-  mozilla::StyleSetHandle StyleSet() const { return mStyleSet; }
+  mozilla::ServoStyleSet* StyleSet() const { return mStyleSet.get(); }
 
   nsCSSFrameConstructor* FrameConstructor() const { return mFrameConstructor; }
-
-  nsFrameManager* FrameManager() const {
-    // reinterpret_cast is valid since nsFrameManager does not add
-    // any members over nsFrameManagerBase.
-    return reinterpret_cast<nsFrameManager*>
-                           (const_cast<nsIPresShell*>(this)->mFrameManager);
-  }
 
   /* Enable/disable author style level. Disabling author style disables the entire
    * author level of the cascade, including the HTML preshint level.
@@ -531,7 +526,18 @@ public:
    *
    * Note that this may destroy frames for an ancestor instead.
    */
-  virtual void DestroyFramesForAndRestyle(mozilla::dom::Element* aElement) = 0;
+  void DestroyFramesForAndRestyle(mozilla::dom::Element* aElement);
+
+  /**
+   * Handles all the layout stuff needed when the slot assignment for an element
+   * is about to change.
+   *
+   * Only called when the slot attribute of the element changes, the rest of
+   * the changes should be handled in ShadowRoot.
+   */
+  void SlotAssignmentWillChange(mozilla::dom::Element& aElement,
+                                mozilla::dom::HTMLSlotElement* aOldSlot,
+                                mozilla::dom::HTMLSlotElement* aNewSlot);
 
   void PostRecreateFramesFor(mozilla::dom::Element* aElement);
   void RestyleForAnimation(mozilla::dom::Element* aElement,
@@ -548,6 +554,12 @@ public:
   bool IsSafeToFlush() const;
 
   /**
+   * Informs the document's FontFaceSet that the refresh driver ticked,
+   * flushing style and layout.
+   */
+  void NotifyFontFaceSetOnRefresh();
+
+  /**
    * Flush pending notifications of the type specified.  This method
    * will not affect the content model; it'll just affect style and
    * frames. Callers that actually want up-to-date presentation (other
@@ -562,7 +574,6 @@ public:
    *
    * @param aType the type of notifications to flush
    */
-public:
   void FlushPendingNotifications(mozilla::FlushType aType)
   {
     if (!NeedFlush(aType)) {
@@ -617,6 +628,23 @@ public:
   inline void SetNeedLayoutFlush();
   inline void SetNeedThrottledAnimationFlush();
 
+  // Removes ourself from the list of layout / style / and resize refresh driver
+  // observers.
+  //
+  // Right now this is only used for documents in the BFCache, so if you want to
+  // use this for anything else you need to ensure we don't end up in those
+  // lists after calling this, but before calling StartObservingRefreshDriver
+  // again.
+  //
+  // That is handled by the mDocument->GetBFCacheEntry checks in
+  // DoObserve*Flushes functions, though that could conceivably become a boolean
+  // member in the shell if needed.
+  //
+  // Callers are responsible of manually calling StartObservingRefreshDriver
+  // again.
+  void StopObservingRefreshDriver();
+  void StartObservingRefreshDriver();
+
   bool ObservingStyleFlushes() const { return mObservingStyleFlushes; }
   bool ObservingLayoutFlushes() const { return mObservingLayoutFlushes; }
 
@@ -627,6 +655,12 @@ public:
   }
 
   bool NeedStyleFlush() const { return mNeedStyleFlush; }
+  /**
+   * Returns true if we might need to flush layout, even if we haven't scheduled
+   * one yet (as opposed to HasPendingReflow, which returns true if a flush is
+   * scheduled or will soon be scheduled).
+   */
+  bool NeedLayoutFlush() const { return mNeedLayoutFlush; }
 
   /**
    * Callbacks will be called even if reflow itself fails for
@@ -894,7 +928,8 @@ public:
                                  nsIContent* aContent,
                                  nsEventStatus* aStatus,
                                  bool aIsHandlingNativeEvent = false,
-                                 nsIContent** aTargetContent = nullptr) = 0;
+                                 nsIContent** aTargetContent = nullptr,
+                                 nsIContent* aOverrideClickTarget = nullptr) = 0;
 
   /**
    * Dispatch event to content only (NOT full processing)
@@ -972,13 +1007,13 @@ public:
    * Get the set of agent style sheets for this presentation
    */
   virtual nsresult GetAgentStyleSheets(
-      nsTArray<RefPtr<mozilla::StyleSheet>>& aSheets) = 0;
+      nsTArray<RefPtr<mozilla::ServoStyleSheet>>& aSheets) = 0;
 
   /**
    * Replace the set of agent style sheets
    */
   virtual nsresult SetAgentStyleSheets(
-      const nsTArray<RefPtr<mozilla::StyleSheet>>& aSheets) = 0;
+      const nsTArray<RefPtr<mozilla::ServoStyleSheet>>& aSheets) = 0;
 
   /**
    * Add an override style sheet for this presentation
@@ -1031,10 +1066,9 @@ public:
 
 #ifdef DEBUG
   // Debugging hooks
-  virtual void ListStyleContexts(FILE *out, int32_t aIndent = 0) = 0;
+  virtual void ListComputedStyles(FILE *out, int32_t aIndent = 0) = 0;
 
   virtual void ListStyleSheets(FILE *out, int32_t aIndent = 0) = 0;
-  virtual void VerifyStyleTree() = 0;
 #endif
 
 #ifdef ACCESSIBILITY
@@ -1159,7 +1193,7 @@ public:
    * frames.
    */
   virtual already_AddRefed<mozilla::gfx::SourceSurface>
-  RenderSelection(nsISelection* aSelection,
+  RenderSelection(mozilla::dom::Selection* aSelection,
                   const mozilla::LayoutDeviceIntPoint aPoint,
                   mozilla::LayoutDeviceIntRect* aScreenRect,
                   uint32_t aFlags) = 0;
@@ -1480,8 +1514,7 @@ public:
   virtual void ScheduleViewManagerFlush(PaintType aType = PAINT_DEFAULT) = 0;
   virtual void ClearMouseCaptureOnView(nsView* aView) = 0;
   virtual bool IsVisible() = 0;
-  virtual void DispatchSynthMouseMove(mozilla::WidgetGUIEvent* aEvent,
-                                      bool aFlushOnHoverChange) = 0;
+  void DispatchSynthMouseMove(mozilla::WidgetGUIEvent* aEvent);
 
   virtual void AddSizeOfIncludingThis(nsWindowSizes& aWindowSizes) const = 0;
 
@@ -1645,6 +1678,10 @@ public:
     mIsNeverPainting = aNeverPainting;
   }
 
+  /**
+   * True if a reflow event has been scheduled, or is going to be scheduled
+   * to run in the future.
+   */
   bool HasPendingReflow() const
     { return mObservingLayoutFlushes || mReflowContinueTimer; }
 
@@ -1669,14 +1706,14 @@ protected:
   // we must share ownership.
   nsCOMPtr<nsIDocument>     mDocument;
   RefPtr<nsPresContext>   mPresContext;
-  mozilla::StyleSetHandle   mStyleSet;      // [OWNS]
+  mozilla::UniquePtr<mozilla::ServoStyleSet> mStyleSet;
   nsCSSFrameConstructor*    mFrameConstructor; // [OWNS]
   nsViewManager*           mViewManager;   // [WEAK] docViewer owns it so I don't have to
   nsPresArena               mFrameArena;
   RefPtr<nsFrameSelection> mSelection;
-  // Pointer into mFrameConstructor - this is purely so that FrameManager() and
-  // GetRootFrame() can be inlined:
-  nsFrameManagerBase*       mFrameManager;
+  // Pointer into mFrameConstructor - this is purely so that GetRootFrame() can
+  // be inlined:
+  nsFrameManager*       mFrameManager;
   mozilla::WeakPtr<nsDocShell>                 mForwardingContainer;
 #ifdef ACCESSIBILITY
   mozilla::a11y::DocAccessible* mDocAccessible;
@@ -1770,6 +1807,8 @@ protected:
   //
   // Guaranteed to be false if mReflowContinueTimer is non-null.
   bool mObservingLayoutFlushes: 1;
+
+  bool mResizeEventPending : 1;
 
   // True if there are throttled animations that would be processed when
   // performing a flush with mFlushAnimations == true.

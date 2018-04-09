@@ -100,7 +100,7 @@ void
 AtomSet::Remove(nsAtom* aAtom)
 {
   auto index = mElems.BinaryIndexOf(aAtom);
-  if (index != mElems.NoIndex) {
+  if (index != ArrayType::NoIndex) {
     mElems.RemoveElementAt(index);
   }
 }
@@ -129,6 +129,15 @@ URLInfo::Host() const
     Unused << mURI->GetHost(mHost);
   }
   return mHost;
+}
+
+const nsAtom*
+URLInfo::HostAtom() const
+{
+  if (!mHostAtom) {
+    mHostAtom = NS_Atomize(Host());
+  }
+  return mHostAtom;
 }
 
 const nsString&

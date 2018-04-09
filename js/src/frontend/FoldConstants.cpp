@@ -13,6 +13,7 @@
 #include "frontend/ParseNode.h"
 #include "frontend/Parser.h"
 #include "js/Conversions.h"
+#include "vm/StringType.h"
 
 #include "vm/JSContext-inl.h"
 #include "vm/JSObject-inl.h"
@@ -1009,18 +1010,13 @@ ComputeBinary(ParseNodeKind kind, double left, double right)
         return left * right;
 
     if (kind == ParseNodeKind::Mod)
-        return right == 0 ? GenericNaN() : js_fmod(left, right);
+        return right == 0 ? GenericNaN() : fmod(left, right);
 
     if (kind == ParseNodeKind::Ursh)
         return ToUint32(left) >> (ToUint32(right) & 31);
 
     if (kind == ParseNodeKind::Div) {
         if (right == 0) {
-#if defined(XP_WIN)
-            /* XXX MSVC miscompiles such that (NaN == 0) */
-            if (IsNaN(right))
-                return GenericNaN();
-#endif
             if (left == 0 || IsNaN(left))
                 return GenericNaN();
             if (IsNegative(left) != IsNegative(right))
@@ -1294,9 +1290,11 @@ FoldElement(JSContext* cx, ParseNode** nodePtr, PerHandlerParser<FullParseHandle
             // Optimization 2: We have something like expr[3.14]. The number
             // isn't an array index, so it converts to a string ("3.14"),
             // enabling optimization 3 below.
-            JSAtom* atom = ToAtom<NoGC>(cx, DoubleValue(number));
-            if (!atom)
+            JSAtom* atom = NumberToAtom(cx, number);
+            if (!atom) {
+                cx->recoverFromOutOfMemory();
                 return false;
+            }
             name = atom->asPropertyName();
         }
     }

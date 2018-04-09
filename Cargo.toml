@@ -7,6 +7,7 @@
 members = [
   "js/src",
   "js/rust",
+  "js/src/frontend/binsource", # Code generator.
   "testing/geckodriver",
   "toolkit/library/gtest/rust",
   "toolkit/library/rust/",
@@ -39,7 +40,9 @@ exclude = [
   "media/mp4parse-rust/mp4parse_fallible",
 ]
 
-# Explicitly specify what our profiles use.
+# Explicitly specify what our profiles use.  The opt-level setting here is
+# a total fiction; see the setup of MOZ_RUST_DEFAULT_FLAGS for what the
+# opt-level setting will be as a result of various other configure flags.
 [profile.dev]
 opt-level = 1
 rpath = false
@@ -56,4 +59,4 @@ codegen-units = 1
 
 [patch.crates-io]
 libudev-sys = { path = "dom/webauthn/libudev-sys" }
-serde_derive = { git = "https://github.com/gankro/serde", branch = "deserialize_from_enums4" }
+serde_derive = { git = "https://github.com/servo/serde", branch = "deserialize_from_enums5" }

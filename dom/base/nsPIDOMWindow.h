@@ -55,8 +55,6 @@ class Navigator;
 class Performance;
 class ServiceWorker;
 class ServiceWorkerDescriptor;
-class ServiceWorkerRegistration;
-class ServiceWorkerRegistrationDescriptor;
 class Timeout;
 class TimeoutManager;
 class CustomElementRegistry;
@@ -190,10 +188,6 @@ public:
   bool GetAudioCaptured() const;
   nsresult SetAudioCapture(bool aCapture);
 
-  already_AddRefed<mozilla::dom::ServiceWorkerRegistration>
-    GetServiceWorkerRegistration(const mozilla::dom::ServiceWorkerRegistrationDescriptor& aDescriptor);
-  void InvalidateServiceWorkerRegistration(const nsAString& aScope);
-
   mozilla::dom::Performance* GetPerformance();
 
   bool HasMutationListeners(uint32_t aMutationEventType) const
@@ -252,14 +246,6 @@ public:
   void SetHasPointerEnterLeaveEventListeners()
   {
     mMayHavePointerEnterLeaveEventListener = true;
-  }
-
-  /**
-   * Check whether this has had inner objects freed.
-   */
-  bool InnerObjectsFreed() const
-  {
-    return mInnerObjectsFreed;
   }
 
   /**
@@ -596,7 +582,6 @@ public:
     return mMarkedCCGeneration;
   }
 
-  virtual nsIDOMScreen* GetScreen() = 0;
   mozilla::dom::Navigator* Navigator();
   virtual mozilla::dom::Location* GetLocation() = 0;
 
@@ -655,11 +640,6 @@ protected:
 
   RefPtr<mozilla::dom::Navigator> mNavigator;
 
-  typedef nsRefPtrHashtable<nsStringHashKey,
-                            mozilla::dom::ServiceWorkerRegistration>
-          ServiceWorkerRegistrationTable;
-  ServiceWorkerRegistrationTable mServiceWorkerRegistrationTable;
-
   // These variables are only used on inner windows.
   uint32_t mMutationBits;
 
@@ -672,10 +652,6 @@ protected:
   bool mMayHaveSelectionChangeEventListener;
   bool mMayHaveMouseEnterLeaveEventListener;
   bool mMayHavePointerEnterLeaveEventListener;
-
-  // Used to detect whether we have called FreeInnerObjects() (e.g. to ensure
-  // that a call to ResumeTimeouts() after FreeInnerObjects() does nothing).
-  bool mInnerObjectsFreed;
 
   bool mAudioCaptured;
 
@@ -1105,7 +1081,6 @@ public:
 
   // XXX(nika): These feel like they should be inner window only, but they're
   // called on the outer window.
-  virtual nsIDOMScreen* GetScreen() = 0;
   virtual mozilla::dom::Navigator* GetNavigator() = 0;
   virtual mozilla::dom::Location* GetLocation() = 0;
 

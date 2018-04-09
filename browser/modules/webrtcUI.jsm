@@ -262,7 +262,6 @@ var webrtcUI = {
         break;
       case "webrtc:UpdateBrowserIndicators":
         let id = aMessage.data.windowId;
-        aMessage.targetFrameLoader.QueryInterface(Ci.nsIFrameLoader);
         let processMM =
           aMessage.targetFrameLoader.messageManager.processMessageManager;
         let index;
@@ -364,8 +363,7 @@ function prompt(aBrowser, aRequest) {
   } catch (e) {
     uri = Services.io.newURI(aRequest.documentURI);
   }
-  let message = {};
-  message.host = getHost(uri);
+
   let chromeDoc = aBrowser.ownerDocument;
   let stringBundle = chromeDoc.defaultView.gNavigatorBundle;
 
@@ -386,10 +384,7 @@ function prompt(aBrowser, aRequest) {
     "getUserMedia.shareScreenAndAudioCapture3.message",
   ].find(id => id.includes(joinedRequestTypes));
 
-  let header = stringBundle.getFormattedString(stringId, ["<>"], 1);
-  header = header.split("<>");
-  message.end = header[1];
-  message.start = header[0];
+  let message = stringBundle.getFormattedString(stringId, ["<>"], 1);
 
   let notification; // Used by action callbacks.
   let mainAction = {
@@ -424,6 +419,7 @@ function prompt(aBrowser, aRequest) {
   let productName = gBrandBundle.GetStringFromName("brandShortName");
 
   let options = {
+    name: getHost(uri),
     persistent: true,
     hideClose: !Services.prefs.getBoolPref("privacy.permissionPrompts.showCloseButton"),
     eventCallback(aTopic, aNewBrowser) {

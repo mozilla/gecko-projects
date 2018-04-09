@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 /*
  * Hide Browser Console JS input field if devtools.chrome.enabled is false.
  *
@@ -24,7 +22,7 @@
 
 "use strict";
 
-add_task(async function () {
+add_task(async function() {
   let browserConsole, webConsole, objInspector;
 
   // We don't use `pushPref()` because we need to revert the same pref later

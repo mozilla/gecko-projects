@@ -33,6 +33,7 @@
 #include "mozilla/Range.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLMeterElement.h"
+#include "mozilla/layers/StackingContextHelper.h"
 #include "nsLookAndFeel.h"
 #include "VibrancyManager.h"
 
@@ -2980,7 +2981,7 @@ nsNativeThemeCocoa::CreateWebRenderCommandsForWidget(mozilla::wr::DisplayListBui
                                                      const nsRect& aRect)
 {
   nsPresContext* presContext = aFrame->PresContext();
-  wr::LayoutRect bounds = aSc.ToRelativeLayoutRect(
+  wr::LayoutRect bounds = wr::ToRoundedLayoutRect(
     LayoutDeviceRect::FromAppUnits(aRect, presContext->AppUnitsPerDevPixel()));
 
   EventStates eventState = GetContentState(aFrame, aWidgetType);

@@ -18,6 +18,7 @@ const {
   MESSAGE_OPEN,
   MESSAGES_ADD,
   MESSAGES_CLEAR,
+  PRIVATE_MESSAGES_CLEAR,
   REMOVED_ACTORS_CLEAR,
   NETWORK_MESSAGE_UPDATE,
   PREFS,
@@ -144,7 +145,10 @@ function enableActorReleaser(hud) {
 
       let type = action.type;
       let proxy = hud ? hud.proxy : null;
-      if (proxy && ([MESSAGES_ADD, MESSAGES_CLEAR].includes(type))) {
+      if (
+        proxy &&
+        ([MESSAGES_ADD, MESSAGES_CLEAR, PRIVATE_MESSAGES_CLEAR].includes(type))
+      ) {
         releaseActors(state.messages.removedActors, proxy);
 
         // Reset `removedActors` in message reducer.
@@ -212,9 +216,9 @@ function enableNetProvider(hud) {
         let updates = getAllNetworkMessagesUpdateById(newState);
         let message = updates[action.id];
         if (message && !message.openedOnce && message.source == "network") {
-          dataProvider.onNetworkEvent(null, message);
+          dataProvider.onNetworkEvent(message);
           message.updates.forEach(updateType => {
-            dataProvider.onNetworkEventUpdate(null, {
+            dataProvider.onNetworkEventUpdate({
               packet: { updateType: updateType },
               networkInfo: message,
             });
@@ -234,7 +238,7 @@ function enableNetProvider(hud) {
         if (open) {
           let message = getMessage(state, actor);
           message.updates.forEach(updateType => {
-            dataProvider.onNetworkEventUpdate(null, {
+            dataProvider.onNetworkEventUpdate({
               packet: { updateType },
               networkInfo: message,
             });

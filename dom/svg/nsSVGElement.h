@@ -112,10 +112,6 @@ public:
    */
   virtual void NodeInfoChanged(nsIDocument* aOldDoc) override;
 
-#ifdef MOZ_OLD_STYLE
-  NS_IMETHOD WalkContentStyleRules(nsRuleWalker* aRuleWalker) override;
-  void WalkAnimatedContentStyleRules(nsRuleWalker* aRuleWalker);
-#endif
 
   NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const override;
 
@@ -134,7 +130,7 @@ public:
 
   NS_DECL_NSIDOMELEMENT
 
-  NS_IMPL_FROMCONTENT(nsSVGElement, kNameSpaceID_SVG)
+  NS_IMPL_FROMNODE(nsSVGElement, kNameSpaceID_SVG)
 
   // Gets the element that establishes the rectangular viewport against which
   // we should resolve percentage lengths (our "coordinate context"). Returns
@@ -323,7 +319,7 @@ public:
   virtual bool IsSVGFocusable(bool* aIsFocusable, int32_t* aTabIndex);
   virtual bool IsFocusableInternal(int32_t* aTabIndex, bool aWithMouse) override;
 
-  void UpdateContentDeclarationBlock(mozilla::StyleBackendType aBackend);
+  void UpdateContentDeclarationBlock();
   const mozilla::DeclarationBlock* GetContentDeclarationBlock() const;
 
 protected:

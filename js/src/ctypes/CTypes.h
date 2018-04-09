@@ -17,7 +17,7 @@
 #include "js/GCHashTable.h"
 #include "js/UniquePtr.h"
 #include "js/Vector.h"
-#include "vm/String.h"
+#include "vm/StringType.h"
 
 namespace js {
 namespace ctypes {
@@ -181,6 +181,8 @@ MOZ_MUST_USE bool
 DeflateStringToUTF8Buffer(JSContext* maybecx, const CharT* src, size_t srclen,
                           char* dst, size_t* dstlenp);
 
+MOZ_MUST_USE JSObject*
+GetThisObject(JSContext* cx, const CallArgs& args, const char* msg);
 
 /*******************************************************************************
 ** Function and struct API definitions

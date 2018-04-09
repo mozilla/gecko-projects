@@ -46,8 +46,8 @@
           tabs._expandSpacerBy(this._scrollButtonDown.clientWidth);
         }
 
-        for (let tab of Array.from(tabs.tabbrowser._removingTabs)) {
-          tabs.tabbrowser.removeTab(tab);
+        for (let tab of Array.from(gBrowser._removingTabs)) {
+          gBrowser.removeTab(tab);
         }
 
         tabs._positionPinnedTabs();
@@ -73,10 +73,6 @@
 
   <binding id="tabbrowser-tabs"
            extends="chrome://global/content/bindings/tabbox.xml#tabs">
-    <resources>
-      <stylesheet src="chrome://browser/content/tabbrowser.css"/>
-    </resources>
-
     <content>
       <xul:hbox class="tab-drop-indicator-box">
         <xul:image class="tab-drop-indicator" anonid="tab-drop-indicator" collapsed="true"/>
@@ -99,13 +95,6 @@
                            command="cmd_newNavigatorTab"
                            onclick="checkForMiddleClick(this, event);"
                            tooltip="dynamic-shortcut-tooltip"/>
-        <xul:hbox class="restore-tabs-button-wrapper"
-                  anonid="restore-tabs-button-wrapper">
-          <xul:toolbarbutton anonid="restore-tabs-button"
-                             class="restore-tabs-button"
-                             onclick="SessionStore.restoreLastSession();"/>
-        </xul:hbox>
-
         <xul:spacer class="closing-tabs-spacer" anonid="closing-tabs-spacer"
                     style="width: 0;"/>
       </xul:arrowscrollbox>
@@ -116,31 +105,50 @@
         <![CDATA[
           this._tabClipWidth = Services.prefs.getIntPref("browser.tabs.tabClipWidth");
 
-          let { restoreTabsButton } = this;
-          restoreTabsButton.setAttribute("label", gTabBrowserBundle.GetStringFromName("tabs.restoreLastTabs"));
+          let strId = PrivateBrowsingUtils.isWindowPrivate(window) ?
+              "emptyPrivateTabTitle" : "emptyTabTitle";
+          this.emptyTabTitle = gTabBrowserBundle.GetStringFromName("tabs." + strId);
 
           var tab = this.firstChild;
-          tab.label = gTabBrowserBundle.GetStringFromName("tabs.emptyTabTitle");
+          tab.label = this.emptyTabTitle;
           tab.setAttribute("onerror", "this.removeAttribute('image');");
 
           window.addEventListener("resize", this);
-          window.addEventListener("DOMContentLoaded", this);
 
           Services.prefs.addObserver("privacy.userContext", this);
           this.observe(null, "nsPref:changed", "privacy.userContext.enabled");
 
+          XPCOMUtils.defineLazyPreferenceGetter(this, "_tabMinWidthPref",
+            "browser.tabs.tabMinWidth", null,
+            (pref, prevValue, newValue) => this._tabMinWidth = newValue,
+            newValue => {
+              const LIMIT = 50;
+              return Math.max(newValue, LIMIT);
+            },
+          );
+
+          this._tabMinWidth = this._tabMinWidthPref;
+
           this._setPositionalAttributes();
+
+          CustomizableUI.addListener(this);
+          this._updateNewTabVisibility();
+
+          XPCOMUtils.defineLazyPreferenceGetter(this, "_closeTabByDblclick",
+            "browser.tabs.closeTabByDblclick", false);
         ]]>
       </constructor>
 
       <destructor>
         <![CDATA[
           Services.prefs.removeObserver("privacy.userContext", this);
+
+          CustomizableUI.removeListener(this);
         ]]>
       </destructor>
 
       <field name="tabbox" readonly="true">
-        this.tabbrowser.tabbox;
+        document.getElementById("tabbrowser-tabbox");
       </field>
 
       <field name="contextMenu" readonly="true">
@@ -157,64 +165,13 @@
       <field name="_beforeHoveredTab">null</field>
       <field name="_afterHoveredTab">null</field>
       <field name="_hoveredTab">null</field>
-      <field name="restoreTabsButton">
-        document.getAnonymousElementByAttribute(this, "anonid", "restore-tabs-button");
-      </field>
-      <field name="_restoreTabsButtonWrapperWidth">0</field>
-      <field name="windowUtils">
-        window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
-      </field>
 
-      <property name="tabbrowser" readonly="true">
-        <getter>
-          return window.gBrowser;
-        </getter>
+      <property name="_tabMinWidth">
+        <setter>
+          this.style.setProperty("--tab-min-width", val + "px");
+          return val;
+        </setter>
       </property>
-
-      <property name="restoreTabsButtonWrapperWidth" readonly="true">
-        <getter>
-          if (!this._restoreTabsButtonWrapperWidth) {
-            this._restoreTabsButtonWrapperWidth = this.windowUtils
-              .getBoundsWithoutFlushing(this.restoreTabsButton.parentNode)
-              .width;
-          }
-          return this._restoreTabsButtonWrapperWidth;
-        </getter>
-      </property>
-
-      <method name="updateSessionRestoreVisibility">
-        <body><![CDATA[
-          let {restoreTabsButton, restoreTabsButtonWrapperWidth, windowUtils} = this;
-          let restoreTabsButtonWrapper = restoreTabsButton.parentNode;
-
-          if (!restoreTabsButtonWrapper.getAttribute("session-exists")) {
-            restoreTabsButtonWrapper.removeAttribute("shown");
-            return;
-          }
-
-          let arrowScrollboxWidth = this.arrowScrollbox.clientWidth;
-
-          let newTabButton = document.getAnonymousElementByAttribute(
-            this, "anonid", "tabs-newtab-button");
-
-          // If there are no pinned tabs it will multiply by 0 and result in 0
-          let pinnedTabsWidth = windowUtils.getBoundsWithoutFlushing(this.firstChild).width * this._lastNumPinned;
-
-          let numUnpinnedTabs = this.childNodes.length - this._lastNumPinned;
-          let unpinnedTabsWidth = windowUtils.getBoundsWithoutFlushing(this.lastChild).width * numUnpinnedTabs;
-
-          let tabbarUsedSpace = pinnedTabsWidth + unpinnedTabsWidth
-            + windowUtils.getBoundsWithoutFlushing(newTabButton).width;
-
-          // Subtract the elements' widths from the available space to ensure
-          // that showing the restoreTabsButton won't cause any overflow.
-          if (arrowScrollboxWidth - tabbarUsedSpace > restoreTabsButtonWrapperWidth) {
-            restoreTabsButtonWrapper.setAttribute("shown", "true");
-          } else {
-            restoreTabsButtonWrapper.removeAttribute("shown");
-          }
-        ]]></body>
-      </method>
 
       <method name="observe">
         <parameter name="aSubject"/>
@@ -285,13 +242,23 @@
         ]]></getter>
       </property>
 
+      <method name="_getVisibleTabs">
+        <body><![CDATA[
+          // Cannot access gBrowser before it's initialized.
+          if (!gBrowser) {
+            return [ this.firstChild ];
+          }
+
+          return gBrowser.visibleTabs;
+        ]]></body>
+      </method>
+
       <method name="_setPositionalAttributes">
         <body><![CDATA[
-          let visibleTabs = this.tabbrowser.visibleTabs;
-
-          if (!visibleTabs.length)
+          let visibleTabs = this._getVisibleTabs();
+          if (!visibleTabs.length) {
             return;
-
+          }
           let selectedIndex = visibleTabs.indexOf(this.selectedItem);
 
           if (this._beforeSelectedTab) {
@@ -340,49 +307,6 @@
       <field name="_dragOverDelay">350</field>
       <field name="_dragTime">0</field>
 
-      <field name="_container" readonly="true"><![CDATA[
-        this.parentNode && this.parentNode.localName == "toolbar" ? this.parentNode : this;
-      ]]></field>
-
-      <field name="_propagatedVisibilityOnce">false</field>
-
-      <property name="visible"
-                onget="return !this._container.collapsed;">
-        <setter><![CDATA[
-          if (val == this.visible &&
-              this._propagatedVisibilityOnce)
-            return val;
-
-          this._container.collapsed = !val;
-
-          this._propagateVisibility();
-          this._propagatedVisibilityOnce = true;
-
-          return val;
-        ]]></setter>
-      </property>
-
-      <method name="_propagateVisibility">
-        <body><![CDATA[
-          let visible = this.visible;
-
-          document.getElementById("menu_closeWindow").hidden = !visible;
-          document.getElementById("menu_close").setAttribute("label",
-            gTabBrowserBundle.GetStringFromName(visible ? "tabs.closeTab" : "tabs.close"));
-
-          TabsInTitlebar.allowedBy("tabs-visible", visible);
-        ]]></body>
-      </method>
-
-      <method name="updateVisibility">
-        <body><![CDATA[
-          if (this.childNodes.length - this.tabbrowser._removingTabs.length == 1)
-            this.visible = window.toolbar.visible;
-          else
-            this.visible = true;
-        ]]></body>
-      </method>
-
       <field name="_closeButtonsUpdatePending">false</field>
       <method name="_updateCloseButtons">
         <body><![CDATA[
@@ -418,7 +342,7 @@
                              .getInterface(Ci.nsIDOMWindowUtils)
                              .getBoundsWithoutFlushing(ele);
               };
-              let tab = this.tabbrowser.visibleTabs[this.tabbrowser._numPinnedTabs];
+              let tab = this._getVisibleTabs()[gBrowser._numPinnedTabs];
               if (tab && rect(tab).width <= this._tabClipWidth) {
                 this.setAttribute("closebuttons", "activetab");
               } else {
@@ -426,6 +350,16 @@
               }
             });
           });
+        ]]></body>
+      </method>
+
+      <method name="_updateHiddenTabsStatus">
+        <body><![CDATA[
+          if (gBrowser.visibleTabs.length < gBrowser.tabs.length) {
+            this.setAttribute("hashiddentabs", "true");
+          } else {
+            this.removeAttribute("hashiddentabs");
+          }
         ]]></body>
       </method>
 
@@ -451,45 +385,48 @@
       <method name="_lockTabSizing">
         <parameter name="aTab"/>
         <body><![CDATA[
-          var tabs = this.tabbrowser.visibleTabs;
-          if (!tabs.length)
+          let tabs = this._getVisibleTabs();
+          if (!tabs.length) {
             return;
+          }
 
           var isEndTab = (aTab._tPos > tabs[tabs.length - 1]._tPos);
           var tabWidth = aTab.getBoundingClientRect().width;
 
-          if (!this._tabDefaultMaxWidth)
+          if (!this._tabDefaultMaxWidth) {
             this._tabDefaultMaxWidth =
               parseFloat(window.getComputedStyle(aTab).maxWidth);
+          }
           this._lastTabClosedByMouse = true;
 
           if (this.getAttribute("overflow") == "true") {
             // Don't need to do anything if we're in overflow mode and aren't scrolled
             // all the way to the right, or if we're closing the last tab.
-            if (isEndTab || !this.arrowScrollbox._scrollButtonDown.disabled)
+            if (isEndTab || !this.arrowScrollbox._scrollButtonDown.disabled) {
               return;
-
+            }
             // If the tab has an owner that will become the active tab, the owner will
             // be to the left of it, so we actually want the left tab to slide over.
             // This can't be done as easily in non-overflow mode, so we don't bother.
-            if (aTab.owner)
+            if (aTab.owner) {
               return;
-
+            }
             this._expandSpacerBy(tabWidth);
           } else { // non-overflow mode
             // Locking is neither in effect nor needed, so let tabs expand normally.
-            if (isEndTab && !this._hasTabTempMaxWidth)
+            if (isEndTab && !this._hasTabTempMaxWidth) {
               return;
-
-            let numPinned = this.tabbrowser._numPinnedTabs;
+            }
+            let numPinned = gBrowser._numPinnedTabs;
             // Force tabs to stay the same width, unless we're closing the last tab,
             // which case we need to let them expand just enough so that the overall
             // tabbar width is the same.
             if (isEndTab) {
               let numNormalTabs = tabs.length - numPinned;
               tabWidth = tabWidth * (numNormalTabs + 1) / numNormalTabs;
-              if (tabWidth > this._tabDefaultMaxWidth)
+              if (tabWidth > this._tabDefaultMaxWidth) {
                 tabWidth = this._tabDefaultMaxWidth;
+              }
             }
             tabWidth += "px";
             for (let i = numPinned; i < tabs.length; i++) {
@@ -502,7 +439,7 @@
               }
             }
             this._hasTabTempMaxWidth = true;
-            this.tabbrowser.addEventListener("mousemove", this);
+            gBrowser.addEventListener("mousemove", this);
             window.addEventListener("mouseout", this);
           }
         ]]></body>
@@ -514,21 +451,22 @@
           let spacer = this._closingTabsSpacer;
           spacer.style.width = parseFloat(spacer.style.width) + pixels + "px";
           this.setAttribute("using-closing-tabs-spacer", "true");
-          this.tabbrowser.addEventListener("mousemove", this);
+          gBrowser.addEventListener("mousemove", this);
           window.addEventListener("mouseout", this);
         ]]></body>
       </method>
 
       <method name="_unlockTabSizing">
         <body><![CDATA[
-          this.tabbrowser.removeEventListener("mousemove", this);
+          gBrowser.removeEventListener("mousemove", this);
           window.removeEventListener("mouseout", this);
 
           if (this._hasTabTempMaxWidth) {
             this._hasTabTempMaxWidth = false;
-            let tabs = this.tabbrowser.visibleTabs;
-            for (let i = 0; i < tabs.length; i++)
+            let tabs = this._getVisibleTabs();
+            for (let i = 0; i < tabs.length; i++) {
               tabs[i].style.maxWidth = "";
+            }
           }
 
           if (this.hasAttribute("using-closing-tabs-spacer")) {
@@ -550,9 +488,9 @@
       <field name="_pinnedTabsLayoutCache">null</field>
       <method name="_positionPinnedTabs">
         <body><![CDATA[
-          var numPinned = this.tabbrowser._numPinnedTabs;
-          var doPosition = this.getAttribute("overflow") == "true" &&
-                           this.tabbrowser.visibleTabs.length > numPinned &&
+          let numPinned = gBrowser._numPinnedTabs;
+          let doPosition = this.getAttribute("overflow") == "true" &&
+                           this._getVisibleTabs().length > numPinned &&
                            numPinned > 0;
 
           if (doPosition) {
@@ -619,12 +557,13 @@
 
           let rtl = (window.getComputedStyle(this).direction == "rtl");
           let pinned = draggedTab.pinned;
-          let numPinned = this.tabbrowser._numPinnedTabs;
-          let tabs = this.tabbrowser.visibleTabs
-                                    .slice(pinned ? 0 : numPinned,
-                                           pinned ? numPinned : undefined);
-          if (rtl)
+          let numPinned = gBrowser._numPinnedTabs;
+          let tabs = this._getVisibleTabs()
+                         .slice(pinned ? 0 : numPinned,
+                                pinned ? numPinned : undefined);
+          if (rtl) {
             tabs.reverse();
+          }
           let tabWidth = draggedTab.getBoundingClientRect().width;
           draggedTab._dragData.tabWidth = tabWidth;
 
@@ -634,8 +573,9 @@
           let rightTab = tabs[tabs.length - 1];
           let tabScreenX = draggedTab.boxObject.screenX;
           let translateX = screenX - draggedTab._dragData.screenX;
-          if (!pinned)
+          if (!pinned) {
             translateX += this.arrowScrollbox._scrollbox.scrollLeft - draggedTab._dragData.scrollX;
+          }
           let leftBound = leftTab.boxObject.screenX - tabScreenX;
           let rightBound = (rightTab.boxObject.screenX + rightTab.boxObject.width) -
                            (tabScreenX + tabWidth);
@@ -701,11 +641,13 @@
 
       <method name="_finishAnimateTabMove">
         <body><![CDATA[
-          if (this.getAttribute("movingtab") != "true")
+          if (this.getAttribute("movingtab") != "true") {
             return;
+          }
 
-          for (let tab of this.tabbrowser.visibleTabs)
+          for (let tab of this._getVisibleTabs()) {
             tab.style.transform = "";
+          }
 
           this.removeAttribute("movingtab");
           this.parentNode.removeAttribute("movingtab");
@@ -718,18 +660,12 @@
         <parameter name="aEvent"/>
         <body><![CDATA[
           switch (aEvent.type) {
-            case "DOMContentLoaded":
-              this.updateVisibility();
-              TabsInTitlebar.init();
-              break;
             case "resize":
               if (aEvent.target != window)
                 break;
 
-              TabsInTitlebar.updateAppearance();
               this._updateCloseButtons();
               this._handleTabSelect(true);
-              this.updateSessionRestoreVisibility();
               break;
             case "mouseout":
               // If the "related target" (the node to which the pointer went) is not
@@ -864,10 +800,11 @@
       <method name="_handleNewTab">
         <parameter name="tab"/>
         <body><![CDATA[
-          if (tab.parentNode != this)
+          if (tab.parentNode != this) {
             return;
+          }
           tab._fullyOpen = true;
-          this.tabbrowser.tabAnimationsInProgress--;
+          gBrowser.tabAnimationsInProgress--;
 
           this._updateCloseButtons();
 
@@ -885,7 +822,7 @@
           this.arrowScrollbox._updateScrollButtonsDisabledState();
 
           // Preload the next about:newtab if there isn't one already.
-          this.tabbrowser._createPreloadBrowser();
+          gBrowser._createPreloadBrowser();
         ]]></body>
       </method>
 
@@ -902,15 +839,73 @@
         <parameter name="aTab"/>
         <body>
         <![CDATA[
-          if (!aTab)
+          if (!aTab) {
             return null;
+          }
+
+          // Cannot access gBrowser before it's initialized.
+          if (!gBrowser) {
+            return this.tabbox.tabpanels.firstChild;
+          }
+
           // If the tab's browser is lazy, we need to `_insertBrowser` in order
           // to have a linkedPanel.  This will also serve to bind the browser
           // and make it ready to use when the tab is selected.
-          this.tabbrowser._insertBrowser(aTab);
+          gBrowser._insertBrowser(aTab);
           return document.getElementById(aTab.linkedPanel);
         ]]>
         </body>
+      </method>
+
+      <method name="_updateNewTabVisibility">
+        <body><![CDATA[
+          // Helper functions to help deal with customize mode wrapping some items
+          let wrap = n => n.parentNode.localName == "toolbarpaletteitem" ? n.parentNode : n;
+          let unwrap = n => n && n.localName == "toolbarpaletteitem" ? n.firstElementChild : n;
+
+          let sib = this;
+          do {
+            sib = unwrap(wrap(sib).nextElementSibling);
+          } while (sib && sib.hidden);
+
+          const kAttr = "hasadjacentnewtabbutton";
+          if (sib && sib.id == "new-tab-button") {
+            this.setAttribute(kAttr, "true");
+          } else {
+            this.removeAttribute(kAttr);
+          }
+        ]]></body>
+      </method>
+
+      <method name="onWidgetAfterDOMChange">
+        <parameter name="aNode"/>
+        <parameter name="aNextNode"/>
+        <parameter name="aContainer"/>
+        <body><![CDATA[
+          if (aContainer.ownerDocument == document &&
+              aContainer.id == "TabsToolbar") {
+            this._updateNewTabVisibility();
+          }
+        ]]></body>
+      </method>
+
+      <method name="onAreaNodeRegistered">
+        <parameter name="aArea"/>
+        <parameter name="aContainer"/>
+        <body><![CDATA[
+          if (aContainer.ownerDocument == document &&
+              aArea == "TabsToolbar") {
+            this._updateNewTabVisibility();
+          }
+        ]]></body>
+      </method>
+
+      <method name="onAreaReset">
+        <parameter name="aArea"/>
+        <parameter name="aContainer"/>
+        <body><![CDATA[
+          this.onAreaNodeRegistered(aArea, aContainer);
+        ]]></body>
       </method>
     </implementation>
 
@@ -918,18 +913,20 @@
       <handler event="TabSelect" action="this._handleTabSelect();"/>
 
       <handler event="transitionend"><![CDATA[
-        if (event.propertyName != "max-width")
+        if (event.propertyName != "max-width") {
           return;
+        }
 
         var tab = event.target;
 
         if (tab.getAttribute("fadein") == "true") {
-          if (tab._fullyOpen)
+          if (tab._fullyOpen) {
             this._updateCloseButtons();
-          else
+          } else {
             this._handleNewTab(tab);
+          }
         } else if (tab.closing) {
-          this.tabbrowser._endRemoveTab(tab);
+          gBrowser._endRemoveTab(tab);
         }
       ]]></handler>
 
@@ -1005,12 +1002,15 @@
       ]]></handler>
 
       <handler event="click"><![CDATA[
-        if (event.button != 1)
+        if (event.button != 1) {
           return;
+        }
 
         if (event.target.localName == "tab") {
-          this.tabbrowser.removeTab(event.target, {animate: true,
-                byMouse: event.mozInputSource == MouseEvent.MOZ_SOURCE_MOUSE});
+          gBrowser.removeTab(event.target, {
+            animate: true,
+            byMouse: event.mozInputSource == MouseEvent.MOZ_SOURCE_MOUSE,
+          });
         } else if (event.originalTarget.localName == "box") {
           // The user middleclicked an open space on the tabstrip. This could
           // be because they intend to open a new tab, but it could also be
@@ -1019,8 +1019,8 @@
           // want to open a tab. So if we're removing one or more tabs, and
           // the tab click is before the end of the last visible tab, we do
           // nothing.
-          if (this.tabbrowser._removingTabs.length) {
-            let visibleTabs = this.tabbrowser.visibleTabs;
+          if (gBrowser._removingTabs.length) {
+            let visibleTabs = this._getVisibleTabs();
             let ltr = (window.getComputedStyle(this).direction == "ltr");
             let lastTab = visibleTabs[visibleTabs.length - 1];
             let endOfTab = lastTab.getBoundingClientRect()[ltr ? "right" : "left"];
@@ -1057,20 +1057,20 @@
 
         switch (event.keyCode) {
           case KeyEvent.DOM_VK_UP:
-            this.tabbrowser.moveTabBackward();
+            gBrowser.moveTabBackward();
             break;
           case KeyEvent.DOM_VK_DOWN:
-            this.tabbrowser.moveTabForward();
+            gBrowser.moveTabForward();
             break;
           case KeyEvent.DOM_VK_RIGHT:
           case KeyEvent.DOM_VK_LEFT:
-            this.tabbrowser.moveTabOver(event);
+            gBrowser.moveTabOver(event);
             break;
           case KeyEvent.DOM_VK_HOME:
-            this.tabbrowser.moveTabToStart();
+            gBrowser.moveTabToStart();
             break;
           case KeyEvent.DOM_VK_END:
-            this.tabbrowser.moveTabToEnd();
+            gBrowser.moveTabToEnd();
             break;
           default:
             // Consume the keydown event for the above keyboard
@@ -1289,10 +1289,11 @@
         if (draggedTab && dropEffect == "copy") {
           // copy the dropped tab (wherever it's from)
           let newIndex = this._getDropIndex(event, false);
-          let newTab = this.tabbrowser.duplicateTab(draggedTab);
-          this.tabbrowser.moveTabTo(newTab, newIndex);
-          if (draggedTab.parentNode != this || event.shiftKey)
+          let newTab = gBrowser.duplicateTab(draggedTab);
+          gBrowser.moveTabTo(newTab, newIndex);
+          if (draggedTab.parentNode != this || event.shiftKey) {
             this.selectedItem = newTab;
+          }
         } else if (draggedTab && draggedTab.parentNode == this) {
           let oldTranslateX = Math.round(draggedTab._dragData.translateX);
           let tabWidth = Math.round(draggedTab._dragData.tabWidth);
@@ -1309,7 +1310,7 @@
           if (dropIndex && dropIndex > draggedTab._tPos)
             dropIndex--;
 
-          let animate = this.tabbrowser.animationsEnabled;
+          let animate = gBrowser.animationsEnabled;
           if (oldTranslateX && oldTranslateX != newTranslateX && animate) {
             draggedTab.setAttribute("tabdrop-samewindow", "true");
             draggedTab.style.transform = "translateX(" + newTranslateX + "px)";
@@ -1323,20 +1324,22 @@
               draggedTab.removeAttribute("tabdrop-samewindow");
 
               this._finishAnimateTabMove();
-              if (dropIndex !== false)
-                this.tabbrowser.moveTabTo(draggedTab, dropIndex);
+              if (dropIndex !== false) {
+                gBrowser.moveTabTo(draggedTab, dropIndex);
+              }
 
-              this.tabbrowser.syncThrobberAnimations(draggedTab);
+              gBrowser.syncThrobberAnimations(draggedTab);
             };
             draggedTab.addEventListener("transitionend", onTransitionEnd);
           } else {
             this._finishAnimateTabMove();
-            if (dropIndex !== false)
-              this.tabbrowser.moveTabTo(draggedTab, dropIndex);
+            if (dropIndex !== false) {
+              gBrowser.moveTabTo(draggedTab, dropIndex);
+            }
           }
         } else if (draggedTab) {
           let newIndex = this._getDropIndex(event, false);
-          this.tabbrowser.adoptTab(draggedTab, newIndex, true);
+          gBrowser.adoptTab(draggedTab, newIndex, true);
         } else {
           // Pass true to disallow dropping javascript: or data: urls
           let links;
@@ -1369,7 +1372,7 @@
               }
             }
 
-            this.tabbrowser.loadTabs(urls, {
+            gBrowser.loadTabs(urls, {
               inBackground,
               replace,
               allowThirdPartyFixup: true,
@@ -1450,7 +1453,7 @@
 
         delete draggedTab._dragData;
 
-        if (this.tabbrowser.tabs.length == 1) {
+        if (gBrowser.tabs.length == 1) {
           // resize _before_ move to ensure the window fits the new screen.  if
           // the window is too large for its screen, the window manager may do
           // automatic repositioning.
@@ -1463,7 +1466,7 @@
             props.outerWidth = winWidth;
             props.outerHeight = winHeight;
           }
-          this.tabbrowser.replaceTabWithWindow(draggedTab, props);
+          gBrowser.replaceTabWithWindow(draggedTab, props);
         }
         event.stopPropagation();
       ]]></handler>
@@ -1486,10 +1489,6 @@
 
   <binding id="tabbrowser-tab" display="xul:hbox"
            extends="chrome://global/content/bindings/tabbox.xml#tab">
-    <resources>
-      <stylesheet src="chrome://browser/content/tabbrowser.css"/>
-    </resources>
-
     <content context="tabContextMenu">
       <xul:stack class="tab-stack" flex="1">
         <xul:vbox xbl:inherits="selected=visuallyselected,fadein"
@@ -1556,11 +1555,16 @@
       <property name="_visuallySelected">
         <setter>
           <![CDATA[
-          if (val)
+          if (val == (this.getAttribute("visuallyselected") == "true")) {
+            return val;
+          }
+
+          if (val) {
             this.setAttribute("visuallyselected", "true");
-          else
+          } else {
             this.removeAttribute("visuallyselected");
-          this.parentNode.tabbrowser._tabAttrModified(this, ["visuallyselected"]);
+          }
+          gBrowser._tabAttrModified(this, ["visuallyselected"]);
 
           return val;
           ]]>
@@ -1590,6 +1594,7 @@
         ]]>
         </setter>
       </property>
+      <field name="_selectedOnFirstMouseDown">false</field>
 
       <property name="pinned" readonly="true">
         <getter>
@@ -1674,11 +1679,12 @@
 
       <method name="_mouseenter">
         <body><![CDATA[
-          if (this.hidden || this.closing)
+          if (this.hidden || this.closing) {
             return;
+          }
 
           let tabContainer = this.parentNode;
-          let visibleTabs = tabContainer.tabbrowser.visibleTabs;
+          let visibleTabs = tabContainer._getVisibleTabs();
           let tabIndex = visibleTabs.indexOf(this);
 
           if (this.selected)
@@ -1718,9 +1724,9 @@
 
           let tabToWarm = this;
           if (this.mOverCloseButton) {
-            tabToWarm = tabContainer.tabbrowser._findTabToBlurTo(this);
+            tabToWarm = gBrowser._findTabToBlurTo(this);
           }
-          tabContainer.tabbrowser.warmupTab(tabToWarm);
+          gBrowser.warmupTab(tabToWarm);
         ]]></body>
       </method>
 
@@ -1805,12 +1811,6 @@
         <parameter name="aMuteReason"/>
         <body>
         <![CDATA[
-          // Do not attempt to toggle mute state if browser is lazy.
-          if (!this.linkedPanel) {
-            return;
-          }
-
-          let tabContainer = this.parentNode;
           let browser = this.linkedBrowser;
           let modifiedAttrs = [];
           let hist = Services.telemetry.getHistogramById("TAB_AUDIO_INDICATOR_USED");
@@ -1824,12 +1824,18 @@
             this.finishMediaBlockTimer();
           } else {
             if (browser.audioMuted) {
-              browser.unmute();
+              if (this.linkedPanel) {
+                // "Lazy Browser" should not invoke its unmute method
+                browser.unmute();
+              }
               this.removeAttribute("muted");
               BrowserUITelemetry.countTabMutingEvent("unmute", aMuteReason);
               hist.add(1 /* unmute */);
             } else {
-              browser.mute();
+              if (this.linkedPanel) {
+                // "Lazy Browser" should not invoke its mute method
+                browser.mute();
+              }
               this.setAttribute("muted", "true");
               BrowserUITelemetry.countTabMutingEvent("mute", aMuteReason);
               hist.add(0 /* mute */);
@@ -1837,7 +1843,7 @@
             this.muteReason = aMuteReason || null;
             modifiedAttrs.push("muted");
           }
-          tabContainer.tabbrowser._tabAttrModified(this, modifiedAttrs);
+          gBrowser._tabAttrModified(this, modifiedAttrs);
         ]]>
         </body>
       </method>
@@ -1892,6 +1898,13 @@
 
       <handler event="mousedown" phase="capturing">
       <![CDATA[
+        let tabContainer = this.parentNode;
+        if (tabContainer._closeTabByDblclick &&
+            event.button == 0 &&
+            event.detail == 1) {
+          this._selectedOnFirstMouseDown = this.selected;
+        }
+
         if (this.selected) {
           this.style.MozUserFocus = "ignore";
         } else if (this.mOverCloseButton ||
@@ -1912,12 +1925,13 @@
         }
 
         if (event.originalTarget.getAttribute("anonid") == "close-button") {
-          let tabContainer = this.parentNode;
-          tabContainer.tabbrowser.removeTab(this, {animate: true,
-                  byMouse: event.mozInputSource == MouseEvent.MOZ_SOURCE_MOUSE});
+          gBrowser.removeTab(this, {
+            animate: true,
+            byMouse: event.mozInputSource == MouseEvent.MOZ_SOURCE_MOUSE,
+          });
           // This enables double-click protection for the tab container
           // (see tabbrowser-tabs 'click' handler).
-          tabContainer._blockDblClick = true;
+          gBrowser.tabContainer._blockDblClick = true;
         }
       ]]></handler>
 
@@ -1925,6 +1939,17 @@
         // for the one-close-button case
         if (event.originalTarget.getAttribute("anonid") == "close-button") {
           event.stopPropagation();
+        }
+
+        let tabContainer = this.parentNode;
+        if (tabContainer._closeTabByDblclick &&
+            this._selectedOnFirstMouseDown &&
+            this.selected &&
+            !this._overPlayingIcon) {
+          gBrowser.removeTab(this, {
+            animate: true,
+            byMouse: event.mozInputSource == MouseEvent.MOZ_SOURCE_MOUSE,
+          });
         }
       ]]></handler>
 
@@ -2015,7 +2040,7 @@
           aTab.mCorrespondingMenuitem = menuItem;
           menuItem.tab = aTab;
 
-          this.appendChild(menuItem);
+          return menuItem;
         ]]></body>
       </method>
 
@@ -2073,6 +2098,19 @@
         if (event.target.getAttribute("id") == "alltabs_containersMenuTab") {
           createUserContextMenu(event, {useAccessKeys: false});
           return;
+        } else if (event.target.getAttribute("id") == "alltabs_hiddenTabsMenu") {
+          let fragment = document.createDocumentFragment();
+
+          for (let tab of gBrowser.tabs) {
+            if (tab.hidden) {
+              fragment.appendChild(this._createTabMenuItem(tab));
+            }
+          }
+
+          event.target.textContent = "";
+          event.target.appendChild(fragment);
+
+          return;
         }
 
         let containersEnabled = Services.prefs.getBoolPref("privacy.userContext.enabled");
@@ -2095,6 +2133,10 @@
           document.getElementById("alltabs_undoCloseTab").disabled =
             SessionStore.getClosedTabCount(window) == 0;
 
+          let showHiddenTabs = gBrowser.visibleTabs.length < gBrowser.tabs.length;
+          document.getElementById("alltabs_hiddenTabs").hidden = !showHiddenTabs;
+          document.getElementById("alltabs-popup-separator-3").hidden = !showHiddenTabs;
+
           var tabcontainer = gBrowser.tabContainer;
 
           // Listen for changes in the tab bar.
@@ -2102,10 +2144,14 @@
           tabcontainer.addEventListener("TabClose", this);
 
           let tabs = gBrowser.visibleTabs;
+          let fragment = document.createDocumentFragment();
           for (var i = 0; i < tabs.length; i++) {
-            if (!tabs[i].pinned)
-              this._createTabMenuItem(tabs[i]);
+            if (!tabs[i].pinned) {
+              let li = this._createTabMenuItem(tabs[i]);
+              fragment.appendChild(li);
+            }
           }
+          this.appendChild(fragment);
           this._updateTabsVisibilityStatus();
         }
       ]]></handler>
@@ -2116,20 +2162,25 @@
           return;
         }
 
+        // This could be the visible or hidden tabs menu container.
+        let container = event.target;
+
         // clear out the menu popup and remove the listeners
-        for (let i = this.childNodes.length - 1; i > 0; i--) {
-          let menuItem = this.childNodes[i];
+        for (let i = container.childNodes.length - 1; i > 0; i--) {
+          let menuItem = container.childNodes[i];
           if (menuItem.tab) {
             menuItem.tab.mCorrespondingMenuitem = null;
-            this.removeChild(menuItem);
+            menuItem.remove();
           }
           if (menuItem.hasAttribute("usercontextid")) {
-            this.removeChild(menuItem);
+            menuItem.remove();
           }
         }
-        var tabcontainer = gBrowser.tabContainer;
-        tabcontainer.removeEventListener("TabAttrModified", this);
-        tabcontainer.removeEventListener("TabClose", this);
+
+        if (container == this) {
+          gBrowser.tabContainer.removeEventListener("TabAttrModified", this);
+          gBrowser.tabContainer.removeEventListener("TabClose", this);
+        }
       ]]></handler>
 
       <handler event="DOMMenuItemActive">
@@ -2159,134 +2210,6 @@
       ]]></handler>
 
     </handlers>
-  </binding>
-
-  <binding id="statuspanel" display="xul:hbox">
-    <content>
-      <xul:hbox class="statuspanel-inner">
-        <xul:label class="statuspanel-label"
-                   role="status"
-                   aria-live="off"
-                   xbl:inherits="value=label,crop,mirror"
-                   flex="1"
-                   crop="end"/>
-      </xul:hbox>
-    </content>
-
-    <implementation implements="nsIDOMEventListener">
-      <constructor><![CDATA[
-        window.addEventListener("resize", this);
-      ]]></constructor>
-
-      <destructor><![CDATA[
-        window.removeEventListener("resize", this);
-        MousePosTracker.removeListener(this);
-      ]]></destructor>
-
-      <property name="label">
-        <setter><![CDATA[
-          if (!this.label) {
-            this.removeAttribute("mirror");
-            this.removeAttribute("sizelimit");
-          }
-
-          if (this.getAttribute("type") == "status" &&
-              this.getAttribute("previoustype") == "status") {
-            // Before updating the label, set the panel's current width as its
-            // min-width to let the panel grow but not shrink and prevent
-            // unnecessary flicker while loading pages. We only care about the
-            // panel's width once it has been painted, so we can do this
-            // without flushing layout.
-            this.style.minWidth =
-              window.QueryInterface(Ci.nsIInterfaceRequestor)
-                    .getInterface(Ci.nsIDOMWindowUtils)
-                    .getBoundsWithoutFlushing(this).width + "px";
-          } else {
-            this.style.minWidth = "";
-          }
-
-          if (val) {
-            this.setAttribute("label", val);
-            this.removeAttribute("inactive");
-            this._mouseTargetRect = null;
-            MousePosTracker.addListener(this);
-          } else {
-            this.setAttribute("inactive", "true");
-            MousePosTracker.removeListener(this);
-          }
-
-          return val;
-        ]]></setter>
-        <getter>
-          return this.hasAttribute("inactive") ? "" : this.getAttribute("label");
-        </getter>
-      </property>
-
-      <method name="getMouseTargetRect">
-        <body><![CDATA[
-          if (!this._mouseTargetRect) {
-            this._calcMouseTargetRect();
-          }
-          return this._mouseTargetRect;
-        ]]></body>
-      </method>
-
-      <method name="onMouseEnter">
-        <body>
-          this._mirror();
-        </body>
-      </method>
-
-      <method name="onMouseLeave">
-        <body>
-          this._mirror();
-        </body>
-      </method>
-
-      <method name="handleEvent">
-        <parameter name="event"/>
-        <body><![CDATA[
-          if (!this.label)
-            return;
-
-          switch (event.type) {
-            case "resize":
-              this._mouseTargetRect = null;
-              break;
-          }
-        ]]></body>
-      </method>
-
-      <method name="_calcMouseTargetRect">
-        <body><![CDATA[
-          let container = this.parentNode;
-          let alignRight = (getComputedStyle(container).direction == "rtl");
-          let panelRect = this.getBoundingClientRect();
-          let containerRect = container.getBoundingClientRect();
-
-          this._mouseTargetRect = {
-            top:    panelRect.top,
-            bottom: panelRect.bottom,
-            left:   alignRight ? containerRect.right - panelRect.width : containerRect.left,
-            right:  alignRight ? containerRect.right : containerRect.left + panelRect.width
-          };
-        ]]></body>
-      </method>
-
-      <method name="_mirror">
-        <body>
-          if (this.hasAttribute("mirror"))
-            this.removeAttribute("mirror");
-          else
-            this.setAttribute("mirror", "true");
-
-          if (!this.hasAttribute("sizelimit")) {
-            this.setAttribute("sizelimit", "true");
-            this._mouseTargetRect = null;
-          }
-        </body>
-      </method>
-    </implementation>
   </binding>
 
   <binding id="tabbrowser-tabpanels"
@@ -2334,24 +2257,12 @@
       <field name="tabModalPromptBox">null</field>
 
       <!-- throws exception for unknown schemes -->
-      <method name="loadURIWithFlags">
+      <method name="loadURI">
         <parameter name="aURI"/>
-        <parameter name="aFlags"/>
-        <parameter name="aReferrerURI"/>
-        <parameter name="aCharset"/>
-        <parameter name="aPostData"/>
+        <parameter name="aParams"/>
         <body>
           <![CDATA[
-            var params = arguments[1];
-            if (typeof(params) == "number") {
-              params = {
-                flags: aFlags,
-                referrerURI: aReferrerURI,
-                charset: aCharset,
-                postData: aPostData,
-              };
-            }
-            _loadURIWithFlags(this, aURI, params);
+            _loadURI(this, aURI, aParams);
           ]]>
         </body>
       </method>
@@ -2364,24 +2275,12 @@
       <field name="tabModalPromptBox">null</field>
 
       <!-- throws exception for unknown schemes -->
-      <method name="loadURIWithFlags">
+      <method name="loadURI">
         <parameter name="aURI"/>
-        <parameter name="aFlags"/>
-        <parameter name="aReferrerURI"/>
-        <parameter name="aCharset"/>
-        <parameter name="aPostData"/>
+        <parameter name="aParams"/>
         <body>
           <![CDATA[
-            var params = arguments[1];
-            if (typeof(params) == "number") {
-              params = {
-                flags: aFlags,
-                referrerURI: aReferrerURI,
-                charset: aCharset,
-                postData: aPostData,
-              };
-            }
-            _loadURIWithFlags(this, aURI, params);
+            _loadURI(this, aURI, aParams);
           ]]>
         </body>
       </method>

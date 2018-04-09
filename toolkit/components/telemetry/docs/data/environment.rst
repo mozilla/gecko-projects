@@ -264,7 +264,7 @@ Structure:
             },
             ...
         },
-        activeExperiment: { // section is empty if there's no active experiment
+        activeExperiment: { // obsolete in firefox 61, section is empty if there's no active experiment
             id: <string>, // id
             branch: <string>, // branch name
         },
@@ -403,8 +403,18 @@ activeAddons
 
 Starting from Firefox 44, the length of the following string fields: ``name``, ``description`` and ``version`` is limited to 100 characters. The same limitation applies to the same fields in ``theme`` and ``activePlugins``.
 
-Some of the fields in the record for each add-on are not available during startup.  The fields that will always be present are ``id``, ``version``, ``type``, ``updateDate``, ``scope``, ``isSystem``, ``isWebExtension``, and ``multiprocessCompatible``.  All the other fields documented above become present shortly after the ``sessionstore-windows-restored`` event is dispatched.
+Some of the fields in the record for each add-on are not available during startup.  The fields that will always be present are ``id``, ``version``, ``type``, ``updateDate``, ``scope``, ``isSystem``, ``isWebExtension``, and ``multiprocessCompatible``.  All the other fields documented above become present shortly after the ``sessionstore-windows-restored`` observer topic is notified.
+
+activePlugins
+~~~~~~~~~~~~~
+
+Just like activeAddons, up-to-date information is not available immediately during startup. The field will be populated with dummy information until the blocklist is loaded. At the latest, this will happen just after the ``sessionstore-windows-restored`` observer topic is notified.
+
+activeGMPPlugins
+~~~~~~~~~~~~~~~~
+
+Just like activePlugins, this will report dummy values until the blocklist is loaded.
 
 experiments
 -----------
-For each experiment we collect the ``id`` and the ``branch`` the client is enrolled in. Both fields are truncated to 100 characters and a warning is printed when that happens. This section will eventually supersede ``addons/activeExperiment``.
+For each experiment we collect the ``id`` and the ``branch`` the client is enrolled in. Both fields are truncated to 100 characters and a warning is printed when that happens.

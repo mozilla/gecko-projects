@@ -25,10 +25,9 @@
 #include "TextEditUtils.h"
 #include "TypeInState.h"
 
+#include "nsHTMLDocument.h"
 #include "nsIDOMDocument.h"
 #include "nsIDocumentInlines.h"
-#include "nsIDOMEventTarget.h"
-#include "nsIDOMMouseEvent.h"
 #include "nsISelectionController.h"
 #include "nsILinkHandler.h"
 #include "nsIInlineSpellChecker.h"
@@ -88,6 +87,17 @@ IsNamedAnchorTag(const nsString& s)
 {
   return s.EqualsIgnoreCase("anchor") || s.EqualsIgnoreCase("namedanchor");
 }
+
+template EditorDOMPoint
+HTMLEditor::InsertNodeIntoProperAncestor(
+              nsIContent& aNode,
+              const EditorDOMPoint& aPointToInsert,
+              SplitAtEdges aSplitAtEdges);
+template EditorDOMPoint
+HTMLEditor::InsertNodeIntoProperAncestor(
+              nsIContent& aNode,
+              const EditorRawDOMPoint& aPointToInsert,
+              SplitAtEdges aSplitAtEdges);
 
 HTMLEditor::HTMLEditor()
   : mCRInParagraphCreatesParagraph(false)
@@ -377,6 +387,10 @@ HTMLEditor::UpdateRootElement()
 already_AddRefed<nsIContent>
 HTMLEditor::FindSelectionRoot(nsINode* aNode)
 {
+  if (NS_WARN_IF(!aNode)) {
+    return nullptr;
+  }
+
   NS_PRECONDITION(aNode->IsNodeOfType(nsINode::eDOCUMENT) ||
                   aNode->IsContent(),
                   "aNode must be content or document node");
@@ -450,7 +464,7 @@ HTMLEditor::RemoveEventListeners()
     return;
   }
 
-  nsCOMPtr<nsIDOMEventTarget> target = GetDOMEventTarget();
+  RefPtr<EventTarget> target = GetDOMEventTarget();
 
   if (target) {
     // Both mMouseMotionListenerP and mResizeEventListenerP can be
@@ -596,8 +610,7 @@ HTMLEditor::MaybeCollapseSelectionAtFirstEditableNode(
     int32_t visOffset = 0;
     WSType visType;
     nsCOMPtr<nsINode> visNode;
-    wsObj.NextVisibleNode(pointToPutCaret.GetContainer(),
-                          pointToPutCaret.Offset(),
+    wsObj.NextVisibleNode(pointToPutCaret,
                           address_of(visNode), &visOffset, &visType);
 
     // If we meet a non-editable node first, we should move caret to start of
@@ -811,24 +824,13 @@ HTMLEditor::NodeIsBlockStatic(const nsINode* aElement)
     nsHTMLTags::AtomTagToId(aElement->NodeInfo()->NameAtom()));
 }
 
-nsresult
-HTMLEditor::NodeIsBlockStatic(nsIDOMNode* aNode,
-                              bool* aIsBlock)
-{
-  if (!aNode || !aIsBlock) {
-    return NS_ERROR_NULL_POINTER;
-  }
-
-  nsCOMPtr<dom::Element> element = do_QueryInterface(aNode);
-  *aIsBlock = element && NodeIsBlockStatic(element);
-  return NS_OK;
-}
-
 NS_IMETHODIMP
 HTMLEditor::NodeIsBlock(nsIDOMNode* aNode,
                         bool* aIsBlock)
 {
-  return NodeIsBlockStatic(aNode, aIsBlock);
+  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
+  *aIsBlock = IsBlockNode(node);
+  return NS_OK;
 }
 
 bool
@@ -886,7 +888,7 @@ HTMLEditor::GetBlock(nsINode& aNode,
   if (NodeIsBlockStatic(&aNode)) {
     return aNode.AsElement();
   }
-  return GetBlockNodeParent(&aNode);
+  return GetBlockNodeParent(&aNode, aAncestorLimiter);
 }
 
 /**
@@ -1007,8 +1009,8 @@ HTMLEditor::IsVisibleBRElement(nsINode* aNode)
   nsCOMPtr<nsINode> unused;
   int32_t visOffset = 0;
   WSType visType;
-  wsObj.NextVisibleNode(selNode, selOffset, address_of(unused),
-                        &visOffset, &visType);
+  wsObj.NextVisibleNode(EditorRawDOMPoint(selNode, selOffset),
+                        address_of(unused), &visOffset, &visType);
   if (visType & WSType::block) {
     return false;
   }
@@ -1476,8 +1478,7 @@ HTMLEditor::GetBetterInsertionPointFor(nsINode& aNodeToInsert,
   nsCOMPtr<nsINode> nextVisibleNode;
   int32_t nextVisibleOffset = 0;
   WSType nextVisibleType;
-  wsObj.NextVisibleNode(aPointToInsert.GetContainer(), aPointToInsert.Offset(),
-                        address_of(nextVisibleNode),
+  wsObj.NextVisibleNode(aPointToInsert, address_of(nextVisibleNode),
                         &nextVisibleOffset, &nextVisibleType);
   // So, if the next visible node isn't a <br> element, we can insert the block
   // level element to the point.
@@ -1493,8 +1494,7 @@ HTMLEditor::GetBetterInsertionPointFor(nsINode& aNodeToInsert,
   nsCOMPtr<nsINode> previousVisibleNode;
   int32_t previousVisibleOffset = 0;
   WSType previousVisibleType;
-  wsObj.PriorVisibleNode(aPointToInsert.GetContainer(), aPointToInsert.Offset(),
-                         address_of(previousVisibleNode),
+  wsObj.PriorVisibleNode(aPointToInsert, address_of(previousVisibleNode),
                          &previousVisibleOffset, &previousVisibleType);
   // So, if there is no previous visible node,
   // or, if both nodes of the insertion point is <br> elements,
@@ -1600,7 +1600,7 @@ HTMLEditor::InsertElementAtSelection(nsIDOMElement* aElement,
           "Failed to advance offset from inserted point");
         // Collapse selection to the new <br> element node after creating it.
         RefPtr<Element> newBRElement =
-          CreateBRImpl(*selection, insertedPoint.AsRaw(), ePrevious);
+          CreateBRImpl(*selection, insertedPoint, ePrevious);
         if (NS_WARN_IF(!newBRElement)) {
           return NS_ERROR_FAILURE;
         }
@@ -1611,10 +1611,11 @@ HTMLEditor::InsertElementAtSelection(nsIDOMElement* aElement,
   return rv;
 }
 
+template<typename PT, typename CT>
 EditorDOMPoint
 HTMLEditor::InsertNodeIntoProperAncestor(
               nsIContent& aNode,
-              const EditorRawDOMPoint& aPointToInsert,
+              const EditorDOMPointBase<PT, CT>& aPointToInsert,
               SplitAtEdges aSplitAtEdges)
 {
   if (NS_WARN_IF(!aPointToInsert.IsSet())) {
@@ -1670,7 +1671,7 @@ HTMLEditor::InsertNodeIntoProperAncestor(
     // when it's necessary.
     AutoEditorDOMPointChildInvalidator lockOffset(pointToInsert);
     // Now we can insert the new node.
-    nsresult rv = InsertNode(aNode, pointToInsert.AsRaw());
+    nsresult rv = InsertNode(aNode, pointToInsert);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return EditorDOMPoint();
     }
@@ -2042,7 +2043,7 @@ HTMLEditor::MakeOrChangeList(const nsAString& aListType,
     // Create a list and insert it before the right node if we split some
     // parents of start of selection above, or just start of selection
     // otherwise.
-    RefPtr<Element> newList = CreateNode(listAtom, pointToInsertList.AsRaw());
+    RefPtr<Element> newList = CreateNode(listAtom, pointToInsertList);
     NS_ENSURE_STATE(newList);
     // make a list item
     EditorRawDOMPoint atStartOfNewList(newList, 0);
@@ -2192,8 +2193,7 @@ HTMLEditor::InsertBasicBlock(const nsAString& aBlockType)
     // Create a block and insert it before the right node if we split some
     // parents of start of selection above, or just start of selection
     // otherwise.
-    RefPtr<Element> newBlock =
-      CreateNode(blockAtom, pointToInsertBlock.AsRaw());
+    RefPtr<Element> newBlock = CreateNode(blockAtom, pointToInsertBlock);
     NS_ENSURE_STATE(newBlock);
 
     // reposition selection to inside the block
@@ -2276,7 +2276,7 @@ HTMLEditor::Indent(const nsAString& aIndent)
     // parents of start of selection above, or just start of selection
     // otherwise.
     RefPtr<Element> newBQ =
-      CreateNode(nsGkAtoms::blockquote, pointToInsertBlockquote.AsRaw());
+      CreateNode(nsGkAtoms::blockquote, pointToInsertBlockquote);
     NS_ENSURE_STATE(newBQ);
     // put a space in it so layout will draw the list item
     rv = selection->Collapse(newBQ, 0);
@@ -2687,7 +2687,7 @@ HTMLEditor::InsertLinkAroundSelection(nsIDOMElement* aAnchorElement)
 
   // Be sure we were given an anchor element
   nsCOMPtr<nsIContent> content = do_QueryInterface(aAnchorElement);
-  RefPtr<HTMLAnchorElement> anchor = HTMLAnchorElement::FromContentOrNull(content);
+  RefPtr<HTMLAnchorElement> anchor = HTMLAnchorElement::FromNodeOrNull(content);
   if (!anchor) {
     return NS_OK;
   }
@@ -3002,16 +3002,8 @@ HTMLEditor::EnableExistingStyleSheet(const nsAString& aURL)
   nsCOMPtr<nsIDocument> document = GetDocument();
   sheet->SetAssociatedDocument(document, StyleSheet::NotOwnedByDocument);
 
-  if (sheet->IsServo()) {
-    // XXXheycam ServoStyleSheets don't support being enabled/disabled yet.
-    NS_ERROR("stylo: ServoStyleSheets can't be disabled yet");
-    return true;
-  }
-#ifdef MOZ_OLD_STYLE
-  sheet->AsGecko()->SetDisabled(false);
-#else
-  MOZ_CRASH("old style system disabled");
-#endif
+  // FIXME: This used to do sheet->SetDisabled(false), figure out if we can
+  // just remove all this code in bug 1449522, since it seems unused.
   return true;
 }
 
@@ -3197,7 +3189,7 @@ HTMLEditor::DeleteNode(nsIDOMNode* aNode)
 }
 
 nsresult
-HTMLEditor::DeleteText(nsGenericDOMDataNode& aCharData,
+HTMLEditor::DeleteText(CharacterData& aCharData,
                        uint32_t aOffset,
                        uint32_t aLength)
 {
@@ -3655,10 +3647,7 @@ HTMLEditor::CollapseAdjacentTextNodes(nsRange* aInRange)
     // get the prev sibling of the right node, and see if its leftTextNode
     nsCOMPtr<nsINode> prevSibOfRightNode = rightTextNode->GetPreviousSibling();
     if (prevSibOfRightNode && prevSibOfRightNode == leftTextNode) {
-      nsCOMPtr<nsINode> parent = rightTextNode->GetParentNode();
-      NS_ENSURE_TRUE(parent, NS_ERROR_NULL_POINTER);
-      rv = JoinNodes(leftTextNode->AsDOMNode(), rightTextNode->AsDOMNode(),
-                     parent->AsDOMNode());
+      rv = JoinNodes(*leftTextNode, *rightTextNode);
       NS_ENSURE_SUCCESS(rv, rv);
     }
 
@@ -3805,9 +3794,10 @@ HTMLEditor::GetPreviousHTMLElementOrTextInternal(nsINode& aNode,
                             GetPreviousElementOrText(aNode);
 }
 
+template<typename PT, typename CT>
 nsIContent*
 HTMLEditor::GetPreviousHTMLElementOrTextInternal(
-              const EditorRawDOMPoint& aPoint,
+              const EditorDOMPointBase<PT, CT>& aPoint,
               bool aNoBlockCrossing)
 {
   if (!GetActiveEditingHost()) {
@@ -3828,9 +3818,11 @@ HTMLEditor::GetPreviousEditableHTMLNodeInternal(nsINode& aNode,
                             GetPreviousEditableNode(aNode);
 }
 
+template<typename PT, typename CT>
 nsIContent*
-HTMLEditor::GetPreviousEditableHTMLNodeInternal(const EditorRawDOMPoint& aPoint,
-                                                bool aNoBlockCrossing)
+HTMLEditor::GetPreviousEditableHTMLNodeInternal(
+              const EditorDOMPointBase<PT, CT>& aPoint,
+              bool aNoBlockCrossing)
 {
   if (!GetActiveEditingHost()) {
     return nullptr;
@@ -3850,9 +3842,11 @@ HTMLEditor::GetNextHTMLElementOrTextInternal(nsINode& aNode,
                             GetNextElementOrText(aNode);
 }
 
+template<typename PT, typename CT>
 nsIContent*
-HTMLEditor::GetNextHTMLElementOrTextInternal(const EditorRawDOMPoint& aPoint,
-                                             bool aNoBlockCrossing)
+HTMLEditor::GetNextHTMLElementOrTextInternal(
+              const EditorDOMPointBase<PT, CT>& aPoint,
+              bool aNoBlockCrossing)
 {
   if (!GetActiveEditingHost()) {
     return nullptr;
@@ -3872,9 +3866,11 @@ HTMLEditor::GetNextEditableHTMLNodeInternal(nsINode& aNode,
                             GetNextEditableNode(aNode);
 }
 
+template<typename PT, typename CT>
 nsIContent*
-HTMLEditor::GetNextEditableHTMLNodeInternal(const EditorRawDOMPoint& aPoint,
-                                            bool aNoBlockCrossing)
+HTMLEditor::GetNextEditableHTMLNodeInternal(
+              const EditorDOMPointBase<PT, CT>& aPoint,
+              bool aNoBlockCrossing)
 {
   if (!GetActiveEditingHost()) {
     return nullptr;
@@ -4007,7 +4003,8 @@ HTMLEditor::IsVisibleTextNode(Text& aText)
   nsCOMPtr<nsINode> nextVisibleNode;
   int32_t unused = 0;
   WSType visibleNodeType;
-  wsRunObj.NextVisibleNode(&aText, 0, address_of(nextVisibleNode),
+  wsRunObj.NextVisibleNode(EditorRawDOMPoint(&aText, 0),
+                           address_of(nextVisibleNode),
                            &unused, &visibleNodeType);
   return (visibleNodeType == WSType::normalWS ||
           visibleNodeType == WSType::text) &&
@@ -4019,18 +4016,6 @@ HTMLEditor::IsVisibleTextNode(Text& aText)
  * children and still be considered empty, if the children are empty or
  * non-editable.
  */
-nsresult
-HTMLEditor::IsEmptyNode(nsIDOMNode*aNode,
-                        bool* outIsEmptyNode,
-                        bool aSingleBRDoesntCount,
-                        bool aListOrCellNotEmpty,
-                        bool aSafeToAskFrames)
-{
-  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
-  return IsEmptyNode(node, outIsEmptyNode, aSingleBRDoesntCount,
-                     aListOrCellNotEmpty, aSafeToAskFrames);
-}
-
 nsresult
 HTMLEditor::IsEmptyNode(nsINode* aNode,
                         bool* outIsEmptyNode,
@@ -4991,6 +4976,16 @@ Element*
 HTMLEditor::GetEditorRoot()
 {
   return GetActiveEditingHost();
+}
+
+nsHTMLDocument*
+HTMLEditor::GetHTMLDocument() const
+{
+  nsIDocument* doc = GetDocument();
+  if (NS_WARN_IF(!doc)) {
+    return nullptr;
+  }
+  return doc->AsHTMLDocument();
 }
 
 } // namespace mozilla

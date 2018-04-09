@@ -7,6 +7,24 @@ const paymentDialog = window.parent.document.querySelector("payment-dialog");
 // happen through setStateFromParent which includes some consistency checks.
 const requestStore = paymentDialog.requestStore;
 
+// keep the payment options checkboxes in sync w. actual state
+const paymentOptionsUpdater = {
+  stateChangeCallback(state) {
+    this.render(state);
+  },
+  render(state) {
+    let options = state.request.paymentOptions;
+    let checkboxes = document.querySelectorAll("#paymentOptions input[type='checkbox']");
+    for (let input of checkboxes) {
+      if (options.hasOwnProperty(input.name)) {
+        input.checked = options[input.name];
+      }
+    }
+  },
+};
+
+requestStore.subscribe(paymentOptionsUpdater);
+
 let REQUEST_1 = {
   tabId: 9,
   topLevelPrincipal: {URI: {displayHost: "tschaeff.github.io"}},
@@ -120,33 +138,12 @@ let REQUEST_2 = {
   },
 };
 
-let REQUEST_CONTACT_NO_SHIPPING = {
-  tabId: 10,
-  topLevelPrincipal: {URI: {displayHost: "example.org"}},
-  requestId: "8288347a-ccec-4190-b4b1-673dbc709738",
-  paymentMethods: [],
-  paymentDetails: {
-    id: "",
-    totalItem: {label: "", amount: {currency: "EUR", value: "1234.56"}, pending: false},
-    displayItems: [],
-    shippingOptions: [],
-    modifiers: null,
-    error: "",
-  },
-  paymentOptions: {
-    requestPayerName: true,
-    requestPayerEmail: true,
-    requestPayerPhone: true,
-    requestShipping: false,
-    shippingType: "shipping",
-  },
-};
-
 let ADDRESSES_1 = {
   "48bnds6854t": {
     "address-level1": "MI",
     "address-level2": "Some City",
     "country": "US",
+    "email": "foo@bar.com",
     "guid": "48bnds6854t",
     "name": "Mr. Foo",
     "postal-code": "90210",
@@ -162,6 +159,53 @@ let ADDRESSES_1 = {
     "postal-code": "94041",
     "street-address": "P.O. Box 123",
     "tel": "+1 650 555-5555",
+  },
+};
+
+let DUPED_ADDRESSES = {
+  "a9e830667189": {
+    "street-address": "Unit 1\n1505 Northeast Kentucky Industrial Parkway \n",
+    "address-level2": "Greenup",
+    "address-level1": "KY",
+    "postal-code": "41144",
+    "country": "US",
+    "email": "bob@example.com",
+    "guid": "a9e830667189",
+    "tel": "+19871234567",
+    "name": "Bob Smith",
+  },
+  "72a15aed206d": {
+    "street-address": "1 New St",
+    "address-level2": "York",
+    "address-level1": "SC",
+    "postal-code": "29745",
+    "country": "US",
+    "guid": "72a15aed206d",
+    "tel": "+19871234567",
+    "name": "Mary Sue",
+    "address-line1": "1 New St",
+  },
+  "2b4dce0fbc1f": {
+    "street-address": "123 Park St",
+    "address-level2": "Springfield",
+    "address-level1": "OR",
+    "postal-code": "97403",
+    "country": "US",
+    "email": "rita@foo.com",
+    "guid": "2b4dce0fbc1f",
+    "name": "Rita Foo",
+    "address-line1": "123 Park St",
+  },
+  "46b2635a5b26": {
+    "street-address": "432 Another St",
+    "address-level2": "Springfield",
+    "address-level1": "OR",
+    "postal-code": "97402",
+    "country": "US",
+    "email": "rita@foo.com",
+    "guid": "46b2635a5b26",
+    "name": "Rita Foo",
+    "address-line1": "432 Another St",
   },
 };
 
@@ -244,6 +288,10 @@ let buttonActions = {
     paymentDialog.setStateFromParent({savedAddresses: ADDRESSES_1});
   },
 
+  setDupesAddresses() {
+    paymentDialog.setStateFromParent({savedAddresses: DUPED_ADDRESSES});
+  },
+
   setBasicCards1() {
     paymentDialog.setStateFromParent({savedBasicCards: BASIC_CARDS_1});
   },
@@ -268,8 +316,29 @@ let buttonActions = {
     requestStore.setState({request: REQUEST_2});
   },
 
-  setRequestContactNoShipping() {
-    requestStore.setState({request: REQUEST_CONTACT_NO_SHIPPING});
+  setRequestPayerName() {
+    buttonActions.setPaymentOptions();
+  },
+  setRequestPayerEmail() {
+    buttonActions.setPaymentOptions();
+  },
+  setRequestPayerPhone() {
+    buttonActions.setPaymentOptions();
+  },
+  setRequestShipping() {
+    buttonActions.setPaymentOptions();
+  },
+
+  setPaymentOptions() {
+    let options = {};
+    let checkboxes = document.querySelectorAll("#paymentOptions input[type='checkbox']");
+    for (let input of checkboxes) {
+      options[input.name] = input.checked;
+    }
+    let req = Object.assign({}, requestStore.getState().request, {
+      paymentOptions: options,
+    });
+    requestStore.setState({ request: req });
   },
 
   setShippingError() {
@@ -303,6 +372,12 @@ let buttonActions = {
   setStateFail() {
     requestStore.setState({
       completionState: "fail",
+    });
+  },
+
+  setStateUnknown() {
+    requestStore.setState({
+      completionState: "unknown",
     });
   },
 };

@@ -17,16 +17,16 @@
 #include "nsISupportsImpl.h"
 
 class nsIGlobalObject;
-class nsStyleContext;
 class nsPresContext;
 class nsCSSPropertyIDSet;
 
 namespace mozilla {
+class ComputedStyle;
 enum class CSSPseudoElementType : uint8_t;
-class GeckoStyleContext;
+class GeckoComputedStyle;
 struct Keyframe;
 struct StyleTransition;
-class ServoStyleContext;
+class ComputedStyle;
 } // namespace mozilla
 
 /*****************************************************************************
@@ -307,7 +307,6 @@ class nsTransitionManager final
 public:
   explicit nsTransitionManager(nsPresContext *aPresContext)
     : mozilla::CommonAnimationManager<mozilla::dom::CSSTransition>(aPresContext)
-    , mInAnimationOnlyStyleUpdate(false)
   {
   }
 
@@ -316,25 +315,6 @@ public:
   typedef mozilla::AnimationCollection<mozilla::dom::CSSTransition>
     CSSTransitionCollection;
 
-#ifdef MOZ_OLD_STYLE
-  /**
-   * StyleContextChanged
-   *
-   * To be called from RestyleManager::TryInitiatingTransition when the
-   * style of an element has changed, to initiate transitions from
-   * that style change.  For style contexts with :before and :after
-   * pseudos, aElement is expected to be the generated before/after
-   * element.
-   *
-   * It may modify the new style context (by replacing
-   * *aNewStyleContext) to cover up some of the changes for the duration
-   * of the restyling of descendants.  If it does, this function will
-   * take care of causing the necessary restyle afterwards.
-   */
-  void StyleContextChanged(mozilla::dom::Element *aElement,
-                           mozilla::GeckoStyleContext* aOldStyleContext,
-                           RefPtr<mozilla::GeckoStyleContext>* aNewStyleContext /* inout */);
-#endif
 
   /**
    * Update transitions for stylo.
@@ -342,30 +322,9 @@ public:
   bool UpdateTransitions(
     mozilla::dom::Element *aElement,
     mozilla::CSSPseudoElementType aPseudoType,
-    const mozilla::ServoStyleContext* aOldStyle,
-    const mozilla::ServoStyleContext* aNewStyle);
+    const mozilla::ComputedStyle* aOldStyle,
+    const mozilla::ComputedStyle* aNewStyle);
 
-#ifdef MOZ_OLD_STYLE
-  /**
-   * When we're resolving style for an element that previously didn't have
-   * style, we might have some old finished transitions for it, if,
-   * say, it was display:none for a while, but previously displayed.
-   *
-   * This method removes any finished transitions that don't match the
-   * new style.
-   */
-  void PruneCompletedTransitions(mozilla::dom::Element* aElement,
-                                 mozilla::CSSPseudoElementType aPseudoType,
-                                 mozilla::GeckoStyleContext* aNewStyleContext);
-#endif
-
-  void SetInAnimationOnlyStyleUpdate(bool aInAnimationOnlyUpdate) {
-    mInAnimationOnlyStyleUpdate = aInAnimationOnlyUpdate;
-  }
-
-  bool InAnimationOnlyStyleUpdate() const {
-    return mInAnimationOnlyStyleUpdate;
-  }
 
 protected:
   virtual ~nsTransitionManager() {}
@@ -398,7 +357,6 @@ protected:
                                bool* aStartedAny,
                                nsCSSPropertyIDSet* aWhichStarted);
 
-  bool mInAnimationOnlyStyleUpdate;
 };
 
 #endif /* !defined(nsTransitionManager_h_) */

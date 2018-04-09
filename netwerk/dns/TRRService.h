@@ -19,12 +19,14 @@ namespace net {
 
 class TRRService
   : public nsIObserver
+  , public nsITimerCallback
   , public nsSupportsWeakReference
   , public AHostResolver
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIOBSERVER
+  NS_DECL_NSITIMERCALLBACK
 
   TRRService();
   nsresult Init();
@@ -34,6 +36,8 @@ public:
   uint32_t Mode() { return mMode; }
   bool AllowRFC1918() { return mRfc1918; }
   bool UseGET() { return mUseGET; }
+  bool EarlyAAAA() { return mEarlyAAAA; }
+  bool DisableIPv6() { return mDisableIPv6; }
   nsresult GetURI(nsCString &result);
   nsresult GetCredentials(nsCString &result);
   uint32_t GetRequestTimeout() { return mTRRTimeout; }
@@ -65,6 +69,8 @@ private:
   Atomic<bool, Relaxed> mRfc1918; // okay with local IP addresses in DOH responses?
   Atomic<bool, Relaxed> mCaptiveIsPassed; // set when captive portal check is passed
   Atomic<bool, Relaxed> mUseGET; // do DOH using GET requests (instead of POST)
+  Atomic<bool, Relaxed> mEarlyAAAA; // allow use of AAAA results before A is in
+  Atomic<bool, Relaxed> mDisableIPv6; // don't even try
 
   // TRR Blacklist storage
   RefPtr<DataStorage> mTRRBLStorage;
@@ -77,7 +83,9 @@ private:
     CONFIRM_FAILED = 3
   };
   Atomic<ConfirmationState, Relaxed>  mConfirmationState;
-  RefPtr<TRR>           mConfirmer;
+  RefPtr<TRR> mConfirmer;
+  nsCOMPtr<nsITimer> mRetryConfirmTimer;
+  uint32_t mRetryConfirmInterval; // milliseconds until retry
 };
 
 extern TRRService *gTRRService;

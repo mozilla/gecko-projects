@@ -3,8 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head.js */
-
 // Tests if the JSTerm sandbox is updated when the user navigates from one
 // domain to another, in order to avoid permission denied errors with a sandbox
 // created for a different origin. See Bug 664688.
@@ -16,7 +14,7 @@ const BASE_URI = "browser/devtools/client/webconsole/" +
 const TEST_URI1 = "http://example.com/" + BASE_URI;
 const TEST_URI2 = "http://example.org/" + BASE_URI;
 
-add_task(async function () {
+add_task(async function() {
   pushPref("devtools.webconsole.persistlog", false);
 
   let hud = await openNewTabAndConsole(TEST_URI1);

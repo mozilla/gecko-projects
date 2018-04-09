@@ -229,22 +229,9 @@ let gSiteDataSettings = {
           SiteDataManager.removeAll();
         }
       } else {
-        let args = {
-          hosts: removals,
-          allowed: false
-        };
-        let features = "centerscreen,chrome,modal,resizable=no";
-        window.openDialog("chrome://browser/content/preferences/siteDataRemoveSelected.xul", "", features, args);
-        allowed = args.allowed;
+        allowed = SiteDataManager.promptSiteDataRemoval(window, removals);
         if (allowed) {
-          try {
-            SiteDataManager.remove(removals);
-          } catch (e) {
-            // Hit error, maybe remove unknown site.
-            // Let's print out the error, then proceed to close this settings dialog.
-            // When we next open again we will once more get sites from the SiteDataManager and refresh the list.
-            Cu.reportError(e);
-          }
+          SiteDataManager.remove(removals).catch(Cu.reportError);
         }
       }
     }
@@ -263,6 +250,7 @@ let gSiteDataSettings = {
   onClickTreeCol(e) {
     this._sortSites(this._sites, e.target);
     this._buildSitesList(this._sites);
+    this._list.clearSelection();
   },
 
   onCommandSearch() {

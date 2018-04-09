@@ -32,7 +32,7 @@ var StarUI = {
     // initially the panel is hidden
     // to avoid impacting startup / new window performance
     element.hidden = false;
-    element.addEventListener("keypress", this);
+    element.addEventListener("keypress", this, {mozSystemGroup: true});
     element.addEventListener("mousedown", this);
     element.addEventListener("mouseout", this);
     element.addEventListener("mousemove", this);
@@ -201,8 +201,7 @@ var StarUI = {
     }
   },
 
-  _overlayLoaded: false,
-  _overlayLoading: false,
+  _bookmarkPopupInitialized: false,
   async showEditBookmarkPopup(aNode, aAnchorElement, aPosition, aIsNewBookmark, aUrl) {
     // Slow double-clicks (not true double-clicks) shouldn't
     // cause the panel to flicker.
@@ -214,32 +213,19 @@ var StarUI = {
     this._isNewBookmark = aIsNewBookmark;
     this._itemGuids = null;
 
-    // Performance: load the overlay the first time the panel is opened
-    // (see bug 392443).
-    if (this._overlayLoading)
-      return;
-
-    if (this._overlayLoaded) {
+    if (this._bookmarkPopupInitialized) {
       await this._doShowEditBookmarkPanel(aNode, aAnchorElement, aPosition, aUrl);
       return;
     }
+    this._bookmarkPopupInitialized = true;
+    // Move the header (star, title, button) into the grid,
+    // so that it aligns nicely with the other items (bug 484022).
+    let header = this._element("editBookmarkPanelHeader");
+    let rows = this._element("editBookmarkPanelGrid").lastChild;
+    rows.insertBefore(header, rows.firstChild);
+    header.hidden = false;
 
-    this._overlayLoading = true;
-    document.loadOverlay(
-      "chrome://browser/content/places/editBookmarkOverlay.xul",
-      (aSubject, aTopic, aData) => {
-        // Move the header (star, title, button) into the grid,
-        // so that it aligns nicely with the other items (bug 484022).
-        let header = this._element("editBookmarkPanelHeader");
-        let rows = this._element("editBookmarkPanelGrid").lastChild;
-        rows.insertBefore(header, rows.firstChild);
-        header.hidden = false;
-
-        this._overlayLoading = false;
-        this._overlayLoaded = true;
-        this._doShowEditBookmarkPanel(aNode, aAnchorElement, aPosition, aUrl);
-      }
-    );
+    await this._doShowEditBookmarkPanel(aNode, aAnchorElement, aPosition, aUrl);
   },
 
   async _doShowEditBookmarkPanel(aNode, aAnchorElement, aPosition, aUrl) {
@@ -352,14 +338,6 @@ var StarUI = {
     this._batching = false;
   }
 };
-
-// Checks if an element is visible without flushing layout changes.
-function isVisible(element) {
-  let windowUtils = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                          .getInterface(Ci.nsIDOMWindowUtils);
-  let bounds = windowUtils.getBoundsWithoutFlushing(element);
-  return bounds.height > 0 && bounds.width > 0;
-}
 
 var PlacesCommandHook = {
   /**
@@ -979,8 +957,7 @@ var PlacesMenuDNDHandler = {
   _isStaticContainer: function PMDH__isContainer(node) {
     let isMenu = node.localName == "menu" ||
                  (node.localName == "toolbarbutton" &&
-                  (node.getAttribute("type") == "menu" ||
-                   node.getAttribute("type") == "menu-button"));
+                  node.getAttribute("type") == "menu");
     let isStatic = !("_placesNode" in node) && node.lastChild &&
                    node.lastChild.hasAttribute("placespopup") &&
                    !node.parentNode.hasAttribute("placespopup");
@@ -1273,16 +1250,6 @@ var BookmarkingUI = {
     return BrowserPageActions.panelAnchorNodeForAction(action);
   },
 
-  get notifier() {
-    delete this.notifier;
-    return this.notifier = document.getElementById("bookmarked-notification-anchor");
-  },
-
-  get dropmarkerNotifier() {
-    delete this.dropmarkerNotifier;
-    return this.dropmarkerNotifier = document.getElementById("bookmarked-notification-dropmarker-anchor");
-  },
-
   get broadcaster() {
     delete this.broadcaster;
     let broadcaster = document.getElementById("bookmarkThisPageBroadcaster");
@@ -1398,18 +1365,7 @@ var BookmarkingUI = {
   MOBILE_BOOKMARKS_PREF: "browser.bookmarks.showMobileBookmarks",
 
   _shouldShowMobileBookmarks() {
-    try {
-      return Services.prefs.getBoolPref(this.MOBILE_BOOKMARKS_PREF);
-    } catch (e) {}
-    // No pref set (or invalid pref set), look for a mobile bookmarks left pane query.
-    const organizerQueryAnno = "PlacesOrganizer/OrganizerQuery";
-    const mobileBookmarksAnno = "MobileBookmarks";
-    let shouldShow = PlacesUtils.annotations.getItemsWithAnnotation(organizerQueryAnno, {}).filter(
-      id => PlacesUtils.annotations.getItemAnnotation(id, organizerQueryAnno) == mobileBookmarksAnno
-    ).length > 0;
-    // Sync will change this pref if/when it adds a mobile bookmarks query.
-    Services.prefs.setBoolPref(this.MOBILE_BOOKMARKS_PREF, shouldShow);
-    return shouldShow;
+    return Services.prefs.getBoolPref(this.MOBILE_BOOKMARKS_PREF, false);
   },
 
   _initMobileBookmarks(mobileMenuItem) {
@@ -1597,69 +1553,6 @@ var BookmarkingUI = {
     this._initMobileBookmarks(document.getElementById("menu_mobileBookmarks"));
   },
 
-  _showBookmarkedNotification: function BUI_showBookmarkedNotification() {
-    function getCenteringTransformForRects(rectToPosition, referenceRect) {
-      let topDiff = referenceRect.top - rectToPosition.top;
-      let leftDiff = referenceRect.left - rectToPosition.left;
-      let heightDiff = referenceRect.height - rectToPosition.height;
-      let widthDiff = referenceRect.width - rectToPosition.width;
-      return [(leftDiff + .5 * widthDiff) + "px", (topDiff + .5 * heightDiff) + "px"];
-    }
-
-    if (this._notificationTimeout) {
-      clearTimeout(this._notificationTimeout);
-    }
-
-    if (this.notifier.style.transform == "") {
-      // Get all the relevant nodes and computed style objects
-      let dropmarker = document.getAnonymousElementByAttribute(this.button, "anonid", "dropmarker");
-      let dropmarkerIcon = document.getAnonymousElementByAttribute(dropmarker, "class", "dropmarker-icon");
-      let dropmarkerStyle = getComputedStyle(dropmarkerIcon);
-
-      // Check for RTL and get bounds
-      let isRTL = getComputedStyle(this.button).direction == "rtl";
-      let buttonRect = this.button.getBoundingClientRect();
-      let notifierRect = this.notifier.getBoundingClientRect();
-      let dropmarkerRect = dropmarkerIcon.getBoundingClientRect();
-      let dropmarkerNotifierRect = this.dropmarkerNotifier.getBoundingClientRect();
-
-      // Compute, but do not set, transform for star icon
-      let [translateX, translateY] = getCenteringTransformForRects(notifierRect, buttonRect);
-      let starIconTransform = "translate(" + translateX + ", " + translateY + ")";
-      if (isRTL) {
-        starIconTransform += " scaleX(-1)";
-      }
-
-      // Compute, but do not set, transform for dropmarker
-      [translateX, translateY] = getCenteringTransformForRects(dropmarkerNotifierRect, dropmarkerRect);
-      let dropmarkerTransform = "translate(" + translateX + ", " + translateY + ")";
-
-      // Do all layout invalidation in one go:
-      this.notifier.style.transform = starIconTransform;
-      this.dropmarkerNotifier.style.transform = dropmarkerTransform;
-
-      let dropmarkerAnimationNode = this.dropmarkerNotifier.firstChild;
-      dropmarkerAnimationNode.style.listStyleImage = dropmarkerStyle.listStyleImage;
-      dropmarkerAnimationNode.style.fill = dropmarkerStyle.fill;
-    }
-
-    let isInOverflowPanel = this.button.getAttribute("overflowedItem") == "true";
-    if (!isInOverflowPanel) {
-      this.notifier.setAttribute("notification", "finish");
-      this.button.setAttribute("notification", "finish");
-      this.dropmarkerNotifier.setAttribute("notification", "finish");
-    }
-
-    this._notificationTimeout = setTimeout( () => {
-      this.notifier.removeAttribute("notification");
-      this.dropmarkerNotifier.removeAttribute("notification");
-      this.button.removeAttribute("notification");
-
-      this.dropmarkerNotifier.style.transform = "";
-      this.notifier.style.transform = "";
-    }, 1000);
-  },
-
   showSubView(anchor) {
     this._showSubView(null, anchor);
   },
@@ -1752,17 +1645,6 @@ var BookmarkingUI = {
     this._panelMenuView.uninit();
     delete this._panelMenuView;
     aEvent.target.removeEventListener("ViewHiding", this);
-  },
-
-  onPanelMenuViewCommand: function BUI_onPanelMenuViewCommand(aEvent) {
-    let target = aEvent.originalTarget;
-    if (!target._placesNode)
-      return;
-    if (PlacesUtils.nodeIsContainer(target._placesNode))
-      PlacesCommandHook.showPlacesOrganizer([ "BookmarksMenu", target._placesNode.itemId ]);
-    else
-      PlacesUIUtils.openNodeWithEvent(target._placesNode, aEvent);
-    PanelUI.hide();
   },
 
   showBookmarkingTools(triggerNode) {

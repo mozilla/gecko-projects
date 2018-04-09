@@ -33,24 +33,13 @@ class ZoneGroup
     JSRuntime* const runtime;
 
   private:
-    // The context with exclusive access to this zone group.
-    UnprotectedData<CooperatingContext> ownerContext_;
-
-    // The number of times the context has entered this zone group.
-    UnprotectedData<size_t> enterCount;
-
-    // If this flag is true, then we may need to block before entering this zone
-    // group. Blocking happens using JSContext::yieldToEmbedding.
-    UnprotectedData<bool> useExclusiveLocking_;
+    // The helper thread context with exclusive access to this zone group, if
+    // usedByHelperThread(), or nullptr when on the main thread.
+    UnprotectedData<JSContext*> helperThreadOwnerContext_;
 
   public:
-    CooperatingContext& ownerContext() { return ownerContext_.ref(); }
-    void* addressOfOwnerContext() { return &ownerContext_.ref().cx; }
-
-    void enter(JSContext* cx);
-    void leave();
-    bool canEnterWithoutYielding(JSContext* cx);
-    bool ownedByCurrentThread();
+    bool ownedByCurrentHelperThread();
+    void setHelperThreadOwnerContext(JSContext* cx);
 
     // All zones in the group.
   private:
@@ -93,17 +82,11 @@ class ZoneGroup
     explicit ZoneGroup(JSRuntime* runtime);
     ~ZoneGroup();
 
-    bool init();
-
     inline Nursery& nursery();
     inline gc::StoreBuffer& storeBuffer();
 
     inline bool isCollecting();
     inline bool isGCScheduled();
-
-    // See the useExclusiveLocking_ field above.
-    void setUseExclusiveLocking() { useExclusiveLocking_ = true; }
-    bool useExclusiveLocking() { return useExclusiveLocking_; }
 
     // Delete an empty zone after its contents have been merged.
     void deleteEmptyZone(Zone* zone);
@@ -123,8 +106,6 @@ class ZoneGroup
         ionBailAfter_ = after;
     }
 #endif
-
-    ZoneGroupData<jit::JitZoneGroup*> jitZoneGroup;
 
   private:
     /* Linked list of all Debugger objects in the group. */

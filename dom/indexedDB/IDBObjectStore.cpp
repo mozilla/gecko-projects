@@ -700,7 +700,8 @@ GetAddInfoCallback(JSContext* aCx, void* aClosure)
     nullptr /* reportError */,
     nullptr /* readTransfer */,
     nullptr /* writeTransfer */,
-    nullptr /* freeTransfer */
+    nullptr /* freeTransfer */,
+    nullptr /* canTransfer */
   };
 
   MOZ_ASSERT(aCx);
@@ -1323,6 +1324,7 @@ IDBObjectStore::DeserializeValue(JSContext* aCx,
     nullptr,
     nullptr,
     nullptr,
+    nullptr,
     nullptr
   };
 
@@ -1377,7 +1379,7 @@ private:
       MOZ_ASSERT(xpc, "This should never be null!");
 
       // Let's use a null principal.
-      nsCOMPtr<nsIPrincipal> principal = NullPrincipal::Create();
+      nsCOMPtr<nsIPrincipal> principal = NullPrincipal::CreateWithoutOriginAttributes();
 
       JS::Rooted<JSObject*> sandbox(aCx);
       nsresult rv = xpc->CreateSandbox(aCx, principal, sandbox.address());
@@ -1496,6 +1498,7 @@ private:
       nullptr,
       nullptr,
       nullptr,
+      nullptr,
       nullptr
     };
 
@@ -1605,6 +1608,7 @@ private:
   {
     static const JSStructuredCloneCallbacks callbacks = {
       CommonStructuredCloneReadCallback,
+      nullptr,
       nullptr,
       nullptr,
       nullptr,

@@ -38,7 +38,7 @@
 #include "nsBoxLayoutState.h"
 #include "mozilla/dom/Touch.h"
 #include "mozilla/Move.h"
-#include "nsStyleContext.h"
+#include "mozilla/ComputedStyle.h"
 #include "nsPlaceholderFrame.h"
 #include "nsPresContext.h"
 #include "nsCOMPtr.h"
@@ -96,16 +96,16 @@ nsIFrame* nsBoxFrame::mDebugChild = nullptr;
 #endif
 
 nsIFrame*
-NS_NewBoxFrame(nsIPresShell* aPresShell, nsStyleContext* aContext, bool aIsRoot, nsBoxLayout* aLayoutManager)
+NS_NewBoxFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle, bool aIsRoot, nsBoxLayout* aLayoutManager)
 {
-  return new (aPresShell) nsBoxFrame(aContext, nsBoxFrame::kClassID,
+  return new (aPresShell) nsBoxFrame(aStyle, nsBoxFrame::kClassID,
                                      aIsRoot, aLayoutManager);
 }
 
 nsIFrame*
-NS_NewBoxFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewBoxFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsBoxFrame(aContext);
+  return new (aPresShell) nsBoxFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsBoxFrame)
@@ -116,11 +116,11 @@ NS_QUERYFRAME_HEAD(nsBoxFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 #endif
 
-nsBoxFrame::nsBoxFrame(nsStyleContext* aContext,
+nsBoxFrame::nsBoxFrame(ComputedStyle* aStyle,
                        ClassID aID,
                        bool aIsRoot,
                        nsBoxLayout* aLayoutManager)
-  : nsContainerFrame(aContext, aID)
+  : nsContainerFrame(aStyle, aID)
   , mFlex(0)
   , mAscent(0)
 {
@@ -161,9 +161,9 @@ nsBoxFrame::SetInitialChildList(ChildListID     aListID,
 }
 
 /* virtual */ void
-nsBoxFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
+nsBoxFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
 {
-  nsContainerFrame::DidSetStyleContext(aOldStyleContext);
+  nsContainerFrame::DidSetComputedStyle(aOldComputedStyle);
 
   // The values that CacheAttributes() computes depend on our style,
   // so we need to recompute them here...
@@ -204,7 +204,7 @@ nsBoxFrame::Init(nsIContent*       aContent,
 void nsBoxFrame::UpdateMouseThrough()
 {
   static Element::AttrValuesArray strings[] =
-    {&nsGkAtoms::never, &nsGkAtoms::always, nullptr};
+    {nsGkAtoms::never, nsGkAtoms::always, nullptr};
   switch (mContent->AsElement()->FindAttrValueIn(kNameSpaceID_None,
             nsGkAtoms::mousethrough, strings, eCaseMatters)) {
     case 0: AddStateBits(NS_FRAME_MOUSE_THROUGH_NEVER); break;
@@ -284,7 +284,7 @@ nsBoxFrame::GetInitialDebug(bool& aDebug)
     return false;
 
   static Element::AttrValuesArray strings[] =
-    {&nsGkAtoms::_false, &nsGkAtoms::_true, nullptr};
+    {nsGkAtoms::_false, nsGkAtoms::_true, nullptr};
   int32_t index = GetContent()->FindAttrValueIn(kNameSpaceID_None,
       nsGkAtoms::debug, strings, eCaseMatters);
   if (index >= 0) {
@@ -305,7 +305,7 @@ nsBoxFrame::GetInitialHAlignment(nsBoxFrame::Halignment& aHalign)
   Element* element = GetContent()->AsElement();
   // XXXdwh Everything inside this if statement is deprecated code.
   static Element::AttrValuesArray alignStrings[] =
-    {&nsGkAtoms::left, &nsGkAtoms::right, nullptr};
+    {nsGkAtoms::left, nsGkAtoms::right, nullptr};
   static const Halignment alignValues[] = {hAlign_Left, hAlign_Right};
   int32_t index = element->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::align,
       alignStrings, eCaseMatters);
@@ -319,7 +319,7 @@ nsBoxFrame::GetInitialHAlignment(nsBoxFrame::Halignment& aHalign)
   // we are checking the ALIGN attribute.
   nsAtom* attrName = IsXULHorizontal() ? nsGkAtoms::pack : nsGkAtoms::align;
   static Element::AttrValuesArray strings[] =
-    {&nsGkAtoms::_empty, &nsGkAtoms::start, &nsGkAtoms::center, &nsGkAtoms::end, nullptr};
+    {nsGkAtoms::_empty, nsGkAtoms::start, nsGkAtoms::center, nsGkAtoms::end, nullptr};
   static const Halignment values[] =
     {hAlign_Left/*not used*/, hAlign_Left, hAlign_Center, hAlign_Right};
   index = element->FindAttrValueIn(kNameSpaceID_None, attrName,
@@ -381,7 +381,7 @@ nsBoxFrame::GetInitialVAlignment(nsBoxFrame::Valignment& aValign)
   Element* element = GetContent()->AsElement();
 
   static Element::AttrValuesArray valignStrings[] =
-    {&nsGkAtoms::top, &nsGkAtoms::baseline, &nsGkAtoms::middle, &nsGkAtoms::bottom, nullptr};
+    {nsGkAtoms::top, nsGkAtoms::baseline, nsGkAtoms::middle, nsGkAtoms::bottom, nullptr};
   static const Valignment valignValues[] =
     {vAlign_Top, vAlign_BaseLine, vAlign_Middle, vAlign_Bottom};
   int32_t index = element->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::valign,
@@ -396,8 +396,8 @@ nsBoxFrame::GetInitialVAlignment(nsBoxFrame::Valignment& aValign)
   // we are checking the PACK attribute.
   nsAtom* attrName = IsXULHorizontal() ? nsGkAtoms::align : nsGkAtoms::pack;
   static Element::AttrValuesArray strings[] =
-    {&nsGkAtoms::_empty, &nsGkAtoms::start, &nsGkAtoms::center,
-     &nsGkAtoms::baseline, &nsGkAtoms::end, nullptr};
+    {nsGkAtoms::_empty, nsGkAtoms::start, nsGkAtoms::center,
+     nsGkAtoms::baseline, nsGkAtoms::end, nullptr};
   static const Valignment values[] =
     {vAlign_Top/*not used*/, vAlign_Top, vAlign_Middle, vAlign_BaseLine, vAlign_Bottom};
   index = element->FindAttrValueIn(kNameSpaceID_None, attrName,
@@ -473,7 +473,7 @@ nsBoxFrame::GetInitialOrientation(bool& aIsHorizontal)
     return;
 
   static Element::AttrValuesArray strings[] =
-    {&nsGkAtoms::vertical, &nsGkAtoms::horizontal, nullptr};
+    {nsGkAtoms::vertical, nsGkAtoms::horizontal, nullptr};
   int32_t index =
     GetContent()->AsElement()->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::orient,
                                                strings, eCaseMatters);
@@ -512,7 +512,7 @@ nsBoxFrame::GetInitialDirection(bool& aIsNormal)
   // the style system value.
   if (IsXULHorizontal()) {
     static Element::AttrValuesArray strings[] =
-      {&nsGkAtoms::reverse, &nsGkAtoms::ltr, &nsGkAtoms::rtl, nullptr};
+      {nsGkAtoms::reverse, nsGkAtoms::ltr, nsGkAtoms::rtl, nullptr};
     int32_t index = element->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::dir,
         strings, eCaseMatters);
     if (index >= 0) {
@@ -555,7 +555,7 @@ nsBoxFrame::GetInitialAutoStretch(bool& aStretch)
   // Check the align attribute.
   if (GetContent()->IsElement()) {
     static Element::AttrValuesArray strings[] =
-      {&nsGkAtoms::_empty, &nsGkAtoms::stretch, nullptr};
+      {nsGkAtoms::_empty, nsGkAtoms::stretch, nullptr};
     int32_t index =
       GetContent()->AsElement()->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::align,
                                                  strings, eCaseMatters);
@@ -770,7 +770,8 @@ nsBoxFrame::GetXULPrefSize(nsBoxLayoutState& aBoxLayoutState)
   nsSize size(0,0);
   DISPLAY_PREF_SIZE(this, size);
   if (!DoesNeedRecalc(mPrefSize)) {
-     return mPrefSize;
+    size = mPrefSize;
+    return size;
   }
 
 #ifdef DEBUG_LAYOUT
@@ -833,7 +834,8 @@ nsBoxFrame::GetXULMinSize(nsBoxLayoutState& aBoxLayoutState)
   nsSize size(0,0);
   DISPLAY_MIN_SIZE(this, size);
   if (!DoesNeedRecalc(mMinSize)) {
-    return mMinSize;
+    size = mMinSize;
+    return size;
   }
 
 #ifdef DEBUG_LAYOUT
@@ -873,7 +875,8 @@ nsBoxFrame::GetXULMaxSize(nsBoxLayoutState& aBoxLayoutState)
   nsSize size(NS_INTRINSICSIZE, NS_INTRINSICSIZE);
   DISPLAY_MAX_SIZE(this, size);
   if (!DoesNeedRecalc(mMaxSize)) {
-    return mMaxSize;
+    size = mMaxSize;
+    return size;
   }
 
 #ifdef DEBUG_LAYOUT
@@ -1927,7 +1930,7 @@ nsBoxFrame::AppendDirectlyOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult)
 
 // Helper less-than-or-equal function, used in CheckBoxOrder() as a
 // template-parameter for the sorting functions.
-bool
+static bool
 IsBoxOrdinalLEQ(nsIFrame* aFrame1,
                 nsIFrame* aFrame2)
 {

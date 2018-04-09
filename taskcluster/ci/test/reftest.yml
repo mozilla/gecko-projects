@@ -24,7 +24,7 @@ crashtest:
     treeherder-symbol: R(C)
     run-on-projects:
         by-test-platform:
-            .*-qr/.*: ['mozilla-central', 'autoland', 'mozilla-inbound', 'try']  # exclude beta and project branches
+            .*-qr/.*: ['trunk', 'try']  # exclude beta and project branches
             default: built-projects
     instance-size:
         by-test-platform:
@@ -54,6 +54,10 @@ jsreftest:
     suite: reftest/jsreftest
     schedules-component: jsreftest  # scheduling for this reftest is different from the others..
     treeherder-symbol: R(J)
+    run-on-projects:
+        by-test-platform:
+            .*-qr/.*: ['trunk', 'try']  # exclude beta and project branches
+            default: built-projects
     instance-size:
         by-test-platform:
             android.*: xlarge
@@ -69,13 +73,10 @@ jsreftest:
             linux32/debug: 5
             macosx.*: 2
             default: 3
-    e10s:
-        by-test-platform:
-            linux64-jsdcov/opt: false
-            default: true
     max-run-time:
         by-test-platform:
             android.*: 7200
+            windows10-64-ccov/debug: 7200
             default: 3600
     tier:
         by-test-platform:
@@ -87,23 +88,27 @@ reftest:
     description: "Reftest run"
     suite: reftest/reftest
     treeherder-symbol: R(R)
-    worker-type:
+    run-on-projects:
         by-test-platform:
-            windows10-64.*: buildbot-bridge/buildbot-bridge
-            default: null
+            .*-qr/.*: ['trunk', 'try']  # exclude beta and project branches
+            default: built-projects
     instance-size:
         by-test-platform:
             android.*: xlarge
             default: default
-    virtualization: virtual-with-gpu
+    virtualization:
+        by-test-platform:
+            windows10.*: hardware
+            default: virtual-with-gpu
     chunks:
         by-test-platform:
             android-4.3-arm7-api-16/debug: 56
             android.*: 28
             macosx64.*/opt: 1
             macosx64.*/debug: 3
-            windows10-64.*/opt: 1
-            windows10-64.*/debug: 2
+            windows.*/opt: 2
+            windows.*/debug: 4
+            windows10-64-ccov/debug: 6
             default: 8
     e10s:
         by-test-platform:
@@ -112,6 +117,7 @@ reftest:
     max-run-time:
         by-test-platform:
             android.*: 7200
+            windows10-64-ccov/debug: 5400
             default: 3600
     mozharness:
         chunked:
@@ -130,7 +136,10 @@ reftest-gpu:
     description: "Reftest GPU run"
     suite: reftest/reftest-gpu
     treeherder-symbol: R(Rg)
-    chunks: 8
+    chunks:
+        by-test-platform:
+            windows.*/opt: 2
+            default: 4
     run-on-projects:
         by-test-platform:
             windows10.*: []
@@ -154,11 +163,8 @@ reftest-no-accel:
     chunks:
         by-test-platform:
             macosx.*: 1
+            windows.*: 4
             default: 8
-    e10s:
-        by-test-platform:
-            linux64-jsdcov/opt: false
-            default: true
     mozharness:
         chunked:
             by-test-platform:
@@ -169,10 +175,3 @@ reftest-no-accel:
         by-test-platform:
             windows10-64-asan.*: 3
             default: default
-
-reftest-stylo:
-    description: "Reftest run in Stylo vs. Gecko mode"
-    suite: reftest/reftest-stylo
-    treeherder-symbol: R(Rs)
-    virtualization: virtual-with-gpu
-    chunks: 8

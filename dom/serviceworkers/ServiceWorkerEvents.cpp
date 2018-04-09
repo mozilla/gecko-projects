@@ -397,11 +397,7 @@ public:
     rv = NS_NewURI(getter_AddRefs(uri), url, nullptr, nullptr);
     NS_ENSURE_SUCCESS(rv, false);
     int16_t decision = nsIContentPolicy::ACCEPT;
-    rv = NS_CheckContentLoadPolicy(aLoadInfo->InternalContentPolicyType(), uri,
-                                   aLoadInfo->LoadingPrincipal(),
-                                   aLoadInfo->TriggeringPrincipal(),
-                                   aLoadInfo->LoadingNode(), EmptyCString(),
-                                   nullptr, &decision);
+    rv = NS_CheckContentLoadPolicy(uri, aLoadInfo, EmptyCString(), &decision);
     NS_ENSURE_SUCCESS(rv, false);
     return decision == nsIContentPolicy::ACCEPT;
   }
@@ -726,7 +722,7 @@ RespondWithHandler::ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValu
     // the fragment, so this will never conflict with an existing fragment
     // on the response.  In the future we will have to check for a response
     // fragment and avoid overriding in that case.
-    if (!mRequestFragment.IsEmpty()) {
+    if (!mRequestFragment.IsEmpty() && !responseURL.IsEmpty()) {
       MOZ_ASSERT(!responseURL.Contains('#'));
       responseURL.Append(NS_LITERAL_CSTRING("#"));
       responseURL.Append(mRequestFragment);
