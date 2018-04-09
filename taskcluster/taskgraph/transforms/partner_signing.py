@@ -34,7 +34,7 @@ def define_upstream_artifacts(config, jobs):
         else:
             for partner, partner_config in partner_configs.iteritems():
                 for sub_partner, cfg in partner_config.iteritems():
-                    if build_platform not in cfg["platforms"]:
+                    if not cfg or build_platform not in cfg["platforms"]:
                         continue
                     for locale in cfg["locales"]:
                         repack_ids.append("{}-{}".format(sub_partner, locale))

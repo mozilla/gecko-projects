@@ -112,13 +112,15 @@ def add_artifacts(config, tasks):
         for partner, partner_config in partner_configs.iteritems():
             # TODO clean up configs? Some have a {} as the config
             for sub_partner, cfg in partner_config.iteritems():
-                if platform not in cfg.get("platforms", []):
+                if not cfg or platform not in cfg.get("platforms", []):
                     continue
                 for locale in cfg.get("locales", []):
                     # Some partner configs have public builds, and specific a path in the
                     # candidates directory
                     if cfg.get('upload_to_candidates') and cfg.get('output_dir'):
                         subst = {
+                            'partner': partner,
+                            'partner_distro': sub_partner,
                             'locale': locale,
                             'platform': get_ftp_platform(platform)
                         }
