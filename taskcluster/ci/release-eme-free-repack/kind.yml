@@ -12,7 +12,8 @@ transforms:
    - taskgraph.transforms.task:transforms
 
 kind-dependencies:
-   - build
+   - build-signing
+   - nightly-l10n-signing
 
 job-defaults:
    name: eme-free-repack
@@ -31,21 +32,22 @@ job-defaults:
             by-project:
                mozilla-beta: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
                mozilla-release: "git@github.com:mozilla-partners/mozilla-EME-free-manifest"
-               maple: "git@github.com:nthomas-mozilla/partner-manifest.git"
+               maple: "git@github.com:nthomas-mozilla/mozilla-EME-free-manifest.git"
                default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
    run:
-      using: run-task
-      sparse-profile: update-verify
+      using: mozharness
+      config:
+         - partner_repacks/release_mozilla-release_desktop.py
+      script: mozharness/scripts/desktop_partner_repacks.py
+      job-script: taskcluster/scripts/builder/repackage.sh
+      need-xvfb: false
+      tooltool-downloads: false
+
    extra:
       repack_id: eme-free
 
 jobs:
    macosx64-nightly:
-      worker:
-         artifacts:
-            - name: releng/partner/eme-free/target.dmg
-              path: /builds/worker/checkouts/gecko/eme-free.dmg
-              type: file
       treeherder:
          symbol: EME
          platform: macosx64/opt
@@ -57,14 +59,6 @@ jobs:
          artifact_prefix: releng/partner
 
    win32-nightly:
-      worker:
-         artifacts:
-            - name: releng/partner/eme-free/setup.exe
-              path: /builds/worker/checkouts/gecko/eme-free.exe
-              type: file
-            - name: releng/partner/eme-free/target.zip
-              path: /builds/worker/checkouts/gecko/eme-free.zip
-              type: file
       treeherder:
          symbol: EME
          platform: win32/opt
@@ -76,14 +70,6 @@ jobs:
          artifact_prefix: releng/partner
 
    win64-nightly:
-      worker:
-         artifacts:
-            - name: releng/partner/eme-free/setup.exe
-              path: /builds/worker/checkouts/gecko/eme-free.exe
-              type: file
-            - name: releng/partner/eme-free/target.zip
-              path: /builds/worker/checkouts/gecko/eme-free.zip
-              type: file
       treeherder:
          symbol: EME
          platform: win64/opt

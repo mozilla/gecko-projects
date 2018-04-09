@@ -12,7 +12,8 @@ transforms:
    - taskgraph.transforms.task:transforms
 
 kind-dependencies:
-   - build
+   - build-signing
+   - nightly-l10n-signing
 
 job-defaults:
    name: partner-repack
@@ -34,8 +35,13 @@ job-defaults:
                maple: "git@github.com:nthomas-mozilla/partner-manifest.git"
                default: "git@github.com:mozilla-releng/staging-repack-manifests.git"
    run:
-      using: run-task
-      sparse-profile: update-verify
+      using: mozharness
+      config:
+         - partner_repacks/release_mozilla-release_desktop.py
+      script: mozharness/scripts/desktop_partner_repacks.py
+      job-script: taskcluster/scripts/builder/repackage.sh
+      need-xvfb: false
+      tooltool-downloads: false
 
 jobs:
    linux-nightly:
