@@ -18,9 +18,8 @@ RUN apt-get update && \
       zip && \
     apt-get clean
 
-# Add wrapper scripts for xvfb allowing tasks to easily retry starting up xvfb
+# Add wrapper scripts for xvfb for repackage.sh, and interactive sessions
 # %include taskcluster/docker/recipes/xvfb.sh
 COPY topsrcdir/taskcluster/docker/recipes/xvfb.sh /builds/worker/scripts/xvfb.sh
 
-RUN mkdir /root/.ssh
-COPY known_hosts /root/.ssh/known_hosts
+COPY known_hosts /etc/ssh/ssh_known_hosts
