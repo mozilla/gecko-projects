@@ -26,7 +26,7 @@ def chunk_partners(config, jobs):
                 if dep_job.attributes["build_platform"] not in cfg.get("platforms", []):
                     continue
                 for locale in cfg.get("locales", []):
-                    repack_id = "{}-{}".format(partner, locale)
+                    repack_id = "{}-{}".format(sub_partner, locale)
 
                     partner_job = copy.deepcopy(job)  # don't overwrite dict values here
                     if 'extra' not in partner_job:
