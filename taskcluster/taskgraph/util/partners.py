@@ -68,7 +68,7 @@ def fix_partner_config(orig_config):
     pc = {}
     with open(LOCALES_FILE, 'r') as fh:
         all_locales = json.load(fh).keys()
-    for kind, kind_config in pc.iteritems():
+    for kind, kind_config in orig_config.iteritems():
         pc.setdefault(kind, {})
         for partner, partner_config in kind_config.iteritems():
             pc.setdefault(partner, {})
