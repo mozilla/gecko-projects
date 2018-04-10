@@ -277,13 +277,12 @@ def generate_upstream_artifacts(job, build_task_ref, build_signing_task_ref,
                 _check_platform_matched_only_one_regex(
                     tasktype, platform, plarform_was_previously_matched_by_regex, platform_regex
                 )
-                if paths:
-                    upstream_artifacts.append({
-                        "taskId": {"task-reference": ref},
-                        "taskType": tasktype,
-                        "paths": ["{}/{}".format(artifact_prefix, path) for path in paths],
-                        "locale": locale or "en-US",
-                    })
+                upstream_artifacts.append({
+                    "taskId": {"task-reference": ref},
+                    "taskType": tasktype,
+                    "paths": ["{}/{}".format(artifact_prefix, path) for path in paths],
+                    "locale": locale or "en-US",
+                })
                 plarform_was_previously_matched_by_regex = platform_regex
 
     return upstream_artifacts
