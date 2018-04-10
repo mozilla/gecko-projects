@@ -69,15 +69,12 @@ def fix_partner_config(orig_config):
     with open(LOCALES_FILE, 'r') as fh:
         all_locales = json.load(fh).keys()
     for kind, kind_config in orig_config.iteritems():
-        pc.setdefault(kind, {})
         for partner, partner_config in kind_config.iteritems():
-            pc.setdefault(partner, {})
             for subpartner, subpartner_config in partner_config.iteritems():
                 # get rid of empty subpartner configs
                 if not subpartner_config:
                     continue
                 # Make sure our locale list is a subset of all_locales
-                pc[kind][partner][subpartner] = _fix_subpartner_locales(
-                    subpartner_config, all_locales
-                )
+                pc.setdefault(kind, {}).setdefault(partner, {})[subpartner] = \
+                    _fix_subpartner_locales(subpartner_config, all_locales)
     return pc
