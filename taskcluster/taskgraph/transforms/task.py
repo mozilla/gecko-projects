@@ -552,14 +552,6 @@ task_description_schema = Schema({
             Required('paths'): [basestring],
         }],
     }, {
-        Required('implementation'): 'sign-and-push-addons',
-        Required('channel'): Any('listed', 'unlisted'),
-        Required('upstream-artifacts'): [{
-            Required('taskId'): taskref_or_string,
-            Required('taskType'): basestring,
-            Required('paths'): [basestring],
-        }],
-    }, {
         Required('implementation'): 'shipit',
         Required('release-name'): basestring,
     }, {
@@ -1134,16 +1126,6 @@ def build_ship_it_payload(config, task, task_def):
 
     task_def['payload'] = {
         'release_name': worker['release-name']
-    }
-
-
-@payload_builder('sign-and-push-addons')
-def build_sign_and_push_addons_payload(config, task, task_def):
-    worker = task['worker']
-
-    task_def['payload'] = {
-        'channel': worker['channel'],
-        'upstreamArtifacts': worker['upstream-artifacts'],
     }
 
 
