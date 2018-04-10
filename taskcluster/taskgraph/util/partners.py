@@ -10,7 +10,7 @@ import os
 log = logging.getLogger(__name__)
 
 LOCALES_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)),
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
     'browser', 'locales', 'l10n-changesets.json'
 )
 
