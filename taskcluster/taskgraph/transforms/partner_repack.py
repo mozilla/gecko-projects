@@ -106,40 +106,46 @@ def add_artifacts(config, tasks):
         platform = task["attributes"]["build_platform"]
         platform_files = generate_platform_artifacts(platform)
 
-        if not task["worker"].get("artifacts"):
-            task["worker"]["artifacts"] = []
+        task["worker"].setdefault("artifacts", [])
+        task["worker"]["artifacts"].append({
+            'name': '/builds/worker/workspace/build/artifacts/releng/partner/',
+            'path': 'releng/partner',
+            'type': 'directory',
+        })
 
-        for partner, partner_config in partner_configs.iteritems():
-            # TODO clean up configs? Some have a {} as the config
-            for sub_partner, cfg in partner_config.iteritems():
-                if not cfg or platform not in cfg.get("platforms", []):
-                    continue
-                for locale in cfg.get("locales", []):
-                    # Some partner configs have public builds, and specific a path in the
-                    # candidates directory
-                    if cfg.get('upload_to_candidates') and cfg.get('output_dir'):
-                        subst = {
-                            'partner': partner,
-                            'partner_distro': sub_partner,
-                            'locale': locale,
-                            'platform': get_ftp_platform(platform)
-                        }
-                        prefix = get_artifact_path(task,
-                                                   cfg['output_dir'] % subst)
-                    else:
-                        prefix = get_artifact_path(task,
-                                                   '{}/{}/{}'.format(partner, sub_partner, locale))
-                    worker_prefix = '{}/{}'.format('/builds/worker/workspace/build/artifacts',
-                                                   prefix)
-
-                    task["worker"]["artifacts"].extend(
-                        [
-                            {
-                                'name': '{}/{}'.format(prefix, f),
-                                'path': '{}/{}'.format(worker_prefix, f),
-                                'type': 'file',
-                            } for f in platform_files
-                        ]
-                    )
+#        if not task["worker"].get("artifacts"):
+#             task["worker"]["artifacts"] = []
+#        for partner, partner_config in partner_configs.iteritems():
+#            # TODO clean up configs? Some have a {} as the config
+#            for sub_partner, cfg in partner_config.iteritems():
+#                if not cfg or platform not in cfg.get("platforms", []):
+#                    continue
+#                for locale in cfg.get("locales", []):
+#                    # Some partner configs have public builds, and specific a path in the
+#                    # candidates directory
+#                    if cfg.get('upload_to_candidates') and cfg.get('output_dir'):
+#                        subst = {
+#                            'partner': partner,
+#                            'partner_distro': sub_partner,
+#                            'locale': locale,
+#                            'platform': get_ftp_platform(platform)
+#                        }
+#                        prefix = get_artifact_path(task,
+#                                                   cfg['output_dir'] % subst)
+#                    else:
+#                        prefix = get_artifact_path(task,
+#                                                   '{}/{}/{}'.format(partner, sub_partner, locale))
+#                    worker_prefix = '{}/{}'.format('/builds/worker/workspace/build/artifacts',
+#                                                   prefix)
+#
+#                    task["worker"]["artifacts"].extend(
+#                        [
+#                            {
+#                                'name': '{}/{}'.format(prefix, f),
+#                                'path': '{}/{}'.format(worker_prefix, f),
+#                                'type': 'file',
+#                            } for f in platform_files
+#                        ]
+#                    )
 
         yield task
