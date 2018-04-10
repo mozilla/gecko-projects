@@ -2,10 +2,17 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+from copy import deepcopy
+import json
 import logging
+import os
 
 log = logging.getLogger(__name__)
 
+LOCALES_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
+    'browser', 'locales', 'l10n-changesets.json'
+)
 partner_configs = {}
 
 
@@ -47,3 +54,31 @@ def get_partner_config_by_kind(config, kind):
                 del(kind_config[partner])
 
     return kind_config
+
+
+def _fix_subpartner_locales(orig_config, all_locales):
+    subpartner_config = deepcopy(orig_config)
+    # Get an ordered list of subpartner locales that is a subset of all_locales
+    subpartner_config['locales'] = sorted(list(
+        set(orig_config['locales']) & set(all_locales)
+    ))
+    return subpartner_config
+
+
+def fix_partner_config(orig_config):
+    pc = {}
+    with open(LOCALES_FILE, 'r') as fh:
+        all_locales = json.load(fh).keys()
+    for kind, kind_config in pc.iteritems():
+        pc.setdefault(kind, {})
+        for partner, partner_config in kind_config.iteritems():
+            pc.setdefault(partner, {})
+            for subpartner, subpartner_config in partner_config.iteritems():
+                # get rid of empty subpartner configs
+                if not subpartner_config:
+                    continue
+                # Make sure our locale list is a subset of all_locales
+                pc[kind][partner][subpartner] = _fix_subpartner_locales(
+                    subpartner_config, all_locales
+                )
+    return pc

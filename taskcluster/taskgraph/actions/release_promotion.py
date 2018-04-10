@@ -15,6 +15,7 @@ from .util import (find_decision_task, find_existing_tasks_from_previous_kinds,
                    find_hg_revision_pushlog_id)
 from taskgraph.util.taskcluster import get_artifact
 from taskgraph.util.partials import populate_release_history
+from taskgraph.util.partners import fix_partner_config
 from taskgraph.taskgraph import TaskGraph
 from taskgraph.decision import taskgraph_decision
 from taskgraph.parameters import Parameters
@@ -341,7 +342,8 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     parameters['release_eta'] = input.get('release_eta', '')
     parameters['release_enable_partners'] = release_enable_partners
     parameters['release_partners'] = input.get('release_partners')
-    parameters['release_partner_config'] = input.get('release_partner_config')
+    if input.get('release_partner_config'):
+        parameters['release_partner_config'] = fix_partner_config(input['release_partner_config'])
     parameters['release_enable_emefree'] = release_enable_emefree
 
     if input['version']:
