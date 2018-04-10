@@ -167,7 +167,7 @@ def yield_all_platform_jobs(config, jobs):
     # Even though langpacks are now platform independent, we keep beetmoving them at old
     # platform-specific locations. That's why this transform exist
     for job in jobs:
-        for platform in ('linux', 'linux64', 'macosx64', 'win32', 'win64'):
+        for platform in ('linux32', 'linux64', 'macosx64', 'win32', 'win64'):
             platform_job = copy.deepcopy(job)
 
             platform_job['attributes']['build_platform'] = platform
