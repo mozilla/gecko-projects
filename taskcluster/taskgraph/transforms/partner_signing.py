@@ -11,8 +11,6 @@ from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.partners import get_partner_config_by_kind, check_if_partners_enabled
 from taskgraph.util.signed_artifacts import generate_specifications_of_artifacts_to_sign
 
-MAX_REPACK_IDS = 20
-
 transforms = TransformSequence()
 
 transforms.add(check_if_partners_enabled)
@@ -29,19 +27,12 @@ def define_upstream_artifacts(config, jobs):
         build_platform = dep_job.attributes.get('build_platform')
 
         repack_ids = []
-        if "eme" in config.kind:
-            repack_ids.append("eme-free")
-        else:
-            for partner, partner_config in partner_configs.iteritems():
-                for sub_partner, cfg in partner_config.iteritems():
-                    if not cfg or build_platform not in cfg["platforms"]:
-                        continue
-                    for locale in cfg["locales"]:
-                        repack_ids.append("{}-{}".format(sub_partner, locale))
-
-        # continue the hack, remove when we have a real script
-        if len(repack_ids) > MAX_REPACK_IDS:
-            repack_ids = sorted(repack_ids)[:MAX_REPACK_IDS]
+        for partner, partner_config in partner_configs.iteritems():
+            for sub_partner, cfg in partner_config.iteritems():
+                if not cfg or build_platform not in cfg["platforms"]:
+                    continue
+                for locale in cfg["locales"]:
+                    repack_ids.append("{}/{}".format(sub_partner, locale))
 
         artifacts_specifications = generate_specifications_of_artifacts_to_sign(
             dep_job,
