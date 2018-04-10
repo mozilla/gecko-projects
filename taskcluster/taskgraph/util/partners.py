@@ -68,6 +68,9 @@ def fix_partner_config(orig_config):
     pc = {}
     with open(LOCALES_FILE, 'r') as fh:
         all_locales = json.load(fh).keys()
+    # l10n-changesets.json doesn't include en-US, but the repack list does
+    if 'en-US' not in all_locales:
+        all_locales.append('en-US')
     for kind, kind_config in orig_config.iteritems():
         for partner, partner_config in kind_config.iteritems():
             for subpartner, subpartner_config in partner_config.iteritems():
