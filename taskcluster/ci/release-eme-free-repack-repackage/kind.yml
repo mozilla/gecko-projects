@@ -24,10 +24,6 @@ only-for-build-platforms:
    - win64-nightly/opt
 
 job-template:
-   treeherder:
-      symbol: EME-Rpk
-      tier: 1
-      kind: build
    mozharness:
       config:
          by-build-platform:

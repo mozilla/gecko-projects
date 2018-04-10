@@ -18,9 +18,3 @@ only-for-build-platforms:
    - macosx64-nightly/opt
    - win32-nightly/opt
    - win64-nightly/opt
-
-job-template:
-   treeherder:
-      symbol: BMR-EME
-      tier: 1
-      kind: build

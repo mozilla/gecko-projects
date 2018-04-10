@@ -30,7 +30,6 @@ repackage_signing_description_schema = Schema({
     Required('depname', default='repackage'): basestring,
     Optional('label'): basestring,
     Optional('extra'): object,
-    Optional('treeherder'): task_description_schema['treeherder'],
     Optional('shipping-product'): task_description_schema['shipping-product'],
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
 })
@@ -54,14 +53,6 @@ def make_repackage_signing_description(config, jobs):
         dep_job = job['dependent-task']
         repack_id = dep_job.task['extra']['repack_id']
         attributes = dep_job.attributes
-
-        treeherder = None
-        if 'partner' not in config.kind:
-            treeherder = job.get('treeherder', {})
-            dep_th_platform = dep_job.task.get('extra', {}).get(
-                'treeherder', {}).get('machine', {}).get('platform', '')
-            treeherder.setdefault('platform',
-                                  "{}/opt".format(dep_th_platform))
 
         label = dep_job.label.replace("repackage-", "repackage-signing-")
         description = (
@@ -119,8 +110,5 @@ def make_repackage_signing_description(config, jobs):
                 'repack_id': repack_id,
             }
         }
-
-        if treeherder:
-            task['treeherder'] = treeherder
 
         yield task

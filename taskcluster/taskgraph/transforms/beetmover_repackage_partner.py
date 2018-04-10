@@ -45,11 +45,6 @@ beetmover_description_schema = Schema({
     # unique label to describe this beetmover task, defaults to {dep.label}-beetmover
     Optional('label'): basestring,
 
-    # treeherder is allowed here to override any defaults we use for beetmover.  See
-    # taskcluster/taskgraph/transforms/task.py for the schema details, and the
-    # below transforms for defaults of various values.
-    Optional('treeherder'): task_description_schema['treeherder'],
-
     Optional('extra'): object,
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
     Optional('shipping-product'): task_description_schema['shipping-product'],
@@ -108,14 +103,6 @@ def make_task_description(config, jobs):
         if not build_platform:
             raise Exception("Cannot find build platform!")
 
-        treeherder = None
-        if 'partner' not in config.kind:
-            treeherder = job.get('treeherder', {})
-            dep_th_platform = dep_job.task.get('extra', {}).get(
-                'treeherder', {}).get('machine', {}).get('platform', '')
-            treeherder.setdefault('platform',
-                                  "{}/opt".format(dep_th_platform))
-
         label = dep_job.label.replace("repackage-signing-", "beetmover-")
         label = label.replace("repackage-", "beetmover-")
         label = label.replace("chunking-dummy-", "beetmover-")
@@ -163,8 +150,6 @@ def make_task_description(config, jobs):
                 'repack_id': repack_id,
             },
         }
-        if treeherder:
-            task['treeherder'] = treeherder
 
         yield task
 
