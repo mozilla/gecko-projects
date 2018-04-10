@@ -31,7 +31,7 @@ def make_label(config, jobs):
             repack_id = job.get("extra", {}).get("repack_id", None)
             template = "{kind}-{build_platform}"
             if repack_id:
-                template += "-{}".format(repack_id)
+                template += "-{}".format(repack_id.replace('/', '-'))
         else:
             template = "{kind}-{build_platform}/{build_type}"
         job['label'] = template.format(

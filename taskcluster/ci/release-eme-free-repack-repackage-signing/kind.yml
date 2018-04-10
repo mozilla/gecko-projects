@@ -22,5 +22,3 @@ job-template:
       symbol: EME-Rpk-Sign
       tier: 1
       kind: build
-   extra:
-      repack_id: eme-free

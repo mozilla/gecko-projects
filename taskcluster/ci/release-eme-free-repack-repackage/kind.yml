@@ -5,6 +5,7 @@
 loader: taskgraph.loader.single_dep:loader
 
 transforms:
+   - taskgraph.transforms.chunk_partners:transforms
    - taskgraph.transforms.name_sanity:transforms
    - taskgraph.transforms.repackage_partner:transforms
    - taskgraph.transforms.use_toolchains:transforms
@@ -27,8 +28,6 @@ job-template:
       symbol: EME-Rpk
       tier: 1
       kind: build
-   extra:
-      repack_id: eme-free
    mozharness:
       config:
          by-build-platform:

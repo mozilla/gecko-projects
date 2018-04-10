@@ -43,9 +43,6 @@ job-defaults:
       need-xvfb: false
       tooltool-downloads: false
 
-   extra:
-      repack_id: eme-free
-
 jobs:
    macosx64-nightly:
       treeherder:

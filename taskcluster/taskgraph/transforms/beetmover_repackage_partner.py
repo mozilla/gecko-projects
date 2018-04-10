@@ -131,16 +131,16 @@ def make_task_description(config, jobs):
         dependencies = {}
 
         base_label = "release-partner-repack"
-        if "eme" in repack_id:
+        if "eme" in config.kind:
             base_label = "release-eme-free-repack"
         dependencies["build"] = "{}-{}".format(base_label, build_platform)
         if "macosx" in build_platform or "win" in build_platform:
             dependencies["repackage"] = "{}-repackage-{}-{}".format(
-                base_label, build_platform, repack_id
+                base_label, build_platform, repack_id.replace('/', '-')
             )
         if "win" in build_platform:
             dependencies["repackage-signing"] = "{}-repackage-signing-{}-{}".format(
-                base_label, build_platform, repack_id
+                base_label, build_platform, repack_id.replace('/', '-')
             )
 
         attributes = copy_attributes_from_dependent_job(dep_job)

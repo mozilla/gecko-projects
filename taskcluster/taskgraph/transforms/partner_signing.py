@@ -32,7 +32,7 @@ def define_upstream_artifacts(config, jobs):
                 if not cfg or build_platform not in cfg["platforms"]:
                     continue
                 for locale in cfg["locales"]:
-                    repack_ids.append("{}/{}".format(sub_partner, locale))
+                    repack_ids.append("{}/{}/{}".format(partner, sub_partner, locale))
 
         artifacts_specifications = generate_specifications_of_artifacts_to_sign(
             dep_job,

@@ -48,11 +48,6 @@ packaging_description_schema = Schema({
     # unique label to describe this repackaging task
     Optional('label'): basestring,
 
-    # treeherder is allowed here to override any defaults we use for repackaging.  See
-    # taskcluster/taskgraph/transforms/task.py for the schema details, and the
-    # below transforms for defaults of various values.
-    Optional('treeherder'): task_description_schema['treeherder'],
-
     # Routes specific to this task, if defined
     Optional('routes'): [basestring],
 
@@ -141,13 +136,6 @@ def make_job_description(config, jobs):
         dependencies = {dep_job.attributes.get('kind'): dep_job.label}
         dependencies.update(dep_job.dependencies)
 
-        treeherder = None
-        if 'partner' not in config.kind:
-            treeherder = job.get('treeherder')
-            dep_th_platform = dep_job.task.get("extra", {}).get(
-                "treeherder", {}).get("machine", {}).get("platform", "")
-            treeherder['platform'] = "{}/opt".format(dep_th_platform)
-
         signing_task = None
         for dependency in dependencies.keys():
             if build_platform.startswith('macosx') and dependency.endswith('signing'):
@@ -198,7 +186,7 @@ def make_job_description(config, jobs):
         description = (
             "Repackaging for repack_id '{repack_id}' for build '"
             "{build_platform}/{build_type}'".format(
-                repack_id=job['extra'].get('repack_id', 'FIXME'),
+                repack_id=job['extra']['repack_id'],
                 build_platform=attributes.get('build_platform'),
                 build_type=attributes.get('build_type')
             )
@@ -217,8 +205,6 @@ def make_job_description(config, jobs):
             'worker': worker,
             'run': run,
         }
-        if treeherder:
-            task['treeherder'] = treeherder
 
         if build_platform.startswith('macosx'):
             task['toolchains'] = [

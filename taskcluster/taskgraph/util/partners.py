@@ -13,7 +13,6 @@ LOCALES_FILE = os.path.join(
     os.path.dirname(os.path.dirname(__file__)),
     'browser', 'locales', 'l10n-changesets.json'
 )
-partner_configs = {}
 
 
 def check_if_partners_enabled(config, tasks):
