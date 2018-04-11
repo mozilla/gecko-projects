@@ -240,6 +240,10 @@ def _generate_task_env(build_platform, signing_task, signing_task_ref, partner):
 
 
 def _generate_task_output_files(task, build_platform, partner):
+    """We carefully generate an explicit list here, but there's an artifacts directory
+    too, courtesy of generic_worker_add_artifacts() (windows) or docker_worker_add_artifacts().
+    Any errors here are likely masked by that.
+    """
     partner_output_path = '{}/'.format(partner)
     artifact_prefix = get_artifact_prefix(task)
 
