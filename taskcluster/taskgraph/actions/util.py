@@ -37,7 +37,7 @@ def find_hg_revision_pushlog_id(parameters, graph_config, revision):
     """Given the parameters for this action and a revision, find the
     pushlog_id of the revision."""
 
-    repo_param = '{}head_repository'.format(graph_config['XXXprefix'])
+    repo_param = '{}head_repository'.format(graph_config['project-repo-param-prefix'])
     pushlog_url = PUSHLOG_TMPL.format(parameters[repo_param], revision)
     r = requests.get(pushlog_url)
     r.raise_for_status()
