@@ -52,7 +52,7 @@ SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
 """Map the signing scope aliases to the actual scopes.
 """
 SIGNING_CERT_SCOPES = {
-    'all-release-branches': 'signing:cert:dep-signing',
+    'all-release-branches': 'signing:cert:release-signing',
     'all-nightly-branches': 'signing:cert:nightly-signing',
     'default': 'signing:cert:dep-signing',
 }
@@ -65,7 +65,7 @@ DEVEDITION_SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
 ]]
 
 DEVEDITION_SIGNING_CERT_SCOPES = {
-    'beta': 'signing:cert:dep-signing',
+    'beta': 'signing:cert:nightly-signing',
     'default': 'signing:cert:dep-signing',
 }
 
