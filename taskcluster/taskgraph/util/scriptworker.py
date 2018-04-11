@@ -45,7 +45,6 @@ SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
     'all-release-branches', set([
         'mozilla-beta',
         'mozilla-release',
-        'maple',
     ])
 ]]
 
@@ -60,7 +59,6 @@ SIGNING_CERT_SCOPES = {
 DEVEDITION_SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
     'beta', set([
         'mozilla-beta',
-        'maple',
     ])
 ]]
 
