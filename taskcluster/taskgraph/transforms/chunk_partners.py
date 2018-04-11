@@ -10,18 +10,9 @@ from __future__ import absolute_import, print_function, unicode_literals
 import copy
 
 from taskgraph.transforms.base import TransformSequence
-from taskgraph.util.partners import get_partner_config_by_kind
+from taskgraph.util.partners import get_partner_config_by_kind, locales_per_build_platform
 
 transforms = TransformSequence()
-
-
-# Ugh
-def _locales_per_build_platform(build_platform, locales):
-    if build_platform.startswith('mac'):
-        exclude = ['ja']
-    else:
-        exclude = ['ja-JP-mac']
-    return [locale for locale in locales if locale not in exclude]
 
 
 @transforms.add
@@ -35,7 +26,7 @@ def chunk_partners(config, jobs):
             for sub_partner, cfg in partner_config.iteritems():
                 if build_platform not in cfg.get("platforms", []):
                     continue
-                locales = _locales_per_build_platform(build_platform, cfg.get('locales', []))
+                locales = locales_per_build_platform(build_platform, cfg.get('locales', []))
                 for locale in locales:
                     repack_id = "{}/{}/{}".format(partner, sub_partner, locale)
 

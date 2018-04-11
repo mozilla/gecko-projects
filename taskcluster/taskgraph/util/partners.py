@@ -97,3 +97,12 @@ def get_ftp_platform(platform):
         return 'linux-x86_64'
     else:
         raise ValueError('Unimplemented platform %s'.format(platform))
+
+
+# Ugh
+def locales_per_build_platform(build_platform, locales):
+    if build_platform.startswith('mac'):
+        exclude = ['ja']
+    else:
+        exclude = ['ja-JP-mac']
+    return [locale for locale in locales if locale not in exclude]
