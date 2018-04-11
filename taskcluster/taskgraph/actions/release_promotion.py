@@ -234,6 +234,14 @@ def is_release_promotion_available(parameters):
                 'default': False,
                 'description': ('Toggle for creating partner repacks'),
             },
+            'release_partner_build_number': {
+                'type': 'integer',
+                'default': 1,
+                'minimum': 1,
+                'description': ('The partner build number. This translates to, e.g. '
+                                '`v1` in the path. We generally only have to '
+                                'bump this on off-cycle partner rebuilds.'),
+            },
             'release_partners': {
                 'type': 'array',
                 'description': ('A list of partners to repack, or if null or empty then use '

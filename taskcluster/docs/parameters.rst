@@ -168,6 +168,9 @@ Release Promotion
 ``release_partner_config``
    Configuration for partner repacks.
 
+``release_partner_build_number``
+   The build number for partner repacks. We sometimes have multiple partner build numbers per release build number; this parameter lets us bump them independently. Defaults to 1.
+
 ``release_enable_emefree``
    Boolean which controls repacking vanilla Firefox builds into EME-free builds.
 
