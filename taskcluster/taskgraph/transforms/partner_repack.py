@@ -73,8 +73,8 @@ def add_artifacts(config, tasks):
     for task in tasks:
         task["worker"].setdefault("artifacts", [])
         task["worker"]["artifacts"].append({
-            'name': '/builds/worker/workspace/artifacts/releng/partner',
-            'path': 'releng/partner',
+            'name': 'releng/partner',
+            'path': '/builds/worker/workspace/build/artifacts/releng/partner',
             'type': 'directory',
         })
 

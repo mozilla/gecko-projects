@@ -81,3 +81,19 @@ def fix_partner_config(orig_config):
                 pc.setdefault(kind, {}).setdefault(partner, {})[subpartner] = \
                     _fix_subpartner_locales(subpartner_config, all_locales)
     return pc
+
+
+# seems likely this exists elsewhere already
+def get_ftp_platform(platform):
+    if platform.startswith('win32'):
+        return 'win32'
+    elif platform.startswith('win64'):
+        return 'win64'
+    elif platform.startswith('macosx'):
+        return 'mac'
+    elif platform.startswith('linux-'):
+        return 'linux-i686'
+    elif platform.startswith('linux64'):
+        return 'linux-x86_64'
+    else:
+        raise ValueError('Unimplemented platform %s'.format(platform))
