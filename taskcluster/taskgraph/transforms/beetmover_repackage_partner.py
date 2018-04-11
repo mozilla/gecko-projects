@@ -12,8 +12,8 @@ from taskgraph.transforms.beetmover import craft_release_properties
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.partners import check_if_partners_enabled
 from taskgraph.util.schema import validate_schema, Schema
-from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
-                                         get_beetmover_action_scope,
+from taskgraph.util.scriptworker import (add_scope_prefix,
+                                         get_beetmover_bucket_scope,
                                          get_phase)
 from taskgraph.util.taskcluster import get_artifact_prefix
 from taskgraph.transforms.task import task_description_schema
@@ -133,8 +133,7 @@ def make_task_description(config, jobs):
         attributes = copy_attributes_from_dependent_job(dep_job)
 
         bucket_scope = get_beetmover_bucket_scope(config)
-        action_scope = get_beetmover_action_scope(config)
-        phase = get_phase(config)
+        action_scope = add_scope_prefix(config, "beetmover:action:push-to-partner")
 
         task = {
             'label': label,
@@ -144,7 +143,7 @@ def make_task_description(config, jobs):
             'dependencies': dependencies,
             'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
-            'shipping-phase': job.get('shipping-phase', phase),
+            'shipping-phase': job['shipping-phase'],
             'shipping-product': job.get('shipping-product'),
             'extra': {
                 'repack_id': repack_id,
@@ -160,6 +159,7 @@ def generate_upstream_artifacts(job, build_task_ref, repackage_task_ref,
     upstream_artifacts = []
     artifact_prefix = get_artifact_prefix(job)
 
+    # TODO private / public `locale`
     if "linux" in platform:
         upstream_artifacts.append({
             "taskId": {"task-reference": build_task_ref},
