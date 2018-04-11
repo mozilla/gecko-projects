@@ -24,3 +24,8 @@ only-for-build-platforms:
 
 job-template:
    shipping-phase: promote
+   partner-bucket-scope:
+      by-project:
+         mozilla-beta: beetmover:bucket:partner
+         mozilla-release: beetmover:bucket:partner
+         default: beetmover:bucket:dep
