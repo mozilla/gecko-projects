@@ -29,3 +29,5 @@ job-template:
          mozilla-beta: beetmover:bucket:partner
          mozilla-release: beetmover:bucket:partner
          default: beetmover:bucket:dep
+   partner-public-path: "partner-repacks/{partner}/{subpartner}/v{release_partner_build_number}/{platform}/{locale}"
+   partner-private-path: "{partner}/{version}-{build_number}/{subpartner}/{platform}/{locale}"
