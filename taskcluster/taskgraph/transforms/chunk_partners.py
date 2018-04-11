@@ -15,17 +15,28 @@ from taskgraph.util.partners import get_partner_config_by_kind
 transforms = TransformSequence()
 
 
+# Ugh
+def _locales_per_build_platform(build_platform, locales):
+    if build_platform.startswith('mac'):
+        exclude = ['ja']
+    else:
+        exclude = ['ja-JP-mac']
+    return [locale for locale in locales if locale not in exclude]
+
+
 @transforms.add
 def chunk_partners(config, jobs):
     partner_configs = get_partner_config_by_kind(config, config.kind)
 
     for job in jobs:
         dep_job = job['dependent-task']
+        build_platform = dep_job.attributes["build_platform"]
         for partner, partner_config in partner_configs.iteritems():
             for sub_partner, cfg in partner_config.iteritems():
-                if dep_job.attributes["build_platform"] not in cfg.get("platforms", []):
+                if build_platform not in cfg.get("platforms", []):
                     continue
-                for locale in cfg.get("locales", []):
+                locales = _locales_per_build_platform(build_platform, cfg.get('locales', []))
+                for locale in locales:
                     repack_id = "{}/{}/{}".format(partner, sub_partner, locale)
 
                     partner_job = copy.deepcopy(job)  # don't overwrite dict values here

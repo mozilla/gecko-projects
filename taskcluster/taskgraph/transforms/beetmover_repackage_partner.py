@@ -13,8 +13,7 @@ from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.partners import check_if_partners_enabled
 from taskgraph.util.schema import validate_schema, Schema
 from taskgraph.util.scriptworker import (add_scope_prefix,
-                                         get_beetmover_bucket_scope,
-                                         get_phase)
+                                         get_beetmover_bucket_scope)
 from taskgraph.util.taskcluster import get_artifact_prefix
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
