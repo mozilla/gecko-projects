@@ -39,7 +39,8 @@ RERUN_STATES = ('exception', 'failed')
 )
 def rerun_action(parameters, graph_config, input, task_group_id, task_id, task):
     parameters = dict(parameters)
-    decision_task_id, full_task_graph, label_to_taskid = fetch_graph_and_labels(parameters, graph_config)
+    decision_task_id, full_task_graph, label_to_taskid = fetch_graph_and_labels(
+        parameters, graph_config)
     label = task['metadata']['name']
     if task_id not in label_to_taskid.values():
         logger.error(
