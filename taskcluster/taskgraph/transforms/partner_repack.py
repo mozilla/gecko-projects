@@ -66,16 +66,3 @@ def add_command_arguments(config, tasks):
         }
 
         yield task
-
-
-@transforms.add
-def add_artifacts(config, tasks):
-    for task in tasks:
-        task["worker"].setdefault("artifacts", [])
-        task["worker"]["artifacts"].append({
-            'name': 'releng/partner',
-            'path': '/builds/worker/workspace/build/artifacts/releng/partner',
-            'type': 'directory',
-        })
-
-        yield task
