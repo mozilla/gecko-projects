@@ -115,6 +115,8 @@ scriptworker:
             - 'project:releng:beetmover:bucket:nightly'
         'scriptworker-prov-v1/beetmoverworker-dev':
             - 'project:releng:beetmover:bucket:dep'
+            # TODO move this to beetmoverworker-v1 when we're done with partner migration
+            - 'project:releng:beetmover:bucket:partner'
         'scriptworker-prov-v1/balrogworker-v1':
             - 'project:releng:balrog:server:nightly'
             - 'project:releng:balrog:server:aurora'

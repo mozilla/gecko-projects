@@ -12,8 +12,11 @@ from taskgraph.transforms.beetmover import craft_release_properties
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.partners import check_if_partners_enabled
 from taskgraph.util.schema import validate_schema, Schema
-from taskgraph.util.scriptworker import (add_scope_prefix,
-                                         get_beetmover_bucket_scope)
+from taskgraph.util.scriptworker import (
+    add_scope_prefix,
+    get_beetmover_bucket_scope,
+    get_worker_type_for_scope,
+)
 from taskgraph.util.taskcluster import get_artifact_prefix
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
@@ -137,7 +140,7 @@ def make_task_description(config, jobs):
         task = {
             'label': label,
             'description': description,
-            'worker-type': 'scriptworker-prov-v1/beetmoverworker-v1',
+            'worker-type': get_worker_type_for_scope(config, bucket_scope),
             'scopes': [bucket_scope, action_scope],
             'dependencies': dependencies,
             'attributes': attributes,
