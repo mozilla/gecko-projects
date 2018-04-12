@@ -179,6 +179,8 @@ namespace recordreplay {
   MACRO(CFBundleGetValueForInfoDictionaryKey)   \
   MACRO(CFDataGetBytePtr)                       \
   MACRO(CFDataGetLength)                        \
+  MACRO(CFDateFormatterCreate)                  \
+  MACRO(CFDateFormatterGetFormat)               \
   MACRO(CFDictionaryAddValue)                   \
   MACRO(CFDictionaryCreate)                     \
   MACRO(CFDictionaryCreateMutable)              \
@@ -189,9 +191,12 @@ namespace recordreplay {
   MACRO(CFEqual)                                \
   MACRO(CFGetTypeID)                            \
   MACRO(CFLocaleCopyCurrent)                    \
+  MACRO(CFLocaleCopyPreferredLanguages)         \
+  MACRO(CFLocaleCreate)                         \
   MACRO(CFLocaleGetIdentifier)                  \
   MACRO(CFNotificationCenterAddObserver)        \
   MACRO(CFNotificationCenterGetLocalCenter)     \
+  MACRO(CFNotificationCenterRemoveObserver)     \
   MACRO(CFNumberCreate)                         \
   MACRO(CFNumberGetValue)                       \
   MACRO(CFNumberIsFloatType)                    \
@@ -216,6 +221,7 @@ namespace recordreplay {
   MACRO(CFStringCreateArrayBySeparatingStrings) \
   MACRO(CFStringCreateMutable)                  \
   MACRO(CFStringCreateWithBytes)                \
+  MACRO(CFStringCreateWithBytesNoCopy)          \
   MACRO(CFStringCreateWithCharactersNoCopy)     \
   MACRO(CFStringCreateWithCString)              \
   MACRO(CFStringCreateWithFormat)               \
@@ -1830,6 +1836,8 @@ RR_CFDataGetBytePtr(CFDataRef aData)
 }
 
 RRFunction1(CFDataGetLength)
+RRFunction4(CFDateFormatterCreate)
+RRFunction1(CFDateFormatterGetFormat)
 RRFunctionVoid3(CFDictionaryAddValue)
 RRFunction6(CFDictionaryCreate)
 RRFunction4(CFDictionaryCreateMutable)
@@ -1849,6 +1857,8 @@ RRFunctionVoid3(CFDictionaryReplaceValue)
 RRFunction2(CFEqual)
 RRFunction1(CFGetTypeID)
 RRFunction0(CFLocaleCopyCurrent)
+RRFunction0(CFLocaleCopyPreferredLanguages)
+RRFunction2(CFLocaleCreate)
 RRFunction1(CFLocaleGetIdentifier)
 
 static void DummyCFNotificationCallback(CFNotificationCenterRef aCenter, void* aObserver,
@@ -1874,6 +1884,7 @@ RR_CFNotificationCenterAddObserver(CFNotificationCenterRef aCenter, const void* 
 }
 
 RRFunction0(CFNotificationCenterGetLocalCenter)
+RRFunctionVoid4(CFNotificationCenterRemoveObserver)
 RRFunction3(CFNumberCreate)
 
 static size_t
@@ -1953,6 +1964,7 @@ RRFunction3(CFStringCompare)
 RRFunction3(CFStringCreateArrayBySeparatingStrings)
 RRFunction2(CFStringCreateMutable)
 RRFunction5(CFStringCreateWithBytes)
+RRFunction6(CFStringCreateWithBytesNoCopy)
 RRFunction4(CFStringCreateWithCharactersNoCopy)
 RRFunction3(CFStringCreateWithCString)
 RRFunction10(CFStringCreateWithFormat) // Hope this is enough arguments...
