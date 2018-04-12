@@ -26,7 +26,6 @@ job-template:
       by-project:
          mozilla-beta: scriptworker-prov-v1/addon-v1
          mozilla-release: scriptworker-prov-v1/addon-v1
-         maple: scriptworker-prov-v1/addon-v1
          default: scriptworker-prov-v1/addon-dev
    worker:
       implementation: sign-and-push-addons
