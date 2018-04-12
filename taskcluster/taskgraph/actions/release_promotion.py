@@ -61,11 +61,6 @@ RELEASE_PROMOTION_CONFIG = {
         'target_tasks_method': 'promote_firefox',
         'product': 'firefox',
         'rebuild_kinds': [
-            'release-eme-free',
-            'release-eme-free-beetmover',
-            'release-eme-free-repackage-signing',
-            'release-eme-free-repackage',
-            'release-eme-free-signing',
             'release-partner-repack',
             'release-partner-beetmover',
             'release-partner-repack-chunking-dummy',
