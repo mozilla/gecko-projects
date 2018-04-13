@@ -344,8 +344,7 @@ def release_promotion_action(parameters, graph_config, input, task_group_id, tas
     parameters['release_type'] = promotion_config.get('release_type', '')
     parameters['release_eta'] = input.get('release_eta', '')
     parameters['release_enable_partners'] = release_enable_partners
-    if input.get('release_partners'):
-        parameters['release_partners'] = input['release_partners']
+    parameters['release_partners'] = input.get('release_partners')
     if input.get('release_partner_config'):
         parameters['release_partner_config'] = fix_partner_config(input['release_partner_config'])
     parameters['release_enable_emefree'] = release_enable_emefree
