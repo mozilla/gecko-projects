@@ -577,15 +577,14 @@ IProtocol::GetActorEventTargetInternal(IProtocol* aActor)
 }
 
 IToplevelProtocol::IToplevelProtocol(ProtocolId aProtoId, Side aSide)
-  : IProtocol(aSide)
-  , mMonitor("mozilla.ipc.IToplevelProtocol.mMonitor")
-  , mProtocolId(aProtoId)
-  , mOtherPid(mozilla::ipc::kInvalidProcessId)
-  , mOtherPidState(ProcessIdState::eUnstarted)
-  , mLastRouteId(aSide == ParentSide ? kFreedActorId : kNullActorId)
-  , mLastShmemId(aSide == ParentSide ? kFreedActorId : kNullActorId)
-  , mIsMainThreadProtocol{ false }
-  , mEventTargetMutex("ProtocolEventTargetMutex")
+ : IProtocol(aSide),
+   mMonitor("mozilla.ipc.IToplevelProtocol.mMonitor"),
+   mProtocolId(aProtoId),
+   mOtherPid(mozilla::ipc::kInvalidProcessId),
+   mOtherPidState(ProcessIdState::eUnstarted),
+   mLastRouteId(aSide == ParentSide ? kFreedActorId : kNullActorId),
+   mLastShmemId(aSide == ParentSide ? kFreedActorId : kNullActorId),
+   mEventTargetMutex("ProtocolEventTargetMutex")
 {
 }
 
@@ -932,7 +931,17 @@ IToplevelProtocol::SetEventTargetForActorInternal(IProtocol* aActor,
   aActor->SetId(id);
 
   MutexAutoLock lock(mEventTargetMutex);
-  mEventTargetMap.AddWithID(aEventTarget, id);
+  // FIXME bug 1445121 - sometimes the id is already mapped.
+  // (IDMap debug-asserts that the existing state is as expected.)
+  bool replace = false;
+#ifdef DEBUG
+  replace = mEventTargetMap.Lookup(id) != nullptr;
+#endif
+  if (replace) {
+    mEventTargetMap.ReplaceWithID(aEventTarget, id);
+  } else {
+    mEventTargetMap.AddWithID(aEventTarget, id);
+  }
 }
 
 void

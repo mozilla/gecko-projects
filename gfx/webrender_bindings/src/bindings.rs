@@ -456,10 +456,9 @@ fn get_proc_address(glcontext_ptr: *mut c_void,
     let symbol_name = CString::new(name).unwrap();
     let symbol = unsafe { get_proc_address_from_glcontext(glcontext_ptr, symbol_name.as_ptr()) };
 
-    // For now panic, not sure we should be though or if we can recover
     if symbol.is_null() {
         // XXX Bug 1322949 Make whitelist for extensions
-        println!("Could not find symbol {:?} by glcontext", symbol_name);
+        warn!("Could not find symbol {:?} by glcontext", symbol_name);
     }
 
     symbol as *const _
@@ -564,7 +563,7 @@ pub extern "C" fn wr_renderer_render(renderer: &mut Renderer,
         Ok(_) => true,
         Err(errors) => {
             for e in errors {
-                println!(" Failed to render: {:?}", e);
+                warn!(" Failed to render: {:?}", e);
                 let msg = CString::new(format!("wr_renderer_render: {:?}", e)).unwrap();
                 unsafe {
                     gfx_critical_note(msg.as_ptr());
@@ -836,7 +835,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
 
     let version = gl.get_string(gl::VERSION);
 
-    println!("WebRender - OpenGL version new {}", version);
+    info!("WebRender - OpenGL version new {}", version);
 
     let workers = unsafe {
         Arc::clone(&(*thread_pool).0)
@@ -879,7 +878,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
     let (renderer, sender) = match Renderer::new(gl, notifier, opts) {
         Ok((renderer, sender)) => (renderer, sender),
         Err(e) => {
-            println!(" Failed to create a Renderer: {:?}", e);
+            warn!(" Failed to create a Renderer: {:?}", e);
             let msg = CString::new(format!("wr_window_new: {:?}", e)).unwrap();
             unsafe {
                 gfx_critical_note(msg.as_ptr());
@@ -1066,8 +1065,6 @@ pub extern "C" fn wr_transaction_update_dynamic_properties(
     transform_array: *const WrTransformProperty,
     transform_count: usize,
 ) {
-    debug_assert!(transform_count > 0 || opacity_count > 0);
-
     let mut properties = DynamicProperties {
         transforms: Vec::new(),
         floats: Vec::new(),
@@ -1099,6 +1096,35 @@ pub extern "C" fn wr_transaction_update_dynamic_properties(
     }
 
     txn.update_dynamic_properties(properties);
+}
+
+#[no_mangle]
+pub extern "C" fn wr_transaction_append_transform_properties(
+    txn: &mut Transaction,
+    transform_array: *const WrTransformProperty,
+    transform_count: usize,
+) {
+    if transform_count == 0 {
+        return;
+    }
+
+    let mut properties = DynamicProperties {
+        transforms: Vec::new(),
+        floats: Vec::new(),
+    };
+
+    let transform_slice = make_slice(transform_array, transform_count);
+
+    for element in transform_slice.iter() {
+        let prop = PropertyValue {
+            key: PropertyBindingKey::new(element.id),
+            value: element.transform.into(),
+        };
+
+        properties.transforms.push(prop);
+    }
+
+    txn.append_dynamic_properties(properties);
 }
 
 #[no_mangle]
@@ -1296,7 +1322,7 @@ pub extern "C" fn wr_api_capture(
             file.write(revision).unwrap();
         }
         Err(e) => {
-            println!("Unable to create path '{:?}' for capture: {:?}", path, e);
+            warn!("Unable to create path '{:?}' for capture: {:?}", path, e);
             return
         }
     }

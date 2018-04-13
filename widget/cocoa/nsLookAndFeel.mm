@@ -13,6 +13,7 @@
 #include "gfxFont.h"
 #include "gfxFontConstants.h"
 #include "gfxPlatformMac.h"
+#include "mozilla/FontPropertyTypes.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/widget/WidgetMessageUtils.h"
 
@@ -37,8 +38,8 @@ nsLookAndFeel::nsLookAndFeel()
  , mUseOverlayScrollbarsCached(false)
  , mAllowOverlayScrollbarsOverlap(-1)
  , mAllowOverlayScrollbarsOverlapCached(false)
- , mColorTextSelectBackground{}, mColorTextSelectBackgroundDisabled{}, mColorHighlight{}, mColorMenuHover{}, mColorTextSelectForeground{}, mColorMenuHoverText{}, mColorButtonText{}, mHasColorButtonText(false)
- , mColorButtonHoverText{}, mColorText{}, mColorWindowText{}, mColorActiveCaption{}, mColorActiveBorder{}, mColorGrayText{}, mColorInactiveBorder{}, mColorInactiveCaption{}, mColorScrollbar{}, mColorThreeDHighlight{}, mColorMenu{}, mColorWindowFrame{}, mColorFieldText{}, mColorDialog{}, mColorDialogText{}, mColorDragTargetZone{}, mColorChromeActive{}, mColorChromeInactive{}, mColorFocusRing{}, mColorTextSelect{}, mColorDisabledToolbarText{}, mColorMenuSelect{}, mColorCellHighlight{}, mColorEvenTreeRow{}, mColorOddTreeRow{}, mColorActiveSourceListSelection{}, mInitialized(false)
+ , mHasColorButtonText(false)
+ , mInitialized(false)
 {
 }
 
@@ -565,7 +566,7 @@ nsLookAndFeel::GetFontImpl(FontID aID, nsString &aFontName,
     // hack for now
     if (aID == eFont_Window || aID == eFont_Document) {
         aFontStyle.style      = NS_FONT_STYLE_NORMAL;
-        aFontStyle.weight     = NS_FONT_WEIGHT_NORMAL;
+        aFontStyle.weight     = mozilla::FontWeight::Normal();
         aFontStyle.stretch    = NS_FONT_STRETCH_NORMAL;
         aFontStyle.size       = 14 * aDevPixPerCSSPixel;
         aFontStyle.systemFont = true;

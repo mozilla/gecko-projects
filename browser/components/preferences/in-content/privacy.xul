@@ -23,7 +23,7 @@
   <vbox id="passwordSettings">
     <hbox id="savePasswordsBox">
       <checkbox id="savePasswords"
-                data-l10n-id="forms-remember-logins"
+                data-l10n-id="forms-ask-to-save-logins"
                 preference="signon.rememberSignons"
                 onsyncfrompreference="return gPrivacyPane.readSavePasswords();"
                 flex="1" />
@@ -160,7 +160,7 @@
 </groupbox>
 
 <!-- Site Data -->
-<groupbox id="siteDataGroup" hidden="true" data-category="panePrivacy" data-hidden-from-search="true">
+<groupbox id="siteDataGroup" data-category="panePrivacy">
   <caption><label data-l10n-id="sitedata-header"/></caption>
 
   <hbox data-subcategory="sitedata" align="baseline">
@@ -281,8 +281,8 @@
   <vbox>
     <hbox align="start">
       <vbox flex="1">
-        <description data-l10n-id="tracking-description">
-          <a id="trackingProtectionLearnMore" target="_blank" class="learnMore text-link"/>
+        <description data-l10n-id="tracking-desc">
+          <a id="trackingProtectionLearnMore" data-l10n-name="learn-more" target="_blank" class="learnMore text-link"/>
         </description>
       </vbox>
       <spacer flex="1"/>

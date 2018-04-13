@@ -8,7 +8,6 @@
 :root {
   --panelui-subview-transition-duration: 150ms;
   --lwt-additional-images: none;
-  --lwt-background-alignment: right top;
   --lwt-background-tiling: no-repeat;
 }
 
@@ -18,13 +17,11 @@
 
 :root:-moz-lwtheme {
   background-color: var(--lwt-accent-color) !important;
-  background-image: var(--lwt-additional-images) !important;
-  background-position: var(--lwt-background-alignment) !important;
-  background-repeat: var(--lwt-background-tiling) !important;
 }
 
 :root:-moz-lwtheme[lwtheme-image] {
-  background-image: var(--lwt-header-image), var(--lwt-additional-images) !important;
+  background-image: var(--lwt-header-image) !important;
+  background-position: right top !important;
 }
 
 :root:-moz-lwtheme:-moz-window-inactive {
@@ -361,6 +358,14 @@ toolbarpaletteitem {
   transition: 1.5s margin-top ease-out;
 }
 
+/* Set additional backgrounds alignment relative to toolbox*/
+#navigator-toolbox:-moz-lwtheme {
+  background-image: var(--lwt-additional-images);
+  background-position: var(--lwt-background-alignment);
+  background-repeat: var(--lwt-background-tiling);
+}
+
+
 /* Rules to help integrate WebExtension buttons */
 
 .webextension-browser-action > .toolbarbutton-badge-stack > .toolbarbutton-icon {
@@ -621,8 +626,16 @@ html|input.urlbar-input[textoverflow]:not([focused]) {
 #PopupAutoCompleteRichResult > richlistbox > richlistitem > .ac-tags:not([empty]),
 #PopupAutoCompleteRichResult > richlistbox > richlistitem > .ac-separator:not([type=keyword]),
 #PopupAutoCompleteRichResult > richlistbox > richlistitem > .ac-url:not([actiontype]),
-#PopupAutoCompleteRichResult > richlistbox > richlistitem > .ac-action[actiontype] {
+#PopupAutoCompleteRichResult > richlistbox > richlistitem > .ac-action[actiontype],
+#PopupAutoCompleteRichResult > richlistbox > richlistitem[selected] > .ac-url[actiontype=remotetab],
+#PopupAutoCompleteRichResult > richlistbox > richlistitem:hover > .ac-url[actiontype=remotetab]
+{
   display: -moz-box;
+}
+
+#PopupAutoCompleteRichResult > richlistbox > richlistitem[selected] > .ac-action[actiontype=remotetab],
+#PopupAutoCompleteRichResult > richlistbox > richlistitem:hover > .ac-action[actiontype=remotetab] {
+  display: none;
 }
 
 /* Only show the "Search with" label on hover or selection. */

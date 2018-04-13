@@ -37,7 +37,8 @@ logger = logging.getLogger(__name__)
     },
 )
 def add_all_talos(parameters, graph_config, input, task_group_id, task_id, task):
-    decision_task_id, full_task_graph, label_to_taskid = fetch_graph_and_labels(parameters)
+    decision_task_id, full_task_graph, label_to_taskid = fetch_graph_and_labels(
+        parameters, graph_config)
 
     times = input.get('times', 1)
     for i in xrange(times):

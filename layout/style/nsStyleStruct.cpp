@@ -32,6 +32,7 @@
 #include "imgIContainer.h"
 #include "CounterStyleManager.h"
 
+#include "mozilla/dom/AnimationEffectReadOnlyBinding.h" // for PlaybackDirection
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/ImageTracker.h"
 #include "mozilla/CORSMode.h"
@@ -91,16 +92,6 @@ DefinitelyEqualImages(nsStyleImageRequest* aRequest1,
   }
 
   return aRequest1->DefinitelyEquals(*aRequest2);
-}
-
-// A nullsafe wrapper for strcmp. We depend on null-safety.
-static int
-safe_strcmp(const char16_t* a, const char16_t* b)
-{
-  if (!a || !b) {
-    return (int)(a - b);
-  }
-  return NS_strcmp(a, b);
 }
 
 static bool AreShadowArraysEqual(nsCSSShadowArray* lhs, nsCSSShadowArray* rhs);
@@ -320,10 +311,6 @@ nsStyleBorder::nsStyleBorder(const nsPresContext* aContext)
   , mBorderImageRepeatV(StyleBorderImageRepeat::Stretch)
   , mFloatEdge(StyleFloatEdge::ContentBox)
   , mBoxDecorationBreak(StyleBoxDecorationBreak::Slice)
-  , mBorderTopColor{}
-  , mBorderRightColor{}
-  , mBorderBottomColor{}
-  , mBorderLeftColor{}
   , mComputedBorder(0, 0, 0, 0)
 {
   MOZ_COUNT_CTOR(nsStyleBorder);
@@ -2317,7 +2304,6 @@ CachedBorderImageData::GetSubImage(uint8_t aIndex)
 
 nsStyleImage::nsStyleImage()
   : mType(eStyleImageType_Null)
-  , mImage{ nullptr }
   , mCropRect(nullptr)
 {
   MOZ_COUNT_CTOR(nsStyleImage);
@@ -3125,8 +3111,7 @@ nsStyleImageLayers::Size::operator==(const Size& aOther) const
 
 nsStyleImageLayers::Layer::Layer()
   : mClip(StyleGeometryBox::BorderBox)
-  , /* FIXME: initialize mOrigin */ mAttachment(
-    NS_STYLE_IMAGELAYER_ATTACHMENT_SCROLL)
+  , mAttachment(NS_STYLE_IMAGELAYER_ATTACHMENT_SCROLL)
   , mBlendMode(NS_STYLE_BLEND_NORMAL)
   , mComposite(NS_STYLE_MASK_COMPOSITE_ADD)
   , mMaskMode(NS_STYLE_MASK_MODE_MATCH_SOURCE)
@@ -4142,6 +4127,7 @@ nsStyleContentData::~nsStyleContentData()
   MOZ_COUNT_DTOR(nsStyleContentData);
 
   if (mType == eStyleContentType_Image) {
+    // FIXME(emilio): Is this needed now that URLs are not main thread only?
     NS_ReleaseOnMainThreadSystemGroup(
       "nsStyleContentData::mContent.mImage", dont_AddRef(mContent.mImage));
     mContent.mImage = nullptr;
@@ -4161,17 +4147,25 @@ nsStyleContentData::nsStyleContentData(const nsStyleContentData& aOther)
   : mType(aOther.mType)
 {
   MOZ_COUNT_CTOR(nsStyleContentData);
-  if (mType == eStyleContentType_Image) {
-    mContent.mImage = aOther.mContent.mImage;
-    mContent.mImage->AddRef();
-  } else if (mType == eStyleContentType_Counter ||
-             mType == eStyleContentType_Counters) {
-    mContent.mCounters = aOther.mContent.mCounters;
-    mContent.mCounters->AddRef();
-  } else if (aOther.mContent.mString) {
-    mContent.mString = NS_strdup(aOther.mContent.mString);
-  } else {
-    mContent.mString = nullptr;
+  switch (mType) {
+    case eStyleContentType_Image:
+      mContent.mImage = aOther.mContent.mImage;
+      mContent.mImage->AddRef();
+      break;
+    case eStyleContentType_Counter:
+    case eStyleContentType_Counters:
+      mContent.mCounters = aOther.mContent.mCounters;
+      mContent.mCounters->AddRef();
+      break;
+    case eStyleContentType_Attr:
+      mContent.mAttr = new nsStyleContentAttr(*mContent.mAttr);
+      break;
+    case eStyleContentType_String:
+      mContent.mString = NS_strdup(aOther.mContent.mString);
+      break;
+    default:
+      MOZ_ASSERT(!aOther.mContent.mString);
+      mContent.mString = nullptr;
   }
 }
 
@@ -4205,11 +4199,18 @@ nsStyleContentData::operator==(const nsStyleContentData& aOther) const
   if (mType == eStyleContentType_Image) {
     return DefinitelyEqualImages(mContent.mImage, aOther.mContent.mImage);
   }
+  if (mType == eStyleContentType_Attr) {
+    return *mContent.mAttr == *aOther.mContent.mAttr;
+  }
   if (mType == eStyleContentType_Counter ||
       mType == eStyleContentType_Counters) {
     return *mContent.mCounters == *aOther.mContent.mCounters;
   }
-  return safe_strcmp(mContent.mString, aOther.mContent.mString) == 0;
+  if (mType == eStyleContentType_String) {
+    return NS_strcmp(mContent.mString, aOther.mContent.mString) == 0;
+  }
+  MOZ_ASSERT(!mContent.mString && !aOther.mContent.mString);
+  return true;
 }
 
 void

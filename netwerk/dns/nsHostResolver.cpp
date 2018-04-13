@@ -183,29 +183,29 @@ nsHostKey::SizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const
 }
 
 nsHostRecord::nsHostRecord(const nsHostKey& key)
-  : nsHostKey(key)
-  , addr_info_lock("nsHostRecord.addr_info_lock")
-  , addr_info_gencnt(0)
-  , addr_info(nullptr)
-  , addr(nullptr)
-  , negative(false)
-  , /* FIXME: initialize mResolverMode */ mResolving(0)
-  , mNative(false)
-  , mTRRSuccess(0)
-  , mTRRUsed(false)
-  , mNativeUsed(false)
-  , mNativeSuccess(false)
-  , mFirstTRR(nullptr)
-  , onQueue(false)
-  , usingAnyThread(false)
-  , mDoomed(false)
-  , mDidCallbacks(false)
-  , mGetTtl(false)
-  , mTrrAUsed(INIT)
-  , mTrrAAAAUsed(INIT)
-  , mTrrLock("nsHostRecord.mTrrLock")
-  , mBlacklistedCount(0)
-  , mResolveAgain(false)
+    : nsHostKey(key)
+    , addr_info_lock("nsHostRecord.addr_info_lock")
+    , addr_info_gencnt(0)
+    , addr_info(nullptr)
+    , addr(nullptr)
+    , negative(false)
+    , mResolving(0)
+    , mNative(false)
+    , mTRRSuccess(0)
+    , mTRRUsed(false)
+    , mNativeUsed(false)
+    , mNativeSuccess(false)
+    , mFirstTRR(nullptr)
+    , onQueue(false)
+    , usingAnyThread(false)
+    , mDoomed(false)
+    , mDidCallbacks(false)
+    , mGetTtl(false)
+    , mTrrAUsed(INIT)
+    , mTrrAAAAUsed(INIT)
+    , mTrrLock("nsHostRecord.mTrrLock")
+    , mBlacklistedCount(0)
+    , mResolveAgain(false)
 {
 }
 
@@ -313,6 +313,9 @@ nsHostRecord::ResolveComplete()
         break;
     case MODE_SHADOW:
         AccumulateCategorical(Telemetry::LABELS_DNS_LOOKUP_ALGORITHM::trrShadow);
+        break;
+    case MODE_TRROFF:
+        AccumulateCategorical(Telemetry::LABELS_DNS_LOOKUP_ALGORITHM::trrOff);
         break;
     }
 
@@ -1267,12 +1270,12 @@ nsHostResolver::NameLookup(nsHostRecord *rec)
         mode = MODE_NATIVEONLY;
     }
 
-    if (mode != MODE_NATIVEONLY) {
+    if (!TRR_DISABLED(mode)) {
         rv = TrrLookup(rec);
     }
 
     if ((mode == MODE_PARALLEL) ||
-        (mode == MODE_NATIVEONLY) ||
+        TRR_DISABLED(mode) ||
         (mode == MODE_SHADOW) ||
         ((mode == MODE_TRRFIRST) && NS_FAILED(rv))) {
         rv = NativeLookup(rec);

@@ -187,7 +187,8 @@ def register_callback_action(name, title, symbol, description, order=10000,
 
             task_group_id = os.environ.get('TASK_ID', slugid())
 
-            # XXX
+            # FIXME: https://bugzilla.mozilla.org/show_bug.cgi?id=1454034
+            # trust-domain works, but isn't semantically correct here.
             if graph_config['trust-domain'] == 'comm':
                 template = os.path.join(GECKO, 'comm', '.taskcluster.yml')
             else:

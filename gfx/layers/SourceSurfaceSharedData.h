@@ -41,8 +41,7 @@ public:
   SourceSurfaceSharedDataWrapper()
     : mStride(0)
     , mFormat(SurfaceFormat::UNKNOWN)
-  {
-  }
+  { }
 
   bool Init(const IntSize& aSize,
             int32_t aStride,
@@ -83,17 +82,6 @@ public:
   void Unmap() override
   { }
 
-  bool AddConsumer()
-  {
-    return ++mConsumers == 1;
-  }
-
-  bool RemoveConsumer()
-  {
-    MOZ_ASSERT(mConsumers > 0);
-    return --mConsumers == 0;
-  }
-
 private:
   size_t GetDataLength() const
   {
@@ -106,7 +94,6 @@ private:
   }
 
   int32_t mStride;
-  uint32_t mConsumers;
   IntSize mSize;
   RefPtr<SharedMemoryBasic> mBuf;
   SurfaceFormat mFormat;
