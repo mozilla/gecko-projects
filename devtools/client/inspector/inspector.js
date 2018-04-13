@@ -1127,8 +1127,7 @@ Inspector.prototype = {
     // Restore the highlighter states prior to emitting "new-root".
     await Promise.all([
       this.highlighters.restoreFlexboxState(),
-      this.highlighters.restoreGridState(),
-      this.highlighters.restoreShapeState()
+      this.highlighters.restoreGridState()
     ]);
 
     this.emit("new-root");
@@ -1361,7 +1360,7 @@ Inspector.prototype = {
 
     let markupDestroyer = this._destroyMarkup();
 
-    this.highlighters.destroy();
+    let highlighterDestroyer = this.highlighters.destroy();
     this.prefsObserver.destroy();
     this.reflowTracker.destroy();
     this.styleChangeTracker.destroy();
@@ -1384,6 +1383,7 @@ Inspector.prototype = {
     this.target = null;
 
     this._panelDestroyer = promise.all([
+      highlighterDestroyer,
       cssPropertiesDestroyer,
       markupDestroyer,
       sidebarDestroyer,
@@ -1566,6 +1566,8 @@ Inspector.prototype = {
       click: () => this.showDOMProperties(),
     }));
 
+    this.buildA11YMenuItem(menu);
+
     let nodeLinkMenuItems = this._getNodeLinkMenuItems();
     if (nodeLinkMenuItems.filter(item => item.visible).length > 0) {
       menu.append(new MenuItem({
@@ -1580,6 +1582,38 @@ Inspector.prototype = {
 
     menu.popup(screenX, screenY, this._toolbox);
     return menu;
+  },
+
+  buildA11YMenuItem: function(menu) {
+    if (!this.selection.isElementNode() ||
+        !Services.prefs.getBoolPref("devtools.accessibility.enabled")) {
+      return;
+    }
+
+    const showA11YPropsItem = new MenuItem({
+      id: "node-menu-showaccessibilityproperties",
+      label: INSPECTOR_L10N.getStr("inspectorShowAccessibilityProperties.label"),
+      click: () => this.showAccessibilityProperties(),
+      disabled: true
+    });
+    this._updateA11YMenuItem(showA11YPropsItem);
+    menu.append(showA11YPropsItem);
+  },
+
+  _updateA11YMenuItem: async function(menuItem) {
+    const hasMethod = await this.target.actorHasMethod("domwalker",
+                                                       "hasAccessibilityProperties");
+    if (!hasMethod) {
+      return;
+    }
+
+    const hasA11YProps = await this.walker.hasAccessibilityProperties(
+      this.selection.nodeFront);
+    if (hasA11YProps) {
+      this._toolbox.doc.getElementById(menuItem.id).disabled = menuItem.disabled = false;
+    }
+
+    this.emit("node-menu-updated");
   },
 
   _getCopySubmenu: function(markupContainer, isSelectionElement) {
@@ -1954,6 +1988,18 @@ Inspector.prototype = {
   },
 
   /**
+   * Show Accessibility properties for currently selected node
+   */
+  async showAccessibilityProperties() {
+    let a11yPanel = await this._toolbox.selectTool("accessibility");
+    // Select the accessible object in the panel and wait for the event that
+    // tells us it has been done.
+    let onSelected = a11yPanel.once("new-accessible-front-selected");
+    a11yPanel.selectAccessibleForNode(this.selection.nodeFront);
+    await onSelected;
+  },
+
+  /**
    * Use in Console.
    *
    * Takes the currently selected node in the inspector and assigns it to a
@@ -2291,7 +2337,7 @@ Inspector.prototype = {
         link, this.selection.nodeFront).then(url => {
           if (type === "uri") {
             let browserWin = this.target.tab.ownerDocument.defaultView;
-            browserWin.openUILinkIn(url, "tab");
+            browserWin.openWebLinkIn(url, "tab");
           } else if (type === "cssresource") {
             return this.toolbox.viewSourceInStyleEditor(url);
           } else if (type === "jsresource") {

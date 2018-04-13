@@ -4,7 +4,7 @@
 
 use api::{AddFont, BlobImageData, BlobImageResources, ResourceUpdate, ResourceUpdates};
 use api::{BlobImageDescriptor, BlobImageError, BlobImageRenderer, BlobImageRequest};
-use api::{ClearCache, ColorF, DevicePoint, DeviceUintRect, DeviceUintSize};
+use api::{ClearCache, ColorF, DevicePoint, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
 use api::{Epoch, FontInstanceKey, FontKey, FontTemplate};
 use api::{ExternalImageData, ExternalImageType};
 use api::{FontInstanceOptions, FontInstancePlatformOptions, FontVariation};
@@ -482,7 +482,8 @@ impl ResourceCache {
             data,
             epoch: Epoch(0),
             tiling,
-            dirty_rect: None,
+            dirty_rect: Some(DeviceUintRect::new(DeviceUintPoint::zero(),
+                                                 DeviceUintSize::new(descriptor.width, descriptor.height))),
         };
 
         self.resources.image_templates.insert(image_key, resource);
@@ -597,7 +598,7 @@ impl ResourceCache {
         };
 
         let needs_upload = self.texture_cache
-            .request(&mut entry.as_mut().unwrap().texture_cache_handle, gpu_cache);
+            .request(&entry.as_ref().unwrap().texture_cache_handle, gpu_cache);
 
         if !needs_upload && !needs_update {
             return;
@@ -858,7 +859,7 @@ impl ResourceCache {
         debug_assert_eq!(self.state, State::Idle);
         self.state = State::AddResources;
         self.texture_cache.begin_frame(frame_id);
-        self.cached_glyphs.begin_frame(&mut self.texture_cache, &self.cached_render_tasks);
+        self.cached_glyphs.begin_frame(&self.texture_cache, &self.cached_render_tasks);
         self.cached_render_tasks.begin_frame(&mut self.texture_cache);
         self.current_frame_id = frame_id;
     }

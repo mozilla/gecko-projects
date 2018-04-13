@@ -55,76 +55,88 @@ gfxCharacterMap::NotifyReleased()
     delete this;
 }
 
-gfxFontEntry::gfxFontEntry() :
-    mStyle(NS_FONT_STYLE_NORMAL), mFixedPitch(false),
-    mIsBadUnderlineFont(false),
-    mIsUserFontContainer(false),
-    mIsDataUserFont(false),
-    mIsLocalUserFont(false),
-    mStandardFace(false),
-    mIgnoreGDEF(false),
-    mIgnoreGSUB(false),
-    mSVGInitialized(false),
-    mHasSpaceFeaturesInitialized(false),
-    mHasSpaceFeatures(false),
-    mHasSpaceFeaturesKerning(false),
-    mHasSpaceFeaturesNonKerning(false),
-    mSkipDefaultFeatureSpaceCheck(false),
-    mGraphiteSpaceContextualsInitialized(false),
-    mHasGraphiteSpaceContextuals(false),
-    mSpaceGlyphIsInvisible(false),
-    mSpaceGlyphIsInvisibleInitialized(false),
-    mCheckedForGraphiteTables(false),
-    mHasCmapTable(false),
-    mGrFaceInitialized(false),
-    mCheckedForColorGlyph(false),
-    mWeight(500), mStretch(NS_FONT_STRETCH_NORMAL),
-    mUVSOffset(0), mUVSData(nullptr),
-    mLanguageOverride(NO_FONT_LANGUAGE_OVERRIDE),
-    mCOLR(nullptr),
-    mCPAL(nullptr),
-    mUnitsPerEm(0),
-    mHBFace(nullptr),
-    mGrFace(nullptr),
-    mGrFaceRefCnt(0),
-    mComputedSizeOfUserFont(0)
+gfxFontEntry::gfxFontEntry()
+  : mStyle(NS_FONT_STYLE_NORMAL)
+  , mFixedPitch(false)
+  , mIsBadUnderlineFont(false)
+  , mIsUserFontContainer(false)
+  , mIsDataUserFont(false)
+  , mIsLocalUserFont(false)
+  , mStandardFace(false)
+  , mIgnoreGDEF(false)
+  , mIgnoreGSUB(false)
+  , mSVGInitialized(false)
+  , mHasSpaceFeaturesInitialized(false)
+  , mHasSpaceFeatures(false)
+  , mHasSpaceFeaturesKerning(false)
+  , mHasSpaceFeaturesNonKerning(false)
+  , mSkipDefaultFeatureSpaceCheck(false)
+  , mGraphiteSpaceContextualsInitialized(false)
+  , mHasGraphiteSpaceContextuals(false)
+  , mSpaceGlyphIsInvisible(false)
+  , mSpaceGlyphIsInvisibleInitialized(false)
+  , mHasGraphiteTables{ false }
+  , mCheckedForGraphiteTables(false)
+  , mHasCmapTable(false)
+  , mGrFaceInitialized(false)
+  , mCheckedForColorGlyph(false)
+  , mWeight(500)
+  , mStretch(NS_FONT_STRETCH_NORMAL)
+  , mUVSOffset(0)
+  , mUVSData(nullptr)
+  , mLanguageOverride(NO_FONT_LANGUAGE_OVERRIDE)
+  , mCOLR(nullptr)
+  , mCPAL(nullptr)
+  , mUnitsPerEm(0)
+  , mHBFace(nullptr)
+  , mGrFace(nullptr)
+  , mGrTableMap{ nullptr }
+  , mGrFaceRefCnt(0)
+  , mComputedSizeOfUserFont(0)
 {
     memset(&mDefaultSubSpaceFeatures, 0, sizeof(mDefaultSubSpaceFeatures));
     memset(&mNonDefaultSubSpaceFeatures, 0, sizeof(mNonDefaultSubSpaceFeatures));
 }
 
-gfxFontEntry::gfxFontEntry(const nsAString& aName, bool aIsStandardFace) :
-    mName(aName), mStyle(NS_FONT_STYLE_NORMAL), mFixedPitch(false),
-    mIsBadUnderlineFont(false),
-    mIsUserFontContainer(false),
-    mIsDataUserFont(false),
-    mIsLocalUserFont(false), mStandardFace(aIsStandardFace),
-    mIgnoreGDEF(false),
-    mIgnoreGSUB(false),
-    mSVGInitialized(false),
-    mHasSpaceFeaturesInitialized(false),
-    mHasSpaceFeatures(false),
-    mHasSpaceFeaturesKerning(false),
-    mHasSpaceFeaturesNonKerning(false),
-    mSkipDefaultFeatureSpaceCheck(false),
-    mGraphiteSpaceContextualsInitialized(false),
-    mHasGraphiteSpaceContextuals(false),
-    mSpaceGlyphIsInvisible(false),
-    mSpaceGlyphIsInvisibleInitialized(false),
-    mCheckedForGraphiteTables(false),
-    mHasCmapTable(false),
-    mGrFaceInitialized(false),
-    mCheckedForColorGlyph(false),
-    mWeight(500), mStretch(NS_FONT_STRETCH_NORMAL),
-    mUVSOffset(0), mUVSData(nullptr),
-    mLanguageOverride(NO_FONT_LANGUAGE_OVERRIDE),
-    mCOLR(nullptr),
-    mCPAL(nullptr),
-    mUnitsPerEm(0),
-    mHBFace(nullptr),
-    mGrFace(nullptr),
-    mGrFaceRefCnt(0),
-    mComputedSizeOfUserFont(0)
+gfxFontEntry::gfxFontEntry(const nsAString& aName, bool aIsStandardFace)
+  : mName(aName)
+  , mStyle(NS_FONT_STYLE_NORMAL)
+  , mFixedPitch(false)
+  , mIsBadUnderlineFont(false)
+  , mIsUserFontContainer(false)
+  , mIsDataUserFont(false)
+  , mIsLocalUserFont(false)
+  , mStandardFace(aIsStandardFace)
+  , mIgnoreGDEF(false)
+  , mIgnoreGSUB(false)
+  , mSVGInitialized(false)
+  , mHasSpaceFeaturesInitialized(false)
+  , mHasSpaceFeatures(false)
+  , mHasSpaceFeaturesKerning(false)
+  , mHasSpaceFeaturesNonKerning(false)
+  , mSkipDefaultFeatureSpaceCheck(false)
+  , mGraphiteSpaceContextualsInitialized(false)
+  , mHasGraphiteSpaceContextuals(false)
+  , mSpaceGlyphIsInvisible(false)
+  , mSpaceGlyphIsInvisibleInitialized(false)
+  , mHasGraphiteTables{ false }
+  , mCheckedForGraphiteTables(false)
+  , mHasCmapTable(false)
+  , mGrFaceInitialized(false)
+  , mCheckedForColorGlyph(false)
+  , mWeight(500)
+  , mStretch(NS_FONT_STRETCH_NORMAL)
+  , mUVSOffset(0)
+  , mUVSData(nullptr)
+  , mLanguageOverride(NO_FONT_LANGUAGE_OVERRIDE)
+  , mCOLR(nullptr)
+  , mCPAL(nullptr)
+  , mUnitsPerEm(0)
+  , mHBFace(nullptr)
+  , mGrFace(nullptr)
+  , mGrTableMap{ nullptr }
+  , mGrFaceRefCnt(0)
+  , mComputedSizeOfUserFont(0)
 {
     memset(&mDefaultSubSpaceFeatures, 0, sizeof(mDefaultSubSpaceFeatures));
     memset(&mNonDefaultSubSpaceFeatures, 0, sizeof(mNonDefaultSubSpaceFeatures));
@@ -1307,8 +1319,7 @@ gfxFontFamily::FindAllFontsForStyle(const gfxFontStyle& aFontStyle,
 
     aNeedsSyntheticBold = false;
 
-    int8_t baseWeight = aFontStyle.ComputeWeight();
-    bool wantBold = baseWeight >= 6;
+    bool wantBold = aFontStyle.weight >= 600;
     gfxFontEntry *fe = nullptr;
 
     // If the family has only one face, we simply return it; no further
@@ -1502,7 +1513,7 @@ CalcStyleMatch(gfxFontEntry *aFontEntry, const gfxFontStyle *aStyle)
          }
 
         // measure of closeness of weight to the desired value
-        rank += 9 - DeprecatedAbs(aFontEntry->Weight() / 100 - aStyle->ComputeWeight());
+        rank += 9 - Abs((aFontEntry->Weight() - aStyle->weight) / 100);
     } else {
         // if no font to match, prefer non-bold, non-italic fonts
         if (aFontEntry->IsUpright()) {

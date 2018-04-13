@@ -163,7 +163,16 @@ struct nsCSSToken {
 class nsCSSScannerPosition {
   friend class nsCSSScanner;
 public:
-  nsCSSScannerPosition() : mInitialized(false) { }
+  nsCSSScannerPosition()
+    : mOffset{}
+    , mLineNumber{}
+    , mLineOffset{}
+    , mTokenLineNumber{}
+    , mTokenLineOffset{}
+    , mTokenOffset{}
+    , mInitialized(false)
+  {
+  }
 
   uint32_t LineNumber() {
     MOZ_ASSERT(mInitialized);
@@ -205,10 +214,6 @@ class nsCSSScanner {
   // alive for the lifetime of the scanner.
   nsCSSScanner(const nsAString& aBuffer, uint32_t aLineNumber);
   ~nsCSSScanner();
-
-  void SetErrorReporter(mozilla::css::ErrorReporter* aReporter) {
-    mReporter = aReporter;
-  }
 
   // Reset or check whether a BAD_URL or BAD_STRING token has been seen.
   void ClearSeenBadToken() { mSeenBadToken = false; }
@@ -363,8 +368,6 @@ protected:
 
   uint32_t mRecordStartOffset;
   EOFCharacters mEOFCharacters;
-
-  mozilla::css::ErrorReporter *mReporter;
 
   bool mRecording;
   bool mSeenBadToken;

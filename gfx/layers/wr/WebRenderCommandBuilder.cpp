@@ -7,6 +7,7 @@
 #include "WebRenderCommandBuilder.h"
 
 #include "BasicLayers.h"
+#include "mozilla/AutoRestore.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/Types.h"
 #include "mozilla/gfx/DrawEventRecorder.h"
@@ -96,8 +97,10 @@ struct BlobItemData
   IntRect mImageRect;
   IntPoint mGroupOffset;
 
-  BlobItemData(DIGroup* aGroup, nsDisplayItem *aItem)
-    : mGroup(aGroup)
+  BlobItemData(DIGroup* aGroup, nsDisplayItem* aItem)
+    : mUsed{ false }
+    , mGroup(aGroup)
+    , mOpacity{ 0.0 }
   {
     mInvalid = false;
     mEmpty = false;
@@ -178,7 +181,9 @@ struct DIGroup;
 struct Grouper
 {
   explicit Grouper(ScrollingLayersHelper& aScrollingHelper)
-   : mScrollingHelper(aScrollingHelper)
+    : mAppUnitsPerDevPixel{}
+    , mDisplayListBuilder{ nullptr }
+    , mScrollingHelper(aScrollingHelper)
   {}
 
   int32_t mAppUnitsPerDevPixel;
@@ -357,7 +362,6 @@ struct DIGroup
       nsRect bounds = combined.GetBounds();
 
       IntRect transformedRect = ToDeviceSpace(combined.GetBounds(), aMatrix, appUnitsPerDevPixel, mGroupOffset);
-      ToDeviceSpace(combined.GetBounds(), aMatrix, appUnitsPerDevPixel, mGroupOffset);
       aData->mRect = transformedRect.Intersect(imageRect);
       GP("CGC %s %d %d %d %d\n", aItem->Name(), bounds.x, bounds.y, bounds.width, bounds.height);
       GP("%d %d,  %f %f\n", mGroupOffset.x, mGroupOffset.y, aMatrix._11, aMatrix._22);
@@ -535,11 +539,11 @@ struct DIGroup
       }
     }
 
-    // Round the bounds in a way that matches the existing fallback code
-    LayoutDeviceRect bounds = LayoutDeviceRect::FromAppUnits(mGroupBounds, aGrouper->mAppUnitsPerDevPixel);
-    bounds = LayoutDeviceRect(RoundedToInt(bounds));
-
-    IntSize size = mGroupBounds.Size().ScaleToNearestPixels(mScale.width, mScale.height, aGrouper->mAppUnitsPerDevPixel);
+    // Round the bounds out to leave space for unsnapped content
+    LayoutDeviceToLayerScale2D scale(mScale.width, mScale.height);
+    LayerIntRect layerBounds = LayerIntRect::FromUnknownRect(mGroupBounds.ScaleToOutsidePixels(mScale.width, mScale.height, aGrouper->mAppUnitsPerDevPixel));
+    IntSize dtSize = layerBounds.Size().ToUnknownSize();
+    LayoutDeviceRect bounds = layerBounds / scale;
 
     if (mInvalidRect.IsEmpty()) {
       GP("Not repainting group because it's empty\n");
@@ -565,7 +569,7 @@ struct DIGroup
     RefPtr<gfx::DrawTarget> dummyDt =
       gfx::Factory::CreateDrawTarget(gfx::BackendType::SKIA, gfx::IntSize(1, 1), format);
 
-    RefPtr<gfx::DrawTarget> dt = gfx::Factory::CreateRecordingDrawTarget(recorder, dummyDt, size);
+    RefPtr<gfx::DrawTarget> dt = gfx::Factory::CreateRecordingDrawTarget(recorder, dummyDt, dtSize);
     // Setup the gfxContext
     RefPtr<gfxContext> context = gfxContext::CreateOrNull(dt);
     GP("ctx-offset %f %f\n", bounds.x, bounds.y);
@@ -589,8 +593,8 @@ struct DIGroup
       float r = float(rand()) / RAND_MAX;
       float g = float(rand()) / RAND_MAX;
       float b = float(rand()) / RAND_MAX;
-      dt->FillRect(gfx::Rect(0, 0, size.width, size.height), gfx::ColorPattern(gfx::Color(r, g, b, 0.5)));
-      dt->FlushItem(IntRect(IntPoint(0, 0), size));
+      dt->FillRect(gfx::Rect(0, 0, dtSize.width, dtSize.height), gfx::ColorPattern(gfx::Color(r, g, b, 0.5)));
+      dt->FlushItem(IntRect(IntPoint(0, 0), dtSize));
     }
 
     // XXX: set this correctly perhaps using aItem->GetOpaqueRegion(aDisplayListBuilder, &snapped).Contains(paintBounds);?
@@ -604,17 +608,17 @@ struct DIGroup
         return;
       wr::ImageKey key = aWrManager->WrBridge()->GetNextImageKey();
       GP("No previous key making new one %d\n", key.mHandle);
-      wr::ImageDescriptor descriptor(size, 0, dt->GetFormat(), isOpaque);
+      wr::ImageDescriptor descriptor(dtSize, 0, dt->GetFormat(), isOpaque);
       MOZ_RELEASE_ASSERT(bytes.length() > sizeof(size_t));
       if (!aResources.AddBlobImage(key, descriptor, bytes)) {
         return;
       }
       mKey = Some(key);
     } else {
-      wr::ImageDescriptor descriptor(size, 0, dt->GetFormat(), isOpaque);
+      wr::ImageDescriptor descriptor(dtSize, 0, dt->GetFormat(), isOpaque);
       auto bottomRight = mInvalidRect.BottomRight();
-      GP("check invalid %d %d - %d %d\n", bottomRight.x, bottomRight.y, size.width, size.height);
-      MOZ_RELEASE_ASSERT(bottomRight.x <= size.width && bottomRight.y <= size.height);
+      GP("check invalid %d %d - %d %d\n", bottomRight.x, bottomRight.y, dtSize.width, dtSize.height);
+      MOZ_RELEASE_ASSERT(bottomRight.x <= dtSize.width && bottomRight.y <= dtSize.height);
       GP("Update Blob %d %d %d %d\n", mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
       if (!aResources.UpdateBlobImage(mKey.value(), descriptor, bytes, ViewAs<ImagePixel>(mInvalidRect))) {
         return;
@@ -915,21 +919,20 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
       // tighter for just the sublist that made it into this group.
       // We want to ensure the tight bounds are still clipped by area
       // that we're building the display list for.
-      if (groupData->mFollowingGroup.mKey) {
-        if (!groupData->mFollowingGroup.mGroupBounds.IsEqualEdges(currentGroup->mGroupBounds) ||
-            groupData->mFollowingGroup.mScale != currentGroup->mScale ||
-            groupData->mFollowingGroup.mAppUnitsPerDevPixel != currentGroup->mAppUnitsPerDevPixel) {
-          if (groupData->mFollowingGroup.mAppUnitsPerDevPixel != currentGroup->mAppUnitsPerDevPixel) {
-            printf("app unit change following: %d %d\n", groupData->mFollowingGroup.mAppUnitsPerDevPixel, currentGroup->mAppUnitsPerDevPixel);
-          }
-          // The group changed size
-          GP("Inner group size change\n");
-          aCommandBuilder->mManager->AddImageKeyForDiscard(groupData->mFollowingGroup.mKey.value());
-          groupData->mFollowingGroup.mKey = Nothing();
-          groupData->mFollowingGroup.ClearItems();
-
+      if (!groupData->mFollowingGroup.mGroupBounds.IsEqualEdges(currentGroup->mGroupBounds) ||
+          groupData->mFollowingGroup.mScale != currentGroup->mScale ||
+          groupData->mFollowingGroup.mAppUnitsPerDevPixel != currentGroup->mAppUnitsPerDevPixel) {
+        if (groupData->mFollowingGroup.mAppUnitsPerDevPixel != currentGroup->mAppUnitsPerDevPixel) {
+          GP("app unit change following: %d %d\n", groupData->mFollowingGroup.mAppUnitsPerDevPixel, currentGroup->mAppUnitsPerDevPixel);
+        }
+        // The group changed size
+        GP("Inner group size change\n");
+        groupData->mFollowingGroup.ClearItems();
+        if (groupData->mFollowingGroup.mKey) {
           IntSize size = currentGroup->mGroupBounds.Size().ScaleToNearestPixels(currentGroup->mScale.width, currentGroup->mScale.height, mAppUnitsPerDevPixel);
           groupData->mFollowingGroup.mInvalidRect = IntRect(IntPoint(0, 0), size);
+          aCommandBuilder->mManager->AddImageKeyForDiscard(groupData->mFollowingGroup.mKey.value());
+          groupData->mFollowingGroup.mKey = Nothing();
         }
       }
       groupData->mFollowingGroup.mGroupBounds = currentGroup->mGroupBounds;

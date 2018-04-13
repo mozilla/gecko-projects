@@ -9,13 +9,11 @@ const Services = require("Services");
 
 const {DevToolsShim} = require("chrome://devtools-startup/content/DevToolsShim.jsm");
 
-// Load gDevToolsBrowser toolbox lazily as they need gDevTools to be fully initialized
 loader.lazyRequireGetter(this, "TargetFactory", "devtools/client/framework/target", true);
 loader.lazyRequireGetter(this, "TabTarget", "devtools/client/framework/target", true);
-loader.lazyRequireGetter(this, "Toolbox", "devtools/client/framework/toolbox", true);
 loader.lazyRequireGetter(this, "ToolboxHostManager", "devtools/client/framework/toolbox-host-manager", true);
-loader.lazyRequireGetter(this, "gDevToolsBrowser", "devtools/client/framework/devtools-browser", true);
 loader.lazyRequireGetter(this, "HUDService", "devtools/client/webconsole/hudservice", true);
+loader.lazyRequireGetter(this, "Telemetry", "devtools/client/shared/telemetry");
 loader.lazyImporter(this, "ScratchpadManager", "resource://devtools/client/scratchpad/scratchpad-manager.jsm");
 loader.lazyImporter(this, "BrowserToolboxProcess", "resource://devtools/client/framework/ToolboxProcess.jsm");
 
@@ -43,6 +41,8 @@ function DevTools() {
   this._creatingToolboxes = new Map(); // Map<target, toolbox Promise>
 
   EventEmitter.decorate(this);
+  this._telemetry = new Telemetry();
+  this._telemetry.setEventRecordingEnabled("devtools.main", true);
 
   // Listen for changes to the theme pref.
   this._onThemeChanged = this._onThemeChanged.bind(this);
@@ -481,6 +481,11 @@ DevTools.prototype = {
       }
       this._firstShowToolbox = false;
     }
+
+    let width = Math.ceil(toolbox.win.outerWidth / 50) * 50;
+    this._telemetry.addEventProperty(
+      "devtools.main", "open", "tools", null, "width", width);
+
     return toolbox;
   },
 
@@ -500,10 +505,34 @@ DevTools.prototype = {
   logToolboxOpenTime(toolId, startTime) {
     let { performance } = Services.appShell.hiddenDOMWindow;
     let delay = performance.now() - startTime;
+
     let telemetryKey = this._firstShowToolbox ?
       "DEVTOOLS_COLD_TOOLBOX_OPEN_DELAY_MS" : "DEVTOOLS_WARM_TOOLBOX_OPEN_DELAY_MS";
-    let histogram = Services.telemetry.getKeyedHistogramById(telemetryKey);
-    histogram.add(toolId, delay);
+    this._telemetry.logKeyed(telemetryKey, toolId, delay);
+
+    this._telemetry.addEventProperty(
+      "devtools.main", "open", "tools", null, "first_panel",
+      this.makeToolIdHumanReadable(toolId));
+  },
+
+  makeToolIdHumanReadable(toolId) {
+    if (/^[0-9a-fA-F]{40}_temporary-addon/.test(toolId)) {
+      return "temporary-addon";
+    }
+
+    let matches = toolId.match(
+      /^_([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})_/
+    );
+    if (matches && matches.length === 2) {
+      return matches[1];
+    }
+
+    matches = toolId.match(/^_?(.*)-\d+-\d+-devtools-panel$/);
+    if (matches && matches.length === 2) {
+      return matches[1];
+    }
+
+    return toolId;
   },
 
   async createToolbox(target, toolId, hostType, hostOptions) {
@@ -604,6 +633,34 @@ DevTools.prototype = {
   },
 
   /**
+   * Evaluate the cross iframes query selectors
+   * @oaram {Object} walker
+   * @param {Array} selectors
+   *        An array of CSS selectors to find the target accessible object.
+   *        Several selectors can be needed if the element is nested in frames
+   *        and not directly in the root document.
+   * @return {Promise} a promise that resolves when the node front is found for
+   *                   selection using inspector tools.
+   */
+  async findNodeFront(walker, nodeSelectors) {
+    async function querySelectors(nodeFront) {
+      let selector = nodeSelectors.shift();
+      if (!selector) {
+        return nodeFront;
+      }
+      nodeFront = await walker.querySelector(nodeFront, selector);
+      if (nodeSelectors.length > 0) {
+        let { nodes } = await walker.children(nodeFront);
+        // This is the NodeFront for the document node inside the iframe
+        nodeFront = nodes[0];
+      }
+      return querySelectors(nodeFront);
+    }
+    let nodeFront = await walker.getRootNode();
+    return querySelectors(nodeFront);
+  },
+
+  /**
    * Called from the DevToolsShim, used by nsContextMenu.js.
    *
    * @param {XULTab} tab
@@ -633,22 +690,7 @@ DevTools.prototype = {
     // browser is remote or not.
     let onNewNode = inspector.selection.once("new-node-front");
 
-    // Evaluate the cross iframes query selectors
-    async function querySelectors(nodeFront) {
-      let selector = nodeSelectors.shift();
-      if (!selector) {
-        return nodeFront;
-      }
-      nodeFront = await inspector.walker.querySelector(nodeFront, selector);
-      if (nodeSelectors.length > 0) {
-        let { nodes } = await inspector.walker.children(nodeFront);
-        // This is the NodeFront for the document node inside the iframe
-        nodeFront = nodes[0];
-      }
-      return querySelectors(nodeFront);
-    }
-    let nodeFront = await inspector.walker.getRootNode();
-    nodeFront = await querySelectors(nodeFront);
+    let nodeFront = await this.findNodeFront(inspector.walker, nodeSelectors);
     // Select the final node
     inspector.selection.setNodeFront(nodeFront, { reason: "browser-context-menu" });
 
@@ -659,8 +701,36 @@ DevTools.prototype = {
   },
 
   /**
-   * Either the DevTools Loader has been destroyed or firefox is shutting down.
+   * Called from the DevToolsShim, used by nsContextMenu.js.
+   *
+   * @param {XULTab} tab
+   *        The browser tab on which inspect accessibility was used.
+   * @param {Array} selectors
+   *        An array of CSS selectors to find the target accessible object.
+   *        Several selectors can be needed if the element is nested in frames
+   *        and not directly in the root document.
+   * @param {Number} startTime
+   *        Optional, indicates the time at which the user event related to this
+   *        node inspection started. This is a `performance.now()` timing.
+   * @return {Promise} a promise that resolves when the accessible object is
+   *         selected in the accessibility inspector.
+   */
+  async inspectA11Y(tab, nodeSelectors, startTime) {
+    let target = TargetFactory.forTab(tab);
 
+    let toolbox = await gDevTools.showToolbox(
+      target, "accessibility", null, null, startTime);
+    let nodeFront = await this.findNodeFront(toolbox.walker, nodeSelectors);
+    // Select the accessible object in the panel and wait for the event that
+    // tells us it has been done.
+    let a11yPanel = toolbox.getCurrentPanel();
+    let onSelected = a11yPanel.once("new-accessible-front-selected");
+    a11yPanel.selectAccessibleForNode(nodeFront);
+    await onSelected;
+  },
+
+  /**
+   * Either the DevTools Loader has been destroyed or firefox is shutting down.
    * @param {boolean} shuttingDown
    *        True if firefox is currently shutting down. We may prevent doing
    *        some cleanups to speed it up. Otherwise everything need to be
@@ -705,15 +775,6 @@ DevTools.prototype = {
   getToolboxes() {
     return Array.from(this._toolboxes.values());
   },
-
-  /**
-   * Iterator that yields each of the toolboxes.
-   */
-  * [Symbol.iterator ]() {
-    for (let toolbox of this._toolboxes) {
-      yield toolbox;
-    }
-  }
 };
 
 const gDevTools = exports.gDevTools = new DevTools();

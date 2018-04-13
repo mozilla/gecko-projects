@@ -24,7 +24,7 @@ namespace layers {
 
 class APZCTreeManager;
 class LayerMetricsWrapper;
-struct ScrollThumbData;
+struct ScrollbarData;
 
 /**
  * This interface exposes APZ methods related to "sampling" (i.e. reading the
@@ -58,7 +58,7 @@ public:
   LayerToParentLayerMatrix4x4 ComputeTransformForScrollThumb(
       const LayerToParentLayerMatrix4x4& aCurrentTransform,
       const LayerMetricsWrapper& aContent,
-      const ScrollThumbData& aThumbData,
+      const ScrollbarData& aThumbData,
       bool aScrollbarIsDescendant,
       AsyncTransformComponentMatrix* aOutClipTransform);
 
@@ -75,12 +75,12 @@ public:
    * sampler thread (which samples the async transform).
    * This does nothing if thread assertions are disabled.
    */
-  void AssertOnSamplerThread();
+  void AssertOnSamplerThread() const;
 
   /**
    * Returns true if currently on the APZSampler's "sampler thread".
    */
-  bool IsSamplerThread();
+  bool IsSamplerThread() const;
 
 protected:
   virtual ~APZSampler();

@@ -36,6 +36,7 @@ module.exports = {
     "files": [
       "client/scratchpad/scratchpad-manager.jsm",
       "client/scratchpad/scratchpad.js",
+      "client/shared/*.jsm",
     ],
     "rules": {
       "camelcase": "off",
@@ -44,6 +45,8 @@ module.exports = {
     "files": [
       "client/framework/**",
       "client/scratchpad/**",
+      "client/shared/*.jsm",
+      "client/shared/widgets/*.jsm",
     ],
     "rules": {
       "consistent-return": "off",
@@ -52,6 +55,7 @@ module.exports = {
     "files": [
       "client/framework/**",
       "client/scratchpad/**",
+      "client/shared/AppCacheUtils.jsm",
     ],
     "rules": {
       "max-nested-callbacks": "off",
@@ -60,6 +64,8 @@ module.exports = {
     "files": [
       "client/framework/**",
       "client/scratchpad/**",
+      "client/shared/*.jsm",
+      "client/shared/widgets/*.jsm",
     ],
     "rules": {
       "max-len": "off",
@@ -76,6 +82,8 @@ module.exports = {
     "files": [
       "client/framework/**",
       "client/scratchpad/**",
+      "client/shared/*.jsm",
+      "client/shared/widgets/*.jsm",
     ],
     "rules": {
       "mozilla/no-aArgs": "off",
@@ -92,6 +100,8 @@ module.exports = {
     "files": [
       "client/framework/**",
       "client/scratchpad/**",
+      "client/shared/AppCacheUtils.jsm",
+      "client/shared/widgets/*.jsm",
     ],
     "rules": {
       "no-shadow": "off",
@@ -374,7 +384,7 @@ module.exports = {
     // Warn about invalid JSDoc comments.
     // Disabled for now because of https://github.com/eslint/eslint/issues/2270
     // The rule fails on some jsdoc comments like in:
-    // devtools/client/webconsole/console-output.js
+    // devtools/client/webconsole/old/console-output.js
     "valid-jsdoc": "off",
     // Allow vars to be declared anywhere in the scope.
     "vars-on-top": "off",

@@ -288,9 +288,8 @@ impl Transaction {
         &mut self,
         scroll_location: ScrollLocation,
         cursor: WorldPoint,
-        phase: ScrollEventPhase,
     ) {
-        self.frame_ops.push(FrameMsg::Scroll(scroll_location, cursor, phase));
+        self.frame_ops.push(FrameMsg::Scroll(scroll_location, cursor));
     }
 
     pub fn scroll_node_with_id(
@@ -314,10 +313,6 @@ impl Transaction {
         self.frame_ops.push(FrameMsg::SetPan(pan));
     }
 
-    pub fn tick_scrolling_bounce_animations(&mut self) {
-        self.frame_ops.push(FrameMsg::TickScrollingBounce);
-    }
-
     /// Generate a new frame.
     pub fn generate_frame(&mut self) {
         self.generate_frame = true;
@@ -327,6 +322,14 @@ impl Transaction {
     /// bindings in the current display list.
     pub fn update_dynamic_properties(&mut self, properties: DynamicProperties) {
         self.frame_ops.push(FrameMsg::UpdateDynamicProperties(properties));
+    }
+
+    /// Add to the list of animated property bindings that should be used to
+    /// resolve bindings in the current display list. This is a convenience method
+    /// so the caller doesn't have to figure out all the dynamic properties before
+    /// setting them on the transaction but can do them incrementally.
+    pub fn append_dynamic_properties(&mut self, properties: DynamicProperties) {
+        self.frame_ops.push(FrameMsg::AppendDynamicProperties(properties));
     }
 
     /// Enable copying of the output of this pipeline id to
@@ -487,11 +490,11 @@ pub enum FrameMsg {
     HitTest(Option<PipelineId>, WorldPoint, HitTestFlags, MsgSender<HitTestResult>),
     SetPan(DeviceIntPoint),
     EnableFrameOutput(PipelineId, bool),
-    Scroll(ScrollLocation, WorldPoint, ScrollEventPhase),
+    Scroll(ScrollLocation, WorldPoint),
     ScrollNodeWithId(LayoutPoint, ExternalScrollId, ScrollClamping),
-    TickScrollingBounce,
     GetScrollNodeState(MsgSender<Vec<ScrollNodeState>>),
     UpdateDynamicProperties(DynamicProperties),
+    AppendDynamicProperties(DynamicProperties),
 }
 
 impl fmt::Debug for SceneMsg {
@@ -516,10 +519,10 @@ impl fmt::Debug for FrameMsg {
             FrameMsg::SetPan(..) => "FrameMsg::SetPan",
             FrameMsg::Scroll(..) => "FrameMsg::Scroll",
             FrameMsg::ScrollNodeWithId(..) => "FrameMsg::ScrollNodeWithId",
-            FrameMsg::TickScrollingBounce => "FrameMsg::TickScrollingBounce",
             FrameMsg::GetScrollNodeState(..) => "FrameMsg::GetScrollNodeState",
             FrameMsg::EnableFrameOutput(..) => "FrameMsg::EnableFrameOutput",
             FrameMsg::UpdateDynamicProperties(..) => "FrameMsg::UpdateDynamicProperties",
+            FrameMsg::AppendDynamicProperties(..) => "FrameMsg::AppendDynamicProperties",
         })
     }
 }
@@ -622,6 +625,7 @@ pub enum ApiMsg {
     /// Wakes the render backend's event loop up. Needed when an event is communicated
     /// through another channel.
     WakeUp,
+    WakeSceneBuilder,
     ShutDown,
 }
 
@@ -641,6 +645,7 @@ impl fmt::Debug for ApiMsg {
             ApiMsg::DebugCommand(..) => "ApiMsg::DebugCommand",
             ApiMsg::ShutDown => "ApiMsg::ShutDown",
             ApiMsg::WakeUp => "ApiMsg::WakeUp",
+            ApiMsg::WakeSceneBuilder => "ApiMsg::WakeSceneBuilder",
         })
     }
 }
@@ -949,6 +954,10 @@ impl RenderApi {
         rx.recv().unwrap()
     }
 
+    pub fn wake_scene_builder(&self) {
+        self.send_message(ApiMsg::WakeSceneBuilder);
+    }
+
     /// Save a capture of the current frame state for debugging.
     pub fn save_capture(&self, path: PathBuf, bits: CaptureBits) {
         let msg = ApiMsg::DebugCommand(DebugCommand::SaveCapture(path, bits));
@@ -979,17 +988,6 @@ impl Drop for RenderApi {
         let msg = ApiMsg::ClearNamespace(self.namespace_id);
         let _ = self.api_sender.send(msg);
     }
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub enum ScrollEventPhase {
-    /// The user started scrolling.
-    Start,
-    /// The user performed a scroll. The Boolean flag indicates whether the user's fingers are
-    /// down, if a touchpad is in use. (If false, the event is a touchpad fling.)
-    Move(bool),
-    /// The user ended scrolling.
-    End,
 }
 
 #[derive(Clone, Deserialize, Serialize)]

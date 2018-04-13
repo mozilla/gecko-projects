@@ -67,7 +67,7 @@ APZSampler::SampleAnimations(const LayerMetricsWrapper& aLayer,
 LayerToParentLayerMatrix4x4
 APZSampler::ComputeTransformForScrollThumb(const LayerToParentLayerMatrix4x4& aCurrentTransform,
                                            const LayerMetricsWrapper& aContent,
-                                           const ScrollThumbData& aThumbData,
+                                           const ScrollbarData& aThumbData,
                                            bool aScrollbarIsDescendant,
                                            AsyncTransformComponentMatrix* aOutClipTransform)
 {
@@ -146,7 +146,7 @@ APZSampler::HasUnusedAsyncTransform(const LayerMetricsWrapper& aLayer)
 }
 
 void
-APZSampler::AssertOnSamplerThread()
+APZSampler::AssertOnSamplerThread() const
 {
   if (APZThreadUtils::GetThreadAssertionsEnabled()) {
     MOZ_ASSERT(IsSamplerThread());
@@ -154,7 +154,7 @@ APZSampler::AssertOnSamplerThread()
 }
 
 bool
-APZSampler::IsSamplerThread()
+APZSampler::IsSamplerThread() const
 {
   return CompositorThreadHolder::IsInCompositorThread();
 }

@@ -139,6 +139,12 @@ WorkerGlobalScope::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
   MOZ_CRASH("We should never get here!");
 }
 
+void
+WorkerGlobalScope::NoteTerminating()
+{
+  DisconnectEventTargetObjects();
+}
+
 already_AddRefed<Console>
 WorkerGlobalScope::GetConsole(ErrorResult& aRv)
 {
@@ -747,6 +753,8 @@ public:
   explicit ReportFetchListenerWarningRunnable(const nsString& aScope)
     : mozilla::Runnable("ReportFetchListenerWarningRunnable")
     , mScope(NS_ConvertUTF16toUTF8(aScope))
+    , mLine{}
+    , mColumn{}
   {
     WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
     MOZ_ASSERT(workerPrivate);

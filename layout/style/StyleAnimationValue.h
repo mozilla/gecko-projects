@@ -28,7 +28,6 @@ class gfx3DMatrix;
 namespace mozilla {
 
 class ComputedStyle;
-class GeckoComputedStyle;
 
 namespace css {
 class StyleRule;
@@ -45,7 +44,10 @@ struct PropertyStyleAnimationValuePair;
 struct AnimationValue
 {
   explicit AnimationValue(const RefPtr<RawServoAnimationValue>& aValue)
-    : mServo(aValue) { }
+    : mGecko{}
+    , mServo(aValue)
+  {
+  }
   AnimationValue() = default;
 
   AnimationValue(const AnimationValue& aOther)

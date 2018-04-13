@@ -183,7 +183,7 @@ public:
   NS_IMETHOD Reset() override;
   NS_IMETHOD SubmitNamesValues(HTMLFormSubmission* aFormSubmission) override;
   NS_IMETHOD SaveState() override;
-  virtual bool RestoreState(nsPresState* aState) override;
+  virtual bool RestoreState(PresState* aState) override;
   virtual bool AllowDrop() override;
   virtual bool IsDisabledForEvents(EventMessage aMessage) override;
 
@@ -1755,13 +1755,6 @@ private:
    */
   static bool
   IsInputDateTimeOthersEnabled();
-
-  /**
-   * Checks preference "dom.forms.number" to determine if input type=number
-   * should be supported.
-   */
-  static bool
-  IsInputNumberEnabled();
 
   /**
    * Checks preference "dom.forms.color" to determine if date/time related

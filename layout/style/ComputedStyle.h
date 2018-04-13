@@ -13,7 +13,6 @@
 #include <algorithm>
 #include "mozilla/ArenaObjectID.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/RestyleLogging.h"
 #include "mozilla/ServoTypes.h"
 #include "mozilla/ServoUtils.h"
 #include "mozilla/StyleComplexColor.h"
@@ -26,7 +25,7 @@
 
 // Bits for each struct.
 // NS_STYLE_INHERIT_BIT defined in nsStyleStructFwd.h
-#define NS_STYLE_INHERIT_MASK              0x000ffffff
+#define NS_STYLE_INHERIT_MASK              0x0007fffff
 
 // Bits for inherited structs.
 #define NS_STYLE_INHERITED_STRUCT_MASK \
@@ -37,6 +36,7 @@
    << nsStyleStructID_Inherited_Count)
 
 // Additional bits for ComputedStyle's mBits:
+// (free bit)                              0x000800000
 // See ComputedStyle::HasTextDecorationLines
 #define NS_STYLE_HAS_TEXT_DECORATION_LINES 0x001000000
 // See ComputedStyle::HasPseudoElementData.
@@ -115,7 +115,9 @@ public:
                 CSSPseudoElementType aPseudoType,
                 ServoComputedDataForgotten aComputedValues);
 
-  nsPresContext* PresContext() const { return mPresContext; }
+  // FIXME(emilio, bug 548397): This will need to go away. Don't add new callers
+  // of this methed.
+  nsPresContext* PresContextForFrame() const { return mPresContext; }
   const ServoComputedData* ComputedData() const { return &mSource; }
 
   // These two methods are for use by ArenaRefPtr.
@@ -350,8 +352,7 @@ public:
    * representing which structs were compared to be non-equal.
    *
    * CSS Variables are not compared here. Instead, the caller is responsible for
-   * that when needed (basically only for elements). The Variables bit in
-   * aEqualStructs is always set.
+   * that when needed (basically only for elements).
    */
   nsChangeHint CalcStyleDifference(ComputedStyle* aNewContext,
                                    uint32_t* aEqualStructs);
@@ -383,12 +384,6 @@ public:
    */
   inline void StartBackgroundImageLoads();
 
-  static bool IsReset(const nsStyleStructID aSID) {
-    MOZ_ASSERT(0 <= aSID && aSID < nsStyleStructID_Length,
-               "must be an inherited or reset SID");
-    return nsStyleStructID_Reset_Start <= aSID;
-  }
-  static bool IsInherited(const nsStyleStructID aSID) { return !IsReset(aSID); }
   static uint32_t GetBitForSID(const nsStyleStructID aSID) { return 1 << aSID; }
 
 #ifdef DEBUG
@@ -439,9 +434,8 @@ protected:
   RefPtr<nsAtom> mPseudoTag;
 
   // mBits stores a number of things:
-  //  - It records (using the style struct bits) which structs are
-  //    inherited from the parent context or owned by the rule node (i.e.,
-  //    not owned by the ComputedStyle).
+  //  - It records (using the style struct bits) which structs have
+  //    been requested on this ComputedStyle.
   //  - It also stores the additional bits listed at the top of
   //    nsStyleStruct.h.
   uint64_t                mBits;

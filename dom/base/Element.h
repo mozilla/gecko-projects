@@ -65,6 +65,9 @@ class nsDOMStringMap;
 namespace mozilla {
 class DeclarationBlock;
 class TextEditor;
+namespace css {
+  struct URLValue;
+} // namespace css
 namespace dom {
   struct AnimationFilter;
   struct ScrollIntoViewOptions;
@@ -803,7 +806,7 @@ public:
    * @return ATTR_MISSING, ATTR_VALUE_NO_MATCH or the non-negative index
    * indicating the first value of aValues that matched
    */
-  typedef nsStaticAtom* const AttrValuesArray;
+  typedef nsStaticAtom* const* const AttrValuesArray;
   int32_t FindAttrValueIn(int32_t aNameSpaceID,
                                   nsAtom* aName,
                                   AttrValuesArray* aValues,
@@ -964,7 +967,7 @@ public:
    * Attribute Mapping Helpers
    */
   struct MappedAttributeEntry {
-    const nsStaticAtom* const attribute;
+    nsStaticAtom** attribute;
   };
 
   /**
@@ -981,7 +984,7 @@ public:
     return FindAttributeDependence(aAttribute, aMaps, N);
   }
 
-  static nsStaticAtom* const* HTMLSVGPropertiesToTraverseAndUnlink();
+  static nsStaticAtom*** HTMLSVGPropertiesToTraverseAndUnlink();
 
 private:
   void DescribeAttribute(uint32_t index, nsAString& aOutDescription) const;

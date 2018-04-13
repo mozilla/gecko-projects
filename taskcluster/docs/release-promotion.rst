@@ -46,3 +46,9 @@ In-depth relpro guide
 .. toctree::
 
     release-promotion-action
+    balrog
+
+Release Promotion Tasks
+-----------------------
+
+* :doc:`partials`

@@ -200,6 +200,7 @@ HttpBaseChannel::HttpBaseChannel()
   , mReferrerPolicy(NS_GetDefaultReferrerPolicy())
   , mRedirectCount(0)
   , mInternalRedirectCount(0)
+  , mChannelCreationTime{}
   , mForcePending(false)
   , mCorsIncludeCredentials(false)
   , mCorsMode(nsIHttpChannelInternal::CORS_MODE_NO_CORS)
@@ -220,10 +221,13 @@ HttpBaseChannel::HttpBaseChannel()
   , mAltDataForChild(false)
   , mForceMainDocumentChannel(false)
   , mIsTrackingResource(false)
+  , mChannelId{}
   , mLastRedirectFlags(0)
   , mReqContentLength(0U)
   , mReqContentLengthDetermined(false)
 {
+  this->mSelfAddr.inet = {};
+  this->mPeerAddr.inet = {};
   LOG(("Creating HttpBaseChannel @%p\n", this));
 
   // Subfields of unions cannot be targeted in an initializer list.
@@ -2219,7 +2223,9 @@ HttpBaseChannel::RedirectTo(nsIURI *targetURI)
   // Only Web Extensions are allowed to redirect a channel to a data:
   // URI. To avoid any bypasses after the channel was flagged by
   // the WebRequst API, we are dropping the flag here.
-  mLoadInfo->SetAllowInsecureRedirectToDataURI(false);
+  if (mLoadInfo) {
+    mLoadInfo->SetAllowInsecureRedirectToDataURI(false);
+  }
   return NS_OK;
 }
 

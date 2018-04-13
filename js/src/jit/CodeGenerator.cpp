@@ -10237,14 +10237,11 @@ CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
     // will trickle to jit::Compile() and return Method_Skipped.
     uint32_t warmUpCount = script->getWarmUpCount();
 
-    JitRuntime* jrt = cx->runtime()->jitRuntime();
-    IonCompilationId compilationId = jrt->nextCompilationId();
-#ifdef DEBUG
-    jrt->currentCompilationId().emplace(compilationId);
-    auto resetCurrentId = mozilla::MakeScopeExit([jrt] {
-        jrt->currentCompilationId().reset();
+    IonCompilationId compilationId = cx->runtime()->jitRuntime()->nextCompilationId();
+    cx->zone()->types.currentCompilationIdRef().emplace(compilationId);
+    auto resetCurrentId = mozilla::MakeScopeExit([cx] {
+        cx->zone()->types.currentCompilationIdRef().reset();
     });
-#endif
 
     // Record constraints. If an error occured, returns false and potentially
     // prevent future compilations. Otherwise, if an invalidation occured, then
@@ -10491,7 +10488,7 @@ CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
         for (size_t i = 0; i < graph.numConstants(); i++) {
             const Value& v = vp[i];
             if ((v.isObject() || v.isString()) && IsInsideNursery(v.toGCThing())) {
-                cx->zone()->group()->storeBuffer().putWholeCell(script);
+                cx->runtime()->gc.storeBuffer().putWholeCell(script);
                 break;
             }
         }

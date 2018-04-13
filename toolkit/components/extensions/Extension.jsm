@@ -1163,6 +1163,7 @@ class Extension extends ExtensionData {
     }
 
     this.addonData = addonData;
+    this.startupData = addonData.startupData || {};
     this.startupReason = startupReason;
 
     if (["ADDON_UPGRADE", "ADDON_DOWNGRADE"].includes(startupReason)) {
@@ -1193,7 +1194,6 @@ class Extension extends ExtensionData {
 
     this.uninstallURL = null;
 
-    this.apis = [];
     this.whiteListedHosts = null;
     this._optionalOrigins = null;
     this.webAccessibleResources = null;
@@ -1357,6 +1357,10 @@ class Extension extends ExtensionData {
             this.isPrivileged);
   }
 
+  saveStartupData() {
+    AddonManagerPrivate.setStartupData(this.id, this.startupData);
+  }
+
   async _parseManifest() {
     let manifest = await super.parseManifest();
     if (manifest && manifest.permissions.has("mozillaAddons") &&
@@ -1390,18 +1394,6 @@ class Extension extends ExtensionData {
 
     if (this.errors.length) {
       return Promise.reject({errors: this.errors});
-    }
-
-    if (this.apiNames.size) {
-      // Load Experiments APIs that this extension depends on.
-      let apis = await Promise.all(
-        Array.from(this.apiNames, api => ExtensionCommon.ExtensionAPIs.load(api)));
-
-      for (let API of apis) {
-        if (API) {
-          this.apis.push(new API(this));
-        }
-      }
     }
 
     return manifest;
@@ -1649,9 +1641,11 @@ class Extension extends ExtensionData {
       Management.emit("ready", this);
       this.emit("ready");
       TelemetryStopwatch.finish("WEBEXT_EXTENSION_STARTUP_MS", this);
-    } catch (e) {
-      dump(`Extension error: ${e.message || e} ${e.filename || e.fileName}:${e.lineNumber} :: ${e.stack || new Error().stack}\n`);
-      Cu.reportError(e);
+    } catch (errors) {
+      for (let e of [].concat(errors)) {
+        dump(`Extension error: ${e.message || e} ${e.filename || e.fileName}:${e.lineNumber} :: ${e.stack || new Error().stack}\n`);
+        Cu.reportError(e);
+      }
 
       if (this.policy) {
         this.policy.active = false;
@@ -1659,7 +1653,7 @@ class Extension extends ExtensionData {
 
       this.cleanupGeneratedFile();
 
-      throw e;
+      throw errors;
     }
 
     this.startupPromise = null;
@@ -1758,10 +1752,6 @@ class Extension extends ExtensionData {
 
     for (let obj of this.onShutdown) {
       obj.close();
-    }
-
-    for (let api of this.apis) {
-      api.destroy();
     }
 
     ParentAPIManager.shutdownExtension(this.id);

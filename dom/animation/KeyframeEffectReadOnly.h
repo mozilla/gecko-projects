@@ -46,7 +46,6 @@ struct AnimationRule;
 struct TimingParams;
 class EffectSet;
 class ComputedStyle;
-class GeckoComputedStyle;
 
 namespace dom {
 class ElementOrCSSPseudoElement;
@@ -166,7 +165,7 @@ public:
   void SetKeyframes(JSContext* aContext, JS::Handle<JSObject*> aKeyframes,
                     ErrorResult& aRv);
   void SetKeyframes(nsTArray<Keyframe>&& aKeyframes,
-                    const ComputedStyle* aComputedValues);
+                    const ComputedStyle* aStyle);
 
   // Returns true if the effect includes |aProperty| regardless of whether the
   // property is overridden by !important rule.
@@ -204,8 +203,7 @@ public:
   // Updates |aComposeResult| with the animation values produced by this
   // AnimationEffect for the current time except any properties contained
   // in |aPropertiesToSkip|.
-  template<typename ComposeAnimationResult>
-  void ComposeStyle(ComposeAnimationResult&& aRestultContainer,
+  void ComposeStyle(RawServoAnimationValueMap& aComposeResult,
                     const nsCSSPropertyIDSet& aPropertiesToSkip);
 
 
@@ -244,8 +242,7 @@ public:
 
   // Cumulative change hint on each segment for each property.
   // This is used for deciding the animation is paint-only.
-  template<typename StyleType>
-  void CalculateCumulativeChangeHint(StyleType* aComputedStyle);
+  void CalculateCumulativeChangeHint(const ComputedStyle* aStyle);
 
   // Returns true if all of animation properties' change hints
   // can ignore painting if the animation is not visible.
@@ -297,8 +294,7 @@ protected:
   // Build properties by recalculating from |mKeyframes| using |aComputedStyle|
   // to resolve specified values. This function also applies paced spacing if
   // needed.
-  template<typename StyleType>
-  nsTArray<AnimationProperty> BuildProperties(StyleType* aStyle);
+  nsTArray<AnimationProperty> BuildProperties(const ComputedStyle* aStyle);
 
   // This effect is registered with its target element so long as:
   //
@@ -379,13 +375,6 @@ protected:
 private:
   nsChangeHint mCumulativeChangeHint;
 
-  template<typename StyleType>
-  void DoSetKeyframes(nsTArray<Keyframe>&& aKeyframes, StyleType* aStyle);
-
-  template<typename StyleType>
-  void DoUpdateProperties(StyleType* aStyle);
-
-
   void ComposeStyleRule(RawServoAnimationValueMap& aAnimationValues,
                         const AnimationProperty& aProperty,
                         const AnimationPropertySegment& aSegment,
@@ -395,6 +384,7 @@ private:
   already_AddRefed<ComputedStyle> CreateComputedStyleForAnimationValue(
     nsCSSPropertyID aProperty,
     const AnimationValue& aValue,
+    nsPresContext* aPresContext,
     const ComputedStyle* aBaseComputedStyle);
 
   nsIFrame* GetAnimationFrame() const;
@@ -429,9 +419,6 @@ private:
                                     nsChangeHint_AddOrRemoveTransform |
                                     nsChangeHint_UpdateTransformLayer);
   }
-
-  // FIXME: This flag will be removed in bug 1324966.
-  bool mIsComposingStyle = false;
 };
 
 } // namespace dom

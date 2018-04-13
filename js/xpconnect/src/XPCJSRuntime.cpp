@@ -106,7 +106,8 @@ const char* const XPCJSRuntime::mStrings[] = {
     "stack",                // IDX_STACK
     "message",              // IDX_MESSAGE
     "lastIndex",            // IDX_LASTINDEX
-    "then"                  // IDX_THEN
+    "then",                 // IDX_THEN
+    "isInstance",           // IDX_ISINSTANCE
 };
 
 /***************************************************************************/
@@ -2743,19 +2744,24 @@ static const JSWrapObjectCallbacks WrapObjectCallbacks = {
 };
 
 XPCJSRuntime::XPCJSRuntime(JSContext* aCx)
- : CycleCollectedJSRuntime(aCx),
-   mWrappedJSMap(JSObject2WrappedJSMap::newMap(XPC_JS_MAP_LENGTH)),
-   mWrappedJSClassMap(IID2WrappedJSClassMap::newMap(XPC_JS_CLASS_MAP_LENGTH)),
-   mIID2NativeInterfaceMap(IID2NativeInterfaceMap::newMap(XPC_NATIVE_INTERFACE_MAP_LENGTH)),
-   mClassInfo2NativeSetMap(ClassInfo2NativeSetMap::newMap(XPC_NATIVE_SET_MAP_LENGTH)),
-   mNativeSetMap(NativeSetMap::newMap(XPC_NATIVE_SET_MAP_LENGTH)),
-   mDyingWrappedNativeProtoMap(XPCWrappedNativeProtoMap::newMap(XPC_DYING_NATIVE_PROTO_MAP_LENGTH)),
-   mGCIsRunning(false),
-   mNativesToReleaseArray(),
-   mDoingFinalization(false),
-   mVariantRoots(nullptr),
-   mWrappedJSRoots(nullptr),
-   mAsyncSnowWhiteFreer(new AsyncFreeSnowWhite())
+  : CycleCollectedJSRuntime(aCx)
+  , mWrappedJSMap(JSObject2WrappedJSMap::newMap(XPC_JS_MAP_LENGTH))
+  , mWrappedJSClassMap(IID2WrappedJSClassMap::newMap(XPC_JS_CLASS_MAP_LENGTH))
+  , mIID2NativeInterfaceMap(
+      IID2NativeInterfaceMap::newMap(XPC_NATIVE_INTERFACE_MAP_LENGTH))
+  , mClassInfo2NativeSetMap(
+      ClassInfo2NativeSetMap::newMap(XPC_NATIVE_SET_MAP_LENGTH))
+  , mNativeSetMap(NativeSetMap::newMap(XPC_NATIVE_SET_MAP_LENGTH))
+  , mDyingWrappedNativeProtoMap(
+      XPCWrappedNativeProtoMap::newMap(XPC_DYING_NATIVE_PROTO_MAP_LENGTH))
+  , mGCIsRunning(false)
+  , mNativesToReleaseArray()
+  , mDoingFinalization(false)
+  , mVariantRoots(nullptr)
+  , mWrappedJSRoots(nullptr)
+  , mPrevGCSliceCallback{ nullptr }
+  , mPrevDoCycleCollectionCallback{ nullptr }
+  , mAsyncSnowWhiteFreer(new AsyncFreeSnowWhite())
 {
     MOZ_COUNT_CTOR_INHERITED(XPCJSRuntime, CycleCollectedJSRuntime);
 }

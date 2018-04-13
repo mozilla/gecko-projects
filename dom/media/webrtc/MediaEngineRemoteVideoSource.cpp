@@ -114,17 +114,17 @@ MediaEngineRemoteVideoSource::SetName(nsString aName)
   // See media/webrtc/trunk/webrtc/modules/video_capture/android/java/src/org/
   // webrtc/videoengine/VideoCaptureDeviceInfoAndroid.java
 
-  if (aName.Find(NS_LITERAL_STRING("Facing back")) != kNotFound) {
+  if (mDeviceName.Find(NS_LITERAL_STRING("Facing back")) != kNotFound) {
     hasFacingMode = true;
     facingMode = VideoFacingModeEnum::Environment;
-  } else if (aName.Find(NS_LITERAL_STRING("Facing front")) != kNotFound) {
+  } else if (mDeviceName.Find(NS_LITERAL_STRING("Facing front")) != kNotFound) {
     hasFacingMode = true;
     facingMode = VideoFacingModeEnum::User;
   }
 #endif // ANDROID
 #ifdef XP_MACOSX
   // Kludge to test user-facing cameras on OSX.
-  if (aName.Find(NS_LITERAL_STRING("Face")) != -1) {
+  if (mDeviceName.Find(NS_LITERAL_STRING("Face")) != -1) {
     hasFacingMode = true;
     facingMode = VideoFacingModeEnum::User;
   }
@@ -133,10 +133,10 @@ MediaEngineRemoteVideoSource::SetName(nsString aName)
   // The cameras' name of Surface book are "Microsoft Camera Front" and
   // "Microsoft Camera Rear" respectively.
 
-  if (aName.Find(NS_LITERAL_STRING("Front")) != kNotFound) {
+  if (mDeviceName.Find(NS_LITERAL_STRING("Front")) != kNotFound) {
     hasFacingMode = true;
     facingMode = VideoFacingModeEnum::User;
-  } else if (aName.Find(NS_LITERAL_STRING("Rear")) != kNotFound) {
+  } else if (mDeviceName.Find(NS_LITERAL_STRING("Rear")) != kNotFound) {
     hasFacingMode = true;
     facingMode = VideoFacingModeEnum::Environment;
   }
@@ -310,7 +310,22 @@ MediaEngineRemoteVideoSource::Start(const RefPtr<const AllocationHandle>& aHandl
 
   NS_DispatchToMainThread(NS_NewRunnableFunction(
       "MediaEngineRemoteVideoSource::SetLastCapability",
-      [settings = mSettings, cap = mCapability]() mutable {
+      [settings = mSettings, source = mMediaSource, cap = mCapability]() mutable {
+    switch (source) {
+      case dom::MediaSourceEnum::Screen:
+      case dom::MediaSourceEnum::Window:
+      case dom::MediaSourceEnum::Application:
+        // Undo the hack where ideal and max constraints are crammed together
+        // in mCapability for consumption by low-level code. We don't actually
+        // know the real resolution yet, so report min(ideal, max) for now.
+        // TODO: This can be removed in bug 1453269.
+        cap.width = std::min(cap.width >> 16, cap.width & 0xffff);
+        cap.height = std::min(cap.height >> 16, cap.height & 0xffff);
+        break;
+      default:
+        break;
+    }
+
     settings->mWidth.Value() = cap.width;
     settings->mHeight.Value() = cap.height;
     settings->mFrameRate.Value() = cap.maxFPS;
@@ -494,6 +509,7 @@ MediaEngineRemoteVideoSource::DeliverFrame(uint8_t* aBuffer,
   {
     MutexAutoLock lock(mMutex);
     MOZ_ASSERT(mState == kStarted);
+    // TODO: These can be removed in bug 1453269.
     req_max_width = mCapability.width & 0xffff;
     req_max_height = mCapability.height & 0xffff;
     req_ideal_width = (mCapability.width >> 16) & 0xffff;
@@ -826,6 +842,7 @@ MediaEngineRemoteVideoSource::ChooseCapability(
       // time (and may in fact change over time), so as a hack, we push ideal
       // and max constraints down to desktop_capture_impl.cc and finish the
       // algorithm there.
+      // TODO: This can be removed in bug 1453269.
       aCapability.width =
         (c.mWidth.mIdeal.valueOr(0) & 0xffff) << 16 | (c.mWidth.mMax & 0xffff);
       aCapability.height =

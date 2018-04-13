@@ -31,7 +31,6 @@
 #include "nsView.h"
 #include "nsViewManager.h"
 #include "nsIContentViewer.h"
-#include "nsIDOMXULElement.h"
 #include "nsIStreamListener.h"
 #include "nsITimer.h"
 #include "nsDocShell.h"
@@ -4132,7 +4131,7 @@ XULDocument::IsDocumentRightToLeft()
     Element* element = GetRootElement();
     if (element) {
         static Element::AttrValuesArray strings[] =
-            {nsGkAtoms::ltr, nsGkAtoms::rtl, nullptr};
+            {&nsGkAtoms::ltr, &nsGkAtoms::rtl, nullptr};
         switch (element->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::localedir,
                                          strings, eCaseMatters)) {
             case 0: return false;

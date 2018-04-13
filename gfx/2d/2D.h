@@ -920,7 +920,12 @@ class DrawTarget : public external::AtomicRefCounted<DrawTarget>
 {
 public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DrawTarget)
-  DrawTarget() : mTransformDirty(false), mPermitSubpixelAA(false) {}
+  DrawTarget()
+    : mTransformDirty(false)
+    , mPermitSubpixelAA(false)
+    , mFormat{ SurfaceFormat::UNKNOWN }
+  {
+  }
   virtual ~DrawTarget() {}
 
   virtual bool IsValid() const { return true; };
@@ -1259,9 +1264,7 @@ public:
    * Perform an in-place blur operation. This is only supported on data draw
    * targets.
    */
-  virtual void Blur(const AlphaBoxBlur& aBlur) {
-    MOZ_CRASH("GFX: DoBlur");
-  }
+  virtual void Blur(const AlphaBoxBlur& aBlur);
 
   /**
    * Create a SourceSurface optimized for use with this DrawTarget from

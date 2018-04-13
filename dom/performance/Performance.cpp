@@ -75,6 +75,7 @@ Performance::CreateForWorker(WorkerPrivate* aWorkerPrivate)
 Performance::Performance()
   : mResourceTimingBufferSize(kDefaultResourceTimingBufferSize)
   , mPendingNotificationObserversTask(false)
+  , mSystemPrincipal{ false }
 {
   MOZ_ASSERT(!NS_IsMainThread());
 }
@@ -83,6 +84,7 @@ Performance::Performance(nsPIDOMWindowInner* aWindow)
   : DOMEventTargetHelper(aWindow)
   , mResourceTimingBufferSize(kDefaultResourceTimingBufferSize)
   , mPendingNotificationObserversTask(false)
+  , mSystemPrincipal{ false }
 {
   MOZ_ASSERT(NS_IsMainThread());
 }
@@ -412,7 +414,6 @@ void
 Performance::InsertResourceEntry(PerformanceEntry* aEntry)
 {
   MOZ_ASSERT(aEntry);
-  MOZ_ASSERT(mResourceEntries.Length() <= mResourceTimingBufferSize);
 
   // We won't add an entry when 'privacy.resistFingerprint' is true.
   if (nsContentUtils::ShouldResistFingerprinting()) {

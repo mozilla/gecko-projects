@@ -451,6 +451,12 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
     WatchersList& onNewGlobalObjectWatchers() { return onNewGlobalObjectWatchers_.ref(); }
 
   private:
+    /* Linked list of all Debugger objects in the runtime. */
+    js::ActiveThreadData<mozilla::LinkedList<js::Debugger>> debuggerList_;
+  public:
+    mozilla::LinkedList<js::Debugger>& debuggerList() { return debuggerList_.ref(); }
+
+  private:
     /*
      * Lock taken when using per-runtime or per-zone data that could otherwise
      * be accessed simultaneously by multiple threads.
@@ -479,7 +485,7 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
      * Number of zones which may be operated on by non-cooperating helper
      * threads.
      */
-    js::UnprotectedData<size_t> numActiveHelperThreadZones;
+    mozilla::Atomic<size_t> numActiveHelperThreadZones;
 
     friend class js::AutoLockForExclusiveAccess;
     friend class js::AutoLockScriptData;
@@ -1139,18 +1145,6 @@ SetValueRangeToNull(Value* vec, size_t len)
 }
 
 extern const JSSecurityCallbacks NullSecurityCallbacks;
-
-inline Nursery&
-ZoneGroup::nursery()
-{
-    return runtime->gc.nursery();
-}
-
-inline gc::StoreBuffer&
-ZoneGroup::storeBuffer()
-{
-    return runtime->gc.storeBuffer();
-}
 
 // This callback is set by JS::SetProcessLargeAllocationFailureCallback
 // and may be null. See comment in jsapi.h.

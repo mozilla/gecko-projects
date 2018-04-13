@@ -354,22 +354,8 @@ InspectorUtils::SelectorMatchesElement(GlobalObject& aGlobalObject,
 InspectorUtils::IsInheritedProperty(GlobalObject& aGlobalObject,
                                     const nsAString& aPropertyName)
 {
-  nsCSSPropertyID prop = nsCSSProps::
-    LookupProperty(aPropertyName, CSSEnabledState::eIgnoreEnabledState);
-  if (prop == eCSSProperty_UNKNOWN) {
-    return false;
-  }
-
-  if (prop == eCSSPropertyExtra_variable) {
-    return true;
-  }
-
-  if (nsCSSProps::IsShorthand(prop)) {
-    prop = nsCSSProps::SubpropertyEntryFor(prop)[0];
-  }
-
-  nsStyleStructID sid = nsCSSProps::kSIDTable[prop];
-  return !ComputedStyle::IsReset(sid);
+  NS_ConvertUTF16toUTF8 propName(aPropertyName);
+  return Servo_Property_IsInherited(&propName);
 }
 
 /* static */ void
@@ -420,17 +406,21 @@ static void InsertNoDuplicates(nsTArray<nsString>& aArray,
 static void GetKeywordsForProperty(const nsCSSPropertyID aProperty,
                                    nsTArray<nsString>& aArray)
 {
+  const nsCSSProps::KTableEntry* keywordTable;
   if (nsCSSProps::IsShorthand(aProperty)) {
-    // Shorthand props have no keywords.
-    return;
-  }
-  const nsCSSProps::KTableEntry* keywordTable =
-    nsCSSProps::kKeywordTableTable[aProperty];
-
-  // Special cases where nsCSSPropList.h doesn't hold the table.
-  if (keywordTable == nullptr) {
-    if (aProperty == eCSSProperty_clip_path) {
-      keywordTable = nsCSSProps::kClipPathGeometryBoxKTable;
+    if (aProperty == eCSSProperty_font) {
+      keywordTable = nsCSSProps::kFontKTable;
+    } else {
+      // Other shorthand props have no keywords.
+      return;
+    }
+  } else {
+    keywordTable = nsCSSProps::kKeywordTableTable[aProperty];
+    // Special cases where nsCSSPropList.h doesn't hold the table.
+    if (keywordTable == nullptr) {
+      if (aProperty == eCSSProperty_clip_path) {
+        keywordTable = nsCSSProps::kClipPathGeometryBoxKTable;
+      }
     }
   }
 
@@ -812,6 +802,8 @@ InspectorUtils::GetCSSValuesForProperty(GlobalObject& aGlobalObject,
         break;
       }
     }
+    // Some shorthands may have keywords not available in subproperties.
+    GetKeywordsForProperty(propertyID, aResult);
     CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(subproperty, propertyID,
                                          CSSEnabledState::eForAllContent) {
       uint32_t propertyParserVariant = nsCSSProps::ParserVariant(*subproperty);

@@ -3986,6 +3986,12 @@ struct MOZ_STACK_CLASS CanvasBidiProcessor : public nsBidiPresUtils::BidiProcess
 
   CanvasBidiProcessor()
     : nsBidiPresUtils::BidiProcessor()
+    , mCtx{ nullptr }
+    , mFontgrp{ nullptr }
+    , mAppUnitsPerDevPixel{}
+    , mOp{ static_cast<CanvasRenderingContext2D::TextDrawOperation>(0) }
+    , mTextRunFlags{ static_cast<gfx::ShapedTextFlags>(0) }
+    , mDoMeasureBoundingBox{ false }
   {
     if (Preferences::GetBool(GFX_MISSING_FONTS_NOTIFY_PREF)) {
       mMissingFonts = new gfxMissingFontRecorder();
@@ -4299,9 +4305,10 @@ CanvasRenderingContext2D::DrawOrMeasureText(const nsAString& aRawText,
   MOZ_ASSERT(!presShell->IsDestroying(),
              "GetCurrentFontStyle() should have returned null if the presshell is being destroyed");
 
+  nsPresContext* presContext = presShell->GetPresContext();
+
   // ensure user font set is up to date
-  currentFontStyle->
-    SetUserFontSet(presShell->GetPresContext()->GetUserFontSet());
+  currentFontStyle->SetUserFontSet(presContext->GetUserFontSet());
 
   if (currentFontStyle->GetStyle()->size == 0.0F) {
     if (aWidth) {
@@ -4320,6 +4327,7 @@ CanvasRenderingContext2D::DrawOrMeasureText(const nsAString& aRawText,
   // (for now, at least; perhaps we need new Canvas API to control this).
   processor.mTextRunFlags = canvasStyle
     ? nsLayoutUtils::GetTextRunFlagsForStyle(canvasStyle,
+                                             presContext,
                                              canvasStyle->StyleFont(),
                                              canvasStyle->StyleText(),
                                              0)

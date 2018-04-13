@@ -294,50 +294,52 @@ AutoRedirectVetoNotifier::ReportRedirectResult(bool succeeded)
 //-----------------------------------------------------------------------------
 
 nsHttpChannel::nsHttpChannel()
-    : HttpAsyncAborter<nsHttpChannel>(this)
-    , mLogicalOffset(0)
-    , mPostID(0)
-    , mRequestTime(0)
-    , mOfflineCacheLastModifiedTime(0)
-    , mSuspendTotalTime(0)
-    , mCacheOpenWithPriority(false)
-    , mCacheQueueSizeWhenOpen(0)
-    , mCachedContentIsValid(false)
-    , mCachedContentIsPartial(false)
-    , mCacheOnlyMetadata(false)
-    , mTransactionReplaced(false)
-    , mAuthRetryPending(false)
-    , mProxyAuthPending(false)
-    , mCustomAuthHeader(false)
-    , mResuming(false)
-    , mInitedCacheEntry(false)
-    , mFallbackChannel(false)
-    , mCustomConditionalRequest(false)
-    , mFallingBack(false)
-    , mWaitingForRedirectCallback(false)
-    , mRequestTimeInitialized(false)
-    , mCacheEntryIsReadOnly(false)
-    , mCacheEntryIsWriteOnly(false)
-    , mCacheEntriesToWaitFor(0)
-    , mHasQueryString(0)
-    , mConcurrentCacheAccess(0)
-    , mIsPartialRequest(0)
-    , mHasAutoRedirectVetoNotifier(0)
-    , mPinCacheContent(0)
-    , mIsCorsPreflightDone(0)
-    , mStronglyFramed(false)
-    , mUsedNetwork(0)
-    , mAuthConnectionRestartable(0)
-    , mPushedStream(nullptr)
-    , mOnTailUnblock(nullptr)
-    , mWarningReporter(nullptr)
-    , mIsReadingFromCache(false)
-    , mFirstResponseSource(RESPONSE_PENDING)
-    , mRaceCacheWithNetwork(false)
-    , mRaceDelay(0)
-    , mIgnoreCacheEntry(false)
-    , mRCWNLock("nsHttpChannel.mRCWNLock")
-    , mDidReval(false)
+  : HttpAsyncAborter<nsHttpChannel>(this)
+  , mLogicalOffset(0)
+  , mPostID(0)
+  , mRequestTime(0)
+  , mOfflineCacheLastModifiedTime(0)
+  , mSuspendTotalTime(0)
+  , mRedirectType{}
+  , mCacheOpenWithPriority(false)
+  , mCacheQueueSizeWhenOpen(0)
+  , mCachedContentIsValid(false)
+  , mCachedContentIsPartial(false)
+  , mCacheOnlyMetadata(false)
+  , mTransactionReplaced(false)
+  , mAuthRetryPending(false)
+  , mProxyAuthPending(false)
+  , mCustomAuthHeader(false)
+  , mResuming(false)
+  , mInitedCacheEntry(false)
+  , mFallbackChannel(false)
+  , mCustomConditionalRequest(false)
+  , mFallingBack(false)
+  , mWaitingForRedirectCallback(false)
+  , mRequestTimeInitialized(false)
+  , mCacheEntryIsReadOnly(false)
+  , mCacheEntryIsWriteOnly(false)
+  , mCacheEntriesToWaitFor(0)
+  , mHasQueryString(0)
+  , mConcurrentCacheAccess(0)
+  , mIsPartialRequest(0)
+  , mHasAutoRedirectVetoNotifier(0)
+  , mPinCacheContent(0)
+  , mIsCorsPreflightDone(0)
+  , mStronglyFramed(false)
+  , mUsedNetwork(0)
+  , mAuthConnectionRestartable(0)
+  , mPushedStream(nullptr)
+  , mLocalBlocklist{ false }
+  , mOnTailUnblock(nullptr)
+  , mWarningReporter(nullptr)
+  , mIsReadingFromCache(false)
+  , mFirstResponseSource(RESPONSE_PENDING)
+  , mRaceCacheWithNetwork(false)
+  , mRaceDelay(0)
+  , mIgnoreCacheEntry(false)
+  , mRCWNLock("nsHttpChannel.mRCWNLock")
+  , mDidReval(false)
 {
     LOG(("Creating nsHttpChannel [this=%p]\n", this));
     mChannelCreationTime = PR_Now();
@@ -7929,46 +7931,24 @@ nsHttpChannel::SetOfflineCacheToken(nsISupports *token)
 }
 
 NS_IMETHODIMP
-nsHttpChannel::GetCacheKey(nsISupports **key)
+nsHttpChannel::GetCacheKey(uint32_t* key)
 {
-    nsresult rv;
     NS_ENSURE_ARG_POINTER(key);
 
     LOG(("nsHttpChannel::GetCacheKey [this=%p]\n", this));
 
-    *key = nullptr;
-
-    nsCOMPtr<nsISupportsPRUint32> container =
-        do_CreateInstance(NS_SUPPORTS_PRUINT32_CONTRACTID, &rv);
-
-    if (!container)
-        return NS_ERROR_OUT_OF_MEMORY;
-
-    rv = container->SetData(mPostID);
-    if (NS_FAILED(rv)) return rv;
-
-    return CallQueryInterface(container.get(), key);
+    *key = mPostID;
+    return NS_OK;
 }
 
 NS_IMETHODIMP
-nsHttpChannel::SetCacheKey(nsISupports *key)
+nsHttpChannel::SetCacheKey(uint32_t key)
 {
-    nsresult rv;
-
-    LOG(("nsHttpChannel::SetCacheKey [this=%p key=%p]\n", this, key));
+    LOG(("nsHttpChannel::SetCacheKey [this=%p key=%u]\n", this, key));
 
     ENSURE_CALLED_BEFORE_CONNECT();
 
-    if (!key)
-        mPostID = 0;
-    else {
-        // extract the post id
-        nsCOMPtr<nsISupportsPRUint32> container = do_QueryInterface(key, &rv);
-        if (NS_FAILED(rv)) return rv;
-
-        rv = container->GetData(&mPostID);
-        if (NS_FAILED(rv)) return rv;
-    }
+    mPostID = key;
     return NS_OK;
 }
 

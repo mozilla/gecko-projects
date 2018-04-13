@@ -68,7 +68,7 @@ pub fn nscsspropertyid_is_animatable(property: nsCSSPropertyID) -> bool {
     match property {
         % for prop in data.longhands + data.shorthands_except_all():
             % if prop.animatable:
-                ${helpers.to_nscsspropertyid(prop.ident)} => true,
+                ${prop.nscsspropertyid()} => true,
             % endif
         % endfor
         _ => false
@@ -154,12 +154,12 @@ impl From<nsCSSPropertyID> for TransitionProperty {
     fn from(property: nsCSSPropertyID) -> TransitionProperty {
         match property {
             % for prop in data.longhands:
-            ${helpers.to_nscsspropertyid(prop.ident)} => {
+            ${prop.nscsspropertyid()} => {
                 TransitionProperty::Longhand(LonghandId::${prop.camel_case})
             }
             % endfor
             % for prop in data.shorthands_except_all():
-            ${helpers.to_nscsspropertyid(prop.ident)} => {
+            ${prop.nscsspropertyid()} => {
                 TransitionProperty::Shorthand(ShorthandId::${prop.camel_case})
             }
             % endfor
@@ -179,7 +179,7 @@ pub fn nscsspropertyid_is_transitionable(property: nsCSSPropertyID) -> bool {
     match property {
         % for prop in data.longhands + data.shorthands_except_all():
             % if prop.transitionable:
-                ${helpers.to_nscsspropertyid(prop.ident)} => true,
+                ${prop.nscsspropertyid()} => true,
             % endif
         % endfor
         _ => false
@@ -1204,7 +1204,8 @@ impl Animate for ComputedTransformOperation {
             ) => {
                 Ok(TransformOperation::Translate(
                     fx.animate(tx, procedure)?,
-                    Some(fy.unwrap_or(*fx).animate(&ty.unwrap_or(*tx), procedure)?)
+                    Some(fy.unwrap_or(LengthOrPercentage::zero())
+                        .animate(&ty.unwrap_or(LengthOrPercentage::zero()), procedure)?)
                 ))
             },
             (

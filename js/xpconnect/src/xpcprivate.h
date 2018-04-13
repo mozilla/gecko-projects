@@ -298,10 +298,8 @@ class XPCRootSetElem
 public:
     XPCRootSetElem()
     {
-#ifdef DEBUG
         mNext = nullptr;
         mSelfp = nullptr;
-#endif
     }
 
     ~XPCRootSetElem()
@@ -415,6 +413,8 @@ public:
 
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 
+    bool IsSystemCaller() const override;
+
     AutoMarkingPtr** GetAutoRootsAdr() {return &mAutoRoots;}
 
     nsresult GetPendingResult() { return mPendingResult; }
@@ -464,6 +464,7 @@ public:
         IDX_MESSAGE                 ,
         IDX_LASTINDEX               ,
         IDX_THEN                    ,
+        IDX_ISINSTANCE              ,
         IDX_TOTAL_COUNT // just a count of the above
     };
 
@@ -1094,7 +1095,14 @@ public:
         {mIndexInInterface = index;}
 
     /* default ctor - leave random contents */
-    XPCNativeMember()  {MOZ_COUNT_CTOR(XPCNativeMember);}
+    XPCNativeMember()
+      : mName{}
+      , mIndex{}
+      , mFlags{}
+      , mIndexInInterface{}
+    {
+      MOZ_COUNT_CTOR(XPCNativeMember);
+    }
     ~XPCNativeMember() {MOZ_COUNT_DTOR(XPCNativeMember);}
 
 private:
@@ -2623,6 +2631,7 @@ struct GlobalProperties {
     bool URL : 1;
     bool URLSearchParams : 1;
     bool XMLHttpRequest : 1;
+    bool XMLSerializer : 1;
 
     // Ad-hoc property names we implement.
     bool atob : 1;

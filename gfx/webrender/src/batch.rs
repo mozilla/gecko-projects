@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{AlphaType, DeviceIntRect, DeviceIntSize};
+use api::{AlphaType, ClipMode, DeviceIntRect, DeviceIntSize};
 use api::{DeviceUintRect, DeviceUintPoint, DeviceUintSize, ExternalImageType, FilterOp, ImageRendering, LayerRect};
 use api::{DeviceIntPoint, SubpixelDirection, YuvColorSpace, YuvFormat};
 use api::{LayerToWorldTransform, WorldPixel};
@@ -240,7 +240,7 @@ impl OpaqueBatchList {
         // case we just see if it can be added to the existing batch or
         // create a new one.
         if item_area > self.pixel_area_threshold_for_new_batch {
-            if let Some(ref batch) = self.batches.last() {
+            if let Some(batch) = self.batches.last() {
                 if batch.key.is_compatible_with(&key) {
                     selected_batch_index = Some(self.batches.len() - 1);
                 }
@@ -655,7 +655,7 @@ impl AlphaBatchBuilder {
                                 .into();
                             let polygon = make_polygon(
                                 picture.real_local_rect,
-                                &real_xf,
+                                real_xf,
                                 prim_index.0,
                             );
 
@@ -884,7 +884,8 @@ impl AlphaBatchBuilder {
                                 false
                             }
                             Some(PictureCompositeMode::Blit) => {
-                                let cache_task_id = picture.surface.expect("bug: no surface allocated");
+                                let cache_task_id =
+                                    picture.surface.expect("bug: no surface allocated");
                                 let kind = BatchKind::Brush(
                                     BrushBatchKind::Image(ImageBufferKind::Texture2DArray)
                                 );
@@ -893,7 +894,10 @@ impl AlphaBatchBuilder {
                                     non_segmented_blend_mode,
                                     BatchTextures::render_target_cache(),
                                 );
-                                let batch = self.batch_list.get_suitable_batch(key, &task_relative_bounding_rect);
+                                let batch = self.batch_list.get_suitable_batch(
+                                    key,
+                                    &task_relative_bounding_rect
+                                );
 
                                 let uv_rect_address = render_tasks[cache_task_id]
                                     .get_texture_handle()
@@ -943,7 +947,7 @@ impl AlphaBatchBuilder {
                                 ctx.resource_cache,
                                 gpu_cache,
                                 deferred_resolves,
-                                &ctx.cached_gradients,
+                                ctx.cached_gradients,
                         ) {
                             self.add_brush_to_batch(
                                 brush,
@@ -971,23 +975,17 @@ impl AlphaBatchBuilder {
                 let border_cpu =
                     &ctx.prim_store.cpu_borders[prim_metadata.cpu_prim_index.0];
                 // TODO(gw): Select correct blend mode for edges and corners!!
-                let corner_kind = BatchKind::Transformable(
-                    transform_kind,
-                    TransformBatchKind::BorderCorner,
-                );
-                let corner_key = BatchKey::new(corner_kind, non_segmented_blend_mode, no_textures);
-                let edge_kind = BatchKind::Transformable(
-                    transform_kind,
-                    TransformBatchKind::BorderEdge,
-                );
-                let edge_key = BatchKey::new(edge_kind, non_segmented_blend_mode, no_textures);
 
-                // Work around borrow ck on borrowing batch_list twice.
-                {
-                    let batch =
-                        self.batch_list.get_suitable_batch(corner_key, &task_relative_bounding_rect);
-                    for (i, instance_kind) in border_cpu.corner_instances.iter().enumerate()
-                    {
+                if border_cpu.corner_instances.iter().any(|&kind| kind != BorderCornerInstance::None) {
+                    let corner_kind = BatchKind::Transformable(
+                        transform_kind,
+                        TransformBatchKind::BorderCorner,
+                    );
+                    let corner_key = BatchKey::new(corner_kind, non_segmented_blend_mode, no_textures);
+                    let batch = self.batch_list
+                        .get_suitable_batch(corner_key, &task_relative_bounding_rect);
+
+                    for (i, instance_kind) in border_cpu.corner_instances.iter().enumerate() {
                         let sub_index = i as i32;
                         match *instance_kind {
                             BorderCornerInstance::None => {}
@@ -1014,12 +1012,22 @@ impl AlphaBatchBuilder {
                     }
                 }
 
-                let batch = self.batch_list.get_suitable_batch(edge_key, &task_relative_bounding_rect);
-                for (border_segment, instance_kind) in border_cpu.edges.iter().enumerate() {
-                    match *instance_kind {
-                        BorderEdgeKind::None => {},
-                        _ => {
-                          batch.push(base_instance.build(border_segment as i32, 0, 0));
+                if border_cpu.edges.iter().any(|&kind| kind != BorderEdgeKind::None) {
+                    let edge_kind = BatchKind::Transformable(
+                        transform_kind,
+                        TransformBatchKind::BorderEdge,
+                    );
+                    let edge_key = BatchKey::new(edge_kind, non_segmented_blend_mode, no_textures);
+                    let batch = self.batch_list
+                        .get_suitable_batch(edge_key, &task_relative_bounding_rect);
+
+                    for (border_segment, instance_kind) in border_cpu.edges.iter().enumerate() {
+                        match *instance_kind {
+                            BorderEdgeKind::None => {},
+                            BorderEdgeKind::Solid |
+                            BorderEdgeKind::Clip => {
+                                batch.push(base_instance.build(border_segment as i32, 0, 0));
+                            }
                         }
                     }
                 }
@@ -1254,13 +1262,21 @@ impl BrushPrimitive {
         cached_gradients: &[CachedGradient],
     ) -> Option<(BrushBatchKind, BatchTextures, [i32; 3])> {
         match self.kind {
-            BrushKind::Image { request, .. } => {
-                let cache_item = resolve_image(
-                    request,
-                    resource_cache,
-                    gpu_cache,
-                    deferred_resolves,
-                );
+            BrushKind::Image { request, ref source, .. } => {
+
+                let cache_item = match *source {
+                    ImageSource::Default => {
+                        resolve_image(
+                            request,
+                            resource_cache,
+                            gpu_cache,
+                            deferred_resolves,
+                        )
+                    }
+                    ImageSource::Cache { ref item, .. } => {
+                        item.clone()
+                    }
+                };
 
                 if cache_item.texture_id == SourceTexture::Invalid {
                     None
@@ -1615,8 +1631,9 @@ impl ClipBatcher {
                                 ..instance
                             });
                     }
-                    ClipSource::Rectangle(..) => {
-                        if work_item.coordinate_system_id != coordinate_system_id {
+                    ClipSource::Rectangle(_, mode) => {
+                        if work_item.coordinate_system_id != coordinate_system_id ||
+                           mode == ClipMode::ClipOut {
                             self.rectangles.push(ClipMaskInstance {
                                 clip_data_address: gpu_address,
                                 ..instance

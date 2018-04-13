@@ -270,7 +270,6 @@ const int32_t nsNavHistory::kGetInfoIndex_VisitType = 17;
 
 PLACES_FACTORY_SINGLETON_IMPLEMENTATION(nsNavHistory, gHistoryService)
 
-
 nsNavHistory::nsNavHistory()
   : mBatchLevel(0)
   , mBatchDBTransaction(nullptr)
@@ -281,6 +280,28 @@ nsNavHistory::nsNavHistory()
   , mEmbedVisits(EMBED_VISITS_INITIAL_CACHE_LENGTH)
   , mHistoryEnabled(true)
   , mNumVisitsForFrecency(10)
+  , mFirstBucketCutoffInDays{}
+  , mSecondBucketCutoffInDays{}
+  , mThirdBucketCutoffInDays{}
+  , mFourthBucketCutoffInDays{}
+  , mFirstBucketWeight{}
+  , mSecondBucketWeight{}
+  , mThirdBucketWeight{}
+  , mFourthBucketWeight{}
+  , mDefaultWeight{}
+  , mEmbedVisitBonus{}
+  , mFramedLinkVisitBonus{}
+  , mLinkVisitBonus{}
+  , mTypedVisitBonus{}
+  , mBookmarkVisitBonus{}
+  , mDownloadVisitBonus{}
+  , mPermRedirectVisitBonus{}
+  , mTempRedirectVisitBonus{}
+  , mRedirectSourceVisitBonus{}
+  , mDefaultVisitBonus{}
+  , mUnvisitedBookmarkBonus{}
+  , mUnvisitedTypedBonus{}
+  , mReloadVisitBonus{}
   , mTagsFolder(-1)
   , mDaysOfHistory(-1)
   , mLastCachedStartOfDay(INT64_MAX)
@@ -3036,28 +3057,24 @@ nsNavHistory::QueryToSelectClause(const RefPtr<nsNavHistoryQuery>& aQuery,
   const nsTArray<int64_t>& folders = aQuery->Folders();
   if (folders.Length() > 0) {
     aOptions->SetQueryType(nsNavHistoryQueryOptions::QUERY_TYPE_BOOKMARKS);
-
-    nsTArray<int64_t> includeFolders;
-    includeFolders.AppendElements(folders);
-
-    nsNavBookmarks* bookmarks = nsNavBookmarks::GetBookmarksService();
-    NS_ENSURE_STATE(bookmarks);
-
-    for (nsTArray<int64_t>::size_type i = 0; i < folders.Length(); ++i) {
-      nsTArray<int64_t> subFolders;
-      if (NS_FAILED(bookmarks->GetDescendantFolders(folders[i], subFolders)))
-        continue;
-      includeFolders.AppendElements(subFolders);
-    }
-
-    clause.Condition("b.parent IN(");
-    for (nsTArray<int64_t>::size_type i = 0; i < includeFolders.Length(); ++i) {
-      clause.Str(nsPrintfCString("%" PRId64, includeFolders[i]).get());
-      if (i < includeFolders.Length() - 1) {
+    clause.Condition("b.parent IN( "
+                       "WITH RECURSIVE parents(id) AS ( "
+                         "VALUES ");
+    for (uint32_t i = 0; i < folders.Length(); ++i) {
+      nsPrintfCString param("(:parent%d_)", i);
+      clause.Param(param.get());
+      if (i < folders.Length() - 1) {
         clause.Str(",");
       }
     }
-    clause.Str(")");
+    clause.Str(          "UNION ALL "
+                         "SELECT b2.id "
+                         "FROM moz_bookmarks b2 "
+                         "JOIN parents p ON b2.parent = p.id "
+                         "WHERE b2.type = 2 "
+                       ") "
+                       "SELECT id FROM parents "
+                     ")");
   }
 
   if (excludeQueries) {
@@ -3183,6 +3200,14 @@ nsNavHistory::BindQueryClauseParameters(mozIStorageBaseStatement* statement,
   for (uint32_t i = 0; i < transitions.Length(); ++i) {
     nsPrintfCString paramName("transition%d_", i);
     rv = statement->BindInt64ByName(paramName, transitions[i]);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  // folders
+  const nsTArray<int64_t>& folders = aQuery->Folders();
+  for (uint32_t i = 0; i < folders.Length(); ++i) {
+    nsPrintfCString paramName("parent%d_", i);
+    rv = statement->BindInt64ByName(paramName, folders[i]);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -3435,6 +3460,12 @@ nsNavHistory::RowToResult(mozIStorageValueArray* aRow,
   nsAutoCString url;
   nsresult rv = aRow->GetUTF8String(kGetInfoIndex_URL, url);
   NS_ENSURE_SUCCESS(rv, rv);
+  // In case of data corruption URL may be null, but our UI code prefers an
+  // empty string.
+  if (url.IsVoid()) {
+    MOZ_ASSERT(false, "Found a NULL url in moz_places");
+    url.SetIsVoid(false);
+  }
 
   // title
   nsAutoCString title;

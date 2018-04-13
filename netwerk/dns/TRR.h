@@ -105,10 +105,10 @@ public:
   }
 
   // used on push
-  explicit TRR(AHostResolver *aResolver, bool aPB)
+  explicit TRR(AHostResolver* aResolver, bool aPB)
     : mozilla::Runnable("TRR")
     , mHostResolver(aResolver)
-    , mBodySize(0)
+    , /* FIXME: initialize mType */ mBodySize(0)
     , mFailed(false)
     , mPB(aPB)
     , mCnameLoop(kCnameChaseMax)
@@ -142,6 +142,7 @@ private:
   ~TRR() = default;
   nsresult SendHTTPRequest();
   nsresult DohEncode(nsCString &target);
+  nsresult PassQName(unsigned int &index);
   nsresult DohDecode();
   nsresult ReturnData();
   nsresult FailData();

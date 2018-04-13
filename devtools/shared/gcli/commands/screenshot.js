@@ -160,7 +160,9 @@ exports.items = [
         root.addEventListener("click", () => {
           if (imageSummary.href) {
             let mainWindow = context.environment.chromeWindow;
-            mainWindow.openUILinkIn(imageSummary.href, "tab");
+            mainWindow.openWebLinkIn(imageSummary.href, "tab", {
+              triggeringPrincipal: document.nodePrincipal,
+            });
           } else if (imageSummary.filename) {
             const file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
             file.initWithPath(imageSummary.filename);
@@ -578,7 +580,7 @@ var saveToFile = Task.async(function* (context, reply) {
   let listener = new DownloadListener(window, tr);
   persist.progressListener = listener;
   persist.savePrivacyAwareURI(sourceURI,
-                              null,
+                              0,
                               document.documentURIObject,
                               Ci.nsIHttpChannel.REFERRER_POLICY_UNSET,
                               null,

@@ -255,6 +255,7 @@ bitflags! {
         const DISABLE_BATCHING  = 1 << 5;
         const EPOCHS            = 1 << 6;
         const COMPACT_PROFILER  = 1 << 7;
+        const ECHO_DRIVER_MESSAGES = 1 << 8;
     }
 }
 
@@ -1022,8 +1023,8 @@ impl CacheTexture {
         match self.bus {
             CacheBus::PixelBuffer { ref mut rows, ref mut cpu_blocks, .. } => {
                 for update in &updates.updates {
-                    match update {
-                        &GpuCacheUpdate::Copy {
+                    match *update {
+                        GpuCacheUpdate::Copy {
                             block_index,
                             block_count,
                             address,
@@ -1066,8 +1067,8 @@ impl CacheTexture {
                 let size = self.texture.get_dimensions().to_usize();
 
                 for update in &updates.updates {
-                    match update {
-                        &GpuCacheUpdate::Copy {
+                    match *update {
+                        GpuCacheUpdate::Copy {
                             block_index,
                             block_count,
                             address,
@@ -1257,6 +1258,12 @@ impl LazyInitializedDebugRenderer {
     }
 }
 
+pub struct RendererVAOs {
+    prim_vao: VAO,
+    blur_vao: VAO,
+    clip_vao: VAO,
+}
+
 /// The renderer is responsible for submitting to the GPU the work prepared by the
 /// RenderBackend.
 pub struct Renderer {
@@ -1287,9 +1294,7 @@ pub struct Renderer {
     last_time: u64,
 
     pub gpu_profile: GpuProfiler<GpuProfileTag>,
-    prim_vao: VAO,
-    blur_vao: VAO,
-    clip_vao: VAO,
+    vaos: RendererVAOs,
 
     node_data_texture: VertexDataTexture,
     local_clip_rects_texture: VertexDataTexture,
@@ -1412,7 +1417,7 @@ impl Renderer {
         // gracefully fail now than panic as soon as a texture is allocated.
         let min_texture_size = 512;
         if device_max_size < min_texture_size {
-            println!(
+            error!(
                 "Device reporting insufficient max texture size ({})",
                 device_max_size
             );
@@ -1607,12 +1612,15 @@ impl Renderer {
         let blob_image_renderer = options.blob_image_renderer.take();
         let thread_listener_for_render_backend = thread_listener.clone();
         let thread_listener_for_scene_builder = thread_listener.clone();
-        let renderer_id_for_render_backend = options.renderer_id.clone();
+        let scene_builder_hooks = options.scene_builder_hooks;
         let rb_thread_name = format!("WRRenderBackend#{}", options.renderer_id.unwrap_or(0));
         let scene_thread_name = format!("WRSceneBuilder#{}", options.renderer_id.unwrap_or(0));
         let glyph_rasterizer = GlyphRasterizer::new(workers)?;
 
-        let (scene_builder, scene_tx, scene_rx) = SceneBuilder::new(config, api_tx.clone());
+        let (scene_builder, scene_tx, scene_rx) = SceneBuilder::new(
+            config,
+            api_tx.clone(),
+            scene_builder_hooks);
         thread::Builder::new().name(scene_thread_name.clone()).spawn(move || {
             register_thread_with_profiler(scene_thread_name.clone());
             if let Some(ref thread_listener) = *thread_listener_for_scene_builder {
@@ -1630,7 +1638,6 @@ impl Renderer {
         thread::Builder::new().name(rb_thread_name.clone()).spawn(move || {
             register_thread_with_profiler(rb_thread_name.clone());
             if let Some(ref thread_listener) = *thread_listener_for_render_backend {
-                thread_listener.new_render_backend_thread(renderer_id_for_render_backend);
                 thread_listener.thread_started(&rb_thread_name);
             }
 
@@ -1687,9 +1694,11 @@ impl Renderer {
             last_time: 0,
             gpu_profile,
             gpu_glyph_renderer,
-            prim_vao,
-            blur_vao,
-            clip_vao,
+            vaos: RendererVAOs {
+                prim_vao,
+                blur_vao,
+                clip_vao,
+            },
             node_data_texture,
             local_clip_rects_texture,
             render_task_texture,
@@ -2296,6 +2305,10 @@ impl Renderer {
             }
         }
 
+        if self.debug_flags.contains(DebugFlags::ECHO_DRIVER_MESSAGES) {
+            self.device.echo_driver_messages();
+        }
+
         self.backend_profile_counters.reset();
         self.profile_counters.reset();
         self.profile_counters.frame_counter.inc();
@@ -2317,12 +2330,6 @@ impl Renderer {
         } else {
             Err(mem::replace(&mut self.renderer_errors, Vec::new()))
         }
-    }
-
-    pub fn layers_are_bouncing_back(&self) -> bool {
-        self.active_documents
-            .iter()
-            .any(|&(_, ref render_doc)| !render_doc.layers_bouncing_back.is_empty())
     }
 
     fn update_gpu_cache(&mut self) {
@@ -2516,11 +2523,7 @@ impl Renderer {
         vertex_array_kind: VertexArrayKind,
         stats: &mut RendererStats,
     ) {
-        let vao = get_vao(vertex_array_kind,
-                          &self.prim_vao,
-                          &self.clip_vao,
-                          &self.blur_vao,
-                          &self.gpu_glyph_renderer);
+        let vao = get_vao(vertex_array_kind, &self.vaos, &self.gpu_glyph_renderer);
 
         self.device.bind_vao(vao);
 
@@ -2849,7 +2852,7 @@ impl Renderer {
                     self.submit_batch(
                         &batch.key,
                         &batch.instances,
-                        &projection,
+                        projection,
                         render_tasks,
                         render_target,
                         target_size,
@@ -3034,7 +3037,7 @@ impl Renderer {
                         self.submit_batch(
                             &batch.key,
                             &batch.instances,
-                            &projection,
+                            projection,
                             render_tasks,
                             render_target,
                             target_size,
@@ -3924,9 +3927,9 @@ impl Renderer {
         self.render_task_texture.deinit(&mut self.device);
         self.device.delete_pbo(self.texture_cache_upload_pbo);
         self.texture_resolver.deinit(&mut self.device);
-        self.device.delete_vao(self.prim_vao);
-        self.device.delete_vao(self.clip_vao);
-        self.device.delete_vao(self.blur_vao);
+        self.device.delete_vao(self.vaos.prim_vao);
+        self.device.delete_vao(self.vaos.clip_vao);
+        self.device.delete_vao(self.vaos.blur_vao);
 
         #[cfg(feature = "debug_renderer")]
         {
@@ -3996,7 +3999,28 @@ pub trait OutputImageHandler {
 pub trait ThreadListener {
     fn thread_started(&self, thread_name: &str);
     fn thread_stopped(&self, thread_name: &str);
-    fn new_render_backend_thread(&self, renderer_id: Option<u64>);
+}
+
+/// Allows callers to hook in at certain points of the async scene build. These
+/// functions are all called from the scene builder thread.
+pub trait SceneBuilderHooks {
+    /// This is called exactly once, when the scene builder thread is started
+    /// and before it processes anything.
+    fn register(&self);
+    /// This is called before each scene swap occurs.
+    fn pre_scene_swap(&self);
+    /// This is called after each scene swap occurs. The PipelineInfo contains
+    /// the updated epochs and pipelines removed in the new scene compared to
+    /// the old scene.
+    fn post_scene_swap(&self, info: PipelineInfo);
+    /// This is a generic callback which provides an opportunity to run code
+    /// on the scene builder thread. This is called as part of the main message
+    /// loop of the scene builder thread, but outside of any specific message
+    /// handler.
+    fn poke(&self);
+    /// This is called exactly once, when the scene builder thread is about to
+    /// terminate.
+    fn deregister(&self);
 }
 
 pub struct RendererOptions {
@@ -4023,6 +4047,7 @@ pub struct RendererOptions {
     pub debug_flags: DebugFlags,
     pub renderer_id: Option<u64>,
     pub disable_dual_source_blending: bool,
+    pub scene_builder_hooks: Option<Box<SceneBuilderHooks + Send>>,
 }
 
 impl Default for RendererOptions {
@@ -4054,6 +4079,7 @@ impl Default for RendererOptions {
             renderer_id: None,
             cached_programs: None,
             disable_dual_source_blending: false,
+            scene_builder_hooks: None,
         }
     }
 }
@@ -4469,19 +4495,15 @@ impl Renderer {
     }
 }
 
-// FIXME(pcwalton): We should really gather up all the VAOs into a separate structure so that they
-// don't have to be passed in as parameters here.
 #[cfg(feature = "pathfinder")]
 fn get_vao<'a>(vertex_array_kind: VertexArrayKind,
-               prim_vao: &'a VAO,
-               clip_vao: &'a VAO,
-               blur_vao: &'a VAO,
+               vaos: &'a RendererVAOs,
                gpu_glyph_renderer: &'a GpuGlyphRenderer)
                -> &'a VAO {
     match vertex_array_kind {
-        VertexArrayKind::Primitive => prim_vao,
-        VertexArrayKind::Clip => clip_vao,
-        VertexArrayKind::Blur => blur_vao,
+        VertexArrayKind::Primitive => &vaos.prim_vao,
+        VertexArrayKind::Clip => &vaos.clip_vao,
+        VertexArrayKind::Blur => &vaos.blur_vao,
         VertexArrayKind::VectorStencil => &gpu_glyph_renderer.vector_stencil_vao,
         VertexArrayKind::VectorCover => &gpu_glyph_renderer.vector_cover_vao,
     }
@@ -4489,15 +4511,13 @@ fn get_vao<'a>(vertex_array_kind: VertexArrayKind,
 
 #[cfg(not(feature = "pathfinder"))]
 fn get_vao<'a>(vertex_array_kind: VertexArrayKind,
-               prim_vao: &'a VAO,
-               clip_vao: &'a VAO,
-               blur_vao: &'a VAO,
+               vaos: &'a RendererVAOs,
                _: &'a GpuGlyphRenderer)
                -> &'a VAO {
     match vertex_array_kind {
-        VertexArrayKind::Primitive => prim_vao,
-        VertexArrayKind::Clip => clip_vao,
-        VertexArrayKind::Blur => blur_vao,
+        VertexArrayKind::Primitive => &vaos.prim_vao,
+        VertexArrayKind::Clip => &vaos.clip_vao,
+        VertexArrayKind::Blur => &vaos.blur_vao,
         VertexArrayKind::VectorStencil | VertexArrayKind::VectorCover => unreachable!(),
     }
 }

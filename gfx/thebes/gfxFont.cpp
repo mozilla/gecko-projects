@@ -766,17 +766,22 @@ gfxFont::RunMetrics::CombineWith(const RunMetrics& aOther, bool aOtherIsOnLeft)
 }
 
 gfxFont::gfxFont(const RefPtr<UnscaledFont>& aUnscaledFont,
-                 gfxFontEntry *aFontEntry, const gfxFontStyle *aFontStyle,
-                 AntialiasOption anAAOption, cairo_scaled_font_t *aScaledFont) :
-    mScaledFont(aScaledFont),
-    mFontEntry(aFontEntry), mIsValid(true),
-    mApplySyntheticBold(false),
-    mMathInitialized(false),
-    mStyle(*aFontStyle),
-    mAdjustedSize(0.0),
-    mFUnitsConvFactor(-1.0f), // negative to indicate "not yet initialized"
-    mAntialiasOption(anAAOption),
-    mUnscaledFont(aUnscaledFont)
+                 gfxFontEntry* aFontEntry,
+                 const gfxFontStyle* aFontStyle,
+                 AntialiasOption anAAOption,
+                 cairo_scaled_font_t* aScaledFont)
+  : mScaledFont(aScaledFont)
+  , mFontEntry(aFontEntry)
+  , mIsValid(true)
+  , mApplySyntheticBold(false)
+  , mKerningEnabled{ false }
+  , mMathInitialized(false)
+  , mStyle(*aFontStyle)
+  , mAdjustedSize(0.0)
+  , mFUnitsConvFactor(-1.0f)
+  , // negative to indicate "not yet initialized"
+  mAntialiasOption(anAAOption)
+  , mUnscaledFont(aUnscaledFont)
 {
 #ifdef DEBUG_TEXT_RUN_STORAGE_METRICS
     ++gFontCount;
@@ -4164,19 +4169,6 @@ gfxFontStyle::gfxFontStyle(uint8_t aStyle, uint16_t aWeight, int16_t aStretch,
         NS_WARNING("null language");
         language = nsGkAtoms::x_western;
     }
-}
-
-int8_t
-gfxFontStyle::ComputeWeight() const
-{
-    int8_t baseWeight = (weight + 50) / 100;
-
-    if (baseWeight < 0)
-        baseWeight = 0;
-    if (baseWeight > 9)
-        baseWeight = 9;
-
-    return baseWeight;
 }
 
 void

@@ -34,6 +34,12 @@ interface FrameLoader {
   readonly attribute LoadContext loadContext;
 
   /**
+   * Get the ParentSHistory for the nsFrameLoader. May return null if this
+   * frameloader is not for a toplevel frame.
+   */
+  readonly attribute ParentSHistory? parentSHistory;
+
+  /**
    * Adds a blocking promise for the current cross process navigation.
    * This method can only be called while the "BrowserWillChangeProcess" event
    * is being fired.
@@ -179,6 +185,29 @@ interface FrameLoader {
   readonly attribute boolean isDead;
 };
 
+/**
+ * Interface for objects which represent a document that can be
+ * serialized with nsIWebBrowserPersist.  This interface is
+ * asynchronous because the actual document can be in another process
+ * (e.g., if this object is a FrameLoader for an out-of-process
+ * frame).
+ *
+ * XXXbz This method should really just return a Promise...
+ *
+ * @see nsIWebBrowserPersistDocumentReceiver
+ * @see nsIWebBrowserPersistDocument
+ * @see nsIWebBrowserPersist
+ *
+ * @param aOuterWindowID
+ *        The outer window ID of the subframe we'd like to persist.
+ *        If set at 0, WebBrowserPersistable will attempt to persist
+ *        the top-level document. If the outer window ID is for a subframe
+ *        that does not exist, or is not held beneath the WebBrowserPersistable,
+ *        aRecv's onError method will be called with NS_ERROR_NO_CONTENT.
+ * @param aRecv
+ *        The nsIWebBrowserPersistDocumentReceiver is a callback that
+ *        will be fired once the document is ready for persisting.
+ */
 [NoInterfaceObject]
 interface WebBrowserPersistable
 {

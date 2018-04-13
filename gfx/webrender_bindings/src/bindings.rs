@@ -12,6 +12,7 @@ use webrender::{ReadPixelsFormat, Renderer, RendererOptions, ThreadListener};
 use webrender::{ExternalImage, ExternalImageHandler, ExternalImageSource};
 use webrender::DebugFlags;
 use webrender::{ApiRecordingReceiver, BinaryRecorder};
+use webrender::{PipelineInfo, SceneBuilderHooks};
 use webrender::{ProgramCache, UploadMethod, VertexUsageHint};
 use thread_profiler::register_thread_with_profiler;
 use moz2d_renderer::Moz2dImageRenderer;
@@ -158,6 +159,39 @@ impl WrVecU8 {
     }
 }
 
+#[repr(C)]
+pub struct FfiVec<T> {
+    // We use a *const instead of a *mut because we don't want the C++ side
+    // to be mutating this. It is strictly read-only from C++
+    data: *const T,
+    length: usize,
+    capacity: usize,
+}
+
+impl<T> FfiVec<T> {
+    fn from_vec(v: Vec<T>) -> FfiVec<T> {
+        let ret = FfiVec {
+            data: v.as_ptr(),
+            length: v.len(),
+            capacity: v.capacity(),
+        };
+        mem::forget(v);
+        ret
+    }
+}
+
+impl<T> Drop for FfiVec<T> {
+    fn drop(&mut self) {
+        // turn the stuff back into a Vec and let it be freed normally
+        let _ = unsafe {
+            Vec::from_raw_parts(
+                self.data as *mut T,
+                self.length,
+                self.capacity
+            )
+        };
+    }
+}
 
 #[no_mangle]
 pub extern "C" fn wr_vec_u8_push_bytes(v: &mut WrVecU8, bytes: ByteSlice) {
@@ -596,53 +630,104 @@ pub unsafe extern "C" fn wr_renderer_delete(renderer: *mut Renderer) {
     // let renderer go out of scope and get dropped
 }
 
-pub struct WrPipelineInfo {
-    epochs: Vec<(WrPipelineId, WrEpoch)>,
-    removed_pipelines: Vec<PipelineId>,
+// cbindgen doesn't support tuples, so we have a little struct instead, with
+// an Into implementation to convert from the tuple to the struct.
+#[repr(C)]
+pub struct WrPipelineEpoch {
+    pipeline_id: WrPipelineId,
+    epoch: WrEpoch,
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn wr_renderer_flush_pipeline_info(renderer: &mut Renderer) -> *mut WrPipelineInfo {
-    let info = renderer.flush_pipeline_info();
-    let pipeline_epochs = Box::new(
-        WrPipelineInfo {
-            epochs: info.epochs.into_iter().collect(),
-            removed_pipelines: info.removed_pipelines,
+impl From<(WrPipelineId, WrEpoch)> for WrPipelineEpoch {
+    fn from(tuple: (WrPipelineId, WrEpoch)) -> WrPipelineEpoch {
+        WrPipelineEpoch {
+            pipeline_id: tuple.0,
+            epoch: tuple.1
         }
-    );
-    return Box::into_raw(pipeline_epochs);
+    }
+}
+
+#[repr(C)]
+pub struct WrPipelineInfo {
+    // This contains an entry for each pipeline that was rendered, along with
+    // the epoch at which it was rendered. Rendered pipelines include the root
+    // pipeline and any other pipelines that were reachable via IFrame display
+    // items from the root pipeline.
+    epochs: FfiVec<WrPipelineEpoch>,
+    // This contains an entry for each pipeline that was removed during the
+    // last transaction. These pipelines would have been explicitly removed by
+    // calling remove_pipeline on the transaction object; the pipeline showing
+    // up in this array means that the data structures have been torn down on
+    // the webrender side, and so any remaining data structures on the caller
+    // side can now be torn down also.
+    removed_pipelines: FfiVec<PipelineId>,
+}
+
+impl WrPipelineInfo {
+    fn new(info: PipelineInfo) -> Self {
+        WrPipelineInfo {
+            epochs: FfiVec::from_vec(info.epochs.into_iter().map(WrPipelineEpoch::from).collect()),
+            removed_pipelines: FfiVec::from_vec(info.removed_pipelines),
+        }
+    }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn wr_pipeline_info_next_epoch(
-    info: &mut WrPipelineInfo,
-    out_pipeline: &mut WrPipelineId,
-    out_epoch: &mut WrEpoch
-) -> bool {
-    if let Some((pipeline, epoch)) = info.epochs.pop() {
-        *out_pipeline = pipeline;
-        *out_epoch = epoch;
-        return true;
-    }
-    return false;
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn wr_pipeline_info_next_removed_pipeline(
-    info: &mut WrPipelineInfo,
-    out_pipeline: &mut WrPipelineId,
-) -> bool {
-    if let Some(pipeline) = info.removed_pipelines.pop() {
-        *out_pipeline = pipeline;
-        return true;
-    }
-    return false;
+pub unsafe extern "C" fn wr_renderer_flush_pipeline_info(renderer: &mut Renderer) -> WrPipelineInfo {
+    let info = renderer.flush_pipeline_info();
+    WrPipelineInfo::new(info)
 }
 
 /// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
-pub unsafe extern "C" fn wr_pipeline_info_delete(info: *mut WrPipelineInfo) {
-    Box::from_raw(info);
+pub unsafe extern "C" fn wr_pipeline_info_delete(_info: WrPipelineInfo) {
+    // _info will be dropped here, and the drop impl on FfiVec will free
+    // the underlying vec memory
+}
+
+extern "C" {
+    fn apz_register_updater(window_id: WrWindowId);
+    fn apz_pre_scene_swap(window_id: WrWindowId);
+    // This function takes ownership of the pipeline_info and is responsible for
+    // freeing it via wr_pipeline_info_delete.
+    fn apz_post_scene_swap(window_id: WrWindowId, pipeline_info: WrPipelineInfo);
+    fn apz_run_updater(window_id: WrWindowId);
+    fn apz_deregister_updater(window_id: WrWindowId);
+}
+
+struct APZCallbacks {
+    window_id: WrWindowId,
+}
+
+impl APZCallbacks {
+    pub fn new(window_id: WrWindowId) -> Self {
+        APZCallbacks {
+            window_id,
+        }
+    }
+}
+
+impl SceneBuilderHooks for APZCallbacks {
+    fn register(&self) {
+        unsafe { apz_register_updater(self.window_id) }
+    }
+
+    fn pre_scene_swap(&self) {
+        unsafe { apz_pre_scene_swap(self.window_id) }
+    }
+
+    fn post_scene_swap(&self, info: PipelineInfo) {
+        let info = WrPipelineInfo::new(info);
+        unsafe { apz_post_scene_swap(self.window_id, info) }
+    }
+
+    fn poke(&self) {
+        unsafe { apz_run_updater(self.window_id) }
+    }
+
+    fn deregister(&self) {
+        unsafe { apz_deregister_updater(self.window_id) }
+    }
 }
 
 extern "C" {
@@ -671,9 +756,6 @@ impl ThreadListener for GeckoProfilerThreadListener {
         unsafe {
             gecko_profiler_unregister_thread();
         }
-    }
-
-    fn new_render_backend_thread(&self, _renderer_id: Option<u64>) {
     }
 }
 
@@ -787,6 +869,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
         },
         renderer_id: Some(window_id.0),
         upload_method,
+        scene_builder_hooks: Some(Box::new(APZCallbacks::new(window_id))),
         ..Default::default()
     };
 
@@ -866,8 +949,17 @@ pub unsafe extern "C" fn wr_api_shut_down(dh: &mut DocumentHandle) {
 }
 
 #[no_mangle]
-pub extern "C" fn wr_transaction_new() -> *mut Transaction {
-    Box::into_raw(Box::new(Transaction::new()))
+pub extern "C" fn wr_transaction_new(do_async: bool) -> *mut Transaction {
+    let mut transaction = Transaction::new();
+    // Ensure that we either use async scene building or not based on the
+    // gecko pref, regardless of what the default is. We can remove this once
+    // the scene builder thread is enabled everywhere and working well.
+    if do_async {
+        transaction.use_scene_builder_thread();
+    } else {
+        transaction.skip_scene_builder();
+    }
+    Box::into_raw(Box::new(transaction))
 }
 
 /// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
@@ -1321,6 +1413,11 @@ pub unsafe extern "C" fn wr_api_get_namespace(dh: &mut DocumentHandle) -> WrIdNa
     dh.api.get_namespace_id()
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn wr_api_wake_scene_builder(dh: &mut DocumentHandle) {
+    dh.api.wake_scene_builder();
+}
+
 // RenderThread WIP notes:
 // In order to separate the compositor thread (or ipc receiver) and the render
 // thread, some of the logic below needs to be rewritten. In particular
@@ -1407,6 +1504,7 @@ pub extern "C" fn wr_dp_clear_save(state: &mut WrState) {
 #[no_mangle]
 pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
                                               bounds: LayoutRect,
+                                              clip_node_id: *const usize,
                                               animation: *const WrAnimationProperty,
                                               opacity: *const f32,
                                               transform: *const LayoutTransform,
@@ -1436,6 +1534,12 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
             WrFilterOpType::ColorMatrix => FilterOp::ColorMatrix(c_filter.matrix),
         }
     }).collect();
+
+    let clip_node_id_ref = unsafe { clip_node_id.as_ref() };
+    let clip_node_id = match clip_node_id_ref {
+        Some(clip_node_id) => Some(ClipId::Clip(*clip_node_id, state.pipeline_id)),
+        None => None,
+    };
 
     let opacity_ref = unsafe { opacity.as_ref() };
     if let Some(opacity) = opacity_ref {
@@ -1472,6 +1576,7 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
     state.frame_builder
          .dl_builder
          .push_stacking_context(&prim_info,
+                                clip_node_id,
                                 ScrollPolicy::Scrollable,
                                 transform_binding,
                                 transform_style,

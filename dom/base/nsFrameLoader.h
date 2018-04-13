@@ -22,10 +22,10 @@
 #include "nsFrameMessageManager.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/ParentSHistory.h"
 #include "mozilla/Attributes.h"
 #include "nsStubMutationObserver.h"
 #include "Units.h"
-#include "nsIWebBrowserPersistable.h"
 #include "nsIFrame.h"
 #include "nsPluginTags.h"
 
@@ -41,6 +41,7 @@ class nsIDocShellTreeOwner;
 class nsILoadContext;
 class nsIMessageSender;
 class nsIPrintSettings;
+class nsIWebBrowserPersistDocumentReceiver;
 class nsIWebProgressListener;
 
 namespace mozilla {
@@ -76,8 +77,7 @@ typedef struct _GtkWidget GtkWidget;
   { 0x297fd0ea, 0x1b4a, 0x4c9a,                                 \
       { 0xa4, 0x04, 0xe5, 0x8b, 0xe8, 0x95, 0x10, 0x50 } }
 
-class nsFrameLoader final : public nsIWebBrowserPersistable,
-                            public nsStubMutationObserver,
+class nsFrameLoader final : public nsStubMutationObserver,
                             public mozilla::dom::ipc::MessageManagerCallback,
                             public nsWrapperCache
 {
@@ -96,10 +96,9 @@ public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_FRAMELOADER_IID)
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(nsFrameLoader,
-                                                         nsIWebBrowserPersistable)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsFrameLoader)
+
   NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTECHANGED
-  NS_DECL_NSIWEBBROWSERPERSISTABLE
   nsresult CheckForRecursiveLoad(nsIURI* aURI);
   nsresult ReallyStartLoading();
   void StartDestroy();
@@ -285,6 +284,8 @@ public:
   bool ShouldClipSubdocument() { return mClipSubdocument; }
 
   bool ShouldClampScrollPosition() { return mClampScrollPosition; }
+
+  mozilla::dom::ParentSHistory* GetParentSHistory() { return mParentSHistory; }
 
   /**
    * Tell this FrameLoader to use a particular remote browser.
@@ -481,6 +482,8 @@ private:
   // grouped history navigation
   nsTArray<RefPtr<mozilla::dom::Promise>>* mBrowserChangingProcessBlockers;
 
+  RefPtr<mozilla::dom::ParentSHistory> mParentSHistory;
+
   bool mDepthTooGreat : 1;
   bool mIsTopLevelContent : 1;
   bool mDestroyCalled : 1;
@@ -511,7 +514,7 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsFrameLoader, NS_FRAMELOADER_IID)
 inline nsISupports*
 ToSupports(nsFrameLoader* aFrameLoader)
 {
-  return static_cast<nsIWebBrowserPersistable*>(aFrameLoader);
+  return aFrameLoader;
 }
 
 #endif

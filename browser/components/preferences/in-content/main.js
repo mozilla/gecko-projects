@@ -693,7 +693,7 @@ var gMainPane = {
     const user = await fxAccounts.getSignedInUser();
     if (user) {
       // We have a user, open Sync preferences in the same tab
-      win.openUILinkIn("about:preferences#sync", "current");
+      win.openTrustedLinkIn("about:preferences#sync", "current");
       return;
     }
     let url = await FxAccounts.config.promiseSignInURI("dev-edition-setup");
@@ -1295,7 +1295,7 @@ var gMainPane = {
 
   // nsISupports
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver, Ci.nsIDOMEventListener]),
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver]),
 
   // nsIObserver
 
@@ -1327,7 +1327,7 @@ var gMainPane = {
   },
 
 
-  // nsIDOMEventListener
+  // EventListener
 
   handleEvent(aEvent) {
     if (aEvent.type == "unload") {

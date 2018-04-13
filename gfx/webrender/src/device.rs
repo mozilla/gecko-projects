@@ -11,6 +11,7 @@ use api::ImageDescriptor;
 use euclid::Transform3D;
 use gleam::gl;
 use internal_types::{FastHashMap, RenderTargetInfo};
+use log::Level;
 use smallvec::SmallVec;
 use std::cell::RefCell;
 use std::fs::File;
@@ -53,7 +54,6 @@ const SHADER_VERSION_GLES: &str = "#version 300 es\n";
 const SHADER_KIND_VERTEX: &str = "#define WR_VERTEX_SHADER\n";
 const SHADER_KIND_FRAGMENT: &str = "#define WR_FRAGMENT_SHADER\n";
 const SHADER_IMPORT: &str = "#include ";
-const SHADER_LINE_MARKER: &str = "#line 1\n";
 
 pub struct TextureSlot(pub usize);
 
@@ -170,11 +170,9 @@ fn get_shader_source(shader_name: &str, base_path: &Option<PathBuf>) -> Option<S
 // Parse a shader string for imports. Imports are recursively processed, and
 // prepended to the list of outputs.
 fn parse_shader_source(source: String, base_path: &Option<PathBuf>, output: &mut String) {
-    output.push_str(SHADER_LINE_MARKER);
-
-    for (line_num, line) in source.lines().enumerate() {
+    for line in source.lines() {
         if line.starts_with(SHADER_IMPORT) {
-            let imports = line[SHADER_IMPORT.len() ..].split(",");
+            let imports = line[SHADER_IMPORT.len() ..].split(',');
 
             // For each import, get the source, and recurse.
             for import in imports {
@@ -182,8 +180,6 @@ fn parse_shader_source(source: String, base_path: &Option<PathBuf>, output: &mut
                     parse_shader_source(include, base_path, output);
                 }
             }
-
-            output.push_str(&format!("#line {}\n", line_num+1));
         } else {
             output.push_str(line);
             output.push_str("\n");
@@ -349,11 +345,11 @@ impl VertexDescriptor {
     }
 
     fn bind(&self, gl: &gl::Gl, main: VBOId, instance: VBOId) {
-        Self::bind_attributes(&self.vertex_attributes, 0, 0, gl, main);
+        Self::bind_attributes(self.vertex_attributes, 0, 0, gl, main);
 
         if !self.instance_attributes.is_empty() {
             Self::bind_attributes(
-                &self.instance_attributes,
+                self.instance_attributes,
                 self.vertex_attributes.len(),
                 1, gl, instance,
             );
@@ -777,6 +773,25 @@ impl Device {
         self.bound_draw_fbo = FBOId(0);
     }
 
+    #[cfg(debug_assertions)]
+    fn print_shader_errors(source: &str, log: &str) {
+        // hacky way to extract the offending lines
+        if !log.starts_with("0:") {
+            return;
+        }
+        let end_pos = match log[2..].chars().position(|c| !c.is_digit(10)) {
+            Some(pos) => 2 + pos,
+            None => return,
+        };
+        let base_line_number = match log[2 .. end_pos].parse::<usize>() {
+            Ok(number) if number >= 2 => number - 2,
+            _ => return,
+        };
+        for (line, prefix) in source.lines().skip(base_line_number).zip(&["|",">","|"]) {
+            error!("{}\t{}", prefix, line);
+        }
+    }
+
     pub fn compile_shader(
         gl: &gl::Gl,
         name: &str,
@@ -789,11 +804,13 @@ impl Device {
         gl.compile_shader(id);
         let log = gl.get_shader_info_log(id);
         if gl.get_shader_iv(id, gl::COMPILE_STATUS) == (0 as gl::GLint) {
-            println!("Failed to compile shader: {}\n{}", name, log);
+            error!("Failed to compile shader: {}\n{}", name, log);
+            #[cfg(debug_assertions)]
+            Self::print_shader_errors(source, &log);
             Err(ShaderError::Compilation(name.to_string(), log))
         } else {
             if !log.is_empty() {
-                println!("Warnings detected on shader: {}\n{}", name, log);
+                warn!("Warnings detected on shader: {}\n{}", name, log);
             }
             Ok(id)
         }
@@ -1364,7 +1381,7 @@ impl Device {
 
                 if self.gl.get_program_iv(pid, gl::LINK_STATUS) == (0 as gl::GLint) {
                     let error_log = self.gl.get_program_info_log(pid);
-                    println!(
+                    error!(
                       "Failed to load a program object with a program binary: {} renderer {}\n{}",
                       base_filename,
                       self.renderer_name,
@@ -1426,7 +1443,7 @@ impl Device {
 
             if self.gl.get_program_iv(pid, gl::LINK_STATUS) == (0 as gl::GLint) {
                 let error_log = self.gl.get_program_info_log(pid);
-                println!(
+                error!(
                     "Failed to link shader program: {}\n{}",
                     base_filename,
                     error_log
@@ -2086,6 +2103,31 @@ impl Device {
 
     pub fn supports_extension(&self, extension: &str) -> bool {
         self.extensions.iter().any(|s| s == extension)
+    }
+
+    pub fn echo_driver_messages(&self) {
+        for msg in self.gl.get_debug_messages() {
+            let level = match msg.severity {
+                gl::DEBUG_SEVERITY_HIGH => Level::Error,
+                gl::DEBUG_SEVERITY_MEDIUM => Level::Warn,
+                gl::DEBUG_SEVERITY_LOW => Level::Info,
+                gl::DEBUG_SEVERITY_NOTIFICATION => Level::Debug,
+                _ => Level::Trace,
+            };
+            let ty = match msg.ty {
+                gl::DEBUG_TYPE_ERROR => "error",
+                gl::DEBUG_TYPE_DEPRECATED_BEHAVIOR => "deprecated",
+                gl::DEBUG_TYPE_UNDEFINED_BEHAVIOR => "undefined",
+                gl::DEBUG_TYPE_PORTABILITY => "portability",
+                gl::DEBUG_TYPE_PERFORMANCE => "perf",
+                gl::DEBUG_TYPE_MARKER => "marker",
+                gl::DEBUG_TYPE_PUSH_GROUP => "group push",
+                gl::DEBUG_TYPE_POP_GROUP => "group pop",
+                gl::DEBUG_TYPE_OTHER => "other",
+                _ => "?",
+            };
+            log!(level, "({}) {}", ty, msg.message);
+        }
     }
 }
 

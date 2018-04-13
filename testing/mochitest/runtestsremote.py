@@ -216,7 +216,7 @@ class MochiRemote(MochitestDesktop):
         if options.testingModulesDir:
             try:
                 self.device.push(options.testingModulesDir, self.remoteModulesDir)
-                self.device.chmod(self.remoteModulesDir, recursive=True)
+                self.device.chmod(self.remoteModulesDir, recursive=True, root=True)
             except Exception:
                 self.log.error(
                     "Automation Error: Unable to copy test modules to device.")
@@ -244,7 +244,7 @@ class MochiRemote(MochitestDesktop):
         # we really need testConfig.js (for browser chrome)
         try:
             self.device.push(options.profilePath, self.remoteProfile)
-            self.device.chmod(self.remoteProfile, recursive=True)
+            self.device.chmod(self.remoteProfile, recursive=True, root=True)
         except Exception:
             self.log.error("Automation Error: Unable to copy profile to device.")
             raise
@@ -271,11 +271,8 @@ class MochiRemote(MochitestDesktop):
             if printLogcat:
                 logcat = self.device.get_logcat(
                     filter_out_regexps=fennecLogcatFilters)
-                self.log.info(
-                    '\n' +
-                    ''.join(logcat).decode(
-                        'utf-8',
-                        'replace'))
+                for l in logcat:
+                    self.log.info(l.decode('utf-8', 'replace'))
             self.log.info("Device info:")
             devinfo = self.device.get_info()
             for category in devinfo:

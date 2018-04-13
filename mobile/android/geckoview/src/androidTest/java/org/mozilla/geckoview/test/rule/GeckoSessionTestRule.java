@@ -4,6 +4,8 @@
 package org.mozilla.geckoview.test.rule;
 
 import org.mozilla.gecko.gfx.GeckoDisplay;
+import org.mozilla.geckoview.GeckoRuntime;
+import org.mozilla.geckoview.GeckoRuntimeSettings;
 import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoSessionSettings;
 import org.mozilla.geckoview.test.util.Callbacks;
@@ -506,6 +508,7 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
     }
 
     private static final List<Class<?>> CALLBACK_CLASSES = Arrays.asList(getCallbackClasses());
+    private static GeckoRuntime sRuntime;
 
     public final Environment env = new Environment();
 
@@ -611,6 +614,15 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
         return mMainSession;
     }
 
+    /**
+     * Get the runtime set up for the current test.
+     *
+     * @return GeckoRuntime object.
+     */
+    public @NonNull GeckoRuntime getRuntime() {
+        return sRuntime;
+    }
+
     protected static Method getCallbackSetter(final @NonNull Class<?> cls)
             throws NoSuchMethodException {
         return GeckoSession.class.getMethod("set" + cls.getSimpleName(), cls);
@@ -714,7 +726,14 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
         mCallbackProxy = Proxy.newProxyInstance(GeckoSession.class.getClassLoader(),
                                                 classes, recorder);
 
-        GeckoSession.preload(InstrumentationRegistry.getTargetContext(), new String[] { "-purgecaches" }, null, false);
+        if (sRuntime == null) {
+            final GeckoRuntimeSettings geckoSettings = new GeckoRuntimeSettings();
+            geckoSettings.setArguments(new String[] { "-purgecaches" });
+            sRuntime = GeckoRuntime.create(
+                InstrumentationRegistry.getTargetContext(),
+                geckoSettings);
+        }
+
         mMainSession = new GeckoSession(settings);
         prepareSession(mMainSession);
 
@@ -753,7 +772,7 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
             loopUntilIdle(/* timeout */ 0);
         }
 
-        session.open(mInstrumentation.getTargetContext());
+        session.open(sRuntime);
 
         if (!e10s) {
             return;
@@ -1248,8 +1267,9 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
     }
 
     /**
-     * Get information about the current call. Only valid during a {@link #forCallbacksDuringWait}
-     * callback.
+     * Get information about the current call. Only valid during a {@link
+     * #forCallbacksDuringWait}, {@link #delegateDuringNextWait}, or {@link
+     * #delegateUntilTestEnd} callback.
      *
      * @return Call information
      */
@@ -1392,5 +1412,23 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
      */
     public GeckoSession createClosedSession(final GeckoSessionSettings settings) {
         return createSession(settings, /* open */ false);
+    }
+
+    /**
+     * Return a value from the given array indexed by the current call counter. Only valid
+     * during a {@link #forCallbacksDuringWait}, {@link #delegateDuringNextWait}, or
+     * {@link #delegateUntilTestEnd} callback.
+     * <p><p>
+     * Asserts that {@code foo} is equal to {@code "bar"} during the first call and {@code
+     * "baz"} during the second call:
+     * <pre>{@code assertThat("Foo should match", foo, equalTo(forEachCall("bar",
+     * "baz")));}</pre>
+     *
+     * @param values Input array
+     * @return Value from input array indexed by the current call counter.
+     */
+    public <T> T forEachCall(T... values) {
+        assertThat("Should be in a method call", mCurrentMethodCall, notNullValue());
+        return values[Math.min(mCurrentMethodCall.getCurrentCount(), values.length) - 1];
     }
 }

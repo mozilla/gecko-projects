@@ -58,7 +58,6 @@
 #include "nsPluginFrame.h"
 #include "nsMenuPopupFrame.h"
 
-#include "nsIDOMXULElement.h"
 #include "nsIObserverService.h"
 #include "nsIDocShell.h"
 #include "nsIMozBrowserFrame.h"
@@ -292,8 +291,10 @@ EventStateManager::EventStateManager()
   : mLockCursor(0)
   , mLastFrameConsumedSetCursor(false)
   , mCurrentTarget(nullptr)
-    // init d&d gesture state machine variables
-  , mGestureDownPoint(0,0)
+  // init d&d gesture state machine variables
+  , mGestureDownPoint(0, 0)
+  , mGestureModifiers{}
+  , mGestureDownButtons{}
   , mPresContext(nullptr)
   , mLClickCount(0)
   , mMClickCount(0)
@@ -2965,7 +2966,7 @@ NodeAllowsClickThrough(nsINode* aNode)
     if (aNode->IsXULElement()) {
       mozilla::dom::Element* element = aNode->AsElement();
       static Element::AttrValuesArray strings[] =
-        {nsGkAtoms::always, nsGkAtoms::never, nullptr};
+        {&nsGkAtoms::always, &nsGkAtoms::never, nullptr};
       switch (element->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::clickthrough,
                                        strings, eCaseMatters)) {
         case 0:

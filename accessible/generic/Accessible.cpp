@@ -32,7 +32,6 @@
 
 #include "nsIDOMElement.h"
 #include "nsIDOMXULButtonElement.h"
-#include "nsIDOMXULElement.h"
 #include "nsIDOMXULLabelElement.h"
 #include "nsIDOMXULSelectCntrlEl.h"
 #include "nsIDOMXULSelectCntrlItemEl.h"
@@ -1492,9 +1491,8 @@ nsAtom*
 Accessible::LandmarkRole() const
 {
   const nsRoleMapEntry* roleMapEntry = ARIARoleMap();
-  return roleMapEntry && roleMapEntry->IsOfType(eLandmark)
-       ? roleMapEntry->roleAtom
-       : nullptr;
+  return roleMapEntry && roleMapEntry->IsOfType(eLandmark) ?
+    *(roleMapEntry->roleAtom) : nullptr;
 }
 
 role

@@ -11,7 +11,7 @@ loader.lazyRequireGetter(this, "TargetFactory", "devtools/client/framework/targe
 loader.lazyRequireGetter(this, "gDevToolsBrowser", "devtools/client/framework/devtools-browser", true);
 loader.lazyRequireGetter(this, "Tools", "devtools/client/definitions", true);
 loader.lazyRequireGetter(this, "Telemetry", "devtools/client/shared/telemetry");
-loader.lazyRequireGetter(this, "WebConsoleFrame", "devtools/client/webconsole/webconsole", true);
+loader.lazyRequireGetter(this, "WebConsoleFrame", "devtools/client/webconsole/old/webconsole", true);
 loader.lazyRequireGetter(this, "NewWebConsoleFrame", "devtools/client/webconsole/new-webconsole", true);
 loader.lazyRequireGetter(this, "gDevTools", "devtools/client/framework/devtools", true);
 loader.lazyRequireGetter(this, "DebuggerServer", "devtools/server/main", true);
@@ -381,11 +381,11 @@ WebConsole.prototype = {
    */
   openLink(link, e) {
     let isOSX = Services.appinfo.OS == "Darwin";
+    let where = "tab";
     if (e && (e.button === 1 || (e.button === 0 && (isOSX ? e.metaKey : e.ctrlKey)))) {
-      this.chromeUtilsWindow.openUILinkIn(link, "tabshifted");
-    } else {
-      this.chromeUtilsWindow.openUILinkIn(link, "tab");
+      where = "tabshifted";
     }
+    this.chromeUtilsWindow.openWebLinkIn(link, where);
   },
 
   /**

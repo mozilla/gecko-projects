@@ -136,8 +136,7 @@ NS_IMPL_ISUPPORTS(TabParent,
                   nsITabParent,
                   nsIAuthPromptProvider,
                   nsISecureBrowserUI,
-                  nsISupportsWeakReference,
-                  nsIWebBrowserPersistable)
+                  nsISupportsWeakReference)
 
 TabParent::TabParent(nsIContentParent* aManager,
                      const TabId& aTabId,
@@ -164,6 +163,8 @@ TabParent::TabParent(nsIContentParent* aManager,
   , mTabId(aTabId)
   , mCreatingWindow(false)
   , mCursor(eCursorInvalid)
+  , mCustomCursorHotspotX{}
+  , mCustomCursorHotspotY{}
   , mTabSetsCursor(false)
   , mHasContentOpener(false)
 #ifdef DEBUG
@@ -1722,9 +1723,9 @@ TabParent::RecvAsyncMessage(const nsString& aMessage,
 }
 
 mozilla::ipc::IPCResult
-TabParent::RecvSetCursor(const uint32_t& aCursor, const bool& aForce)
+TabParent::RecvSetCursor(const nsCursor& aCursor, const bool& aForce)
 {
-  mCursor = static_cast<nsCursor>(aCursor);
+  mCursor = aCursor;
   mCustomCursor = nullptr;
 
   nsCOMPtr<nsIWidget> widget = GetWidget();
@@ -2442,8 +2443,8 @@ TabParent::RecvDefaultProcOfPluginEvent(const WidgetPluginEvent& aEvent)
 }
 
 mozilla::ipc::IPCResult
-TabParent::RecvGetInputContext(int32_t* aIMEEnabled,
-                               int32_t* aIMEOpen)
+TabParent::RecvGetInputContext(IMEState::Enabled* aIMEEnabled,
+                               IMEState::Open* aIMEOpen)
 {
   nsCOMPtr<nsIWidget> widget = GetWidget();
   if (!widget) {
@@ -2453,33 +2454,32 @@ TabParent::RecvGetInputContext(int32_t* aIMEEnabled,
   }
 
   InputContext context = widget->GetInputContext();
-  *aIMEEnabled = static_cast<int32_t>(context.mIMEState.mEnabled);
-  *aIMEOpen = static_cast<int32_t>(context.mIMEState.mOpen);
+  *aIMEEnabled = context.mIMEState.mEnabled;
+  *aIMEOpen = context.mIMEState.mOpen;
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult
-TabParent::RecvSetInputContext(const int32_t& aIMEEnabled,
-                               const int32_t& aIMEOpen,
-                               const nsString& aType,
-                               const nsString& aInputmode,
-                               const nsString& aActionHint,
-                               const bool& aInPrivateBrowsing,
-                               const int32_t& aCause,
-                               const int32_t& aFocusChange)
+TabParent::RecvSetInputContext(
+  const IMEState::Enabled& aIMEEnabled,
+  const IMEState::Open& aIMEOpen,
+  const nsString& aType,
+  const nsString& aInputmode,
+  const nsString& aActionHint,
+  const bool& aInPrivateBrowsing,
+  const InputContextAction::Cause& aCause,
+  const InputContextAction::FocusChange& aFocusChange)
 {
   InputContext context;
-  context.mIMEState.mEnabled = static_cast<IMEState::Enabled>(aIMEEnabled);
-  context.mIMEState.mOpen = static_cast<IMEState::Open>(aIMEOpen);
+  context.mIMEState.mEnabled = aIMEEnabled;
+  context.mIMEState.mOpen = aIMEOpen;
   context.mHTMLInputType.Assign(aType);
   context.mHTMLInputInputmode.Assign(aInputmode);
   context.mActionHint.Assign(aActionHint);
   context.mOrigin = InputContext::ORIGIN_CONTENT;
   context.mInPrivateBrowsing = aInPrivateBrowsing;
 
-  InputContextAction action(
-    static_cast<InputContextAction::Cause>(aCause),
-    static_cast<InputContextAction::FocusChange>(aFocusChange));
+  InputContextAction action(aCause, aFocusChange);
 
   IMEStateManager::SetInputContextForChildProcess(this, context, action);
 
@@ -3437,19 +3437,23 @@ TabParent::AsyncPanZoomEnabled() const
   return widget && widget->AsyncPanZoomEnabled();
 }
 
-NS_IMETHODIMP
+void
 TabParent::StartPersistence(uint64_t aOuterWindowID,
-                            nsIWebBrowserPersistDocumentReceiver* aRecv)
+                            nsIWebBrowserPersistDocumentReceiver* aRecv,
+                            ErrorResult& aRv)
 {
   nsCOMPtr<nsIContentParent> manager = Manager();
   if (!manager->IsContentParent()) {
-    return NS_ERROR_UNEXPECTED;
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return;
   }
   auto* actor = new WebBrowserPersistDocumentParent();
   actor->SetOnReady(aRecv);
-  return manager->AsContentParent()
-    ->SendPWebBrowserPersistDocumentConstructor(actor, this, aOuterWindowID)
-    ? NS_OK : NS_ERROR_FAILURE;
+  bool ok = manager->AsContentParent()
+    ->SendPWebBrowserPersistDocumentConstructor(actor, this, aOuterWindowID);
+  if (!ok) {
+    aRv.Throw(NS_ERROR_FAILURE);
+  }
   // (The actor will be destroyed on constructor failure.)
 }
 
