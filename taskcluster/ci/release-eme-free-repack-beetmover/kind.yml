@@ -25,6 +25,6 @@ job-template:
       by-project:
          mozilla-beta: beetmover:bucket:partner
          mozilla-release: beetmover:bucket:partner
-         default: beetmover:bucket:dep
+         default: beetmover:bucket:dep-partner
    partner-private-path: null
    partner-public-path: "{platform}-EME-free/{locale}"
