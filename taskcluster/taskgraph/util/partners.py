@@ -1,13 +1,8 @@
-# TODO - redo errors to keep in style ??
-
 from __future__ import absolute_import, print_function, unicode_literals
 
 from copy import deepcopy
 import json
-import logging
 import os
-
-log = logging.getLogger(__name__)
 
 LOCALES_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),

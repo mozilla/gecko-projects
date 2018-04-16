@@ -101,9 +101,8 @@ PARTIAL_UPDATES_FLAVORS = (
     'ship_devedition',
 )
 
-# TODO - add prod branches, and handle half-of-beta-cycle
-PARTNER_BRANCHES = ('maple', 'birch', 'jamun')
-EMEFREE_BRANCHES = ('maple', 'birch', 'jamun')
+PARTNER_BRANCHES = ('mozilla-beta', 'mozilla-release', 'maple', 'birch', 'jamun')
+EMEFREE_BRANCHES = ('mozilla-beta', 'mozilla-release', 'maple', 'birch', 'jamun')
 
 
 def is_release_promotion_available(parameters):
