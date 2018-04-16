@@ -1,3 +1,4 @@
+An explanation of the Mozilla Source Code Directory Structure and links to
 project pages with documentation can be found at:
 
     https://developer.mozilla.org/en/Mozilla_Source_Code_Directory_Structure
@@ -24,4 +25,3 @@ testing, may be buggy. Firefox nightlies, for example, can be found at:
     https://archive.mozilla.org/pub/firefox/nightly/latest-mozilla-central/
             - or -
     https://nightly.mozilla.org/
-
