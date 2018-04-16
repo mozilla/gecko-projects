@@ -21,3 +21,4 @@ job-template:
    shipping-product: firefox
    shipping-phase: promote
    depname: release-partner-repack
+   max-run-time: 7200
