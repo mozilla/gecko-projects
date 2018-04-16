@@ -21,6 +21,7 @@ job-template:
    shipping-product: firefox
    shipping-phase: promote
    depname: release-eme-free-repack
+   max-run-time: 7200
    treeherder:
       symbol: EME-Sign
       platform: macosx64/opt
