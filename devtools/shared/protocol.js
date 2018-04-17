@@ -718,12 +718,22 @@ Response.prototype = {
    *    The object writing the response.
    */
   write: function(ret, ctx) {
-    return JSON.parse(JSON.stringify(this.template, function(key, value) {
+    // Consider that `template` is either directly a `RetVal`,
+    // or a dictionary with may be one `RetVal`.
+    if (this.template instanceof RetVal) {
+      return this.template.write(ret, ctx);
+    }
+    let result = {};
+    for (let key in this.template) {
+      let value = this.template[key];
       if (value instanceof RetVal) {
-        return value.write(ret, ctx);
+        result[key] = value.write(ret, ctx);
+      } else {
+        throw new Error("Response can only be a `RetVal` instance or an object " +
+                        "with one property being a `RetVal` instance.");
       }
-      return value;
-    }));
+    }
+    return result;
   },
 
   /**

@@ -276,6 +276,7 @@ nsIInterfaceRequestor* nsContentUtils::sSameOriginChecker = nullptr;
 
 bool nsContentUtils::sIsHandlingKeyBoardEvent = false;
 bool nsContentUtils::sAllowXULXBL_for_file = false;
+bool nsContentUtils::sDisablePopups = false;
 
 nsString* nsContentUtils::sShiftText = nullptr;
 nsString* nsContentUtils::sControlText = nullptr;
@@ -732,6 +733,9 @@ nsContentUtils::Init()
 
   Preferences::AddBoolVarCache(&sIsBytecodeCacheEnabled,
                                "dom.script_loader.bytecode_cache.enabled", false);
+
+  Preferences::AddBoolVarCache(&sDisablePopups,
+                               "dom.disable_open_during_load", false);
 
   Preferences::AddIntVarCache(&sBytecodeCacheStrategy,
                               "dom.script_loader.bytecode_cache.strategy", 0);
@@ -5292,7 +5296,7 @@ nsContentUtils::SetNodeTextContent(nsIContent* aContent,
       for (child = aContent->GetFirstChild();
            child && child->GetParentNode() == aContent;
            child = child->GetNextSibling()) {
-        if (skipFirst && child->IsNodeOfType(nsINode::eTEXT)) {
+        if (skipFirst && child->IsText()) {
           skipFirst = false;
           continue;
         }
@@ -5413,7 +5417,7 @@ nsContentUtils::HasNonEmptyTextContent(nsINode* aNode,
   for (nsIContent* child = aNode->GetFirstChild();
        child;
        child = child->GetNextSibling()) {
-    if (child->IsNodeOfType(nsINode::eTEXT) &&
+    if (child->IsText() &&
         child->TextLength() > 0) {
         return true;
     }
@@ -6426,41 +6430,24 @@ nsContentUtils::GetUTFOrigin(nsIURI* aURI, nsAString& aOrigin)
 {
   NS_PRECONDITION(aURI, "missing uri");
 
-  // For Blob URI we have to return the origin of page using its principal.
-  nsCOMPtr<nsIURIWithPrincipal> uriWithPrincipal = do_QueryInterface(aURI);
-  if (uriWithPrincipal) {
-    nsCOMPtr<nsIPrincipal> principal;
-    uriWithPrincipal->GetPrincipal(getter_AddRefs(principal));
+  bool isBlobURL = false;
+  nsresult rv = aURI->SchemeIs(BLOBURI_SCHEME, &isBlobURL);
+  NS_ENSURE_SUCCESS(rv, rv);
 
-    if (principal) {
-      nsCOMPtr<nsIURI> uri;
-      nsresult rv = principal->GetURI(getter_AddRefs(uri));
-      NS_ENSURE_SUCCESS(rv, rv);
+  // For Blob URI, the path is the URL of the owning page.
+  if (isBlobURL) {
+    nsAutoCString path;
+    rv = aURI->GetPathQueryRef(path);
+    NS_ENSURE_SUCCESS(rv, rv);
 
-      if (uri && uri != aURI) {
-        return GetUTFOrigin(uri, aOrigin);
-      }
-    } else {
-      // We are probably dealing with an unknown blob URL.
-      bool isBlobURL = false;
-      nsresult rv = aURI->SchemeIs(BLOBURI_SCHEME, &isBlobURL);
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      if (isBlobURL) {
-        nsAutoCString path;
-        rv = aURI->GetPathQueryRef(path);
-        NS_ENSURE_SUCCESS(rv, rv);
-
-        nsCOMPtr<nsIURI> uri;
-        nsresult rv = NS_NewURI(getter_AddRefs(uri), path);
-        if (NS_FAILED(rv)) {
-          aOrigin.AssignLiteral("null");
-          return NS_OK;
-        }
-
-        return GetUTFOrigin(uri, aOrigin);
-      }
+    nsCOMPtr<nsIURI> uri;
+    nsresult rv = NS_NewURI(getter_AddRefs(uri), path);
+    if (NS_FAILED(rv)) {
+      aOrigin.AssignLiteral("null");
+      return NS_OK;
     }
+
+    return GetUTFOrigin(uri, aOrigin);
   }
 
   aOrigin.Truncate();
@@ -6469,7 +6456,7 @@ nsContentUtils::GetUTFOrigin(nsIURI* aURI, nsAString& aOrigin)
   NS_ENSURE_TRUE(uri, NS_ERROR_UNEXPECTED);
 
   nsCString host;
-  nsresult rv = uri->GetHost(host);
+  rv = uri->GetHost(host);
 
   if (NS_SUCCEEDED(rv) && !host.IsEmpty()) {
     nsCString scheme;
@@ -7440,7 +7427,7 @@ nsContentUtils::GetSelectionInTextControl(Selection* aSelection,
                endContainer == lastChild, "Unexpected endContainer");
   // firstChild is either text or a <br> (hence an element).
   MOZ_ASSERT_IF(firstChild,
-                firstChild->IsNodeOfType(nsINode::eTEXT) || firstChild->IsElement());
+                firstChild->IsText() || firstChild->IsElement());
 #endif
   // Testing IsElement() is faster than testing IsNodeOfType(), since it's
   // non-virtual.
@@ -11029,4 +11016,25 @@ nsContentUtils::InnerOrOuterWindowDestroyed()
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(sInnerOrOuterWindowCount > 0);
   --sInnerOrOuterWindowCount;
+}
+
+/* static */ bool
+nsContentUtils::CanShowPopup(nsIPrincipal* aPrincipal)
+{
+  MOZ_ASSERT(aPrincipal);
+  uint32_t permit;
+  nsCOMPtr<nsIPermissionManager> permissionManager =
+    services::GetPermissionManager();
+
+  if (permissionManager &&
+      NS_SUCCEEDED(permissionManager->TestPermissionFromPrincipal(aPrincipal, "popup", &permit))) {
+    if (permit == nsIPermissionManager::ALLOW_ACTION) {
+      return true;
+    }
+    if (permit == nsIPermissionManager::DENY_ACTION) {
+      return false;
+    }
+  }
+
+  return !sDisablePopups;
 }

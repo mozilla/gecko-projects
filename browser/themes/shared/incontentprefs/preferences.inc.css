@@ -297,6 +297,9 @@ button > hbox > label {
 #homepageGroup textbox {
   margin: 5px 0;
 }
+#homepageAndNewWindowsOption {
+  margin-top: 20px;
+}
 #homepageGroup:-moz-locale-dir(rtl) input {
   unicode-bidi: plaintext;
   direction: rtl;
@@ -380,6 +383,12 @@ button > hbox > label {
 
 #historyPane {
   margin-top: 4px;
+}
+
+#historyButtons {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
 #acceptCookies {

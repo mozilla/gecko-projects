@@ -6,7 +6,10 @@
 const { AccessibilityFront } = require("devtools/shared/fronts/accessibility");
 const EventEmitter = require("devtools/shared/event-emitter");
 
+const Telemetry = require("devtools/client/shared/telemetry");
+
 const { Picker } = require("./picker");
+const { A11Y_SERVICE_DURATION } = require("./constants");
 
 // The panel's window global is an EventEmitter firing the following events:
 const EVENTS = {
@@ -35,7 +38,9 @@ function AccessibilityPanel(iframeWindow, toolbox) {
     this.onNewAccessibleFrontSelected.bind(this);
   this.onAccessibilityInspectorUpdated =
     this.onAccessibilityInspectorUpdated.bind(this);
+  this.updateA11YServiceDurationTimer = this.updateA11YServiceDurationTimer.bind(this);
   this.updatePickerButton = this.updatePickerButton.bind(this);
+  this.updateToolboxButtons = this.updateToolboxButtons.bind(this);
 
   EventEmitter.decorate(this);
 }
@@ -60,6 +65,9 @@ AccessibilityPanel.prototype = {
       await this.target.makeRemote();
     }
 
+    this._telemetry = new Telemetry();
+    this.panelWin.gTelemetry = this._telemetry;
+
     this.target.on("navigate", this.onTabNavigated);
     this._toolbox.on("select", this.onPanelVisibilityChange);
 
@@ -83,6 +91,10 @@ AccessibilityPanel.prototype = {
       await this._front.bootstrap();
       this.picker = new Picker(this);
     }
+
+    this.updateA11YServiceDurationTimer();
+    this._front.on("init", this.updateA11YServiceDurationTimer);
+    this._front.on("shutdown", this.updateA11YServiceDurationTimer);
 
     this.isReady = true;
     this.emit("ready");
@@ -119,11 +131,11 @@ AccessibilityPanel.prototype = {
     this.cancelPicker();
 
     if (this.isVisible) {
-      this._front.on("init", this.updatePickerButton);
-      this._front.on("shutdown", this.updatePickerButton);
+      this._front.on("init", this.updateToolboxButtons);
+      this._front.on("shutdown", this.updateToolboxButtons);
     } else {
-      this._front.off("init", this.updatePickerButton);
-      this._front.off("shutdown", this.updatePickerButton);
+      this._front.off("init", this.updateToolboxButtons);
+      this._front.off("shutdown", this.updateToolboxButtons);
       // Do not refresh if the panel isn't visible.
       return;
     }
@@ -137,11 +149,24 @@ AccessibilityPanel.prototype = {
     this.postContentMessage("initialize", this._front, this._walker, this._isOldVersion);
   },
 
+  updateA11YServiceDurationTimer() {
+    if (this._front.enabled) {
+      this._telemetry.startTimer(A11Y_SERVICE_DURATION);
+    } else {
+      this._telemetry.stopTimer(A11Y_SERVICE_DURATION);
+    }
+  },
+
   selectAccessible(accessibleFront) {
     this.postContentMessage("selectAccessible", this._walker, accessibleFront);
   },
 
-  selectAccessibleForNode(nodeFront) {
+  selectAccessibleForNode(nodeFront, reason) {
+    if (reason) {
+      this._telemetry.logKeyedScalar(
+        "devtools.accessibility.select_accessible_for_node", reason, 1);
+    }
+
     this.postContentMessage("selectNodeAccessible", this._walker, nodeFront);
   },
 
@@ -157,6 +182,10 @@ AccessibilityPanel.prototype = {
     });
 
     this.panelWin.dispatchEvent(event);
+  },
+
+  updateToolboxButtons() {
+    this._toolbox.updatePickerButton();
   },
 
   updatePickerButton() {
@@ -201,6 +230,8 @@ AccessibilityPanel.prototype = {
       resolver = resolve;
     });
 
+    this._telemetry.destroy();
+
     this.target.off("navigate", this.onTabNavigated);
     this._toolbox.off("select", this.onPanelVisibilityChange);
 
@@ -213,11 +244,15 @@ AccessibilityPanel.prototype = {
     this.picker = null;
 
     if (this._front) {
+      this._front.off("init", this.updateA11YServiceDurationTimer);
+      this._front.off("shutdown", this.updateA11YServiceDurationTimer);
       await this._front.destroy();
     }
 
     this._front = null;
+    this._telemetry = null;
     this.panelWin.gToolbox = null;
+    this.panelWin.gTelemetry = null;
 
     this.emit("destroyed");
 

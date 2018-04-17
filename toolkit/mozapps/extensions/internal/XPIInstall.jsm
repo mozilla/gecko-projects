@@ -158,14 +158,15 @@ const PROP_TARGETAPP     = ["id", "minVersion", "maxVersion"];
 
 // Map new string type identifiers to old style nsIUpdateItem types.
 // Retired values:
+// 8 = locale
 // 32 = multipackage xpi file
 // 8 = locale
 // 256 = apiextension
+// 128 = experiment
 const TYPES = {
   extension: 2,
   theme: 4,
   dictionary: 64,
-  experiment: 128,
 };
 
 const COMPATIBLE_BY_DEFAULT_TYPES = {
@@ -175,7 +176,6 @@ const COMPATIBLE_BY_DEFAULT_TYPES = {
 
 const RESTARTLESS_TYPES = new Set([
   "dictionary",
-  "experiment",
   "webextension",
   "webextension-theme",
 ]);
@@ -807,23 +807,12 @@ async function loadManifestFromRDF(aUri, aData) {
   if (isTheme(addon.type)) {
     addon.userDisabled = !!LightweightThemeManager.currentTheme ||
                          addon.internalName != DEFAULT_SKIN;
-  } else if (addon.type == "experiment") {
-    // Experiments are disabled by default. It is up to the Experiments Manager
-    // to enable them (it drives installation).
-    addon.userDisabled = true;
   } else {
     addon.userDisabled = false;
   }
 
   addon.softDisabled = addon.blocklistState == nsIBlocklistService.STATE_SOFTBLOCKED;
   addon.applyBackgroundUpdates = AddonManager.AUTOUPDATE_DEFAULT;
-
-  // Experiments are managed and updated through an external "experiments
-  // manager." So disable some built-in mechanisms.
-  if (addon.type == "experiment") {
-    addon.applyBackgroundUpdates = AddonManager.AUTOUPDATE_DISABLE;
-    addon.updateURL = null;
-  }
 
   // icons will be filled by the calling function
   addon.icons = {};
@@ -867,7 +856,7 @@ function generateTemporaryInstallID(aFile) {
   return id;
 }
 
-var loadManifest = async function(aPackage, aInstallLocation) {
+var loadManifest = async function(aPackage, aInstallLocation, aOldAddon) {
   async function loadFromRDF(aUri) {
     let manifest = await aPackage.readString("install.rdf");
     let addon = await loadManifestFromRDF(aUri, manifest);
@@ -920,7 +909,7 @@ var loadManifest = async function(aPackage, aInstallLocation) {
     }
   }
 
-  addon.updateBlocklistState();
+  await addon.updateBlocklistState({oldAddon: aOldAddon});
   addon.appDisabled = !isUsableAddon(addon);
 
   defineSyncGUID(addon);
@@ -928,10 +917,10 @@ var loadManifest = async function(aPackage, aInstallLocation) {
   return addon;
 };
 
-var loadManifestFromFile = async function(aFile, aInstallLocation) {
+var loadManifestFromFile = async function(aFile, aInstallLocation, aOldAddon) {
   let pkg = Package.get(aFile);
   try {
-    let addon = await loadManifest(pkg, aInstallLocation);
+    let addon = await loadManifest(pkg, aInstallLocation, aOldAddon);
     return addon;
   } finally {
     pkg.close();
@@ -1441,7 +1430,7 @@ class AddonInstall {
 
     try {
       try {
-        this.addon = await loadManifest(pkg, this.installLocation);
+        this.addon = await loadManifest(pkg, this.installLocation, this.existingAddon);
       } catch (e) {
         return Promise.reject([AddonManager.ERROR_CORRUPT_FILE, e]);
       }
@@ -1909,7 +1898,7 @@ var LocalAddonInstall = class extends AddonInstall {
     });
 
     this.existingAddon = addon;
-    this.addon.updateBlocklistState({oldAddon: this.existingAddon});
+    await this.addon.updateBlocklistState({oldAddon: this.existingAddon});
     this.addon.updateDate = Date.now();
     this.addon.installDate = addon ? addon.installDate : this.addon.updateDate;
 
@@ -2302,7 +2291,7 @@ var DownloadAddonInstall = class extends AddonInstall {
    * Notify listeners that the download completed.
    */
   downloadCompleted() {
-    XPIDatabase.getVisibleAddonForID(this.addon.id, aAddon => {
+    XPIDatabase.getVisibleAddonForID(this.addon.id, async aAddon => {
       if (aAddon)
         this.existingAddon = aAddon;
 
@@ -2315,7 +2304,7 @@ var DownloadAddonInstall = class extends AddonInstall {
       } else {
         this.addon.installDate = this.addon.updateDate;
       }
-      this.addon.updateBlocklistState({oldAddon: this.existingAddon});
+      await this.addon.updateBlocklistState({oldAddon: this.existingAddon});
 
       if (AddonManagerPrivate.callInstallListeners("onDownloadEnded",
                                                    this.listeners,

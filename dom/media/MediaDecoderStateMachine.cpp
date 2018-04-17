@@ -6,18 +6,19 @@
 
 #include <algorithm>
 #include <stdint.h>
+#include <utility>
 
 #include "mediasink/AudioSink.h"
 #include "mediasink/AudioSinkWrapper.h"
 #include "mediasink/DecodedStream.h"
 #include "mediasink/OutputStreamManager.h"
 #include "mediasink/VideoSink.h"
-#include "mozilla/IndexSequence.h"
 #include "mozilla/Logging.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/NotNull.h"
 #include "mozilla/SharedThreadPool.h"
 #include "mozilla/Sprintf.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TaskQueue.h"
 #include "mozilla/Tuple.h"
@@ -28,7 +29,6 @@
 #include "MediaDecoder.h"
 #include "MediaDecoderStateMachine.h"
 #include "MediaShutdownManager.h"
-#include "MediaPrefs.h"
 #include "MediaTimer.h"
 #include "ReaderProxy.h"
 #include "TimeUnits.h"
@@ -159,7 +159,7 @@ static TimeDuration
 SuspendBackgroundVideoDelay()
 {
   return TimeDuration::FromMilliseconds(
-    MediaPrefs::MDSMSuspendBackgroundVideoDelay());
+    StaticPrefs::MediaSuspendBkgndVideoDelayMs());
 }
 
 class MediaDecoderStateMachine::StateObject
@@ -257,7 +257,7 @@ protected:
   auto
   CallEnterMemberFunction(S* aS,
                           Tuple<Args...>& aTuple,
-                          IndexSequence<Indexes...>)
+                          std::index_sequence<Indexes...>)
     -> decltype(ReturnTypeHelper(&S::Enter))
   {
     return aS->Enter(Move(Get<Indexes>(aTuple))...);
@@ -299,7 +299,7 @@ protected:
 
     master->mStateObj.reset(s);
     return CallEnterMemberFunction(s, copiedArgs,
-                                   typename IndexSequenceFor<Ts...>::Type());
+                                   std::index_sequence_for<Ts...>{});
   }
 
   RefPtr<MediaDecoder::SeekPromise>
@@ -760,7 +760,7 @@ private:
       return;
     }
 
-    auto timeout = MediaPrefs::DormantOnPauseTimeout();
+    auto timeout = StaticPrefs::MediaDormantOnPauseTimeoutMs();
     if (timeout < 0) {
       // Disabled when timeout is negative.
       return;
@@ -2203,7 +2203,7 @@ DecodeMetadataState::OnMetadataRead(MetadataHolder&& aMetadata)
 
   // Check whether the media satisfies the requirement of seamless looing.
   // (Before checking the media is audio only, we need to get metadata first.)
-  mMaster->mSeamlessLoopingAllowed = MediaPrefs::SeamlessLooping() &&
+  mMaster->mSeamlessLoopingAllowed = StaticPrefs::MediaSeamlessLooping() &&
                                      mMaster->HasAudio() &&
                                      !mMaster->HasVideo();
   mMaster->LoopingChanged();
@@ -3052,7 +3052,7 @@ void MediaDecoderStateMachine::SetVideoDecodeModeInternal(VideoDecodeMode aMode)
       mVideoDecodeSuspended ? 'T' : 'F');
 
   // Should not suspend decoding if we don't turn on the pref.
-  if (!MediaPrefs::MDSMSuspendBackgroundVideoEnabled() &&
+  if (!StaticPrefs::MediaSuspendBkgndVideoEnabled() &&
       aMode == VideoDecodeMode::Suspend) {
     LOG("SetVideoDecodeModeInternal(), early return because preference off and set to Suspend");
     return;

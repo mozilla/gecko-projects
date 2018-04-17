@@ -217,9 +217,9 @@ GetSelectorRuntime(const CompilationSelector& selector)
 {
     struct Matcher
     {
-        JSRuntime* match(JSScript* script)    { return script->runtimeFromActiveCooperatingThread(); }
-        JSRuntime* match(JSCompartment* comp) { return comp->runtimeFromActiveCooperatingThread(); }
-        JSRuntime* match(Zone* zone)          { return zone->runtimeFromActiveCooperatingThread(); }
+        JSRuntime* match(JSScript* script)    { return script->runtimeFromMainThread(); }
+        JSRuntime* match(JSCompartment* comp) { return comp->runtimeFromMainThread(); }
+        JSRuntime* match(Zone* zone)          { return zone->runtimeFromMainThread(); }
         JSRuntime* match(ZonesInState zbs)    { return zbs.runtime; }
         JSRuntime* match(JSRuntime* runtime)  { return runtime; }
         JSRuntime* match(AllCompilations all) { return nullptr; }
@@ -368,7 +368,7 @@ js::HasOffThreadIonCompile(JSCompartment* comp)
             return true;
     }
 
-    JSRuntime* rt = comp->runtimeFromActiveCooperatingThread();
+    JSRuntime* rt = comp->runtimeFromMainThread();
     jit::IonBuilder* builder = rt->jitRuntime()->ionLazyLinkList(rt).getFirst();
     while (builder) {
         if (builder->script()->compartment() == comp)
@@ -757,10 +757,10 @@ StartOffThreadParseTask(JSContext* cx, ParseTask* task, const ReadOnlyCompileOpt
     if (!global)
         return false;
 
-    // Mark the global's zone group as created for a helper thread. This
-    // prevents it from being collected until clearUsedByHelperThread() is
-    // called after parsing is complete. If this function exits due to error
-    // this state is cleared automatically.
+    // Mark the global's zone as created for a helper thread. This prevents it
+    // from being collected until clearUsedByHelperThread() is called after
+    // parsing is complete. If this function exits due to error this state is
+    // cleared automatically.
     AutoSetCreatedForHelperThread createdForHelper(global);
 
     if (!task->init(cx, options, global))
@@ -1446,7 +1446,7 @@ TimeSince(TimeStamp prev)
 }
 
 void
-js::GCParallelTask::runFromActiveCooperatingThread(JSRuntime* rt)
+js::GCParallelTask::runFromMainThread(JSRuntime* rt)
 {
     MOZ_ASSERT(state == NotStarted);
     MOZ_ASSERT(js::CurrentThreadCanAccessRuntime(rt));
@@ -2224,7 +2224,7 @@ HelperThread::threadLoop()
     JSContext cx(nullptr, JS::ContextOptions());
     {
         AutoEnterOOMUnsafeRegion oomUnsafe;
-        if (!cx.init(ContextKind::Background))
+        if (!cx.init(ContextKind::HelperThread))
             oomUnsafe.crash("HelperThread cx.init()");
     }
     cx.setHelperThread(this);

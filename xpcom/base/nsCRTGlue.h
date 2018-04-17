@@ -104,41 +104,41 @@ NS_IsAscii(char16_t aChar)
   return (0x0080 > aChar);
 }
 
-bool NS_IsAscii(const char16_t* aString);
-bool NS_IsAscii(const char* aString);
-bool NS_IsAscii(const char* aString, uint32_t aLength);
-
-// These three functions are `constexpr` alternatives to NS_IsAscii. It should
-// only be used for compile-time computation because it uses recursion.
-// XXX: once support for GCC 4.9 is dropped, this function should be removed
-// and NS_IsAscii should be made `constexpr`.
 constexpr bool
-NS_ConstExprIsAscii(const char16_t* aString)
+NS_IsAscii(const char16_t* aString)
 {
-  return !*aString ? true :
-    !NS_IsAscii(*aString) ? false : NS_ConstExprIsAscii(aString + 1);
+  while (*aString) {
+    if (0x0080 <= *aString) {
+      return false;
+    }
+    aString++;
+  }
+  return true;
 }
 
 constexpr bool
-NS_ConstExprIsAscii(const char* aString)
+NS_IsAscii(const char* aString)
 {
-  return !*aString ? true :
-    !NS_IsAscii(*aString) ? false : NS_ConstExprIsAscii(aString + 1);
+  while (*aString) {
+    if (0x80 & *aString) {
+      return false;
+    }
+    aString++;
+  }
+  return true;
 }
 
 constexpr bool
-NS_ConstExprIsAscii(const char* aString, uint32_t aLength)
+NS_IsAscii(const char* aString, uint32_t aLength)
 {
-  return aLength == 0 ? true :
-    !NS_IsAscii(*aString) ? false :
-    NS_ConstExprIsAscii(aString + 1, aLength - 1);
-}
-
-constexpr bool
-NS_IsAsciiAlpha(char16_t aChar)
-{
-  return (aChar >= 'A' && aChar <= 'Z') ||
-         (aChar >= 'a' && aChar <= 'z');
+  const char* end = aString + aLength;
+  while (aString < end) {
+    if (0x80 & *aString) {
+      return false;
+    }
+    aString++;
+  }
+  return true;
 }
 
 constexpr bool
@@ -148,12 +148,6 @@ NS_IsAsciiWhitespace(char16_t aChar)
          aChar == '\r' ||
          aChar == '\n' ||
          aChar == '\t';
-}
-
-constexpr bool
-NS_IsAsciiDigit(char16_t aChar)
-{
-  return aChar >= '0' && aChar <= '9';
 }
 
 #ifndef XPCOM_GLUE_AVOID_NSPR

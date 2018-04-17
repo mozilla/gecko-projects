@@ -962,7 +962,7 @@ jit::IonCompilationCanUseNurseryPointers()
     // Otherwise, we must be on the active thread during MIR construction. The
     // store buffer must have been notified that minor GCs must cancel pending
     // or in progress Ion compilations.
-    JSRuntime* rt = TlsContext.get()->zone()->runtimeFromActiveCooperatingThread();
+    JSRuntime* rt = TlsContext.get()->zone()->runtimeFromMainThread();
     return rt->gc.storeBuffer().cancelIonCompilations();
 }
 
@@ -6267,7 +6267,7 @@ PropertyReadNeedsTypeBarrier(CompilerConstraintList* constraints,
     }
 
     if (!name && IsTypedArrayClass(key->clasp())) {
-        Scalar::Type arrayType = Scalar::Type(key->clasp() - &TypedArrayObject::classes[0]);
+        Scalar::Type arrayType = GetTypedArrayClassType(key->clasp());
         MIRType type = MIRTypeForTypedArrayRead(arrayType, true);
         if (observed->mightBeMIRType(type))
             return BarrierKind::NoBarrier;

@@ -362,6 +362,7 @@ nsDocShell::nsDocShell()
   , mAllowContentRetargetingOnChildren(true)
   , mUseErrorPages(false)
   , mObserveErrorPages(true)
+  , mCSSErrorReportingEnabled(false)
   , mAllowAuth(true)
   , mAllowKeywordFixup(false)
   , mIsOffScreenBrowser(false)
@@ -1683,6 +1684,21 @@ nsDocShell::GetAllowJavascript(bool* aAllowJavascript)
   NS_ENSURE_ARG_POINTER(aAllowJavascript);
 
   *aAllowJavascript = mAllowJavascript;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::GetCssErrorReportingEnabled(bool* aEnabled)
+{
+  MOZ_ASSERT(aEnabled);
+  *aEnabled = mCSSErrorReportingEnabled;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::SetCssErrorReportingEnabled(bool aEnabled)
+{
+  mCSSErrorReportingEnabled = aEnabled;
   return NS_OK;
 }
 
@@ -6159,8 +6175,13 @@ nsDocShell::SetCurScrollPosEx(int32_t aCurHorizontalPos,
   nsIScrollableFrame* sf = GetRootScrollFrame();
   NS_ENSURE_TRUE(sf, NS_ERROR_FAILURE);
 
-  sf->ScrollTo(nsPoint(aCurHorizontalPos, aCurVerticalPos),
-               nsIScrollableFrame::INSTANT);
+  nsIScrollableFrame::ScrollMode scrollMode = nsIScrollableFrame::INSTANT;
+  if (sf->GetScrollbarStyles().mScrollBehavior ==
+        NS_STYLE_SCROLL_BEHAVIOR_SMOOTH) {
+    scrollMode = nsIScrollableFrame::SMOOTH_MSD;
+  }
+
+  sf->ScrollTo(nsPoint(aCurHorizontalPos, aCurVerticalPos), scrollMode);
   return NS_OK;
 }
 
@@ -11849,6 +11870,8 @@ nsDocShell::AddState(JS::Handle<JS::Value> aData, const nsAString& aTitle,
   // call ReplaceEntry so that we notify nsIHistoryListeners that an entry
   // was replaced.
   RefPtr<ChildSHistory> rootSH = GetRootSessionHistory();
+  NS_ENSURE_TRUE(rootSH, NS_ERROR_UNEXPECTED);
+
   if (!aReplace) {
     int32_t curIndex = rootSH->Index();
     if (curIndex > -1) {
@@ -13669,7 +13692,7 @@ nsDocShell::OnOverLink(nsIContent* aContent,
   }
 
   nsAutoCString spec;
-  rv = aURI->GetSpec(spec);
+  rv = aURI->GetDisplaySpec(spec);
   NS_ENSURE_SUCCESS(rv, rv);
 
   NS_ConvertUTF8toUTF16 uStr(spec);

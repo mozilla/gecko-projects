@@ -28,7 +28,7 @@ class GCParallelTask
     UnprotectedData<TaskState> state;
 
     // Amount of time this task took to execute.
-    ActiveThreadOrGCTaskData<mozilla::TimeDuration> duration_;
+    MainThreadOrGCTaskData<mozilla::TimeDuration> duration_;
 
     explicit GCParallelTask(const GCParallelTask&) = delete;
 
@@ -66,7 +66,7 @@ class GCParallelTask
     void joinWithLockHeld(AutoLockHelperThreadState& locked);
 
     // Instead of dispatching to a helper, run the task on the current thread.
-    void runFromActiveCooperatingThread(JSRuntime* rt);
+    void runFromMainThread(JSRuntime* rt);
 
     // Dispatch a cancelation request.
     enum CancelMode { CancelNoWait, CancelAndWait};

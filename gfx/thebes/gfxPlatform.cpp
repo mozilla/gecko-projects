@@ -31,7 +31,6 @@
 #include "gfxTextRun.h"
 #include "gfxUserFontSet.h"
 #include "gfxConfig.h"
-#include "MediaPrefs.h"
 #include "VRThread.h"
 
 #ifdef XP_WIN
@@ -657,7 +656,6 @@ gfxPlatform::Init()
 
     // Initialize the preferences by creating the singleton.
     gfxPrefs::GetSingleton();
-    MediaPrefs::GetSingleton();
     gfxVars::Initialize();
 
     gfxConfig::Init();
@@ -1759,7 +1757,7 @@ gfxPlatform::IsFontFormatSupported(uint32_t aFormatFlags)
 gfxFontEntry*
 gfxPlatform::LookupLocalFont(const nsAString& aFontName,
                              FontWeight aWeight,
-                             int16_t aStretch,
+                             uint16_t aStretch,
                              uint8_t aStyle)
 {
     return gfxPlatformFontList::PlatformFontList()->LookupLocalFont(aFontName,
@@ -1771,7 +1769,7 @@ gfxPlatform::LookupLocalFont(const nsAString& aFontName,
 gfxFontEntry*
 gfxPlatform::MakePlatformFont(const nsAString& aFontName,
                               FontWeight aWeight,
-                              int16_t aStretch,
+                              uint16_t aStretch,
                               uint8_t aStyle,
                               const uint8_t* aFontData,
                               uint32_t aLength)
@@ -2730,7 +2728,14 @@ gfxPlatform::UsesOffMainThreadCompositing()
 bool
 gfxPlatform::UsesTiling() const
 {
-  return gfxPrefs::LayersTilesEnabled();
+  bool isSkiaPOMTP = XRE_IsContentProcess() &&
+      GetDefaultContentBackend() == BackendType::SKIA &&
+      gfxVars::UseOMTP() &&
+      (gfxPrefs::LayersOMTPPaintWorkers() == -1 ||
+      gfxPrefs::LayersOMTPPaintWorkers() > 1);
+
+  return gfxPrefs::LayersTilesEnabled() ||
+    (gfxPrefs::LayersTilesEnabledIfSkiaPOMTP() && isSkiaPOMTP);
 }
 
 /***

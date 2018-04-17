@@ -28,8 +28,6 @@ loader.lazyRequireGetter(this, "getFontPreviewData", "devtools/server/actors/sty
 loader.lazyRequireGetter(this, "CssLogic", "devtools/server/actors/inspector/css-logic", true);
 loader.lazyRequireGetter(this, "EventParsers", "devtools/server/actors/inspector/event-parsers", true);
 
-const EventEmitter = require("devtools/shared/event-emitter");
-
 const PSEUDO_CLASSES = [":hover", ":active", ":focus"];
 const FONT_FAMILY_PREVIEW_TEXT = "The quick brown fox jumps over the lazy dog";
 const FONT_FAMILY_PREVIEW_TEXT_SIZE = 20;
@@ -138,22 +136,6 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
       form.isDocumentElement = true;
     }
 
-    // Add an extra API for custom properties added by other
-    // modules/extensions.
-    form.setFormProperty = (name, value) => {
-      if (!form.props) {
-        form.props = {};
-      }
-      form.props[name] = value;
-    };
-
-    // Fire an event so, other modules can create its own properties
-    // that should be passed to the client (within the form.props field).
-    EventEmitter.emit(NodeActor, "form", {
-      target: this,
-      data: form
-    });
-
     return form;
   },
 
@@ -196,7 +178,7 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
 
   get isShadowRoot() {
     let isFragment = this.rawNode.nodeType === Ci.nsIDOMNode.DOCUMENT_FRAGMENT_NODE;
-    return isFragment && this.rawNode.host;
+    return isFragment && !!this.rawNode.host;
   },
 
   get isShadowHost() {
@@ -211,7 +193,7 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
     }
 
     let parentNode = this.rawNode.parentNode;
-    return parentNode && parentNode.shadowRoot;
+    return parentNode && !!parentNode.shadowRoot;
   },
 
   // Estimate the number of children that the walker will return without making

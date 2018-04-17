@@ -38,19 +38,14 @@ CheckThreadLocal::check() const
 {
     JSContext* cx = TlsContext.get();
     MOZ_ASSERT(cx);
-
-    // As for CheckZoneGroup, in a cooperatively scheduled runtime the active
-    // thread is permitted access to thread local state for other suspended
-    // threads in the same runtime.
-    if (cx->isCooperativelyScheduled())
-        MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
-    else
-        MOZ_ASSERT(id == ThisThread::GetId());
+    MOZ_ASSERT_IF(cx->isMainThreadContext(),
+                  CurrentThreadCanAccessRuntime(cx->runtime()));
+    MOZ_ASSERT(id == ThisThread::GetId());
 }
 
 template <AllowedHelperThread Helper>
 void
-CheckActiveThread<Helper>::check() const
+CheckMainThread<Helper>::check() const
 {
     if (OnHelperThread<Helper>())
         return;
@@ -59,13 +54,13 @@ CheckActiveThread<Helper>::check() const
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
 }
 
-template class CheckActiveThread<AllowedHelperThread::None>;
-template class CheckActiveThread<AllowedHelperThread::GCTask>;
-template class CheckActiveThread<AllowedHelperThread::IonCompile>;
+template class CheckMainThread<AllowedHelperThread::None>;
+template class CheckMainThread<AllowedHelperThread::GCTask>;
+template class CheckMainThread<AllowedHelperThread::IonCompile>;
 
 template <AllowedHelperThread Helper>
 void
-CheckZoneGroup<Helper>::check() const
+CheckZone<Helper>::check() const
 {
     if (OnHelperThread<Helper>())
         return;
@@ -84,10 +79,10 @@ CheckZoneGroup<Helper>::check() const
     }
 }
 
-template class CheckZoneGroup<AllowedHelperThread::None>;
-template class CheckZoneGroup<AllowedHelperThread::GCTask>;
-template class CheckZoneGroup<AllowedHelperThread::IonCompile>;
-template class CheckZoneGroup<AllowedHelperThread::GCTaskOrIonCompile>;
+template class CheckZone<AllowedHelperThread::None>;
+template class CheckZone<AllowedHelperThread::GCTask>;
+template class CheckZone<AllowedHelperThread::IonCompile>;
+template class CheckZone<AllowedHelperThread::GCTaskOrIonCompile>;
 
 template <GlobalLock Lock, AllowedHelperThread Helper>
 void

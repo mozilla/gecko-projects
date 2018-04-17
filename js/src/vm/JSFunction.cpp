@@ -848,7 +848,7 @@ CreateFunctionPrototype(JSContext* cx, JSProtoKey key)
     size_t sourceLen = strlen(rawSource);
     size_t begin = 9;
     MOZ_ASSERT(rawSource[begin] == '(');
-    mozilla::UniquePtr<char16_t[], JS::FreePolicy> source(InflateString(cx, rawSource, sourceLen));
+    UniqueTwoByteChars source(InflateString(cx, rawSource, sourceLen));
     if (!source)
         return nullptr;
 
@@ -1616,10 +1616,10 @@ JSFunction::createScriptForLazilyInterpretedFunction(JSContext* cx, HandleFuncti
         MOZ_ASSERT(lazy->scriptSource()->hasSourceData());
 
         // Parse and compile the script from source.
-        size_t lazyLength = lazy->end() - lazy->begin();
+        size_t lazyLength = lazy->sourceEnd() - lazy->sourceStart();
         UncompressedSourceCache::AutoHoldEntry holder;
         ScriptSource::PinnedChars chars(cx, lazy->scriptSource(), holder,
-                                        lazy->begin(), lazyLength);
+                                        lazy->sourceStart(), lazyLength);
         if (!chars.get())
             return false;
 
@@ -2141,11 +2141,10 @@ NewFunctionClone(JSContext* cx, HandleFunction fun, NewObjectKind newKind,
             return nullptr;
     }
 
-    JSObject* cloneobj = NewObjectWithClassProto(cx, &JSFunction::class_, cloneProto,
-                                                 allocKind, newKind);
-    if (!cloneobj)
+    RootedFunction clone(cx);
+    clone = NewObjectWithClassProto<JSFunction>(cx, cloneProto, allocKind, newKind);
+    if (!clone)
         return nullptr;
-    RootedFunction clone(cx, &cloneobj->as<JSFunction>());
 
     // JSFunction::HAS_INFERRED_NAME can be set at compile-time and at
     // runtime. In the latter case we should actually clear the flag before

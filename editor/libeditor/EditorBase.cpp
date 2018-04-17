@@ -2639,7 +2639,7 @@ EditorBase::FindBetterInsertionPoint(const EditorRawDOMPoint& aPoint)
     // available.  In that case, we'll just adjust node and offset accordingly.
     if (aPoint.IsStartOfContainer() &&
         aPoint.GetContainer()->HasChildren() &&
-        aPoint.GetContainer()->GetFirstChild()->IsNodeOfType(nsINode::eTEXT)) {
+        aPoint.GetContainer()->GetFirstChild()->IsText()) {
       return EditorRawDOMPoint(aPoint.GetContainer()->GetFirstChild(), 0);
     }
 
@@ -2651,7 +2651,7 @@ EditorBase::FindBetterInsertionPoint(const EditorRawDOMPoint& aPoint)
         // Fall back to a slow path that uses GetChildAt_Deprecated() for Thunderbird's
         // plaintext editor.
         nsIContent* child = aPoint.GetPreviousSiblingOfChild();
-        if (child && child->IsNodeOfType(nsINode::eTEXT)) {
+        if (child && child->IsText()) {
           if (NS_WARN_IF(child->Length() > INT32_MAX)) {
             return aPoint;
           }
@@ -2662,7 +2662,7 @@ EditorBase::FindBetterInsertionPoint(const EditorRawDOMPoint& aPoint)
         // calling GetChildAt_Deprecated() which may perform a linear search.
         nsIContent* child = aPoint.GetContainer()->GetLastChild();
         while (child) {
-          if (child->IsNodeOfType(nsINode::eTEXT)) {
+          if (child->IsText()) {
             if (NS_WARN_IF(child->Length() > INT32_MAX)) {
               return aPoint;
             }
@@ -2680,7 +2680,7 @@ EditorBase::FindBetterInsertionPoint(const EditorRawDOMPoint& aPoint)
   if (TextEditUtils::IsMozBR(aPoint.GetContainer()) &&
       aPoint.IsStartOfContainer()) {
     nsIContent* previousSibling = aPoint.GetContainer()->GetPreviousSibling();
-    if (previousSibling && previousSibling->IsNodeOfType(nsINode::eTEXT)) {
+    if (previousSibling && previousSibling->IsText()) {
       if (NS_WARN_IF(previousSibling->Length() > INT32_MAX)) {
         return aPoint;
       }
@@ -2737,11 +2737,11 @@ EditorBase::InsertTextImpl(nsIDocument& aDocument,
     nsIContent* child = nullptr;
     if (!pointToInsert.IsStartOfContainer() &&
         (child = pointToInsert.GetPreviousSiblingOfChild()) &&
-        child->IsNodeOfType(nsINode::eTEXT)) {
+        child->IsText()) {
       pointToInsert.Set(child, child->Length());
     } else if (!pointToInsert.IsEndOfContainer() &&
                (child = pointToInsert.GetChild()) &&
-               child->IsNodeOfType(nsINode::eTEXT)) {
+               child->IsText()) {
       pointToInsert.Set(child, 0);
     }
   }
@@ -4019,40 +4019,36 @@ EditorBase::GetEndChildNode(Selection* aSelection,
  * IsPreformatted() checks the style info for the node for the preformatted
  * text style.
  */
-nsresult
-EditorBase::IsPreformatted(nsIDOMNode* aNode,
-                           bool* aResult)
+// static
+bool
+EditorBase::IsPreformatted(nsINode* aNode)
 {
-  nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
-
-  NS_ENSURE_TRUE(aResult && content, NS_ERROR_NULL_POINTER);
-
-  nsCOMPtr<nsIPresShell> ps = GetPresShell();
-  NS_ENSURE_TRUE(ps, NS_ERROR_NOT_INITIALIZED);
-
+  if (NS_WARN_IF(!aNode)) {
+    return false;
+  }
   // Look at the node (and its parent if it's not an element), and grab its
   // ComputedStyle.
   RefPtr<ComputedStyle> elementStyle;
-  if (!content->IsElement()) {
-    content = content->GetParent();
-  }
-  if (content && content->IsElement()) {
-    elementStyle =
-      nsComputedDOMStyle::GetComputedStyleNoFlush(content->AsElement(), nullptr);
+  Element* element = aNode->IsElement() ? aNode->AsElement() : nullptr;
+  if (!element) {
+    element = aNode->GetParentElement();
+    if (!element) {
+      return false;
+    }
   }
 
+  elementStyle =
+    nsComputedDOMStyle::GetComputedStyleNoFlush(element, nullptr);
   if (!elementStyle) {
     // Consider nodes without a ComputedStyle to be NOT preformatted:
     // For instance, this is true of JS tags inside the body (which show
     // up as #text nodes but have no ComputedStyle).
-    *aResult = false;
-    return NS_OK;
+    return false;
   }
 
   const nsStyleText* styleText = elementStyle->StyleText();
 
-  *aResult = styleText->WhiteSpaceIsSignificant();
-  return NS_OK;
+  return styleText->WhiteSpaceIsSignificant();
 }
 
 template<typename PT, typename CT>
@@ -4397,7 +4393,9 @@ EditorBase::DeleteSelectionAndPrepareToCreateNode()
 {
   RefPtr<Selection> selection = GetSelection();
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
-  MOZ_ASSERT(selection->GetAnchorFocusRange());
+  if (NS_WARN_IF(!selection->GetAnchorFocusRange())) {
+    return NS_OK;
+  }
 
   if (!selection->GetAnchorFocusRange()->Collapsed()) {
     nsresult rv = DeleteSelection(nsIEditor::eNone, nsIEditor::eStrip);

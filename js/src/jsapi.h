@@ -447,9 +447,6 @@ typedef void
                                       JS::PromiseRejectionHandlingState state,
                                       void* data);
 
-typedef void
-(* JSProcessPromiseCallback)(JSContext* cx, JS::HandleObject promise);
-
 /**
  * Possible exception types. These types are part of a JSErrorFormatString
  * structure. They define which error to throw in case of a runtime error.
@@ -1504,6 +1501,22 @@ JS_DefineProfilingFunctions(JSContext* cx, JS::HandleObject obj);
 /* Defined in vm/Debugger.cpp. */
 extern JS_PUBLIC_API(bool)
 JS_DefineDebuggerObject(JSContext* cx, JS::HandleObject obj);
+
+namespace JS {
+
+/**
+ * Tell JS engine whether Profile Timeline Recording is enabled or not.
+ * If Profile Timeline Recording is enabled, data shown there like stack won't
+ * be optimized out.
+ * This is global state and not associated with specific runtime or context.
+ */
+extern JS_PUBLIC_API(void)
+SetProfileTimelineRecordingEnabled(bool enabled);
+
+extern JS_PUBLIC_API(bool)
+IsProfileTimelineRecordingEnabled();
+
+} // namespace JS
 
 #ifdef JS_HAS_CTYPES
 /**

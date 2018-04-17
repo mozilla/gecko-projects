@@ -6,7 +6,7 @@ use cssparser::{ParseErrorKind, Parser, ParserInput, SourceLocation};
 use cssparser::ToCss as ParserToCss;
 use env_logger::Builder;
 use malloc_size_of::MallocSizeOfOps;
-use selectors::NthIndexCache;
+use selectors::{NthIndexCache, SelectorList};
 use selectors::matching::{MatchingContext, MatchingMode, matches_selector};
 use servo_arc::{Arc, ArcBorrow, RawOffsetArc};
 use smallvec::SmallVec;
@@ -1903,6 +1903,37 @@ pub extern "C" fn Servo_StyleRule_SelectorMatchesElement(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn Servo_StyleRule_SetSelectorText(
+    sheet: RawServoStyleSheetContentsBorrowed,
+    rule: RawServoStyleRuleBorrowed,
+    text: *const nsAString,
+) -> bool {
+    let value_str = (*text).to_string();
+
+    write_locked_arc(rule, |rule: &mut StyleRule| {
+        use style::selector_parser::SelectorParser;
+
+        let contents = StylesheetContents::as_arc(&sheet);
+        let namespaces = contents.namespaces.read();
+        let url_data = contents.url_data.read();
+        let parser = SelectorParser {
+            stylesheet_origin: contents.origin,
+            namespaces: &namespaces,
+            url_data: Some(&url_data),
+        };
+
+        let mut parser_input = ParserInput::new(&value_str);
+        match SelectorList::parse(&parser, &mut Parser::new(&mut parser_input)) {
+            Ok(selectors) => {
+                rule.selectors = selectors;
+                true
+            }
+            Err(_) => false,
+        }
+    })
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn Servo_SelectorList_Closest(
     element: RawGeckoElementBorrowed,
     selectors: RawServoSelectorListBorrowed,
@@ -2017,7 +2048,7 @@ pub extern "C" fn Servo_ImportRule_GetSheet(
     rule: RawServoImportRuleBorrowed,
 ) -> *const ServoStyleSheet {
     read_locked_arc(rule, |rule: &ImportRule| {
-        rule.stylesheet.0.raw() as *const ServoStyleSheet
+        rule.stylesheet.as_sheet().unwrap().raw() as *const ServoStyleSheet
     })
 }
 

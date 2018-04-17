@@ -1317,9 +1317,9 @@ void nsIDocument::SelectorCache::NotifyExpired(SelectorCacheKey* aSelector)
   // There is no guarantee that this method won't be re-entered when selector
   // matching is ongoing because "memory-pressure" could be notified immediately
   // when OOM happens according to the design of nsExpirationTracker.
-  // The perfect solution is to delete the |aSelector| and its nsCSSSelectorList
-  // in mTable asynchronously.
-  // We remove these objects synchronously for now because NotifiyExpired() will
+  // The perfect solution is to delete the |aSelector| and its
+  // RawServoSelectorList in mTable asynchronously.
+  // We remove these objects synchronously for now because NotifyExpired() will
   // never be triggered by "memory-pressure" which is not implemented yet in
   // the stage 2 of mozalloc_handle_oom().
   // Once these objects are removed asynchronously, we should update the warning
@@ -3593,7 +3593,7 @@ nsIDocument::NodesFromRectHelper(float aX, float aY,
   for (uint32_t i = 0; i < outFrames.Length(); i++) {
     nsIContent* node = GetContentInThisDocument(outFrames[i]);
 
-    if (node && !node->IsElement() && !node->IsNodeOfType(nsINode::eTEXT)) {
+    if (node && !node->IsElement() && !node->IsText()) {
       // We have a node that isn't an element or a text node,
       // use its parent content instead.
       node = node->GetParent();
@@ -3843,13 +3843,25 @@ static inline void
 AssertNoStaleServoDataIn(const nsINode& aSubtreeRoot)
 {
 #ifdef DEBUG
-  for (const nsINode* node = aSubtreeRoot.GetFirstChild();
+  for (const nsINode* node = &aSubtreeRoot;
        node;
-       node = node->GetNextNode()) {
-    if (node->IsElement()) {
-      MOZ_ASSERT(!node->AsElement()->HasServoData());
-      if (auto* shadow = node->AsElement()->GetShadowRoot()) {
-        AssertNoStaleServoDataIn(*shadow);
+       node = node->GetNextNode(&aSubtreeRoot)) {
+    if (!node->IsElement()) {
+      continue;
+    }
+    MOZ_ASSERT(!node->AsElement()->HasServoData());
+    if (auto* shadow = node->AsElement()->GetShadowRoot()) {
+      AssertNoStaleServoDataIn(*shadow);
+    }
+    if (nsXBLBinding* binding = node->AsElement()->GetXBLBinding()) {
+      if (nsXBLBinding* bindingWithContent = binding->GetBindingWithContent()) {
+        nsIContent* content = bindingWithContent->GetAnonymousContent();
+        MOZ_ASSERT(!content->AsElement()->HasServoData());
+        for (nsINode* child = content->GetFirstChild();
+             child;
+             child = child->GetNextSibling()) {
+          AssertNoStaleServoDataIn(*child);
+        }
       }
     }
   }

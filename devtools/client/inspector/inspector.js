@@ -1406,7 +1406,8 @@ Inspector.prototype = {
   },
 
   _onContextMenu: function(e) {
-    if (e.originalTarget.closest("input[type=text]") ||
+    if (!(e.originalTarget instanceof Element) ||
+        e.originalTarget.closest("input[type=text]") ||
         e.originalTarget.closest("input:not([type])") ||
         e.originalTarget.closest("textarea")) {
       return;
@@ -1995,7 +1996,8 @@ Inspector.prototype = {
     // Select the accessible object in the panel and wait for the event that
     // tells us it has been done.
     let onSelected = a11yPanel.once("new-accessible-front-selected");
-    a11yPanel.selectAccessibleForNode(this.selection.nodeFront);
+    a11yPanel.selectAccessibleForNode(this.selection.nodeFront,
+                                      "inspector-context-menu");
     await onSelected;
   },
 

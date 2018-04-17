@@ -637,10 +637,11 @@ impl<'le> GeckoElement<'le> {
         !self.xbl_binding_with_content().is_none()
     }
 
-    /// This and has_xbl_binding_parent duplicate the logic in Gecko's virtual
-    /// nsINode::GetBindingParent function, which only has two implementations:
-    /// one for XUL elements, and one for other elements.  We just hard code in
-    /// our knowledge of those two implementations here.
+    /// This duplicates the logic in Gecko's virtual nsINode::GetBindingParent
+    /// function, which only has two implementations: one for XUL elements, and
+    /// one for other elements.
+    ///
+    /// We just hard code in our knowledge of those two implementations here.
     fn xbl_binding_parent(&self) -> Option<Self> {
         if self.is_xul_element() {
             // FIXME(heycam): Having trouble with bindgen on nsXULElement,
@@ -667,25 +668,9 @@ impl<'le> GeckoElement<'le> {
             .map_or(ptr::null_mut(), |slots| slots._base.mBindingParent)
     }
 
-    fn has_xbl_binding_parent(&self) -> bool {
-        if self.is_xul_element() {
-            // FIXME(heycam): Having trouble with bindgen on nsXULElement,
-            // where the binding parent is stored in a member variable
-            // rather than in slots.  So just get it through FFI for now.
-            unsafe { bindings::Gecko_GetBindingParent(self.0).is_some() }
-        } else {
-            !self.non_xul_xbl_binding_parent_raw_content().is_null()
-        }
-    }
-
     #[inline]
     fn namespace_id(&self) -> i32 {
         self.as_node().node_info().mInner.mNamespaceID
-    }
-
-    #[inline]
-    fn is_xul_element(&self) -> bool {
-        self.namespace_id() == (structs::root::kNameSpaceID_XUL as i32)
     }
 
     #[inline]
@@ -815,8 +800,16 @@ impl<'le> GeckoElement<'le> {
     /// This logic is duplicated in Gecko's nsIContent::IsInAnonymousSubtree.
     #[inline]
     fn is_in_anonymous_subtree(&self) -> bool {
-        self.is_in_native_anonymous_subtree() ||
-            (!self.as_node().is_in_shadow_tree() && self.has_xbl_binding_parent())
+        if self.is_in_native_anonymous_subtree() {
+            return true;
+        }
+
+        let binding_parent = match self.xbl_binding_parent() {
+            Some(p) => p,
+            None => return false,
+        };
+
+        binding_parent.shadow_root().is_none()
     }
 
     /// Returns true if this node is the shadow root of an use-element shadow tree.
@@ -828,7 +821,7 @@ impl<'le> GeckoElement<'le> {
         match self.parent_element() {
             Some(e) => {
                 e.local_name() == &*local_name!("use") &&
-                    e.namespace() == &*ns!("http://www.w3.org/2000/svg")
+                e.is_svg_element()
             },
             None => false,
         }
@@ -1060,7 +1053,22 @@ impl<'le> TElement for GeckoElement<'le> {
 
     #[inline]
     fn is_html_element(&self) -> bool {
-        self.namespace_id() == (structs::root::kNameSpaceID_XHTML as i32)
+        self.namespace_id() == structs::kNameSpaceID_XHTML as i32
+    }
+
+    #[inline]
+    fn is_mathml_element(&self) -> bool {
+        self.namespace_id() == structs::kNameSpaceID_MathML as i32
+    }
+
+    #[inline]
+    fn is_svg_element(&self) -> bool {
+        self.namespace_id() == structs::kNameSpaceID_SVG as i32
+    }
+
+    #[inline]
+    fn is_xul_element(&self) -> bool {
+        self.namespace_id() == structs::root::kNameSpaceID_XUL as i32
     }
 
     /// Return the list of slotted nodes of this node.

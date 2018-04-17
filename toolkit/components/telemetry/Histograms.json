@@ -294,7 +294,7 @@
   "CONTENT_PROCESS_LAUNCH_TIME_MS" : {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["fgomes@mozilla.com", "mconley@mozilla.com"],
-    "expires_in_version": "57",
+    "expires_in_version": "67",
     "bug_numbers": [1304790],
     "kind": "exponential",
     "high": 64000,
@@ -957,7 +957,7 @@
     "description": "Total Memory Across All Processes (KB)"
   },
   "MEMORY_DISTRIBUTION_AMONG_CONTENT": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "alert_emails": ["memshrink-telemetry-alerts@mozilla.com"],
     "bug_numbers": [1344174],
     "expires_in_version": "never",
@@ -3289,12 +3289,20 @@
     "bug_numbers": [1434852],
     "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"]
   },
+  "DNS_TRR_NS_VERFIFIED": {
+    "record_in_processes": ["main"],
+    "expires_in_version": "never",
+    "kind": "boolean",
+    "description": "TRR managed to verify NS entry",
+    "bug_numbers": [1453825],
+    "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"]
+  },
   "DNS_LOOKUP_ALGORITHM": {
     "record_in_processes": ["main"],
     "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"],
     "expires_in_version": "never",
     "kind": "categorical",
-    "labels": ["nativeOnly", "trrRace", "trrFirst", "trrOnly", "trrShadow", "trrOff"],
+    "labels": ["nativeOnly", "trrRace", "trrFirst", "trrOnly", "trrShadow"],
     "bug_numbers": [1434852],
     "description": "DNS: lookup algorithm"
   },
@@ -6616,10 +6624,11 @@
       "enterSelection",
       "click",
       "arrowEnterSelection",
-      "tabEnterSelection"
+      "tabEnterSelection",
+      "rightClickEnter"
     ],
     "bug_numbers": [1334615],
-    "description": "The input method the user used to select a result in the urlbar. 'enter' => The user hit the Enter key on the heuristic result at index 0. 'enterSelection' => The user chose a non-heuristic result (in exotic ways) and then hit the Enter key. 'click' => The user clicked a result with the mouse. 'arrowEnterSelection' => The user chose a non-heuristic result using arrow keys and then hit the Enter key. 'tabEnterSelection' => The user chose a non-heuristic result using tab at least once and then hit the Enter key."
+    "description": "The input method the user used to select a result in the urlbar. 'enter' => The user hit the Enter key on the heuristic result at index 0. 'enterSelection' => The user chose a non-heuristic result (in exotic ways) and then hit the Enter key. 'click' => The user clicked a result with the mouse. 'arrowEnterSelection' => The user chose a non-heuristic result using arrow keys and then hit the Enter key. 'tabEnterSelection' => The user chose a non-heuristic result using tab at least once and then hit the Enter key. 'rightClickEnter' => The user chose a non-heuristic result using right click and then hit the Enter key."
   },
   "FX_SEARCHBAR_SELECTED_RESULT_METHOD": {
     "record_in_processes": ["main", "content"],
@@ -9458,6 +9467,39 @@
     "description": "Number of times a custom developer tool has been opened.",
     "releaseChannelCollection": "opt-out"
   },
+  "DEVTOOLS_ACCESSIBILITY_TIME_ACTIVE_SECONDS": {
+    "record_in_processes": ["main", "content"],
+    "expires_in_version": "65",
+    "kind": "exponential",
+    "high": 86400,
+    "n_buckets": 100,
+    "bug_numbers": [1447302],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "yzenevich@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
+    "description": "How long has the accessibility panel been active (seconds)."
+  },
+  "DEVTOOLS_ACCESSIBILITY_PICKER_TIME_ACTIVE_SECONDS": {
+    "record_in_processes": ["main", "content"],
+    "expires_in_version": "65",
+    "kind": "exponential",
+    "high": 86400,
+    "n_buckets": 100,
+    "bug_numbers": [1447302],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "yzenevich@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
+    "description": "How long has the picker tool in accessibility panel been active (seconds)."
+  },
+  "DEVTOOLS_ACCESSIBILITY_SERVICE_TIME_ACTIVE_SECONDS": {
+    "record_in_processes": ["main", "content"],
+    "expires_in_version": "65",
+    "kind": "exponential",
+    "high": 86400,
+    "n_buckets": 100,
+    "bug_numbers": [1447302],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "yzenevich@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
+    "description": "How long has the platform accessibility been active (seconds) in accessibility panel."
+  },
   "DEVTOOLS_TOOLBOX_TIME_ACTIVE_SECONDS": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
@@ -11092,6 +11134,18 @@
     "expires_in_version": "never",
     "kind": "count",
     "keyed": true,
+    "keys": [
+      "main-crash",
+      "main-hang",
+      "content-crash",
+      "content-hang",
+      "plugin-crash",
+      "plugin-hang",
+      "gmplugin-crash",
+      "gmplugin-hang",
+      "gpu-crash",
+      "gpu-hang"
+    ],
     "releaseChannelCollection": "opt-out",
     "description": "An attempt to submit a crash. Keyed on the CrashManager Crash.type."
   },
@@ -11295,6 +11349,15 @@
     "n_buckets": 100,
     "description": "720p VP9 decode benchmark measurement in frames per second",
     "releaseChannelCollection": "opt-out"
+  },
+  "MEDIA_PLAY_PROMISE_RESOLUTION": {
+    "record_in_processes": ["main", "content"],
+    "bug_numbers": [1453176],
+    "alert_emails": ["cpearce@mozilla.com", "drno@ohlmeier.org"],
+    "expires_in_version": "72",
+    "kind": "categorical",
+    "labels": ["Resolved", "NotAllowedErr", "SrcNotSupportedErr", "PauseAbortErr", "AbortErr", "UnknownErr"],
+    "description": "Records whether promise returned by HTMLMediaElement.play() successfully resolved, or the error code which it was rejected with."
   },
   "MEDIA_CODEC_USED": {
     "record_in_processes": ["main", "content"],

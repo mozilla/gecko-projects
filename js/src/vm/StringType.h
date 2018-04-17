@@ -10,6 +10,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/Range.h"
+#include "mozilla/TextUtils.h"
 
 #include "jsapi.h"
 #include "jsfriendapi.h"
@@ -890,10 +891,10 @@ class JSFlatString : public JSLinearString
         JS::AutoCheckCannotGC nogc;
         if (hasLatin1Chars()) {
             const JS::Latin1Char* s = latin1Chars(nogc);
-            return JS7_ISDEC(*s) && isIndexSlow(s, length(), indexp);
+            return mozilla::IsAsciiDigit(*s) && isIndexSlow(s, length(), indexp);
         }
         const char16_t* s = twoByteChars(nogc);
-        return JS7_ISDEC(*s) && isIndexSlow(s, length(), indexp);
+        return mozilla::IsAsciiDigit(*s) && isIndexSlow(s, length(), indexp);
     }
 
     /*
@@ -1587,9 +1588,21 @@ SubstringKernel(JSContext* cx, HandleString str, int32_t beginInt, int32_t lengt
 
 /*
  * Convert a value to a printable C string.
+ *
+ * As the function name implies, any characters in a converted printable string will be Latin1
+ * characters. If there are any non-Latin1 characters in the original value, then those characters
+ * will be changed to Unicode escape sequences(I.e. \udddd, dddd are 4 hex digits) in the printable
+ * string.
  */
 extern const char*
-ValueToPrintable(JSContext* cx, const Value&, JSAutoByteString* bytes, bool asSource = false);
+ValueToPrintableLatin1(JSContext* cx, const Value&, JSAutoByteString* bytes,
+                       bool asSource = false);
+
+/*
+ * Convert a value to a printable C string encoded in UTF-8.
+ */
+extern const char*
+ValueToPrintableUTF8(JSContext* cx, const Value&, JSAutoByteString* bytes, bool asSource = false);
 
 /*
  * Convert a non-string value to a string, returning null after reporting an

@@ -3382,7 +3382,6 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
       MakeDisplayItem<nsDisplayOwnLayer>(aBuilder, this, &resultList,
                                        aBuilder->CurrentActiveScrolledRoot(),
                                        nsDisplayOwnLayerFlags::eNone,
-                                       mozilla::layers::FrameMetrics::NULL_SCROLL_ID,
                                        ScrollbarData{}, /* aForceActive = */ false));
     if (aCreatedContainerItem) {
       *aCreatedContainerItem = true;
@@ -5643,28 +5642,26 @@ nsFrame::ComputeSize(gfxContext*         aRenderingContext,
     flexMainAxis = nsFlexContainerFrame::IsItemInlineAxisMainAxis(this) ?
       eLogicalAxisInline : eLogicalAxisBlock;
 
-    // NOTE: The logic here should match the similar chunk for determining
-    // inlineStyleCoord and blockStyleCoord in
-    // nsFrame::ComputeSizeWithIntrinsicDimensions().
+    // NOTE: The logic here should match the similar chunk for updating
+    // mainAxisCoord in nsFrame::ComputeSizeWithIntrinsicDimensions() (aside
+    // from using a different dummy value in the IsUsedFlexBasisContent() case).
     const nsStyleCoord* flexBasis = &(stylePos->mFlexBasis);
-    if (flexBasis->GetUnit() != eStyleUnit_Auto) {
-      // Replace our main-axis styleCoord pointer with a different one,
-      // depending on our flex-basis value.
-      auto& mainAxisCoord = (flexMainAxis == eLogicalAxisInline
-                             ? inlineStyleCoord : blockStyleCoord);
-      if (flexBasis->GetUnit() == eStyleUnit_Enumerated &&
-          flexBasis->GetIntValue() == NS_STYLE_FLEX_BASIS_CONTENT) {
-        // We have 'flex-basis: content', which is equivalent to
-        // 'flex-basis:auto; {main-size}: auto'. So, just swap in a dummy
-        // 'auto' value to use for the main size property:
-        static const nsStyleCoord autoStyleCoord(eStyleUnit_Auto);
-        mainAxisCoord = &autoStyleCoord;
-      } else {
-        // For all other flex-basis values, we just swap in the flex-basis
-        // itself for the main-size property here:
-        mainAxisCoord = flexBasis;
-      }
-    }
+    auto& mainAxisCoord = (flexMainAxis == eLogicalAxisInline
+                           ? inlineStyleCoord : blockStyleCoord);
+
+    if (nsFlexContainerFrame::IsUsedFlexBasisContent(flexBasis,
+                                                     mainAxisCoord)) {
+      static const nsStyleCoord maxContStyleCoord(NS_STYLE_WIDTH_MAX_CONTENT,
+                                                  eStyleUnit_Enumerated);
+      mainAxisCoord = &maxContStyleCoord;
+      // (Note: if our main axis is the block axis, then this 'max-content'
+      // value will be treated like 'auto', via the IsAutoBSize() call below.)
+    } else if (flexBasis->GetUnit() != eStyleUnit_Auto) {
+      // For all other non-'auto' flex-basis values, we just swap in the
+      // flex-basis itself for the main-size property.
+      mainAxisCoord = flexBasis;
+    } // else: flex-basis is 'auto', which is deferring to some explicit value
+      // in mainAxisCoord. So we proceed w/o touching mainAxisCoord.
   }
 
   // Compute inline-axis size
@@ -5899,28 +5896,35 @@ nsFrame::ComputeSizeWithIntrinsicDimensions(gfxContext*          aRenderingConte
       // property (e.g. "width") for sizing purposes, *unless* they have
       // "flex-basis:auto", in which case they use their main-size property
       // after all.
-      // NOTE: The logic here should match the similar chunk for determining
-      // inlineStyleCoord and blockStyleCoord in nsFrame::ComputeSize().
+      // NOTE: The logic here should match the similar chunk for updating
+      // mainAxisCoord in nsFrame::ComputeSize() (aside from using a different
+      // dummy value in the IsUsedFlexBasisContent() case).
       const nsStyleCoord* flexBasis = &(stylePos->mFlexBasis);
-      if (flexBasis->GetUnit() != eStyleUnit_Auto) {
-        // Replace our main-axis styleCoord pointer with a different one,
-        // depending on our flex-basis value.
-        auto& mainAxisCoord = (flexMainAxis == eLogicalAxisInline
-                               ? inlineStyleCoord : blockStyleCoord);
+      auto& mainAxisCoord = (flexMainAxis == eLogicalAxisInline
+                             ? inlineStyleCoord : blockStyleCoord);
 
-        if (flexBasis->GetUnit() == eStyleUnit_Enumerated &&
-            flexBasis->GetIntValue() == NS_STYLE_FLEX_BASIS_CONTENT) {
-          // We have 'flex-basis: content', which is equivalent to
-          // 'flex-basis:auto; {main-size}: auto'. So, just swap in a dummy
-          // 'auto' value to use for the main size property:
-          static const nsStyleCoord autoStyleCoord(eStyleUnit_Auto);
-          mainAxisCoord = &autoStyleCoord;
-        } else {
-          // For all other flex-basis values, we just swap in the flex-basis
-          // itself for the main-size property here:
-          mainAxisCoord = flexBasis;
-        }
-      }
+      if (nsFlexContainerFrame::IsUsedFlexBasisContent(flexBasis,
+                                                       mainAxisCoord)) {
+        // If we get here, we're resolving the flex base size for a flex item,
+        // and we fall into the flexbox spec section 9.2 step 3, substep C (if
+        // we have a definite cross size) or E (if not). And specifically:
+        //
+        // * If we have a definite cross size, we're supposed to resolve our
+        //   main-size based on that and our intrinsic ratio.
+        // * Otherwise, we're supposed to produce our max-content size.
+        //
+        // Conveniently, we can handle both of those scenarios (regardless of
+        // which substep we fall into) by using the 'auto' keyword for our
+        // main-axis coordinate here. (This makes sense, because the spec is
+        // effectively trying to produce the 'auto' sizing behavior).
+        static const nsStyleCoord autoStyleCoord(eStyleUnit_Auto);
+        mainAxisCoord = &autoStyleCoord;
+      } else if (flexBasis->GetUnit() != eStyleUnit_Auto) {
+        // For all other non-'auto' flex-basis values, we just swap in the
+        // flex-basis itself for the main-size property.
+        mainAxisCoord = flexBasis;
+      } // else: flex-basis is 'auto', which is deferring to some explicit
+        // value in mainAxisCoord. So we proceed w/o touching mainAxisCoord.
     }
   }
 
@@ -7804,7 +7808,7 @@ nsresult
 nsFrame::MakeFrameName(const nsAString& aType, nsAString& aResult) const
 {
   aResult = aType;
-  if (mContent && !mContent->IsNodeOfType(nsINode::eTEXT)) {
+  if (mContent && !mContent->IsText()) {
     nsAutoString buf;
     mContent->NodeInfo()->NameAtom()->ToString(buf);
     if (IsSubDocumentFrame()) {

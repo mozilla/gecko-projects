@@ -44,7 +44,6 @@ function NewWebConsoleFrame(webConsoleOwner) {
   this.owner = webConsoleOwner;
   this.hudId = this.owner.hudId;
   this.isBrowserConsole = this.owner._browserConsole;
-  this.NEW_CONSOLE_OUTPUT_ENABLED = true;
   this.window = this.owner.iframeWindow;
 
   this._onToolboxPrefChanged = this._onToolboxPrefChanged.bind(this);
@@ -255,6 +254,7 @@ NewWebConsoleFrame.prototype = {
       shortcuts.on("Esc", event => {
         if (!this.jsterm.autocompletePopup || !this.jsterm.autocompletePopup.isOpen) {
           this.newConsoleOutput.dispatchSidebarClose();
+          this.jsterm.focus();
         }
       });
     }

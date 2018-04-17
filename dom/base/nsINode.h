@@ -415,8 +415,6 @@ public:
     eDOCUMENT            = 1 << 1,
     /** nsIAttribute nodes */
     eATTRIBUTE           = 1 << 2,
-    /** text nodes */
-    eTEXT                = 1 << 3,
     /** xml processing instructions */
     ePROCESSING_INSTRUCTION = 1 << 4,
     /** comment nodes */
@@ -450,17 +448,13 @@ public:
   bool
   IsContainerNode() const
   {
-    return IsElement() ||
-      !(IsNodeOfType(eTEXT) ||
-        IsNodeOfType(ePROCESSING_INSTRUCTION) ||
-        IsNodeOfType(eCOMMENT) ||
-        IsNodeOfType(eDATA_NODE));
+    return IsElement() || !IsCharacterData();
   }
 
   bool
   IsSlotable() const
   {
-    return IsElement() || IsNodeOfType(eTEXT);
+    return IsElement() || IsText();
   }
 
   virtual JSObject* WrapObject(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
