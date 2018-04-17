@@ -183,6 +183,7 @@ tasks:
                 context:
                   taskGroupId: '${action.taskGroupId}'
                   taskId: {$eval: 'taskId'}
+                  input: {$eval: 'input'}
                   parameters: {$eval: 'parameters'}
           - $if: 'tasks_for == "cron"'
             then:
