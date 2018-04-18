@@ -15,10 +15,6 @@ from taskgraph.util.partners import check_if_partners_enabled
 
 transforms = TransformSequence()
 
-# debugging goop
-import logging
-log = logging.getLogger(__name__)
-
 
 transforms.add(check_if_partners_enabled)
 
