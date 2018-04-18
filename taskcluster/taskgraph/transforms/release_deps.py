@@ -43,7 +43,6 @@ def add_dependencies(config, jobs):
                job.get("attributes", {}).get("build_platform"):
                 if dep_task.attributes["build_platform"] != job["attributes"]["build_platform"]:
                     continue
-
             # Add matching product tasks to deps
             if dep_task.task.get('shipping-product') == product or \
                     dep_task.attributes.get('shipping_product') == product:

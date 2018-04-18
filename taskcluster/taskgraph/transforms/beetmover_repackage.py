@@ -14,12 +14,10 @@ from taskgraph.util.partials import (get_balrog_platform_name,
                                      get_partials_artifacts,
                                      get_partials_artifact_map)
 from taskgraph.util.schema import validate_schema, Schema
-from taskgraph.util.scriptworker import (
-    get_beetmover_bucket_scope,
-    get_beetmover_action_scope,
-    get_phase,
-    get_worker_type_for_scope,
-)
+from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
+                                         get_beetmover_action_scope,
+                                         get_phase,
+                                         get_worker_type_for_scope)
 from taskgraph.util.taskcluster import get_artifact_prefix
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional

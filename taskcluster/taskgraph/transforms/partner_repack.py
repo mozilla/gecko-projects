@@ -15,7 +15,6 @@ from taskgraph.util.partners import check_if_partners_enabled
 
 transforms = TransformSequence()
 
-
 transforms.add(check_if_partners_enabled)
 
 
