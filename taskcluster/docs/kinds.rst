@@ -364,23 +364,23 @@ Generates customized versions of releases for partners.
 
 release-partner-repack-chunking-dummy
 ----------------------
-Generates customized versions of releases for partners.
+Chunks the partner repacks by locale.
 
 release-partner-repack-signing
 ------------------------------
-Internal signing of partner repacks
+Internal signing of partner repacks.
 
 release-partner-repack-repackage
 ------------------------------
-Repackaging of partner repacks
+Repackaging of partner repacks.
 
 release-partner-repack-repackage-signing
 ------------------------------
-Repackaging of partner repacks
+External signing of partner repacks.
 
 release-partner-repack-beetmover
 ------------------------------
-Repackaging of partner repacks
+Moves the partner repacks to S3 buckets.
 
 release-eme-free-repack
 ----------------------
@@ -392,15 +392,15 @@ Internal signing of eme-free repacks
 
 release-eme-free-repack-repackage
 ------------------------------
-Repackaging of eme-free repacks
+Repackaging of eme-free repacks.
 
 release-eme-free-repack-repackage-signing
 ------------------------------
-Repackaging of eme-free repacks
+External signing of eme-free repacks.
 
 release-eme-free-repack-beetmover
 ------------------------------
-Repackaging of eme-free repacks
+Moves the eme-free repacks to S3 buckets.
 
 repackage
 ---------
