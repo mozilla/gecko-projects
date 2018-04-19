@@ -62,6 +62,12 @@ PER_PROJECT_PARAMETERS = {
         'include_nightly': False,
     },
 
+    'maple': {
+        'target_tasks_method': 'mozilla_beta_tasks',
+        'optimize_target_tasks': True,
+        'include_nightly': True,
+    },
+
     'mozilla-beta': {
         'target_tasks_method': 'mozilla_beta_tasks',
         'optimize_target_tasks': True,
