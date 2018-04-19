@@ -109,7 +109,7 @@ class FixtureServer(object):
 
         self._httpd = server.WebTestHttpd(host=host,
                                           port=port,
-                                          bind_address=True,
+                                          bind_hostname=True,
                                           doc_root=doc_root,
                                           routes=routes,
                                           use_ssl=True if scheme == "https" else False,

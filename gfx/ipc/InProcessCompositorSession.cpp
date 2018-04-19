@@ -27,7 +27,7 @@ InProcessCompositorSession::InProcessCompositorSession(widget::CompositorWidget*
 /* static */ RefPtr<InProcessCompositorSession>
 InProcessCompositorSession::Create(nsBaseWidget* aWidget,
                                    LayerManager* aLayerManager,
-                                   const LayersId& aRootLayerTreeId,
+                                   const uint64_t& aRootLayerTreeId,
                                    CSSToLayoutDeviceScale aScale,
                                    const CompositorOptions& aOptions,
                                    bool aUseExternalSurfaceSize,

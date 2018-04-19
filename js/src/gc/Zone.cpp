@@ -6,7 +6,6 @@
 
 #include "gc/Zone.h"
 
-#include "gc/FreeOp.h"
 #include "gc/Policy.h"
 #include "gc/PublicIterators.h"
 #include "jit/BaselineJIT.h"
@@ -24,46 +23,45 @@ using namespace js::gc;
 
 Zone * const Zone::NotOnList = reinterpret_cast<Zone*>(1);
 
-JS::Zone::Zone(JSRuntime* rt)
+JS::Zone::Zone(JSRuntime* rt, ZoneGroup* group)
   : JS::shadow::Zone(rt, &rt->gc.marker),
-    debuggers(this, nullptr),
-    uniqueIds_(this),
-    suppressAllocationMetadataBuilder(this, false),
-    arenas(rt, this),
+    group_(group),
+    debuggers(group, nullptr),
+    uniqueIds_(group),
+    suppressAllocationMetadataBuilder(group, false),
+    arenas(rt, group),
     types(this),
-    gcWeakMapList_(this),
+    gcWeakMapList_(group),
     compartments_(),
-    gcGrayRoots_(this),
-    gcWeakRefs_(this),
-    weakCaches_(this),
-    gcWeakKeys_(this, SystemAllocPolicy(), rt->randomHashCodeScrambler()),
-    typeDescrObjects_(this, this),
+    gcGrayRoots_(group),
+    gcWeakRefs_(group),
+    weakCaches_(group),
+    gcWeakKeys_(group, SystemAllocPolicy(), rt->randomHashCodeScrambler()),
+    typeDescrObjects_(group, this),
     regExps(this),
-    markedAtoms_(this),
-    atomCache_(this),
-    externalStringCache_(this),
-    functionToStringCache_(this),
+    markedAtoms_(group),
+    atomCache_(group),
+    externalStringCache_(group),
+    functionToStringCache_(group),
     usage(&rt->gc.usage),
     threshold(),
     gcDelayBytes(0),
-    tenuredStrings(this, 0),
-    allocNurseryStrings(this, true),
-    propertyTree_(this, this),
-    baseShapes_(this, this),
-    initialShapes_(this, this),
-    nurseryShapes_(this),
-    data(this, nullptr),
-    isSystem(this, false),
-    helperThreadOwnerContext_(nullptr),
-    helperThreadUse(HelperThreadUse::None),
+    tenuredStrings(group, 0),
+    allocNurseryStrings(group, true),
+    propertyTree_(group, this),
+    baseShapes_(group, this),
+    initialShapes_(group, this),
+    nurseryShapes_(group),
+    data(group, nullptr),
+    isSystem(group, false),
 #ifdef DEBUG
-    gcLastSweepGroupIndex(this, 0),
+    gcLastSweepGroupIndex(group, 0),
 #endif
-    jitZone_(this, nullptr),
+    jitZone_(group, nullptr),
     gcScheduled_(false),
     gcScheduledSaved_(false),
-    gcPreserveCode_(this, false),
-    keepShapeTables_(this, false),
+    gcPreserveCode_(group, false),
+    keepShapeTables_(group, false),
     listNext_(NotOnList)
 {
     /* Ensure that there are no vtables to mess us up here. */
@@ -78,8 +76,6 @@ JS::Zone::Zone(JSRuntime* rt)
 
 Zone::~Zone()
 {
-    MOZ_ASSERT(helperThreadUse == HelperThreadUse::None);
-
     JSRuntime* rt = runtimeFromAnyThread();
     if (this == rt->gc.systemZone)
         rt->gc.systemZone = nullptr;
@@ -120,7 +116,8 @@ Zone::setNeedsIncrementalBarrier(bool needs)
 void
 Zone::beginSweepTypes(bool releaseTypes)
 {
-    types.beginSweep(releaseTypes);
+    AutoClearTypeInferenceStateOnOOM oom(this);
+    types.beginSweep(releaseTypes, oom);
 }
 
 Zone::DebuggerVector*
@@ -138,7 +135,7 @@ Zone::getOrCreateDebuggers(JSContext* cx)
 void
 Zone::sweepBreakpoints(FreeOp* fop)
 {
-    if (fop->runtime()->debuggerList().isEmpty())
+    if (!group() || group()->debuggerList().isEmpty())
         return;
 
     /*
@@ -272,7 +269,7 @@ Zone::gcNumber()
 {
     // Zones in use by exclusive threads are not collected, and threads using
     // them cannot access the main runtime's gcNumber without racing.
-    return usedByHelperThread() ? 0 : runtimeFromMainThread()->gc.gcNumber();
+    return usedByHelperThread() ? 0 : runtimeFromActiveCooperatingThread()->gc.gcNumber();
 }
 
 js::jit::JitZone*
@@ -311,17 +308,15 @@ Zone::canCollect()
 
     // Zones that will be or are currently used by other threads cannot be
     // collected.
-    return !createdForHelperThread();
+    return !group()->createdForHelperThread();
 }
 
 void
 Zone::notifyObservingDebuggers()
 {
-    JSRuntime* rt = runtimeFromMainThread();
-    JSContext* cx = rt->mainContextFromOwnThread();
-
     for (CompartmentsInZoneIter comps(this); !comps.done(); comps.next()) {
-        RootedGlobalObject global(cx, comps->unsafeUnbarrieredMaybeGlobal());
+        JSRuntime* rt = runtimeFromAnyThread();
+        RootedGlobalObject global(TlsContext.get(), comps->unsafeUnbarrieredMaybeGlobal());
         if (!global)
             continue;
 
@@ -395,26 +390,11 @@ Zone::deleteEmptyCompartment(JSCompartment* comp)
     for (auto& i : compartments()) {
         if (i == comp) {
             compartments().erase(&i);
-            comp->destroy(runtimeFromMainThread()->defaultFreeOp());
+            comp->destroy(runtimeFromActiveCooperatingThread()->defaultFreeOp());
             return;
         }
     }
     MOZ_CRASH("Compartment not found");
-}
-
-void
-Zone::setHelperThreadOwnerContext(JSContext* cx)
-{
-    MOZ_ASSERT_IF(cx, TlsContext.get() == cx);
-    helperThreadOwnerContext_ = cx;
-}
-
-bool
-Zone::ownedByCurrentHelperThread()
-{
-    MOZ_ASSERT(usedByHelperThread());
-    MOZ_ASSERT(TlsContext.get());
-    return helperThreadOwnerContext_ == TlsContext.get();
 }
 
 ZoneList::ZoneList()

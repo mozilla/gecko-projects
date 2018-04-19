@@ -34,5 +34,5 @@ add_task(async function test_timezone() {
     }
   );
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

@@ -10,6 +10,7 @@
 // Keep others in (case-insensitive) order:
 #include "ImgDrawResult.h"
 #include "mozilla/RestyleManager.h"
+#include "mozilla/RestyleManagerInlines.h"
 #include "nsCSSFrameConstructor.h"
 #include "SVGObserverUtils.h"
 #include "nsSVGElement.h"
@@ -31,10 +32,10 @@ NS_QUERYFRAME_TAIL_INHERITING(nsSVGContainerFrame)
 
 nsIFrame*
 NS_NewSVGContainerFrame(nsIPresShell* aPresShell,
-                        ComputedStyle* aStyle)
+                        nsStyleContext* aContext)
 {
   nsIFrame* frame =
-    new (aPresShell) nsSVGContainerFrame(aStyle, nsSVGContainerFrame::kClassID);
+    new (aPresShell) nsSVGContainerFrame(aContext, nsSVGContainerFrame::kClassID);
   // If we were called directly, then the frame is for a <defs> or
   // an unknown element type. In both cases we prevent the content
   // from displaying directly.

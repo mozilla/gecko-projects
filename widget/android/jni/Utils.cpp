@@ -297,7 +297,7 @@ void DispatchToGeckoPriorityQueue(already_AddRefed<nsIRunnable> aCall)
     {
         nsCOMPtr<nsIRunnable> mCall;
     public:
-        explicit RunnableEvent(already_AddRefed<nsIRunnable> aCall) : mCall(aCall) {}
+        RunnableEvent(already_AddRefed<nsIRunnable> aCall) : mCall(aCall) {}
         void Run() override { NS_ENSURE_SUCCESS_VOID(mCall->Run()); }
     };
 

@@ -177,7 +177,7 @@ private:
 class MessagePumpForAndroidUI : public base::MessagePump {
 
 public:
-  explicit MessagePumpForAndroidUI(nsIEventTarget* aEventTarget)
+  MessagePumpForAndroidUI(nsIEventTarget* aEventTarget)
     : mEventTarget(aEventTarget)
   { }
 

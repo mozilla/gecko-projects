@@ -13,7 +13,7 @@
 // to clients right now.
 //===----------------------------------------------------------------------===//
 #include "FuzzerDefs.h"
-#if LIBFUZZER_LINUX || LIBFUZZER_NETBSD || LIBFUZZER_FUCHSIA || LIBFUZZER_FREEBSD
+#if LIBFUZZER_LINUX
 
 #include "FuzzerExtFunctions.h"
 #include "FuzzerIO.h"
@@ -41,8 +41,7 @@ namespace fuzzer {
 ExternalFunctions::ExternalFunctions() {
 #define EXT_FUNC(NAME, RETURN_TYPE, FUNC_SIG, WARN)                            \
   this->NAME = ::NAME;                                                         \
-  CheckFnPtr(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(::NAME)),    \
-             #NAME, WARN);
+  CheckFnPtr((void *)::NAME, #NAME, WARN);
 
 #include "FuzzerExtFunctions.def"
 
@@ -51,4 +50,4 @@ ExternalFunctions::ExternalFunctions() {
 
 } // namespace fuzzer
 
-#endif // LIBFUZZER_LINUX || LIBFUZZER_NETBSD || LIBFUZZER_FUSCHIA || LIBFUZZER_FREEBSD
+#endif // LIBFUZZER_LINUX

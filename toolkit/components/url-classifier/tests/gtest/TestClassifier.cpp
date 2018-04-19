@@ -95,7 +95,7 @@ TestReadNoiseEntries(Classifier* classifier,
 
 }
 
-TEST(UrlClassifier, ReadNoiseEntriesV4)
+TEST(Classifier, ReadNoiseEntriesV4)
 {
   UniquePtr<Classifier> classifier(GetClassifier());
   _PrefixArray array = { GeneratePrefix(_Fragment("bravo.com/"), 5),
@@ -115,7 +115,7 @@ TEST(UrlClassifier, ReadNoiseEntriesV4)
   TestReadNoiseEntries(classifier.get(), array, GTEST_TABLE_V4, _Fragment("gound.com/"));
 }
 
-TEST(UrlClassifier, ReadNoiseEntriesV2)
+TEST(Classifier, ReadNoiseEntriesV2)
 {
   UniquePtr<Classifier> classifier(GetClassifier());
   _PrefixArray array = { GeneratePrefix(_Fragment("helloworld.com/"), 4),

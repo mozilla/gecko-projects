@@ -2,23 +2,24 @@
 
 from __future__ import absolute_import
 
+import mozrunner
+
 import mozunit
-import pytest
 
-from mozrunner import RunnerNotStartedError
+import mozrunnertest
 
 
-def test_errors_before_start(runner):
-    """Bug 965714: Not started errors before start() is called"""
+class MozrunnerStatesTestCase(mozrunnertest.MozrunnerTestCase):
 
-    with pytest.raises(RunnerNotStartedError):
-        runner.is_running()
+    def test_errors_before_start(self):
+        """Bug 965714: Not started errors before start() is called"""
 
-    with pytest.raises(RunnerNotStartedError):
-        runner.returncode
+        def test_returncode():
+            return self.runner.returncode
 
-    with pytest.raises(RunnerNotStartedError):
-        runner.wait()
+        self.assertRaises(mozrunner.RunnerNotStartedError, self.runner.is_running)
+        self.assertRaises(mozrunner.RunnerNotStartedError, test_returncode)
+        self.assertRaises(mozrunner.RunnerNotStartedError, self.runner.wait)
 
 
 if __name__ == '__main__':

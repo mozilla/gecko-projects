@@ -17,8 +17,6 @@
 
 namespace js {
 
-class GlobalObject;
-
 class AtomicsObject : public NativeObject
 {
   public:
@@ -139,11 +137,11 @@ public:
     static mozilla::Atomic<js::Mutex*> lock_;
 
     // A flag that controls whether waiting is allowed.
-    ThreadData<bool> canWait_;
+    ThreadLocalData<bool> canWait_;
 };
 
 JSObject*
-InitAtomicsClass(JSContext* cx, Handle<GlobalObject*> global);
+InitAtomicsClass(JSContext* cx, HandleObject obj);
 
 // Go to sleep if the int32_t value at the given address equals `value`.
 MOZ_MUST_USE FutexThread::WaitResult

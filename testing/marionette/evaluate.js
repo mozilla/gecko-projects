@@ -36,29 +36,37 @@ this.evaluate = {};
 /**
  * Evaluate a script in given sandbox.
  *
- * The the provided `script` will be wrapped in an anonymous function
- * with the `args` argument applied.
+ * If the option var>directInject</var> is not specified, the script
+ * will be executed as a function with the <var>args</var> argument
+ * applied.
  *
- * The arguments provided by the `args<` argument are exposed
- * through the `arguments` object available in the script context,
- * and if the script is executed asynchronously with the `async`
- * option, an additional last argument that is synonymous to the
- * `marionetteScriptFinished` global is appended, and can be accessed
- * through `arguments[arguments.length - 1]`.
+ * The arguments provided by the <var>args</var> argument are exposed
+ * through the <code>arguments</code> object available in the script
+ * context, and if the script is executed asynchronously with the
+ * <var>async</var> option, an additional last argument that is synonymous
+ * to the <code>marionetteScriptFinished</code> global is appended, and
+ * can be accessed through <code>arguments[arguments.length - 1]</code>.
  *
- * The `timeout` option specifies the duration for how long the
- * script should be allowed to run before it is interrupted and aborted.
+ * The <var>timeout</var> option specifies the duration for how long
+ * the script should be allowed to run before it is interrupted and aborted.
  * An interrupted script will cause a {@link ScriptTimeoutError} to occur.
  *
- * The `async` option indicates that the script will not return
- * until the `marionetteScriptFinished` global callback is invoked,
- * which is analogous to the last argument of the `arguments` object.
+ * The <var>async</var> option indicates that the script will
+ * not return until the <code>marionetteScriptFinished</code> global
+ * callback is invoked, which is analogous to the last argument of the
+ * <code>arguments</code> object.
  *
- * The `file` option is used in error messages to provide information
- * on the origin script file in the local end.
+ * The option <var>directInject</var> causes the script to be evaluated
+ * without being wrapped in a function and the provided arguments will
+ * be disregarded.  This will cause such things as root scope return
+ * statements to throw errors because they are not used inside a function.
  *
- * The `line` option is used in error messages, along with `filename`,
- * to provide the line number in the origin script file on the local end.
+ * The <var>file</var> option is used in error messages to provide
+ * information on the origin script file in the local end.
+ *
+ * The <var>line</var> option is used in error messages, along with
+ * <var>filename</var>, to provide the line number in the origin script
+ * file on the local end.
  *
  * @param {nsISandbox} sb
  *     Sandbox the script will be evaluted in.
@@ -69,6 +77,8 @@ this.evaluate = {};
  * @param {boolean=} [async=false] async
  *     Indicates if the script should return immediately or wait for
  *     the callback to be invoked before returning.
+ * @param {boolean=} [debug=false] debug
+ *     Attaches an <code>onerror</code> event listener.
  * @param {string=} [file="dummy file"] file
  *     File location of the program in the client.
  * @param {number=} [line=0] line
@@ -92,6 +102,8 @@ this.evaluate = {};
 evaluate.sandbox = function(sb, script, args = [],
     {
       async = false,
+      debug = false,
+      directInject = false,
       file = "dummy file",
       line = 0,
       sandboxName = null,
@@ -102,30 +114,44 @@ evaluate.sandbox = function(sb, script, args = [],
   let promise = new Promise((resolve, reject) => {
     let src = "";
     sb[COMPLETE] = resolve;
-    timeoutHandler = () => reject(new ScriptTimeoutError(`Timed out after ${timeout} ms`));
+    timeoutHandler = () => reject(new ScriptTimeoutError("Timed out"));
     unloadHandler = sandbox.cloneInto(
         () => reject(new JavaScriptError("Document was unloaded")),
         sb);
 
-    if (async) {
-      sb[CALLBACK] = sb[COMPLETE];
+    // wrap in function
+    if (!directInject) {
+      if (async) {
+        sb[CALLBACK] = sb[COMPLETE];
+      }
+      sb[ARGUMENTS] = sandbox.cloneInto(args, sb);
+
+      // callback function made private
+      // so that introspection is possible
+      // on the arguments object
+      if (async) {
+        sb[CALLBACK] = sb[COMPLETE];
+        src += `${ARGUMENTS}.push(rv => ${CALLBACK}(rv));`;
+      }
+
+      src += `(function() { ${script} }).apply(null, ${ARGUMENTS})`;
+
+      // marionetteScriptFinished is not WebDriver conformant,
+      // hence it is only exposed to immutable sandboxes
+      if (sandboxName) {
+        sb[MARIONETTE_SCRIPT_FINISHED] = sb[CALLBACK];
+      }
     }
-    sb[ARGUMENTS] = sandbox.cloneInto(args, sb);
 
-    // callback function made private
-    // so that introspection is possible
-    // on the arguments object
-    if (async) {
-      sb[CALLBACK] = sb[COMPLETE];
-      src += `${ARGUMENTS}.push(rv => ${CALLBACK}(rv));`;
-    }
-
-    src += `(function() { ${script} }).apply(null, ${ARGUMENTS})`;
-
-    // marionetteScriptFinished is not WebDriver conformant,
-    // hence it is only exposed to immutable sandboxes
-    if (sandboxName) {
-      sb[MARIONETTE_SCRIPT_FINISHED] = sb[CALLBACK];
+    // onerror is not hooked on by default because of the inability to
+    // differentiate content errors from chrome errors.
+    //
+    // see bug 1128760 for more details
+    if (debug) {
+      sb.window.onerror = (msg, url, line) => {
+        let err = new JavaScriptError(`${msg} at ${url}:${line}`);
+        reject(err);
+      };
     }
 
     // timeout and unload handlers
@@ -134,9 +160,15 @@ evaluate.sandbox = function(sb, script, args = [],
 
     let res;
     try {
-      res = Cu.evalInSandbox(src, sb, "1.8", file, line);
+      res = Cu.evalInSandbox(src, sb, "1.8", file, 0);
     } catch (e) {
-      reject(new JavaScriptError(e));
+      let err = new JavaScriptError(e, {
+        fnName: "execute_script",
+        file,
+        line,
+        script,
+      });
+      reject(err);
     }
 
     if (!async) {

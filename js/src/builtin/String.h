@@ -24,11 +24,9 @@
 
 namespace js {
 
-class GlobalObject;
-
 /* Initialize the String class, returning its prototype object. */
 extern JSObject*
-InitStringClass(JSContext* cx, Handle<GlobalObject*> global);
+InitStringClass(JSContext* cx, HandleObject obj);
 
 extern bool
 str_fromCharCode(JSContext* cx, unsigned argc, Value* vp);

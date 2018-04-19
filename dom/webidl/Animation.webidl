@@ -10,7 +10,7 @@
  * liability, trademark and document use rules apply.
  */
 
-enum AnimationPlayState { "idle", "running", "paused", "finished" };
+enum AnimationPlayState { "idle", "pending", "running", "paused", "finished" };
 
 [Func="nsDocument::IsElementAnimateEnabled",
  Constructor (optional AnimationEffectReadOnly? effect = null,
@@ -29,7 +29,7 @@ interface Animation : EventTarget {
            attribute double             playbackRate;
   [BinaryName="playStateFromJS"]
   readonly attribute AnimationPlayState playState;
-  [BinaryName="pendingFromJS"]
+  [Pref="dom.animations-api.pending-member.enabled", BinaryName="pendingFromJS"]
   readonly attribute boolean            pending;
   [Func="nsDocument::IsWebAnimationsEnabled", Throws]
   readonly attribute Promise<Animation> ready;

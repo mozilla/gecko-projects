@@ -112,11 +112,11 @@ U_CDECL_BEGIN
  * Comparison:
  * - u_isUWhiteSpace=UCHAR_WHITE_SPACE: Unicode White_Space property;
  *       most of general categories "Z" (separators) + most whitespace ISO controls
- *       (including no-break spaces, but excluding IS1..IS4)
+ *       (including no-break spaces, but excluding IS1..IS4 and ZWSP)
  * - u_isWhitespace: Java isWhitespace; Z + whitespace ISO controls but excluding no-break spaces
  * - u_isJavaSpaceChar: Java isSpaceChar; just Z (including no-break spaces)
  * - u_isspace: Z + whitespace ISO controls (including no-break spaces)
- * - u_isblank: "horizontal spaces" = TAB + Zs
+ * - u_isblank: "horizontal spaces" = TAB + Zs - ZWSP
  */
 
 /**
@@ -2702,7 +2702,8 @@ u_isgraph(UChar32 c);
  *
  * same as
  *
- * TRUE for U+0009 (TAB) and characters with general category "Zs" (space separators).
+ * TRUE for U+0009 (TAB) and characters with general category "Zs" (space separators)
+ * except Zero Width Space (ZWSP, U+200B).
  *
  * Note: There are several ICU whitespace functions; please see the uchar.h
  * file documentation for a detailed comparison.

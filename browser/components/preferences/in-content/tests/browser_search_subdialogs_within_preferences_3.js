@@ -5,7 +5,8 @@
 // Enabling Searching functionatily. Will display search bar form this testcase forward.
 add_task(async function() {
   await SpecialPowers.pushPrefEnv({"set": [
-    ["browser.preferences.search", true]
+    ["browser.preferences.search", true],
+    ["browser.storageManager.enabled", true]
   ]});
 });
 
@@ -15,7 +16,7 @@ add_task(async function() {
 add_task(async function() {
   await openPreferencesViaOpenPreferencesAPI("paneGeneral", {leaveOpen: true});
   await evaluateSearchResults("allowed to install add-ons", "permissionsGroup");
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
 /**
@@ -24,5 +25,5 @@ add_task(async function() {
 add_task(async function() {
   await openPreferencesViaOpenPreferencesAPI("paneGeneral", {leaveOpen: true});
   await evaluateSearchResults("identify these certificate authorities", "certSelection");
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });

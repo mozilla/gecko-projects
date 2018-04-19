@@ -64,11 +64,11 @@ add_task(async function checkCaptivePortalCertErrorUI() {
   let portalTab2 = await portalTabPromise;
   is(portalTab2, portalTab, "The existing portal tab should be focused.");
 
-  let portalTabClosing = BrowserTestUtils.waitForTabClosing(portalTab);
+  let portalTabRemoved = BrowserTestUtils.tabRemoved(portalTab);
   let errorTabReloaded = BrowserTestUtils.waitForErrorPage(browser);
 
   Services.obs.notifyObservers(null, "captive-portal-login-success");
-  await portalTabClosing;
+  await portalTabRemoved;
 
   info("Waiting for error tab to be reloaded after the captive portal was freed.");
   await errorTabReloaded;
@@ -78,5 +78,5 @@ add_task(async function checkCaptivePortalCertErrorUI() {
        "Captive portal error page UI is not visible.");
   });
 
-  BrowserTestUtils.removeTab(errorTab);
+  await BrowserTestUtils.removeTab(errorTab);
 });

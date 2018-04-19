@@ -7,48 +7,53 @@
 // * element existance
 // * name text
 
-const TEST_DATA = [
+const TEST_CASES = [
   {
-    targetClass: "cssanimation-normal",
+    targetClassName: "cssanimation-normal",
     expectedLabel: "cssanimation",
   },
   {
-    targetClass: "cssanimation-linear",
+    targetClassName: "cssanimation-linear",
     expectedLabel: "cssanimation",
   },
   {
-    targetClass: "delay-positive",
+    targetClassName: "delay-positive",
     expectedLabel: "test-delay-animation",
   },
   {
-    targetClass: "delay-negative",
+    targetClassName: "delay-negative",
     expectedLabel: "test-negative-delay-animation",
   },
   {
-    targetClass: "easing-step",
+    targetClassName: "easing-step",
   },
 ];
 
-add_task(async function() {
+add_task(async function () {
   await addTab(URL_ROOT + "doc_multi_timings.html");
-  await removeAnimatedElementsExcept(TEST_DATA.map(t => `.${ t.targetClass }`));
+
   const { panel } = await openAnimationInspector();
 
-  for (const { targetClass, expectedLabel } of TEST_DATA) {
-    const animationItemEl =
-      findAnimationItemElementsByTargetSelector(panel, `.${ targetClass }`);
+  for (const testCase of TEST_CASES) {
+    const {
+      expectedLabel,
+      targetClassName,
+    } = testCase;
 
-    info(`Checking animation name element existance for ${ targetClass }`);
+    const animationItemEl =
+      findAnimationItemElementsByTargetClassName(panel, targetClassName);
+
+    info(`Checking animation name element existance for ${ targetClassName }`);
     const animationNameEl = animationItemEl.querySelector(".animation-name");
 
     if (expectedLabel) {
       ok(animationNameEl,
-        "The animation name element should be in animation item element");
+         "The animation name element should be in animation item element");
       is(animationNameEl.textContent, expectedLabel,
-        `The animation name should be ${ expectedLabel }`);
+         `The animation name should be ${ expectedLabel }`);
     } else {
       ok(!animationNameEl,
-        "The animation name element should not be in animation item element");
+         "The animation name element should not be in animation item element");
     }
   }
 });

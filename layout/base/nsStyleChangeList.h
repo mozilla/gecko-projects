@@ -13,6 +13,7 @@
 #define nsStyleChangeList_h___
 
 #include "mozilla/Attributes.h"
+#include "mozilla/StyleBackendType.h"
 
 #include "nsChangeHint.h"
 #include "nsCOMPtr.h"
@@ -40,9 +41,8 @@ public:
   using base_type::Length;
   using base_type::operator[];
 
-  nsStyleChangeList() {
-    MOZ_COUNT_CTOR(nsStyleChangeList);
-  }
+  explicit nsStyleChangeList(mozilla::StyleBackendType aType) :
+    mType(aType) { MOZ_COUNT_CTOR(nsStyleChangeList); }
   ~nsStyleChangeList() { MOZ_COUNT_DTOR(nsStyleChangeList); }
   void AppendChange(nsIFrame* aFrame, nsIContent* aContent, nsChangeHint aHint);
 
@@ -51,9 +51,15 @@ public:
   void PopChangesForContent(nsIContent* aContent)
   {
     while (!IsEmpty() && LastElement().mContent == aContent) {
-      RemoveLastElement();
+      RemoveElementAt(Length() - 1);
     }
   }
+
+  bool IsGecko() const { return mType == mozilla::StyleBackendType::Gecko; }
+  bool IsServo() const { return mType == mozilla::StyleBackendType::Servo; }
+
+private:
+  mozilla::StyleBackendType mType;
 };
 
 #endif /* nsStyleChangeList_h___ */

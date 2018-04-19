@@ -37,6 +37,7 @@
 #include "nsGenericHTMLElement.h"
 
 #include "nsIDOMDocument.h"
+#include "nsIDOMDocumentType.h"
 #include "nsIScriptElement.h"
 
 #include "nsIComponentManager.h"

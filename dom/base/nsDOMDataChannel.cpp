@@ -11,6 +11,7 @@
 
 #include "nsDOMDataChannelDeclarations.h"
 #include "nsDOMDataChannel.h"
+#include "nsIDOMDataChannel.h"
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/MessageEvent.h"
@@ -68,6 +69,7 @@ NS_IMPL_ADDREF_INHERITED(nsDOMDataChannel, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(nsDOMDataChannel, DOMEventTargetHelper)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDOMDataChannel)
+  NS_INTERFACE_MAP_ENTRY(nsIDOMDataChannel)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
 nsDOMDataChannel::nsDOMDataChannel(already_AddRefed<mozilla::DataChannel>& aDataChannel,
@@ -334,12 +336,12 @@ nsDOMDataChannel::DoOnMessageAvailable(const nsACString& aData,
   event->SetTrusted(true);
 
   LOG(("%p(%p): %s - Dispatching\n",this,(void*)mDataChannel,__FUNCTION__));
-  ErrorResult err;
-  DispatchEvent(*event, err);
-  if (err.Failed()) {
+  bool dummy;
+  rv = DispatchEvent(static_cast<Event*>(event), &dummy);
+  if (NS_FAILED(rv)) {
     NS_WARNING("Failed to dispatch the message event!!!");
   }
-  return err.StealNSResult();
+  return rv;
 }
 
 nsresult
@@ -373,9 +375,8 @@ nsDOMDataChannel::OnSimpleEvent(nsISupports* aContext, const nsAString& aName)
   event->InitEvent(aName, false, false);
   event->SetTrusted(true);
 
-  ErrorResult err;
-  DispatchEvent(*event, err);
-  return err.StealNSResult();
+  bool dummy;
+  return DispatchEvent(event, &dummy);
 }
 
 nsresult
@@ -534,7 +535,7 @@ nsDOMDataChannel::EventListenerRemoved(nsAtom* aType)
 nsresult
 NS_NewDOMDataChannel(already_AddRefed<mozilla::DataChannel>&& aDataChannel,
                      nsPIDOMWindowInner* aWindow,
-                     nsDOMDataChannel** aDomDataChannel)
+                     nsIDOMDataChannel** aDomDataChannel)
 {
   RefPtr<nsDOMDataChannel> domdc =
     new nsDOMDataChannel(aDataChannel, aWindow);
@@ -542,6 +543,12 @@ NS_NewDOMDataChannel(already_AddRefed<mozilla::DataChannel>&& aDataChannel,
   nsresult rv = domdc->Init(aWindow);
   NS_ENSURE_SUCCESS(rv,rv);
 
-  domdc.forget(aDomDataChannel);
-  return NS_OK;
+  return CallQueryInterface(domdc, aDomDataChannel);
+}
+
+/* static */
+void
+NS_DataChannelAppReady(nsIDOMDataChannel* aDomDataChannel)
+{
+  ((nsDOMDataChannel *)aDomDataChannel)->AppReady();
 }

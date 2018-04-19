@@ -171,8 +171,11 @@ function checkFirstLevel(index, node, roots) {
 
     Assert.ok(PlacesUtils.nodeIsDay(node));
     PlacesUtils.asQuery(node);
-    let query = node.query;
+    let queries = node.getQueries();
     let options = node.queryOptions;
+
+    Assert.equal(queries.length, 1);
+    let query = queries[0];
 
     Assert.ok(query.hasBeginTime && query.hasEndTime);
 
@@ -191,8 +194,11 @@ function checkFirstLevel(index, node, roots) {
 }
 
 function checkSecondLevel(index, secondIndex, child, roots) {
-    let query = child.query;
+    let queries = child.getQueries();
     let options = child.queryOptions;
+
+    Assert.equal(queries.length, 1);
+    let query = queries[0];
 
     Assert.ok(query.hasDomain);
     Assert.ok(query.hasBeginTime && query.hasEndTime);

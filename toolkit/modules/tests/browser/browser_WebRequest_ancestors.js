@@ -1,8 +1,6 @@
 "use strict";
 
-// This test requires an XMLHttpRequest constructor which isn't
-// associated with a window.
-const {XMLHttpRequest} = Cu.Sandbox(window, {wantGlobalProperties: ["XMLHttpRequest"]});
+Cu.importGlobalProperties(["XMLHttpRequest"]);
 
 var {WebRequest} = ChromeUtils.import("resource://gre/modules/WebRequest.jsm", {});
 var {PromiseUtils} = ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm", {});
@@ -19,7 +17,7 @@ add_task(async function test_ancestors_exist() {
 
   let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, "http://mochi.test:8888/test/");
   await deferred.promise;
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 
   WebRequest.onBeforeRequest.removeListener(onBeforeRequest);
 });

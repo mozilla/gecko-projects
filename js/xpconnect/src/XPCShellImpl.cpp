@@ -337,10 +337,11 @@ Load(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    JS::RootedObject thisObject(cx);
-    if (!args.computeThis(cx, &thisObject))
+    JS::Rooted<JSObject*> obj(cx, JS_THIS_OBJECT(cx, vp));
+    if (!obj)
         return false;
-    if (!JS_IsGlobalObject(thisObject)) {
+
+    if (!JS_IsGlobalObject(obj)) {
         JS_ReportErrorASCII(cx, "Trying to load() into a non-global object");
         return false;
     }
@@ -977,8 +978,7 @@ ProcessArgs(AutoJSAPI& jsapi, char** argv, int argc, XPCShellDirProvider* aDirPr
             }
 
             JS::CompileOptions opts(cx);
-            opts.setUTF8(true)
-                .setFileAndLine("-e", 1);
+            opts.setFileAndLine("-e", 1);
             JS::Evaluate(cx, opts, argv[i], strlen(argv[i]), &rval);
 
             isInteractive = false;
@@ -1072,7 +1072,7 @@ XRE_XPCShellMain(int argc, char** argv, char** envp,
 
     NS_LogInit();
 
-    mozilla::LogModule::Init(argc, argv);
+    mozilla::LogModule::Init();
 
 #ifdef MOZ_GECKO_PROFILER
     char aLocal;
@@ -1283,7 +1283,7 @@ XRE_XPCShellMain(int argc, char** argv, char** envp,
         // Make the default XPCShell global use a fresh zone (rather than the
         // System Zone) to improve cross-zone test coverage.
         JS::CompartmentOptions options;
-        options.creationOptions().setNewZone();
+        options.creationOptions().setNewZoneInSystemZoneGroup();
         if (xpc::SharedMemoryEnabled())
             options.creationOptions().setSharedMemoryAndAtomicsEnabled(true);
         JS::Rooted<JSObject*> glob(cx);

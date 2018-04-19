@@ -112,10 +112,13 @@ WebAuthnManagerBase::StopListeningForVisibilityEvents()
     return;
   }
 
-  windowRoot->RemoveEventListener(kDeactivateEvent, this,
-                                  /* use capture */ true);
-  windowRoot->RemoveEventListener(kVisibilityChange, this,
-                                  /* use capture */ true);
+  nsresult rv = windowRoot->RemoveEventListener(kDeactivateEvent, this,
+                                                /* use capture */ true);
+  Unused << NS_WARN_IF(NS_FAILED(rv));
+
+  rv = windowRoot->RemoveEventListener(kVisibilityChange, this,
+                                       /* use capture */ true);
+  Unused << NS_WARN_IF(NS_FAILED(rv));
 }
 
 NS_IMETHODIMP

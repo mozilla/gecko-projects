@@ -17,6 +17,8 @@
 
 U_NAMESPACE_BEGIN
 
+#ifndef U_HIDE_DRAFT_API
+
 /**
  * Records lengths of string edits but not replacement text.
  * Supports replacements, insertions, deletions in linear progression.
@@ -25,13 +27,13 @@ U_NAMESPACE_BEGIN
  * An Edits object tracks a separate UErrorCode, but ICU string transformation functions
  * (e.g., case mapping functions) merge any such errors into their API's UErrorCode.
  *
- * @stable ICU 59
+ * @draft ICU 59
  */
 class U_COMMON_API Edits U_FINAL : public UMemory {
 public:
     /**
      * Constructs an empty object.
-     * @stable ICU 59
+     * @draft ICU 59
      */
     Edits() :
             array(stackArray), capacity(STACK_CAPACITY), length(0), delta(0), numChanges(0),
@@ -62,7 +64,7 @@ public:
 
     /**
      * Destructor.
-     * @stable ICU 59
+     * @draft ICU 59
      */
     ~Edits();
 
@@ -86,20 +88,20 @@ public:
 
     /**
      * Resets the data but may not release memory.
-     * @stable ICU 59
+     * @draft ICU 59
      */
     void reset() U_NOEXCEPT;
 
     /**
      * Adds a record for an unchanged segment of text.
      * Normally called from inside ICU string transformation functions, not user code.
-     * @stable ICU 59
+     * @draft ICU 59
      */
     void addUnchanged(int32_t unchangedLength);
     /**
      * Adds a record for a text replacement/insertion/deletion.
      * Normally called from inside ICU string transformation functions, not user code.
-     * @stable ICU 59
+     * @draft ICU 59
      */
     void addReplace(int32_t oldLength, int32_t newLength);
     /**
@@ -110,35 +112,33 @@ public:
      *                  and an error occurred while recording edits.
      *                  Otherwise unchanged.
      * @return TRUE if U_FAILURE(outErrorCode)
-     * @stable ICU 59
+     * @draft ICU 59
      */
     UBool copyErrorTo(UErrorCode &outErrorCode);
 
     /**
      * How much longer is the new text compared with the old text?
      * @return new length minus old length
-     * @stable ICU 59
+     * @draft ICU 59
      */
     int32_t lengthDelta() const { return delta; }
     /**
      * @return TRUE if there are any change edits
-     * @stable ICU 59
+     * @draft ICU 59
      */
     UBool hasChanges() const { return numChanges != 0; }
 
-#ifndef U_HIDE_DRAFT_API
     /**
      * @return the number of change edits
      * @draft ICU 60
      */
     int32_t numberOfChanges() const { return numChanges; }
-#endif  // U_HIDE_DRAFT_API
 
     /**
      * Access to the list of edits.
      * @see getCoarseIterator
      * @see getFineIterator
-     * @stable ICU 59
+     * @draft ICU 59
      */
     struct U_COMMON_API Iterator U_FINAL : public UMemory {
         /**
@@ -152,12 +152,12 @@ public:
                 srcIndex(0), replIndex(0), destIndex(0) {}
         /**
          * Copy constructor.
-         * @stable ICU 59
+         * @draft ICU 59
          */
         Iterator(const Iterator &other) = default;
         /**
          * Assignment operator.
-         * @stable ICU 59
+         * @draft ICU 59
          */
         Iterator &operator=(const Iterator &other) = default;
 
@@ -167,7 +167,7 @@ public:
          *                  or else the function returns immediately. Check for U_FAILURE()
          *                  on output or use with function chaining. (See User Guide for details.)
          * @return TRUE if there is another edit
-         * @stable ICU 59
+         * @draft ICU 59
          */
         UBool next(UErrorCode &errorCode) { return next(onlyChanges_, errorCode); }
 
@@ -188,13 +188,12 @@ public:
          *                  or else the function returns immediately. Check for U_FAILURE()
          *                  on output or use with function chaining. (See User Guide for details.)
          * @return TRUE if the edit for the source index was found
-         * @stable ICU 59
+         * @draft ICU 59
          */
         UBool findSourceIndex(int32_t i, UErrorCode &errorCode) {
             return findIndex(i, TRUE, errorCode) == 0;
         }
 
-#ifndef U_HIDE_DRAFT_API
         /**
          * Finds the edit that contains the destination index.
          * The destination index may be found in a non-change
@@ -265,40 +264,39 @@ public:
          * @draft ICU 60
          */
         int32_t sourceIndexFromDestinationIndex(int32_t i, UErrorCode &errorCode);
-#endif  // U_HIDE_DRAFT_API
 
         /**
          * @return TRUE if this edit replaces oldLength() units with newLength() different ones.
          *         FALSE if oldLength units remain unchanged.
-         * @stable ICU 59
+         * @draft ICU 59
          */
         UBool hasChange() const { return changed; }
         /**
          * @return the number of units in the original string which are replaced or remain unchanged.
-         * @stable ICU 59
+         * @draft ICU 59
          */
         int32_t oldLength() const { return oldLength_; }
         /**
          * @return the number of units in the modified string, if hasChange() is TRUE.
          *         Same as oldLength if hasChange() is FALSE.
-         * @stable ICU 59
+         * @draft ICU 59
          */
         int32_t newLength() const { return newLength_; }
 
         /**
          * @return the current index into the source string
-         * @stable ICU 59
+         * @draft ICU 59
          */
         int32_t sourceIndex() const { return srcIndex; }
         /**
          * @return the current index into the replacement-characters-only string,
          *         not counting unchanged spans
-         * @stable ICU 59
+         * @draft ICU 59
          */
         int32_t replacementIndex() const { return replIndex; }
         /**
          * @return the current index into the full destination string
-         * @stable ICU 59
+         * @draft ICU 59
          */
         int32_t destinationIndex() const { return destIndex; }
 
@@ -333,7 +331,7 @@ public:
      * Returns an Iterator for coarse-grained changes for simple string updates.
      * Skips non-changes.
      * @return an Iterator that merges adjacent changes.
-     * @stable ICU 59
+     * @draft ICU 59
      */
     Iterator getCoarseChangesIterator() const {
         return Iterator(array, length, TRUE, TRUE);
@@ -342,7 +340,7 @@ public:
     /**
      * Returns an Iterator for coarse-grained changes and non-changes for simple string updates.
      * @return an Iterator that merges adjacent changes.
-     * @stable ICU 59
+     * @draft ICU 59
      */
     Iterator getCoarseIterator() const {
         return Iterator(array, length, FALSE, TRUE);
@@ -352,7 +350,7 @@ public:
      * Returns an Iterator for fine-grained changes for modifying styled text.
      * Skips non-changes.
      * @return an Iterator that separates adjacent changes.
-     * @stable ICU 59
+     * @draft ICU 59
      */
     Iterator getFineChangesIterator() const {
         return Iterator(array, length, TRUE, FALSE);
@@ -361,13 +359,12 @@ public:
     /**
      * Returns an Iterator for fine-grained changes and non-changes for modifying styled text.
      * @return an Iterator that separates adjacent changes.
-     * @stable ICU 59
+     * @draft ICU 59
      */
     Iterator getFineIterator() const {
         return Iterator(array, length, FALSE, FALSE);
     }
 
-#ifndef U_HIDE_DRAFT_API
     /**
      * Merges the two input Edits and appends the result to this object.
      *
@@ -396,7 +393,6 @@ public:
      * @draft ICU 60
      */
     Edits &mergeAndAppend(const Edits &ab, const Edits &bc, UErrorCode &errorCode);
-#endif  // U_HIDE_DRAFT_API
 
 private:
     void releaseArray() U_NOEXCEPT;
@@ -418,6 +414,8 @@ private:
     UErrorCode errorCode_;
     uint16_t stackArray[STACK_CAPACITY];
 };
+
+#endif  // U_HIDE_DRAFT_API
 
 U_NAMESPACE_END
 

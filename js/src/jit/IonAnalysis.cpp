@@ -1681,7 +1681,7 @@ TypeAnalyzer::adjustInputs(MDefinition* def)
         return true;
 
     MInstruction* ins = def->toInstruction();
-    const TypePolicy* policy = ins->typePolicy();
+    TypePolicy* policy = ins->typePolicy();
     if (policy && !policy->adjustInputs(alloc(), ins))
         return false;
     return true;
@@ -4792,7 +4792,6 @@ jit::CreateMIRRootList(IonBuilder& builder)
     return true;
 }
 
-#ifdef JS_JITSPEW
 static void
 DumpDefinition(GenericPrinter& out, MDefinition* def, size_t depth)
 {
@@ -4807,12 +4806,10 @@ DumpDefinition(GenericPrinter& out, MDefinition* def, size_t depth)
         out.printf(")");
     }
 }
-#endif
 
 void
 jit::DumpMIRExpressions(MIRGraph& graph)
 {
-#ifdef JS_JITSPEW
     if (!JitSpewEnabled(JitSpew_MIRExpressions))
         return;
 
@@ -4825,5 +4822,4 @@ jit::DumpMIRExpressions(MIRGraph& graph)
             out.printf("\n");
         }
     }
-#endif
 }

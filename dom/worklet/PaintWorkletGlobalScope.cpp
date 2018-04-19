@@ -5,23 +5,30 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "PaintWorkletGlobalScope.h"
-#include "WorkletPrincipal.h"
 #include "mozilla/dom/PaintWorkletGlobalScopeBinding.h"
 #include "mozilla/dom/FunctionBinding.h"
 
 namespace mozilla {
 namespace dom {
 
-PaintWorkletGlobalScope::PaintWorkletGlobalScope() = default;
+PaintWorkletGlobalScope::PaintWorkletGlobalScope(nsPIDOMWindowInner* aWindow)
+  : WorkletGlobalScope(aWindow)
+{
+}
+
+PaintWorkletGlobalScope::~PaintWorkletGlobalScope()
+{
+}
 
 bool
 PaintWorkletGlobalScope::WrapGlobalObject(JSContext* aCx,
+                                          nsIPrincipal* aPrincipal,
                                           JS::MutableHandle<JSObject*> aReflector)
 {
   JS::CompartmentOptions options;
   return PaintWorkletGlobalScopeBinding::Wrap(aCx, this, this,
                                               options,
-                                              WorkletPrincipal::GetWorkletPrincipal(),
+                                              nsJSPrincipals::get(aPrincipal),
                                               true, aReflector);
 }
 

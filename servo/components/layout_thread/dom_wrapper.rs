@@ -151,10 +151,10 @@ impl<'ln> NodeInfo for ServoLayoutNode<'ln> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy)]
 enum Impossible { }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy)]
 pub struct ShadowRoot<'lr>(Impossible, PhantomData<&'lr ()>);
 
 impl<'lr> TShadowRoot for ShadowRoot<'lr> {
@@ -657,14 +657,6 @@ impl<'le> ::selectors::Element for ServoLayoutElement<'le> {
         unsafe {
             self.element.upcast().parent_node_ref().and_then(as_element)
         }
-    }
-
-    fn parent_node_is_shadow_root(&self) -> bool {
-        false
-    }
-
-    fn containing_shadow_host(&self) -> Option<Self> {
-        None
     }
 
     fn first_child_element(&self) -> Option<ServoLayoutElement<'le>> {
@@ -1204,14 +1196,6 @@ impl<'le> ::selectors::Element for ServoThreadSafeLayoutElement<'le> {
 
     fn parent_element(&self) -> Option<Self> {
         warn!("ServoThreadSafeLayoutElement::parent_element called");
-        None
-    }
-
-    fn parent_node_is_shadow_root(&self) -> bool {
-        false
-    }
-
-    fn containing_shadow_host(&self) -> Option<Self> {
         None
     }
 

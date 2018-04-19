@@ -8,12 +8,9 @@
 #define _mozilla_a11y_style_h_
 
 #include "mozilla/gfx/Types.h"
-#include "mozilla/ComputedStyle.h"
+#include "nsStyleContext.h"
 
 namespace mozilla {
-namespace dom {
-class Element;
-} // namespace dom
 namespace a11y {
 
 class StyleInfo
@@ -42,7 +39,7 @@ private:
   void Margin(Side aSide, nsAString& aValue);
 
   dom::Element* mElement;
-  RefPtr<ComputedStyle> mComputedStyle;
+  RefPtr<nsStyleContext> mStyleContext;
 };
 
 } // namespace a11y

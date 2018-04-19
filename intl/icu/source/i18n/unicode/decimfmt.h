@@ -30,7 +30,7 @@
 #include "unicode/utypes.h"
 /**
  * \file
- * \brief C++ API: Compatibility APIs for decimal formatting.
+ * \brief C++ API: Formats decimal numbers.
  */
 
 #if !UCONFIG_NO_FORMATTING
@@ -67,19 +67,13 @@ class PluralRules;
 class VisibleDigitsWithExponent;
 
 // explicit template instantiation. see digitlst.h
-// (When building DLLs for Windows this is required.)
-#if U_PF_WINDOWS <= U_PLATFORM && U_PLATFORM <= U_PF_CYGWIN
+#if defined (_MSC_VER)
 template class U_I18N_API    EnumSet<UNumberFormatAttribute,
             UNUM_MAX_NONBOOLEAN_ATTRIBUTE+1,
             UNUM_LIMIT_BOOLEAN_ATTRIBUTE>;
 #endif
 
 /**
- * <p><strong>IMPORTANT:</strong> New users are strongly encouraged to see if
- * numberformatter.h fits their use case.  Although not deprecated, this header
- * is provided for backwards compatibility only.
- * <hr/>
- *
  * DecimalFormat is a concrete subclass of NumberFormat that formats decimal
  * numbers. It has a variety of features designed to make it possible to parse
  * and format numbers in any locale, including support for Western, Arabic, or
@@ -694,9 +688,6 @@ public:
      * on NumberFormat such as createInstance. These factories will
      * return the most appropriate sub-class of NumberFormat for a given
      * locale.
-     * <p>
-     * <strong>NOTE:</strong> New users are strongly encouraged to use
-     * {@link NumberFormatter} instead of DecimalFormat.
      * @param status    Output param set to success/failure code. If the
      *                  pattern is invalid this will be set to a failure code.
      * @stable ICU 2.0
@@ -712,9 +703,6 @@ public:
      * on NumberFormat such as createInstance. These factories will
      * return the most appropriate sub-class of NumberFormat for a given
      * locale.
-     * <p>
-     * <strong>NOTE:</strong> New users are strongly encouraged to use
-     * {@link NumberFormatter} instead of DecimalFormat.
      * @param pattern   A non-localized pattern string.
      * @param status    Output param set to success/failure code. If the
      *                  pattern is invalid this will be set to a failure code.
@@ -733,9 +721,6 @@ public:
      * createInstance or createCurrencyInstance. If you need only minor adjustments
      * to a standard format, you can modify the format returned by
      * a NumberFormat factory method.
-     * <p>
-     * <strong>NOTE:</strong> New users are strongly encouraged to use
-     * {@link NumberFormatter} instead of DecimalFormat.
      *
      * @param pattern           a non-localized pattern string
      * @param symbolsToAdopt    the set of symbols to be used.  The caller should not
@@ -841,9 +826,6 @@ public:
      * createInstance or createCurrencyInstance. If you need only minor adjustments
      * to a standard format, you can modify the format returned by
      * a NumberFormat factory method.
-     * <p>
-     * <strong>NOTE:</strong> New users are strongly encouraged to use
-     * {@link NumberFormatter} instead of DecimalFormat.
      *
      * @param pattern           a non-localized pattern string
      * @param symbolsToAdopt    the set of symbols to be used.  The caller should not
@@ -867,9 +849,6 @@ public:
      * createInstance or createCurrencyInstance. If you need only minor adjustments
      * to a standard format, you can modify the format returned by
      * a NumberFormat factory method.
-     * <p>
-     * <strong>NOTE:</strong> New users are strongly encouraged to use
-     * {@link NumberFormatter} instead of DecimalFormat.
      *
      * @param pattern           a non-localized pattern string
      * @param symbols   the set of symbols to be used
@@ -1985,14 +1964,12 @@ public:
     UCurrencyUsage getCurrencyUsage() const;
 
 
-#ifndef U_HIDE_DEPRECATED_API
     /**
      * The resource tags we use to retrieve decimal format data from
      * locale resource bundles.
      * @deprecated ICU 3.4. This string has no public purpose. Please don't use it.
      */
     static const char fgNumberPatterns[];
-#endif  // U_HIDE_DEPRECATED_API
 
 #ifndef U_HIDE_INTERNAL_API
     /**

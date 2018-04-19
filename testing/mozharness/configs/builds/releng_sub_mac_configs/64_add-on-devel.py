@@ -8,6 +8,7 @@ config = {
 #        'update',
     ],
     'stage_platform': 'macosx64-add-on-devel',
+    'build_type': 'add-on-devel',
     'enable_signing': False,
     #### 64 bit build specific #####
     'env': {

@@ -23,10 +23,9 @@ class EditorBase;
 class InsertNodeTransaction final : public EditTransactionBase
 {
 protected:
-  template<typename PT, typename CT>
   InsertNodeTransaction(EditorBase& aEditorBase,
                         nsIContent& aContentToInsert,
-                        const EditorDOMPointBase<PT, CT>& aPointToInsert);
+                        const EditorRawDOMPoint& aPointToInsert);
 
 public:
   /**
@@ -43,11 +42,10 @@ public:
    * @return                    A InsertNodeTranaction which was initialized
    *                            with the arguments.
    */
-  template<typename PT, typename CT>
   static already_AddRefed<InsertNodeTransaction>
   Create(EditorBase& aEditorBase,
          nsIContent& aContentToInsert,
-         const EditorDOMPointBase<PT, CT>& aPointToInsert);
+         const EditorRawDOMPoint& aPointToInsert);
 
 
   NS_DECL_ISUPPORTS_INHERITED

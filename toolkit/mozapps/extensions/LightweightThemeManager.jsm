@@ -13,6 +13,8 @@ ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const ID_SUFFIX              = "@personas.mozilla.org";
 const PREF_LWTHEME_TO_SELECT = "extensions.lwThemeToSelect";
+const PREF_GENERAL_SKINS_SELECTEDSKIN = "general.skins.selectedSkin";
+const PREF_SKIN_TO_SELECT             = "extensions.lastSelectedSkin";
 const ADDON_TYPE             = "theme";
 const ADDON_TYPE_WEBEXT      = "webextension-theme";
 
@@ -512,6 +514,10 @@ AddonWrapper.prototype = {
   },
 
   get operationsRequiringRestart() {
+    // If a non-default theme is in use then a restart will be required to
+    // enable lightweight themes unless dynamic theme switching is enabled
+    if (Services.prefs.prefHasUserValue(PREF_GENERAL_SKINS_SELECTEDSKIN))
+      return AddonManager.OP_NEEDS_RESTART_ENABLE;
     return AddonManager.OP_NEEDS_RESTART_NONE;
   },
 
@@ -654,6 +660,9 @@ function _getInternalID(id) {
 function _setCurrentTheme(aData, aLocal) {
   aData = _sanitizeTheme(aData, null, aLocal);
 
+  let needsRestart = (ADDON_TYPE == "theme") &&
+                     Services.prefs.prefHasUserValue(PREF_GENERAL_SKINS_SELECTEDSKIN);
+
   let cancel = Cc["@mozilla.org/supports-PRBool;1"].createInstance(Ci.nsISupportsPRBool);
   cancel.data = false;
   Services.obs.notifyObservers(cancel, "lightweight-theme-change-requested",
@@ -683,7 +692,8 @@ function _setCurrentTheme(aData, aLocal) {
     if (current && current.id != aData.id) {
       usedThemes.splice(1, 0, aData);
     } else {
-      if (current && current.id == aData.id) {
+      if (current && current.id == aData.id && !needsRestart &&
+          !Services.prefs.prefHasUserValue(PREF_SKIN_TO_SELECT)) {
         notify = false;
       }
       usedThemes.unshift(aData);
@@ -699,7 +709,7 @@ function _setCurrentTheme(aData, aLocal) {
 
   if (notify) {
     AddonManagerPrivate.notifyAddonChanged(aData ? aData.id + ID_SUFFIX : null,
-                                           ADDON_TYPE, false);
+                                           ADDON_TYPE, needsRestart);
   }
 
   return LightweightThemeManager.currentTheme;
@@ -859,7 +869,7 @@ function _persistImage(sourceURL, localFileName, successCallback) {
 
   persist.progressListener = new _persistProgressListener(successCallback);
 
-  persist.saveURI(sourceURI, 0,
+  persist.saveURI(sourceURI, null,
                   null, Ci.nsIHttpChannel.REFERRER_POLICY_UNSET,
                   null, null, targetURI, null);
 }

@@ -376,14 +376,15 @@ nsSHEntry::SetIsSubFrame(bool aFlag)
 }
 
 NS_IMETHODIMP
-nsSHEntry::GetCacheKey(uint32_t* aResult)
+nsSHEntry::GetCacheKey(nsISupports** aResult)
 {
   *aResult = mShared->mCacheKey;
+  NS_IF_ADDREF(*aResult);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsSHEntry::SetCacheKey(uint32_t aCacheKey)
+nsSHEntry::SetCacheKey(nsISupports* aCacheKey)
 {
   mShared->mCacheKey = aCacheKey;
   return NS_OK;
@@ -439,7 +440,7 @@ NS_IMETHODIMP
 nsSHEntry::Create(nsIURI* aURI, const nsAString& aTitle,
                   nsIInputStream* aInputStream,
                   nsILayoutHistoryState* aLayoutHistoryState,
-                  uint32_t aCacheKey, const nsACString& aContentType,
+                  nsISupports* aCacheKey, const nsACString& aContentType,
                   nsIPrincipal* aTriggeringPrincipal,
                   nsIPrincipal* aPrincipalToInherit,
                   const nsID& aDocShellID,

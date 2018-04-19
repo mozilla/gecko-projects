@@ -9,11 +9,11 @@ import android.graphics.Color;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.RobolectricTestRunner;
+import org.mozilla.gecko.background.testhelpers.TestRunner;
 
 import static org.mockito.Mockito.mock;
 
-@RunWith(RobolectricTestRunner.class)
+@RunWith(TestRunner.class)
 public class TestIconResponse {
     private static final String ICON_URL = "http://www.mozilla.org/favicon.ico";
 

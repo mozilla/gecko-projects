@@ -23,8 +23,9 @@ sinon.assert.expose(assert, {prefix: ""});
 
 chai.use(chaiAssertions);
 
-const overrider = new GlobalOverrider();
-const TEST_GLOBAL = {
+let overrider = new GlobalOverrider();
+
+overrider.set({
   AddonManager: {
     getActiveAddons() {
       return Promise.resolve({addons: [], fullData: false});
@@ -38,32 +39,8 @@ const TEST_GLOBAL = {
   Components: {isSuccessCode: () => true},
   // eslint-disable-next-line object-shorthand
   ContentSearchUIController: function() {}, // NB: This is a function/constructor
-  Cc: {
-    "@mozilla.org/browser/nav-bookmarks-service;1": {
-      addObserver() {},
-      getService() {
-        return this;
-      },
-      removeObserver() {},
-      SOURCES: {},
-      TYPE_BOOKMARK: {}
-    },
-    "@mozilla.org/browser/nav-history-service;1": {
-      addObserver() {},
-      executeQuery() {},
-      getNewQuery() {},
-      getNewQueryOptions() {},
-      getService() {
-        return this;
-      },
-      insert() {},
-      removeObserver() {}
-    }
-  },
-  Ci: {
-    nsIHttpChannel: {REFERRER_POLICY_UNSAFE_URL: 5},
-    nsITimer: {TYPE_ONE_SHOT: 1}
-  },
+  Cc: {},
+  Ci: {nsIHttpChannel: {REFERRER_POLICY_UNSAFE_URL: 5}},
   Cu: {
     importGlobalProperties() {},
     now: () => window.performance.now(),
@@ -73,16 +50,6 @@ const TEST_GLOBAL = {
   fetch() {},
   // eslint-disable-next-line object-shorthand
   Image: function() {}, // NB: This is a function/constructor
-  LightweightThemeManager: {currentThemeForDisplay: {}},
-  PlacesUtils: {
-    get bookmarks() {
-      return TEST_GLOBAL.Cc["@mozilla.org/browser/nav-bookmarks-service;1"];
-    },
-    get history() {
-      return TEST_GLOBAL.Cc["@mozilla.org/browser/nav-history-service;1"];
-    }
-  },
-  PluralForm: {get() {}},
   Preferences: FakePrefs,
   Services: {
     locale: {
@@ -112,7 +79,6 @@ const TEST_GLOBAL = {
       getStringPref() {},
       getIntPref() {},
       getBoolPref() {},
-      setBoolPref() {},
       getBranch() {},
       getDefaultBranch() {
         return {
@@ -123,10 +89,7 @@ const TEST_GLOBAL = {
         };
       }
     },
-    tm: {
-      dispatchToMainThread: cb => cb(),
-      idleDispatchToMainThread: cb => cb()
-    },
+    tm: {dispatchToMainThread: cb => cb()},
     eTLD: {
       getBaseDomain({spec}) { return spec.match(/\/([^/]+)/)[1]; },
       getPublicSuffix() {}
@@ -152,8 +115,7 @@ const TEST_GLOBAL = {
     scriptSecurityManager: {
       createNullPrincipal() {},
       getSystemPrincipal() {}
-    },
-    wm: {getMostRecentWindow: () => window}
+    }
   },
   XPCOMUtils: {
     defineLazyGetter(_1, _2, f) { f(); },
@@ -163,8 +125,7 @@ const TEST_GLOBAL = {
   },
   EventEmitter,
   ShellService: {isDefaultBrowser: () => true}
-};
-overrider.set(TEST_GLOBAL);
+});
 
 describe("activity-stream", () => {
   after(() => overrider.restore());

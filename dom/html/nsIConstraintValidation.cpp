@@ -177,7 +177,7 @@ nsIConstraintValidation::ReportValidity()
 
   if (content->IsHTMLElement(nsGkAtoms::input) &&
       nsContentUtils::IsFocusedContent(content)) {
-    HTMLInputElement* inputElement = HTMLInputElement::FromNode(content);
+    HTMLInputElement* inputElement = HTMLInputElement::FromContent(content);
     inputElement->UpdateValidityUIBits(true);
   }
 

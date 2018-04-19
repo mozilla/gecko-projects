@@ -34,8 +34,8 @@ class nsCanvasFrame final : public nsContainerFrame,
                             public nsIAnonymousContentCreator
 {
 public:
-  explicit nsCanvasFrame(ComputedStyle* aStyle)
-    : nsContainerFrame(aStyle, kClassID)
+  explicit nsCanvasFrame(nsStyleContext* aContext)
+    : nsContainerFrame(aContext, kClassID)
     , mDoPaintFocus(false)
     , mAddedScrollPositionListener(false)
   {}
@@ -168,7 +168,8 @@ public:
                                    LayerManager* aManager,
                                    const ContainerLayerParameters& aParameters) override
   {
-    if (ForceActiveLayers()) {
+    if (ShouldUseAdvancedLayer(aManager, gfxPrefs::LayersAllowCanvasBackgroundColorLayers) ||
+        ForceActiveLayers()) {
       return mozilla::LAYER_ACTIVE;
     }
     return mozilla::LAYER_NONE;

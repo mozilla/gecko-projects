@@ -43,7 +43,6 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
-#include "mozilla/TextUtils.h"
 #include "mozilla/TypeTraits.h"
 #include "mozilla/Unused.h"
 #include "mozStorageCID.h"
@@ -1554,8 +1553,7 @@ ReportInternalError(const char* aFile, uint32_t aLine, const char* aStr)
   nsContentUtils::LogSimpleConsoleError(
     NS_ConvertUTF8toUTF16(nsPrintfCString(
                           "Quota %s: %s:%" PRIu32, aStr, aFile, aLine)),
-    "quota",
-    false /* Quota Manager is not active in private browsing mode */);
+    "quota");
 }
 
 namespace {
@@ -8334,7 +8332,7 @@ OriginParser::HandleToken(const nsDependentCSubstring& aToken)
         return;
       }
 
-      if (IsAsciiDigit(aToken.First())) {
+      if (NS_IsAsciiDigit(aToken.First())) {
         // nsDependentCSubstring doesn't provice ToInteger()
         nsCString token(aToken);
 
@@ -8495,7 +8493,7 @@ OriginParser::HandleToken(const nsDependentCSubstring& aToken)
         return;
       }
 
-      if (aToken.Length() == 1 && IsAsciiAlpha(aToken.First())) {
+      if (aToken.Length() == 1 && NS_IsAsciiAlpha(aToken.First())) {
         mMaybeDriveLetter = true;
 
         mPathnameComponents.AppendElement(aToken);

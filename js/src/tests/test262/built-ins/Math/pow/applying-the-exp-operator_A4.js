@@ -18,7 +18,8 @@ exponent[5] = +Infinity;
 exponent[6] = NaN;
 var exponentnum = 7;
 
-for (var i = 0; i < exponentnum; i++) {
+for (var i = 0; i < exponentnum; i++)
+{
   assert.sameValue(
     Math.pow(base, exponent[i]),
     NaN,

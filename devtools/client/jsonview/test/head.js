@@ -50,34 +50,43 @@ async function addJsonViewTab(url, {
   docReadyState = "complete",
 } = {}) {
   info("Adding a new JSON tab with URL: '" + url + "'");
-  let tabAdded = BrowserTestUtils.waitForNewTab(gBrowser, url);
   let tabLoaded = addTab(url);
-  let tab = await Promise.race([tabAdded, tabLoaded]);
+  let tab = gBrowser.selectedTab;
   let browser = tab.linkedBrowser;
+  await Promise.race([tabLoaded, new Promise(resolve => {
+    browser.webProgress.addProgressListener({
+      QueryInterface: XPCOMUtils.generateQI(["nsIWebProgressListener",
+                                             "nsISupportsWeakReference"]),
+      onLocationChange(webProgress) {
+        // Fires when the tab is ready but before completely loaded.
+        webProgress.removeProgressListener(this);
+        resolve();
+      },
+    }, Ci.nsIWebProgress.NOTIFY_LOCATION);
+  })]);
 
   // Load devtools/shared/test/frame-script-utils.js
   loadFrameScriptUtils();
   let rootDir = getRootDirectory(gTestPath);
 
   // Catch RequireJS errors (usually timeouts)
-  let error = tabLoaded.then(() => ContentTask.spawn(browser, null, function() {
-    return new Promise((resolve, reject) => {
-      let {requirejs} = content.wrappedJSObject;
-      if (requirejs) {
-        requirejs.onError = err => {
-          info(err);
-          ok(false, "RequireJS error");
-          reject(err);
-        };
-      }
-    });
+  let error = tabLoaded.then(() => new Promise((resolve, reject) => {
+    // eslint-disable-next-line mozilla/no-cpows-in-tests
+    let {requirejs} = gBrowser.contentWindowAsCPOW.wrappedJSObject;
+    if (requirejs) {
+      requirejs.onError = err => {
+        info(err);
+        ok(false, "RequireJS error");
+        reject(err);
+      };
+    }
   }));
 
   let data = {rootDir, appReadyState, docReadyState};
   // eslint-disable-next-line no-shadow
-  await Promise.race([error, ContentTask.spawn(browser, data, async function(data) {
+  await Promise.race([error, ContentTask.spawn(browser, data, async function (data) {
     // Check if there is a JSONView object.
-    let {JSONView} = content.wrappedJSObject;
+    let {JSONView} = content.window.wrappedJSObject;
     if (!JSONView) {
       throw new Error("The JSON Viewer did not load.");
     }
@@ -95,7 +104,7 @@ async function addJsonViewTab(url, {
     }
 
     // Wait until the document readyState suffices.
-    let {document} = content;
+    let {document} = content.window;
     while (docReadyStates.indexOf(document.readyState) < docReadyIndex) {
       info(`DocReadyState is "${document.readyState}". Await "${data.docReadyState}"`);
       await new Promise(resolve => {

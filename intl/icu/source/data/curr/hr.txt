@@ -684,10 +684,6 @@ hr{
         }
         MRO{
             "MRO",
-            "mauritanijska ouguja (1973–2017)",
-        }
-        MRU{
-            "MRU",
             "mauritanijska ouguja",
         }
         MTL{
@@ -920,10 +916,6 @@ hr{
         }
         STD{
             "STD",
-            "dobra Svetog Tome i Principa (1977–2017)",
-        }
-        STN{
-            "STN",
             "dobra Svetog Tome i Principa",
         }
         SUR{
@@ -1289,7 +1281,7 @@ hr{
         SHP{"£"}
         SRD{"$"}
         SSP{"£"}
-        STN{"Db"}
+        STD{"Db"}
         SYP{"£"}
         THB{"฿"}
         TOP{"T$"}
@@ -2151,11 +2143,6 @@ hr{
             other{"makaoških pataka"}
         }
         MRO{
-            few{"mauritanijske ouguje (1973–2017)"}
-            one{"mauritanijska ouguja (1973–2017)"}
-            other{"mauritanijskih ouguja (1973–2017)"}
-        }
-        MRU{
             few{"mauritanijske ouguje"}
             one{"mauritanijska ouguja"}
             other{"mauritanijskih ouguja"}
@@ -2446,11 +2433,6 @@ hr{
             other{"južnosudanskih funti"}
         }
         STD{
-            few{"dobre Svetog Tome i Principa (1977–2017)"}
-            one{"dobra Svetog Tome i Principa (1977–2017)"}
-            other{"dobri Svetog Tome i Principa (1977–2017)"}
-        }
-        STN{
             few{"dobre Svetog Tome i Principa"}
             one{"dobra Svetog Tome i Principa"}
             other{"dobri Svetog Tome i Principa"}
@@ -2811,5 +2793,5 @@ hr{
         one{"{0} {1}"}
         other{"{0} {1}"}
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.37.1"}
 }

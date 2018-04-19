@@ -3,7 +3,7 @@ async function importFromFixture(fixture, replace) {
   let path = OS.Path.join(cwd, fixture);
 
   info(`Importing from ${path}`);
-  await BookmarkJSONUtils.importFromFile(path, { replace });
+  await BookmarkJSONUtils.importFromFile(path, replace);
   await PlacesTestUtils.promiseAsyncUpdates();
 }
 
@@ -48,6 +48,12 @@ add_task(async function test_restore_mobile_bookmarks_root() {
     }, {
       guid: PlacesUtils.bookmarks.mobileGuid,
       index: 4,
+      annos: [{
+        name: "mobile/bookmarksRoot",
+        flags: 0,
+        expires: 4,
+        value: 1,
+      }],
       children: [
         { guid: "_o8e1_zxTJFg", index: 0 },
         { guid: "QCtSqkVYUbXB", index: 1 },
@@ -83,6 +89,12 @@ add_task(async function test_import_mobile_bookmarks_root() {
     }, {
       guid: PlacesUtils.bookmarks.mobileGuid,
       index: 4,
+      annos: [{
+        name: "mobile/bookmarksRoot",
+        flags: 0,
+        expires: 4,
+        value: 1,
+      }],
       children: [
         // The first two are in ..._import.json, the second two are in
         // ..._merge.json
@@ -98,8 +110,6 @@ add_task(async function test_import_mobile_bookmarks_root() {
 });
 
 add_task(async function test_restore_mobile_bookmarks_folder() {
-  // This tests importing a mobile bookmarks folder with the annotation,
-  // and the old, random guid.
   await importFromFixture("mobile_bookmarks_folder_import.json",
                            /* replace */ true);
 
@@ -124,6 +134,12 @@ add_task(async function test_restore_mobile_bookmarks_folder() {
     }, {
       guid: PlacesUtils.bookmarks.mobileGuid,
       index: 4,
+      annos: [{
+        name: "mobile/bookmarksRoot",
+        flags: 0,
+        expires: 4,
+        value: 1,
+      }],
       children: [
         { guid: "_o8e1_zxTJFg", index: 0 },
         { guid: "QCtSqkVYUbXB", index: 1 },
@@ -170,6 +186,12 @@ add_task(async function test_import_mobile_bookmarks_folder() {
     }, {
       guid: PlacesUtils.bookmarks.mobileGuid,
       index: 4,
+      annos: [{
+        name: "mobile/bookmarksRoot",
+        flags: 0,
+        expires: 4,
+        value: 1,
+      }],
       children: [
         { guid: "_o8e1_zxTJFg", index: 0 },
         { guid: "QCtSqkVYUbXB", index: 1 },
@@ -208,6 +230,12 @@ add_task(async function test_restore_multiple_bookmarks_folders() {
     }, {
       guid: PlacesUtils.bookmarks.mobileGuid,
       index: 4,
+      annos: [{
+        name: "mobile/bookmarksRoot",
+        flags: 0,
+        expires: 4,
+        value: 1,
+      }],
       children: [
         { guid: "a17yW6-nTxEJ", index: 0 },
         { guid: "sSZ86WT9WbN3", index: 1 },
@@ -247,6 +275,12 @@ add_task(async function test_import_multiple_bookmarks_folders() {
     }, {
       guid: PlacesUtils.bookmarks.mobileGuid,
       index: 4,
+      annos: [{
+        name: "mobile/bookmarksRoot",
+        flags: 0,
+        expires: 4,
+        value: 1,
+      }],
       children: [
         { guid: "_o8e1_zxTJFg", index: 0 },
         { guid: "QCtSqkVYUbXB", index: 1 },

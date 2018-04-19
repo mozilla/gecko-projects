@@ -123,10 +123,20 @@ const TEST_URI = "data:text/html;charset=UTF-8," + encodeURIComponent(
    " </html>"
   ].join("\n"));
 
-add_task(async function test() {
-  let tab = await addTab(TEST_URI);
-  let browser = tab.linkedBrowser;
+let doc = null;
+function test() {
+  waitForExplicitFinish();
+  gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
+  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(() => {
+    /* eslint-disable mozilla/no-cpows-in-tests */
+    doc = gBrowser.contentDocumentAsCPOW;
+    /* eslint-enable mozilla/no-cpows-in-tests */
+    runTests();
+  });
+  gBrowser.loadURI(TEST_URI);
+}
 
+function runTests() {
   let completer = new CSSCompleter({
     cssProperties: getClientCssProperties()
   });
@@ -150,16 +160,13 @@ add_task(async function test() {
     return false;
   };
 
+  let progress = doc.getElementById("progress");
+  let progressDiv = doc.querySelector("#progress > div");
   let i = 0;
   for (let expected of tests) {
-    ++i;
     let caret = expected.splice(0, 1)[0];
-    await ContentTask.spawn(browser, [i, tests.length], function([idx, len]) {
-      let progress = content.document.getElementById("progress");
-      let progressDiv = content.document.querySelector("#progress > div");
-      progress.dataset.progress = idx;
-      progressDiv.style.width = 100 * idx / len + "%";
-    });
+    progress.dataset.progress = ++i;
+    progressDiv.style.width = 100 * i / tests.length + "%";
     let actual = completer.getInfoAt(source, caret);
     if (checkState(expected, actual)) {
       ok(true, "Test " + i + " passed. ");
@@ -168,11 +175,9 @@ add_task(async function test() {
          "but found [" + actual.state + ", " +
          (actual.selector || actual.selectors) + ", " +
          actual.propertyName + ", " + actual.value + "].");
-      await ContentTask.spawn(browser, null, function() {
-        let progress = content.document.getElementById("progress");
-        progress.classList.add("failed");
-      });
+      progress.classList.add("failed");
     }
   }
   gBrowser.removeCurrentTab();
-});
+  finish();
+}

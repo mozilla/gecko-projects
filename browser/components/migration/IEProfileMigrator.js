@@ -38,17 +38,17 @@ History.prototype = {
   },
 
   migrate: function H_migrate(aCallback) {
-    let pageInfos = [];
+    let places = [];
     let typedURLs = MSMigrationUtils.getTypedURLs("Software\\Microsoft\\Internet Explorer");
     let historyEnumerator = Cc["@mozilla.org/profile/migrator/iehistoryenumerator;1"].
                             createInstance(Ci.nsISimpleEnumerator);
     while (historyEnumerator.hasMoreElements()) {
       let entry = historyEnumerator.getNext().QueryInterface(Ci.nsIPropertyBag2);
-      let url = entry.get("uri").QueryInterface(Ci.nsIURI);
+      let uri = entry.get("uri").QueryInterface(Ci.nsIURI);
       // MSIE stores some types of URLs in its history that we don't handle,
       // like HTMLHelp and others.  Since we don't properly map handling for
       // all of them we just avoid importing them.
-      if (!["http", "https", "ftp", "file"].includes(url.scheme)) {
+      if (!["http", "https", "ftp", "file"].includes(uri.scheme)) {
         continue;
       }
 
@@ -59,31 +59,37 @@ History.prototype = {
       }
 
       // The typed urls are already fixed-up, so we can use them for comparison.
-      let transition = typedURLs.has(url.spec) ?
-        PlacesUtils.history.TRANSITIONS.LINK :
-        PlacesUtils.history.TRANSITIONS.TYPED;
+      let transitionType = typedURLs.has(uri.spec) ?
+                             Ci.nsINavHistoryService.TRANSITION_TYPED :
+                             Ci.nsINavHistoryService.TRANSITION_LINK;
       // use the current date if we have no visits for this entry.
-      let time = entry.get("time");
+      // Note that the entry will have a time in microseconds (PRTime),
+      // and Date.now() returns milliseconds. Places expects PRTime,
+      // so we multiply the Date.now return value to make up the difference.
+      let lastVisitTime = entry.get("time") || (Date.now() * 1000);
 
-      pageInfos.push({
-        url,
-        title,
-        visits: [{
-          transition,
-          date: time ? PlacesUtils.toDate(entry.get("time")) : new Date(),
-        }],
-      });
+      places.push(
+        { uri,
+          title,
+          visits: [{ transitionType,
+                     visitDate: lastVisitTime }],
+        }
+      );
     }
 
     // Check whether there is any history to import.
-    if (pageInfos.length == 0) {
+    if (places.length == 0) {
       aCallback(true);
       return;
     }
 
-    MigrationUtils.insertVisitsWrapper(pageInfos).then(
-      () => aCallback(true),
-      () => aCallback(false));
+    MigrationUtils.insertVisitsWrapper(places, {
+      ignoreErrors: true,
+      ignoreResults: true,
+      handleCompletion(updatedCount) {
+        aCallback(updatedCount > 0);
+      },
+    });
   },
 };
 

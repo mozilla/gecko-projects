@@ -14,6 +14,7 @@ const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {}
 const Services = require("Services");
 const Telemetry = require("devtools/client/shared/telemetry");
 
+
 /**
  * The ScratchpadManager object opens new Scratchpad windows and manages the state
  * of open scratchpads for session restore. There's only one ScratchpadManager in
@@ -33,7 +34,8 @@ this.ScratchpadManager = {
    * @return array
    *         The array of scratchpad states.
    */
-  getSessionState: function SPM_getSessionState() {
+  getSessionState: function SPM_getSessionState()
+  {
     return this._scratchpads;
   },
 
@@ -47,13 +49,14 @@ this.ScratchpadManager = {
    * @return array
    *         The restored scratchpad windows.
    */
-  restoreSession: function SPM_restoreSession(aSession) {
+  restoreSession: function SPM_restoreSession(aSession)
+  {
     if (!Array.isArray(aSession)) {
       return [];
     }
 
     let wins = [];
-    aSession.forEach(function(state) {
+    aSession.forEach(function (state) {
       let win = this.openScratchpad(state);
       wins.push(win);
     }, this);
@@ -104,7 +107,8 @@ this.ScratchpadManager = {
    * @return nsIDomWindow
    *         The opened scratchpad window.
    */
-  openScratchpad: function SPM_openScratchpad(aState) {
+  openScratchpad: function SPM_openScratchpad(aState)
+  {
     let params = Cc["@mozilla.org/embedcomp/dialogparam;1"]
                  .createInstance(Ci.nsIDialogParamBlock);
 
@@ -137,10 +141,12 @@ this.ScratchpadManager = {
   /**
    * Create a unique ID for a new Scratchpad.
    */
-  createUid: function SPM_createUid() {
+  createUid: function SPM_createUid()
+  {
     return JSON.stringify(this._nextUid++);
   }
 };
+
 
 /**
  * The ShutdownObserver listens for app shutdown and saves the current state

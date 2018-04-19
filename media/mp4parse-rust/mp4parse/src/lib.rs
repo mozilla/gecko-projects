@@ -45,7 +45,7 @@ const TABLE_SIZE_LIMIT: u32 = 30 * 60 * 60 * 24 * 7;
 pub fn vec_push<T>(vec: &mut Vec<T>, val: T) -> std::result::Result<(), ()> {
     #[cfg(feature = "mp4parse_fallible")]
     {
-        return FallibleVec::try_push(vec, val);
+        return vec.try_push(val);
     }
 
     vec.push(val);
@@ -56,7 +56,7 @@ pub fn vec_push<T>(vec: &mut Vec<T>, val: T) -> std::result::Result<(), ()> {
 pub fn vec_reserve<T>(vec: &mut Vec<T>, size: usize) -> std::result::Result<(), ()> {
     #[cfg(feature = "mp4parse_fallible")]
     {
-        return FallibleVec::try_reserve(vec, size);
+        return vec.try_reserve(size);
     }
 
     vec.reserve(size);
@@ -68,7 +68,7 @@ fn allocate_read_buf(size: usize) -> std::result::Result<Vec<u8>, ()> {
     #[cfg(feature = "mp4parse_fallible")]
     {
         let mut buf: Vec<u8> = Vec::new();
-        FallibleVec::try_reserve(&mut buf, size)?;
+        buf.try_reserve(size)?;
         unsafe { buf.set_len(size); }
         return Ok(buf);
     }
@@ -1377,12 +1377,6 @@ fn find_descriptor(data: &[u8], esds: &mut ES_Descriptor) -> Result<()> {
         let mut end: u32 = 0;   // It's u8 without declaration type that is incorrect.
         // MSB of extend_or_len indicates more bytes, up to 4 bytes.
         for _ in 0..4 {
-            if (des.position() as usize) == remains.len() {
-                // There's nothing more to read, the 0x80 was actually part of
-                // the content, and not an extension size.
-                end = des.position() as u32;
-                break;
-            }
             let extend_or_len = des.read_u8()?;
             end = (end << 7) + (extend_or_len & 0x7F) as u32;
             if (extend_or_len & 0x80) == 0 {

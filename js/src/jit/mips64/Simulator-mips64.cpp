@@ -550,6 +550,8 @@ class AutoLockSimulatorCache : public LockGuard<Mutex>
 
 mozilla::Atomic<size_t, mozilla::ReleaseAcquire>
     SimulatorProcess::ICacheCheckingDisableCount(1);  // Checking is disabled by default.
+mozilla::Atomic<bool, mozilla::ReleaseAcquire>
+    SimulatorProcess::cacheInvalidatedBySignalHandler_(false);
 SimulatorProcess* SimulatorProcess::singleton_ = nullptr;
 
 int64_t Simulator::StopSimAt = -1;
@@ -1213,11 +1215,25 @@ SimulatorProcess::checkICacheLocked(SimInstruction* instr)
     bool cache_hit = (*cache_valid_byte == CachePage::LINE_VALID);
     char* cached_line = cache_page->cachedData(offset & ~CachePage::kLineMask);
 
+    // Read all state before considering signal handler effects.
+    int cmpret = 0;
     if (cache_hit) {
         // Check that the data in memory matches the contents of the I-cache.
-        int cmpret = memcmp(reinterpret_cast<void*>(instr),
-                            cache_page->cachedData(offset),
-                            SimInstruction::kInstrSize);
+        cmpret = memcmp(reinterpret_cast<void*>(instr),
+                        cache_page->cachedData(offset),
+                        SimInstruction::kInstrSize);
+    }
+
+    // Check for signal handler interruption between reading state and asserting.
+    // It is safe for the signal to arrive during the !cache_hit path, since it
+    // will be cleared the next time this function is called.
+    if (cacheInvalidatedBySignalHandler_) {
+        icache().clear();
+        cacheInvalidatedBySignalHandler_ = false;
+        return;
+    }
+
+    if (cache_hit) {
         MOZ_ASSERT(cmpret == 0);
     } else {
         // Cache miss.  Load memory into the cache.
@@ -1262,6 +1278,7 @@ Simulator::Simulator()
     pc_modified_ = false;
     icount_ = 0;
     break_count_ = 0;
+    wasm_interrupt_ = false;
     break_pc_ = nullptr;
     break_instr_ = 0;
     single_stepping_ = false;
@@ -1628,6 +1645,35 @@ Simulator::registerState()
     return state;
 }
 
+// The signal handler only redirects the PC to the interrupt stub when the PC is
+// in function code. However, this guard is racy for the simulator since the
+// signal handler samples PC in the middle of simulating an instruction and thus
+// the current PC may have advanced once since the signal handler's guard. So we
+// re-check here.
+void
+Simulator::handleWasmInterrupt()
+{
+    if (!wasm::CodeExists)
+        return;
+
+    void* pc = (void*)get_pc();
+    void* fp = (void*)getRegister(Register::fp);
+
+    JitActivation* activation = TlsContext.get()->activation()->asJit();
+    const wasm::CodeSegment* segment = wasm::LookupCodeSegment(pc);
+    if (!segment || !segment->isModule() || !segment->containsCodePC(pc))
+        return;
+
+    // fp can be null during the prologue/epilogue of the entry function.
+    if (!fp)
+        return;
+
+    if (!activation->startWasmInterrupt(registerState()))
+         return;
+
+    set_pc(int64_t(segment->asModule()->interruptCode()));
+}
+
 // WebAssembly memories contain an extra region of guard pages (see
 // WasmArrayRawBuffer comment). The guard pages catch out-of-bounds accesses
 // using a signal handler that redirects PC to a stub that safely reports an
@@ -1664,16 +1710,17 @@ Simulator::handleWasmFault(uint64_t addr, unsigned numBytes)
 
     LLBit_ = false;
 
-    wasm::Trap trap;
-    wasm::BytecodeOffset bytecode;
-    if (!moduleSegment->code().lookupTrap(pc, &trap, &bytecode)) {
-        act->startWasmTrap(wasm::Trap::OutOfBounds, 0, registerState());
+    const wasm::MemoryAccess* memoryAccess = instance->code().lookupMemoryAccess(pc);
+    if (!memoryAccess) {
+        MOZ_ALWAYS_TRUE(act->startWasmInterrupt(registerState()));
+        if (!instance->code().containsCodePC(pc))
+            MOZ_CRASH("Cannot map PC to trap handler");
         set_pc(int64_t(moduleSegment->outOfBoundsCode()));
         return true;
     }
 
-    act->startWasmTrap(wasm::Trap::OutOfBounds, bytecode.offset(), registerState());
-    set_pc(int64_t(moduleSegment->trapCode()));
+    MOZ_ASSERT(memoryAccess->hasTrapOutOfLineCode());
+    set_pc(int64_t(memoryAccess->trapOutOfLineCode(moduleSegment->base())));
     return true;
 }
 
@@ -1700,7 +1747,7 @@ Simulator::handleWasmTrapFault()
     if (!moduleSegment->code().lookupTrap(pc, &trap, &bytecode))
         return false;
 
-    act->startWasmTrap(trap, bytecode.offset(), registerState());
+    act->startWasmTrap(trap, bytecode.offset, registerState());
     set_pc(int64_t(moduleSegment->trapCode()));
     return true;
 }
@@ -2109,25 +2156,25 @@ typedef int64_t (*Prototype_General7)(int64_t arg0, int64_t arg1, int64_t arg2, 
                                       int64_t arg4, int64_t arg5, int64_t arg6);
 typedef int64_t (*Prototype_General8)(int64_t arg0, int64_t arg1, int64_t arg2, int64_t arg3,
                                       int64_t arg4, int64_t arg5, int64_t arg6, int64_t arg7);
-typedef int32_t (*Prototype_Int_GeneralGeneralGeneralInt64)(int64_t arg0, int64_t arg1, int64_t arg2,
+typedef int64_t (*Prototype_GeneralGeneralGeneralInt64)(int64_t arg0, int64_t arg1, int64_t arg2,
                                                         int64_t arg3);
-typedef int32_t (*Prototype_Int_GeneralGeneralInt64Int64)(int64_t arg0, int64_t arg1, int64_t arg2,
+typedef int64_t (*Prototype_GeneralGeneralInt64Int64)(int64_t arg0, int64_t arg1, int64_t arg2,
                                                       int64_t arg3);
 typedef double (*Prototype_Double_None)();
 typedef double (*Prototype_Double_Double)(double arg0);
-typedef double (*Prototype_Double_Int)(int32_t arg0);
-typedef int32_t (*Prototype_Int_Double)(double arg0);
-typedef int32_t (*Prototype_Int_DoubleIntInt)(double arg0, int32_t arg1, int32_t arg2);
-typedef int32_t (*Prototype_Int_IntDoubleIntInt)(int32_t arg0, double arg1, int32_t arg2,
-                                                 int32_t arg3);
+typedef double (*Prototype_Double_Int)(int64_t arg0);
+typedef int64_t (*Prototype_Int_Double)(double arg0);
+typedef int64_t (*Prototype_Int_DoubleIntInt)(double arg0, int64_t arg1, int64_t arg2);
+typedef int64_t (*Prototype_Int_IntDoubleIntInt)(int64_t arg0, double arg1, int64_t arg2,
+                                                 int64_t arg3);
 typedef float (*Prototype_Float32_Float32)(float arg0);
 typedef float (*Prototype_Float32_Float32Float32)(float arg0, float arg1);
-typedef float (*Prototype_Float32_IntInt)(int32_t arg0, int32_t arg1);
+typedef float (*Prototype_Float32_IntInt)(int arg0, int arg1);
 
-typedef double (*Prototype_Double_DoubleInt)(double arg0, int32_t arg1);
-typedef double (*Prototype_Double_IntDouble)(int32_t arg0, double arg1);
+typedef double (*Prototype_DoubleInt)(double arg0, int64_t arg1);
+typedef double (*Prototype_Double_IntDouble)(int64_t arg0, double arg1);
 typedef double (*Prototype_Double_DoubleDouble)(double arg0, double arg1);
-typedef int32_t (*Prototype_Int_IntDouble)(int32_t arg0, double arg1);
+typedef int64_t (*Prototype_Int_IntDouble)(int64_t arg0, double arg1);
 
 typedef double (*Prototype_Double_DoubleDoubleDouble)(double arg0, double arg1, double arg2);
 typedef double (*Prototype_Double_DoubleDoubleDoubleDouble)(double arg0, double arg1,
@@ -2238,35 +2285,41 @@ Simulator::softwareInterrupt(SimInstruction* instr)
           case Args_Int_Double: {
             double dval0 = getFpuRegisterDouble(12);
             Prototype_Int_Double target = reinterpret_cast<Prototype_Int_Double>(external);
-            int32_t res = target(dval0);
+            int64_t res = target(dval0);
             setRegister(v0, res);
             break;
           }
           case Args_Int_GeneralGeneralGeneralInt64: {
-            Prototype_Int_GeneralGeneralGeneralInt64 target =
-                reinterpret_cast<Prototype_Int_GeneralGeneralGeneralInt64>(external);
-            int32_t res = target(arg0, arg1, arg2, arg3);
-            setRegister(v0, res);
+            Prototype_GeneralGeneralGeneralInt64 target =
+                reinterpret_cast<Prototype_GeneralGeneralGeneralInt64>(external);
+            int64_t result = target(arg0, arg1, arg2, arg3);
+            if(external == intptr_t(&js::wasm::Instance::wait_i32)) {
+                result = int32_t(result);
+            }
+            setCallResult(result);
             break;
           }
           case Args_Int_GeneralGeneralInt64Int64: {
-            Prototype_Int_GeneralGeneralInt64Int64 target =
-                reinterpret_cast<Prototype_Int_GeneralGeneralInt64Int64>(external);
-            int32_t res = target(arg0, arg1, arg2, arg3);
-            setRegister(v0, res);
+            Prototype_GeneralGeneralInt64Int64 target =
+                reinterpret_cast<Prototype_GeneralGeneralInt64Int64>(external);
+            int64_t result = target(arg0, arg1, arg2, arg3);
+            if(external == intptr_t(&js::wasm::Instance::wait_i64)) {
+                result = int32_t(result);
+            }
+            setCallResult(result);
             break;
           }
           case Args_Int_DoubleIntInt: {
             double dval = getFpuRegisterDouble(12);
             Prototype_Int_DoubleIntInt target = reinterpret_cast<Prototype_Int_DoubleIntInt>(external);
-            int32_t res = target(dval, int32_t(arg1), int32_t(arg2));
+            int64_t res = target(dval, arg1, arg2);
             setRegister(v0, res);
             break;
           }
           case Args_Int_IntDoubleIntInt: {
             double dval = getFpuRegisterDouble(13);
             Prototype_Int_IntDoubleIntInt target = reinterpret_cast<Prototype_Int_IntDoubleIntInt>(external);
-            int32_t res = target(int32_t(arg0), dval, int32_t(arg2), int32_t(arg3));
+            int64_t res = target(arg0, dval, arg2, arg3);
             setRegister(v0, res);
             break;
           }
@@ -2297,20 +2350,20 @@ Simulator::softwareInterrupt(SimInstruction* instr)
           }
           case Args_Float32_IntInt: {
             Prototype_Float32_IntInt target = reinterpret_cast<Prototype_Float32_IntInt>(external);
-            float fresult = target(int32_t(arg0), int32_t(arg1));
+            float fresult = target(arg0, arg1);
             setCallResultFloat(fresult);
             break;
           }
           case Args_Double_Int: {
             Prototype_Double_Int target = reinterpret_cast<Prototype_Double_Int>(external);
-            double dresult = target(int32_t(arg0));
+            double dresult = target(arg0);
             setCallResultDouble(dresult);
             break;
           }
           case Args_Double_DoubleInt: {
             double dval0 = getFpuRegisterDouble(12);
-            Prototype_Double_DoubleInt target = reinterpret_cast<Prototype_Double_DoubleInt>(external);
-            double dresult = target(dval0, int32_t(arg1));
+            Prototype_DoubleInt target = reinterpret_cast<Prototype_DoubleInt>(external);
+            double dresult = target(dval0, arg1);
             setCallResultDouble(dresult);
             break;
           }
@@ -2325,14 +2378,14 @@ Simulator::softwareInterrupt(SimInstruction* instr)
           case Args_Double_IntDouble: {
             double dval1 = getFpuRegisterDouble(13);
             Prototype_Double_IntDouble target = reinterpret_cast<Prototype_Double_IntDouble>(external);
-            double dresult = target(int32_t(arg0), dval1);
+            double dresult = target(arg0, dval1);
             setCallResultDouble(dresult);
             break;
           }
           case Args_Int_IntDouble: {
             double dval1 = getFpuRegisterDouble(13);
             Prototype_Int_IntDouble target = reinterpret_cast<Prototype_Int_IntDouble>(external);
-            int32_t result = target(int32_t(arg0), dval1);
+            int64_t result = target(arg0, dval1);
             setRegister(v0, result);
             break;
           }
@@ -4009,6 +4062,19 @@ Simulator::disable_single_stepping()
     single_step_callback_arg_ = nullptr;
 }
 
+static void
+FakeInterruptHandler()
+{
+    JSContext* cx = TlsContext.get();
+    uint8_t* pc = cx->simulator()->get_pc_as<uint8_t*>();
+
+    const wasm::ModuleSegment* ms = nullptr;
+    if (!wasm::InInterruptibleCode(cx, pc, &ms))
+        return;
+
+    cx->simulator()->trigger_wasm_interrupt();
+}
+
 template<bool enableStopSimAt>
 void
 Simulator::execute()
@@ -4027,9 +4093,16 @@ Simulator::execute()
         } else {
             if (single_stepping_)
                 single_step_callback_(single_step_callback_arg_, this, (void*)program_counter);
+            if (MOZ_UNLIKELY(JitOptions.simulatorAlwaysInterrupt))
+                FakeInterruptHandler();
             SimInstruction* instr = reinterpret_cast<SimInstruction *>(program_counter);
             instructionDecode(instr);
             icount_++;
+
+            if (MOZ_UNLIKELY(wasm_interrupt_)) {
+                handleWasmInterrupt();
+                wasm_interrupt_ = false;
+            }
         }
         program_counter = get_pc();
     }

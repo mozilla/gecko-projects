@@ -302,11 +302,13 @@ FSURLEncoded::GetEncodedSubmission(nsIURI* aURI,
                .SetPathQueryRef(path)
                .Finalize(aOutURI);
     } else {
-      uint32_t queryStringLength = mQueryString.Length();
+
       nsCOMPtr<nsIInputStream> dataStream;
-      rv = NS_NewCStringInputStream(getter_AddRefs(dataStream), Move(mQueryString));
+      // XXX We *really* need to either get the string to disown its data (and
+      // not destroy it), or make a string input stream that owns the CString
+      // that is passed to it.  Right now this operation does a copy.
+      rv = NS_NewCStringInputStream(getter_AddRefs(dataStream), mQueryString);
       NS_ENSURE_SUCCESS(rv, rv);
-      mQueryString.Truncate();
 
       nsCOMPtr<nsIMIMEInputStream> mimeStream(
         do_CreateInstance("@mozilla.org/network/mime-input-stream;1", &rv));
@@ -316,9 +318,10 @@ FSURLEncoded::GetEncodedSubmission(nsIURI* aURI,
                             "application/x-www-form-urlencoded");
       mimeStream->SetData(dataStream);
 
-      mimeStream.forget(aPostDataStream);
+      *aPostDataStream = mimeStream;
+      NS_ADDREF(*aPostDataStream);
 
-      *aPostDataStreamLength = queryStringLength;
+      *aPostDataStreamLength = mQueryString.Length();
     }
 
   } else {
@@ -779,9 +782,8 @@ FSTextPlain::GetEncodedSubmission(nsIURI* aURI,
                 ConvertLineBreaks(cbody.get(),
                                   nsLinebreakConverter::eLinebreakAny,
                                   nsLinebreakConverter::eLinebreakNet));
-    uint32_t bodyLength = cbody.Length();
     nsCOMPtr<nsIInputStream> bodyStream;
-    rv = NS_NewCStringInputStream(getter_AddRefs(bodyStream), Move(cbody));
+    rv = NS_NewCStringInputStream(getter_AddRefs(bodyStream), cbody);
     if (!bodyStream) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
@@ -795,7 +797,7 @@ FSTextPlain::GetEncodedSubmission(nsIURI* aURI,
     mimeStream->SetData(bodyStream);
     CallQueryInterface(mimeStream, aPostDataStream);
 
-    *aPostDataStreamLength = bodyLength;
+    *aPostDataStreamLength = cbody.Length();
   }
 
   return rv;

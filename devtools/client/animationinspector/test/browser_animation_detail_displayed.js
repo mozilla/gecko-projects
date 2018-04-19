@@ -16,9 +16,9 @@
 
 requestLongerTimeout(5);
 
-add_task(async function() {
-  await addTab(URL_ROOT + "doc_multiple_property_types.html");
-  const { panel, inspector } = await openAnimationInspector();
+add_task(function* () {
+  yield addTab(URL_ROOT + "doc_multiple_property_types.html");
+  const { panel, inspector } = yield openAnimationInspector();
   const timelineComponent = panel.animationsTimelineComponent;
   const animationDetailEl =
     timelineComponent.rootWrapperEl.querySelector(".animation-detail");
@@ -35,37 +35,37 @@ add_task(async function() {
      + "if multiple animations were displayed");
 
   // 3. Display after click on an animation.
-  await clickOnAnimation(panel, 0);
+  yield clickOnAnimation(panel, 0);
   isnot(win.getComputedStyle(splitboxControlledEl).display, "none",
         "The animation-detail element should be displayed after clicked on an animation");
 
   // 4. Display from first time if displayed animation is only one.
-  await selectNodeAndWaitForAnimations("#target1", inspector);
+  yield selectNodeAndWaitForAnimations("#target1", inspector);
   ok(animationDetailEl.querySelector(".property"),
      "The property in animation-detail element should be displayed");
 
   // 5. Close the animation-detail element by clicking on close button.
   const previousHeight = animationDetailEl.offsetHeight;
-  await clickCloseButtonForDetailPanel(timelineComponent, animationDetailEl);
+  yield clickCloseButtonForDetailPanel(timelineComponent, animationDetailEl);
   is(win.getComputedStyle(splitboxControlledEl).display, "none",
      "animation-detail element should not display");
 
   // Select another animation.
-  await selectNodeAndWaitForAnimations("#target2", inspector);
+  yield selectNodeAndWaitForAnimations("#target2", inspector);
   isnot(win.getComputedStyle(splitboxControlledEl).display, "none",
         "animation-detail element should display");
   is(animationDetailEl.offsetHeight, previousHeight,
      "The height of animation-detail should keep the height");
 
   // 6. Stay selected animation even if refresh all UI.
-  await selectNodeAndWaitForAnimations("#target1", inspector);
-  await clickTimelineRewindButton(panel);
+  yield selectNodeAndWaitForAnimations("#target1", inspector);
+  yield clickTimelineRewindButton(panel);
   ok(animationDetailEl.querySelector(".property"),
      "The property in animation-detail element should stay as is");
 
   // 7. Close the animation-detail element again and click selected animation again.
-  await clickCloseButtonForDetailPanel(timelineComponent, animationDetailEl);
-  await clickOnAnimation(panel, 0);
+  yield clickCloseButtonForDetailPanel(timelineComponent, animationDetailEl);
+  yield clickOnAnimation(panel, 0);
   isnot(win.getComputedStyle(splitboxControlledEl).display, "none",
      "animation-detail element should display again");
 });
@@ -77,9 +77,9 @@ add_task(async function() {
  * @param {DOMNode} animation-detail element
  * @return {Promise} which wait for close the detail pane
  */
-async function clickCloseButtonForDetailPanel(timeline, element) {
+function* clickCloseButtonForDetailPanel(timeline, element) {
   const button = element.querySelector(".animation-detail-header button");
   const onclosed = timeline.once("animation-detail-closed");
   EventUtils.sendMouseEvent({type: "click"}, button, element.ownerDocument.defaultView);
-  return onclosed;
+  return yield onclosed;
 }

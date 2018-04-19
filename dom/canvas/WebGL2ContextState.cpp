@@ -150,7 +150,10 @@ WebGL2Context::GetParameter(JSContext* cx, GLenum pname, ErrorResult& rv)
       return WebGLObjectAsJSValue(cx, mBoundPixelUnpackBuffer.get(), rv);
 
     case LOCAL_GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
-      return WebGLObjectAsJSValue(cx, mBoundTransformFeedbackBuffer.get(), rv);
+      {
+        const auto& tf = mBoundTransformFeedback;
+        return WebGLObjectAsJSValue(cx, tf->mGenericBufferBinding.get(), rv);
+      }
 
     case LOCAL_GL_UNIFORM_BUFFER_BINDING:
       return WebGLObjectAsJSValue(cx, mBoundUniformBuffer.get(), rv);

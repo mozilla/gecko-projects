@@ -74,7 +74,7 @@ PostMessageEvent::Run()
   RefPtr<nsGlobalWindowInner> targetWindow;
   if (mTargetWindow->IsClosedOrClosing() ||
       !(targetWindow = mTargetWindow->GetCurrentInnerWindowInternal()) ||
-      targetWindow->IsDying())
+      targetWindow->IsClosedOrClosing())
     return NS_OK;
 
   JSAutoCompartment ac(cx, targetWindow->GetWrapper());

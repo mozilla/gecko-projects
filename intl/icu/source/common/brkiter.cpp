@@ -52,7 +52,7 @@ U_NAMESPACE_BEGIN
 // -------------------------------------
 
 BreakIterator*
-BreakIterator::buildInstance(const Locale& loc, const char *type, UErrorCode &status)
+BreakIterator::buildInstance(const Locale& loc, const char *type, int32_t kind, UErrorCode &status)
 {
     char fnbuff[256];
     char ext[4]={'\0'};
@@ -121,6 +121,7 @@ BreakIterator::buildInstance(const Locale& loc, const char *type, UErrorCode &st
         U_LOCALE_BASED(locBased, *(BreakIterator*)result);
         locBased.setLocaleIDs(ures_getLocaleByType(b, ULOC_VALID_LOCALE, &status), 
                               actualLocale.data());
+        result->setBreakType(kind);
     }
 
     ures_close(b);
@@ -412,10 +413,10 @@ BreakIterator::makeInstance(const Locale& loc, int32_t kind, UErrorCode& status)
     BreakIterator *result = NULL;
     switch (kind) {
     case UBRK_CHARACTER:
-        result = BreakIterator::buildInstance(loc, "grapheme", status);
+        result = BreakIterator::buildInstance(loc, "grapheme", kind, status);
         break;
     case UBRK_WORD:
-        result = BreakIterator::buildInstance(loc, "word", status);
+        result = BreakIterator::buildInstance(loc, "word", kind, status);
         break;
     case UBRK_LINE:
         uprv_strcpy(lbType, "line");
@@ -428,10 +429,10 @@ BreakIterator::makeInstance(const Locale& loc, int32_t kind, UErrorCode& status)
                 uprv_strcat(lbType, lbKeyValue);
             }
         }
-        result = BreakIterator::buildInstance(loc, lbType, status);
+        result = BreakIterator::buildInstance(loc, lbType, kind, status);
         break;
     case UBRK_SENTENCE:
-        result = BreakIterator::buildInstance(loc, "sentence", status);
+        result = BreakIterator::buildInstance(loc, "sentence", kind, status);
 #if !UCONFIG_NO_FILTERED_BREAK_ITERATION
         {
             char ssKeyValue[kKeyValueLenMax] = {0};
@@ -448,7 +449,7 @@ BreakIterator::makeInstance(const Locale& loc, int32_t kind, UErrorCode& status)
 #endif
         break;
     case UBRK_TITLE:
-        result = BreakIterator::buildInstance(loc, "title", status);
+        result = BreakIterator::buildInstance(loc, "title", kind, status);
         break;
     default:
         status = U_ILLEGAL_ARGUMENT_ERROR;

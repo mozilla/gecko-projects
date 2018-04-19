@@ -1,31 +1,18 @@
-# Python
-*.py[co]
-.virtualenv/
-_venv/
-.cache/
-.pytest_cache/
-.tox/
-
-# Node
-node_modules/
-
-# WPT repo stuff
-/MANIFEST.json
-
-testharness_runner.html
-!/testharness_runner.html
-!/tools/wptrunner/wptrunner/testharness_runner.html
-
-_certs
-config.json
-
-# Various OS/editor specific files
 *#
+*.py[co]
 *.sw[po]
 *~
+MANIFEST.json
 \#*
+_certs
+.virtualenv
+config.json
+node_modules
 scratch
-.idea/
+testharness_runner.html
+webdriver/.idea
 .vscode/
 .DS_Store
 *.rej
+_venv
+webdriver/.cache

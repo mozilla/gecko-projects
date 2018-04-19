@@ -5,8 +5,10 @@
 
 // Test that whether animations detail could be displayed if there is selected animation.
 
-add_task(async function() {
-  await addTab(URL_ROOT + "doc_custom_playback_rate.html");
+requestLongerTimeout(2);
+
+add_task(async function () {
+  await addTab(URL_ROOT + "doc_multi_timings.html");
   const { animationInspector, inspector, panel } = await openAnimationInspector();
 
   info("Checking animation detail visibility if animation was unselected");
@@ -25,7 +27,7 @@ add_task(async function() {
     "detailEl should be unvisibled after choose html node");
 
   info("Checking animation detail visibility when choose node which has an animation");
-  await selectNodeAndWaitForAnimations("div", inspector);
+  await selectNodeAndWaitForAnimations(".cssanimation-normal", inspector);
   isnot(win.getComputedStyle(detailEl).display, "none",
     "detailEl should be visibled after choose .cssanimation-normal node");
 });

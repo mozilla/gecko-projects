@@ -300,7 +300,6 @@ public:
     , mLoadFlags(nsIChannel::LOAD_BYPASS_SERVICE_WORKER)
     , mState(WaitingForInitialization)
     , mPendingCount(0)
-    , mOnFailure(OnFailure::DoNothing)
     , mAreScriptsEqual(true)
   {
     MOZ_ASSERT(NS_IsMainThread());
@@ -361,7 +360,6 @@ public:
       MOZ_ASSERT(mCallback);
       mCallback->ComparisonResult(aStatus,
                                   true /* aSameScripts */,
-                                  mOnFailure,
                                   EmptyString(),
                                   mMaxScope,
                                   mLoadFlags);
@@ -478,10 +476,16 @@ private:
 
     mState = WaitingForScriptOrComparisonResult;
 
-    bool hasMainScript = false;
-    AutoTArray<nsString, 8> urlList;
+    // Always make sure to fetch the main script.  If the old cache has
+    // no entries or the main script entry is missing, then the loop below
+    // may not trigger it.  This should not really happen, but we handle it
+    // gracefully if it does occur.  Its possible the bad cache state is due
+    // to a crash or shutdown during an update, etc.
+    rv = FetchScript(mURL, true /* aIsMainScript */, mOldCache);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return;
+    }
 
-    // Extract the list of URLs in the old cache.
     for (uint32_t i = 0; i < len; ++i) {
       JS::Rooted<JS::Value> val(aCx);
       if (NS_WARN_IF(!JS_GetElement(aCx, obj, i, &val)) ||
@@ -495,41 +499,15 @@ private:
         return;
       };
 
-      nsString url;
-      request->GetUrl(url);
+      nsString URL;
+      request->GetUrl(URL);
 
-      if (!hasMainScript && url == mURL) {
-        hasMainScript = true;
-      }
-
-      urlList.AppendElement(url);
-    }
-
-    // If the main script is missing, then something has gone wrong.  We
-    // will try to continue with the update process to trigger a new
-    // installation.  If that fails, however, then uninstall the registration
-    // because it is broken in a way that cannot be fixed.
-    if (!hasMainScript) {
-      mOnFailure = OnFailure::Uninstall;
-    }
-
-    // Always make sure to fetch the main script.  If the old cache has
-    // no entries or the main script entry is missing, then the loop below
-    // may not trigger it.  This should not really happen, but we handle it
-    // gracefully if it does occur.  Its possible the bad cache state is due
-    // to a crash or shutdown during an update, etc.
-    rv = FetchScript(mURL, true /* aIsMainScript */, mOldCache);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return;
-    }
-
-    for (const auto& url : urlList) {
       // We explicitly start the fetch for the main script above.
-      if (mURL == url) {
+      if (mURL == URL) {
         continue;
       }
 
-      rv = FetchScript(url, false /* aIsMainScript */, mOldCache);
+      rv = FetchScript(URL, false /* aIsMainScript */, mOldCache);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return;
       }
@@ -696,7 +674,6 @@ private:
   } mState;
 
   uint32_t mPendingCount;
-  OnFailure mOnFailure;
   bool mAreScriptsEqual;
 };
 
@@ -1349,7 +1326,6 @@ CompareManager::ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue)
       if (--mPendingCount == 0) {
         mCallback->ComparisonResult(NS_OK,
                                     false /* aIsEqual */,
-                                    mOnFailure,
                                     mNewCacheName,
                                     mMaxScope,
                                     mLoadFlags);
@@ -1391,7 +1367,7 @@ void
 CompareManager::Fail(nsresult aStatus)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  mCallback->ComparisonResult(aStatus, false /* aIsEqual */, mOnFailure,
+  mCallback->ComparisonResult(aStatus, false /* aIsEqual */,
                               EmptyString(), EmptyCString(), mLoadFlags);
   Cleanup();
 }

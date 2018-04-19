@@ -12,6 +12,7 @@ const LISTS_PREF_BRANCH = "browser.safebrowsing.provider.mozilla.lists.";
 var gBlocklistManager = {
   _type: "",
   _blockLists: [],
+  _brandShortName: null,
   _bundle: null,
   _tree: null,
 
@@ -74,6 +75,15 @@ var gBlocklistManager = {
     }
 
     this._type = "tracking";
+    this._brandShortName = params.brandShortName;
+
+    let blocklistsText = document.getElementById("blocklistsText");
+    while (blocklistsText.hasChildNodes()) {
+      blocklistsText.firstChild.remove();
+    }
+    blocklistsText.appendChild(document.createTextNode(params.introText));
+
+    document.title = params.windowTitle;
 
     this._loadBlockLists();
   },

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{BorderRadius, BorderSide, BorderStyle, BorderWidths, ClipMode, ColorF, LayerPoint};
+use api::{BorderRadius, BorderSide, BorderStyle, BorderWidths, ColorF, LayerPoint};
 use api::{LayerPrimitiveInfo, LayerRect, LayerSize, NormalBorder, RepeatMode, TexelRect};
 use clip::ClipSource;
 use ellipse::Ellipse;
@@ -94,15 +94,6 @@ impl BorderCornerKind {
         };
         BorderCornerKind::Mask(clip_data, radius, LayerSize::new(width0, width1), kind)
     }
-
-    fn get_radius(&self, original_radius: &LayerSize) -> LayerSize {
-        match *self {
-            BorderCornerKind::Solid => *original_radius,
-            BorderCornerKind::Clip(..) => *original_radius,
-            BorderCornerKind::Mask(_, ref radius, _, _) => *radius,
-            BorderCornerKind::None => *original_radius,
-        }
-    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -112,125 +103,134 @@ pub enum BorderEdgeKind {
     Clip,
 }
 
-fn get_corner(
-    edge0: &BorderSide,
-    width0: f32,
-    edge1: &BorderSide,
-    width1: f32,
-    radius: &LayerSize,
-    corner: BorderCorner,
-    border_rect: &LayerRect,
-) -> BorderCornerKind {
-    // If both widths are zero, a corner isn't formed.
-    if width0 == 0.0 && width1 == 0.0 {
-        return BorderCornerKind::None;
-    }
+trait NormalBorderHelpers {
+    fn get_corner(
+        &self,
+        edge0: &BorderSide,
+        width0: f32,
+        edge1: &BorderSide,
+        width1: f32,
+        radius: &LayerSize,
+        corner: BorderCorner,
+        border_rect: &LayerRect,
+    ) -> BorderCornerKind;
 
-    // If both edges are transparent, no corner is formed.
-    if edge0.color.a == 0.0 && edge1.color.a == 0.0 {
-        return BorderCornerKind::None;
-    }
+    fn get_edge(&self, edge: &BorderSide, width: f32) -> (BorderEdgeKind, f32);
+}
 
-    match (edge0.style, edge1.style) {
-        // If both edges are none or hidden, no corner is needed.
-        (BorderStyle::None, BorderStyle::None) |
-        (BorderStyle::None, BorderStyle::Hidden) |
-        (BorderStyle::Hidden, BorderStyle::None) |
-        (BorderStyle::Hidden, BorderStyle::Hidden) => {
-            BorderCornerKind::None
+impl NormalBorderHelpers for NormalBorder {
+    fn get_corner(
+        &self,
+        edge0: &BorderSide,
+        width0: f32,
+        edge1: &BorderSide,
+        width1: f32,
+        radius: &LayerSize,
+        corner: BorderCorner,
+        border_rect: &LayerRect,
+    ) -> BorderCornerKind {
+        // If both widths are zero, a corner isn't formed.
+        if width0 == 0.0 && width1 == 0.0 {
+            return BorderCornerKind::None;
         }
 
-        // If one of the edges is none or hidden, we just draw one style.
-        (BorderStyle::None, _) |
-        (_, BorderStyle::None) |
-        (BorderStyle::Hidden, _) |
-        (_, BorderStyle::Hidden) => {
-            BorderCornerKind::Clip(BorderCornerInstance::Single)
+        // If both edges are transparent, no corner is formed.
+        if edge0.color.a == 0.0 && edge1.color.a == 0.0 {
+            return BorderCornerKind::None;
         }
 
-        // If both borders are solid, we can draw them with a simple rectangle if
-        // both the colors match and there is no radius.
-        (BorderStyle::Solid, BorderStyle::Solid) => {
-            if edge0.color == edge1.color && radius.width == 0.0 && radius.height == 0.0 {
-                BorderCornerKind::Solid
-            } else {
+        match (edge0.style, edge1.style) {
+            // If both edges are none or hidden, no corner is needed.
+            (BorderStyle::None, BorderStyle::None) |
+            (BorderStyle::None, BorderStyle::Hidden) |
+            (BorderStyle::Hidden, BorderStyle::None) |
+            (BorderStyle::Hidden, BorderStyle::Hidden) => {
+                BorderCornerKind::None
+            }
+
+            // If one of the edges is none or hidden, we just draw one style.
+            (BorderStyle::None, _) |
+            (_, BorderStyle::None) |
+            (BorderStyle::Hidden, _) |
+            (_, BorderStyle::Hidden) => {
                 BorderCornerKind::Clip(BorderCornerInstance::Single)
             }
-        }
 
-        // Inset / outset borders just modify the color of edges, so can be
-        // drawn with the normal border corner shader.
-        (BorderStyle::Outset, BorderStyle::Outset) |
-        (BorderStyle::Inset, BorderStyle::Inset) |
-        (BorderStyle::Double, BorderStyle::Double) |
-        (BorderStyle::Groove, BorderStyle::Groove) |
-        (BorderStyle::Ridge, BorderStyle::Ridge) => {
-            BorderCornerKind::Clip(BorderCornerInstance::Single)
-        }
+            // If both borders are solid, we can draw them with a simple rectangle if
+            // both the colors match and there is no radius.
+            (BorderStyle::Solid, BorderStyle::Solid) => {
+                if edge0.color == edge1.color && radius.width == 0.0 && radius.height == 0.0 {
+                    BorderCornerKind::Solid
+                } else {
+                    BorderCornerKind::Clip(BorderCornerInstance::Single)
+                }
+            }
 
-        // Dashed and dotted border corners get drawn into a clip mask.
-        (BorderStyle::Dashed, BorderStyle::Dashed) => BorderCornerKind::new_mask(
-            BorderCornerClipKind::Dash,
-            width0,
-            width1,
-            corner,
-            *radius,
-            *border_rect,
-        ),
-        (BorderStyle::Dotted, BorderStyle::Dotted) => {
-            let mut radius = *radius;
-            if radius.width < width0 {
-                radius.width = 0.0;
+            // Inset / outset borders just modtify the color of edges, so can be
+            // drawn with the normal border corner shader.
+            (BorderStyle::Outset, BorderStyle::Outset) |
+            (BorderStyle::Inset, BorderStyle::Inset) |
+            (BorderStyle::Double, BorderStyle::Double) |
+            (BorderStyle::Groove, BorderStyle::Groove) |
+            (BorderStyle::Ridge, BorderStyle::Ridge) => {
+                BorderCornerKind::Clip(BorderCornerInstance::Single)
             }
-            if radius.height < width1 {
-                radius.height = 0.0;
-            }
-            BorderCornerKind::new_mask(
+
+            // Dashed and dotted border corners get drawn into a clip mask.
+            (BorderStyle::Dashed, BorderStyle::Dashed) => BorderCornerKind::new_mask(
+                BorderCornerClipKind::Dash,
+                width0,
+                width1,
+                corner,
+                *radius,
+                *border_rect,
+            ),
+            (BorderStyle::Dotted, BorderStyle::Dotted) => BorderCornerKind::new_mask(
                 BorderCornerClipKind::Dot,
                 width0,
                 width1,
                 corner,
-                radius,
+                *radius,
                 *border_rect,
-             )
+            ),
+
+            // Draw border transitions with dots and/or dashes as
+            // solid segments. The old border path didn't support
+            // this anyway, so we might as well start using the new
+            // border path here, since the dashing in the edges is
+            // much higher quality anyway.
+            (BorderStyle::Dotted, _) |
+            (_, BorderStyle::Dotted) |
+            (BorderStyle::Dashed, _) |
+            (_, BorderStyle::Dashed) => BorderCornerKind::Clip(BorderCornerInstance::Single),
+
+            // Everything else can be handled by drawing the corner twice,
+            // where the shader outputs zero alpha for the side it's not
+            // drawing. This is somewhat inefficient in terms of pixels
+            // written, but it's a fairly rare case, and we can optimize
+            // this case later.
+            _ => BorderCornerKind::Clip(BorderCornerInstance::Double),
         }
-
-        // Draw border transitions with dots and/or dashes as
-        // solid segments. The old border path didn't support
-        // this anyway, so we might as well start using the new
-        // border path here, since the dashing in the edges is
-        // much higher quality anyway.
-        (BorderStyle::Dotted, _) |
-        (_, BorderStyle::Dotted) |
-        (BorderStyle::Dashed, _) |
-        (_, BorderStyle::Dashed) => BorderCornerKind::Clip(BorderCornerInstance::Single),
-
-        // Everything else can be handled by drawing the corner twice,
-        // where the shader outputs zero alpha for the side it's not
-        // drawing. This is somewhat inefficient in terms of pixels
-        // written, but it's a fairly rare case, and we can optimize
-        // this case later.
-        _ => BorderCornerKind::Clip(BorderCornerInstance::Double),
-    }
-}
-
-fn get_edge(edge: &BorderSide, width: f32, height: f32) -> (BorderEdgeKind, f32) {
-    if width == 0.0 || height <= 0.0 {
-        return (BorderEdgeKind::None, 0.0);
     }
 
-    match edge.style {
-        BorderStyle::None | BorderStyle::Hidden => (BorderEdgeKind::None, 0.0),
-
-        BorderStyle::Solid | BorderStyle::Inset | BorderStyle::Outset => {
-            (BorderEdgeKind::Solid, width)
+    fn get_edge(&self, edge: &BorderSide, width: f32) -> (BorderEdgeKind, f32) {
+        if width == 0.0 {
+            return (BorderEdgeKind::None, 0.0);
         }
 
-        BorderStyle::Double |
-        BorderStyle::Groove |
-        BorderStyle::Ridge |
-        BorderStyle::Dashed |
-        BorderStyle::Dotted => (BorderEdgeKind::Clip, width),
+        match edge.style {
+            BorderStyle::None | BorderStyle::Hidden => (BorderEdgeKind::None, 0.0),
+
+            BorderStyle::Solid | BorderStyle::Inset | BorderStyle::Outset => {
+                (BorderEdgeKind::Solid, width)
+            }
+
+            BorderStyle::Double |
+            BorderStyle::Groove |
+            BorderStyle::Ridge |
+            BorderStyle::Dashed |
+            BorderStyle::Dotted => (BorderEdgeKind::Clip, width),
+        }
     }
 }
 
@@ -284,13 +284,13 @@ impl<'a> DisplayListFlattener<'a> {
         &mut self,
         info: &LayerPrimitiveInfo,
         border: &NormalBorder,
-        radius: &BorderRadius,
         widths: &BorderWidths,
         clip_and_scroll: ScrollNodeAndClipChain,
         corner_instances: [BorderCornerInstance; 4],
         edges: [BorderEdgeKind; 4],
         clip_sources: Vec<ClipSource>,
     ) {
+        let radius = &border.radius;
         let left = &border.left;
         let right = &border.right;
         let top = &border.top;
@@ -373,65 +373,8 @@ impl<'a> DisplayListFlattener<'a> {
         let top = &border.top;
         let bottom = &border.bottom;
 
-        let constant_color = left.color;
-        let is_simple_border = [left, top, right, bottom].iter().all(|edge| {
-            edge.style == BorderStyle::Solid &&
-            edge.color == constant_color
-        });
-
-        if is_simple_border {
-            let extra_clips = vec![
-                ClipSource::new_rounded_rect(
-                    info.rect,
-                    border.radius,
-                    ClipMode::Clip,
-                ),
-                ClipSource::new_rounded_rect(
-                    LayerRect::new(
-                        LayerPoint::new(
-                            info.rect.origin.x + widths.left,
-                            info.rect.origin.y + widths.top,
-                        ),
-                        LayerSize::new(
-                            info.rect.size.width - widths.left - widths.right,
-                            info.rect.size.height - widths.top - widths.bottom,
-                        ),
-                    ),
-                    BorderRadius {
-                        top_left: LayerSize::new(
-                            (border.radius.top_left.width - widths.left).max(0.0),
-                            (border.radius.top_left.height - widths.top).max(0.0),
-                        ),
-                        top_right: LayerSize::new(
-                            (border.radius.top_right.width - widths.right).max(0.0),
-                            (border.radius.top_right.height - widths.top).max(0.0),
-                        ),
-                        bottom_left: LayerSize::new(
-                            (border.radius.bottom_left.width - widths.left).max(0.0),
-                            (border.radius.bottom_left.height - widths.bottom).max(0.0),
-                        ),
-                        bottom_right: LayerSize::new(
-                            (border.radius.bottom_right.width - widths.right).max(0.0),
-                            (border.radius.bottom_right.height - widths.bottom).max(0.0),
-                        ),
-                    },
-                    ClipMode::ClipOut,
-                ),
-            ];
-
-            self.add_solid_rectangle(
-                clip_and_scroll,
-                info,
-                border.top.color,
-                None,
-                extra_clips,
-            );
-
-            return;
-        }
-
         let corners = [
-            get_corner(
+            border.get_corner(
                 left,
                 widths.left,
                 top,
@@ -440,7 +383,7 @@ impl<'a> DisplayListFlattener<'a> {
                 BorderCorner::TopLeft,
                 &info.rect,
             ),
-            get_corner(
+            border.get_corner(
                 right,
                 widths.right,
                 top,
@@ -449,7 +392,7 @@ impl<'a> DisplayListFlattener<'a> {
                 BorderCorner::TopRight,
                 &info.rect,
             ),
-            get_corner(
+            border.get_corner(
                 right,
                 widths.right,
                 bottom,
@@ -458,7 +401,7 @@ impl<'a> DisplayListFlattener<'a> {
                 BorderCorner::BottomRight,
                 &info.rect,
             ),
-            get_corner(
+            border.get_corner(
                 left,
                 widths.left,
                 bottom,
@@ -469,14 +412,10 @@ impl<'a> DisplayListFlattener<'a> {
             ),
         ];
 
-        let (left_edge, left_len) = get_edge(left, widths.left,
-            info.rect.size.height - radius.top_left.height - radius.bottom_left.height);
-        let (top_edge, top_len) = get_edge(top, widths.top,
-            info.rect.size.width - radius.top_left.width - radius.top_right.width);
-        let (right_edge, right_len) = get_edge(right, widths.right,
-            info.rect.size.height - radius.top_right.height - radius.bottom_right.height);
-        let (bottom_edge, bottom_len) = get_edge(bottom, widths.bottom,
-            info.rect.size.width - radius.bottom_right.width - radius.bottom_left.width);
+        let (left_edge, left_len) = border.get_edge(left, widths.left);
+        let (top_edge, top_len) = border.get_edge(top, widths.top);
+        let (right_edge, right_len) = border.get_edge(right, widths.right);
+        let (bottom_edge, bottom_len) = border.get_edge(bottom, widths.bottom);
 
         let edges = [left_edge, top_edge, right_edge, bottom_edge];
 
@@ -506,7 +445,7 @@ impl<'a> DisplayListFlattener<'a> {
             let segment = |x0, y0, x1, y1| BrushSegment::new(
                 LayerPoint::new(x0, y0),
                 LayerSize::new(x1-x0, y1-y0),
-                true,
+                false,
                 EdgeAaSegmentMask::all() // Note: this doesn't seem right, needs revision
             );
 
@@ -523,10 +462,9 @@ impl<'a> DisplayListFlattener<'a> {
 
                 self.add_solid_rectangle(
                     clip_and_scroll,
-                    info,
+                    &info,
                     border.top.color,
                     Some(descriptor),
-                    Vec::new(),
                 );
             }
 
@@ -540,10 +478,9 @@ impl<'a> DisplayListFlattener<'a> {
 
                 self.add_solid_rectangle(
                     clip_and_scroll,
-                    info,
+                    &info,
                     border.left.color,
                     Some(descriptor),
-                    Vec::new(),
                 );
             }
 
@@ -557,10 +494,9 @@ impl<'a> DisplayListFlattener<'a> {
 
                 self.add_solid_rectangle(
                     clip_and_scroll,
-                    info,
+                    &info,
                     border.right.color,
                     Some(descriptor),
-                    Vec::new(),
                 );
             }
 
@@ -576,10 +512,9 @@ impl<'a> DisplayListFlattener<'a> {
 
                 self.add_solid_rectangle(
                     clip_and_scroll,
-                    info,
+                    &info,
                     border.bottom.color,
                     Some(descriptor),
-                    Vec::new(),
                 );
             }
         } else {
@@ -587,17 +522,9 @@ impl<'a> DisplayListFlattener<'a> {
             let mut extra_clips = Vec::new();
             let mut corner_instances = [BorderCornerInstance::Single; 4];
 
-            let radius = &border.radius;
-            let radius = BorderRadius {
-                top_left: corners[0].get_radius(&radius.top_left),
-                top_right: corners[1].get_radius(&radius.top_right),
-                bottom_right: corners[2].get_radius(&radius.bottom_right),
-                bottom_left: corners[3].get_radius(&radius.bottom_left),
-            };
-
             for (i, corner) in corners.iter().enumerate() {
                 match *corner {
-                    BorderCornerKind::Mask(corner_data, mut corner_radius, widths, kind) => {
+                    BorderCornerKind::Mask(corner_data, corner_radius, widths, kind) => {
                         let clip_source =
                             BorderCornerClipSource::new(corner_data, corner_radius, widths, kind);
                         extra_clips.push(ClipSource::BorderCorner(clip_source));
@@ -615,7 +542,6 @@ impl<'a> DisplayListFlattener<'a> {
             self.add_normal_border_primitive(
                 info,
                 &border,
-                &radius,
                 widths,
                 clip_and_scroll,
                 corner_instances,
@@ -717,35 +643,23 @@ impl BorderCornerClipSource {
                 (ellipse, 1 + desired_count.ceil() as usize)
             }
             BorderCornerClipKind::Dot => {
-                let mut corner_radius = corner_radius;
-                if corner_radius.width < (widths.width / 2.0) {
-                    corner_radius.width = 0.0;
-                }
-                if corner_radius.height < (widths.height / 2.0) {
-                    corner_radius.height = 0.0;
-                }
+                // The centers of dots follow an ellipse along the middle of the
+                // border radius.
+                let inner_radius = (corner_radius - widths * 0.5).abs();
+                let ellipse = Ellipse::new(inner_radius);
 
-                if corner_radius.width == 0. && corner_radius.height == 0. {
-                    (Ellipse::new(corner_radius), 1)
-                } else {
-                    // The centers of dots follow an ellipse along the middle of the
-                    // border radius.
-                    let inner_radius = (corner_radius - widths * 0.5).abs();
-                    let ellipse = Ellipse::new(inner_radius);
+                // Allocate a "worst case" number of dot clips. This can be
+                // calculated by taking the minimum edge radius, since that
+                // will result in the maximum number of dots along the path.
+                let min_diameter = widths.width.min(widths.height);
 
-                    // Allocate a "worst case" number of dot clips. This can be
-                    // calculated by taking the minimum edge radius, since that
-                    // will result in the maximum number of dots along the path.
-                    let min_diameter = widths.width.min(widths.height);
+                // Get the number of circles (assuming spacing of one diameter
+                // between dots).
+                let max_dot_count = 0.5 * ellipse.total_arc_length / min_diameter;
 
-                    // Get the number of circles (assuming spacing of one diameter
-                    // between dots).
-                    let max_dot_count = 0.5 * ellipse.total_arc_length / min_diameter;
-
-                    // Add space for one extra dot since they are centered at the
-                    // start of the arc.
-                    (ellipse, 1 + max_dot_count.ceil() as usize)
-                }
+                // Add space for one extra dot since they are centered at the
+                // start of the arc.
+                (ellipse, 1 + max_dot_count.ceil() as usize)
             }
         };
 
@@ -782,16 +696,6 @@ impl BorderCornerClipSource {
                 }
 
                 assert_eq!(request.close(), 2 + 2 * self.actual_clip_count);
-            }
-            BorderCornerClipKind::Dot if self.max_clip_count == 1 => {
-                let dot_diameter = lerp(self.widths.width, self.widths.height, 0.5);
-                let dot = BorderCornerDotClipData {
-                    center: LayerPoint::new(self.widths.width / 2.0, self.widths.height / 2.0),
-                    radius: 0.5 * dot_diameter,
-                };
-                self.actual_clip_count = 1;
-                dot.write(&mut request);
-                assert_eq!(request.close(), 3);
             }
             BorderCornerClipKind::Dot => {
                 let mut forward_dots = Vec::new();

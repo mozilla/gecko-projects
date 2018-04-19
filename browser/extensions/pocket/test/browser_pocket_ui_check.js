@@ -47,7 +47,7 @@ add_task(async function() {
 
   contextMenu.hidePopup();
   await popupHidden;
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 
   await promisePocketDisabled();
 

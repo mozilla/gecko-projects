@@ -54,11 +54,6 @@ dictionary PaymentDetailsInit : PaymentDetailsBase {
   required PaymentItem total;
 };
 
-dictionary PaymentDetailsUpdate : PaymentDetailsBase {
-  DOMString   error;
-  PaymentItem total;
-};
-
 enum PaymentShippingType {
   "shipping",
   "delivery",
@@ -79,7 +74,7 @@ dictionary PaymentOptions {
  Func="mozilla::dom::PaymentRequest::PrefEnabled"]
 interface PaymentRequest : EventTarget {
   [NewObject]
-  Promise<PaymentResponse> show(optional Promise<PaymentDetailsUpdate> detailsPromise);
+  Promise<PaymentResponse> show();
   [NewObject]
   Promise<void>            abort();
   [NewObject]

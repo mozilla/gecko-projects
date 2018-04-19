@@ -35,7 +35,7 @@ window.gActivityStreamStrings = {
   "prefs_section_rows_option": "{num} fila;{num} files",
   "prefs_search_header": "Cerca web",
   "prefs_topsites_description": "El llocs que visiteu més sovint",
-  "prefs_topstories_description2": "Great content from around the web, personalized for you",
+  "prefs_topstories_description": "Contingut d'alta qualitat que d'altra manera potser us passaria per alt",
   "prefs_topstories_show_sponsored_label": "Articles patrocinats per {provider}",
   "prefs_topstories_sponsored_learn_more": "Més informació",
   "prefs_highlights_description": "Una selecció dels llocs que heu desat o visitat",
@@ -89,6 +89,5 @@ window.gActivityStreamStrings = {
   "section_menu_action_add_topsite": "Afegeix com a lloc principal",
   "section_menu_action_move_up": "Mou cap amunt",
   "section_menu_action_move_down": "Mou cap avall",
-  "section_menu_action_privacy_notice": "Avís de privadesa",
-  "prefs_topstories_description": "Contingut d'alta qualitat que d'altra manera potser us passaria per alt"
+  "section_menu_action_privacy_notice": "Avís de privadesa"
 };

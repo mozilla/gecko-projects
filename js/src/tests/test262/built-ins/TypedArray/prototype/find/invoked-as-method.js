@@ -1,7 +1,7 @@
 // Copyright (C) 2016 the V8 project authors. All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
 /*---
-esid: sec-%typedarray%.prototype.find
+es6id: 22.2.3.10
 description: Requires a [[TypedArrayName]] internal slot.
 info: |
   22.2.3.10 %TypedArray%.prototype.find (predicate [ , thisArg ] )

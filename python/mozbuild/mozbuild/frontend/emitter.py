@@ -784,8 +784,7 @@ class TreeMetadataEmitter(LoggingMixin):
                 self._libs[libname].append(lib)
                 self._linkage.append((context, lib, 'USE_LIBS'))
                 linkables.append(lib)
-                if not lib.installed:
-                    generated_files.add(lib.lib_name)
+                generated_files.add(lib.lib_name)
                 if symbols_file and isinstance(symbols_file, SourcePath):
                     script = mozpath.join(
                         mozpath.dirname(mozpath.dirname(__file__)),
@@ -951,10 +950,6 @@ class TreeMetadataEmitter(LoggingMixin):
                 for target_var in ('SOURCES', 'UNIFIED_SOURCES'):
                     for suffix, srcs in ctxt_sources[target_var].items():
                         linkable.sources[suffix] += srcs
-                if no_pgo_sources:
-                    linkable.no_pgo_sources = no_pgo_sources
-                elif no_pgo:
-                    linkable.no_pgo = True
             for host_linkable in host_linkables:
                 for suffix, srcs in ctxt_sources['HOST_SOURCES'].items():
                     host_linkable.sources[suffix] += srcs
@@ -1193,12 +1188,12 @@ class TreeMetadataEmitter(LoggingMixin):
                         if isinstance(f, SourcePath):
                             if f.startswith('en-US/'):
                                 pass
-                            elif 'locales/en-US/' in f:
+                            elif '/locales/en-US/' in f:
                                 pass
                             else:
                                 raise SandboxValidationError(
                                         '%s paths must start with `en-US/` or '
-                                        'contain `locales/en-US/`: %s'
+                                        'contain `/locales/en-US/`: %s'
                                         % (var, f,), context)
 
                     if not isinstance(f, ObjDirPath):
@@ -1344,7 +1339,7 @@ class TreeMetadataEmitter(LoggingMixin):
 
         for idl in context['XPIDL_SOURCES']:
             yield XPIDLFile(context, mozpath.join(context.srcdir, idl),
-                xpidl_module)
+                xpidl_module, add_to_manifest=not context['XPIDL_NO_MANIFEST'])
 
     def _process_generated_files(self, context):
         for path in context['CONFIGURE_DEFINE_FILES']:
@@ -1395,7 +1390,7 @@ class TreeMetadataEmitter(LoggingMixin):
                     inputs.append(p)
 
                 yield GeneratedFile(context, script, method, outputs, inputs,
-                                    flags.flags, localized=localized, force=flags.force)
+                                    flags.flags, localized=localized)
 
     def _process_test_manifests(self, context):
         for prefix, info in TEST_MANIFESTS.items():

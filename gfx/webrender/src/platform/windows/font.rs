@@ -6,8 +6,7 @@ use api::{FontInstanceFlags, FontKey, FontRenderMode};
 use api::{ColorU, GlyphDimensions, GlyphKey, SubpixelDirection};
 use dwrote;
 use gamma_lut::{ColorLut, GammaLut};
-use glyph_rasterizer::{FontInstance, FontTransform, GlyphFormat};
-use glyph_rasterizer::{GlyphRasterResult, RasterizedGlyph};
+use glyph_rasterizer::{FontInstance, FontTransform, GlyphFormat, RasterizedGlyph};
 use internal_types::{FastHashMap, ResourceCacheError};
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
@@ -362,8 +361,11 @@ impl FontContext {
         }
     }
 
-    #[cfg(not(feature = "pathfinder"))]
-    pub fn rasterize_glyph(&mut self, font: &FontInstance, key: &GlyphKey) -> GlyphRasterResult {
+    pub fn rasterize_glyph(
+        &mut self,
+        font: &FontInstance,
+        key: &GlyphKey,
+    ) -> Option<RasterizedGlyph> {
         let (.., y_scale) = font.transform.compute_scale().unwrap_or((1.0, 1.0));
         let size = (font.size.to_f64_px() * y_scale) as f32;
         let bitmaps = is_bitmap_font(font);
@@ -407,7 +409,7 @@ impl FontContext {
         // Alpha texture bounds can sometimes return an empty rect
         // Such as for spaces
         if width == 0 || height == 0 {
-            return GlyphRasterResult::LoadFailed;
+            return None;
         }
 
         let pixels = analysis.create_alpha_texture(texture_type, bounds);
@@ -425,7 +427,7 @@ impl FontContext {
         };
         lut_correction.preblend(&mut bgra_pixels, font.color);
 
-        GlyphRasterResult::Bitmap(RasterizedGlyph {
+        Some(RasterizedGlyph {
             left: bounds.left as f32,
             top: -bounds.top as f32,
             width,

@@ -158,7 +158,7 @@ function checkPingFormat(aPing, aType, aHasClientId, aHasEnvironment) {
   Assert.equal("environment" in aPing, aHasEnvironment);
 }
 
-function checkPayloadInfo(data, reason) {
+function checkPayloadInfo(data) {
   const ALLOWED_REASONS = [
     "environment-change", "shutdown", "daily", "saved-session", "test-ping"
   ];
@@ -203,12 +203,6 @@ function checkPayloadInfo(data, reason) {
               f + " must have the correct type and valid data " + data[f]);
   }
 
-  // Check for a valid revision.
-  if (data.revision != "") {
-    const revisionUrlRegEx = /^http[s]?:\/\/hg.mozilla.org(\/[a-z\S]+)+(\/rev\/[0-9a-z]+)$/g;
-    Assert.ok(revisionUrlRegEx.test(data.revision));
-  }
-
   // Previous buildId is not mandatory.
   if (data.previousBuildId) {
     Assert.ok(stringCheck(data.previousBuildId));
@@ -216,7 +210,6 @@ function checkPayloadInfo(data, reason) {
 
   Assert.ok(ALLOWED_REASONS.find(r => r == data.reason),
             "Payload must contain an allowed reason.");
-  Assert.equal(data.reason, reason, "Payload reason must match expected.");
 
   Assert.ok(Date.parse(data.subsessionStartDate) >= Date.parse(data.sessionStartDate));
   Assert.ok(data.profileSubsessionCounter >= data.subsessionCounter);
@@ -324,7 +317,7 @@ function checkEvents(processes) {
 
 function checkPayload(payload, reason, successfulPings, savedPings) {
   Assert.ok("info" in payload, "Payload must contain an info section.");
-  checkPayloadInfo(payload.info, reason);
+  checkPayloadInfo(payload.info);
 
   Assert.ok(payload.simpleMeasurements.totalTime >= 0);
   Assert.ok(payload.simpleMeasurements.uptime >= 0);
@@ -1350,6 +1343,9 @@ add_task(async function test_experimentAnnotations_subsession() {
 add_task(async function test_savedPingsOnShutdown() {
   await TelemetryController.testReset();
 
+  // On desktop, we expect both "saved-session" and "shutdown" pings. We only expect
+  // the former on Android.
+  const expectedPingCount = (gIsAndroid) ? 1 : 2;
   // Assure that we store the ping properly when saving sessions on shutdown.
   // We make the TelemetryController shutdown to trigger a session save.
   const dir = TelemetryStorage.pingDirectoryPath;
@@ -1360,14 +1356,18 @@ add_task(async function test_savedPingsOnShutdown() {
   PingServer.clearRequests();
   await TelemetryController.testReset();
 
-  const ping = await PingServer.promiseNextPing();
+  const pings = await PingServer.promiseNextPings(expectedPingCount);
 
-  let expectedType   = gIsAndroid ? PING_TYPE_SAVED_SESSION : PING_TYPE_MAIN;
-  let expectedReason = gIsAndroid ? REASON_SAVED_SESSION : REASON_SHUTDOWN;
+  for (let ping of pings) {
+    Assert.ok("type" in ping);
 
-  checkPingFormat(ping, expectedType, true, true);
-  Assert.equal(ping.payload.info.reason, expectedReason);
-  Assert.equal(ping.clientId, gClientID);
+    let expectedReason =
+      (ping.type == PING_TYPE_SAVED_SESSION) ? REASON_SAVED_SESSION : REASON_SHUTDOWN;
+
+    checkPingFormat(ping, ping.type, true, true);
+    Assert.equal(ping.payload.info.reason, expectedReason);
+    Assert.equal(ping.clientId, gClientID);
+  }
 });
 
 add_task(async function test_sendShutdownPing() {
@@ -1382,11 +1382,18 @@ add_task(async function test_sendShutdownPing() {
 
   let checkPendingShutdownPing = async function() {
     let pendingPings = await TelemetryStorage.loadPendingPingList();
-    Assert.equal(pendingPings.length, 1,
-                 "We expect 1 pending ping: shutdown.");
+    Assert.equal(pendingPings.length, 2,
+                 "We expect 2 pending pings: shutdown and saved-session.");
     // Load the pings off the disk.
-    const shutdownPing = await TelemetryStorage.loadPendingPing(pendingPings[0].id);
+    const pings = [
+      await TelemetryStorage.loadPendingPing(pendingPings[0].id),
+      await TelemetryStorage.loadPendingPing(pendingPings[1].id)
+    ];
+    // Find the shutdown main ping and check that it contains the right data.
+    const shutdownPing = pings.find(p => p.type == "main");
     Assert.ok(shutdownPing, "The 'shutdown' ping must be saved to disk.");
+    Assert.ok(pings.find(p => p.type == "saved-session"),
+              "The 'saved-session' ping must be saved to disk.");
     Assert.equal("shutdown", shutdownPing.payload.info.reason,
                  "The 'shutdown' ping must be saved to disk.");
   };
@@ -2104,7 +2111,7 @@ add_task(async function test_pingExtendedStats() {
   Assert.ok(!("addonManager" in ping.payload.simpleMeasurements),
             "addonManager must not be sent if the extended set is off.");
   Assert.ok(!("UITelemetry" in ping.payload.simpleMeasurements),
-            "UITelemetry must not be sent.");
+            "UITelemetry must not be sent if the extended set is off.");
 
   // Restore the preference.
   Telemetry.canRecordExtended = true;
@@ -2122,8 +2129,8 @@ add_task(async function test_pingExtendedStats() {
 
   Assert.ok("addonManager" in ping.payload.simpleMeasurements,
             "addonManager must be sent if the extended set is on.");
-  Assert.ok(!("UITelemetry" in ping.payload.simpleMeasurements),
-            "UITelemetry must not be sent.");
+  Assert.ok("UITelemetry" in ping.payload.simpleMeasurements,
+            "UITelemetry must be sent if the extended set is on.");
 
   await TelemetryController.testShutdown();
 });

@@ -10,7 +10,6 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/Range.h"
-#include "mozilla/TextUtils.h"
 
 #include "jsapi.h"
 #include "jsfriendapi.h"
@@ -290,8 +289,6 @@ class JSString : public js::gc::Cell
 
     static const uint32_t INDEX_VALUE_BIT        = JS_BIT(7);
     static const uint32_t INDEX_VALUE_SHIFT      = 16;
-
-    static const uint32_t PINNED_ATOM_BIT        = JS_BIT(8);
 
     static const uint32_t MAX_LENGTH             = js::MaxStringLength;
 
@@ -891,10 +888,10 @@ class JSFlatString : public JSLinearString
         JS::AutoCheckCannotGC nogc;
         if (hasLatin1Chars()) {
             const JS::Latin1Char* s = latin1Chars(nogc);
-            return mozilla::IsAsciiDigit(*s) && isIndexSlow(s, length(), indexp);
+            return JS7_ISDEC(*s) && isIndexSlow(s, length(), indexp);
         }
         const char16_t* s = twoByteChars(nogc);
-        return mozilla::IsAsciiDigit(*s) && isIndexSlow(s, length(), indexp);
+        return JS7_ISDEC(*s) && isIndexSlow(s, length(), indexp);
     }
 
     /*
@@ -1159,22 +1156,10 @@ class JSAtom : public JSFlatString
     }
 
     // Transform this atom into a permanent atom. This is only done during
-    // initialization of the runtime. Permanent atoms are always pinned.
+    // initialization of the runtime.
     MOZ_ALWAYS_INLINE void morphIntoPermanentAtom() {
         MOZ_ASSERT(static_cast<JSString*>(this)->isAtom());
-        d.u1.flags |= PERMANENT_ATOM_FLAGS | PINNED_ATOM_BIT;
-    }
-
-    MOZ_ALWAYS_INLINE
-    bool isPinned() const {
-        return d.u1.flags & PINNED_ATOM_BIT;
-    }
-
-    // Mark the atom as pinned. For use by atomization only.
-    MOZ_ALWAYS_INLINE void setPinned() {
-        MOZ_ASSERT(static_cast<JSString*>(this)->isAtom());
-        MOZ_ASSERT(!isPinned());
-        d.u1.flags |= PINNED_ATOM_BIT;
+        d.u1.flags |= PERMANENT_ATOM_FLAGS;
     }
 
     inline js::HashNumber hash() const;
@@ -1264,7 +1249,7 @@ MOZ_ALWAYS_INLINE JSAtom*
 JSFlatString::morphAtomizedStringIntoPermanentAtom(js::HashNumber hash)
 {
     MOZ_ASSERT(!isAtom());
-    d.u1.flags |= PERMANENT_ATOM_FLAGS | PINNED_ATOM_BIT;
+    d.u1.flags |= PERMANENT_ATOM_FLAGS;
     d.u1.flags &= ~NON_ATOM_BIT;
     JSAtom* atom = &asAtom();
     atom->initHash(hash);
@@ -1588,21 +1573,9 @@ SubstringKernel(JSContext* cx, HandleString str, int32_t beginInt, int32_t lengt
 
 /*
  * Convert a value to a printable C string.
- *
- * As the function name implies, any characters in a converted printable string will be Latin1
- * characters. If there are any non-Latin1 characters in the original value, then those characters
- * will be changed to Unicode escape sequences(I.e. \udddd, dddd are 4 hex digits) in the printable
- * string.
  */
 extern const char*
-ValueToPrintableLatin1(JSContext* cx, const Value&, JSAutoByteString* bytes,
-                       bool asSource = false);
-
-/*
- * Convert a value to a printable C string encoded in UTF-8.
- */
-extern const char*
-ValueToPrintableUTF8(JSContext* cx, const Value&, JSAutoByteString* bytes, bool asSource = false);
+ValueToPrintable(JSContext* cx, const Value&, JSAutoByteString* bytes, bool asSource = false);
 
 /*
  * Convert a non-string value to a string, returning null after reporting an
@@ -1650,6 +1623,11 @@ extern JSString*
 StringToSource(JSContext* cx, JSString* str);
 
 } /* namespace js */
+
+// Addon IDs are interned atoms which are never destroyed. This detail is
+// not exposed outside the API.
+class JSAddonId : public JSAtom
+{};
 
 MOZ_ALWAYS_INLINE bool
 JSString::getChar(JSContext* cx, size_t index, char16_t* code)

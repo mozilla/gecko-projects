@@ -9,47 +9,85 @@ const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const { connect } = require("devtools/client/shared/vendor/react-redux");
 
-const FontEditor = createFactory(require("./FontEditor"));
-const FontOverview = createFactory(require("./FontOverview"));
+const Accordion = createFactory(require("devtools/client/inspector/layout/components/Accordion"));
+const FontList = createFactory(require("./FontList"));
 
+const { getStr } = require("../utils/l10n");
 const Types = require("../types");
 
 class FontsApp extends PureComponent {
   static get propTypes() {
     return {
       fontData: PropTypes.shape(Types.fontData).isRequired,
-      fontEditor: PropTypes.shape(Types.fontEditor).isRequired,
       fontOptions: PropTypes.shape(Types.fontOptions).isRequired,
-      onAxisUpdate: PropTypes.func.isRequired,
       onPreviewFonts: PropTypes.func.isRequired,
     };
   }
 
-  render() {
-    const {
+  renderElementFonts() {
+    let {
       fontData,
-      fontEditor,
       fontOptions,
-      onAxisUpdate,
       onPreviewFonts,
     } = this.props;
+    let { fonts } = fontData;
 
+    return fonts.length ?
+      FontList({
+        fonts,
+        fontOptions,
+        onPreviewFonts
+      })
+      :
+      dom.div(
+        {
+          className: "devtools-sidepanel-no-result"
+        },
+        getStr("fontinspector.noFontsOnSelectedElement")
+      );
+  }
+
+  renderOtherFonts() {
+    let {
+      fontData,
+      onPreviewFonts,
+      fontOptions,
+    } = this.props;
+    let { otherFonts } = fontData;
+
+    if (!otherFonts.length) {
+      return null;
+    }
+
+    return Accordion({
+      items: [
+        {
+          header: getStr("fontinspector.otherFontsInPageHeader"),
+          component: FontList,
+          componentProps: {
+            fontOptions,
+            fonts: otherFonts,
+            onPreviewFonts
+          },
+          opened: false
+        }
+      ]
+    });
+  }
+
+  render() {
     return dom.div(
       {
         className: "theme-sidebar inspector-tabpanel",
         id: "sidebar-panel-fontinspector"
       },
-      fontEditor.isVisible ?
-        FontEditor({
-          fontEditor,
-          onAxisUpdate,
-        })
-        :
-        FontOverview({
-          fontData,
-          fontOptions,
-          onPreviewFonts,
-        })
+      dom.div(
+        {
+          id: "font-container"
+        },
+        this.renderElementFonts(),
+        this.renderOtherFonts()
+      )
     );
   }
 }

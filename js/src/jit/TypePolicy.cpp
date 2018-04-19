@@ -66,7 +66,7 @@ BoxInputsPolicy::staticAdjustInputs(TempAllocator& alloc, MInstruction* ins)
 }
 
 bool
-ArithPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
+ArithPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
 {
     MIRType specialization = ins->typePolicySpecialization();
     if (specialization == MIRType::None)
@@ -121,7 +121,7 @@ AllDoublePolicy::staticAdjustInputs(TempAllocator& alloc, MInstruction* ins)
 }
 
 bool
-ComparePolicy::adjustInputs(TempAllocator& alloc, MInstruction* def) const
+ComparePolicy::adjustInputs(TempAllocator& alloc, MInstruction* def)
 {
     MOZ_ASSERT(def->isCompare());
     MCompare* compare = def->toCompare();
@@ -269,7 +269,7 @@ ComparePolicy::adjustInputs(TempAllocator& alloc, MInstruction* def) const
 }
 
 bool
-SameValuePolicy::adjustInputs(TempAllocator& alloc, MInstruction* def) const
+SameValuePolicy::adjustInputs(TempAllocator& alloc, MInstruction* def)
 {
     MOZ_ASSERT(def->isSameValue());
     MSameValue* sameValue = def->toSameValue();
@@ -300,7 +300,7 @@ SameValuePolicy::adjustInputs(TempAllocator& alloc, MInstruction* def) const
 }
 
 bool
-TypeBarrierPolicy::adjustInputs(TempAllocator& alloc, MInstruction* def) const
+TypeBarrierPolicy::adjustInputs(TempAllocator& alloc, MInstruction* def)
 {
     MTypeBarrier* ins = def->toTypeBarrier();
     MIRType inputType = ins->getOperand(0)->type();
@@ -355,7 +355,7 @@ TypeBarrierPolicy::adjustInputs(TempAllocator& alloc, MInstruction* def) const
 }
 
 bool
-TestPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
+TestPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
 {
     MDefinition* op = ins->getOperand(0);
     switch (op->type()) {
@@ -386,7 +386,7 @@ TestPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
 }
 
 bool
-BitwisePolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
+BitwisePolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
 {
     MIRType specialization = ins->typePolicySpecialization();
     if (specialization == MIRType::None)
@@ -413,7 +413,7 @@ BitwisePolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
 }
 
 bool
-PowPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
+PowPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
 {
     MIRType specialization = ins->typePolicySpecialization();
     MOZ_ASSERT(specialization == MIRType::Int32 ||
@@ -586,7 +586,7 @@ template bool Float32Policy<2>::staticAdjustInputs(TempAllocator& alloc, MInstru
 
 template <unsigned Op>
 bool
-FloatingPointPolicy<Op>::adjustInputs(TempAllocator& alloc, MInstruction* def) const
+FloatingPointPolicy<Op>::adjustInputs(TempAllocator& alloc, MInstruction* def)
 {
     MIRType policyType = def->typePolicySpecialization();
     if (policyType == MIRType::Double)
@@ -594,7 +594,7 @@ FloatingPointPolicy<Op>::adjustInputs(TempAllocator& alloc, MInstruction* def) c
     return Float32Policy<Op>::staticAdjustInputs(alloc, def);
 }
 
-template bool FloatingPointPolicy<0>::adjustInputs(TempAllocator& alloc, MInstruction* def) const;
+template bool FloatingPointPolicy<0>::adjustInputs(TempAllocator& alloc, MInstruction* def);
 
 template <unsigned Op>
 bool
@@ -611,16 +611,16 @@ template bool NoFloatPolicy<3>::staticAdjustInputs(TempAllocator& alloc, MInstru
 
 template <unsigned FirstOp>
 bool
-NoFloatPolicyAfter<FirstOp>::adjustInputs(TempAllocator& alloc, MInstruction* def) const
+NoFloatPolicyAfter<FirstOp>::adjustInputs(TempAllocator& alloc, MInstruction* def)
 {
     for (size_t op = FirstOp, e = def->numOperands(); op < e; op++)
         EnsureOperandNotFloat32(alloc, def, op);
     return true;
 }
 
-template bool NoFloatPolicyAfter<0>::adjustInputs(TempAllocator& alloc, MInstruction* def) const;
-template bool NoFloatPolicyAfter<1>::adjustInputs(TempAllocator& alloc, MInstruction* def) const;
-template bool NoFloatPolicyAfter<2>::adjustInputs(TempAllocator& alloc, MInstruction* def) const;
+template bool NoFloatPolicyAfter<0>::adjustInputs(TempAllocator& alloc, MInstruction* def);
+template bool NoFloatPolicyAfter<1>::adjustInputs(TempAllocator& alloc, MInstruction* def);
+template bool NoFloatPolicyAfter<2>::adjustInputs(TempAllocator& alloc, MInstruction* def);
 
 template <unsigned Op>
 bool
@@ -856,7 +856,7 @@ template bool
 SimdSameAsReturnedTypePolicy<1>::staticAdjustInputs(TempAllocator& alloc, MInstruction* ins);
 
 bool
-SimdAllPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
+SimdAllPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
 {
     for (unsigned i = 0, e = ins->numOperands(); i < e; i++)
         MOZ_ASSERT(ins->getOperand(i)->type() == ins->typePolicySpecialization());
@@ -865,17 +865,17 @@ SimdAllPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
 
 template <unsigned Op>
 bool
-SimdPolicy<Op>::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
+SimdPolicy<Op>::adjustInputs(TempAllocator& alloc, MInstruction* ins)
 {
     MOZ_ASSERT(ins->typePolicySpecialization() == ins->getOperand(Op)->type());
     return true;
 }
 
 template bool
-SimdPolicy<0>::adjustInputs(TempAllocator& alloc, MInstruction* ins) const;
+SimdPolicy<0>::adjustInputs(TempAllocator& alloc, MInstruction* ins);
 
 bool
-SimdShufflePolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
+SimdShufflePolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
 {
     MSimdGeneralShuffle* s = ins->toSimdGeneralShuffle();
 
@@ -899,7 +899,7 @@ SimdShufflePolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
 }
 
 bool
-SimdSelectPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
+SimdSelectPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
 {
     // First input is the mask, which has to be a boolean.
     MOZ_ASSERT(IsBooleanSimdType(ins->getOperand(0)->type()));
@@ -912,7 +912,7 @@ SimdSelectPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
 }
 
 bool
-CallPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
+CallPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
 {
     MCall* call = ins->toCall();
 
@@ -936,7 +936,7 @@ CallPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
 }
 
 bool
-CallSetElementPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
+CallSetElementPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
 {
     // The first operand should be an object.
     if (!SingleObjectPolicy::staticAdjustInputs(alloc, ins))
@@ -953,7 +953,7 @@ CallSetElementPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) cons
 }
 
 bool
-InstanceOfPolicy::adjustInputs(TempAllocator& alloc, MInstruction* def) const
+InstanceOfPolicy::adjustInputs(TempAllocator& alloc, MInstruction* def)
 {
     // Box first operand if it isn't object
     if (def->getOperand(0)->type() != MIRType::Object)
@@ -1054,7 +1054,7 @@ StoreUnboxedScalarPolicy::adjustValueInput(TempAllocator& alloc, MInstruction* i
 }
 
 bool
-StoreUnboxedScalarPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
+StoreUnboxedScalarPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
 {
     if (!SingleObjectPolicy::staticAdjustInputs(alloc, ins))
         return false;
@@ -1067,7 +1067,7 @@ StoreUnboxedScalarPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) 
 }
 
 bool
-StoreTypedArrayHolePolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
+StoreTypedArrayHolePolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
 {
     MStoreTypedArrayElementHole* store = ins->toStoreTypedArrayElementHole();
     MOZ_ASSERT(store->elements()->type() == MIRType::Elements);
@@ -1078,7 +1078,7 @@ StoreTypedArrayHolePolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
 }
 
 bool
-StoreUnboxedObjectOrNullPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
+StoreUnboxedObjectOrNullPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
 {
     if (!ObjectPolicy<0>::staticAdjustInputs(alloc, ins))
         return false;
@@ -1119,7 +1119,7 @@ StoreUnboxedObjectOrNullPolicy::adjustInputs(TempAllocator& alloc, MInstruction*
 }
 
 bool
-StoreUnboxedStringPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
+StoreUnboxedStringPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
 {
     if (!ObjectPolicy<0>::staticAdjustInputs(alloc, ins))
         return false;
@@ -1146,7 +1146,7 @@ StoreUnboxedStringPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) 
 }
 
 bool
-ClampPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
+ClampPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
 {
     MDefinition* in = ins->toClampToUint8()->input();
 
@@ -1164,7 +1164,7 @@ ClampPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
 }
 
 bool
-FilterTypeSetPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins) const
+FilterTypeSetPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
 {
     MOZ_ASSERT(ins->numOperands() == 1);
     MIRType inputType = ins->getOperand(0)->type();
@@ -1342,10 +1342,10 @@ namespace jit {
 //
 // This Macro use __VA_ARGS__ to account for commas of template parameters.
 #define DEFINE_TYPE_POLICY_SINGLETON_INSTANCES_(...)    \
-    const TypePolicy*                                   \
+    TypePolicy *                                        \
     __VA_ARGS__::Data::thisTypePolicy()                 \
     {                                                   \
-        static constexpr __VA_ARGS__ singletonType;     \
+        static __VA_ARGS__ singletonType;               \
         return &singletonType;                          \
     }
 
@@ -1378,7 +1378,7 @@ thisTypeSpecialization()
 // inherited from the TypePolicy::Data structure, or a member inherited from
 // NoTypePolicy if the MIR instruction has no type policy.
 #define DEFINE_MIR_TYPEPOLICY_MEMBERS_(op)      \
-    const TypePolicy*                           \
+    TypePolicy *                                \
     js::jit::M##op::typePolicy()                \
     {                                           \
         return M##op::thisTypePolicy();         \

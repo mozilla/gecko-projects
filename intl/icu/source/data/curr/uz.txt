@@ -376,10 +376,6 @@ uz{
         }
         MRO{
             "MRO",
-            "Mavritaniya uqiyasi (1973–2017)",
-        }
-        MRU{
-            "MRU",
             "Mavritaniya uqiyasi",
         }
         MUR{
@@ -528,10 +524,6 @@ uz{
         }
         STD{
             "STD",
-            "San-Tome va Prinsipi dobrasi (1977–2017)",
-        }
-        STN{
-            "STN",
             "San-Tome va Prinsipi dobrasi",
         }
         SYP{
@@ -727,7 +719,7 @@ uz{
         SHP{"£"}
         SRD{"$"}
         SSP{"£"}
-        STN{"Db"}
+        STD{"Db"}
         SYP{"£"}
         THB{"฿"}
         TOP{"T$"}
@@ -1121,10 +1113,6 @@ uz{
             other{"Makao patakasi"}
         }
         MRO{
-            one{"Mavritaniya uqiyasi (1973–2017)"}
-            other{"Mavritaniya uqiyasi (1973–2017)"}
-        }
-        MRU{
             one{"Mavritaniya uqiyasi"}
             other{"Mavritaniya uqiyasi"}
         }
@@ -1273,10 +1261,6 @@ uz{
             other{"Janubiy Sudan funti"}
         }
         STD{
-            one{"San-Tome va Prinsipi dobrasi (1977–2017)"}
-            other{"San-Tome va Prinsipi dobrasi (1977–2017)"}
-        }
-        STN{
             one{"San-Tome va Prinsipi dobrasi"}
             other{"San-Tome va Prinsipi dobrasi"}
         }
@@ -1397,5 +1381,5 @@ uz{
         one{"{0} {1}"}
         other{"{0} {1}"}
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.37.1"}
 }

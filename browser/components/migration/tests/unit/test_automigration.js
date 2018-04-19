@@ -5,7 +5,7 @@ ChromeUtils.import("resource:///modules/AutoMigrate.jsm", this);
 let gShimmedMigratorKeyPicker = null;
 let gShimmedMigrator = null;
 
-const kMsecPerMin = 60 * 1000;
+const kUsecPerMin = 60 * 1000000;
 
 // This is really a proxy on MigrationUtils, but if we specify that directly,
 // we get in trouble because the object itself is frozen, and Proxies can't
@@ -261,7 +261,7 @@ add_task(async function checkUndoRemoval() {
   Assert.equal(bookmark.title, "Some example bookmark", "Should have correct bookmark before undo.");
 
   // Insert 2 history visits
-  let now = new Date();
+  let now_uSec = Date.now() * 1000;
   let visitedURI = Services.io.newURI("http://www.example.com/");
   let frecencyUpdatePromise = new Promise(resolve => {
     let observer = {
@@ -273,15 +273,15 @@ add_task(async function checkUndoRemoval() {
     PlacesUtils.history.addObserver(observer);
   });
   await MigrationUtils.insertVisitsWrapper([{
-    url: visitedURI,
+    uri: visitedURI,
     visits: [
       {
-        transition: PlacesUtils.history.TRANSITION_LINK,
-        date: now,
+        transitionType: PlacesUtils.history.TRANSITION_LINK,
+        visitDate: now_uSec,
       },
       {
-        transition: PlacesUtils.history.TRANSITION_LINK,
-        date: new Date(now - 100 * kMsecPerMin),
+        transitionType: PlacesUtils.history.TRANSITION_LINK,
+        visitDate: now_uSec - 100 * kUsecPerMin,
       },
     ],
   }]);
@@ -496,34 +496,34 @@ add_task(async function testLoginsRemovalByUndo() {
 add_task(async function checkUndoVisitsState() {
   MigrationUtils.initializeUndoData();
   await MigrationUtils.insertVisitsWrapper([{
-    url: NetUtil.newURI("http://www.example.com/"),
+    uri: NetUtil.newURI("http://www.example.com/"),
     title: "Example",
     visits: [{
-      date: new Date("2015-07-10"),
-      transition: Ci.nsINavHistoryService.TRANSITION_LINK,
+      visitDate: new Date("2015-07-10").getTime() * 1000,
+      transitionType: Ci.nsINavHistoryService.TRANSITION_LINK,
     }, {
-      date: new Date("2015-09-10"),
-      transition: Ci.nsINavHistoryService.TRANSITION_LINK,
+      visitDate: new Date("2015-09-10").getTime() * 1000,
+      transitionType: Ci.nsINavHistoryService.TRANSITION_LINK,
     }, {
-      date: new Date("2015-08-10"),
-      transition: Ci.nsINavHistoryService.TRANSITION_LINK,
+      visitDate: new Date("2015-08-10").getTime() * 1000,
+      transitionType: Ci.nsINavHistoryService.TRANSITION_LINK,
     }],
   }, {
-    url: Services.io.newURI("http://www.example.org/"),
+    uri: NetUtil.newURI("http://www.example.org/"),
     title: "Example",
     visits: [{
-      date: new Date("2016-04-03"),
-      transition: Ci.nsINavHistoryService.TRANSITION_LINK,
+      visitDate: new Date("2016-04-03").getTime() * 1000,
+      transitionType: Ci.nsINavHistoryService.TRANSITION_LINK,
     }, {
-      date: new Date("2015-08-03"),
-      transition: Ci.nsINavHistoryService.TRANSITION_LINK,
+      visitDate: new Date("2015-08-03").getTime() * 1000,
+      transitionType: Ci.nsINavHistoryService.TRANSITION_LINK,
     }],
   }, {
-    url: "http://www.example.com/",
+    uri: NetUtil.newURI("http://www.example.com/"),
     title: "Example",
     visits: [{
-      date: new Date("2015-10-10"),
-      transition: Ci.nsINavHistoryService.TRANSITION_LINK,
+      visitDate: new Date("2015-10-10").getTime() * 1000,
+      transitionType: Ci.nsINavHistoryService.TRANSITION_LINK,
     }],
   }]);
   let undoVisitData = (await MigrationUtils.stopAndRetrieveUndoData()).get("visits");
@@ -532,14 +532,14 @@ add_task(async function checkUndoVisitsState() {
   Assert.deepEqual(undoVisitData.find(v => v.url == "http://www.example.com/"), {
     url: "http://www.example.com/",
     visitCount: 4,
-    first: new Date("2015-07-10").getTime(),
-    last: new Date("2015-10-10").getTime(),
+    first: new Date("2015-07-10").getTime() * 1000,
+    last: new Date("2015-10-10").getTime() * 1000,
   });
   Assert.deepEqual(undoVisitData.find(v => v.url == "http://www.example.org/"), {
     url: "http://www.example.org/",
     visitCount: 2,
-    first: new Date("2015-08-03").getTime(),
-    last: new Date("2016-04-03").getTime(),
+    first: new Date("2015-08-03").getTime() * 1000,
+    last: new Date("2016-04-03").getTime() * 1000,
   });
 
   await PlacesUtils.history.clear();
@@ -548,41 +548,41 @@ add_task(async function checkUndoVisitsState() {
 add_task(async function checkUndoVisitsState() {
   MigrationUtils.initializeUndoData();
   await MigrationUtils.insertVisitsWrapper([{
-    url: NetUtil.newURI("http://www.example.com/"),
+    uri: NetUtil.newURI("http://www.example.com/"),
     title: "Example",
     visits: [{
-      date: new Date("2015-07-10"),
-      transition: Ci.nsINavHistoryService.TRANSITION_LINK,
+      visitDate: new Date("2015-07-10").getTime() * 1000,
+      transitionType: Ci.nsINavHistoryService.TRANSITION_LINK,
     }, {
-      date: new Date("2015-09-10"),
-      transition: Ci.nsINavHistoryService.TRANSITION_LINK,
+      visitDate: new Date("2015-09-10").getTime() * 1000,
+      transitionType: Ci.nsINavHistoryService.TRANSITION_LINK,
     }, {
-      date: new Date("2015-08-10"),
-      transition: Ci.nsINavHistoryService.TRANSITION_LINK,
+      visitDate: new Date("2015-08-10").getTime() * 1000,
+      transitionType: Ci.nsINavHistoryService.TRANSITION_LINK,
     }],
   }, {
-    url: NetUtil.newURI("http://www.example.org/"),
+    uri: NetUtil.newURI("http://www.example.org/"),
     title: "Example",
     visits: [{
-      date: new Date("2016-04-03"),
-      transition: Ci.nsINavHistoryService.TRANSITION_LINK,
+      visitDate: new Date("2016-04-03").getTime() * 1000,
+      transitionType: Ci.nsINavHistoryService.TRANSITION_LINK,
     }, {
-      date: new Date("2015-08-03"),
-      transition: Ci.nsINavHistoryService.TRANSITION_LINK,
+      visitDate: new Date("2015-08-03").getTime() * 1000,
+      transitionType: Ci.nsINavHistoryService.TRANSITION_LINK,
     }],
   }, {
-    url: NetUtil.newURI("http://www.example.com/"),
+    uri: NetUtil.newURI("http://www.example.com/"),
     title: "Example",
     visits: [{
-      date: new Date("2015-10-10"),
-      transition: Ci.nsINavHistoryService.TRANSITION_LINK,
+      visitDate: new Date("2015-10-10").getTime() * 1000,
+      transitionType: Ci.nsINavHistoryService.TRANSITION_LINK,
     }],
   }, {
-    url: NetUtil.newURI("http://www.mozilla.org/"),
+    uri: NetUtil.newURI("http://www.mozilla.org/"),
     title: "Example",
     visits: [{
-      date: new Date("2015-01-01"),
-      transition: Ci.nsINavHistoryService.TRANSITION_LINK,
+      visitDate: new Date("2015-01-01").getTime() * 1000,
+      transitionType: Ci.nsINavHistoryService.TRANSITION_LINK,
     }],
   }]);
 

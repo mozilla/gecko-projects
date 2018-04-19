@@ -48,4 +48,5 @@ res/table-remove-row-hover.gif
 res/table-remove-row.gif
 res/multilocale.txt
 modules/commonjs/index.js
+chrome/toolkit/content/global/XPCNativeWrapper.js
 update.locale

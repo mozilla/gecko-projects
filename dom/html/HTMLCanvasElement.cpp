@@ -26,7 +26,6 @@
 #include "mozilla/gfx/Rect.h"
 #include "mozilla/layers/AsyncCanvasRenderer.h"
 #include "mozilla/layers/WebRenderCanvasRenderer.h"
-#include "mozilla/layers/WebRenderUserData.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
@@ -607,16 +606,14 @@ HTMLCanvasElement::CopyInnerTo(Element* aDest,
   return rv;
 }
 
-void
-HTMLCanvasElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
+nsresult HTMLCanvasElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   if (aVisitor.mEvent->mClass == eMouseEventClass) {
     WidgetMouseEventBase* evt = (WidgetMouseEventBase*)aVisitor.mEvent;
     if (mCurrentContext) {
       nsIFrame *frame = GetPrimaryFrame();
-      if (!frame) {
-        return;
-      }
+      if (!frame)
+        return NS_OK;
       nsPoint ptInRoot = nsLayoutUtils::GetEventCoordinatesRelativeTo(evt, frame);
       nsRect paddingRect = frame->GetContentRectRelativeToSelf();
       Point hitpoint;
@@ -627,7 +624,7 @@ HTMLCanvasElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
       aVisitor.mCanHandle = true;
     }
   }
-  nsGenericHTMLElement::GetEventTargetParent(aVisitor);
+  return nsGenericHTMLElement::GetEventTargetParent(aVisitor);
 }
 
 nsChangeHint
@@ -1101,9 +1098,14 @@ HTMLCanvasElement::InvalidateCanvasContent(const gfx::Rect* damageRect)
   // Instead, we mark the CanvasRenderer dirty and scheduling an empty transaction
   // which is effectively equivalent.
   CanvasRenderer* renderer = nullptr;
-  RefPtr<WebRenderCanvasData> data = GetWebRenderUserData<WebRenderCanvasData>(frame, static_cast<uint32_t>(DisplayItemType::TYPE_CANVAS));
-  if (data) {
-    renderer = data->GetCanvasRenderer();
+  if (frame->HasProperty(nsIFrame::WebRenderUserDataProperty())) {
+    nsIFrame::WebRenderUserDataTable* userDataTable =
+      frame->GetProperty(nsIFrame::WebRenderUserDataProperty());
+    RefPtr<WebRenderUserData> data;
+    userDataTable->Get(static_cast<uint32_t>(DisplayItemType::TYPE_CANVAS), getter_AddRefs(data));
+    if (data && data->AsCanvasData()) {
+      renderer = data->AsCanvasData()->GetCanvasRenderer();
+    }
   }
 
   if (renderer) {

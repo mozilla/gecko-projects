@@ -340,9 +340,9 @@ class GCSchedulingTunables
     /*
      * JSGC_MAX_NURSERY_BYTES
      *
-     * Maximum nursery size for each runtime.
+     * Maximum nursery size for each zone group.
      */
-    MainThreadData<size_t> gcMaxNurseryBytes_;
+    ActiveThreadData<size_t> gcMaxNurseryBytes_;
 
     /*
      * JSGC_ALLOCATION_THRESHOLD
@@ -351,7 +351,7 @@ class GCSchedulingTunables
      * usage.gcBytes() surpasses threshold.gcTriggerBytes() for a zone, the
      * zone may be scheduled for a GC, depending on the exact circumstances.
      */
-    MainThreadOrGCTaskData<size_t> gcZoneAllocThresholdBase_;
+    ActiveThreadOrGCTaskData<size_t> gcZoneAllocThresholdBase_;
 
     /*
      * JSGC_ALLOCATION_THRESHOLD_FACTOR
@@ -381,7 +381,7 @@ class GCSchedulingTunables
      * Totally disables |highFrequencyGC|, the HeapGrowthFactor, and other
      * tunables that make GC non-deterministic.
      */
-    MainThreadData<bool> dynamicHeapGrowthEnabled_;
+    ActiveThreadData<bool> dynamicHeapGrowthEnabled_;
 
     /*
      * JSGC_HIGH_FREQUENCY_TIME_LIMIT
@@ -389,7 +389,7 @@ class GCSchedulingTunables
      * We enter high-frequency mode if we GC a twice within this many
      * microseconds. This value is stored directly in microseconds.
      */
-    MainThreadData<uint64_t> highFrequencyThresholdUsec_;
+    ActiveThreadData<uint64_t> highFrequencyThresholdUsec_;
 
     /*
      * JSGC_HIGH_FREQUENCY_LOW_LIMIT
@@ -400,10 +400,10 @@ class GCSchedulingTunables
      * When in the |highFrequencyGC| mode, these parameterize the per-zone
      * "HeapGrowthFactor" computation.
      */
-    MainThreadData<uint64_t> highFrequencyLowLimitBytes_;
-    MainThreadData<uint64_t> highFrequencyHighLimitBytes_;
-    MainThreadData<double> highFrequencyHeapGrowthMax_;
-    MainThreadData<double> highFrequencyHeapGrowthMin_;
+    ActiveThreadData<uint64_t> highFrequencyLowLimitBytes_;
+    ActiveThreadData<uint64_t> highFrequencyHighLimitBytes_;
+    ActiveThreadData<double> highFrequencyHeapGrowthMax_;
+    ActiveThreadData<double> highFrequencyHeapGrowthMin_;
 
     /*
      * JSGC_LOW_FREQUENCY_HEAP_GROWTH
@@ -411,14 +411,14 @@ class GCSchedulingTunables
      * When not in |highFrequencyGC| mode, this is the global (stored per-zone)
      * "HeapGrowthFactor".
      */
-    MainThreadData<double> lowFrequencyHeapGrowth_;
+    ActiveThreadData<double> lowFrequencyHeapGrowth_;
 
     /*
      * JSGC_DYNAMIC_MARK_SLICE
      *
      * Doubles the length of IGC slices when in the |highFrequencyGC| mode.
      */
-    MainThreadData<bool> dynamicMarkSliceEnabled_;
+    ActiveThreadData<bool> dynamicMarkSliceEnabled_;
 
     /*
      * JSGC_MIN_EMPTY_CHUNK_COUNT
@@ -473,7 +473,7 @@ class GCSchedulingState
      * growth factor is a measure of how large (as a percentage of the last GC)
      * the heap is allowed to grow before we try to schedule another GC.
      */
-    MainThreadData<bool> inHighFrequencyGCMode_;
+    ActiveThreadData<bool> inHighFrequencyGCMode_;
 
   public:
     GCSchedulingState()
@@ -500,7 +500,7 @@ class MemoryCounter
     size_t maxBytes_;
 
     // The counter value at the start of a GC.
-    MainThreadData<size_t> bytesAtStartOfGC_;
+    ActiveThreadData<size_t> bytesAtStartOfGC_;
 
     // Which kind of GC has been triggered if any.
     mozilla::Atomic<TriggerKind, mozilla::ReleaseAcquire> triggered_;

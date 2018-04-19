@@ -11,7 +11,6 @@
 #include "mozilla/Casting.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/PodOperations.h"
-#include "mozilla/TextUtils.h"
 
 #include <string.h>
 #ifndef XP_WIN
@@ -19,11 +18,11 @@
 #endif
 
 #include "jsapi.h"
+#include "jsarray.h"
 #include "jsnum.h"
 #include "jstypes.h"
 #include "jsutil.h"
 
-#include "builtin/Array.h"
 #include "builtin/DataViewObject.h"
 #include "builtin/TypedObjectConstants.h"
 #include "gc/Barrier.h"
@@ -53,7 +52,6 @@ using namespace js;
 using namespace js::gc;
 
 using mozilla::AssertedCast;
-using mozilla::IsAsciiDigit;
 using JS::CanonicalizeNaN;
 using JS::ToInt32;
 using JS::ToUint32;
@@ -198,7 +196,7 @@ TypedArrayObject::objectMoved(JSObject* obj, JSObject* old)
         return 0;
     }
 
-    Nursery& nursery = obj->runtimeFromMainThread()->gc.nursery();
+    Nursery& nursery = obj->zone()->group()->nursery();
     void* buf = oldObj->elements();
 
     if (!nursery.isInside(buf)) {
@@ -343,7 +341,7 @@ class TypedArrayObjectTemplate : public TypedArrayObject
             return nullptr;
 
         const Class* clasp = TypedArrayObject::protoClassForType(ArrayTypeID());
-        return GlobalObject::createBlankPrototypeInheriting(cx, clasp, typedArrayProto);
+        return GlobalObject::createBlankPrototypeInheriting(cx, global, clasp, typedArrayProto);
     }
 
     static JSObject*
@@ -405,7 +403,7 @@ class TypedArrayObjectTemplate : public TypedArrayObject
     {
         MOZ_ASSERT(proto);
 
-        JSObject* obj = NewObjectWithGivenProto(cx, instanceClass(), proto, allocKind);
+        JSObject* obj = NewObjectWithClassProto(cx, instanceClass(), proto, allocKind);
         return obj ? &obj->as<TypedArrayObject>() : nullptr;
     }
 
@@ -496,7 +494,7 @@ class TypedArrayObjectTemplate : public TypedArrayObject
                     MOZ_ASSERT(buffer->byteLength() == 0 &&
                                (uintptr_t(ptr.unwrapValue()) & gc::ChunkMask) == 0);
                 } else {
-                    cx->runtime()->gc.storeBuffer().putWholeCell(obj);
+                    cx->zone()->group()->storeBuffer().putWholeCell(obj);
                 }
             }
         } else {
@@ -1407,10 +1405,35 @@ JS_FOR_EACH_TYPED_ARRAY(CHECK_TYPED_ARRAY_CONSTRUCTOR)
     return true;
 }
 
+/*
+ * These next 3 functions are brought to you by the buggy GCC we use to build
+ * B2G ICS. Older GCC versions have a bug in which they fail to compile
+ * reinterpret_casts of templated functions with the message: "insufficient
+ * contextual information to determine type". JS_PSG needs to
+ * reinterpret_cast<JSGetterOp>, so this causes problems for us here.
+ *
+ * We could restructure all this code to make this nicer, but since ICS isn't
+ * going to be around forever (and since this bug is fixed with the newer GCC
+ * versions we use on JB and KK), the workaround here is designed for ease of
+ * removal. When you stop seeing ICS Emulator builds on TBPL, remove these 3
+ * JSNatives and insert the templated callee directly into the JS_PSG below.
+ */
 static bool
 TypedArray_lengthGetter(JSContext* cx, unsigned argc, Value* vp)
 {
     return TypedArrayObject::Getter<TypedArrayObject::lengthValue>(cx, argc, vp);
+}
+
+static bool
+TypedArray_byteLengthGetter(JSContext* cx, unsigned argc, Value* vp)
+{
+    return TypedArrayObject::Getter<TypedArrayObject::byteLengthValue>(cx, argc, vp);
+}
+
+static bool
+TypedArray_byteOffsetGetter(JSContext* cx, unsigned argc, Value* vp)
+{
+    return TypedArrayObject::Getter<TypedArrayObject::byteOffsetValue>(cx, argc, vp);
 }
 
 bool
@@ -1435,8 +1458,8 @@ js::TypedArray_bufferGetter(JSContext* cx, unsigned argc, Value* vp)
 TypedArrayObject::protoAccessors[] = {
     JS_PSG("length", TypedArray_lengthGetter, 0),
     JS_PSG("buffer", TypedArray_bufferGetter, 0),
-    JS_PSG("byteLength", TypedArrayObject::Getter<TypedArrayObject::byteLengthValue>, 0),
-    JS_PSG("byteOffset", TypedArrayObject::Getter<TypedArrayObject::byteOffsetValue>, 0),
+    JS_PSG("byteLength", TypedArray_byteLengthGetter, 0),
+    JS_PSG("byteOffset", TypedArray_byteOffsetGetter, 0),
     JS_SELF_HOSTED_SYM_GET(toStringTag, "TypedArrayToStringTag", 0),
     JS_PS_END
 };
@@ -2175,7 +2198,7 @@ js::StringIsTypedArrayIndex(const CharT* s, size_t length, uint64_t* indexp)
             return false;
     }
 
-    if (!IsAsciiDigit(*s))
+    if (!JS7_ISDEC(*s))
         return false;
 
     uint64_t index = 0;
@@ -2188,7 +2211,7 @@ js::StringIsTypedArrayIndex(const CharT* s, size_t length, uint64_t* indexp)
     index = digit;
 
     for (; s < end; s++) {
-        if (!IsAsciiDigit(*s))
+        if (!JS7_ISDEC(*s))
             return false;
 
         digit = JS7_UNDEC(*s);

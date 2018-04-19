@@ -155,8 +155,7 @@ this.SnippetsFeed = class SnippetsFeed {
       defaultBrowser: this.isDefaultBrowser(),
       isDevtoolsUser: this.isDevtoolsUser(),
       addonInfo: await this.getAddonInfo(),
-      blockList: await this._getBlockList() || [],
-      previousSessionEnd: this._previousSessionEnd
+      blockList: await this._getBlockList() || []
     };
     this._dispatchChanges(data);
   }
@@ -169,17 +168,16 @@ this.SnippetsFeed = class SnippetsFeed {
   }
 
   async init() {
-    Services.obs.addObserver(this, SEARCH_ENGINE_OBSERVER_TOPIC);
-    this._previousSessionEnd = await this._storage.get("previousSessionEnd");
+    await this._storage.init();
     await this._refresh();
     Services.prefs.addObserver(ONBOARDING_FINISHED_PREF, this._refresh);
     Services.prefs.addObserver(SNIPPETS_URL_PREF, this._refresh);
     Services.prefs.addObserver(TELEMETRY_PREF, this._refresh);
     Services.prefs.addObserver(FXA_USERNAME_PREF, this._refresh);
+    Services.obs.addObserver(this, SEARCH_ENGINE_OBSERVER_TOPIC);
   }
 
   uninit() {
-    this._storage.set("previousSessionEnd", Date.now());
     Services.prefs.removeObserver(ONBOARDING_FINISHED_PREF, this._refresh);
     Services.prefs.removeObserver(SNIPPETS_URL_PREF, this._refresh);
     Services.prefs.removeObserver(TELEMETRY_PREF, this._refresh);

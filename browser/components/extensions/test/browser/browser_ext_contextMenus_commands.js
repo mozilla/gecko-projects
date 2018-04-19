@@ -76,6 +76,6 @@ add_task(async function() {
   ok(await testContext("open_browser_action"), "_execute_browser_action worked");
   ok(await testContext("open_page_action"), "_execute_page_action worked");
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
   await extension.unload();
 });

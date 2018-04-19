@@ -65,5 +65,5 @@ add_task(async function() {
   is(lastMessageReceived, "Test:FocusReceived",
      "Should receive blur and then focus event");
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

@@ -155,7 +155,8 @@ function PreviewController(win, tab) {
 }
 
 PreviewController.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsITaskbarPreviewController]),
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsITaskbarPreviewController,
+                                         Ci.nsIDOMEventListener]),
 
   destroy() {
     this.tab.removeEventListener("TabAttrModified", this);
@@ -332,7 +333,7 @@ PreviewController.prototype = {
     return true;
   },
 
-  // EventListener
+  // nsIDOMEventListener
   handleEvent(evt) {
     switch (evt.type) {
       case "TabAttrModified":
@@ -495,7 +496,7 @@ TabWindow.prototype = {
     }
   },
 
-  // EventListener
+  // nsIDOMEventListener
   handleEvent(evt) {
     let tab = evt.originalTarget;
     switch (evt.type) {

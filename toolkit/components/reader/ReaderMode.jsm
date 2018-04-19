@@ -32,7 +32,7 @@ const CLASSES_TO_PRESERVE = [
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-Cu.importGlobalProperties(["XMLHttpRequest", "XMLSerializer"]);
+Cu.importGlobalProperties(["XMLHttpRequest"]);
 
 ChromeUtils.defineModuleGetter(this, "CommonUtils", "resource://services-common/utils.js");
 ChromeUtils.defineModuleGetter(this, "EventDispatcher", "resource://gre/modules/Messaging.jsm");
@@ -102,7 +102,7 @@ var ReaderMode = {
     let webNav = docShell.QueryInterface(Ci.nsIWebNavigation);
     let sh = webNav.sessionHistory;
     if (webNav.canGoForward) {
-      let forwardEntry = sh.legacySHistory.getEntryAtIndex(sh.index + 1, false);
+      let forwardEntry = sh.getEntryAtIndex(sh.index + 1, false);
       let forwardURL = forwardEntry.URI.spec;
       if (forwardURL && (forwardURL == readerURL || !readerURL)) {
         webNav.goForward();
@@ -123,7 +123,7 @@ var ReaderMode = {
     let webNav = docShell.QueryInterface(Ci.nsIWebNavigation);
     let sh = webNav.sessionHistory;
     if (webNav.canGoBack) {
-      let prevEntry = sh.legacySHistory.getEntryAtIndex(sh.index - 1, false);
+      let prevEntry = sh.getEntryAtIndex(sh.index - 1, false);
       let prevURL = prevEntry.URI.spec;
       if (prevURL && (prevURL == originalURL || !originalURL)) {
         webNav.goBack();
@@ -471,7 +471,8 @@ var ReaderMode = {
       pathBase: Services.io.newURI(".", null, doc.baseURIObject).spec
     };
 
-    let serializer = new XMLSerializer();
+    let serializer = Cc["@mozilla.org/xmlextras/xmlserializer;1"].
+                     createInstance(Ci.nsIDOMSerializer);
     let serializedDoc = serializer.serializeToString(doc);
 
     let options = {

@@ -11,7 +11,9 @@
 namespace mozilla {
 namespace layers {
 
-KeyboardShortcut::KeyboardShortcut() = default;
+KeyboardShortcut::KeyboardShortcut()
+{
+}
 
 KeyboardShortcut::KeyboardShortcut(KeyboardInput::KeyboardEventType aEventType,
                                    uint32_t aKeyCode,
@@ -128,7 +130,9 @@ KeyboardMap::KeyboardMap(nsTArray<KeyboardShortcut>&& aShortcuts)
 {
 }
 
-KeyboardMap::KeyboardMap() = default;
+KeyboardMap::KeyboardMap()
+{
+}
 
 Maybe<KeyboardShortcut>
 KeyboardMap::FindMatch(const KeyboardInput& aEvent) const

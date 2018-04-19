@@ -52,7 +52,6 @@ static bool Execute(JSContext* cx, MacroAssembler& masm)
     if (!ExecutableAllocator::makeExecutable(code->raw(), code->bufferSize()))
         return false;
 
-    JS::AutoSuppressGCAnalysis suppress;
     EnterTest test = code->as<EnterTest>();
     test();
     return true;
@@ -60,7 +59,7 @@ static bool Execute(JSContext* cx, MacroAssembler& masm)
 
 BEGIN_TEST(testJitMacroAssembler_truncateDoubleToInt64)
 {
-    StackMacroAssembler masm(cx);
+    MacroAssembler masm(cx);
 
     if (!Prepare(masm))
         return false;
@@ -108,7 +107,7 @@ END_TEST(testJitMacroAssembler_truncateDoubleToInt64)
 
 BEGIN_TEST(testJitMacroAssembler_truncateDoubleToUInt64)
 {
-    StackMacroAssembler masm(cx);
+    MacroAssembler masm(cx);
 
     if (!Prepare(masm))
         return false;
@@ -160,7 +159,7 @@ END_TEST(testJitMacroAssembler_truncateDoubleToUInt64)
 
 BEGIN_TEST(testJitMacroAssembler_branchDoubleNotInInt64Range)
 {
-    StackMacroAssembler masm(cx);
+    MacroAssembler masm(cx);
 
     if (!Prepare(masm))
         return false;
@@ -214,7 +213,7 @@ END_TEST(testJitMacroAssembler_branchDoubleNotInInt64Range)
 
 BEGIN_TEST(testJitMacroAssembler_branchDoubleNotInUInt64Range)
 {
-    StackMacroAssembler masm(cx);
+    MacroAssembler masm(cx);
 
     if (!Prepare(masm))
         return false;
@@ -271,7 +270,7 @@ END_TEST(testJitMacroAssembler_branchDoubleNotInUInt64Range)
 
 BEGIN_TEST(testJitMacroAssembler_lshift64)
 {
-    StackMacroAssembler masm(cx);
+    MacroAssembler masm(cx);
 
     if (!Prepare(masm))
         return false;
@@ -340,7 +339,7 @@ END_TEST(testJitMacroAssembler_lshift64)
 
 BEGIN_TEST(testJitMacroAssembler_rshift64Arithmetic)
 {
-    StackMacroAssembler masm(cx);
+    MacroAssembler masm(cx);
 
     if (!Prepare(masm))
         return false;
@@ -408,7 +407,7 @@ END_TEST(testJitMacroAssembler_rshift64Arithmetic)
 
 BEGIN_TEST(testJitMacroAssembler_rshift64)
 {
-    StackMacroAssembler masm(cx);
+    MacroAssembler masm(cx);
 
     if (!Prepare(masm))
         return false;

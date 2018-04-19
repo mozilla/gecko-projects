@@ -534,7 +534,6 @@ Connection::Connection(Service *aService,
 , mDBConn(nullptr)
 , mAsyncExecutionThreadShuttingDown(false)
 , mConnectionClosed(false)
-, mDefaultTransactionType(mozIStorageConnection::TRANSACTION_DEFERRED)
 , mTransactionInProgress(false)
 , mDestroying(false)
 , mProgressHandler(nullptr)
@@ -1533,9 +1532,6 @@ Connection::initializeClone(Connection* aClone, bool aReadOnly)
     aClone->initializeFailed();
   });
 
-  rv = aClone->SetDefaultTransactionType(mDefaultTransactionType);
-  NS_ENSURE_SUCCESS(rv, rv);
-
   // Re-attach on-disk databases that were attached to the original connection.
   {
     nsCOMPtr<mozIStorageStatement> stmt;
@@ -1937,26 +1933,17 @@ Connection::GetTransactionInProgress(bool *_inProgress)
 }
 
 NS_IMETHODIMP
-Connection::GetDefaultTransactionType(int32_t *_type)
-{
-  *_type = mDefaultTransactionType;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-Connection::SetDefaultTransactionType(int32_t aType)
-{
-  NS_ENSURE_ARG_RANGE(aType, TRANSACTION_DEFERRED, TRANSACTION_EXCLUSIVE);
-  mDefaultTransactionType = aType;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 Connection::BeginTransaction()
+{
+  return BeginTransactionAs(mozIStorageConnection::TRANSACTION_DEFERRED);
+}
+
+NS_IMETHODIMP
+Connection::BeginTransactionAs(int32_t aTransactionType)
 {
   if (!mDBConn) return NS_ERROR_NOT_INITIALIZED;
 
-  return beginTransactionInternal(mDBConn, mDefaultTransactionType);
+  return beginTransactionInternal(mDBConn, aTransactionType);
 }
 
 nsresult
@@ -1967,7 +1954,7 @@ Connection::beginTransactionInternal(sqlite3 *aNativeConnection,
   if (mTransactionInProgress)
     return NS_ERROR_FAILURE;
   nsresult rv;
-  switch (aTransactionType) {
+  switch(aTransactionType) {
     case TRANSACTION_DEFERRED:
       rv = convertResultCode(executeSql(aNativeConnection, "BEGIN DEFERRED"));
       break;

@@ -121,11 +121,13 @@ XPIDL_SOURCES += [
     'nsITraceableChannel.idl',
     'nsITransport.idl',
     'nsIUDPSocket.idl',
+    'nsIUnicharStreamLoader.idl',
     'nsIUploadChannel.idl',
     'nsIUploadChannel2.idl',
     'nsIURI.idl',
     'nsIURIClassifier.idl',
     'nsIURIMutator.idl',
+    'nsIURIWithBlobImpl.idl',
     'nsIURIWithPrincipal.idl',
     'nsIURL.idl',
     'nsIURLParser.idl',
@@ -173,6 +175,7 @@ EXPORTS.mozilla.net += [
     'Dashboard.h',
     'DashboardTypes.h',
     'MemoryDownloader.h',
+    'MozURL.h',
     'PartiallySeekableInputStream.h',
     'Predictor.h',
     'ReferrerPolicy.h',
@@ -191,6 +194,7 @@ UNIFIED_SOURCES += [
     'LoadContextInfo.cpp',
     'LoadInfo.cpp',
     'MemoryDownloader.cpp',
+    'MozURL.cpp',
     'NetworkActivityMonitor.cpp',
     'nsAsyncRedirectVerifyHelper.cpp',
     'nsAsyncStreamCopier.cpp',
@@ -237,6 +241,7 @@ UNIFIED_SOURCES += [
     'nsSyncStreamListener.cpp',
     'nsTransportUtils.cpp',
     'nsUDPSocket.cpp',
+    'nsUnicharStreamLoader.cpp',
     'nsURLHelper.cpp',
     'nsURLParsers.cpp',
     'PartiallySeekableInputStream.cpp',
@@ -288,8 +293,6 @@ elif CONFIG['OS_ARCH'] == 'Linux':
 EXTRA_JS_MODULES += [
     'NetUtil.jsm',
 ]
-
-DIRS += [ 'mozurl' ]
 
 include('/ipc/chromium/chromium-config.mozbuild')
 

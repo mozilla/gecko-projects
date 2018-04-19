@@ -45,9 +45,7 @@ assert.throws(TypeError, function() {
 });
 
 assert.throws(TypeError, function() {
-  new WeakMap([
-    ['a', 1], 2
-  ]);
+  new WeakMap([['a', 1], 2]);
 });
 
 reportCompare(0, 0);

@@ -14,6 +14,7 @@
 #include "mozilla/Attributes.h"
 #include "nsIAttribute.h"
 #include "nsIDOMNode.h"
+#include "nsIDOMText.h"
 #include "nsIDOMNodeList.h"
 #include "nsString.h"
 #include "nsCOMPtr.h"
@@ -50,7 +51,7 @@ public:
   virtual void SetNodeValueInternal(const nsAString& aNodeValue,
                                     ErrorResult& aError) override;
 
-  void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
+  virtual nsresult GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
 
   // nsIAttribute interface
   void SetMap(nsDOMAttributeMap *aMap) override;

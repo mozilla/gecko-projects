@@ -483,14 +483,7 @@ var BrowserApp = {
     }, NativeWindow, "contextmenus");
 
     if (AppConstants.ACCESSIBILITY) {
-      InitLater(() => GlobalEventDispatcher.dispatch("GeckoView:AccessibilityReady"));
-      GlobalEventDispatcher.registerListener((aEvent, aData, aCallback) => {
-        if (aData.enabled) {
-          AccessFu.attach(window);
-        } else {
-          AccessFu.detach();
-        }
-      }, "GeckoView:AccessibilitySettings");
+      InitLater(() => AccessFu.attach(window), window, "AccessFu");
     }
 
     InitLater(() => {
@@ -527,7 +520,7 @@ var BrowserApp = {
     GlobalEventDispatcher.sendRequest({ type: "Gecko:Ready" });
 
     this.deck.addEventListener("DOMContentLoaded", function() {
-      ChromeUtils.import("resource://gre/modules/NotificationDB.jsm");
+      InitLater(() => ChromeUtils.import("resource://gre/modules/NotificationDB.jsm"));
 
       InitLater(() => Services.obs.notifyObservers(window, "browser-delayed-startup-finished"));
       InitLater(() => GlobalEventDispatcher.sendRequest({ type: "Gecko:DelayedStartup" }));
@@ -1179,12 +1172,7 @@ var BrowserApp = {
     }
 
     try {
-      aBrowser.loadURI(aURI, {
-        flags,
-        referrerURI,
-        charset,
-        postData,
-      });
+      aBrowser.loadURIWithFlags(aURI, flags, referrerURI, charset, postData);
     } catch(e) {
       if (tab) {
         let message = {
@@ -1891,7 +1879,7 @@ var BrowserApp = {
         try {
           let sh = webNav.sessionHistory;
           if (sh)
-            webNav = sh.legacySHistory.QueryInterface(Ci.nsIWebNavigation);
+            webNav = sh.QueryInterface(Ci.nsIWebNavigation);
         } catch (e) {}
         webNav.reload(flags);
         break;
@@ -2247,7 +2235,7 @@ var BrowserApp = {
     }
 
     let browser = this.selectedBrowser;
-    let hist = browser.sessionHistory.legacySHistory;
+    let hist = browser.sessionHistory;
     for (let i = toIndex; i >= fromIndex; i--) {
       let entry = hist.getEntryAtIndex(i, false);
       let item = {
@@ -3504,7 +3492,7 @@ nsBrowserAccess.prototype = {
       }
 
       let openerWindow = (aFlags & Ci.nsIBrowserDOMWindow.OPEN_NO_OPENER) ? null : aOpener;
-      // BrowserApp.addTab calls loadURI with the appropriate params
+      // BrowserApp.addTab calls loadURIWithFlags with the appropriate params
       let tab = BrowserApp.addTab(aURI ? aURI.spec : "about:blank", { flags: loadflags,
                                                                       referrerURI: referrer,
                                                                       external: isExternal,
@@ -3521,7 +3509,7 @@ nsBrowserAccess.prototype = {
     // OPEN_CURRENTWINDOW and illegal values
     let browser = BrowserApp.selectedBrowser;
     if (aURI && browser) {
-      browser.loadURI(aURI.spec, {
+      browser.loadURIWithFlags(aURI.spec, {
         flags: loadflags,
         referrerURI: referrer,
         triggeringPrincipal: aTriggeringPrincipal,
@@ -3725,7 +3713,7 @@ Tab.prototype = {
     this.filter = Cc["@mozilla.org/appshell/component/browser-status-filter;1"].createInstance(Ci.nsIWebProgress);
     this.filter.addProgressListener(this, flags)
     this.browser.addProgressListener(this.filter, flags);
-    this.browser.sessionHistory.legacySHistory.addSHistoryListener(this);
+    this.browser.sessionHistory.addSHistoryListener(this);
 
     this.browser.addEventListener("DOMContentLoaded", this, true);
     this.browser.addEventListener("DOMFormHasPassword", this, true);
@@ -3787,12 +3775,7 @@ Tab.prototype = {
       this.isSearch = "isSearch" in aParams ? aParams.isSearch : false;
 
       try {
-        this.browser.loadURI(aURL, {
-          flags,
-          referrerURI,
-          charset,
-          postData,
-        });
+        this.browser.loadURIWithFlags(aURL, flags, referrerURI, charset, postData);
       } catch(e) {
         let message = {
           type: "Content:LoadError",
@@ -3849,7 +3832,7 @@ Tab.prototype = {
     this.browser.removeProgressListener(this.filter);
     this.filter.removeProgressListener(this);
     this.filter = null;
-    this.browser.sessionHistory.legacySHistory.removeSHistoryListener(this);
+    this.browser.sessionHistory.removeSHistoryListener(this);
 
     this.browser.removeEventListener("DOMContentLoaded", this, true);
     this.browser.removeEventListener("DOMFormHasPassword", this, true);
@@ -4577,8 +4560,7 @@ Tab.prototype = {
     }
 
     if ((!aRequest || Components.isSuccessCode(aRequest.status)) &&
-        !(aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_ERROR_PAGE) &&
-        !this.isSearch) {
+        !fixedURI.displaySpec.startsWith("about:neterror") && !this.isSearch) {
       // If this won't end up in an error page and the user isn't searching,
       // don't retain the typed entry.
       this.userRequested = "";
@@ -4816,7 +4798,7 @@ var BrowserEventHandler = {
   init: function init() {
     BrowserApp.deck.addEventListener("touchend", this, true);
 
-    BrowserApp.deck.addEventListener("DOMUpdateBlockedPopups", PopupBlockerObserver.onUpdateBlockedPopups);
+    BrowserApp.deck.addEventListener("DOMUpdatePageReport", PopupBlockerObserver.onUpdatePageReport);
     BrowserApp.deck.addEventListener("MozMouseHittest", this, true);
     BrowserApp.deck.addEventListener("OpenMediaWithExternalApp", this, true);
 
@@ -5270,15 +5252,15 @@ var XPInstallObserver = {
 };
 
 /**
- * Handler for blocked popups, triggered by DOMUpdateBlockedPopups events in browser.xml
+ * Handler for blocked popups, triggered by DOMUpdatePageReport events in browser.xml
  */
 var PopupBlockerObserver = {
-  onUpdateBlockedPopups: function onUpdateBlockedPopups(aEvent) {
+  onUpdatePageReport: function onUpdatePageReport(aEvent) {
     let browser = BrowserApp.selectedBrowser;
     if (aEvent.originalTarget != browser)
       return;
 
-    if (!browser.blockedPopups)
+    if (!browser.pageReport)
       return;
 
     let result = Services.perms.testExactPermission(BrowserApp.selectedBrowser.currentURI, "popup");
@@ -5288,10 +5270,10 @@ var PopupBlockerObserver = {
     // Only show the notification again if we've not already shown it. Since
     // notifications are per-browser, we don't need to worry about re-adding
     // it.
-    if (!browser.blockedPopups.reported) {
+    if (!browser.pageReport.reported) {
       if (Services.prefs.getBoolPref("privacy.popups.showBrowserMessage")) {
         let brandShortName = Strings.brand.GetStringFromName("brandShortName");
-        let popupCount = browser.blockedPopups.length;
+        let popupCount = browser.pageReport.length;
 
         let strings = Strings.browser;
         let message = PluralForm.get(popupCount, strings.GetStringFromName("popup.message"))
@@ -5324,7 +5306,7 @@ var PopupBlockerObserver = {
       }
       // Record the fact that we've reported this blocked popup, so we don't
       // show it again.
-      browser.blockedPopups.reported = true;
+      browser.pageReport.reported = true;
     }
   },
 
@@ -5338,12 +5320,12 @@ var PopupBlockerObserver = {
 
   showPopupsForSite: function showPopupsForSite() {
     let uri = BrowserApp.selectedBrowser.currentURI;
-    let {blockedPopups} = BrowserApp.selectedBrowser;
-    if (blockedPopups) {
-      for (let i = 0; i < blockedPopups.length; ++i) {
-        let popupURIspec = blockedPopups[i].popupWindowURIspec;
+    let pageReport = BrowserApp.selectedBrowser.pageReport;
+    if (pageReport) {
+      for (let i = 0; i < pageReport.length; ++i) {
+        let popupURIspec = pageReport[i].popupWindowURIspec;
 
-        // Sometimes the popup URI that we get back from blockedPopups
+        // Sometimes the popup URI that we get back from the pageReport
         // isn't useful (for instance, netscape.com's popup URI ends up
         // being "http://www.netscape.com", which isn't really the URI of
         // the popup they're trying to show).  This isn't going to be
@@ -5351,8 +5333,8 @@ var PopupBlockerObserver = {
         if (popupURIspec == "" || popupURIspec == "about:blank" || popupURIspec == uri.spec)
           continue;
 
-        let popupFeatures = blockedPopups[i].popupWindowFeatures;
-        let popupName = blockedPopups[i].popupWindowName;
+        let popupFeatures = pageReport[i].popupWindowFeatures;
+        let popupName = pageReport[i].popupWindowName;
 
         let parent = BrowserApp.selectedTab;
         let isPrivate = PrivateBrowsingUtils.isBrowserPrivate(parent.browser);

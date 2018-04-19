@@ -9,6 +9,6 @@ includes: [nativeFunctionMatcher.js]
 
 let f = function(){}.bind(null);
 
-assertNativeFunction(f);
+assert(NATIVE_FUNCTION_RE.test("" + f), "looks pretty much like a NativeFunction");
 
 reportCompare(0, 0);

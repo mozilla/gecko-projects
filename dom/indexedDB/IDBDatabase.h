@@ -287,10 +287,6 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBDatabase, IDBWrapperCache)
 
-  // DOMEventTargetHelper
-  void
-  DisconnectFromOwner() override;
-
   // nsIDOMEventTarget
   virtual void
   LastRelease() override;

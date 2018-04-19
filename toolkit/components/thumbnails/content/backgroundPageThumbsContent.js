@@ -46,7 +46,6 @@ const backgroundPageThumbsContent = {
                        Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_HISTORY;
     docShell.defaultLoadFlags = defaultFlags;
     docShell.sandboxFlags |= SANDBOXED_AUXILIARY_NAVIGATION;
-    docShell.useTrackingProtection = true;
 
     addMessageListener("BackgroundPageThumbs:capture",
                        this._onCapture.bind(this));

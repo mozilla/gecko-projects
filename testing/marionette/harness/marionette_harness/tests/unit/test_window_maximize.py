@@ -34,7 +34,7 @@ class TestWindowMaximize(MarionetteTestCase):
         if self.marionette.session_capabilities["platformName"] == "windows_nt":
             delta = 16
         else:
-            delta = 22
+            delta = 8
 
         self.assertGreaterEqual(
             actual["width"], self.max["width"] - delta,

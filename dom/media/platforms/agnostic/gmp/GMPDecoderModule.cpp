@@ -11,6 +11,7 @@
 #include "GMPVideoDecoder.h"
 #include "MP4Decoder.h"
 #include "MediaDataDecoderProxy.h"
+#include "MediaPrefs.h"
 #include "VPXDecoder.h"
 #include "VideoUtils.h"
 #include "gmp-video-decode.h"

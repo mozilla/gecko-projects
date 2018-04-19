@@ -52,6 +52,7 @@ class CompactData : public MultiplierProducer {
 struct CompactModInfo {
     const ImmutablePatternModifier *mod;
     const UChar* patternString;
+    int32_t numDigits;
 };
 
 class CompactHandler : public MicroPropsGenerator, public UMemory {

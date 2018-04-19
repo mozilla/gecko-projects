@@ -23,7 +23,8 @@ namespace layers {
 using namespace mozilla::gfx;
 
 WebRenderBridgeChild::WebRenderBridgeChild(const wr::PipelineId& aPipelineId)
-  : mIsInTransaction(false)
+  : mReadLockSequenceNumber(0)
+  , mIsInTransaction(false)
   , mIsInClearCachedResources(false)
   , mIdNamespace{0}
   , mResourceId(0)
@@ -83,6 +84,7 @@ WebRenderBridgeChild::DoDestroy()
 void
 WebRenderBridgeChild::AddWebRenderParentCommand(const WebRenderParentCommand& aCmd)
 {
+  MOZ_ASSERT(mIsInTransaction || mIsInClearCachedResources);
   mParentCommands.AppendElement(aCmd);
 }
 
@@ -100,6 +102,23 @@ WebRenderBridgeChild::BeginTransaction()
 
   UpdateFwdTransactionId();
   mIsInTransaction = true;
+  mReadLockSequenceNumber = 0;
+  mReadLocks.AppendElement();
+}
+
+void
+WebRenderBridgeChild::ClearReadLocks()
+{
+  for (nsTArray<ReadLockInit>& locks : mReadLocks) {
+    if (locks.Length()) {
+      if (!SendInitReadLocks(locks)) {
+        NS_WARNING("WARNING: sending read locks failed!");
+        return;
+      }
+    }
+  }
+
+  mReadLocks.Clear();
 }
 
 void
@@ -197,23 +216,25 @@ void
 WebRenderBridgeChild::AddPipelineIdForAsyncCompositable(const wr::PipelineId& aPipelineId,
                                                         const CompositableHandle& aHandle)
 {
-  AddWebRenderParentCommand(
-    OpAddPipelineIdForCompositable(aPipelineId, aHandle, /* isAsync */ true));
+  MOZ_ASSERT(!mDestroyed);
+  SendAddPipelineIdForCompositable(aPipelineId, aHandle, true);
 }
 
 void
 WebRenderBridgeChild::AddPipelineIdForCompositable(const wr::PipelineId& aPipelineId,
                                                    const CompositableHandle& aHandle)
 {
-  AddWebRenderParentCommand(
-    OpAddPipelineIdForCompositable(aPipelineId, aHandle, /* isAsync */ false));
+  MOZ_ASSERT(!mDestroyed);
+  SendAddPipelineIdForCompositable(aPipelineId, aHandle, false);
 }
 
 void
 WebRenderBridgeChild::RemovePipelineIdForCompositable(const wr::PipelineId& aPipelineId)
 {
-  AddWebRenderParentCommand(
-    OpRemovePipelineIdForCompositable(aPipelineId));
+  if (!IPCOpen()) {
+    return;
+  }
+  SendRemovePipelineIdForCompositable(aPipelineId);
 }
 
 wr::ExternalImageId
@@ -227,17 +248,23 @@ WebRenderBridgeChild::GetNextExternalImageId()
 wr::ExternalImageId
 WebRenderBridgeChild::AllocExternalImageIdForCompositable(CompositableClient* aCompositable)
 {
+  MOZ_ASSERT(!mDestroyed);
+  MOZ_ASSERT(aCompositable->IsConnected());
+
   wr::ExternalImageId imageId = GetNextExternalImageId();
-  AddWebRenderParentCommand(
-    OpAddExternalImageIdForCompositable(imageId, aCompositable->GetIPCHandle()));
+  SendAddExternalImageIdForCompositable(imageId, aCompositable->GetIPCHandle());
   return imageId;
 }
 
 void
 WebRenderBridgeChild::DeallocExternalImageId(const wr::ExternalImageId& aImageId)
 {
-  AddWebRenderParentCommand(
-    OpRemoveExternalImageId(aImageId));
+  if (mDestroyed) {
+    // This can happen if the IPC connection was torn down, because, e.g.
+    // the GPU process died.
+    return;
+  }
+  SendRemoveExternalImageId(aImageId);
 }
 
 struct FontFileDataSink
@@ -355,14 +382,15 @@ WebRenderBridgeChild::GetFontKeyForUnscaledFont(gfx::UnscaledFont* aUnscaled)
 }
 
 void
-WebRenderBridgeChild::RemoveExpiredFontKeys(wr::IpcResourceUpdateQueue& aResourceUpdates)
+WebRenderBridgeChild::RemoveExpiredFontKeys()
 {
   uint32_t counter = gfx::ScaledFont::DeletionCounter();
+  wr::IpcResourceUpdateQueue resources(this);
   if (mFontInstanceKeysDeleted != counter) {
     mFontInstanceKeysDeleted = counter;
     for (auto iter = mFontInstanceKeys.Iter(); !iter.Done(); iter.Next()) {
       if (!iter.Key()) {
-        aResourceUpdates.DeleteFontInstance(iter.Data());
+        resources.DeleteFontInstance(iter.Data());
         iter.Remove();
       }
     }
@@ -372,11 +400,12 @@ WebRenderBridgeChild::RemoveExpiredFontKeys(wr::IpcResourceUpdateQueue& aResourc
     mFontKeysDeleted = counter;
     for (auto iter = mFontKeys.Iter(); !iter.Done(); iter.Next()) {
       if (!iter.Key()) {
-        aResourceUpdates.DeleteFont(iter.Data());
+        resources.DeleteFont(iter.Data());
         iter.Remove();
       }
     }
   }
+  UpdateResources(resources);
 }
 
 CompositorBridgeChild*

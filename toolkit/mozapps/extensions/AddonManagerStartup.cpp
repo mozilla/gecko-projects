@@ -408,6 +408,8 @@ public:
 
   bool Enabled() { return GetBool("enabled"); }
 
+  bool ShimsEnabled() { return GetBool("enableShims"); }
+
   double LastModifiedTime() { return GetNumber("lastModifiedTime"); }
 
 
@@ -522,7 +524,7 @@ AddonManagerStartup::AddInstallLocation(Addon& addon)
   if (type == NS_SKIN_LOCATION) {
     mThemePaths.AppendElement(file);
   } else {
-    return Ok();
+    mExtensionPaths.AppendElement(file);
   }
 
   if (StringTail(path, 4).LowerCaseEqualsLiteral(".xpi")) {
@@ -602,6 +604,11 @@ AddonManagerStartup::InitializeExtensions(JS::HandleValue locations, JSContext* 
 
       if (addon.Enabled() && !addon.Bootstrapped()) {
         Unused << AddInstallLocation(addon);
+
+        if (addon.ShimsEnabled()) {
+          NS_ConvertUTF16toUTF8 id(addon.Id());
+          Unused << xpc::AllowCPOWsInAddon(id, true);
+        }
       }
     }
   }

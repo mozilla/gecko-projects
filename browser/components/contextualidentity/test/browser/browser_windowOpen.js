@@ -35,5 +35,5 @@ add_task(async function test() {
 
   info("Closing the new window and tab...");
   await BrowserTestUtils.closeWindow(newWin);
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

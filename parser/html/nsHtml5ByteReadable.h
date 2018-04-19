@@ -10,24 +10,24 @@
  */
 class nsHtml5ByteReadable
 {
-public:
-  nsHtml5ByteReadable(const uint8_t* aCurrent, const uint8_t* aEnd)
-    : current(aCurrent)
-    , end(aEnd)
-  {
-  }
+  public:
 
-  inline int32_t read()
-  {
-    if (current < end) {
-      return *(current++);
-    } else {
-      return -1;
+    nsHtml5ByteReadable(const uint8_t* aCurrent, const uint8_t* aEnd)
+     : current(aCurrent),
+       end(aEnd)
+    {
     }
-  }
 
-private:
-  const uint8_t* current;
-  const uint8_t* end;
+    inline int32_t read() {
+      if (current < end) {
+        return *(current++);
+      } else {
+        return -1;
+      }
+    }
+
+  private:
+    const uint8_t* current;
+    const uint8_t* end;
 };
 #endif

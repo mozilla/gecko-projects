@@ -10,11 +10,11 @@
 #include "mozilla/Range.h"
 #include "mozilla/ScopeExit.h"
 
+#include "jsarray.h"
 #include "jsnum.h"
 #include "jstypes.h"
 #include "jsutil.h"
 
-#include "builtin/Array.h"
 #include "builtin/String.h"
 #include "util/StringBuffer.h"
 #include "vm/Interpreter.h"
@@ -23,8 +23,9 @@
 #include "vm/JSObject.h"
 #include "vm/JSONParser.h"
 
-#include "builtin/Array-inl.h"
-#include "builtin/Boolean-inl.h"
+#include "jsarrayinlines.h"
+#include "jsboolinlines.h"
+
 #include "vm/JSAtom-inl.h"
 #include "vm/NativeObject-inl.h"
 
@@ -984,8 +985,10 @@ static const JSFunctionSpec json_static_methods[] = {
 };
 
 JSObject*
-js::InitJSONClass(JSContext* cx, Handle<GlobalObject*> global)
+js::InitJSONClass(JSContext* cx, HandleObject obj)
 {
+    Handle<GlobalObject*> global = obj.as<GlobalObject>();
+
     RootedObject proto(cx, GlobalObject::getOrCreateObjectPrototype(cx, global));
     if (!proto)
         return nullptr;

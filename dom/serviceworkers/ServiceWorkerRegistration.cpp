@@ -41,16 +41,15 @@ ServiceWorkerRegistration::ServiceWorkerRegistration(nsIGlobalObject* aGlobal,
   , mInner(aInner)
 {
   MOZ_DIAGNOSTIC_ASSERT(mInner);
-
-  KeepAliveIfHasListenersFor(NS_LITERAL_STRING("updatefound"));
-
   UpdateState(mDescriptor);
   mInner->SetServiceWorkerRegistration(this);
 }
 
 ServiceWorkerRegistration::~ServiceWorkerRegistration()
 {
-  mInner->ClearServiceWorkerRegistration(this);
+  if (mInner) {
+    mInner->ClearServiceWorkerRegistration(this);
+  }
 }
 
 JSObject*
@@ -85,7 +84,7 @@ ServiceWorkerRegistration::CreateForWorker(WorkerPrivate* aWorkerPrivate,
   aWorkerPrivate->AssertIsOnWorkerThread();
 
   RefPtr<Inner> inner =
-    new ServiceWorkerRegistrationWorkerThread(aDescriptor);
+    new ServiceWorkerRegistrationWorkerThread(aWorkerPrivate, aDescriptor);
 
   RefPtr<ServiceWorkerRegistration> registration =
     new ServiceWorkerRegistration(aGlobal, aDescriptor, inner);
@@ -96,16 +95,9 @@ ServiceWorkerRegistration::CreateForWorker(WorkerPrivate* aWorkerPrivate,
 void
 ServiceWorkerRegistration::DisconnectFromOwner()
 {
+  mInner->ClearServiceWorkerRegistration(this);
+  mInner = nullptr;
   DOMEventTargetHelper::DisconnectFromOwner();
-}
-
-void
-ServiceWorkerRegistration::RegistrationRemoved()
-{
-  // Our underlying registration was removed from SWM, so we
-  // will never get an updatefound event again.  We can let
-  // the object GC if content is not holding it alive.
-  IgnoreKeepAliveIfHasListenersFor(NS_LITERAL_STRING("updatefound"));
 }
 
 already_AddRefed<ServiceWorker>

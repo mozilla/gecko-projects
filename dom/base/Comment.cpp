@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /*
- * Implementations of DOM Core's Comment node.
+ * Implementations of DOM Core's nsIDOMComment node.
  */
 
 #include "nsCOMPtr.h"
@@ -23,7 +23,8 @@ Comment::~Comment()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED(Comment, CharacterData, nsIDOMNode)
+NS_IMPL_ISUPPORTS_INHERITED(Comment, nsGenericDOMDataNode, nsIDOMNode,
+                            nsIDOMCharacterData, nsIDOMComment)
 
 bool
 Comment::IsNodeOfType(uint32_t aFlags) const
@@ -31,16 +32,16 @@ Comment::IsNodeOfType(uint32_t aFlags) const
   return !(aFlags & ~(eCOMMENT | eDATA_NODE));
 }
 
-already_AddRefed<CharacterData>
+nsGenericDOMDataNode*
 Comment::CloneDataNode(mozilla::dom::NodeInfo *aNodeInfo, bool aCloneText) const
 {
   RefPtr<mozilla::dom::NodeInfo> ni = aNodeInfo;
-  RefPtr<Comment> it = new Comment(ni.forget());
-  if (aCloneText) {
+  Comment *it = new Comment(ni.forget());
+  if (it && aCloneText) {
     it->mText = mText;
   }
 
-  return it.forget();
+  return it;
 }
 
 #ifdef DEBUG

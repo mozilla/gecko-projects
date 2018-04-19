@@ -49,6 +49,10 @@
 #include "nsNodeUtils.h"
 #include "nsJSUtils.h"
 
+// Nasty hack.  Maybe we could move some of the classinfo utility methods
+// (e.g. WrapNative) over to nsContentUtils?
+#include "nsDOMClassInfo.h"
+
 #include "mozilla/DeferredFinalize.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ScriptSettings.h"
@@ -347,10 +351,7 @@ nsXBLBinding::GenerateAnonymousContent()
     if (mDefaultInsertionPoint && mInsertionPoints.IsEmpty()) {
       ExplicitChildIterator iter(mBoundElement);
       for (nsIContent* child = iter.GetNextChild(); child; child = iter.GetNextChild()) {
-        // Pass aNotify = false because we're just setting up the whole thing.
-        // Furthermore we do it from frame construction, so passing true here
-        // would reenter into it which is... not great.
-        mDefaultInsertionPoint->AppendInsertedChild(child, false);
+        mDefaultInsertionPoint->AppendInsertedChild(child);
       }
     } else {
       // It is odd to come into this code if mInsertionPoints is not empty, but
@@ -360,9 +361,7 @@ nsXBLBinding::GenerateAnonymousContent()
       for (nsIContent* child = iter.GetNextChild(); child; child = iter.GetNextChild()) {
         XBLChildrenElement* point = FindInsertionPointForInternal(child);
         if (point) {
-          // Pass aNotify = false because we're just setting up the whole thing.
-          // (see the similar call above for more details).
-          point->AppendInsertedChild(child, false);
+          point->AppendInsertedChild(child);
         } else {
           NodeInfo *ni = child->NodeInfo();
           if (ni->NamespaceID() != kNameSpaceID_XUL ||
@@ -826,6 +825,18 @@ nsXBLBinding::InheritsStyle() const
   return true;
 }
 
+#ifdef MOZ_OLD_STYLE
+void
+nsXBLBinding::WalkRules(nsIStyleRuleProcessor::EnumFunc aFunc, void* aData)
+{
+  if (mNextBinding)
+    mNextBinding->WalkRules(aFunc, aData);
+
+  nsIStyleRuleProcessor *rules = mPrototypeBinding->GetRuleProcessor();
+  if (rules)
+    (*aFunc)(rules, aData);
+}
+#endif
 
 const RawServoAuthorStyles*
 nsXBLBinding::GetServoStyles() const
@@ -1104,6 +1115,7 @@ nsXBLBinding::LookupMember(JSContext* aCx, JS::Handle<jsid> aId,
   // add-on scopes here.
   JS::Rooted<JSObject*> boundScope(aCx,
     js::GetGlobalForObjectCrossCompartment(mBoundElement->GetWrapper()));
+  MOZ_RELEASE_ASSERT(!xpc::IsInAddonScope(boundScope));
   MOZ_RELEASE_ASSERT(!xpc::IsInContentXBLScope(boundScope));
   JS::Rooted<JSObject*> xblScope(aCx, xpc::GetXBLScope(aCx, boundScope));
   NS_ENSURE_TRUE(xblScope, false);

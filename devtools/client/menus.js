@@ -101,9 +101,7 @@ exports.menuitems = [
     l10nKey: "responsiveDesignMode",
     oncommand(event) {
       let window = event.target.ownerDocument.defaultView;
-      ResponsiveUIManager.toggle(window, window.gBrowser.selectedTab, {
-        trigger: "menu"
-      });
+      ResponsiveUIManager.toggle(window, window.gBrowser.selectedTab);
     },
     keyId: "responsiveDesignMode",
     checkbox: true
@@ -148,7 +146,7 @@ exports.menuitems = [
     l10nKey: "getMoreDevtoolsCmd",
     oncommand(event) {
       let window = event.target.ownerDocument.defaultView;
-      window.openTrustedLinkIn("https://addons.mozilla.org/firefox/collections/mozilla/webdeveloper/", "tab");
+      window.openUILinkIn("https://addons.mozilla.org/firefox/collections/mozilla/webdeveloper/", "tab");
     }
   },
 ];

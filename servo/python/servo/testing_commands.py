@@ -77,19 +77,6 @@ def create_parser_wpt():
     return parser
 
 
-def create_parser_manifest_update():
-    import manifestupdate
-    return manifestupdate.create_parser()
-
-
-def run_update(topdir, check_clean=False, rebuild=False, **kwargs):
-    import manifestupdate
-    from wptrunner import wptlogging
-    logger = wptlogging.setup(kwargs, {"mach": sys.stdout})
-    wpt_dir = os.path.abspath(os.path.join(topdir, 'tests', 'wpt'))
-    manifestupdate.update(logger, wpt_dir, check_clean, rebuild)
-
-
 @CommandProvider
 class MachCommands(CommandBase):
     DEFAULT_RENDER_MODE = "cpu"
@@ -442,9 +429,11 @@ class MachCommands(CommandBase):
     @Command('update-manifest',
              description='Run test-wpt --manifest-update SKIP_TESTS to regenerate MANIFEST.json',
              category='testing',
-             parser=create_parser_manifest_update)
+             parser=create_parser_wpt)
     def update_manifest(self, **kwargs):
-        return run_update(self.context.topdir, **kwargs)
+        kwargs['test_list'].append(str('SKIP_TESTS'))
+        kwargs['manifest_update'] = True
+        return self.test_wpt(**kwargs)
 
     @Command('update-wpt',
              description='Update the web platform tests',

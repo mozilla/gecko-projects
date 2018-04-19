@@ -17,11 +17,11 @@ Files metadata is defined by using the
 files. e.g.::
 
     with Files('**/Makefile.in'):
-        BUG_COMPONENT = ('Firefox Build System', 'General')
+        BUG_COMPONENT = ('Core', 'Build Config')
 
 This working example says, *for all Makefile.in files in every directory
 underneath this one - including this directory - set the Bugzilla
-component to Firefox Build System :: General*.
+component to Core :: Build Config*.
 
 For more info, read the
 :ref:`docs on Files <mozbuild_subcontext_Files>`.
@@ -135,7 +135,7 @@ possible to finalize the ``BUG_COMPONENT`` value.::
 
     # /moz.build
     with Files('**/Makefile.in'):
-        BUG_COMPONENT = ('Firefox Build System', 'General')
+        BUG_COMPONENT = ('Core', 'Build Config')
         FINAL = True
 
     # /foo/moz.build
@@ -146,7 +146,7 @@ If we query for metadata of ``/foo/Makefile.in``, both ``Files``
 sub-contexts match the file pattern. However, since ``BUG_COMPONENT`` is
 marked as finalized by ``/moz.build``, the assignment from
 ``/foo/moz.build`` is ignored. The final value for ``BUG_COMPONENT``
-is ``('Firefox Build System', 'General')``.
+is ``('Core', 'Build Config')``.
 
 Here is another example::
 

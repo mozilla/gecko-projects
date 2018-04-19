@@ -16,9 +16,8 @@ var prefs = new Preferences();
 prefs.set("extensions.getAddons.get.url",
           SERVER_ADDRESS + "/search/guid:%IDS%");
 
-AddonTestUtils.init(this);
-AddonTestUtils.createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1.9.2");
-AddonTestUtils.awaitPromise(AddonTestUtils.promiseStartupManager());
+loadAddonTestFunctions();
+startupManager();
 
 function createAndStartHTTPServer(port = HTTP_PORT) {
   try {

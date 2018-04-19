@@ -6,13 +6,13 @@
  * respective to their recorded animation frame.
  */
 
-async function ifTestingSupported() {
-  let { target, panel } = await initCanvasDebuggerFrontend(SIMPLE_CANVAS_URL);
+function* ifTestingSupported() {
+  let { target, panel } = yield initCanvasDebuggerFrontend(SIMPLE_CANVAS_URL);
   let { window, $, EVENTS, SnapshotsListView, CallsListView } = panel.panelWin;
 
-  await reload(target);
+  yield reload(target);
 
-  await recordAndWaitForFirstSnapshot();
+  yield recordAndWaitForFirstSnapshot();
   info("First snapshot recorded.");
 
   is(SnapshotsListView.selectedIndex, 0,
@@ -20,7 +20,7 @@ async function ifTestingSupported() {
   is(CallsListView.selectedIndex, -1,
     "There should be no call item automatically selected in the snapshot.");
 
-  await recordAndWaitForAnotherSnapshot();
+  yield recordAndWaitForAnotherSnapshot();
   info("Second snapshot recorded.");
 
   is(SnapshotsListView.selectedIndex, 0,
@@ -32,7 +32,7 @@ async function ifTestingSupported() {
   let snapshotSelected = waitForSnapshotSelection();
   EventUtils.sendMouseEvent({ type: "mousedown" }, secondSnapshotTarget, window);
 
-  await snapshotSelected;
+  yield snapshotSelected;
   info("Second snapshot selected.");
 
   is(SnapshotsListView.selectedIndex, 1,
@@ -44,7 +44,7 @@ async function ifTestingSupported() {
   let screenshotDisplayed = once(window, EVENTS.CALL_SCREENSHOT_DISPLAYED);
   EventUtils.sendMouseEvent({ type: "mousedown" }, firstDrawCallContents, window);
 
-  await screenshotDisplayed;
+  yield screenshotDisplayed;
   info("First draw call in the second snapshot selected.");
 
   is(SnapshotsListView.selectedIndex, 1,
@@ -56,7 +56,7 @@ async function ifTestingSupported() {
   snapshotSelected = waitForSnapshotSelection();
   EventUtils.sendMouseEvent({ type: "mousedown" }, firstSnapshotTarget, window);
 
-  await snapshotSelected;
+  yield snapshotSelected;
   info("First snapshot re-selected.");
 
   is(SnapshotsListView.selectedIndex, 0,
@@ -68,7 +68,7 @@ async function ifTestingSupported() {
     let recordingFinished = once(window, EVENTS.SNAPSHOT_RECORDING_FINISHED);
     let snapshotSelected = waitForSnapshotSelection();
     SnapshotsListView._onRecordButtonClick();
-    return Promise.all([recordingFinished, snapshotSelected]);
+    return promise.all([recordingFinished, snapshotSelected]);
   }
 
   function recordAndWaitForAnotherSnapshot() {
@@ -81,13 +81,13 @@ async function ifTestingSupported() {
     let callListPopulated = once(window, EVENTS.CALL_LIST_POPULATED);
     let thumbnailsDisplayed = once(window, EVENTS.THUMBNAILS_DISPLAYED);
     let screenshotDisplayed = once(window, EVENTS.CALL_SCREENSHOT_DISPLAYED);
-    return Promise.all([
+    return promise.all([
       callListPopulated,
       thumbnailsDisplayed,
       screenshotDisplayed
     ]);
   }
 
-  await teardown(panel);
+  yield teardown(panel);
   finish();
 }

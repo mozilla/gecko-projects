@@ -232,8 +232,7 @@ public:
 
   nsresult RemoveRange(mozilla::dom::Selection *aSpellCheckSelection,
                        nsRange *aRange);
-  nsresult AddRange(mozilla::dom::Selection *aSpellCheckSelection,
-                    nsRange* aRange);
+  nsresult AddRange(nsISelection *aSpellCheckSelection, nsIDOMRange * aRange);
   bool     SpellCheckSelectionIsFull() { return mNumWordsInSpellSelection >= mMaxNumWordsInSpellSelection; }
 
   nsresult MakeSpellCheckRange(nsIDOMNode* aStartNode, int32_t aStartOffset,

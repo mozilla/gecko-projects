@@ -7,18 +7,13 @@ mod common {
     use std::path::{Path, PathBuf};
 
     lazy_static! {
-        pub static ref OUTDIR_PATH: PathBuf =
-            PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("gecko");
+        pub static ref OUTDIR_PATH: PathBuf = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("gecko");
     }
 
     /// Copy contents of one directory into another.
     /// It currently only does a shallow copy.
     pub fn copy_dir<P, Q, F>(from: P, to: Q, callback: F) -> io::Result<()>
-    where
-        P: AsRef<Path>,
-        Q: AsRef<Path>,
-        F: Fn(&Path),
-    {
+    where P: AsRef<Path>, Q: AsRef<Path>, F: Fn(&Path) {
         let to = to.as_ref();
         for entry in from.as_ref().read_dir()? {
             let entry = entry?;
@@ -36,46 +31,54 @@ mod bindings {
     use bindgen::callbacks::{EnumVariantCustomBehavior, EnumVariantValue, ParseCallbacks};
     use regex::{Regex, RegexSet};
     use std::cmp;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{HashSet, HashMap};
     use std::env;
     use std::fs::{self, File};
     use std::io::{Read, Write};
     use std::path::{Path, PathBuf};
-    use std::process::{exit, Command};
+    use std::process::{Command, exit};
     use std::slice;
     use std::sync::Mutex;
     use std::time::SystemTime;
     use super::common::*;
     use super::super::PYTHON;
     use toml;
-    use toml::value::Table;
 
     const STRUCTS_FILE: &'static str = "structs.rs";
     const BINDINGS_FILE: &'static str = "bindings.rs";
 
-    fn read_config(path: &PathBuf) -> Table {
+    fn read_config(path: &PathBuf) -> toml::Table {
         println!("cargo:rerun-if-changed={}", path.to_str().unwrap());
         update_last_modified(&path);
 
         let mut contents = String::new();
-        File::open(path)
-            .expect("Failed to open config file")
-            .read_to_string(&mut contents)
-            .expect("Failed to read config file");
-        match toml::from_str::<toml::value::Table>(&contents) {
-            Ok(result) => result,
-            Err(e) => panic!("Failed to parse config file: {}", e),
+        File::open(path).expect("Failed to open config file")
+            .read_to_string(&mut contents).expect("Failed to read config file");
+        let mut parser = toml::Parser::new(&contents);
+        if let Some(result) = parser.parse() {
+            result
+        } else {
+            use std::fmt::Write;
+            let mut reason = String::from("Failed to parse config file:");
+            for err in parser.errors.iter() {
+                let parsed = &contents[..err.lo];
+                write!(&mut reason, "\n* line {} column {}: {}",
+                       parsed.lines().count(),
+                       parsed.lines().last().map_or(0, |l| l.len()),
+                       err).unwrap();
+            }
+            panic!(reason)
         }
     }
 
     lazy_static! {
-        static ref CONFIG: Table = {
+        static ref CONFIG: toml::Table = {
             // Load Gecko's binding generator config from the source tree.
             let path = PathBuf::from(env::var_os("MOZ_SRC").unwrap())
                 .join("layout/style/ServoBindings.toml");
             read_config(&path)
         };
-        static ref BUILD_CONFIG: Table = {
+        static ref BUILD_CONFIG: toml::Table = {
             // Load build-specific config overrides.
             // FIXME: We should merge with CONFIG above instead of
             // forcing callers to do it.
@@ -116,7 +119,8 @@ mod bindings {
     }
 
     fn update_last_modified(file: &Path) {
-        let modified = get_modified_time(file).expect("Couldn't get file modification time");
+        let modified = get_modified_time(file)
+            .expect("Couldn't get file modification time");
         let mut last_modified = LAST_MODIFIED.lock().unwrap();
         *last_modified = cmp::max(modified, *last_modified);
     }
@@ -165,7 +169,7 @@ mod bindings {
         fn mutable_borrowed_type(self, ty: &str) -> Builder;
     }
 
-    fn add_clang_args(mut builder: Builder, config: &Table, matched_os: &mut bool) -> Builder {
+    fn add_clang_args(mut builder: Builder, config: &toml::Table, matched_os: &mut bool) -> Builder {
         fn add_args(mut builder: Builder, values: &[toml::Value]) -> Builder {
             for item in values.iter() {
                 builder = builder.clang_arg(item.as_str().expect("Expect string in list"));
@@ -174,7 +178,7 @@ mod bindings {
         }
         for (k, v) in config.iter() {
             if k == "args" {
-                builder = add_args(builder, v.as_array().unwrap().as_slice());
+                builder = add_args(builder, v.as_slice().unwrap());
                 continue;
             }
             let equal_idx = k.find('=').expect(&format!("Invalid key: {}", k));
@@ -200,14 +204,19 @@ mod bindings {
 
             // Disable rust unions, because we replace some types inside of
             // them.
-            let mut builder = Builder::default().rust_target(RustTarget::Stable_1_0);
-            let rustfmt_path = env::var_os("MOZ_AUTOMATION")
-                .and_then(|_| env::var_os("TOOLTOOL_DIR").or_else(|| env::var_os("MOZ_SRC")))
-                .map(PathBuf::from);
+            let mut builder = Builder::default()
+                .rust_target(RustTarget::Stable_1_0);
+            let rustfmt_path = env::var_os("MOZ_AUTOMATION").and_then(|_| {
+                env::var_os("TOOLTOOL_DIR")
+            }).map(PathBuf::from);
 
             builder = match rustfmt_path {
-                Some(path) => builder.with_rustfmt(path.join("rustc").join("bin").join("rustfmt")),
-                None => builder.rustfmt_bindings(env::var_os("STYLO_RUSTFMT_BINDINGS").is_some()),
+                Some(path) => {
+                    builder.with_rustfmt(path.join("rustc").join("bin").join("rustfmt"))
+                },
+                None => {
+                    builder.rustfmt_bindings(env::var_os("STYLO_RUSTFMT_BINDINGS").is_some())
+                }
             };
 
             for dir in SEARCH_PATHS.iter() {
@@ -223,9 +232,7 @@ mod bindings {
             let mut matched_os = false;
             let build_config = CONFIG["build"].as_table().expect("Malformed config file");
             builder = add_clang_args(builder, build_config, &mut matched_os);
-            let build_config = BUILD_CONFIG["build"]
-                .as_table()
-                .expect("Malformed config file");
+            let build_config = BUILD_CONFIG["build"].as_table().expect("Malformed config file");
             builder = add_clang_args(builder, build_config, &mut matched_os);
             if !matched_os {
                 panic!("Unknown platform");
@@ -256,26 +263,20 @@ mod bindings {
             self.blacklist_type(format!("{}Borrowed", ty))
                 .raw_line(format!("pub type {0}Borrowed<'a> = &'a {0};", ty))
                 .blacklist_type(format!("{}BorrowedOrNull", ty))
-                .raw_line(format!(
-                    "pub type {0}BorrowedOrNull<'a> = Option<&'a {0}>;",
-                    ty
-                ))
+                .raw_line(format!("pub type {0}BorrowedOrNull<'a> = Option<&'a {0}>;", ty))
         }
         fn mutable_borrowed_type(self, ty: &str) -> Builder {
             self.borrowed_type(ty)
                 .blacklist_type(format!("{}BorrowedMut", ty))
                 .raw_line(format!("pub type {0}BorrowedMut<'a> = &'a mut {0};", ty))
                 .blacklist_type(format!("{}BorrowedMutOrNull", ty))
-                .raw_line(format!(
-                    "pub type {0}BorrowedMutOrNull<'a> = Option<&'a mut {0}>;",
-                    ty
-                ))
+                .raw_line(format!("pub type {0}BorrowedMutOrNull<'a> = Option<&'a mut {0}>;", ty))
         }
     }
 
     struct Fixup {
         pat: String,
-        rep: String,
+        rep: String
     }
 
     fn write_binding_file(builder: Builder, file: &str, fixups: &[Fixup]) {
@@ -292,24 +293,15 @@ mod bindings {
         let mut result = match result {
             Ok(bindings) => bindings.to_string(),
             Err(_) => {
-                panic!(
-                    "Failed to generate bindings, flags: {:?}",
-                    command_line_opts
-                );
+                panic!("Failed to generate bindings, flags: {:?}", command_line_opts);
             },
         };
         for fixup in fixups.iter() {
-            result = Regex::new(&fixup.pat)
-                .unwrap()
-                .replace_all(&result, &*fixup.rep)
-                .into_owned()
-                .into();
+            result = Regex::new(&fixup.pat).unwrap().replace_all(&result, &*fixup.rep)
+                .into_owned().into();
         }
         let bytes = result.into_bytes();
-        File::create(&out_file)
-            .unwrap()
-            .write_all(&bytes)
-            .expect("Unable to write output");
+        File::create(&out_file).unwrap().write_all(&bytes).expect("Unable to write output");
     }
 
     fn get_arc_types() -> Vec<String> {
@@ -317,79 +309,53 @@ mod bindings {
         let mut list_file = File::open(DISTDIR_PATH.join("include/mozilla/ServoArcTypeList.h"))
             .expect("Unable to open ServoArcTypeList.h");
         let mut content = String::new();
-        list_file
-            .read_to_string(&mut content)
-            .expect("Fail to read ServoArcTypeList.h");
+        list_file.read_to_string(&mut content).expect("Fail to read ServoArcTypeList.h");
         // Remove comments
         let block_comment_re = Regex::new(r#"(?s)/\*.*?\*/"#).unwrap();
         let content = block_comment_re.replace_all(&content, "");
         // Extract the list
         let re = Regex::new(r#"^SERVO_ARC_TYPE\(\w+,\s*(\w+)\)$"#).unwrap();
-        content
-            .lines()
-            .map(|line| line.trim())
-            .filter(|line| !line.is_empty())
-            .map(|line| {
-                re.captures(&line)
-                    .expect(&format!(
-                        "Unrecognized line in ServoArcTypeList.h: '{}'",
-                        line
-                    ))
-                    .get(1)
-                    .unwrap()
-                    .as_str()
-                    .to_string()
-            })
+        content.lines().map(|line| line.trim()).filter(|line| !line.is_empty())
+            .map(|line| re.captures(&line)
+                 .expect(&format!("Unrecognized line in ServoArcTypeList.h: '{}'", line))
+                 .get(1).unwrap().as_str().to_string())
             .collect()
     }
 
     struct BuilderWithConfig<'a> {
         builder: Builder,
-        config: &'a Table,
+        config: &'a toml::Table,
         used_keys: HashSet<&'static str>,
     }
     impl<'a> BuilderWithConfig<'a> {
-        fn new(builder: Builder, config: &'a Table) -> Self {
+        fn new(builder: Builder, config: &'a toml::Table) -> Self {
             BuilderWithConfig {
-                builder,
-                config,
+                builder, config,
                 used_keys: HashSet::new(),
             }
         }
 
         fn handle_list<F>(self, key: &'static str, func: F) -> BuilderWithConfig<'a>
-        where
-            F: FnOnce(Builder, slice::Iter<'a, toml::Value>) -> Builder,
-        {
+        where F: FnOnce(Builder, slice::Iter<'a, toml::Value>) -> Builder {
             let mut builder = self.builder;
             let config = self.config;
             let mut used_keys = self.used_keys;
             if let Some(list) = config.get(key) {
                 used_keys.insert(key);
-                builder = func(builder, list.as_array().unwrap().as_slice().iter());
+                builder = func(builder, list.as_slice().unwrap().iter());
             }
-            BuilderWithConfig {
-                builder,
-                config,
-                used_keys,
-            }
+            BuilderWithConfig { builder, config, used_keys }
         }
         fn handle_items<F>(self, key: &'static str, mut func: F) -> BuilderWithConfig<'a>
-        where
-            F: FnMut(Builder, &'a toml::Value) -> Builder,
-        {
+        where F: FnMut(Builder, &'a toml::Value) -> Builder {
             self.handle_list(key, |b, iter| iter.fold(b, |b, item| func(b, item)))
         }
         fn handle_str_items<F>(self, key: &'static str, mut func: F) -> BuilderWithConfig<'a>
-        where
-            F: FnMut(Builder, &'a str) -> Builder,
-        {
+        where F: FnMut(Builder, &'a str) -> Builder {
             self.handle_items(key, |b, item| func(b, item.as_str().unwrap()))
         }
         fn handle_table_items<F>(self, key: &'static str, mut func: F) -> BuilderWithConfig<'a>
-        where
-            F: FnMut(Builder, &'a Table) -> Builder,
-        {
+        where F: FnMut(Builder, &'a toml::Table) -> Builder {
             self.handle_items(key, |b, item| func(b, item.as_table().unwrap()))
         }
         fn handle_common(self, fixups: &mut Vec<Fixup>) -> BuilderWithConfig<'a> {
@@ -419,20 +385,16 @@ mod bindings {
         #[derive(Debug)]
         struct Callbacks(HashMap<String, RegexSet>);
         impl ParseCallbacks for Callbacks {
-            fn enum_variant_behavior(
-                &self,
-                enum_name: Option<&str>,
-                variant_name: &str,
-                _variant_value: EnumVariantValue,
-            ) -> Option<EnumVariantCustomBehavior> {
-                enum_name
-                    .and_then(|enum_name| self.0.get(enum_name))
-                    .and_then(|regex| {
-                        if regex.is_match(variant_name) {
-                            Some(EnumVariantCustomBehavior::Constify)
-                        } else {
-                            None
-                        }
+            fn enum_variant_behavior(&self,
+                                     enum_name: Option<&str>,
+                                     variant_name: &str,
+                                     _variant_value: EnumVariantValue)
+                -> Option<EnumVariantCustomBehavior> {
+                enum_name.and_then(|enum_name| self.0.get(enum_name))
+                    .and_then(|regex| if regex.is_match(variant_name) {
+                        Some(EnumVariantCustomBehavior::Constify)
+                    } else {
+                        None
                     })
             }
         }
@@ -457,11 +419,7 @@ mod bindings {
                 for item in iter {
                     let item = item.as_table().unwrap();
                     let name = item["enum"].as_str().unwrap();
-                    let variants = item["variants"]
-                        .as_array()
-                        .unwrap()
-                        .as_slice()
-                        .iter()
+                    let variants = item["variants"].as_slice().unwrap().iter()
                         .map(|item| item.as_str().unwrap());
                     map.insert(name.into(), RegexSet::new(variants).unwrap());
                 }
@@ -472,22 +430,18 @@ mod bindings {
                 let gecko = item["gecko"].as_str().unwrap();
                 let servo = item["servo"].as_str().unwrap();
                 let gecko_name = gecko.rsplit("::").next().unwrap();
-                let gecko = gecko
-                    .split("::")
-                    .map(|s| format!("\\s*{}\\s*", s))
-                    .collect::<Vec<_>>()
-                    .join("::");
+                let gecko = gecko.split("::")
+                                .map(|s| format!("\\s*{}\\s*", s))
+                                .collect::<Vec<_>>()
+                                .join("::");
 
                 fixups.push(Fixup {
                     pat: format!("\\broot\\s*::\\s*{}\\b", gecko),
-                    rep: format!("::gecko_bindings::structs::{}", gecko_name),
+                    rep: format!("::gecko_bindings::structs::{}", gecko_name)
                 });
-                builder.blacklist_type(gecko).raw_line(format!(
-                    "pub type {0}{2} = {1}{2};",
-                    gecko_name,
-                    servo,
-                    if generic { "<T>" } else { "" }
-                ))
+                builder.blacklist_type(gecko)
+                    .raw_line(format!("pub type {0}{2} = {1}{2};", gecko_name, servo,
+                                      if generic { "<T>" } else { "" }))
             })
             .get_builder();
         write_binding_file(builder, STRUCTS_FILE, &fixups);
@@ -502,43 +456,36 @@ mod bindings {
         }
 
         impl log::Log for BuildLogger {
-            fn enabled(&self, meta: &log::Metadata) -> bool {
+            fn enabled(&self, meta: &log::LogMetadata) -> bool {
                 self.file.is_some() && meta.target().contains(&self.filter)
             }
 
-            fn log(&self, record: &log::Record) {
+            fn log(&self, record: &log::LogRecord) {
                 if !self.enabled(record.metadata()) {
                     return;
                 }
 
                 let mut file = self.file.as_ref().unwrap().lock().unwrap();
-                let _ = writeln!(
-                    file,
-                    "{} - {} - {} @ {}:{}",
-                    record.level(),
-                    record.target(),
-                    record.args(),
-                    record.file().unwrap_or("<unknown>"),
-                    record.line().unwrap_or(0)
-                );
-            }
-
-            fn flush(&self) {
-                if let Some(ref file) = self.file {
-                    file.lock().unwrap().flush().unwrap();
-                }
+                let _ =
+                    writeln!(file, "{} - {} - {} @ {}:{}",
+                             record.level(),
+                             record.target(),
+                             record.args(),
+                             record.location().file(),
+                             record.location().line());
             }
         }
 
         if let Some(path) = env::var_os("STYLO_BUILD_LOG") {
-            log::set_max_level(log::LevelFilter::Debug);
-            log::set_boxed_logger(Box::new(BuildLogger {
-                file: fs::File::create(path).ok().map(Mutex::new),
-                filter: env::var("STYLO_BUILD_FILTER")
-                    .ok()
-                    .unwrap_or_else(|| "bindgen".to_owned()),
-            })).expect("Failed to set logger.");
-
+            log::set_logger(|log_level| {
+                log_level.set(log::LogLevelFilter::Debug);
+                Box::new(BuildLogger {
+                    file: fs::File::create(path).ok().map(Mutex::new),
+                    filter: env::var("STYLO_BUILD_FILTER").ok()
+                        .unwrap_or_else(|| "bindgen".to_owned()),
+                })
+            })
+            .expect("Failed to set logger.");
             true
         } else {
             false
@@ -605,10 +552,7 @@ mod bindings {
         for ty in get_arc_types().iter() {
             builder = builder
                 .blacklist_type(format!("{}Strong", ty))
-                .raw_line(format!(
-                    "pub type {0}Strong = ::gecko_bindings::sugar::ownership::Strong<{0}>;",
-                    ty
-                ))
+                .raw_line(format!("pub type {0}Strong = ::gecko_bindings::sugar::ownership::Strong<{0}>;", ty))
                 .borrowed_type(ty)
                 .zero_size_type(ty, &structs_types);
         }
@@ -617,8 +561,7 @@ mod bindings {
 
     fn generate_atoms() {
         let script = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap())
-            .join("gecko")
-            .join("regen_atoms.py");
+            .join("gecko").join("regen_atoms.py");
         println!("cargo:rerun-if-changed={}", script.display());
         let status = Command::new(&*PYTHON)
             .arg(&script)

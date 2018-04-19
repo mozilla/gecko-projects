@@ -156,7 +156,7 @@ JSID_IS_EMPTY(const jsid id)
     return (size_t)JSID_BITS(id) == JSID_TYPE_SYMBOL;
 }
 
-constexpr const jsid JSID_VOID = { size_t(JSID_TYPE_VOID) };
+extern JS_PUBLIC_DATA(const jsid) JSID_VOID;
 extern JS_PUBLIC_DATA(const jsid) JSID_EMPTY;
 
 extern JS_PUBLIC_DATA(const JS::HandleId) JSID_VOIDHANDLE;

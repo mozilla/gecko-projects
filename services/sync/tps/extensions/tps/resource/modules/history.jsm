@@ -23,10 +23,9 @@ var DumpHistory = async function TPS_History__DumpHistory() {
   for (var i = 0; i < root.childCount; i++) {
     let node = root.getChild(i);
     let uri = node.uri;
-    let guid = await PlacesSyncUtils.history.fetchGuidForURL(uri).catch(() => "?".repeat(12));
     let curvisits = await PlacesSyncUtils.history.fetchVisitsForURL(uri);
     for (var visit of curvisits) {
-      Logger.logInfo(`GUID: ${guid}, URI: ${uri}, type=${visit.type}, date=${visit.date}`, true);
+      Logger.logInfo("URI: " + uri + ", type=" + visit.type + ", date=" + visit.date, true);
     }
   }
   root.containerOpen = false;
@@ -49,22 +48,35 @@ var HistoryEntry = {
    *        the time the current Crossweave run was started
    * @return nothing
    */
-  async Add(item, msSinceEpoch) {
+  async Add(item, usSinceEpoch) {
     Logger.AssertTrue("visits" in item && "uri" in item,
       "History entry in test file must have both 'visits' " +
       "and 'uri' properties");
+    let uri = Services.io.newURI(item.uri);
     let place = {
-      url: item.uri,
+      uri,
       visits: []
     };
     for (let visit of item.visits) {
-      let date = new Date(Math.round(msSinceEpoch + visit.date * 60 * 60 * 1000));
-      place.visits.push({ date, transition: visit.type });
+      place.visits.push({
+        visitDate: usSinceEpoch + (visit.date * 60 * 60 * 1000 * 1000),
+        transitionType: visit.type
+      });
     }
     if ("title" in item) {
       place.title = item.title;
     }
-    return PlacesUtils.history.insert(place);
+    return new Promise((resolve, reject) => {
+      PlacesUtils.asyncHistory.updatePlaces(place, {
+          handleError() {
+            reject(new Error("Error adding history entry"));
+          },
+          handleResult() {},
+          handleCompletion() {
+            resolve();
+          }
+      });
+    });
   },
 
   /**
@@ -77,15 +89,15 @@ var HistoryEntry = {
    *        the time the current Crossweave run was started
    * @return true if all the visits for the uri are found, otherwise false
    */
-  async Find(item, msSinceEpoch) {
+  async Find(item, usSinceEpoch) {
     Logger.AssertTrue("visits" in item && "uri" in item,
       "History entry in test file must have both 'visits' " +
       "and 'uri' properties");
     let curvisits = await PlacesSyncUtils.history.fetchVisitsForURL(item.uri);
     for (let visit of curvisits) {
       for (let itemvisit of item.visits) {
-        // Note: in microseconds.
-        let expectedDate = itemvisit.date * 60 * 60 * 1000 * 1000 + msSinceEpoch * 1000;
+        let expectedDate = itemvisit.date * 60 * 60 * 1000 * 1000
+            + usSinceEpoch;
         if (visit.type == itemvisit.type && visit.date == expectedDate) {
           itemvisit.found = true;
         }
@@ -113,7 +125,7 @@ var HistoryEntry = {
    *        the time the current Crossweave run was started
    * @return nothing
    */
-  async Delete(item, msSinceEpoch) {
+  async Delete(item, usSinceEpoch) {
     if ("uri" in item) {
       let removedAny = await PlacesUtils.history.remove(item.uri);
       if (!removedAny) {
@@ -122,6 +134,7 @@ var HistoryEntry = {
     } else if ("host" in item) {
       await PlacesUtils.history.removePagesFromHost(item.host, false);
     } else if ("begin" in item && "end" in item) {
+      let msSinceEpoch = parseInt(usSinceEpoch / 1000);
       let filter = {
         beginDate: new Date(msSinceEpoch + (item.begin * 60 * 60 * 1000)),
         endDate: new Date(msSinceEpoch + (item.end * 60 * 60 * 1000))

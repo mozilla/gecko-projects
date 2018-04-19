@@ -26,11 +26,12 @@ public:
   Create(WorkerPrivate* aWorkerPrivate, ErrorResult& aRv);
 
 private:
-  ConnectionWorker();
+  explicit ConnectionWorker(WorkerPrivate* aWorkerPrivate);
   ~ConnectionWorker();
 
   virtual void ShutdownInternal() override;
 
+  WorkerPrivate* mWorkerPrivate;
   RefPtr<ConnectionProxy> mProxy;
 };
 

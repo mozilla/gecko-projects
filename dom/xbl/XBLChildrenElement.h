@@ -38,24 +38,24 @@ public:
 
   virtual nsIDOMNode* AsDOMNode() override { return this; }
 
-  void AppendInsertedChild(nsIContent* aChild, bool aNotify)
+  void AppendInsertedChild(nsIContent* aChild)
   {
-    // Appending an inserted child causes the inserted
-    // children to be projected instead of default content.
-    MaybeRemoveDefaultContent(aNotify);
-
     mInsertedChildren.AppendElement(aChild);
     aChild->SetXBLInsertionPoint(this);
+
+    // Appending an inserted child causes the inserted
+    // children to be projected instead of default content.
+    MaybeRemoveDefaultContent();
   }
 
   void InsertInsertedChildAt(nsIContent* aChild, uint32_t aIndex)
   {
-    // Inserting an inserted child causes the inserted
-    // children to be projected instead of default content.
-    MaybeRemoveDefaultContent(true);
-
     mInsertedChildren.InsertElementAt(aIndex, aChild);
     aChild->SetXBLInsertionPoint(this);
+
+    // Inserting an inserted child causes the inserted
+    // children to be projected instead of default content.
+    MaybeRemoveDefaultContent();
   }
 
   void RemoveInsertedChild(nsIContent* aChild)
@@ -68,9 +68,6 @@ public:
 
     // After removing the inserted child, default content
     // may be projected into this insertion point.
-    //
-    // FIXME: Layout should be told about this before clearing
-    // mInsertedChildren, this leaves stale styles and frames in the frame tree.
     MaybeSetupDefaultContent();
   }
 
@@ -83,9 +80,6 @@ public:
 
     // After clearing inserted children, default content
     // will be projected into this insertion point.
-    //
-    // FIXME: Layout should be told about this before clearing
-    // mInsertedChildren, this leaves stale styles and frames in the frame tree.
     MaybeSetupDefaultContent();
   }
 
@@ -100,10 +94,14 @@ public:
     }
   }
 
-  void MaybeRemoveDefaultContent(bool aNotify)
+  void MaybeRemoveDefaultContent()
   {
-    if (!HasInsertedChildren() && HasChildren()) {
-      DoRemoveDefaultContent(aNotify);
+    if (!HasInsertedChildren()) {
+      for (nsIContent* child = static_cast<nsINode*>(this)->GetFirstChild();
+           child;
+           child = child->GetNextSibling()) {
+        child->SetXBLInsertionPoint(nullptr);
+      }
     }
   }
 
@@ -145,8 +143,6 @@ protected:
                                  const nsAttrValueOrString* aValue,
                                  bool aNotify) override;
 
-  void DoRemoveDefaultContent(bool aNotify);
-
 private:
   nsTArray<nsIContent*> mInsertedChildren; // WEAK
   nsTArray<RefPtr<nsAtom> > mIncludes;
@@ -155,7 +151,7 @@ private:
 } // namespace dom
 } // namespace mozilla
 
-class nsAnonymousContentList final : public nsINodeList
+class nsAnonymousContentList : public nsINodeList
 {
 public:
   explicit nsAnonymousContentList(nsIContent* aParent)
@@ -165,12 +161,13 @@ public:
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsAnonymousContentList)
+  // nsIDOMNodeList interface
+  NS_DECL_NSIDOMNODELIST
 
   // nsINodeList interface
   virtual int32_t IndexOf(nsIContent* aContent) override;
   virtual nsINode* GetParentObject() override { return mParent; }
   virtual nsIContent* Item(uint32_t aIndex) override;
-  uint32_t Length() override;
 
   virtual JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto) override;
 

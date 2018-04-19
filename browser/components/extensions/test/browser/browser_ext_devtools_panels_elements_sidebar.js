@@ -209,5 +209,5 @@ add_task(async function test_devtools_panels_elements_sidebar() {
 
   await target.destroy();
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

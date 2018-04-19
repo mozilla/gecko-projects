@@ -15,7 +15,6 @@ class EffectTimingPath extends TimingPath {
     return {
       animation: PropTypes.object.isRequired,
       durationPerPixel: PropTypes.number.isRequired,
-      offset: PropTypes.number.isRequired,
       simulateAnimation: PropTypes.func.isRequired,
       totalDuration: PropTypes.number.isRequired,
     };
@@ -25,7 +24,6 @@ class EffectTimingPath extends TimingPath {
     const {
       animation,
       durationPerPixel,
-      offset,
       simulateAnimation,
       totalDuration,
     } = this.props;
@@ -59,6 +57,7 @@ class EffectTimingPath extends TimingPath {
     const helper = new SummaryGraphHelper(state, null,
                                           totalDuration, durationPerPixel,
                                           getValueFunc, toPathStringFunc);
+    const offset = state.previousStartTime ? state.previousStartTime : 0;
 
     return dom.g(
       {

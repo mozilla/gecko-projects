@@ -15,7 +15,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.RobolectricTestRunner;
+import org.mozilla.gecko.background.testhelpers.TestRunner;
 import org.robolectric.shadows.ShadowContentResolver;
 
 import static org.junit.Assert.*;
@@ -25,7 +25,7 @@ import static org.junit.Assert.*;
  * This is WIP junit4 port of robocop tests at org.mozilla.gecko.tests.testBrowserProvider.
  * See Bug 1269492
  */
-@RunWith(RobolectricTestRunner.class)
+@RunWith(TestRunner.class)
 public class BrowserProviderHistoryTest extends BrowserProviderHistoryVisitsTestBase {
     private ContentProviderClient thumbnailClient;
     private Uri thumbnailTestUri;

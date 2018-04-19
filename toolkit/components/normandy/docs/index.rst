@@ -1,5 +1,3 @@
-.. _components/normandy:
-
 ====================
 Shield Recipe Client
 ====================

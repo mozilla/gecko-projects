@@ -1,7 +1,7 @@
 #include "safebrowsing.pb.h"
 #include "gtest/gtest.h"
 
-TEST(UrlClassifierProtobuf, Empty)
+TEST(SafeBrowsingProtobuf, Empty)
 {
   using namespace mozilla::safebrowsing;
 

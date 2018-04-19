@@ -142,7 +142,7 @@ private:
   nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
 };
 
-class TransactionObserver final : public nsIStreamListener
+class TransactionObserver : public nsIStreamListener
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS

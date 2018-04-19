@@ -8,7 +8,7 @@ import org.junit.runner.RunWith;
 import org.mozilla.android.sync.test.helpers.HTTPServerTestHelper;
 import org.mozilla.android.sync.test.helpers.HTTPServerTestHelper.HTTPServerAlreadyRunningError;
 import org.mozilla.android.sync.test.helpers.MockServer;
-import org.robolectric.RobolectricTestRunner;
+import org.mozilla.gecko.background.testhelpers.TestRunner;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -19,7 +19,7 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-@RunWith(RobolectricTestRunner.class)
+@RunWith(TestRunner.class)
 public class TestHTTPServerTestHelper {
   public static final int TEST_PORT = HTTPServerTestHelper.getTestPort();
 

@@ -10,7 +10,6 @@
 
 #include "mozilla/Maybe.h"
 #include "nsAutoPtr.h"
-#include "nsTArray.h"
 
 struct OpusMSDecoder;
 
@@ -69,8 +68,7 @@ private:
   bool mPaddingDiscarded;
   int64_t mFrames;
   Maybe<int64_t> mLastFrameTime;
-  AutoTArray<uint8_t, 8> mMappingTable;
-  AudioConfig::ChannelLayout::ChannelMap mChannelMap;
+  uint8_t mMappingTable[MAX_AUDIO_CHANNELS]; // Channel mapping table.
 };
 
 } // namespace mozilla

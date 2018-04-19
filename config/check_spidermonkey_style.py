@@ -66,8 +66,6 @@ included_inclnames_to_ignore = set([
     'frontend/ReservedWordsGenerated.h', # generated in $OBJDIR
     'gc/StatsPhasesGenerated.h',         # generated in $OBJDIR
     'gc/StatsPhasesGenerated.cpp',       # generated in $OBJDIR
-    'jit/LOpcodes.h',           # generated in $OBJDIR
-    'jit/MOpcodes.h',           # generated in $OBJDIR
     'jscustomallocator.h',      # provided by embedders;  allowed to be missing
     'js-config.h',              # generated in $OBJDIR
     'fdlibm.h',                 # fdlibm
@@ -113,7 +111,6 @@ included_inclnames_to_ignore = set([
 # ignore #includes of them when checking #include ordering.
 oddly_ordered_inclnames = set([
     'ctypes/typedefs.h',        # Included multiple times in the body of ctypes/CTypes.h
-    'frontend/BinSource-auto.h', # Included in the body of frontend/BinSource.h
     'frontend/ReservedWordsGenerated.h', # Included in the body of frontend/TokenStream.h
     'gc/StatsPhasesGenerated.h',         # Included in the body of gc/Statistics.h
     'gc/StatsPhasesGenerated.cpp',       # Included in the body of gc/Statistics.cpp

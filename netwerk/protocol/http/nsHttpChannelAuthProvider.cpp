@@ -28,7 +28,6 @@
 #include "nsServiceManagerUtils.h"
 #include "nsILoadContext.h"
 #include "nsIURL.h"
-#include "mozilla/StaticPrefs.h"
 #include "mozilla/Telemetry.h"
 #include "nsIProxiedChannel.h"
 #include "nsIProxyInfo.h"
@@ -91,6 +90,27 @@ nsHttpChannelAuthProvider::nsHttpChannelAuthProvider()
 nsHttpChannelAuthProvider::~nsHttpChannelAuthProvider()
 {
     MOZ_ASSERT(!mAuthChannel, "Disconnect wasn't called");
+}
+
+uint32_t nsHttpChannelAuthProvider::sAuthAllowPref =
+    SUBRESOURCE_AUTH_DIALOG_ALLOW_ALL;
+
+bool nsHttpChannelAuthProvider::sImgCrossOriginAuthAllowPref = true;
+bool nsHttpChannelAuthProvider::sNonWebContentTriggeredAuthAllow = false;
+
+void
+nsHttpChannelAuthProvider::InitializePrefs()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  mozilla::Preferences::AddUintVarCache(&sAuthAllowPref,
+                                        "network.auth.subresource-http-auth-allow",
+                                        SUBRESOURCE_AUTH_DIALOG_ALLOW_ALL);
+  mozilla::Preferences::AddBoolVarCache(&sImgCrossOriginAuthAllowPref,
+                                        "network.auth.subresource-img-cross-origin-http-auth-allow",
+                                        true);
+  mozilla::Preferences::AddBoolVarCache(&sNonWebContentTriggeredAuthAllow,
+                                        "network.auth.non-web-content-triggered-resources-http-auth-allow",
+                                        false);
 }
 
 NS_IMETHODIMP
@@ -899,10 +919,8 @@ nsHttpChannelAuthProvider::GetCredentialsForChallenge(const char *challenge,
                 LOG(("nsHttpChannelAuthProvider::GetCredentialsForChallenge: "
                      "Prompt is blocked [this=%p pref=%d img-pref=%d "
                      "non-web-content-triggered-pref=%d]\n",
-                     this,
-                     StaticPrefs::network_auth_subresource_http_auth_allow(),
-                     StaticPrefs::network_auth_subresource_img_cross_origin_http_auth_allow(),
-                     StaticPrefs::network_auth_non_web_content_triggered_resources_http_auth_allow()));
+                      this, sAuthAllowPref, sImgCrossOriginAuthAllowPref,
+                      sNonWebContentTriggeredAuthAllow));
                 return NS_ERROR_ABORT;
             }
 
@@ -1037,13 +1055,11 @@ nsHttpChannelAuthProvider::BlockPrompt(bool proxyAuth)
         }
     }
 
-    if (!topDoc &&
-        !StaticPrefs::network_auth_non_web_content_triggered_resources_http_auth_allow() &&
-        nonWebContent) {
+    if (!topDoc && !sNonWebContentTriggeredAuthAllow && nonWebContent) {
         return true;
     }
 
-    switch (StaticPrefs::network_auth_subresource_http_auth_allow()) {
+    switch (sAuthAllowPref) {
     case SUBRESOURCE_AUTH_DIALOG_DISALLOW_ALL:
         // Do not open the http-authentication credentials dialog for
         // the sub-resources.
@@ -1058,7 +1074,7 @@ nsHttpChannelAuthProvider::BlockPrompt(bool proxyAuth)
         // is set, http-authentication dialog for image subresources is
         // blocked.
         if (mCrossOrigin &&
-            !StaticPrefs::network_auth_subresource_img_cross_origin_http_auth_allow() &&
+            !sImgCrossOriginAuthAllowPref &&
             loadInfo &&
             ((loadInfo->GetExternalContentPolicyType() == nsIContentPolicy::TYPE_IMAGE) ||
              (loadInfo->GetExternalContentPolicyType() == nsIContentPolicy::TYPE_IMAGESET))) {

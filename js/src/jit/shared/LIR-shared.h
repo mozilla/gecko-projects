@@ -1481,14 +1481,20 @@ class LInitPropGetterSetter : public LCallInstructionHelper<0, 2, 0>
     }
 };
 
-class LCheckOverRecursed : public LInstructionHelper<0, 0, 0>
+class LCheckOverRecursed : public LInstructionHelper<0, 0, 1>
 {
   public:
     LIR_HEADER(CheckOverRecursed)
 
-    LCheckOverRecursed()
+    explicit LCheckOverRecursed(const LDefinition& temp)
       : LInstructionHelper(classOpcode)
-    {}
+    {
+        setTemp(0, temp);
+    }
+
+    const LDefinition* temp() {
+        return getTemp(0);
+    }
 
     MCheckOverRecursed* mir() const {
         return mir_->toCheckOverRecursed();
@@ -1611,34 +1617,49 @@ class LRotateI64 : public details::RotateBase<INT64_PIECES, INT64_PIECES + 1, 1>
     LAllocation* count() { return getOperand(Count); }
 };
 
-class LInterruptCheck : public LInstructionHelper<0, 0, 0>
+class LInterruptCheck : public LInstructionHelper<0, 0, 1>
 {
+    Label* oolEntry_;
+
+    // Whether this is an implicit interrupt check. Implicit interrupt checks
+    // use a patchable backedge and signal handlers instead of an explicit
+    // cx->interrupt check.
+    bool implicit_;
+
   public:
     LIR_HEADER(InterruptCheck)
 
-    LInterruptCheck()
-      : LInstructionHelper(classOpcode)
-    {}
+    explicit LInterruptCheck(const LDefinition& temp)
+      : LInstructionHelper(classOpcode),
+        oolEntry_(nullptr),
+        implicit_(false)
+    {
+        setTemp(0, temp);
+    }
+
+    Label* oolEntry() {
+        MOZ_ASSERT(implicit_);
+        return oolEntry_;
+    }
+
+    void setOolEntry(Label* oolEntry) {
+        MOZ_ASSERT(implicit_);
+        oolEntry_ = oolEntry;
+    }
     MInterruptCheck* mir() const {
         return mir_->toInterruptCheck();
     }
-};
 
-class LWasmInterruptCheck : public LInstructionHelper<0, 1, 0>
-{
-  public:
-    LIR_HEADER(WasmInterruptCheck)
+    void setImplicit() {
+        implicit_ = true;
+        setTemp(0, LDefinition::BogusTemp());
+    }
+    bool implicit() const {
+        return implicit_;
+    }
 
-    explicit LWasmInterruptCheck(const LAllocation& tlsData)
-      : LInstructionHelper(classOpcode)
-    {
-        setOperand(0, tlsData);
-    }
-    MWasmInterruptCheck* mir() const {
-        return mir_->toWasmInterruptCheck();
-    }
-    const LAllocation* tlsPtr() {
-        return getOperand(0);
+    const LDefinition* temp() {
+        return getTemp(0);
     }
 };
 
@@ -4310,9 +4331,9 @@ inline bool
 LNode::recoversInput() const
 {
     switch (op()) {
-      case Opcode::AddI:
+      case LOp_AddI:
         return toAddI()->recoversInput();
-      case Opcode::SubI:
+      case LOp_SubI:
         return toSubI()->recoversInput();
       default:
         return false;
@@ -5515,23 +5536,19 @@ class LBinarySharedStub : public LCallInstructionHelper<BOX_PIECES, 2 * BOX_PIEC
     static const size_t RhsInput = BOX_PIECES;
 };
 
-class LUnaryCache : public LInstructionHelper<BOX_PIECES, BOX_PIECES, 0>
+class LUnarySharedStub : public LCallInstructionHelper<BOX_PIECES, BOX_PIECES, 0>
 {
   public:
-    LIR_HEADER(UnaryCache)
+    LIR_HEADER(UnarySharedStub)
 
-    explicit LUnaryCache(const LBoxAllocation& input)
-      : LInstructionHelper(classOpcode)
+    explicit LUnarySharedStub(const LBoxAllocation& input)
+      : LCallInstructionHelper(classOpcode)
     {
         setBoxOperand(Input, input);
     }
 
-    const MUnaryCache* mir() const {
-        return mir_->toUnaryCache();
-    }
-
-    const LAllocation* input() {
-        return getOperand(Input);
+    const MUnarySharedStub* mir() const {
+        return mir_->toUnarySharedStub();
     }
 
     static const size_t Input = 0;
@@ -9692,15 +9709,14 @@ class LWasmAtomicBinopHeapForEffect : public LInstructionHelper<0, 3, 5>
     }
 };
 
-class LWasmLoadGlobalVar : public LInstructionHelper<1, 1, 1>
+class LWasmLoadGlobalVar : public LInstructionHelper<1, 1, 0>
 {
   public:
     LIR_HEADER(WasmLoadGlobalVar);
-    explicit LWasmLoadGlobalVar(const LAllocation& tlsPtr, const LDefinition& addrTemp)
+    explicit LWasmLoadGlobalVar(const LAllocation& tlsPtr)
       : LInstructionHelper(classOpcode)
     {
         setOperand(0, tlsPtr);
-        setTemp(0, addrTemp);
     }
     MWasmLoadGlobalVar* mir() const {
         return mir_->toWasmLoadGlobalVar();
@@ -9708,20 +9724,16 @@ class LWasmLoadGlobalVar : public LInstructionHelper<1, 1, 1>
     const LAllocation* tlsPtr() {
         return getOperand(0);
     }
-    const LDefinition* addrTemp() {
-        return getTemp(0);
-    }
 };
 
-class LWasmLoadGlobalVarI64 : public LInstructionHelper<INT64_PIECES, 1, 1>
+class LWasmLoadGlobalVarI64 : public LInstructionHelper<INT64_PIECES, 1, 0>
 {
   public:
     LIR_HEADER(WasmLoadGlobalVarI64);
-    explicit LWasmLoadGlobalVarI64(const LAllocation& tlsPtr, const LDefinition& addrTemp)
+    explicit LWasmLoadGlobalVarI64(const LAllocation& tlsPtr)
       : LInstructionHelper(classOpcode)
     {
         setOperand(0, tlsPtr);
-        setTemp(0, addrTemp);
     }
     MWasmLoadGlobalVar* mir() const {
         return mir_->toWasmLoadGlobalVar();
@@ -9729,22 +9741,17 @@ class LWasmLoadGlobalVarI64 : public LInstructionHelper<INT64_PIECES, 1, 1>
     const LAllocation* tlsPtr() {
         return getOperand(0);
     }
-    const LDefinition* addrTemp() {
-        return getTemp(0);
-    }
 };
 
-class LWasmStoreGlobalVar : public LInstructionHelper<0, 2, 1>
+class LWasmStoreGlobalVar : public LInstructionHelper<0, 2, 0>
 {
   public:
     LIR_HEADER(WasmStoreGlobalVar);
-    LWasmStoreGlobalVar(const LAllocation& value, const LAllocation& tlsPtr,
-                        const LDefinition& addrTemp)
+    LWasmStoreGlobalVar(const LAllocation& value, const LAllocation& tlsPtr)
       : LInstructionHelper(classOpcode)
     {
         setOperand(0, value);
         setOperand(1, tlsPtr);
-        setTemp(0, addrTemp);
     }
     MWasmStoreGlobalVar* mir() const {
         return mir_->toWasmStoreGlobalVar();
@@ -9755,22 +9762,17 @@ class LWasmStoreGlobalVar : public LInstructionHelper<0, 2, 1>
     const LAllocation* tlsPtr() {
         return getOperand(1);
     }
-    const LDefinition* addrTemp() {
-        return getTemp(0);
-    }
 };
 
-class LWasmStoreGlobalVarI64 : public LInstructionHelper<0, INT64_PIECES + 1, 1>
+class LWasmStoreGlobalVarI64 : public LInstructionHelper<0, INT64_PIECES + 1, 0>
 {
   public:
     LIR_HEADER(WasmStoreGlobalVarI64);
-    LWasmStoreGlobalVarI64(const LInt64Allocation& value, const LAllocation& tlsPtr,
-                           const LDefinition& addrTemp)
+    LWasmStoreGlobalVarI64(const LInt64Allocation& value, const LAllocation& tlsPtr)
       : LInstructionHelper(classOpcode)
     {
         setInt64Operand(0, value);
         setOperand(INT64_PIECES, tlsPtr);
-        setTemp(0, addrTemp);
     }
     MWasmStoreGlobalVar* mir() const {
         return mir_->toWasmStoreGlobalVar();
@@ -9780,9 +9782,6 @@ class LWasmStoreGlobalVarI64 : public LInstructionHelper<0, INT64_PIECES + 1, 1>
     }
     const LAllocation* tlsPtr() {
         return getOperand(INT64_PIECES);
-    }
-    const LDefinition* addrTemp() {
-        return getTemp(0);
     }
 };
 
@@ -9875,9 +9874,9 @@ class LWasmStackArgI64 : public LInstructionHelper<0, INT64_PIECES, 0>
 inline bool
 IsWasmCall(LNode::Opcode op)
 {
-    return (op == LNode::Opcode::WasmCall ||
-            op == LNode::Opcode::WasmCallVoid ||
-            op == LNode::Opcode::WasmCallI64);
+    return (op == LNode::LOp_WasmCall ||
+            op == LNode::LOp_WasmCallVoid ||
+            op == LNode::LOp_WasmCallI64);
 }
 
 template <size_t Defs>

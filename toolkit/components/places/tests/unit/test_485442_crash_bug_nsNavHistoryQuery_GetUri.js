@@ -4,13 +4,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+var hs = Cc["@mozilla.org/browser/nav-history-service;1"].
+         getService(Ci.nsINavHistoryService);
+
 function run_test() {
-  let query = PlacesUtils.history.getNewQuery();
-  let options = PlacesUtils.history.getNewQueryOptions();
+  var query = hs.getNewQuery();
+  var options = hs.getNewQueryOptions();
   options.resultType = options.RESULT_TYPE_QUERY;
-  let root = PlacesUtils.history.executeQuery(query, options).root;
-  root.containerOpen = true;
-  Assert.equal(PlacesUtils.asQuery(root).query.uri, null,
-               "Should be null and not crash the browser");
-  root.containerOpen = false;
+  var result = hs.executeQuery(query, options);
+  result.root.containerOpen = true;
+  var rootNode = result.root;
+  rootNode.QueryInterface(Ci.nsINavHistoryQueryResultNode);
+  var queries = rootNode.getQueries();
+  Assert.equal(queries[0].uri, null); // Should be null, instead of crashing the browser
+  rootNode.containerOpen = false;
 }

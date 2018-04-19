@@ -63,7 +63,14 @@ class TaskPool(object):
         self.cwd = cwd
         self.job_limit = job_limit
         self.timeout = timeout
-        self.next_pending = next(self.pending, None)
+        self.next_pending = self.get_next_pending()
+
+    # Set self.next_pending to the next task that has not yet been executed.
+    def get_next_pending(self):
+        try:
+            return self.pending.next()
+        except StopIteration:
+            return None
 
     def run_all(self):
         # The currently running tasks: a set of Task instances.
@@ -85,7 +92,7 @@ class TaskPool(object):
 
                     t.start(p, time.time() + self.timeout)
                     running.add(t)
-                    self.next_pending = next(self.pending, None)
+                    self.next_pending = self.get_next_pending()
 
                 # If we have no tasks running, and the above wasn't able to
                 # start any new ones, then we must be done!
@@ -111,16 +118,16 @@ class TaskPool(object):
                     # something available.
                     if t.pipe.stdout in readable:
                         output = t.pipe.stdout.read(16384)
-                        if len(output):
+                        if output != "":
                             try:
-                                t.onStdout(output.decode('utf-8'))
+                                t.onStdout(output)
                             except TerminateTask:
                                 terminate.add(t)
                     if t.pipe.stderr in readable:
                         output = t.pipe.stderr.read(16384)
-                        if len(output):
+                        if output != "":
                             try:
-                                t.onStderr(output.decode('utf-8'))
+                                t.onStderr(output)
                             except TerminateTask:
                                 terminate.add(t)
                         else:
@@ -196,17 +203,17 @@ if __name__ == '__main__':
             def cmd(self):
                 return ['sh', '-c', 'echo out; sleep %d; echo err>&2' % (self.n,)]
             def onStdout(self, text):
-                print('%d stdout: %r' % (self.n, text))
+                print '%d stdout: %r' % (self.n, text)
             def onStderr(self, text):
-                print('%d stderr: %r' % (self.n, text))
+                print '%d stderr: %r' % (self.n, text)
             def onFinished(self, returncode):
-                print('%d (rc=%d)' % (self.n, returncode))
+                print '%d (rc=%d)' % (self.n, returncode)
                 sorted.append(self.n)
             def onTimeout(self):
-                print('%d timed out' % (self.n,))
+                print '%d timed out' % (self.n,)
 
         p = TaskPool([SortableTask(_) for _ in ns], job_limit=len(ns), timeout=timeout)
         p.run_all()
         return sorted
 
-    print(repr(sleep_sort([1,1,2,3,5,8,13,21,34], 15)))
+    print repr(sleep_sort([1,1,2,3,5,8,13,21,34], 15))

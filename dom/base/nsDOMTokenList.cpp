@@ -314,7 +314,7 @@ nsDOMTokenList::Toggle(const nsAString& aToken,
   return isPresent;
 }
 
-bool
+void
 nsDOMTokenList::Replace(const nsAString& aToken,
                         const nsAString& aNewToken,
                         ErrorResult& aError)
@@ -324,47 +324,33 @@ nsDOMTokenList::Replace(const nsAString& aToken,
   // SyntaxError, not an InvalidCharacterError.
   if (aNewToken.IsEmpty()) {
     aError.Throw(NS_ERROR_DOM_SYNTAX_ERR);
-    return false;
+    return;
   }
 
   aError = CheckToken(aToken);
   if (aError.Failed()) {
-    return false;
+    return;
   }
 
   aError = CheckToken(aNewToken);
   if (aError.Failed()) {
-    return false;
+    return;
   }
 
   const nsAttrValue* attr = GetParsedAttr();
   if (!attr) {
-    return false;
+    return;
   }
 
-  return ReplaceInternal(attr, aToken, aNewToken);
+  ReplaceInternal(attr, aToken, aNewToken);
 }
 
-bool
+void
 nsDOMTokenList::ReplaceInternal(const nsAttrValue* aAttr,
                                 const nsAString& aToken,
                                 const nsAString& aNewToken)
 {
   RemoveDuplicates(aAttr);
-
-  // Trying to do a single pass here leads to really complicated code.  Just do
-  // the simple thing.
-  bool haveOld = false;
-  for (uint32_t i = 0; i < aAttr->GetAtomCount(); ++i) {
-    if (aAttr->AtomAt(i)->Equals(aToken)) {
-      haveOld = true;
-      break;
-    }
-  }
-  if (!haveOld) {
-    // Make sure to not touch the attribute value in this case.
-    return false;
-  }
 
   bool sawIt = false;
   nsAutoString resultStr;
@@ -388,9 +374,9 @@ nsDOMTokenList::ReplaceInternal(const nsAttrValue* aAttr,
     resultStr.Append(nsDependentAtomString(aAttr->AtomAt(i)));
   }
 
-  MOZ_ASSERT(sawIt, "How could we not have found our token this time?");
-  mElement->SetAttr(kNameSpaceID_None, mAttrAtom, resultStr, true);
-  return true;
+  if (sawIt) {
+    mElement->SetAttr(kNameSpaceID_None, mAttrAtom, resultStr, true);
+  }
 }
 
 bool

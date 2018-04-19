@@ -6,16 +6,12 @@ function run_test() {
   let exe = do_get_file("test_crash_win64cfi_infinite_entry_chain.exe");
   ok(exe);
 
-  // Perform a crash. The PE used for unwind info should fail, resulting in
-  // fallback behavior, calculating the first frame from thread context.
-  // Further frames would be calculated with either frame_pointer or scan trust,
-  // but should not be calculated via CFI. If we see CFI here that would be an
-  // indication that either our alternative EXE was not used, or we failed to
-  // abandon unwind info parsing.
+  // Perform a crash. We won't get unwind info, but make sure the stack scan
+  // still works.
   do_x64CFITest("CRASH_X64CFI_ALLOC_SMALL",
     [
       { symbol: "CRASH_X64CFI_ALLOC_SMALL", trust: "context" },
-      { symbol: null, trust: "!cfi" }
+      { symbol: "CRASH_X64CFI_NO_MANS_LAND", trust: null }
     ],
     ["--force-use-module", exe.path]);
 }

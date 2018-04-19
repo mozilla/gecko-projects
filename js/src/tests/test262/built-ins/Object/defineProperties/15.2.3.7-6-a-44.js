@@ -12,19 +12,18 @@ includes: [propertyHelper.js]
 
 var obj = {};
 
-var desc = {
-  value: NaN
-};
+var desc = { value: NaN };
 Object.defineProperty(obj, "foo", desc);
 
 Object.defineProperties(obj, {
-  foo: {
-    value: NaN
-  }
+    foo: {
+        value: NaN
+    }
 });
 
 verifyNotEnumerable(obj, "foo");
 verifyNotWritable(obj, "foo");
 verifyNotConfigurable(obj, "foo");
+
 
 reportCompare(0, 0);

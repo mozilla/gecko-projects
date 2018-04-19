@@ -285,7 +285,7 @@ public:
 NS_IMPL_ISUPPORTS0(LookupArgument)
 
 
-class LookupHelper final
+class LookupHelper
     : public nsIDNSListener
 {
     virtual ~LookupHelper()
@@ -768,9 +768,9 @@ Dashboard::GetDNSCacheEntries(DnsData *dnsData)
         }
 
         if (dnsData->mData[i].family == PR_AF_INET6) {
-            entry.mFamily.AssignLiteral(u"ipv6");
+            CopyASCIItoUTF16("ipv6", entry.mFamily);
         } else {
-            entry.mFamily.AssignLiteral(u"ipv4");
+            CopyASCIItoUTF16("ipv4", entry.mFamily);
         }
     }
 

@@ -140,6 +140,22 @@ private:
 // for addition and indices to removal. See Bug 1283009.
 class TableUpdateV4 : public TableUpdate {
 public:
+  struct PrefixStdString {
+  private:
+    std::string mStorage;
+    nsDependentCSubstring mString;
+
+  public:
+    explicit PrefixStdString(std::string& aString)
+    {
+      aString.swap(mStorage);
+      mString.Rebind(mStorage.data(), mStorage.size());
+    };
+
+    const nsACString& GetPrefixString() const { return mString; };
+  };
+
+  typedef nsClassHashtable<nsUint32HashKey, PrefixStdString> PrefixStdStringMap;
   typedef nsTArray<int32_t> RemovalIndiceArray;
 
 public:
@@ -157,7 +173,7 @@ public:
   }
 
   bool IsFullUpdate() const { return mFullUpdate; }
-  const PrefixStringMap& Prefixes() { return mPrefixesMap; }
+  PrefixStdStringMap& Prefixes() { return mPrefixesMap; }
   RemovalIndiceArray& RemovalIndices() { return mRemovalIndiceArray; }
   const nsACString& ClientState() const { return mClientState; }
   const nsACString& Checksum() const { return mChecksum; }
@@ -167,7 +183,7 @@ public:
   static const int TAG = 4;
 
   void SetFullUpdate(bool aIsFullUpdate) { mFullUpdate = aIsFullUpdate; }
-  void NewPrefixes(int32_t aSize, const nsACString& aPrefixes);
+  void NewPrefixes(int32_t aSize, std::string& aPrefixes);
   void SetNewClientState(const nsACString& aState) { mClientState = aState; }
   void NewChecksum(const std::string& aChecksum);
 
@@ -179,7 +195,7 @@ private:
   virtual int Tag() const override { return TAG; }
 
   bool mFullUpdate;
-  PrefixStringMap mPrefixesMap;
+  PrefixStdStringMap mPrefixesMap;
   RemovalIndiceArray mRemovalIndiceArray;
   nsCString mClientState;
   nsCString mChecksum;

@@ -25,5 +25,5 @@ add_task(async function() {
   originalURL = new URL(originalURL);
   is(originalURL.host, "example", "Should be an error for http://example, not http://www.example.com/");
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

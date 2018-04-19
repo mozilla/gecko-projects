@@ -1301,7 +1301,8 @@ Notification::DispatchNotificationClickEvent()
 
   event->SetTrusted(true);
   WantsPopupControlCheck popupControlCheck(event);
-  target->DispatchEvent(*event);
+  bool dummy;
+  target->DispatchEvent(event, &dummy);
   // We always return false since in case of dispatching on the serviceworker,
   // there is no well defined window to focus. The script may use the
   // Client.focus() API if it wishes.
@@ -1316,7 +1317,9 @@ Notification::DispatchClickEvent()
   event->InitEvent(NS_LITERAL_STRING("click"), false, true);
   event->SetTrusted(true);
   WantsPopupControlCheck popupControlCheck(event);
-  return DispatchEvent(*event, CallerType::System, IgnoreErrors());
+  bool doDefaultAction = true;
+  DispatchEvent(event, &doDefaultAction);
+  return doDefaultAction;
 }
 
 // Overrides dispatch and run handlers so we can directly dispatch from main

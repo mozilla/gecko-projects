@@ -51,9 +51,6 @@ const PREF_INTERVAL = "browser.sessionstore.interval";
 const kNoIndex = Number.MAX_SAFE_INTEGER;
 const kLastIndex = Number.MAX_SAFE_INTEGER - 1;
 
-// Grab our global so we can access it in functions below.
-const global = this;
-
 /**
  * A function that will recursively call |cb| to collected data for all
  * non-dynamic frames in the current frame/docShell tree.
@@ -153,7 +150,7 @@ var StateChangeNotifier = {
 var EventListener = {
 
   init() {
-    ssu.addDynamicFrameFilteredListener(global, "load", this, true);
+    addEventListener("load", ssu.createDynamicFrameEventFilter(this), true);
   },
 
   handleEvent(event) {
@@ -323,8 +320,8 @@ var SessionHistoryListener = {
     // waiting to add the listener later because these notifications are cheap.
     // We will likely only collect once since we are batching collection on
     // a delay.
-    docShell.QueryInterface(Ci.nsIWebNavigation).
-      sessionHistory.legacySHistory.addSHistoryListener(this);
+    docShell.QueryInterface(Ci.nsIWebNavigation).sessionHistory.
+      addSHistoryListener(this);
 
     // Collect data if we start with a non-empty shistory.
     if (!SessionHistory.isEmpty(docShell)) {
@@ -345,7 +342,7 @@ var SessionHistoryListener = {
   uninit() {
     let sessionHistory = docShell.QueryInterface(Ci.nsIWebNavigation).sessionHistory;
     if (sessionHistory) {
-      sessionHistory.legacySHistory.removeSHistoryListener(this);
+      sessionHistory.removeSHistoryListener(this);
     }
   },
 
@@ -467,7 +464,7 @@ var SessionHistoryListener = {
  */
 var ScrollPositionListener = {
   init() {
-    ssu.addDynamicFrameFilteredListener(global, "scroll", this, false);
+    addEventListener("scroll", ssu.createDynamicFrameEventFilter(this));
     StateChangeNotifier.addObserver(this);
   },
 
@@ -507,7 +504,7 @@ var ScrollPositionListener = {
  */
 var FormDataListener = {
   init() {
-    ssu.addDynamicFrameFilteredListener(global, "input", this, true);
+    addEventListener("input", ssu.createDynamicFrameEventFilter(this), true);
     StateChangeNotifier.addObserver(this);
   },
 
@@ -599,15 +596,13 @@ var SessionStorageListener = {
 
   resetEventListener() {
     if (!this._listener) {
-      this._listener =
-        ssu.addDynamicFrameFilteredListener(global, "MozSessionStorageChanged",
-                                            this, true);
+      this._listener = ssu.createDynamicFrameEventFilter(this);
+      addEventListener("MozSessionStorageChanged", this._listener, true);
     }
   },
 
   removeEventListener() {
-    ssu.removeDynamicFrameFilteredListener(global, "MozSessionStorageChanged",
-                                           this._listener, true);
+    removeEventListener("MozSessionStorageChanged", this._listener, true);
     this._listener = null;
   },
 

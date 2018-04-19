@@ -18,7 +18,6 @@
 
 #include "gfxPrefs.h"
 #include "gfxVR.h"
-#include "gfxVRExternal.h"
 #if defined(XP_WIN)
 #include "gfxVROculus.h"
 #endif
@@ -77,10 +76,6 @@ VRManager::VRManager()
    * OSVR will be used if Oculus SDK and OpenVR don't detect any HMDS,
    * to support everyone else.
    */
-  mExternalManager = VRSystemManagerExternal::Create();
-  if (mExternalManager) {
-      mManagers.AppendElement(mExternalManager);
-  }
 
 #if defined(XP_WIN)
   // The Oculus runtime is supported only on Windows
@@ -516,13 +511,6 @@ VRManager::GetPuppetManager()
 {
   MOZ_ASSERT(mPuppetManager);
   return mPuppetManager;
-}
-
-VRSystemManagerExternal*
-VRManager::GetExternalManager()
-{
-  MOZ_ASSERT(mExternalManager);
-  return mExternalManager;
 }
 
 template<class T>

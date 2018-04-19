@@ -32,6 +32,14 @@ config = {
     "mozilla-central": {
         "repo_path": 'mozilla-central',
         "update_channel": "nightly",
+        'platform_overrides': {
+            'android-api-16-old-id': {
+                "update_channel": "nightly-old-id",
+            },
+            'android-x86-old-id': {
+                "update_channel": "nightly-old-id",
+            },
+        }
     },
     'mozilla-release': {
         'enable_release_promotion': True,
@@ -219,6 +227,14 @@ config = {
     'ux': {},
     'date': {
         'update_channel': 'nightly-date',
+        'platform_overrides': {
+            'android-api-16-old-id': {
+                "update_channel": "nightly-old-id",
+            },
+            'android-x86-old-id': {
+                "update_channel": "nightly-old-id",
+            },
+        }
     },
     'cypress': {
         # bug 1164935

@@ -133,7 +133,6 @@ IPCBlobInputStream::IPCBlobInputStream(IPCBlobInputStreamChild* aActor)
   , mState(eInit)
   , mStart(0)
   , mLength(0)
-  , mMutex("IPCBlobInputStream::mMutex")
 {
   MOZ_ASSERT(aActor);
 
@@ -257,12 +256,8 @@ IPCBlobInputStream::Close()
     mRemoteStream = nullptr;
   }
 
-  {
-    MutexAutoLock lock(mMutex);
-
-    mInputStreamCallback = nullptr;
-    mInputStreamCallbackEventTarget = nullptr;
-  }
+  mInputStreamCallback = nullptr;
+  mInputStreamCallbackEventTarget = nullptr;
 
   mFileMetadataCallback = nullptr;
   mFileMetadataCallbackEventTarget = nullptr;
@@ -366,9 +361,7 @@ IPCBlobInputStream::AsyncWait(nsIInputStreamCallback* aCallback,
     return NS_OK;
 
   // We are still waiting for the remote inputStream
-  case ePending: {
-    MutexAutoLock lock(mMutex);
-
+  case ePending:
     if (mInputStreamCallback && aCallback) {
       return NS_ERROR_FAILURE;
     }
@@ -376,25 +369,10 @@ IPCBlobInputStream::AsyncWait(nsIInputStreamCallback* aCallback,
     mInputStreamCallback = aCallback;
     mInputStreamCallbackEventTarget = aEventTarget;
     return NS_OK;
-  }
 
   // We have the remote inputStream, let's check if we can execute the callback.
-  case eRunning: {
-    {
-      MutexAutoLock lock(mMutex);
-      mInputStreamCallback = aCallback;
-      mInputStreamCallbackEventTarget = aEventTarget;
-    }
-
-    nsresult rv = EnsureAsyncRemoteStream();
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    MOZ_ASSERT(mAsyncRemoteStream);
-    return mAsyncRemoteStream->AsyncWait(aCallback ? this : nullptr,
-                                         0, 0, aEventTarget);
-  }
+  case eRunning:
+    return MaybeExecuteInputStreamCallback(aCallback, aEventTarget);
 
   // Stream is closed.
   default:
@@ -447,28 +425,45 @@ IPCBlobInputStream::StreamReady(already_AddRefed<nsIInputStream> aInputStream)
                                           this);
   }
 
-  nsCOMPtr<nsIInputStreamCallback> inputStreamCallback = this;
+  nsCOMPtr<nsIInputStreamCallback> inputStreamCallback;
+  inputStreamCallback.swap(mInputStreamCallback);
+
   nsCOMPtr<nsIEventTarget> inputStreamCallbackEventTarget;
-  {
-    MutexAutoLock lock(mMutex);
-    inputStreamCallbackEventTarget = mInputStreamCallbackEventTarget;
-    if (!mInputStreamCallback) {
-      inputStreamCallback = nullptr;
-    }
-  }
+  inputStreamCallbackEventTarget.swap(mInputStreamCallbackEventTarget);
 
   if (inputStreamCallback) {
-    nsresult rv = EnsureAsyncRemoteStream();
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return;
-    }
-
-    MOZ_ASSERT(mAsyncRemoteStream);
-
-    rv = mAsyncRemoteStream->AsyncWait(inputStreamCallback, 0, 0,
-                                       inputStreamCallbackEventTarget);
-    Unused << NS_WARN_IF(NS_FAILED(rv));
+    MaybeExecuteInputStreamCallback(inputStreamCallback,
+                                    inputStreamCallbackEventTarget);
   }
+}
+
+nsresult
+IPCBlobInputStream::MaybeExecuteInputStreamCallback(nsIInputStreamCallback* aCallback,
+                                                    nsIEventTarget* aCallbackEventTarget)
+{
+  MOZ_ASSERT(mState == eRunning);
+  MOZ_ASSERT(mRemoteStream || mAsyncRemoteStream);
+
+  // If the callback has been already set, we return an error.
+  if (mInputStreamCallback && aCallback) {
+    return NS_ERROR_FAILURE;
+  }
+
+  mInputStreamCallback = aCallback;
+  mInputStreamCallbackEventTarget = aCallbackEventTarget;
+
+  if (!mInputStreamCallback) {
+    return NS_OK;
+  }
+
+  nsresult rv = EnsureAsyncRemoteStream();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  MOZ_ASSERT(mAsyncRemoteStream);
+
+  return mAsyncRemoteStream->AsyncWait(this, 0, 0, aCallbackEventTarget);
 }
 
 void
@@ -494,31 +489,27 @@ IPCBlobInputStream::InitWithExistingRange(uint64_t aStart, uint64_t aLength)
 NS_IMETHODIMP
 IPCBlobInputStream::OnInputStreamReady(nsIAsyncInputStream* aStream)
 {
-  nsCOMPtr<nsIInputStreamCallback> callback;
-  nsCOMPtr<nsIEventTarget> callbackEventTarget;
-  {
-    MutexAutoLock lock(mMutex);
-
-    // We have been closed in the meantime.
-    if (mState == eClosed) {
-      return NS_OK;
-    }
-
-    MOZ_ASSERT(mState == eRunning);
-    MOZ_ASSERT(mAsyncRemoteStream == aStream);
-
-    // The callback has been canceled in the meantime.
-    if (!mInputStreamCallback) {
-      return NS_OK;
-    }
-
-    callback.swap(mInputStreamCallback);
-    callbackEventTarget.swap(mInputStreamCallbackEventTarget);
+  // We have been closed in the meantime.
+  if (mState == eClosed) {
+    return NS_OK;
   }
+
+  MOZ_ASSERT(mState == eRunning);
+  MOZ_ASSERT(mAsyncRemoteStream == aStream);
+
+  // The callback has been canceled in the meantime.
+  if (!mInputStreamCallback) {
+    return NS_OK;
+  }
+
+  nsCOMPtr<nsIInputStreamCallback> callback;
+  callback.swap(mInputStreamCallback);
+
+  nsCOMPtr<nsIEventTarget> callbackEventTarget;
+  callbackEventTarget.swap(mInputStreamCallbackEventTarget);
 
   // This must be the last operation because the execution of the callback can
   // be synchronous.
-  MOZ_ASSERT(callback);
   InputStreamCallbackRunnable::Execute(callback, callbackEventTarget, this);
   return NS_OK;
 }

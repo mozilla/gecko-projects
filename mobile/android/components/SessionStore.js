@@ -63,6 +63,7 @@ SessionStore.prototype = {
   classID: Components.ID("{8c1f07d6-cba3-4226-a315-8bd43d67d032}"),
 
   QueryInterface: XPCOMUtils.generateQI([Ci.nsISessionStore,
+                                         Ci.nsIDOMEventListener,
                                          Ci.nsIObserver,
                                          Ci.nsISupportsWeakReference]),
 

@@ -4,7 +4,7 @@
 
 "use strict";
 
-const { ConsoleCommand } = require("devtools/client/webconsole/types");
+const { ConsoleCommand } = require("devtools/client/webconsole/new-console-output/types");
 
 function JSTerm(webConsoleFrame) {
   this.hud = webConsoleFrame;

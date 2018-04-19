@@ -10,7 +10,7 @@
 'use strict';
 
 promise_test(t => {
-  return fetch('/interfaces/entries-api.idl')
+  return fetch('interfaces.idl')
     .then(r => r.text())
     .then(idls => {
 

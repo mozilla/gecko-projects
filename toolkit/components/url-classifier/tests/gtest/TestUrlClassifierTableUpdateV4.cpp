@@ -134,7 +134,9 @@ GenerateUpdateData(bool fullUpdate,
 
   for (auto iter = add.ConstIter(); !iter.Done(); iter.Next()) {
     nsCString* pstring = iter.Data();
-    tableUpdate->NewPrefixes(iter.Key(), *pstring);
+    std::string str(pstring->BeginReading(), pstring->Length());
+
+    tableUpdate->NewPrefixes(iter.Key(), str);
   }
 
   if (removal) {

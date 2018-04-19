@@ -21,6 +21,7 @@
 #include "nsCOMPtr.h"
 #include "nsICSSLoaderObserver.h"
 #include "nsIDocumentObserver.h"
+#include "nsIDOMElement.h"
 #include "nsIDOMEventListener.h"
 #include "nsIEditorMailSupport.h"
 #include "nsIEditorStyleSheets.h"
@@ -35,11 +36,10 @@
 #include "nsTArray.h"
 
 class nsDocumentFragment;
-class nsHTMLDocument;
 class nsITransferable;
 class nsIClipboard;
 class nsIDOMDocument;
-class nsIDOMElement;
+class nsIDOMMouseEvent;
 class nsILinkHandler;
 class nsTableWrapperFrame;
 class nsIDOMRange;
@@ -58,7 +58,6 @@ struct PropItem;
 template<class T> class OwningNonNull;
 namespace dom {
 class DocumentFragment;
-class MouseEvent;
 } // namespace dom
 namespace widget {
 struct IMEState;
@@ -230,6 +229,7 @@ public:
    * @param aElement        Must not be null.
    */
   static bool NodeIsBlockStatic(const nsINode* aElement);
+  static nsresult NodeIsBlockStatic(nsIDOMNode *aNode, bool *aIsBlock);
 
   // non-virtual methods of interface methods
   bool AbsolutePositioningEnabled() const
@@ -386,7 +386,7 @@ public:
                                  EStripWrappers aStripWrappers) override;
   nsresult DeleteNode(nsINode* aNode);
   NS_IMETHOD DeleteNode(nsIDOMNode* aNode) override;
-  nsresult DeleteText(dom::CharacterData& aTextNode, uint32_t aOffset,
+  nsresult DeleteText(nsGenericDOMDataNode& aTextNode, uint32_t aOffset,
                       uint32_t aLength);
   virtual nsresult
   InsertTextImpl(nsIDocument& aDocument,
@@ -423,10 +423,9 @@ public:
    * @return                  Returns inserted point if succeeded.
    *                          Otherwise, the result is not set.
    */
-  template<typename PT, typename CT>
   EditorDOMPoint
   InsertNodeIntoProperAncestor(nsIContent& aNode,
-                               const EditorDOMPointBase<PT, CT>& aPointToInsert,
+                               const EditorRawDOMPoint& aPointToInsert,
                                SplitAtEdges aSplitAtEdges);
 
   /**
@@ -456,6 +455,10 @@ public:
    * aNode must be a non-null text node.
    * outIsEmptyNode must be non-null.
    */
+  nsresult IsEmptyNode(nsIDOMNode* aNode, bool* outIsEmptyBlock,
+                       bool aMozBRDoesntCount = false,
+                       bool aListOrCellNotEmpty = false,
+                       bool aSafeToAskFrames = false);
   nsresult IsEmptyNode(nsINode* aNode, bool* outIsEmptyBlock,
                        bool aMozBRDoesntCount = false,
                        bool aListOrCellNotEmpty = false,
@@ -532,7 +535,7 @@ public:
    * event callback when the mouse pointer is moved
    * @param aMouseEvent [IN] the event
    */
-  nsresult OnMouseMove(dom::MouseEvent* aMouseEvent);
+  nsresult OnMouseMove(nsIDOMMouseEvent* aMouseEvent);
 
   /**
    * Modifies the table containing the selection according to the
@@ -567,15 +570,13 @@ public:
   MaybeCollapseSelectionAtFirstEditableNode(
     bool aIgnoreIfSelectionInEditingHost);
 
-  nsHTMLDocument* GetHTMLDocument() const;
-
 protected:
   class BlobReader final : public nsIEditorBlobListener
   {
   public:
     BlobReader(dom::BlobImpl* aBlob, HTMLEditor* aHTMLEditor,
-               bool aIsSafe, nsIDocument* aSourceDoc,
-               nsINode* aDestinationNode, int32_t aDestOffset,
+               bool aIsSafe, nsIDOMDocument* aSourceDoc,
+               nsIDOMNode* aDestinationNode, int32_t aDestOffset,
                bool aDoDeleteSelection);
 
     NS_DECL_ISUPPORTS
@@ -589,8 +590,8 @@ protected:
     RefPtr<dom::BlobImpl> mBlob;
     RefPtr<HTMLEditor> mHTMLEditor;
     bool mIsSafe;
-    nsCOMPtr<nsIDocument> mSourceDoc;
-    nsCOMPtr<nsINode> mDestinationNode;
+    nsCOMPtr<nsIDOMDocument> mSourceDoc;
+    nsCOMPtr<nsIDOMNode> mDestinationNode;
     int32_t mDestOffset;
     bool mDoDeleteSelection;
   };
@@ -772,8 +773,8 @@ protected:
 
   nsresult InsertObject(const nsACString& aType, nsISupports* aObject,
                         bool aIsSafe,
-                        nsIDocument* aSourceDoc,
-                        nsINode* aDestinationNode,
+                        nsIDOMDocument* aSourceDoc,
+                        nsIDOMNode* aDestinationNode,
                         int32_t aDestOffset,
                         bool aDoDeleteSelection);
 
@@ -782,15 +783,17 @@ protected:
   NS_IMETHOD PrepareTransferable(nsITransferable** transferable) override;
   nsresult PrepareHTMLTransferable(nsITransferable** transferable);
   nsresult InsertFromTransferable(nsITransferable* transferable,
-                                    nsIDocument* aSourceDoc,
+                                    nsIDOMDocument* aSourceDoc,
                                     const nsAString& aContextStr,
                                     const nsAString& aInfoStr,
                                     bool havePrivateHTMLFlavor,
+                                    nsIDOMNode *aDestinationNode,
+                                    int32_t aDestinationOffset,
                                     bool aDoDeleteSelection);
   virtual nsresult InsertFromDataTransfer(dom::DataTransfer* aDataTransfer,
                                           int32_t aIndex,
-                                          nsIDocument* aSourceDoc,
-                                          nsINode* aDestinationNode,
+                                          nsIDOMDocument* aSourceDoc,
+                                          nsIDOMNode* aDestinationNode,
                                           int32_t aDestOffset,
                                           bool aDoDeleteSelection) override;
   bool HavePrivateHTMLFlavor(nsIClipboard* clipboard );
@@ -931,15 +934,12 @@ protected:
   {
     return GetPreviousHTMLElementOrTextInternal(aNode, true);
   }
-  template<typename PT, typename CT>
-  nsIContent*
-  GetPreviousHTMLElementOrText(const EditorDOMPointBase<PT, CT>& aPoint)
+  nsIContent* GetPreviousHTMLElementOrText(const EditorRawDOMPoint& aPoint)
   {
     return GetPreviousHTMLElementOrTextInternal(aPoint, false);
   }
-  template<typename PT, typename CT>
   nsIContent*
-  GetPreviousHTMLElementOrTextInBlock(const EditorDOMPointBase<PT, CT>& aPoint)
+  GetPreviousHTMLElementOrTextInBlock(const EditorRawDOMPoint& aPoint)
   {
     return GetPreviousHTMLElementOrTextInternal(aPoint, true);
   }
@@ -950,9 +950,8 @@ protected:
    */
   nsIContent* GetPreviousHTMLElementOrTextInternal(nsINode& aNode,
                                                    bool aNoBlockCrossing);
-  template<typename PT, typename CT>
   nsIContent*
-  GetPreviousHTMLElementOrTextInternal(const EditorDOMPointBase<PT, CT>& aPoint,
+  GetPreviousHTMLElementOrTextInternal(const EditorRawDOMPoint& aPoint,
                                        bool aNoBlockCrossing);
 
   /**
@@ -968,15 +967,12 @@ protected:
   {
     return GetPreviousEditableHTMLNodeInternal(aNode, true);
   }
-  template<typename PT, typename CT>
-  nsIContent*
-  GetPreviousEditableHTMLNode(const EditorDOMPointBase<PT, CT>& aPoint)
+  nsIContent* GetPreviousEditableHTMLNode(const EditorRawDOMPoint& aPoint)
   {
     return GetPreviousEditableHTMLNodeInternal(aPoint, false);
   }
-  template<typename PT, typename CT>
   nsIContent* GetPreviousEditableHTMLNodeInBlock(
-                const EditorDOMPointBase<PT, CT>& aPoint)
+                const EditorRawDOMPoint& aPoint)
   {
     return GetPreviousEditableHTMLNodeInternal(aPoint, true);
   }
@@ -987,9 +983,8 @@ protected:
    */
   nsIContent* GetPreviousEditableHTMLNodeInternal(nsINode& aNode,
                                                   bool aNoBlockCrossing);
-  template<typename PT, typename CT>
   nsIContent* GetPreviousEditableHTMLNodeInternal(
-                const EditorDOMPointBase<PT, CT>& aPoint,
+                const EditorRawDOMPoint& aPoint,
                 bool aNoBlockCrossing);
 
   /**
@@ -1010,15 +1005,11 @@ protected:
   {
     return GetNextHTMLElementOrTextInternal(aNode, true);
   }
-  template<typename PT, typename CT>
-  nsIContent*
-  GetNextHTMLElementOrText(const EditorDOMPointBase<PT, CT>& aPoint)
+  nsIContent* GetNextHTMLElementOrText(const EditorRawDOMPoint& aPoint)
   {
     return GetNextHTMLElementOrTextInternal(aPoint, false);
   }
-  template<typename PT, typename CT>
-  nsIContent*
-  GetNextHTMLElementOrTextInBlock(const EditorDOMPointBase<PT, CT>& aPoint)
+  nsIContent* GetNextHTMLElementOrTextInBlock(const EditorRawDOMPoint& aPoint)
   {
     return GetNextHTMLElementOrTextInternal(aPoint, true);
   }
@@ -1029,10 +1020,8 @@ protected:
    */
   nsIContent* GetNextHTMLElementOrTextInternal(nsINode& aNode,
                                                bool aNoBlockCrossing);
-  template<typename PT, typename CT>
-  nsIContent*
-  GetNextHTMLElementOrTextInternal(const EditorDOMPointBase<PT, CT>& aPoint,
-                                   bool aNoBlockCrossing);
+  nsIContent* GetNextHTMLElementOrTextInternal(const EditorRawDOMPoint& aPoint,
+                                               bool aNoBlockCrossing);
 
   /**
    * GetNextEditableHTMLNode*() methods are similar to
@@ -1052,14 +1041,12 @@ protected:
   {
     return GetNextEditableHTMLNodeInternal(aNode, true);
   }
-  template<typename PT, typename CT>
-  nsIContent* GetNextEditableHTMLNode(const EditorDOMPointBase<PT, CT>& aPoint)
+  nsIContent* GetNextEditableHTMLNode(const EditorRawDOMPoint& aPoint)
   {
     return GetNextEditableHTMLNodeInternal(aPoint, false);
   }
-  template<typename PT, typename CT>
   nsIContent* GetNextEditableHTMLNodeInBlock(
-                const EditorDOMPointBase<PT, CT>& aPoint)
+                const EditorRawDOMPoint& aPoint)
   {
     return GetNextEditableHTMLNodeInternal(aPoint, true);
   }
@@ -1069,10 +1056,9 @@ protected:
    * of above methods.  Please don't use this method directly.
    */
   nsIContent* GetNextEditableHTMLNodeInternal(nsINode& aNode,
-                                              bool aNoBlockCrossing);
-  template<typename PT, typename CT>
+                                                  bool aNoBlockCrossing);
   nsIContent* GetNextEditableHTMLNodeInternal(
-                const EditorDOMPointBase<PT, CT>& aPoint,
+                const EditorRawDOMPoint& aPoint,
                 bool aNoBlockCrossing);
 
   bool IsFirstEditableChild(nsINode* aNode);
@@ -1114,8 +1100,8 @@ protected:
                                    const nsAString& aContextStr,
                                    const nsAString& aInfoStr,
                                    const nsAString& aFlavor,
-                                   nsIDocument* aSourceDoc,
-                                   nsINode* aDestNode,
+                                   nsIDOMDocument* aSourceDoc,
+                                   nsIDOMNode* aDestNode,
                                    int32_t aDestOffset,
                                    bool aDeleteSelection,
                                    bool aTrustedInput,
@@ -1346,7 +1332,7 @@ protected:
   void HideGrabber();
 
   ManualNACPtr CreateGrabber(nsIContent& aParentContent);
-  nsresult StartMoving();
+  nsresult StartMoving(nsIDOMElement* aHandle);
   nsresult SetFinalPosition(int32_t aX, int32_t aY);
   void AddPositioningOffset(int32_t& aX, int32_t& aY);
   void SnapToGrid(int32_t& newX, int32_t& newY);

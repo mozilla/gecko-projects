@@ -8,6 +8,5 @@ extern crate ipc_channel;
 extern crate profile;
 extern crate profile_traits;
 extern crate servo_allocator;
-extern crate servo_config;
 
 mod time;

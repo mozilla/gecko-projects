@@ -55,7 +55,7 @@ add_task(async function test_inconsistencies() {
   }, "Should not report inconsistencies with empty mirror");
 
   info("Set up mirror");
-  await storeRecords(buf, [{
+  await buf.store([{
     id: "menu",
     type: "folder",
     children: ["bookmarkAAAA", "bookmarkDDDD"],
@@ -85,7 +85,7 @@ add_task(async function test_inconsistencies() {
     title: "G",
     bmkUri: "http://example.com/g",
   }], { needsMerge: false });
-  await storeRecords(buf, [{
+  await buf.store([{
     id: "bookmarkHHHH",
     type: "bookmark",
     title: "H",

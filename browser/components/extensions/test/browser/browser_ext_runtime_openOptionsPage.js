@@ -209,7 +209,7 @@ add_tasks(async function test_inline_options(extraOptions) {
 
   await extension.unload();
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });
 
 add_tasks(async function test_tab_options(extraOptions) {
@@ -312,7 +312,7 @@ add_tasks(async function test_tab_options(extraOptions) {
   await extension.awaitFinish("options-ui-tab");
   await extension.unload();
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });
 
 add_tasks(async function test_options_no_manifest(extraOptions) {

@@ -25,14 +25,15 @@ MockTabsEngine.prototype = {
 
 // A clients engine that doesn't need to be a constructor.
 let MockClientsEngine = {
-  getClientType(guid) {
+  isMobile(guid) {
     Assert.ok(guid.endsWith("desktop") || guid.endsWith("mobile"));
-    return guid.endsWith("mobile") ? "phone" : "desktop";
-  }
+    return guid.endsWith("mobile");
+  },
 };
 
 // Tell Sync about the mocks.
 Weave.Service.engineManager.register(MockTabsEngine);
+Weave.Service.clientsEngine = MockClientsEngine;
 
 // Tell the Sync XPCOM service it is initialized.
 let weaveXPCService = Cc["@mozilla.org/weave/service;1"]
@@ -45,7 +46,6 @@ function configureEngine(clients) {
   // Configure the instance Sync created.
   let engine = Weave.Service.engineManager.get("tabs");
   engine.clients = clients;
-  Weave.Service.clientsEngine = MockClientsEngine;
   // Send an observer that pretends the engine just finished a sync.
   Services.obs.notifyObservers(null, "weave:engine:sync:finish", "tabs");
 }

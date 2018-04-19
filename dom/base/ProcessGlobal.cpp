@@ -7,16 +7,17 @@
 #include "ProcessGlobal.h"
 
 #include "nsContentCID.h"
-#include "mozilla/dom/MessageManagerBinding.h"
-#include "mozilla/dom/ResolveSystemBinding.h"
+#include "nsDOMClassInfoID.h"
+#include "mozilla/HoldDropJSObjects.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 
 ProcessGlobal::ProcessGlobal(nsFrameMessageManager* aMessageManager)
- : MessageManagerGlobal(aMessageManager),
-   mInitialized(false)
+ : mInitialized(false),
+   mMessageManager(aMessageManager)
 {
+  SetIsNotDOMBinding();
   mozilla::HoldJSObjects(this);
 }
 
@@ -26,51 +27,23 @@ ProcessGlobal::~ProcessGlobal()
   mozilla::DropJSObjects(this);
 }
 
-bool
-ProcessGlobal::DoResolve(JSContext* aCx, JS::Handle<JSObject*> aObj,
-                         JS::Handle<jsid> aId,
-                         JS::MutableHandle<JS::PropertyDescriptor> aDesc)
-{
-    bool found;
-    if (!SystemGlobalResolve(aCx, aObj, aId, &found)) {
-      return false;
-    }
-    if (found) {
-      FillPropertyDescriptor(aDesc, aObj, JS::UndefinedValue(), false);
-    }
-    return true;
-}
-
-/* static */
-bool
-ProcessGlobal::MayResolve(jsid aId)
-{
-  return MayResolveAsSystemBindingName(aId);
-}
-
-void
-ProcessGlobal::GetOwnPropertyNames(JSContext* aCx, JS::AutoIdVector& aNames,
-                                   bool aEnumerableOnly, ErrorResult& aRv)
-{
-  JS::Rooted<JSObject*> thisObj(aCx, GetWrapper());
-  GetSystemBindingNames(aCx, thisObj, aNames, aEnumerableOnly, aRv);
-}
-
 ProcessGlobal*
 ProcessGlobal::Get()
 {
-  nsCOMPtr<nsIGlobalObject> service = do_GetService(NS_CHILDPROCESSMESSAGEMANAGER_CONTRACTID);
+  nsCOMPtr<nsISyncMessageSender> service = do_GetService(NS_CHILDPROCESSMESSAGEMANAGER_CONTRACTID);
   if (!service) {
     return nullptr;
   }
   return static_cast<ProcessGlobal*>(service.get());
 }
 
-void
+// This method isn't automatically forwarded safely because it's notxpcom, so
+// the IDL binding doesn't know what value to return.
+NS_IMETHODIMP_(bool)
 ProcessGlobal::MarkForCC()
 {
   MarkScopesForCC();
-  MessageManagerGlobal::MarkForCC();
+  return mMessageManager ? mMessageManager->MarkForCC() : false;
 }
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(ProcessGlobal)
@@ -94,11 +67,15 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ProcessGlobal)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIMessageSender)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIContentProcessMessageManager)
+  NS_INTERFACE_MAP_ENTRY(nsIMessageListenerManager)
   NS_INTERFACE_MAP_ENTRY(nsIMessageSender)
+  NS_INTERFACE_MAP_ENTRY(nsISyncMessageSender)
+  NS_INTERFACE_MAP_ENTRY(nsIContentProcessMessageManager)
   NS_INTERFACE_MAP_ENTRY(nsIScriptObjectPrincipal)
   NS_INTERFACE_MAP_ENTRY(nsIGlobalObject)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
+  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(ContentProcessMessageManager)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(ProcessGlobal)
@@ -112,30 +89,15 @@ ProcessGlobal::Init()
   }
   mInitialized = true;
 
-  return InitChildGlobalInternal(NS_LITERAL_CSTRING("processChildGlobal"));
-}
-
-bool
-ProcessGlobal::WrapGlobalObject(JSContext* aCx,
-                                JS::CompartmentOptions& aOptions,
-                                JS::MutableHandle<JSObject*> aReflector)
-{
-  bool ok = ContentProcessMessageManagerBinding::Wrap(aCx, this, this, aOptions,
-                                                      nsJSPrincipals::get(mPrincipal),
-                                                      true, aReflector);
-  if (ok) {
-    // Since we can't rewrap we have to preserve the global's wrapper here.
-    PreserveWrapper(ToSupports(this));
-  }
-  return ok;
+  nsISupports* scopeSupports = NS_ISUPPORTS_CAST(nsIContentProcessMessageManager*, this);
+  return InitChildGlobalInternal(scopeSupports, NS_LITERAL_CSTRING("processChildGlobal"));
 }
 
 void
 ProcessGlobal::LoadScript(const nsAString& aURL)
 {
   Init();
-  JS::Rooted<JSObject*> global(mozilla::dom::RootingCx(), GetWrapper());
-  LoadScriptInternal(global, aURL, false);
+  LoadScriptInternal(aURL, false);
 }
 
 void

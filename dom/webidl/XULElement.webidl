@@ -16,6 +16,8 @@ interface XULElement : Element {
   [SetterThrows]
   attribute DOMString flex;
   [SetterThrows]
+  attribute DOMString flexGroup;
+  [SetterThrows]
   attribute DOMString ordinal;
   [SetterThrows]
   attribute DOMString orient;
@@ -52,6 +54,10 @@ interface XULElement : Element {
   [SetterThrows]
   attribute DOMString maxHeight;
 
+  // Persistence
+  [SetterThrows]
+  attribute DOMString persist;
+
   // Position properties for
   // * popups - these are screen coordinates
   // * other elements - these are client coordinates relative to parent stack.
@@ -60,9 +66,11 @@ interface XULElement : Element {
   [SetterThrows]
   attribute DOMString top;
 
-  // Tooltip
+  // Tooltip and status info
   [SetterThrows]
   attribute DOMString tooltipText;
+  [SetterThrows]
+  attribute DOMString statusText;
 
   // Properties for images
   [SetterThrows]

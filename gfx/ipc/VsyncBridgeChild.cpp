@@ -60,7 +60,7 @@ class NotifyVsyncTask : public Runnable
 public:
   NotifyVsyncTask(RefPtr<VsyncBridgeChild> aVsyncBridge,
                   TimeStamp aTimeStamp,
-                  const layers::LayersId& aLayersId)
+                  const uint64_t& aLayersId)
     : Runnable("gfx::NotifyVsyncTask")
     , mVsyncBridge(aVsyncBridge)
     , mTimeStamp(aTimeStamp)
@@ -75,7 +75,7 @@ public:
 private:
   RefPtr<VsyncBridgeChild> mVsyncBridge;
   TimeStamp mTimeStamp;
-  layers::LayersId mLayersId;
+  uint64_t mLayersId;
 };
 
 bool
@@ -85,7 +85,7 @@ VsyncBridgeChild::IsOnVsyncIOThread() const
 }
 
 void
-VsyncBridgeChild::NotifyVsync(TimeStamp aTimeStamp, const layers::LayersId& aLayersId)
+VsyncBridgeChild::NotifyVsync(TimeStamp aTimeStamp, const uint64_t& aLayersId)
 {
   // This should be on the Vsync thread (not the Vsync I/O thread).
   MOZ_ASSERT(!IsOnVsyncIOThread());
@@ -95,7 +95,7 @@ VsyncBridgeChild::NotifyVsync(TimeStamp aTimeStamp, const layers::LayersId& aLay
 }
 
 void
-VsyncBridgeChild::NotifyVsyncImpl(TimeStamp aTimeStamp, const layers::LayersId& aLayersId)
+VsyncBridgeChild::NotifyVsyncImpl(TimeStamp aTimeStamp, const uint64_t& aLayersId)
 {
   // This should be on the Vsync I/O thread.
   MOZ_ASSERT(IsOnVsyncIOThread());

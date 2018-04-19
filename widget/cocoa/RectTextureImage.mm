@@ -108,10 +108,7 @@ RectTextureImage::Draw(layers::GLManager* aManager,
 {
   gl::GLContext* gl = aManager->gl();
 
-  bool bound = BindIOSurfaceToTexture(gl);
-  if (!bound) {
-    return;
-  }
+  BindIOSurfaceToTexture(gl);
 
   layers::ShaderProgramOGL* program =
     aManager->GetProgram(LOCAL_GL_TEXTURE_RECTANGLE_ARB,
@@ -144,15 +141,9 @@ RectTextureImage::DeleteTexture()
   }
 }
 
-bool
+void
 RectTextureImage::BindIOSurfaceToTexture(gl::GLContext* aGL)
 {
-  if (!mIOSurface) {
-    // If our size is zero or MacIOSurface::CreateIOSurface failed for some
-    // other reason, there's nothing we can bind.
-    return false;
-  }
-
   if (!mTexture) {
     MOZ_ASSERT(aGL);
     aGL->fGenTextures(1, &mTexture);
@@ -176,8 +167,6 @@ RectTextureImage::BindIOSurfaceToTexture(gl::GLContext* aGL)
                                        0);
     mGLContext = aGL;
   }
-
-  return true;
 }
 
 } // namespace widget

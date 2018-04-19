@@ -101,8 +101,6 @@ DEFAULTS = dict(
         'network.proxy.type': 1,
         # Bug 1383896 - reduces noise in tests
         'idle.lastDailyNotification': int(time.time()),
-        # Bug 1445243 - reduces precision of tests
-        'privacy.reduceTimerPrecision': False,
         'places.database.lastMaintenance': FAR_IN_FUTURE,
         'security.enable_java': False,
         'security.fileuri.strict_origin_policy': False,
@@ -193,6 +191,8 @@ DEFAULTS = dict(
         'browser.snippets.enabled': False,
         'browser.snippets.syncPromo.enabled': False,
         'toolkit.telemetry.server': 'https://127.0.0.1/telemetry-dummy/',
+        'experiments.manifest.uri':
+            'https://127.0.0.1/experiments-dummy/manifest',
         'network.http.speculative-parallel-limit': 0,
         'lightweightThemes.selectedThemeID': "",
         'devtools.chrome.enabled': False,
@@ -204,6 +204,7 @@ DEFAULTS = dict(
         'media.libavcodec.allow-obsolete': True,
         'extensions.legacy.enabled': True,
         'xpinstall.signatures.required': False,
+        'extensions.allow-non-mpc-extensions': True
     }
 )
 
@@ -299,20 +300,6 @@ def update_prefs(config):
 def fix_init_url(config):
     if 'init_url' in config:
         config['init_url'] = convert_url(config, config['init_url'])
-
-
-@validator
-def determine_local_symbols_path(config):
-    if 'symbols_path' not in config:
-        return
-
-    # use objdir/dist/crashreporter-symbols for symbolsPath if none provided
-    if not config['symbols_path'] and \
-       config['develop'] and \
-       'MOZ_DEVELOPER_OBJ_DIR' in os.environ:
-        config['symbols_path'] = os.path.join(os.environ['MOZ_DEVELOPER_OBJ_DIR'],
-                                              'dist',
-                                              'crashreporter-symbols')
 
 
 def get_counters(config):
@@ -482,6 +469,7 @@ def get_browser_config(config):
                 'xperf_path': None,
                 'error_filename': None,
                 'no_upload_results': False,
+                'enable_stylo': True,
                 'stylothreads': 0,
                 'subtests': None,
                 }

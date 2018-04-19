@@ -1195,11 +1195,6 @@ SPAN_TEST(from_xpcom_collections)
 SPAN_TEST(from_cstring)
 {
   {
-    const char* str = nullptr;
-    auto cs = MakeStringSpan(str);
-    ASSERT_EQ(cs.size(), 0U);
-  }
-  {
     const char* str = "abc";
 
     auto cs = MakeStringSpan(str);
@@ -1237,11 +1232,6 @@ SPAN_TEST(from_cstring)
     Span<const char> scccea;
     scccea = arr; // error
 #endif
-  }
-  {
-    const char16_t* str = nullptr;
-    auto cs = MakeStringSpan(str);
-    ASSERT_EQ(cs.size(), 0U);
   }
   {
     char16_t arr[4] = {'a', 'b', 'c', 0};

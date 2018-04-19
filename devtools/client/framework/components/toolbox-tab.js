@@ -62,11 +62,6 @@ class ToolboxTab extends Component {
         tabIndex: focusedButton === id ? "0" : "-1",
         onFocus: () => focusButton(id),
         onMouseDown: () => selectTool(id),
-        onKeyDown: (evt) => {
-          if (evt.key === "Enter" || evt.key === " ") {
-            selectTool(id);
-          }
-        },
       },
       span(
         {

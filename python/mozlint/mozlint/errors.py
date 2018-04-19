@@ -4,6 +4,8 @@
 
 from __future__ import absolute_import
 
+import os
+
 
 class LintException(Exception):
     pass
@@ -16,7 +18,7 @@ class LinterNotFound(LintException):
 
 class LinterParseError(LintException):
     def __init__(self, path, message):
-        LintException.__init__(self, "{}: {}".format(path, message))
+        LintException.__init__(self, "{}: {}".format(os.path.basename(path), message))
 
 
 class LintersNotConfigured(LintException):

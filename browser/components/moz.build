@@ -41,7 +41,6 @@ DIRS += [
     'enterprisepolicies',
     'extensions',
     'feeds',
-    'library',
     'migration',
     'newtab',
     'originattributes',

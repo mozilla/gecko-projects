@@ -1,6 +1,12 @@
 load(libdir + "asm.js");
 load(libdir + "asserts.js");
 
+
+enableExpressionClosures();
+assertAsmTypeFail(USE_ASM + 'function f() 0');
+assertAsmTypeFail(USE_ASM + 'function f() 0; return 0');
+assertAsmTypeFail(USE_ASM + 'function f() 0; return f');
+
 assertAsmTypeFail(USE_ASM);
 assertAsmTypeFail(USE_ASM + 'return');
 assertAsmTypeFail(USE_ASM + 'function f(){}');

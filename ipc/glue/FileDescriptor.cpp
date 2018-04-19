@@ -187,7 +187,7 @@ FileDescriptor::Close(PlatformHandleType aHandle)
       NS_WARNING("Failed to close file handle for current process!");
     }
 #else // XP_WIN
-    IGNORE_EINTR(close(aHandle));
+    HANDLE_EINTR(close(aHandle));
 #endif
   }
 }

@@ -41,7 +41,6 @@ DevToolsModules(
     'StackTracePanel.js',
     'StatisticsPanel.js',
     'StatusBar.js',
-    'StatusCode.js',
     'TabboxPanel.js',
     'TimingsPanel.js',
     'Toolbar.js',

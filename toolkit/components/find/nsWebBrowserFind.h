@@ -25,13 +25,6 @@ class nsISelection;
 class nsIDOMWindow;
 
 class nsIDocShell;
-class nsRange;
-
-namespace mozilla {
-namespace dom {
-class Selection;
-} // namespace dom
-} // namespace mozilla
 
 //*****************************************************************************
 // class nsWebBrowserFind
@@ -64,22 +57,21 @@ protected:
   nsresult OnStartSearchFrame(nsPIDOMWindowOuter* aWindow);
   nsresult OnEndSearchFrame(nsPIDOMWindowOuter* aWindow);
 
-  already_AddRefed<mozilla::dom::Selection>
-    GetFrameSelection(nsPIDOMWindowOuter* aWindow);
+  already_AddRefed<nsISelection> GetFrameSelection(nsPIDOMWindowOuter* aWindow);
   nsresult ClearFrameSelection(nsPIDOMWindowOuter* aWindow);
 
   nsresult OnFind(nsPIDOMWindowOuter* aFoundWindow);
 
-  void SetSelectionAndScroll(nsPIDOMWindowOuter* aWindow, nsRange* aRange);
+  void SetSelectionAndScroll(nsPIDOMWindowOuter* aWindow, nsIDOMRange* aRange);
 
   nsresult GetRootNode(nsIDOMDocument* aDomDoc, nsIDOMNode** aNode);
-  nsresult GetSearchLimits(nsRange* aRange,
-                           nsRange* aStartPt, nsRange* aEndPt,
+  nsresult GetSearchLimits(nsIDOMRange* aRange,
+                           nsIDOMRange* aStartPt, nsIDOMRange* aEndPt,
                            nsIDOMDocument* aDoc, nsISelection* aSel,
                            bool aWrap);
-  nsresult SetRangeAroundDocument(nsRange* aSearchRange,
-                                  nsRange* aStartPoint,
-                                  nsRange* aEndPoint,
+  nsresult SetRangeAroundDocument(nsIDOMRange* aSearchRange,
+                                  nsIDOMRange* aStartPoint,
+                                  nsIDOMRange* aEndPoint,
                                   nsIDOMDocument* aDoc);
 
 protected:

@@ -19,6 +19,7 @@ add_task(async function() {
 
   let prefs = await openPreferencesViaOpenPreferencesAPI("paneGeneral", {leaveOpen: true});
   is(prefs.selectedPane, "paneGeneral", "General pane was selected");
+  // eslint-disable-next-line mozilla/no-cpows-in-tests
   let win = gBrowser.selectedBrowser.contentWindow;
 
   let container = win.document.getElementById("handlersView");
@@ -89,7 +90,9 @@ add_task(async function() {
   ok(!list.selectedItem.handlerApp,
      "No app should be visible as preferred item.");
 
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  let tabRemovedPromise = BrowserTestUtils.tabRemoved(gBrowser.selectedTab);
+  gBrowser.removeCurrentTab();
+  await tabRemovedPromise;
 });
 
 registerCleanupFunction(function() {

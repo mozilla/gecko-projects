@@ -16,6 +16,14 @@ XPCOMUtils.defineLazyServiceGetter(this, "OverrideService",
 XPCOMUtils.defineLazyServiceGetter(this, "IDNService",
   "@mozilla.org/network/idn-service;1", "nsIIDNService");
 
+XPCOMUtils.defineLazyGetter(this, "dump", () =>
+    ChromeUtils.import("resource://gre/modules/AndroidLog.jsm",
+                       {}).AndroidLog.d.bind(null, "ViewProgress"));
+
+function debug(aMsg) {
+  // dump(aMsg);
+}
+
 var IdentityHandler = {
   // The definitions below should be kept in sync with those in GeckoView.ProgressListener.SecurityInformation
   // No trusted identity information. No site identity icon is shown.
@@ -179,12 +187,12 @@ var IdentityHandler = {
 };
 
 class GeckoViewProgress extends GeckoViewModule {
-  onInit() {
+  init() {
     this._hostChanged = false;
   }
 
-  onEnable() {
-    debug `onEnable`;
+  register() {
+    debug("register");
 
     let flags = Ci.nsIWebProgress.NOTIFY_STATE_NETWORK |
                 Ci.nsIWebProgress.NOTIFY_SECURITY |
@@ -196,8 +204,8 @@ class GeckoViewProgress extends GeckoViewModule {
     this.browser.addProgressListener(this.progressFilter, flags);
   }
 
-  onDisable() {
-    debug `onDisable`;
+  unregister() {
+    debug("unregister");
 
     if (this.progressFilter) {
       this.progressFilter.removeProgressListener(this);
@@ -206,29 +214,25 @@ class GeckoViewProgress extends GeckoViewModule {
   }
 
   onSettingsUpdate() {
-    const settings = this.settings;
-    debug `onSettingsUpdate: ${settings}`;
+    let settings = this.settings;
+    debug("onSettingsUpdate: " + JSON.stringify(settings));
 
     IdentityHandler.setUseTrackingProtection(!!settings.useTrackingProtection);
     IdentityHandler.setUsePrivateMode(!!settings.usePrivateMode);
   }
 
   onStateChange(aWebProgress, aRequest, aStateFlags, aStatus) {
-    debug `onStateChange: isTopLevel=${ aWebProgress.isTopLevel
-                       }, flags=${ aStateFlags
-                       }, status=${ aStatus }`;
+    debug("onStateChange()");
 
     if (!aWebProgress.isTopLevel) {
       return;
     }
 
-    const uriSpec = aRequest.QueryInterface(Ci.nsIChannel).URI.displaySpec;
-    debug `onStateChange: uri=${uriSpec}`;
-
     if (aStateFlags & Ci.nsIWebProgressListener.STATE_START) {
-      const message = {
+      let uri = aRequest.QueryInterface(Ci.nsIChannel).URI;
+      let message = {
         type: "GeckoView:PageStart",
-        uri: uriSpec,
+        uri: uri.displaySpec,
       };
 
       this.eventDispatcher.sendRequest(message);
@@ -244,8 +248,6 @@ class GeckoViewProgress extends GeckoViewModule {
   }
 
   onSecurityChange(aWebProgress, aRequest, aState) {
-    debug `onSecurityChange`;
-
     // Don't need to do anything if the data we use to update the UI hasn't changed
     if (this._state === aState && !this._hostChanged) {
       return;
@@ -265,16 +267,6 @@ class GeckoViewProgress extends GeckoViewModule {
   }
 
   onLocationChange(aWebProgress, aRequest, aLocationURI, aFlags) {
-    debug `onLocationChange: location=${ aLocationURI.displaySpec
-                          }, flags=${ aFlags }`;
-
     this._hostChanged = true;
-    if (aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_ERROR_PAGE) {
-      // We apparently don't get a STATE_STOP in onStateChange(), so emit PageStop here
-      this.eventDispatcher.sendRequest({
-        type: "GeckoView:PageStop",
-        success: false
-      });
-    }
   }
 }

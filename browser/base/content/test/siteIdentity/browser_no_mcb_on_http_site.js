@@ -102,5 +102,5 @@ add_task(async function test3() {
 // ------------------------------------------------------
 
 add_task(async function cleanup() {
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });

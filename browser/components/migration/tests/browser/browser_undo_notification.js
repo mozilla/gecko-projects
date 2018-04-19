@@ -17,9 +17,7 @@ add_task(async function autoMigrationUndoNotificationShows() {
     notification.querySelector("button.notification-button-default").click();
     ok(!undoCalled, "Undo should not be called when clicking the default button");
     is(notification, notificationBox._closedNotification, "Notification should be closing");
-    let sessionUpdatePromise = BrowserTestUtils.waitForSessionStoreUpdate(tab);
-    BrowserTestUtils.removeTab(tab);
-    await sessionUpdatePromise;
+    await BrowserTestUtils.removeTab(tab);
 
     undoCalled = false;
     Services.prefs.setCharPref("browser.migrate.automigrate.browser", "chrome");
@@ -39,8 +37,8 @@ add_task(async function autoMigrationUndoNotificationShows() {
     is(notification, notificationBox._closedNotification, "Notification should be closing");
     let surveyTab = await tabOpenedPromise;
     ok(surveyTab, "Should have opened a tab with a survey");
-    BrowserTestUtils.removeTab(surveyTab);
-    BrowserTestUtils.removeTab(tab);
+    await BrowserTestUtils.removeTab(surveyTab);
+    await BrowserTestUtils.removeTab(tab);
   }
 });
 

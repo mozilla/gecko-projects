@@ -45,14 +45,14 @@ public:
     mForwarder = aForwarder;
   }
 
-  LayersId GetId() const { return mId; }
+  uint64_t GetId() const { return mId; }
 
   void MarkDestroyed() {
     mDestroyed = true;
   }
 
 protected:
-  explicit LayerTransactionChild(const LayersId& aId)
+  explicit LayerTransactionChild(const uint64_t& aId)
     : mForwarder(nullptr)
     , mIPCOpen(false)
     , mDestroyed(false)
@@ -78,7 +78,7 @@ protected:
   ShadowLayerForwarder* mForwarder;
   bool mIPCOpen;
   bool mDestroyed;
-  LayersId mId;
+  uint64_t mId;
 };
 
 } // namespace layers

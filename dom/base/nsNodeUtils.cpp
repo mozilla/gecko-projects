@@ -361,13 +361,40 @@ nsNodeUtils::LastRelease(nsINode* aNode)
     Element* elem = aNode->AsElement();
     ownerDoc->ClearBoxObjectFor(elem);
 
-    NS_ASSERTION(!elem->GetXBLBinding(),
-                 "Node has binding on destruction");
+    NS_ASSERTION(aNode->HasFlag(NODE_FORCE_XBL_BINDINGS) ||
+                 !elem->GetXBLBinding(),
+                 "Non-forced node has binding on destruction");
+
+    // if NODE_FORCE_XBL_BINDINGS is set, the node might still have a binding
+    // attached
+    if (aNode->HasFlag(NODE_FORCE_XBL_BINDINGS) &&
+        ownerDoc->BindingManager()) {
+      ownerDoc->BindingManager()->RemovedFromDocument(elem, ownerDoc,
+                                                      nsBindingManager::eRunDtor);
+    }
   }
 
   aNode->ReleaseWrapper(aNode);
 
   FragmentOrElement::RemoveBlackMarkedNode(aNode);
+}
+
+static void
+NoteUserData(void *aObject, nsAtom *aKey, void *aXPCOMChild, void *aData)
+{
+  nsCycleCollectionTraversalCallback* cb =
+    static_cast<nsCycleCollectionTraversalCallback*>(aData);
+  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(*cb, "[user data]");
+  cb->NoteXPCOMChild(static_cast<nsISupports*>(aXPCOMChild));
+}
+
+/* static */
+void
+nsNodeUtils::TraverseUserData(nsINode* aNode,
+                              nsCycleCollectionTraversalCallback &aCb)
+{
+  nsIDocument* ownerDoc = aNode->OwnerDoc();
+  ownerDoc->PropertyTable(DOM_USER_DATA)->Enumerate(aNode, NoteUserData, &aCb);
 }
 
 /* static */
@@ -442,7 +469,7 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
       return nullptr;
     }
 
-    if (CustomElementRegistry::IsCustomElementEnabled(nodeInfo->GetDocument()) &&
+    if (CustomElementRegistry::IsCustomElementEnabled() &&
         (clone->IsHTMLElement() || clone->IsXULElement())) {
       // The cloned node may be a custom element that may require
       // enqueing upgrade reaction.
@@ -512,7 +539,7 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
 
     nsIDocument* newDoc = aNode->OwnerDoc();
     if (newDoc) {
-      if (CustomElementRegistry::IsCustomElementEnabled(newDoc)) {
+      if (CustomElementRegistry::IsCustomElementEnabled()) {
         // Adopted callback must be enqueued whenever a node’s
         // shadow-including inclusive descendants that is custom.
         Element* element = aNode->IsElement() ? aNode->AsElement() : nullptr;
@@ -560,7 +587,7 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
 
     if (wasRegistered && oldDoc != newDoc) {
       nsIContent* content = aNode->AsContent();
-      if (auto mediaElem = HTMLMediaElement::FromNodeOrNull(content)) {
+      if (auto mediaElem = HTMLMediaElement::FromContentOrNull(content)) {
         mediaElem->NotifyOwnerDocumentActivityChanged();
       }
       nsCOMPtr<nsIObjectLoadingContent> objectLoadingContent(do_QueryInterface(aNode));
@@ -695,7 +722,39 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
     }
   }
 
+  // XXX setting document on some nodes not in a document so XBL will bind
+  // and chrome won't break. Make XBL bind to document-less nodes!
+  // XXXbz Once this is fixed, fix up the asserts in all implementations of
+  // BindToTree to assert what they would like to assert, and fix the
+  // ChangeDocumentFor() call in nsXULElement::BindToTree as well.  Also,
+  // remove the UnbindFromTree call in ~nsXULElement, and add back in the
+  // precondition in nsXULElement::UnbindFromTree and remove the line in
+  // nsXULElement.h that makes nsNodeUtils a friend of nsXULElement.
+  // Note: Make sure to do this witchery _after_ we've done any deep
+  // cloning, so kids of the new node aren't confused about whether they're
+  // in a document.
+#ifdef MOZ_XUL
+  if (aClone && !aParent && aNode->IsXULElement()) {
+    if (!aNode->OwnerDoc()->IsLoadedAsInteractiveData()) {
+      clone->SetFlags(NODE_FORCE_XBL_BINDINGS);
+    }
+  }
+#endif
+
   return clone.forget();
+}
+
+
+/* static */
+void
+nsNodeUtils::UnlinkUserData(nsINode *aNode)
+{
+  NS_ASSERTION(aNode->HasProperties(), "Call to UnlinkUserData not needed.");
+
+  // Strong reference to the document so that deleting properties can't
+  // delete the document.
+  nsCOMPtr<nsIDocument> document = aNode->OwnerDoc();
+  document->PropertyTable(DOM_USER_DATA)->DeleteAllPropertiesFor(aNode);
 }
 
 bool

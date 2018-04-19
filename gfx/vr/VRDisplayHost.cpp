@@ -78,7 +78,6 @@ VRDisplayHost::VRDisplayHost(VRDeviceType aType)
   mDisplayInfo.mGroupMask = kVRGroupContent;
   mDisplayInfo.mFrameId = 0;
   mDisplayInfo.mPresentingGeneration = 0;
-  mDisplayInfo.mDisplayState.mDisplayName[0] = '\0';
 }
 
 VRDisplayHost::~VRDisplayHost()
@@ -161,7 +160,7 @@ VRDisplayHost::SetGroupMask(uint32_t aGroupMask)
 bool
 VRDisplayHost::GetIsConnected()
 {
-  return mDisplayInfo.mDisplayState.mIsConnected;
+  return mDisplayInfo.mIsConnected;
 }
 
 void
@@ -422,12 +421,13 @@ VRDisplayHost::CheckClearDisplayInfoDirty()
 
 VRControllerHost::VRControllerHost(VRDeviceType aType, dom::GamepadHand aHand,
                                    uint32_t aDisplayID)
- : mControllerInfo{}
+ : mButtonPressed(0)
+ , mButtonTouched(0)
  , mVibrateIndex(0)
 {
   MOZ_COUNT_CTOR(VRControllerHost);
   mControllerInfo.mType = aType;
-  mControllerInfo.mControllerState.mHand = aHand;
+  mControllerInfo.mHand = aHand;
   mControllerInfo.mMappingType = dom::GamepadMappingType::_empty;
   mControllerInfo.mDisplayID = aDisplayID;
   mControllerInfo.mControllerID = VRSystemManager::AllocateControllerID();
@@ -447,25 +447,25 @@ VRControllerHost::GetControllerInfo() const
 void
 VRControllerHost::SetButtonPressed(uint64_t aBit)
 {
-  mControllerInfo.mControllerState.mButtonPressed = aBit;
+  mButtonPressed = aBit;
 }
 
 uint64_t
 VRControllerHost::GetButtonPressed()
 {
-  return mControllerInfo.mControllerState.mButtonPressed;
+  return mButtonPressed;
 }
 
 void
 VRControllerHost::SetButtonTouched(uint64_t aBit)
 {
-  mControllerInfo.mControllerState.mButtonTouched = aBit;
+  mButtonTouched = aBit;
 }
 
 uint64_t
 VRControllerHost::GetButtonTouched()
 {
-  return mControllerInfo.mControllerState.mButtonTouched;
+  return mButtonTouched;
 }
 
 void
@@ -483,7 +483,7 @@ VRControllerHost::GetPose()
 dom::GamepadHand
 VRControllerHost::GetHand()
 {
-  return mControllerInfo.mControllerState.mHand;
+  return mControllerInfo.mHand;
 }
 
 void

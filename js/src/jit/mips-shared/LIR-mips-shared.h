@@ -16,9 +16,7 @@ class LWasmUint32ToDouble : public LInstructionHelper<1, 1, 0>
   public:
     LIR_HEADER(WasmUint32ToDouble)
 
-    LWasmUint32ToDouble(const LAllocation& input)
-      : LInstructionHelper(classOpcode)
-    {
+    LWasmUint32ToDouble(const LAllocation& input) {
         setOperand(0, input);
     }
 };
@@ -29,9 +27,7 @@ class LWasmUint32ToFloat32 : public LInstructionHelper<1, 1, 0>
   public:
     LIR_HEADER(WasmUint32ToFloat32)
 
-    LWasmUint32ToFloat32(const LAllocation& input)
-      : LInstructionHelper(classOpcode)
-    {
+    LWasmUint32ToFloat32(const LAllocation& input) {
         setOperand(0, input);
     }
 };
@@ -42,9 +38,8 @@ class LDivI : public LBinaryMath<1>
   public:
     LIR_HEADER(DivI);
 
-    LDivI(const LAllocation& lhs, const LAllocation& rhs, const LDefinition& temp)
-      : LBinaryMath(classOpcode)
-    {
+    LDivI(const LAllocation& lhs, const LAllocation& rhs,
+          const LDefinition& temp) {
         setOperand(0, lhs);
         setOperand(1, rhs);
         setTemp(0, temp);
@@ -63,8 +58,7 @@ class LDivPowTwoI : public LInstructionHelper<1, 1, 1>
     LIR_HEADER(DivPowTwoI)
 
     LDivPowTwoI(const LAllocation& lhs, int32_t shift, const LDefinition& temp)
-      : LInstructionHelper(classOpcode),
-        shift_(shift)
+      : shift_(shift)
     {
         setOperand(0, lhs);
         setTemp(0, temp);
@@ -73,9 +67,11 @@ class LDivPowTwoI : public LInstructionHelper<1, 1, 1>
     const LAllocation* numerator() {
         return getOperand(0);
     }
-    int32_t shift() const {
+
+    int32_t shift() {
         return shift_;
     }
+
     MDiv* mir() const {
         return mir_->toDiv();
     }
@@ -86,8 +82,8 @@ class LModI : public LBinaryMath<1>
   public:
     LIR_HEADER(ModI);
 
-    LModI(const LAllocation& lhs, const LAllocation& rhs, const LDefinition& callTemp)
-      : LBinaryMath(classOpcode)
+    LModI(const LAllocation& lhs, const LAllocation& rhs,
+          const LDefinition& callTemp)
     {
         setOperand(0, lhs);
         setOperand(1, rhs);
@@ -97,6 +93,7 @@ class LModI : public LBinaryMath<1>
     const LDefinition* callTemp() {
         return getTemp(0);
     }
+
     MMod* mir() const {
         return mir_->toMod();
     }
@@ -108,17 +105,17 @@ class LModPowTwoI : public LInstructionHelper<1, 1, 0>
 
   public:
     LIR_HEADER(ModPowTwoI);
+    int32_t shift()
+    {
+        return shift_;
+    }
 
     LModPowTwoI(const LAllocation& lhs, int32_t shift)
-      : LInstructionHelper(classOpcode),
-        shift_(shift)
+      : shift_(shift)
     {
         setOperand(0, lhs);
     }
 
-    int32_t shift() const {
-        return shift_;
-    }
     MMod* mir() const {
         return mir_->toMod();
     }
@@ -133,8 +130,7 @@ class LModMaskI : public LInstructionHelper<1, 1, 2>
 
     LModMaskI(const LAllocation& lhs, const LDefinition& temp0, const LDefinition& temp1,
               int32_t shift)
-      : LInstructionHelper(classOpcode),
-        shift_(shift)
+      : shift_(shift)
     {
         setOperand(0, lhs);
         setTemp(0, temp0);
@@ -144,6 +140,7 @@ class LModMaskI : public LInstructionHelper<1, 1, 2>
     int32_t shift() const {
         return shift_;
     }
+
     MMod* mir() const {
         return mir_->toMod();
     }
@@ -156,9 +153,7 @@ class LTableSwitch : public LInstructionHelper<0, 1, 2>
     LIR_HEADER(TableSwitch);
 
     LTableSwitch(const LAllocation& in, const LDefinition& inputCopy,
-                 const LDefinition& jumpTablePointer, MTableSwitch* ins)
-      : LInstructionHelper(classOpcode)
-    {
+                 const LDefinition& jumpTablePointer, MTableSwitch* ins) {
         setOperand(0, in);
         setTemp(0, inputCopy);
         setTemp(1, jumpTablePointer);
@@ -168,6 +163,7 @@ class LTableSwitch : public LInstructionHelper<0, 1, 2>
     MTableSwitch* mir() const {
         return mir_->toTableSwitch();
     }
+
     const LAllocation* index() {
         return getOperand(0);
     }
@@ -189,7 +185,6 @@ class LTableSwitchV : public LInstructionHelper<0, BOX_PIECES, 3>
     LTableSwitchV(const LBoxAllocation& input, const LDefinition& inputCopy,
                   const LDefinition& floatCopy, const LDefinition& jumpTablePointer,
                   MTableSwitch* ins)
-      : LInstructionHelper(classOpcode)
     {
         setBoxOperand(InputValue, input);
         setTemp(0, inputCopy);
@@ -220,10 +215,6 @@ class LMulI : public LBinaryMath<0>
   public:
     LIR_HEADER(MulI);
 
-    LMulI()
-      : LBinaryMath(classOpcode)
-    {}
-
     MMul* mir() {
         return mir_->toMul();
     }
@@ -233,10 +224,6 @@ class LUDivOrMod : public LBinaryMath<0>
 {
   public:
     LIR_HEADER(UDivOrMod);
-
-    LUDivOrMod()
-      : LBinaryMath(classOpcode)
-    {}
 
     MBinaryArithInstruction* mir() const {
         MOZ_ASSERT(mir_->isDiv() || mir_->isMod());
@@ -272,14 +259,12 @@ class LWasmUnalignedLoadBase : public details::LWasmLoadBase<NumDefs, 2>
   public:
     typedef LWasmLoadBase<NumDefs, 2> Base;
 
-    explicit LWasmUnalignedLoadBase(LNode::Opcode opcode, const LAllocation& ptr,
-                                    const LDefinition& valueHelper)
-      : Base(opcode, ptr, LAllocation())
+    explicit LWasmUnalignedLoadBase(const LAllocation& ptr, const LDefinition& valueHelper)
+      : Base(ptr, LAllocation())
     {
         Base::setTemp(0, LDefinition::BogusTemp());
         Base::setTemp(1, valueHelper);
     }
-
     const LAllocation* ptr() {
         return Base::getOperand(0);
     }
@@ -293,21 +278,19 @@ class LWasmUnalignedLoadBase : public details::LWasmLoadBase<NumDefs, 2>
 class LWasmUnalignedLoad : public details::LWasmUnalignedLoadBase<1>
 {
   public:
-    LIR_HEADER(WasmUnalignedLoad);
-
     explicit LWasmUnalignedLoad(const LAllocation& ptr, const LDefinition& valueHelper)
-      : LWasmUnalignedLoadBase(classOpcode, ptr, valueHelper)
+      : LWasmUnalignedLoadBase(ptr, valueHelper)
     {}
+    LIR_HEADER(WasmUnalignedLoad);
 };
 
 class LWasmUnalignedLoadI64 : public details::LWasmUnalignedLoadBase<INT64_PIECES>
 {
   public:
-    LIR_HEADER(WasmUnalignedLoadI64);
-
     explicit LWasmUnalignedLoadI64(const LAllocation& ptr, const LDefinition& valueHelper)
-      : LWasmUnalignedLoadBase(classOpcode, ptr, valueHelper)
+      : LWasmUnalignedLoadBase(ptr, valueHelper)
     {}
+    LIR_HEADER(WasmUnalignedLoadI64);
 };
 
 namespace details {
@@ -322,15 +305,12 @@ class LWasmUnalignedStoreBase : public LInstructionHelper<0, NumOps, 2>
     static const size_t PtrIndex = 0;
     static const size_t ValueIndex = 1;
 
-    LWasmUnalignedStoreBase(LNode::Opcode opcode, const LAllocation& ptr,
-                            const LDefinition& valueHelper)
-      : Base(opcode)
+    LWasmUnalignedStoreBase(const LAllocation& ptr, const LDefinition& valueHelper)
     {
         Base::setOperand(0, ptr);
         Base::setTemp(0, LDefinition::BogusTemp());
         Base::setTemp(1, valueHelper);
     }
-
     MWasmStore* mir() const {
         return Base::mir_->toWasmStore();
     }
@@ -348,14 +328,12 @@ class LWasmUnalignedStore : public details::LWasmUnalignedStoreBase<2>
 {
   public:
     LIR_HEADER(WasmUnalignedStore);
-
     LWasmUnalignedStore(const LAllocation& ptr, const LAllocation& value,
                         const LDefinition& valueHelper)
-      : LWasmUnalignedStoreBase(classOpcode, ptr, valueHelper)
+      : LWasmUnalignedStoreBase(ptr, valueHelper)
     {
         setOperand(1, value);
     }
-
     const LAllocation* value() {
         return Base::getOperand(ValueIndex);
     }
@@ -367,11 +345,10 @@ class LWasmUnalignedStoreI64 : public details::LWasmUnalignedStoreBase<1 + INT64
     LIR_HEADER(WasmUnalignedStoreI64);
     LWasmUnalignedStoreI64(const LAllocation& ptr, const LInt64Allocation& value,
                            const LDefinition& valueHelper)
-      : LWasmUnalignedStoreBase(classOpcode, ptr, valueHelper)
+      : LWasmUnalignedStoreBase(ptr, valueHelper)
     {
         setInt64Operand(1, value);
     }
-
     const LInt64Allocation value() {
         return getInt64Operand(ValueIndex);
     }
@@ -382,9 +359,7 @@ class LWasmCompareExchangeI64 : public LInstructionHelper<INT64_PIECES, 1 + INT6
   public:
     LIR_HEADER(WasmCompareExchangeI64);
 
-    LWasmCompareExchangeI64(const LAllocation& ptr, const LInt64Allocation& oldValue,
-                            const LInt64Allocation& newValue)
-      : LInstructionHelper(classOpcode)
+    LWasmCompareExchangeI64(const LAllocation& ptr, const LInt64Allocation& oldValue, const LInt64Allocation& newValue)
     {
         setOperand(0, ptr);
         setInt64Operand(1, oldValue);
@@ -411,7 +386,6 @@ class LWasmAtomicExchangeI64 : public LInstructionHelper<INT64_PIECES, 1 + INT64
     LIR_HEADER(WasmAtomicExchangeI64);
 
     LWasmAtomicExchangeI64(const LAllocation& ptr, const LInt64Allocation& value)
-      : LInstructionHelper(classOpcode)
     {
         setOperand(0, ptr);
         setInt64Operand(1, value);
@@ -434,7 +408,6 @@ class LWasmAtomicBinopI64 : public LInstructionHelper<INT64_PIECES, 1 + INT64_PI
     LIR_HEADER(WasmAtomicBinopI64);
 
     LWasmAtomicBinopI64(const LAllocation& ptr, const LInt64Allocation& value)
-      : LInstructionHelper(classOpcode)
     {
         setOperand(0, ptr);
         setInt64Operand(1, value);
@@ -446,6 +419,7 @@ class LWasmAtomicBinopI64 : public LInstructionHelper<INT64_PIECES, 1 + INT64_PI
     const LInt64Allocation value() {
         return getInt64Operand(1);
     }
+
     const MWasmAtomicBinopHeap* mir() const {
         return mir_->toWasmAtomicBinopHeap();
     }

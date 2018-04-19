@@ -86,7 +86,7 @@ public:
         JNIEnv* const mEnv;
         Type mInstance;
 
-        explicit AutoLock(Type aInstance)
+        AutoLock(Type aInstance)
             : mEnv(FindEnv())
             , mInstance(mEnv->NewLocalRef(aInstance))
         {
@@ -678,7 +678,7 @@ class DependentRef : public Cls::Ref
     using Ref = typename Cls::Ref;
 
 public:
-    explicit DependentRef(typename Ref::JNIType instance)
+    DependentRef(typename Ref::JNIType instance)
         : Ref(instance)
     {}
 

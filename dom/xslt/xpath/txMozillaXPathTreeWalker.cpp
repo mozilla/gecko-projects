@@ -8,6 +8,7 @@
 #include "nsIAttribute.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMElement.h"
+#include "nsIDOMProcessingInstruction.h"
 #include "nsINode.h"
 #include "nsPrintfCString.h"
 #include "nsReadableUtils.h"
@@ -19,7 +20,6 @@
 #include "nsAttrName.h"
 #include "nsTArray.h"
 #include "mozilla/dom/Attr.h"
-#include "mozilla/dom/CharacterData.h"
 #include "mozilla/dom/Element.h"
 #include <stdint.h>
 #include <algorithm>
@@ -470,8 +470,7 @@ txXPathNodeUtils::appendNodeValue(const txXPathNode& aNode, nsAString& aResult)
         return;
     }
 
-    MOZ_ASSERT(aNode.mNode->IsCharacterData());
-    static_cast<CharacterData*>(aNode.Content())->AppendTextTo(aResult);
+    aNode.Content()->AppendTextTo(aResult);
 }
 
 /* static */

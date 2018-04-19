@@ -173,7 +173,7 @@ private:
 class TestAPZCTreeManager : public APZCTreeManager {
 public:
   explicit TestAPZCTreeManager(MockContentControllerDelayed* aMcc)
-    : APZCTreeManager(LayersId{0})
+    : APZCTreeManager(0)
     , mcc(aMcc)
   {}
 
@@ -186,7 +186,7 @@ public:
   }
 
 protected:
-  AsyncPanZoomController* NewAPZCInstance(LayersId aLayersId,
+  AsyncPanZoomController* NewAPZCInstance(uint64_t aLayersId,
                                           GeckoContentController* aController) override;
 
   TimeStamp GetFrameTime() override {
@@ -199,7 +199,7 @@ private:
 
 class TestAsyncPanZoomController : public AsyncPanZoomController {
 public:
-  TestAsyncPanZoomController(LayersId aLayersId, MockContentControllerDelayed* aMcc,
+  TestAsyncPanZoomController(uint64_t aLayersId, MockContentControllerDelayed* aMcc,
                              TestAPZCTreeManager* aTreeManager,
                              GestureBehavior aBehavior = DEFAULT_GESTURES)
     : AsyncPanZoomController(aLayersId, aTreeManager, aTreeManager->GetInputQueue(),
@@ -635,7 +635,7 @@ APZCTesterBase::DoubleTapAndCheckStatus(const RefPtr<InputReceiver>& aTarget,
 }
 
 AsyncPanZoomController*
-TestAPZCTreeManager::NewAPZCInstance(LayersId aLayersId,
+TestAPZCTreeManager::NewAPZCInstance(uint64_t aLayersId,
                                      GeckoContentController* aController)
 {
   MockContentControllerDelayed* mcc = static_cast<MockContentControllerDelayed*>(aController);

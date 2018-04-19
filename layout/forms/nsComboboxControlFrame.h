@@ -32,11 +32,11 @@
 #include "nsIStatefulFrame.h"
 #include "nsThreadUtils.h"
 
+class nsStyleContext;
 class nsIListControlFrame;
 class nsComboboxDisplayFrame;
 class nsIDOMEventListener;
 class nsIScrollableFrame;
-class nsTextNode;
 
 namespace mozilla {
 namespace gfx {
@@ -56,11 +56,11 @@ class nsComboboxControlFrame final : public nsBlockFrame,
 
 public:
   friend nsComboboxControlFrame* NS_NewComboboxControlFrame(nsIPresShell* aPresShell,
-                                                            ComputedStyle* aStyle,
+                                                            nsStyleContext* aContext,
                                                             nsFrameState aFlags);
   friend class nsComboboxDisplayFrame;
 
-  explicit nsComboboxControlFrame(ComputedStyle* aStyle);
+  explicit nsComboboxControlFrame(nsStyleContext* aContext);
   ~nsComboboxControlFrame();
 
   NS_DECL_QUERYFRAME
@@ -71,7 +71,7 @@ public:
   virtual void AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
                                         uint32_t aFilter) override;
 
-  nsIContent* GetDisplayNode() const;
+  nsIContent* GetDisplayNode() { return mDisplayContent; }
   nsIFrame* CreateFrameForDisplayNode();
 
 #ifdef ACCESSIBILITY
@@ -213,8 +213,8 @@ public:
   virtual nsIWidget* GetRollupWidget() override;
 
   //nsIStatefulFrame
-  mozilla::UniquePtr<mozilla::PresState> SaveState() override;
-  NS_IMETHOD RestoreState(mozilla::PresState* aState) override;
+  NS_IMETHOD SaveState(nsPresState** aState) override;
+  NS_IMETHOD RestoreState(nsPresState* aState) override;
   NS_IMETHOD GenerateStateKey(nsIContent* aContent,
                               nsIDocument* aDocument,
                               nsACString& aKey) override;
@@ -286,7 +286,7 @@ private:
 
 protected:
   nsFrameList              mPopupFrames;             // additional named child list
-  RefPtr<nsTextNode>       mDisplayContent;          // Anonymous content used to display the current selection
+  nsCOMPtr<nsIContent>     mDisplayContent;          // Anonymous content used to display the current selection
   RefPtr<Element>     mButtonContent;                // Anonymous content for the button
   nsContainerFrame*        mDisplayFrame;            // frame to display selection
   nsIFrame*                mButtonFrame;             // button frame

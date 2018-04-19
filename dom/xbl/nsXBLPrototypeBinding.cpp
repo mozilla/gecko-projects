@@ -39,9 +39,12 @@
 #include "nsIInterfaceInfo.h"
 #include "nsIScriptError.h"
 
+#ifdef MOZ_OLD_STYLE
+#include "nsCSSRuleProcessor.h"
+#endif
 #include "nsXBLResourceLoader.h"
+#include "mozilla/AddonPathService.h"
 #include "mozilla/dom/CDATASection.h"
-#include "mozilla/dom/CharacterData.h"
 #include "mozilla/dom/Comment.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/StyleSheet.h"
@@ -118,7 +121,6 @@ nsXBLPrototypeBinding::nsXBLPrototypeBinding()
   mKeyHandlersRegistered(false),
   mChromeOnlyContent(false),
   mBindToUntrustedContent(false),
-  mSimpleScopeChain(false),
   mResources(nullptr),
   mBaseNameSpaceID(kNameSpaceID_None)
 {
@@ -241,11 +243,6 @@ nsXBLPrototypeBinding::SetBindingElement(Element* aElement)
   mBindToUntrustedContent = mBinding->AttrValueIs(kNameSpaceID_None,
                                                   nsGkAtoms::bindToUntrustedContent,
                                                   nsGkAtoms::_true, eCaseMatters);
-
-  // TODO(emilio): Should we imply mBindToUntrustedContent -> mSimpleScopeChain?
-  mSimpleScopeChain = mBinding->AttrValueIs(kNameSpaceID_None,
-                                            nsGkAtoms::simpleScopeChain,
-                                            nsGkAtoms::_true, eCaseMatters);
 }
 
 bool
@@ -286,7 +283,7 @@ nsXBLPrototypeBinding::BindingAttached(nsIContent* aBoundElement)
 {
   if (mImplementation && mImplementation->CompiledMembers() &&
       mImplementation->mConstructor)
-    return mImplementation->mConstructor->Execute(aBoundElement, *this);
+    return mImplementation->mConstructor->Execute(aBoundElement, MapURIToAddonID(mBindingURI));
   return NS_OK;
 }
 
@@ -295,7 +292,7 @@ nsXBLPrototypeBinding::BindingDetached(nsIContent* aBoundElement)
 {
   if (mImplementation && mImplementation->CompiledMembers() &&
       mImplementation->mDestructor)
-    return mImplementation->mDestructor->Execute(aBoundElement, *this);
+    return mImplementation->mDestructor->Execute(aBoundElement, MapURIToAddonID(mBindingURI));
   return NS_OK;
 }
 
@@ -590,6 +587,17 @@ nsXBLPrototypeBinding::SetInitialAttributes(
   }
 }
 
+#ifdef MOZ_OLD_STYLE
+nsIStyleRuleProcessor*
+nsXBLPrototypeBinding::GetRuleProcessor()
+{
+  if (mResources) {
+    return mResources->GetRuleProcessor();
+  }
+
+  return nullptr;
+}
+#endif
 
 void
 nsXBLPrototypeBinding::EnsureAttributeTable()
@@ -847,8 +855,6 @@ nsXBLPrototypeBinding::Read(nsIObjectInputStream* aStream,
     (aFlags & XBLBinding_Serialize_ChromeOnlyContent) ? true : false;
   mBindToUntrustedContent =
     (aFlags & XBLBinding_Serialize_BindToUntrustedContent) ? true : false;
-  mSimpleScopeChain =
-    (aFlags & XBLBinding_Serialize_SimpleScopeChain) ? true : false;
 
   // nsXBLContentSink::ConstructBinding doesn't create a binding with an empty
   // id, so we don't here either.
@@ -1072,10 +1078,6 @@ nsXBLPrototypeBinding::Write(nsIObjectOutputStream* aStream)
     flags |= XBLBinding_Serialize_BindToUntrustedContent;
   }
 
-  if (mSimpleScopeChain) {
-    flags |= XBLBinding_Serialize_SimpleScopeChain;
-  }
-
   nsresult rv = aStream->Write8(flags);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1215,7 +1217,7 @@ nsXBLPrototypeBinding::ReadContentNode(nsIObjectInputStream* aStream,
   if (namespaceID == XBLBinding_Serialize_TextNode ||
       namespaceID == XBLBinding_Serialize_CDATANode ||
       namespaceID == XBLBinding_Serialize_CommentNode) {
-    RefPtr<CharacterData> content;
+    nsCOMPtr<nsIContent> content;
     switch (namespaceID) {
       case XBLBinding_Serialize_TextNode:
         content = new nsTextNode(aNim);
@@ -1235,7 +1237,7 @@ nsXBLPrototypeBinding::ReadContentNode(nsIObjectInputStream* aStream,
     NS_ENSURE_SUCCESS(rv, rv);
 
     content->SetText(text, false);
-    content.forget(aContent);
+    content.swap(*aContent);
     return NS_OK;
   }
 

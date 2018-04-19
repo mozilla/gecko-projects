@@ -13,12 +13,10 @@
 #include "mozilla/Base64.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/dom/DOMException.h"
-#include "mozilla/dom/DOMExceptionBinding.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/FileReaderBinding.h"
 #include "mozilla/dom/ProgressEvent.h"
-#include "mozilla/dom/WorkerCommon.h"
-#include "mozilla/dom/WorkerRef.h"
+#include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/dom/WorkerScope.h"
 #include "mozilla/Encoding.h"
 #include "nsAlgorithm.h"
@@ -95,8 +93,9 @@ FileReader::RootResultArrayBuffer()
 //FileReader constructors/initializers
 
 FileReader::FileReader(nsIGlobalObject* aGlobal,
-                       WeakWorkerRef* aWorkerRef)
+                       WorkerPrivate* aWorkerPrivate)
   : DOMEventTargetHelper(aGlobal)
+  , WorkerHolder("FileReader")
   , mFileData(nullptr)
   , mDataLen(0)
   , mDataFormat(FILE_AS_BINARY)
@@ -107,10 +106,10 @@ FileReader::FileReader(nsIGlobalObject* aGlobal,
   , mTotal(0)
   , mTransferred(0)
   , mBusyCount(0)
-  , mWeakWorkerRef(aWorkerRef)
+  , mWorkerPrivate(aWorkerPrivate)
 {
   MOZ_ASSERT(aGlobal);
-  MOZ_ASSERT_IF(NS_IsMainThread(), !mWeakWorkerRef);
+  MOZ_ASSERT(NS_IsMainThread() == !mWorkerPrivate);
 
   if (NS_IsMainThread()) {
     mTarget = aGlobal->EventTargetFor(TaskCategory::Other);
@@ -131,16 +130,15 @@ FileReader::~FileReader()
 FileReader::Constructor(const GlobalObject& aGlobal, ErrorResult& aRv)
 {
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(aGlobal.GetAsSupports());
-  RefPtr<WeakWorkerRef> workerRef;
+  WorkerPrivate* workerPrivate = nullptr;
 
   if (!NS_IsMainThread()) {
     JSContext* cx = aGlobal.Context();
-    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(cx);
-
-    workerRef = WeakWorkerRef::Create(workerPrivate);
+    workerPrivate = GetWorkerPrivateFromContext(cx);
+    MOZ_ASSERT(workerPrivate);
   }
 
-  RefPtr<FileReader> fileReader = new FileReader(global, workerRef);
+  RefPtr<FileReader> fileReader = new FileReader(global, workerPrivate);
 
   return fileReader.forget();
 }
@@ -234,7 +232,7 @@ FileReader::OnLoadEndArrayBuffer()
   // XXX Code selected arbitrarily
   mError =
     new DOMException(NS_ERROR_DOM_INVALID_STATE_ERR, errorMsg,
-                     errorNameC, DOMExceptionBinding::INVALID_STATE_ERR);
+                     errorNameC, DOMException::INVALID_STATE_ERR);
 
   FreeDataAndDispatchError();
 }
@@ -386,11 +384,6 @@ FileReader::ReadFileContent(Blob& aBlob,
                             eDataFormat aDataFormat,
                             ErrorResult& aRv)
 {
-  if (IsCurrentThreadRunningWorker() && !mWeakWorkerRef) {
-    // The worker is already shutting down.
-    return;
-  }
-
   if (mReadyState == LOADING) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
@@ -623,9 +616,8 @@ FileReader::DispatchProgressEvent(const nsAString& aType)
     ProgressEvent::Constructor(this, aType, init);
   event->SetTrusted(true);
 
-  ErrorResult rv;
-  DispatchEvent(*event, rv);
-  return rv.StealNSResult();
+  bool dummy;
+  return DispatchEvent(event, &dummy);
 }
 
 // nsITimerCallback
@@ -655,7 +647,7 @@ FileReader::OnInputStreamReady(nsIAsyncInputStream* aStream)
 
   // We use this class to decrease the busy counter at the end of this method.
   // In theory we can do it immediatelly but, for debugging reasons, we want to
-  // be 100% sure we have a workerRef when OnLoadEnd() is called.
+  // be 100% sure we have a workerHolder when OnLoadEnd() is called.
   FileReaderDecreaseBusyCounter RAII(this);
 
   uint64_t count;
@@ -786,21 +778,9 @@ FileReader::Abort()
 nsresult
 FileReader::IncreaseBusyCounter()
 {
-  if (mWeakWorkerRef && mBusyCount++ == 0) {
-    if (NS_WARN_IF(!mWeakWorkerRef->GetPrivate())) {
-      return NS_ERROR_FAILURE;
-    }
-
-    RefPtr<FileReader> self = this;
-
-    RefPtr<StrongWorkerRef> ref =
-      StrongWorkerRef::Create(mWeakWorkerRef->GetPrivate(), "FileReader",
-                              [self]() { self->Shutdown(); });
-    if (NS_WARN_IF(!ref)) {
-      return NS_ERROR_FAILURE;
-    }
-
-    mStrongWorkerRef = ref;
+  if (mWorkerPrivate && mBusyCount++ == 0 &&
+      !HoldWorker(mWorkerPrivate, Closing)) {
+    return NS_ERROR_FAILURE;
   }
 
   return NS_OK;
@@ -809,10 +789,23 @@ FileReader::IncreaseBusyCounter()
 void
 FileReader::DecreaseBusyCounter()
 {
-  MOZ_ASSERT_IF(mStrongWorkerRef, mBusyCount);
-  if (mStrongWorkerRef && --mBusyCount == 0) {
-    mStrongWorkerRef = nullptr;
+  MOZ_ASSERT_IF(mWorkerPrivate, mBusyCount);
+  if (mWorkerPrivate && --mBusyCount == 0) {
+    ReleaseWorker();
   }
+}
+
+bool
+FileReader::Notify(WorkerStatus aStatus)
+{
+  MOZ_ASSERT(mWorkerPrivate);
+  mWorkerPrivate->AssertIsOnWorkerThread();
+
+  if (aStatus > Running) {
+    Shutdown();
+  }
+
+  return true;
 }
 
 void
@@ -828,9 +821,9 @@ FileReader::Shutdown()
   FreeFileData();
   mResultArrayBuffer = nullptr;
 
-  if (mWeakWorkerRef && mBusyCount != 0) {
-    mStrongWorkerRef = nullptr;
-    mWeakWorkerRef = nullptr;
+  if (mWorkerPrivate && mBusyCount != 0) {
+    ReleaseWorker();
+    mWorkerPrivate = nullptr;
     mBusyCount = 0;
   }
 }

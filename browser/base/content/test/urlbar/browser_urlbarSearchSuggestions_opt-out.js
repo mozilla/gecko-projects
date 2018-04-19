@@ -95,7 +95,7 @@ add_task(async function new_tab() {
   await BrowserTestUtils.synthesizeKey("t", { accelKey: true }, gBrowser.selectedBrowser);
   await new Promise(resolve => setTimeout(resolve, 500));
   Assert.ok(!gURLBar.popup.popupOpen, "popup should be closed");
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
 add_task(async function privateWindow() {

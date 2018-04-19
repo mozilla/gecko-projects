@@ -184,7 +184,7 @@ URLMainThread::IsValidURL(const GlobalObject& aGlobal, const nsAString& aURL,
 }
 
 void
-URLMainThread::GetHref(nsAString& aHref) const
+URLMainThread::GetHref(nsAString& aHref, ErrorResult& aRv) const
 {
   aHref.Truncate();
 
@@ -225,7 +225,7 @@ URLMainThread::GetOrigin(nsAString& aOrigin, ErrorResult& aRv) const
 }
 
 void
-URLMainThread::GetProtocol(nsAString& aProtocol) const
+URLMainThread::GetProtocol(nsAString& aProtocol, ErrorResult& aRv) const
 {
   nsAutoCString protocol;
   if (NS_SUCCEEDED(mURI->GetScheme(protocol))) {
@@ -281,13 +281,13 @@ URLMainThread::SetProtocol(const nsAString& aProtocol, ErrorResult& aRv)
   }
 
 void
-URLMainThread::GetUsername(nsAString& aUsername) const
+URLMainThread::GetUsername(nsAString& aUsername, ErrorResult& aRv) const
 {
   URL_GETTER(aUsername, GetUsername);
 }
 
 void
-URLMainThread::SetUsername(const nsAString& aUsername)
+URLMainThread::SetUsername(const nsAString& aUsername, ErrorResult& aRv)
 {
   Unused << NS_MutateURI(mURI)
               .SetUsername(NS_ConvertUTF16toUTF8(aUsername))
@@ -295,13 +295,13 @@ URLMainThread::SetUsername(const nsAString& aUsername)
 }
 
 void
-URLMainThread::GetPassword(nsAString& aPassword) const
+URLMainThread::GetPassword(nsAString& aPassword, ErrorResult& aRv) const
 {
   URL_GETTER(aPassword, GetPassword);
 }
 
 void
-URLMainThread::SetPassword(const nsAString& aPassword)
+URLMainThread::SetPassword(const nsAString& aPassword, ErrorResult& aRv)
 {
   Unused << NS_MutateURI(mURI)
               .SetPassword(NS_ConvertUTF16toUTF8(aPassword))
@@ -309,13 +309,13 @@ URLMainThread::SetPassword(const nsAString& aPassword)
 }
 
 void
-URLMainThread::GetHost(nsAString& aHost) const
+URLMainThread::GetHost(nsAString& aHost, ErrorResult& aRv) const
 {
   URL_GETTER(aHost, GetHostPort);
 }
 
 void
-URLMainThread::SetHost(const nsAString& aHost)
+URLMainThread::SetHost(const nsAString& aHost, ErrorResult& aRv)
 {
   Unused << NS_MutateURI(mURI)
               .SetHostPort(NS_ConvertUTF16toUTF8(aHost))
@@ -339,14 +339,14 @@ URLMainThread::UpdateURLSearchParams()
 }
 
 void
-URLMainThread::GetHostname(nsAString& aHostname) const
+URLMainThread::GetHostname(nsAString& aHostname, ErrorResult& aRv) const
 {
   aHostname.Truncate();
   nsContentUtils::GetHostOrIPv6WithBrackets(mURI, aHostname);
 }
 
 void
-URLMainThread::SetHostname(const nsAString& aHostname)
+URLMainThread::SetHostname(const nsAString& aHostname, ErrorResult& aRv)
 {
   // nsStandardURL returns NS_ERROR_UNEXPECTED for an empty hostname
   // The return code is silently ignored
@@ -356,7 +356,7 @@ URLMainThread::SetHostname(const nsAString& aHostname)
 }
 
 void
-URLMainThread::GetPort(nsAString& aPort) const
+URLMainThread::GetPort(nsAString& aPort, ErrorResult& aRv) const
 {
   aPort.Truncate();
 
@@ -370,7 +370,7 @@ URLMainThread::GetPort(nsAString& aPort) const
 }
 
 void
-URLMainThread::SetPort(const nsAString& aPort)
+URLMainThread::SetPort(const nsAString& aPort, ErrorResult& aRv)
 {
   nsresult rv;
   nsAutoString portStr(aPort);
@@ -390,7 +390,7 @@ URLMainThread::SetPort(const nsAString& aPort)
 }
 
 void
-URLMainThread::GetPathname(nsAString& aPathname) const
+URLMainThread::GetPathname(nsAString& aPathname, ErrorResult& aRv) const
 {
   aPathname.Truncate();
 
@@ -405,7 +405,7 @@ URLMainThread::GetPathname(nsAString& aPathname) const
 }
 
 void
-URLMainThread::SetPathname(const nsAString& aPathname)
+URLMainThread::SetPathname(const nsAString& aPathname, ErrorResult& aRv)
 {
   // Do not throw!
 
@@ -415,7 +415,7 @@ URLMainThread::SetPathname(const nsAString& aPathname)
 }
 
 void
-URLMainThread::GetSearch(nsAString& aSearch) const
+URLMainThread::GetSearch(nsAString& aSearch, ErrorResult& aRv) const
 {
   aSearch.Truncate();
 
@@ -427,13 +427,12 @@ URLMainThread::GetSearch(nsAString& aSearch) const
 
   rv = mURI->GetQuery(search);
   if (NS_SUCCEEDED(rv) && !search.IsEmpty()) {
-    aSearch.Assign(u'?');
-    AppendUTF8toUTF16(search, aSearch);
+    CopyUTF8toUTF16(NS_LITERAL_CSTRING("?") + search, aSearch);
   }
 }
 
 void
-URLMainThread::GetHash(nsAString& aHash) const
+URLMainThread::GetHash(nsAString& aHash, ErrorResult& aRv) const
 {
   aHash.Truncate();
 
@@ -446,7 +445,7 @@ URLMainThread::GetHash(nsAString& aHash) const
 }
 
 void
-URLMainThread::SetHash(const nsAString& aHash)
+URLMainThread::SetHash(const nsAString& aHash, ErrorResult& aRv)
 {
   Unused << NS_MutateURI(mURI)
               .SetRef(NS_ConvertUTF16toUTF8(aHash))
@@ -454,7 +453,7 @@ URLMainThread::SetHash(const nsAString& aHash)
 }
 
 void
-URLMainThread::SetSearchInternal(const nsAString& aSearch)
+URLMainThread::SetSearchInternal(const nsAString& aSearch, ErrorResult& aRv)
 {
   // Ignore failures to be compatible with NS4.
 

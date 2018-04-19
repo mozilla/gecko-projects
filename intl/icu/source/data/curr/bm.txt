@@ -124,10 +124,6 @@ bm{
         }
         MRO{
             "MRO",
-            "mɔritani Uguwiya (1973–2017)",
-        }
-        MRU{
-            "MRU",
             "mɔritani Uguwiya",
         }
         MUR{
@@ -184,10 +180,6 @@ bm{
         }
         STD{
             "STD",
-            "sawotome Dobra (1977–2017)",
-        }
-        STN{
-            "STN",
             "sawotome Dobra",
         }
         SZL{
@@ -235,5 +227,5 @@ bm{
             "zimbabuwe Dolar",
         }
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.31.33"}
 }

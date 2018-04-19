@@ -146,10 +146,22 @@ struct Zone : public JS::shadow::Zone,
               public js::gc::GraphNodeBase<JS::Zone>,
               public js::MallocProvider<JS::Zone>
 {
-    explicit Zone(JSRuntime* rt);
+    explicit Zone(JSRuntime* rt, js::ZoneGroup* group);
     ~Zone();
     MOZ_MUST_USE bool init(bool isSystem);
     void destroy(js::FreeOp *fop);
+
+  private:
+    js::ZoneGroup* const group_;
+  public:
+    js::ZoneGroup* group() const {
+        return group_;
+    }
+
+    // For JIT use.
+    static size_t offsetOfGroup() {
+        return offsetof(Zone, group_);
+    }
 
     void findOutgoingEdges(js::gc::ZoneComponentFinder& finder);
 
@@ -176,7 +188,7 @@ struct Zone : public JS::shadow::Zone,
                                      void* reallocPtr = nullptr) {
         if (!js::CurrentThreadCanAccessRuntime(runtime_))
             return nullptr;
-        return runtimeFromMainThread()->onOutOfMemory(allocFunc, nbytes, reallocPtr);
+        return runtimeFromActiveCooperatingThread()->onOutOfMemory(allocFunc, nbytes, reallocPtr);
     }
     void reportAllocationOverflow() { js::ReportAllocationOverflow(nullptr); }
 
@@ -203,7 +215,7 @@ struct Zone : public JS::shadow::Zone,
     }
 
     bool isCollecting() const {
-        MOZ_ASSERT(js::CurrentThreadCanAccessRuntime(runtimeFromMainThread()));
+        MOZ_ASSERT(js::CurrentThreadCanAccessRuntime(runtimeFromActiveCooperatingThread()));
         return isCollectingFromAnyThread();
     }
 
@@ -232,7 +244,7 @@ struct Zone : public JS::shadow::Zone,
     bool compileBarriers() const { return compileBarriers(needsIncrementalBarrier()); }
     bool compileBarriers(bool needsIncrementalBarrier) const {
         return needsIncrementalBarrier ||
-               runtimeFromMainThread()->hasZealMode(js::gc::ZealMode::VerifierPre);
+               runtimeFromActiveCooperatingThread()->hasZealMode(js::gc::ZealMode::VerifierPre);
     }
 
     void setNeedsIncrementalBarrier(bool needs);
@@ -260,7 +272,7 @@ struct Zone : public JS::shadow::Zone,
     using DebuggerVector = js::Vector<js::Debugger*, 0, js::SystemAllocPolicy>;
 
   private:
-    js::ZoneData<DebuggerVector*> debuggers;
+    js::ZoneGroupData<DebuggerVector*> debuggers;
 
     js::jit::JitZone* createJitZone(JSContext* cx);
 
@@ -269,7 +281,7 @@ struct Zone : public JS::shadow::Zone,
     }
 
     // Side map for storing a unique ids for cells, independent of address.
-    js::ZoneOrGCTaskData<js::gc::UniqueIdMap> uniqueIds_;
+    js::ZoneGroupOrGCTaskData<js::gc::UniqueIdMap> uniqueIds_;
 
     js::gc::UniqueIdMap& uniqueIds() { return uniqueIds_.ref(); }
 
@@ -291,7 +303,7 @@ struct Zone : public JS::shadow::Zone,
      *   is silly
      * And so on.
      */
-    js::ZoneData<bool> suppressAllocationMetadataBuilder;
+    js::ZoneGroupData<bool> suppressAllocationMetadataBuilder;
 
     js::gc::ArenaLists arenas;
 
@@ -299,7 +311,7 @@ struct Zone : public JS::shadow::Zone,
 
   private:
     /* Live weakmaps in this zone. */
-    js::ZoneOrGCTaskData<mozilla::LinkedList<js::WeakMapBase>> gcWeakMapList_;
+    js::ZoneGroupOrGCTaskData<mozilla::LinkedList<js::WeakMapBase>> gcWeakMapList_;
   public:
     mozilla::LinkedList<js::WeakMapBase>& gcWeakMapList() { return gcWeakMapList_.ref(); }
 
@@ -307,14 +319,14 @@ struct Zone : public JS::shadow::Zone,
 
   private:
     // The set of compartments in this zone.
-    js::MainThreadOrGCTaskData<CompartmentVector> compartments_;
+    js::ActiveThreadOrGCTaskData<CompartmentVector> compartments_;
   public:
     CompartmentVector& compartments() { return compartments_.ref(); }
 
     // This zone's gray roots.
     typedef js::Vector<js::gc::Cell*, 0, js::SystemAllocPolicy> GrayRootVector;
   private:
-    js::ZoneOrGCTaskData<GrayRootVector> gcGrayRoots_;
+    js::ZoneGroupOrGCTaskData<GrayRootVector> gcGrayRoots_;
   public:
     GrayRootVector& gcGrayRoots() { return gcGrayRoots_.ref(); }
 
@@ -322,13 +334,13 @@ struct Zone : public JS::shadow::Zone,
     // preserved for re-scanning during sweeping.
     using WeakEdges = js::Vector<js::gc::TenuredCell**, 0, js::SystemAllocPolicy>;
   private:
-    js::ZoneOrGCTaskData<WeakEdges> gcWeakRefs_;
+    js::ZoneGroupOrGCTaskData<WeakEdges> gcWeakRefs_;
   public:
     WeakEdges& gcWeakRefs() { return gcWeakRefs_.ref(); }
 
   private:
     // List of non-ephemeron weak containers to sweep during beginSweepingSweepGroup.
-    js::ZoneOrGCTaskData<mozilla::LinkedList<detail::WeakCacheBase>> weakCaches_;
+    js::ZoneGroupOrGCTaskData<mozilla::LinkedList<detail::WeakCacheBase>> weakCaches_;
   public:
     mozilla::LinkedList<detail::WeakCacheBase>& weakCaches() { return weakCaches_.ref(); }
     void registerWeakCache(detail::WeakCacheBase* cachep) {
@@ -340,7 +352,7 @@ struct Zone : public JS::shadow::Zone,
      * Mapping from not yet marked keys to a vector of all values that the key
      * maps to in any live weak map.
      */
-    js::ZoneOrGCTaskData<js::gc::WeakKeyTable> gcWeakKeys_;
+    js::ZoneGroupOrGCTaskData<js::gc::WeakKeyTable> gcWeakKeys_;
   public:
     js::gc::WeakKeyTable& gcWeakKeys() { return gcWeakKeys_.ref(); }
 
@@ -349,7 +361,7 @@ struct Zone : public JS::shadow::Zone,
     //
     // This is used during GC while calculating sweep groups to record edges
     // that can't be determined by examining this zone by itself.
-    js::MainThreadData<ZoneSet> gcSweepGroupEdges_;
+    js::ActiveThreadData<ZoneSet> gcSweepGroupEdges_;
 
   public:
     ZoneSet& gcSweepGroupEdges() { return gcSweepGroupEdges_.ref(); }
@@ -365,7 +377,7 @@ struct Zone : public JS::shadow::Zone,
                                              js::MovableCellHasher<JSObject*>,
                                              js::SystemAllocPolicy>;
   private:
-    js::ZoneData<JS::WeakCache<TypeDescrObjectSet>> typeDescrObjects_;
+    js::ZoneGroupData<JS::WeakCache<TypeDescrObjectSet>> typeDescrObjects_;
 
     // Malloc counter to measure memory pressure for GC scheduling. This
     // counter should be used only when it's not possible to know the size of
@@ -440,16 +452,16 @@ struct Zone : public JS::shadow::Zone,
 
   private:
     // Bitmap of atoms marked by this zone.
-    js::ZoneOrGCTaskData<js::SparseBitmap> markedAtoms_;
+    js::ZoneGroupOrGCTaskData<js::SparseBitmap> markedAtoms_;
 
     // Set of atoms recently used by this Zone. Purged on GC.
-    js::ZoneOrGCTaskData<js::AtomSet> atomCache_;
+    js::ZoneGroupOrGCTaskData<js::AtomSet> atomCache_;
 
     // Cache storing allocated external strings. Purged on GC.
-    js::ZoneOrGCTaskData<js::ExternalStringCache> externalStringCache_;
+    js::ZoneGroupOrGCTaskData<js::ExternalStringCache> externalStringCache_;
 
     // Cache for Function.prototype.toString. Purged on GC.
-    js::ZoneOrGCTaskData<js::FunctionToStringCache> functionToStringCache_;
+    js::ZoneGroupOrGCTaskData<js::FunctionToStringCache> functionToStringCache_;
 
   public:
     js::SparseBitmap& markedAtoms() { return markedAtoms_.ref(); }
@@ -470,18 +482,18 @@ struct Zone : public JS::shadow::Zone,
     // the current GC.
     js::UnprotectedData<size_t> gcDelayBytes;
 
-    js::ZoneData<uint32_t> tenuredStrings;
-    js::ZoneData<bool> allocNurseryStrings;
+    js::ZoneGroupData<uint32_t> tenuredStrings;
+    js::ZoneGroupData<bool> allocNurseryStrings;
 
   private:
     // Shared Shape property tree.
-    js::ZoneData<js::PropertyTree> propertyTree_;
+    js::ZoneGroupData<js::PropertyTree> propertyTree_;
   public:
     js::PropertyTree& propertyTree() { return propertyTree_.ref(); }
 
   private:
     // Set of all unowned base shapes in the Zone.
-    js::ZoneData<js::BaseShapeSet> baseShapes_;
+    js::ZoneGroupData<js::BaseShapeSet> baseShapes_;
   public:
     js::BaseShapeSet& baseShapes() { return baseShapes_.ref(); }
 
@@ -490,14 +502,14 @@ struct Zone : public JS::shadow::Zone,
     // those of various builtin classes -- there are two entries: one for a
     // lookup via TaggedProto, and one for a lookup via JSProtoKey. See
     // InitialShapeProto.
-    js::ZoneData<js::InitialShapeSet> initialShapes_;
+    js::ZoneGroupData<js::InitialShapeSet> initialShapes_;
   public:
     js::InitialShapeSet& initialShapes() { return initialShapes_.ref(); }
 
   private:
     // List of shapes that may contain nursery pointers.
     using NurseryShapeVector = js::Vector<js::AccessorShape*, 0, js::SystemAllocPolicy>;
-    js::ZoneData<NurseryShapeVector> nurseryShapes_;
+    js::ZoneGroupData<NurseryShapeVector> nurseryShapes_;
   public:
     NurseryShapeVector& nurseryShapes() { return nurseryShapes_.ref(); }
 
@@ -509,54 +521,16 @@ struct Zone : public JS::shadow::Zone,
     void fixupAfterMovingGC();
 
     // Per-zone data for use by an embedder.
-    js::ZoneData<void*> data;
+    js::ZoneGroupData<void*> data;
 
-    js::ZoneData<bool> isSystem;
+    js::ZoneGroupData<bool> isSystem;
 
-  private:
-    // The helper thread context with exclusive access to this zone, if
-    // usedByHelperThread(), or nullptr when on the main thread.
-    js::UnprotectedData<JSContext*> helperThreadOwnerContext_;
-
-  public:
-    bool ownedByCurrentHelperThread();
-    void setHelperThreadOwnerContext(JSContext* cx);
-
-  private:
-    enum class HelperThreadUse : uint32_t
-    {
-        None,
-        Pending,
-        Active
-    };
-
-    mozilla::Atomic<HelperThreadUse> helperThreadUse;
-
-  public:
-    // Whether this zone was created for use by a helper thread.
-    bool createdForHelperThread() const {
-        return helperThreadUse != HelperThreadUse::None;
-    }
-    // Whether this zone is currently in use by a helper thread.
     bool usedByHelperThread() {
-        MOZ_ASSERT_IF(isAtomsZone(), helperThreadUse == HelperThreadUse::None);
-        return helperThreadUse == HelperThreadUse::Active;
-    }
-    void setCreatedForHelperThread() {
-        MOZ_ASSERT(helperThreadUse == HelperThreadUse::None);
-        helperThreadUse = HelperThreadUse::Pending;
-    }
-    void setUsedByHelperThread() {
-        MOZ_ASSERT(helperThreadUse == HelperThreadUse::Pending);
-        helperThreadUse = HelperThreadUse::Active;
-    }
-    void clearUsedByHelperThread() {
-        MOZ_ASSERT(helperThreadUse != HelperThreadUse::None);
-        helperThreadUse = HelperThreadUse::None;
+        return !isAtomsZone() && group()->usedByHelperThread();
     }
 
 #ifdef DEBUG
-    js::ZoneData<unsigned> gcLastSweepGroupIndex;
+    js::ZoneGroupData<unsigned> gcLastSweepGroupIndex;
 #endif
 
     static js::HashNumber UniqueIdToHash(uint64_t uid) {
@@ -608,9 +582,7 @@ struct Zone : public JS::shadow::Zone,
         // If the cell was in the nursery, hopefully unlikely, then we need to
         // tell the nursery about it so that it can sweep the uid if the thing
         // does not get tenured.
-        if (IsInsideNursery(cell) &&
-            !runtimeFromMainThread()->gc.nursery().addedUniqueIdToCell(cell))
-        {
+        if (IsInsideNursery(cell) && !group()->nursery().addedUniqueIdToCell(cell)) {
             uniqueIds().remove(cell);
             return false;
         }
@@ -641,7 +613,7 @@ struct Zone : public JS::shadow::Zone,
     void transferUniqueId(js::gc::Cell* tgt, js::gc::Cell* src) {
         MOZ_ASSERT(src != tgt);
         MOZ_ASSERT(!IsInsideNursery(tgt));
-        MOZ_ASSERT(js::CurrentThreadCanAccessRuntime(runtimeFromMainThread()));
+        MOZ_ASSERT(js::CurrentThreadCanAccessRuntime(runtimeFromActiveCooperatingThread()));
         MOZ_ASSERT(js::CurrentThreadCanAccessZone(this));
         MOZ_ASSERT(!uniqueIds().has(tgt));
         uniqueIds().rekeyIfMoved(src, tgt);
@@ -694,7 +666,7 @@ struct Zone : public JS::shadow::Zone,
             reportAllocationOverflow();
             return nullptr;
         }
-        JSRuntime* rt = runtimeFromMainThread();
+        JSRuntime* rt = runtimeFromActiveCooperatingThread();
         p = static_cast<T*>(rt->onOutOfMemoryCanGC(js::AllocFunction::Calloc, bytes));
         if (!p)
             return nullptr;
@@ -703,17 +675,17 @@ struct Zone : public JS::shadow::Zone,
     }
 
   private:
-    js::ZoneData<js::jit::JitZone*> jitZone_;
+    js::ZoneGroupData<js::jit::JitZone*> jitZone_;
 
-    js::MainThreadData<bool> gcScheduled_;
-    js::MainThreadData<bool> gcScheduledSaved_;
-    js::ZoneData<bool> gcPreserveCode_;
-    js::ZoneData<bool> keepShapeTables_;
+    js::ActiveThreadData<bool> gcScheduled_;
+    js::ActiveThreadData<bool> gcScheduledSaved_;
+    js::ZoneGroupData<bool> gcPreserveCode_;
+    js::ZoneGroupData<bool> keepShapeTables_;
 
     // Allow zones to be linked into a list
     friend class js::gc::ZoneList;
     static Zone * const NotOnList;
-    js::MainThreadOrGCTaskData<Zone*> listNext_;
+    js::ActiveThreadOrGCTaskData<Zone*> listNext_;
     bool isOnList() const;
     Zone* nextZone() const;
 

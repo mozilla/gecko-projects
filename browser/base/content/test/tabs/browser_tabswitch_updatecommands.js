@@ -21,6 +21,6 @@ add_task(async function() {
   }
 
   updater.removeEventListener("commandupdate", countUpdates, true);
-  BrowserTestUtils.removeTab(tab1);
-  BrowserTestUtils.removeTab(tab2);
+  await BrowserTestUtils.removeTab(tab1);
+  await BrowserTestUtils.removeTab(tab2);
 });

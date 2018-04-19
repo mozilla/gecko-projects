@@ -7,37 +7,35 @@
 #ifndef mozilla_dom_Text_h
 #define mozilla_dom_Text_h
 
-#include "mozilla/dom/CharacterData.h"
+#include "nsGenericDOMDataNode.h"
 #include "mozilla/ErrorResult.h"
 
 namespace mozilla {
 namespace dom {
 
-class Text : public CharacterData
+class Text : public nsGenericDOMDataNode
 {
 public:
   explicit Text(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
-    : CharacterData(aNodeInfo)
+    : nsGenericDOMDataNode(aNodeInfo)
   {}
 
   explicit Text(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
-    : CharacterData(aNodeInfo)
+    : nsGenericDOMDataNode(aNodeInfo)
   {}
+
+  using nsGenericDOMDataNode::GetWholeText;
 
   // WebIDL API
   already_AddRefed<Text> SplitText(uint32_t aOffset, ErrorResult& rv);
-  void GetWholeText(nsAString& aWholeText, ErrorResult& rv);
+  void GetWholeText(nsAString& aWholeText, ErrorResult& rv)
+  {
+    rv = GetWholeText(aWholeText);
+  }
 
   static already_AddRefed<Text>
   Constructor(const GlobalObject& aGlobal,
               const nsAString& aData, ErrorResult& aRv);
-
-  /**
-   * Method to see if the text node contains data that is useful
-   * for a translation: i.e., it consists of more than just whitespace,
-   * digits and punctuation.
-   */
-  bool HasTextForTranslation();
 };
 
 } // namespace dom
@@ -45,24 +43,14 @@ public:
 
 inline mozilla::dom::Text* nsINode::GetAsText()
 {
-  return IsText() ? AsText() : nullptr;
+  return IsNodeOfType(eTEXT) ? static_cast<mozilla::dom::Text*>(this)
+                             : nullptr;
 }
 
 inline const mozilla::dom::Text* nsINode::GetAsText() const
 {
-  return IsText() ? AsText() : nullptr;
-}
-
-inline mozilla::dom::Text* nsINode::AsText()
-{
-  MOZ_ASSERT(IsText());
-  return static_cast<mozilla::dom::Text*>(this);
-}
-
-inline const mozilla::dom::Text* nsINode::AsText() const
-{
-  MOZ_ASSERT(IsText());
-  return static_cast<const mozilla::dom::Text*>(this);
+  return IsNodeOfType(eTEXT) ? static_cast<const mozilla::dom::Text*>(this)
+                             : nullptr;
 }
 
 #endif // mozilla_dom_Text_h

@@ -22,4 +22,5 @@ verifyNotEnumerable(obj, "property");
 
 verifyNotConfigurable(obj, "property");
 
+
 reportCompare(0, 0);

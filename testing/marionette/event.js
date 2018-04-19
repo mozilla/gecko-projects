@@ -85,7 +85,7 @@ event.DoubleClickTracker = {
 /**
  * Sends a mouse event to given target.
  *
- * @param {MouseEvent} mouseEvent
+ * @param {nsIDOMMouseEvent} mouseEvent
  *     Event to send.
  * @param {(DOMElement|string)} target
  *     Target of event.  Can either be an element or the ID of an element.
@@ -200,22 +200,22 @@ event.sendKey = function(key, window = undefined) {
 event.parseModifiers_ = function(modifiers) {
   let mval = 0;
   if (modifiers.shiftKey) {
-    mval |= Ci.nsIDOMWindowUtils.MODIFIER_SHIFT;
+    mval |= Ci.nsIDOMNSEvent.SHIFT_MASK;
   }
   if (modifiers.ctrlKey) {
-    mval |= Ci.nsIDOMWindowUtils.MODIFIER_CONTROL;
+    mval |= Ci.nsIDOMNSEvent.CONTROL_MASK;
   }
   if (modifiers.altKey) {
-    mval |= Ci.nsIDOMWindowUtils.MODIFIER_ALT;
+    mval |= Ci.nsIDOMNSEvent.ALT_MASK;
   }
   if (modifiers.metaKey) {
-    mval |= Ci.nsIDOMWindowUtils.MODIFIER_META;
+    mval |= Ci.nsIDOMNSEvent.META_MASK;
   }
   if (modifiers.accelKey) {
     if (navigator.platform.includes("Mac")) {
-      mval |= Ci.nsIDOMWindowUtils.MODIFIER_META;
+      mval |= Ci.nsIDOMNSEvent.META_MASK;
     } else {
-      mval |= Ci.nsIDOMWindowUtils.MODIFIER_CONTROL;
+      mval |= Ci.nsIDOMNSEvent.CONTROL_MASK;
     }
   }
   return mval;
@@ -265,20 +265,20 @@ event.synthesizeMouse = function(
  *     Object which may contain the properties "shiftKey", "ctrlKey",
  *     "altKey", "metaKey", "accessKey", "clickCount", "button", and
  *     "type".
- * @param {Window=} win
+ * @param {Window=} window
  *     Window object.  Defaults to the current window.
  */
 event.synthesizeMouseAtPoint = function(
-    left, top, opts, win = window) {
+    left, top, opts, window = undefined) {
 
-  let domutils = getDOMWindowUtils(win);
+  let domutils = getDOMWindowUtils(window);
 
   let button = opts.button || 0;
   let clickCount = opts.clickCount || 1;
   let modifiers = event.parseModifiers_(opts);
   let pressure = ("pressure" in opts) ? opts.pressure : 0;
   let inputSource = ("inputSource" in opts) ? opts.inputSource :
-      win.MouseEvent.MOZ_SOURCE_MOUSE;
+      Ci.nsIDOMMouseEvent.MOZ_SOURCE_MOUSE;
   let isDOMEventSynthesized =
       ("isSynthesized" in opts) ? opts.isSynthesized : true;
   let isWidgetEventSynthesized;

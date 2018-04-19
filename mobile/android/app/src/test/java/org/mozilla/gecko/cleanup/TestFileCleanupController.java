@@ -11,7 +11,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.RobolectricTestRunner;
+import org.mozilla.gecko.background.testhelpers.TestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 import java.util.ArrayList;
@@ -27,7 +27,7 @@ import static org.mockito.Mockito.verify;
 /**
  * Tests functionality of the {@link FileCleanupController}.
  */
-@RunWith(RobolectricTestRunner.class)
+@RunWith(TestRunner.class)
 public class TestFileCleanupController {
 
     @Test

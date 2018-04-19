@@ -151,7 +151,7 @@
     do { \
         auto tmpResult_ = (expr); \
         if (tmpResult_.isErr()) { \
-            MOZ_ALWAYS_FALSE((cx)->resultToBool(tmpResult_)); \
+            JS_ALWAYS_FALSE((cx)->resultToBool(tmpResult_)); \
             return nullptr; \
         } \
     } while (0)
@@ -168,7 +168,7 @@
     do { \
         auto tmpResult_ = (expr); \
         if (tmpResult_.isErr()) {  \
-            MOZ_ALWAYS_FALSE((cx)->resultToBool(tmpResult_)); \
+            JS_ALWAYS_FALSE((cx)->resultToBool(tmpResult_)); \
             return nullptr; \
         } \
         (target) = tmpResult_.unwrap(); \

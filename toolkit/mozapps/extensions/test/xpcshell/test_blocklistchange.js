@@ -31,239 +31,27 @@ ChromeUtils.import("resource://testing-common/MockRegistrar.jsm");
 // Allow insecure updates
 Services.prefs.setBoolPref("extensions.checkUpdateSecurity", false);
 
-var testserver = AddonTestUtils.createHttpServer({hosts: ["example.com"]});
+var testserver = createHttpServer();
+gPort = testserver.identity.primaryPort;
 
-testserver.registerDirectory("/data/", do_get_file("data"));
+// register static files with server and interpolate port numbers in them
+mapFile("/data/blocklistchange/addon_update1.rdf", testserver);
+mapFile("/data/blocklistchange/addon_update2.rdf", testserver);
+mapFile("/data/blocklistchange/addon_update3.rdf", testserver);
+mapFile("/data/blocklistchange/addon_change.xml", testserver);
+mapFile("/data/blocklistchange/app_update.xml", testserver);
+mapFile("/data/blocklistchange/blocklist_update1.xml", testserver);
+mapFile("/data/blocklistchange/blocklist_update2.xml", testserver);
+mapFile("/data/blocklistchange/manual_update.xml", testserver);
 
-const ADDONS = {
-  "blocklist_hard1_1": {
-    id: "hardblock@tests.mozilla.org",
-    version: "1.0",
-    name: "Hardblocked add-on",
-    bootstrap: true,
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_hard1_2": {
-    id: "hardblock@tests.mozilla.org",
-    version: "2.0",
-    name: "Hardblocked add-on",
-    bootstrap: true,
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_hard1_3": {
-    id: "hardblock@tests.mozilla.org",
-    version: "3.0",
-    name: "Hardblocked add-on",
-    bootstrap: true,
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_regexp1_1": {
-    id: "regexpblock@tests.mozilla.org",
-    version: "1.0",
-    name: "RegExp-blocked add-on",
-    bootstrap: true,
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_regexp1_2": {
-    id: "regexpblock@tests.mozilla.org",
-    version: "2.0",
-    name: "RegExp-blocked add-on",
-    bootstrap: true,
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_regexp1_3": {
-    id: "regexpblock@tests.mozilla.org",
-    version: "3.0",
-    name: "RegExp-blocked add-on",
-    bootstrap: true,
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_soft1_1": {
-    id: "softblock1@tests.mozilla.org",
-    version: "1.0",
-    name: "Softblocked add-on",
-    bootstrap: true,
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_soft1_2": {
-    id: "softblock1@tests.mozilla.org",
-    version: "2.0",
-    name: "Softblocked add-on",
-    bootstrap: true,
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_soft1_3": {
-    id: "softblock1@tests.mozilla.org",
-    version: "3.0",
-    name: "Softblocked add-on",
-    bootstrap: true,
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_soft2_1": {
-    id: "softblock2@tests.mozilla.org",
-    version: "1.0",
-    name: "Softblocked add-on",
-    bootstrap: true,
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_soft2_2": {
-    id: "softblock2@tests.mozilla.org",
-    version: "2.0",
-    name: "Softblocked add-on",
-    bootstrap: true,
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_soft2_3": {
-    id: "softblock2@tests.mozilla.org",
-    version: "3.0",
-    name: "Softblocked add-on",
-    bootstrap: true,
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_soft3_1": {
-    id: "softblock3@tests.mozilla.org",
-    version: "1.0",
-    name: "Softblocked add-on",
-    bootstrap: true,
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_soft3_2": {
-    id: "softblock3@tests.mozilla.org",
-    version: "2.0",
-    name: "Softblocked add-on",
-    bootstrap: true,
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_soft3_3": {
-    id: "softblock3@tests.mozilla.org",
-    version: "3.0",
-    name: "Softblocked add-on",
-    bootstrap: true,
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_soft4_1": {
-    id: "softblock4@tests.mozilla.org",
-    version: "1.0",
-    name: "Softblocked add-on",
-    bootstrap: true,
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_soft4_2": {
-    id: "softblock4@tests.mozilla.org",
-    version: "2.0",
-    name: "Softblocked add-on",
-    bootstrap: true,
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_soft4_3": {
-    id: "softblock4@tests.mozilla.org",
-    version: "3.0",
-    name: "Softblocked add-on",
-    bootstrap: true,
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_soft5_1": {
-    id: "softblock5@tests.mozilla.org",
-    version: "1.0",
-    name: "Softblocked add-on",
-    bootstrap: true,
-    internalName: "test/1.0",
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_soft5_2": {
-    id: "softblock5@tests.mozilla.org",
-    version: "2.0",
-    name: "Softblocked add-on",
-    bootstrap: true,
-    internalName: "test/1.0",
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-  "blocklist_soft5_3": {
-    id: "softblock5@tests.mozilla.org",
-    version: "3.0",
-    name: "Softblocked add-on",
-    bootstrap: true,
-    internalName: "test/1.0",
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "3"}],
-  },
-};
+testserver.registerDirectory("/addons/", do_get_file("addons"));
 
-const XPIS = {};
-
-for (let [name, manifest] of Object.entries(ADDONS)) {
-  XPIS[name] = createTempXPIFile(manifest);
-  testserver.registerFile(`/addons/${name}.xpi`, XPIS[name]);
-}
 
 var softblock1_1 = {
   id: "softblock1@tests.mozilla.org",
   version: "1.0",
   name: "Softblocked add-on",
-  bootstrap: true,
-  updateURL: "http://example.com/data/blocklistchange/addon_update1.json",
+  updateURL: "http://localhost:" + gPort + "/data/blocklistchange/addon_update1.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -275,8 +63,7 @@ var softblock1_2 = {
   id: "softblock1@tests.mozilla.org",
   version: "2.0",
   name: "Softblocked add-on",
-  bootstrap: true,
-  updateURL: "http://example.com/data/blocklistchange/addon_update2.json",
+  updateURL: "http://localhost:" + gPort + "/data/blocklistchange/addon_update2.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -288,8 +75,7 @@ var softblock1_3 = {
   id: "softblock1@tests.mozilla.org",
   version: "3.0",
   name: "Softblocked add-on",
-  bootstrap: true,
-  updateURL: "http://example.com/data/blocklistchange/addon_update3.json",
+  updateURL: "http://localhost:" + gPort + "/data/blocklistchange/addon_update3.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -301,8 +87,7 @@ var softblock2_1 = {
   id: "softblock2@tests.mozilla.org",
   version: "1.0",
   name: "Softblocked add-on",
-  bootstrap: true,
-  updateURL: "http://example.com/data/blocklistchange/addon_update1.json",
+  updateURL: "http://localhost:" + gPort + "/data/blocklistchange/addon_update1.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -314,8 +99,7 @@ var softblock2_2 = {
   id: "softblock2@tests.mozilla.org",
   version: "2.0",
   name: "Softblocked add-on",
-  bootstrap: true,
-  updateURL: "http://example.com/data/blocklistchange/addon_update2.json",
+  updateURL: "http://localhost:" + gPort + "/data/blocklistchange/addon_update2.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -327,8 +111,7 @@ var softblock2_3 = {
   id: "softblock2@tests.mozilla.org",
   version: "3.0",
   name: "Softblocked add-on",
-  bootstrap: true,
-  updateURL: "http://example.com/data/blocklistchange/addon_update3.json",
+  updateURL: "http://localhost:" + gPort + "/data/blocklistchange/addon_update3.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -340,8 +123,7 @@ var softblock3_1 = {
   id: "softblock3@tests.mozilla.org",
   version: "1.0",
   name: "Softblocked add-on",
-  bootstrap: true,
-  updateURL: "http://example.com/data/blocklistchange/addon_update1.json",
+  updateURL: "http://localhost:" + gPort + "/data/blocklistchange/addon_update1.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -353,8 +135,7 @@ var softblock3_2 = {
   id: "softblock3@tests.mozilla.org",
   version: "2.0",
   name: "Softblocked add-on",
-  bootstrap: true,
-  updateURL: "http://example.com/data/blocklistchange/addon_update2.json",
+  updateURL: "http://localhost:" + gPort + "/data/blocklistchange/addon_update2.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -366,8 +147,7 @@ var softblock3_3 = {
   id: "softblock3@tests.mozilla.org",
   version: "3.0",
   name: "Softblocked add-on",
-  bootstrap: true,
-  updateURL: "http://example.com/data/blocklistchange/addon_update3.json",
+  updateURL: "http://localhost:" + gPort + "/data/blocklistchange/addon_update3.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -379,8 +159,7 @@ var softblock4_1 = {
   id: "softblock4@tests.mozilla.org",
   version: "1.0",
   name: "Softblocked add-on",
-  bootstrap: true,
-  updateURL: "http://example.com/data/blocklistchange/addon_update1.json",
+  updateURL: "http://localhost:" + gPort + "/data/blocklistchange/addon_update1.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -392,8 +171,7 @@ var softblock4_2 = {
   id: "softblock4@tests.mozilla.org",
   version: "2.0",
   name: "Softblocked add-on",
-  bootstrap: true,
-  updateURL: "http://example.com/data/blocklistchange/addon_update2.json",
+  updateURL: "http://localhost:" + gPort + "/data/blocklistchange/addon_update2.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -405,8 +183,7 @@ var softblock4_3 = {
   id: "softblock4@tests.mozilla.org",
   version: "3.0",
   name: "Softblocked add-on",
-  bootstrap: true,
-  updateURL: "http://example.com/data/blocklistchange/addon_update3.json",
+  updateURL: "http://localhost:" + gPort + "/data/blocklistchange/addon_update3.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -418,8 +195,7 @@ var hardblock_1 = {
   id: "hardblock@tests.mozilla.org",
   version: "1.0",
   name: "Hardblocked add-on",
-  bootstrap: true,
-  updateURL: "http://example.com/data/blocklistchange/addon_update1.json",
+  updateURL: "http://localhost:" + gPort + "/data/blocklistchange/addon_update1.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -431,8 +207,7 @@ var hardblock_2 = {
   id: "hardblock@tests.mozilla.org",
   version: "2.0",
   name: "Hardblocked add-on",
-  bootstrap: true,
-  updateURL: "http://example.com/data/blocklistchange/addon_update2.json",
+  updateURL: "http://localhost:" + gPort + "/data/blocklistchange/addon_update2.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -444,8 +219,7 @@ var hardblock_3 = {
   id: "hardblock@tests.mozilla.org",
   version: "3.0",
   name: "Hardblocked add-on",
-  bootstrap: true,
-  updateURL: "http://example.com/data/blocklistchange/addon_update3.json",
+  updateURL: "http://localhost:" + gPort + "/data/blocklistchange/addon_update3.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -457,8 +231,7 @@ var regexpblock_1 = {
   id: "regexpblock@tests.mozilla.org",
   version: "1.0",
   name: "RegExp-blocked add-on",
-  bootstrap: true,
-  updateURL: "http://example.com/data/blocklistchange/addon_update1.json",
+  updateURL: "http://localhost:" + gPort + "/data/blocklistchange/addon_update1.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -470,8 +243,7 @@ var regexpblock_2 = {
   id: "regexpblock@tests.mozilla.org",
   version: "2.0",
   name: "RegExp-blocked add-on",
-  bootstrap: true,
-  updateURL: "http://example.com/data/blocklistchange/addon_update2.json",
+  updateURL: "http://localhost:" + gPort + "/data/blocklistchange/addon_update2.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -483,8 +255,7 @@ var regexpblock_3 = {
   id: "regexpblock@tests.mozilla.org",
   version: "3.0",
   name: "RegExp-blocked add-on",
-  bootstrap: true,
-  updateURL: "http://example.com/data/blocklistchange/addon_update3.json",
+  updateURL: "http://localhost:" + gPort + "/data/blocklistchange/addon_update3.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -570,7 +341,7 @@ function Pload_blocklist(aFile) {
     }, "blocklist-updated");
   });
 
-  Services.prefs.setCharPref("extensions.blocklist.url", "http://example.com/data/blocklistchange/" + aFile);
+  Services.prefs.setCharPref("extensions.blocklist.url", "http://localhost:" + gPort + "/data/blocklistchange/" + aFile);
   var blocklist = Cc["@mozilla.org/extensions/blocklist;1"].
                   getService(Ci.nsITimerCallback);
   blocklist.notify(null);
@@ -629,7 +400,7 @@ function Pmanual_update(aVersion) {
   for (let name of ["soft1", "soft2", "soft3", "soft4", "hard1", "regexp1"]) {
     Pinstalls.push(
       AddonManager.getInstallForURL(
-        `http://example.com/addons/blocklist_${name}_${aVersion}.xpi`,
+        `http://localhost:${gPort}/addons/blocklist_${name}_${aVersion}.xpi`,
         null, "application/x-xpinstall"));
   }
 
@@ -802,9 +573,9 @@ add_task(async function run_app_update_schema_test() {
 add_task(async function update_schema_2() {
   await promiseShutdownManager();
 
-  await changeXPIDBVersion(100);
+  changeXPIDBVersion(100);
   gAppInfo.version = "2";
-  await promiseStartupManager(true);
+  startupManager(true);
 
   let [s1, s2, s3, s4, h, r] = await promiseAddonsByIDs(ADDON_IDS);
 
@@ -826,9 +597,9 @@ add_task(async function update_schema_3() {
   await promiseRestartManager();
 
   await promiseShutdownManager();
-  await changeXPIDBVersion(100);
+  changeXPIDBVersion(100);
   gAppInfo.version = "2.5";
-  await promiseStartupManager(true);
+  startupManager(true);
 
   let [s1, s2, s3, s4, h, r] = await promiseAddonsByIDs(ADDON_IDS);
 
@@ -843,7 +614,7 @@ add_task(async function update_schema_3() {
 add_task(async function update_schema_4() {
   await promiseShutdownManager();
 
-  await changeXPIDBVersion(100);
+  changeXPIDBVersion(100);
   startupManager(false);
 
   let [s1, s2, s3, s4, h, r] = await promiseAddonsByIDs(ADDON_IDS);
@@ -859,9 +630,9 @@ add_task(async function update_schema_4() {
 add_task(async function update_schema_5() {
   await promiseShutdownManager();
 
-  await changeXPIDBVersion(100);
+  changeXPIDBVersion(100);
   gAppInfo.version = "1";
-  await promiseStartupManager(true);
+  startupManager(true);
 
   let [s1, s2, s3, s4, h, r] = await promiseAddonsByIDs(ADDON_IDS);
 
@@ -1062,7 +833,7 @@ add_task(async function run_addon_change_2_test() {
   getFileForAddon(profileDir, hardblock_1.id).remove(true);
   getFileForAddon(profileDir, regexpblock_1.id).remove(true);
 
-  await promiseStartupManager(false);
+  startupManager(false);
   await promiseShutdownManager();
 
   writeInstallRDFForExtension(softblock1_2, profileDir);
@@ -1188,7 +959,7 @@ add_task(async function run_background_update_2_test() {
   getFileForAddon(profileDir, hardblock_1.id).remove(true);
   getFileForAddon(profileDir, regexpblock_1.id).remove(true);
 
-  await promiseStartupManager(false);
+  startupManager(false);
   await promiseShutdownManager();
 
   writeInstallRDFForExtension(softblock1_3, profileDir);
@@ -1294,7 +1065,7 @@ add_task(async function run_manual_update_2_test() {
   getFileForAddon(profileDir, hardblock_1.id).remove(true);
   getFileForAddon(profileDir, regexpblock_1.id).remove(true);
 
-  await promiseStartupManager(false);
+  startupManager(false);
   await promiseShutdownManager();
 
   writeInstallRDFForExtension(softblock1_1, profileDir);
@@ -1365,12 +1136,12 @@ add_task(async function run_local_install_test() {
   startupManager(false);
 
   await promiseInstallAllFiles([
-    XPIS.blocklist_soft1_1,
-    XPIS.blocklist_soft2_1,
-    XPIS.blocklist_soft3_1,
-    XPIS.blocklist_soft4_1,
-    XPIS.blocklist_hard1_1,
-    XPIS.blocklist_regexp1_1,
+    do_get_file("addons/blocklist_soft1_1.xpi"),
+    do_get_file("addons/blocklist_soft2_1.xpi"),
+    do_get_file("addons/blocklist_soft3_1.xpi"),
+    do_get_file("addons/blocklist_soft4_1.xpi"),
+    do_get_file("addons/blocklist_hard1_1.xpi"),
+    do_get_file("addons/blocklist_regexp1_1.xpi")
   ]);
 
   let aInstalls = await AddonManager.getAllInstalls();

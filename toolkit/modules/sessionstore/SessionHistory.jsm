@@ -72,7 +72,7 @@ var SessionHistoryInternal = {
   collect(docShell, aFromIdx = -1) {
     let loadContext = docShell.QueryInterface(Ci.nsILoadContext);
     let webNavigation = docShell.QueryInterface(Ci.nsIWebNavigation);
-    let history = webNavigation.sessionHistory;
+    let history = webNavigation.sessionHistory.QueryInterface(Ci.nsISHistoryInternal);
 
     let data = {entries: [], userContextId: loadContext.originAttributes.userContextId };
     // We want to keep track how many entries we *could* have collected and
@@ -83,8 +83,7 @@ var SessionHistoryInternal = {
     if (history && history.count > 0) {
       // Loop over the transaction linked list directly so we can get the
       // persist property for each transaction.
-      for (let txn = history.legacySHistory.QueryInterface(Ci.nsISHistoryInternal).rootTransaction;
-           txn; entryCount++, txn = txn.next) {
+      for (let txn = history.rootTransaction; txn; entryCount++, txn = txn.next) {
         if (entryCount <= aFromIdx) {
           skippedCount++;
           continue;
@@ -138,7 +137,13 @@ var SessionHistoryInternal = {
       entry.subframe = true;
     }
 
-    entry.cacheKey = shEntry.cacheKey;
+    let cacheKey = shEntry.cacheKey;
+    if (cacheKey && cacheKey instanceof Ci.nsISupportsPRUint32 &&
+        cacheKey.data != 0) {
+      // XXXbz would be better to have cache keys implement
+      // nsISerializable or something.
+      entry.cacheKey = cacheKey.data;
+    }
     entry.ID = shEntry.ID;
     entry.docshellUUID = shEntry.docshellID.toString();
 
@@ -312,7 +317,7 @@ var SessionHistoryInternal = {
    */
   restore(docShell, tabData) {
     let webNavigation = docShell.QueryInterface(Ci.nsIWebNavigation);
-    let history = webNavigation.sessionHistory.legacySHistory;
+    let history = webNavigation.sessionHistory;
     if (history.count > 0) {
       history.PurgeHistory(history.count);
     }
@@ -385,7 +390,10 @@ var SessionHistoryInternal = {
       shEntry.baseURI = Utils.makeURI(entry.baseURI);
 
     if (entry.cacheKey) {
-      shEntry.cacheKey = entry.cacheKey;
+      var cacheKey = Cc["@mozilla.org/supports-PRUint32;1"].
+                     createInstance(Ci.nsISupportsPRUint32);
+      cacheKey.data = entry.cacheKey;
+      shEntry.cacheKey = cacheKey;
     }
 
     if (entry.ID) {

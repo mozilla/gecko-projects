@@ -11,6 +11,7 @@
 #include "mozilla/dom/nsIContentParent.h"
 #include "mozilla/gfx/gfxVarReceiver.h"
 #include "mozilla/gfx/GPUProcessListener.h"
+#include "mozilla/ipc/GeckoChildProcessHost.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/FileUtils.h"
 #include "mozilla/HalTypes.h"
@@ -20,7 +21,6 @@
 #include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
 
-#include "ContentProcessHost.h"
 #include "nsDataHashtable.h"
 #include "nsPluginTags.h"
 #include "nsFrameMessageManager.h"
@@ -114,6 +114,7 @@ class ContentParent final : public PContentParent
                           , public gfx::GPUProcessListener
                           , public mozilla::MemoryReportingProcess
 {
+  typedef mozilla::ipc::GeckoChildProcessHost GeckoChildProcessHost;
   typedef mozilla::ipc::OptionalURIParams OptionalURIParams;
   typedef mozilla::ipc::PFileDescriptorSetParent PFileDescriptorSetParent;
   typedef mozilla::ipc::TestShellParent TestShellParent;
@@ -121,7 +122,6 @@ class ContentParent final : public PContentParent
   typedef mozilla::ipc::PrincipalInfo PrincipalInfo;
   typedef mozilla::dom::ClonedMessageData ClonedMessageData;
 
-  friend class ContentProcessHost;
   friend class mozilla::PreallocatedProcessManagerImpl;
 
 public:
@@ -375,7 +375,7 @@ public:
     return mJSPluginID != nsFakePluginTag::NOT_JSPLUGIN;
   }
 
-  ContentProcessHost* Process() const
+  GeckoChildProcessHost* Process() const
   {
     return mSubprocess;
   }
@@ -557,7 +557,7 @@ public:
     const IPC::Principal& aTriggeringPrincipal,
     const uint32_t& aReferrerPolicy) override;
 
-  static bool AllocateLayerTreeId(TabParent* aTabParent, layers::LayersId* aId);
+  static bool AllocateLayerTreeId(TabParent* aTabParent, uint64_t* aId);
 
   static void
   BroadcastBlobURLRegistration(const nsACString& aURI,
@@ -750,7 +750,7 @@ private:
   // Returns false if the process fails to start.
   bool LaunchSubprocess(hal::ProcessPriority aInitialPriority = hal::PROCESS_PRIORITY_FOREGROUND);
 
-  // Common initialization after sub process launch.
+  // Common initialization after sub process launch or adoption.
   void InitInternal(ProcessPriority aPriority);
 
   virtual ~ContentParent();
@@ -837,7 +837,7 @@ private:
 
   static bool AllocateLayerTreeId(ContentParent* aContent,
                                   TabParent* aTopLevel, const TabId& aTabId,
-                                  layers::LayersId* aId);
+                                  uint64_t* aId);
 
   /**
    * Get or create the corresponding content parent array to |aContentProcessType|.
@@ -848,7 +848,6 @@ private:
 
   mozilla::ipc::IPCResult RecvAddMemoryReport(const MemoryReport& aReport) override;
   mozilla::ipc::IPCResult RecvFinishMemoryReport(const uint32_t& aGeneration) override;
-  mozilla::ipc::IPCResult RecvAddPerformanceMetrics(nsTArray<PerformanceInfo>&& aMetrics) override;
 
   virtual bool
   DeallocPJavaScriptParent(mozilla::jsipc::PJavaScriptParent*) override;
@@ -1014,7 +1013,7 @@ private:
 
   bool HasNotificationPermission(const IPC::Principal& aPrincipal);
 
-  virtual mozilla::ipc::IPCResult RecvShowAlert(nsIAlertNotification* aAlert) override;
+  virtual mozilla::ipc::IPCResult RecvShowAlert(const AlertNotificationType& aAlert) override;
 
   virtual mozilla::ipc::IPCResult RecvCloseAlert(const nsString& aName,
                                                  const IPC::Principal& aPrincipal) override;
@@ -1058,8 +1057,7 @@ private:
                                                   const uint32_t& aLineNumber,
                                                   const uint32_t& aColNumber,
                                                   const uint32_t& aFlags,
-                                                  const nsCString& aCategory,
-                                                  const bool& aIsFromPrivateWindow) override;
+                                                  const nsCString& aCategory) override;
 
   virtual mozilla::ipc::IPCResult RecvScriptErrorWithStack(const nsString& aMessage,
                                                            const nsString& aSourceName,
@@ -1068,7 +1066,6 @@ private:
                                                            const uint32_t& aColNumber,
                                                            const uint32_t& aFlags,
                                                            const nsCString& aCategory,
-                                                           const bool& aIsFromPrivateWindow,
                                                            const ClonedMessageData& aStack) override;
 
 private:
@@ -1079,7 +1076,6 @@ private:
                                                   const uint32_t& aColNumber,
                                                   const uint32_t& aFlags,
                                                   const nsCString& aCategory,
-                                                  const bool& aIsFromPrivateWindow,
                                                   const ClonedMessageData* aStack = nullptr);
 
 public:
@@ -1091,7 +1087,7 @@ public:
 
   virtual mozilla::ipc::IPCResult RecvKeywordToURI(const nsCString& aKeyword,
                                                    nsString* aProviderName,
-                                                   RefPtr<nsIInputStream>* aPostData,
+                                                   nsCOMPtr<nsIInputStream>* aPostData,
                                                    OptionalURIParams* aURI) override;
 
   virtual mozilla::ipc::IPCResult RecvNotifyKeywordSearchLoading(const nsString &aProvider,
@@ -1106,10 +1102,10 @@ public:
 
   virtual mozilla::ipc::IPCResult RecvAllocateLayerTreeId(const ContentParentId& aCpId,
                                                           const TabId& aTabId,
-                                                          layers::LayersId* aId) override;
+                                                          uint64_t* aId) override;
 
   virtual mozilla::ipc::IPCResult RecvDeallocateLayerTreeId(const ContentParentId& aCpId,
-                                                            const layers::LayersId& aId) override;
+                                                            const uint64_t& aId) override;
 
   virtual mozilla::ipc::IPCResult RecvGraphicsError(const nsCString& aError) override;
 
@@ -1233,7 +1229,7 @@ private:
   // release these objects in ShutDownProcess.  See the comment there for more
   // details.
 
-  ContentProcessHost* mSubprocess;
+  GeckoChildProcessHost* mSubprocess;
   const TimeStamp mLaunchTS; // used to calculate time to start content process
   TimeStamp mActivateTS;
   ContentParent* mOpener;

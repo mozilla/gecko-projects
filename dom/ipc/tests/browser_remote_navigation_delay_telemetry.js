@@ -49,6 +49,6 @@ add_task(async function test_memory_distribution() {
                                              true /* subsession */,
                                              true /* clear */);
 
-  BrowserTestUtils.removeTab(tab2);
-  BrowserTestUtils.removeTab(tab1);
+  await BrowserTestUtils.removeTab(tab2);
+  await BrowserTestUtils.removeTab(tab1);
 });

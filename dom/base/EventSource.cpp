@@ -15,7 +15,6 @@
 #include "mozilla/dom/MessageEventBinding.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/WorkerPrivate.h"
-#include "mozilla/dom/WorkerRef.h"
 #include "mozilla/dom/WorkerRunnable.h"
 #include "mozilla/dom/WorkerScope.h"
 #include "mozilla/UniquePtrExtensions.h"
@@ -144,8 +143,8 @@ public:
   void AddRefObject();
   void ReleaseObject();
 
-  bool CreateWorkerRef(WorkerPrivate* aWorkerPrivate);
-  void ReleaseWorkerRef();
+  bool RegisterWorkerHolder();
+  void UnregisterWorkerHolder();
 
   void AssertIsOnTargetThread() const
   {
@@ -283,8 +282,11 @@ public:
   nsString mLastFieldValue;
 
   // EventSourceImpl internal states.
-  // WorkerRef to keep the worker alive. (accessed on worker thread only)
-  RefPtr<ThreadSafeWorkerRef> mWorkerRef;
+  // The worker private where the EventSource is created. nullptr if created on
+  // main thread. (accessed on worker thread only)
+  WorkerPrivate* mWorkerPrivate;
+  // Holder to worker to keep worker alive. (accessed on worker thread only)
+  nsAutoPtr<WorkerHolder> mWorkerHolder;
   // This mutex protects mFrozen and mEventSource->mReadyState that are used in
   // different threads.
   mozilla::Mutex mMutex;
@@ -351,6 +353,8 @@ EventSourceImpl::EventSourceImpl(EventSource* aEventSource)
 {
   MOZ_ASSERT(mEventSource);
   if (!mIsMainThread) {
+    mWorkerPrivate = GetCurrentThreadWorkerPrivate();
+    MOZ_ASSERT(mWorkerPrivate);
     mEventSource->mIsMainThread = false;
   }
   SetReadyState(CONNECTING);
@@ -360,11 +364,11 @@ class CleanupRunnable final : public WorkerMainThreadRunnable
 {
 public:
   explicit CleanupRunnable(EventSourceImpl* aEventSourceImpl)
-    : WorkerMainThreadRunnable(GetCurrentThreadWorkerPrivate(),
+    : WorkerMainThreadRunnable(aEventSourceImpl->mWorkerPrivate,
                                NS_LITERAL_CSTRING("EventSource :: Cleanup"))
     , mImpl(aEventSourceImpl)
   {
-    mWorkerPrivate->AssertIsOnWorkerThread();
+    mImpl->mWorkerPrivate->AssertIsOnWorkerThread();
   }
 
   bool MainThreadRun() override
@@ -384,9 +388,15 @@ EventSourceImpl::Close()
   if (IsClosed()) {
     return;
   }
-
   SetReadyState(CLOSED);
-  CloseInternal();
+  // Asynchronously call CloseInternal to prevent EventSourceImpl from being
+  // synchronously destoryed while dispatching DOM event.
+  DebugOnly<nsresult> rv =
+    Dispatch(NewRunnableMethod("dom::EventSourceImpl::CloseInternal",
+                               this,
+                               &EventSourceImpl::CloseInternal),
+             NS_DISPATCH_NORMAL);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
 }
 
 void
@@ -409,7 +419,7 @@ EventSourceImpl::CloseInternal()
     RefPtr<CleanupRunnable> runnable = new CleanupRunnable(this);
     runnable->Dispatch(Killing, rv);
     MOZ_ASSERT(!rv.Failed());
-    ReleaseWorkerRef();
+    UnregisterWorkerHolder();
   }
 
   while (mMessagesToDispatch.GetSize() != 0) {
@@ -448,22 +458,20 @@ void EventSourceImpl::CleanupOnMainThread()
 class InitRunnable final : public WorkerMainThreadRunnable
 {
 public:
-  InitRunnable(WorkerPrivate* aWorkerPrivate,
-               EventSourceImpl* aEventSourceImpl,
-               const nsAString& aURL)
-    : WorkerMainThreadRunnable(aWorkerPrivate,
+  explicit InitRunnable(EventSourceImpl* aEventSourceImpl,
+                        const nsAString& aURL)
+    : WorkerMainThreadRunnable(aEventSourceImpl->mWorkerPrivate,
                                NS_LITERAL_CSTRING("EventSource :: Init"))
     , mImpl(aEventSourceImpl)
     , mURL(aURL)
   {
-    MOZ_ASSERT(aWorkerPrivate);
-    aWorkerPrivate->AssertIsOnWorkerThread();
+    mImpl->mWorkerPrivate->AssertIsOnWorkerThread();
   }
 
   bool MainThreadRun() override
   {
     // Get principal from worker's owner document or from worker.
-    WorkerPrivate* wp = mWorkerPrivate;
+    WorkerPrivate* wp = mImpl->mWorkerPrivate;
     while (wp->GetParent()) {
       wp = wp->GetParent();
     }
@@ -483,34 +491,11 @@ public:
 
   nsresult ErrorCode() const { return mRv; }
 
-private:
+protected:
   // Raw pointer because this runnable is sync.
   EventSourceImpl* mImpl;
   const nsAString& mURL;
   nsresult mRv;
-};
-
-class ConnectRunnable final : public WorkerMainThreadRunnable
-{
-public:
-  explicit ConnectRunnable(WorkerPrivate* aWorkerPrivate,
-                           EventSourceImpl* aEventSourceImpl)
-    : WorkerMainThreadRunnable(aWorkerPrivate,
-                               NS_LITERAL_CSTRING("EventSource :: Connect"))
-    , mImpl(aEventSourceImpl)
-  {
-    MOZ_ASSERT(aWorkerPrivate);
-    aWorkerPrivate->AssertIsOnWorkerThread();
-  }
-
-  bool MainThreadRun() override
-  {
-    mImpl->InitChannelAndRequestEventSource();
-    return true;
-  }
-
-private:
-  RefPtr<EventSourceImpl> mImpl;
 };
 
 nsresult
@@ -606,6 +591,11 @@ EventSourceImpl::Init(nsIPrincipal* aPrincipal,
                         DEFAULT_RECONNECTION_TIME_VALUE);
 
   mUnicodeDecoder = UTF_8_ENCODING->NewDecoderWithBOMRemoval();
+
+  // the constructor should throw a SYNTAX_ERROR only if it fails resolving the
+  // url parameter, so we don't care about the InitChannelAndRequestEventSource
+  // result.
+  InitChannelAndRequestEventSource();
 }
 
 //-----------------------------------------------------------------------------
@@ -1147,11 +1137,11 @@ class CallRestartConnection final : public WorkerMainThreadRunnable
 public:
   explicit CallRestartConnection(EventSourceImpl* aEventSourceImpl)
     : WorkerMainThreadRunnable(
-        aEventSourceImpl->mWorkerRef->Private(),
+        aEventSourceImpl->mWorkerPrivate,
         NS_LITERAL_CSTRING("EventSource :: RestartConnection"))
     , mImpl(aEventSourceImpl)
   {
-    mWorkerPrivate->AssertIsOnWorkerThread();
+    mImpl->mWorkerPrivate->AssertIsOnWorkerThread();
   }
 
   bool MainThreadRun() override
@@ -1492,8 +1482,8 @@ EventSourceImpl::DispatchAllMessageEvents()
       return;
     }
   } else {
-    MOZ_ASSERT(mWorkerRef);
-    if (NS_WARN_IF(!jsapi.Init(mWorkerRef->Private()->GlobalScope()))) {
+    MOZ_ASSERT(mWorkerPrivate);
+    if (NS_WARN_IF(!jsapi.Init(mWorkerPrivate->GlobalScope()))) {
       return;
     }
   }
@@ -1524,9 +1514,9 @@ EventSourceImpl::DispatchAllMessageEvents()
                             Sequence<OwningNonNull<MessagePort>>());
     event->SetTrusted(true);
 
-    IgnoredErrorResult err;
-    mEventSource->DispatchEvent(*event, err);
-    if (err.Failed()) {
+    bool dummy;
+    rv = mEventSource->DispatchEvent(static_cast<Event*>(event), &dummy);
+    if (NS_FAILED(rv)) {
       NS_WARNING("Failed to dispatch the message event!!!");
       return;
     }
@@ -1793,6 +1783,28 @@ EventSourceImpl::ReleaseObject()
 }
 
 namespace {
+class EventSourceWorkerHolder final : public WorkerHolder
+{
+public:
+  explicit EventSourceWorkerHolder(EventSourceImpl* aEventSourceImpl)
+    : WorkerHolder("EventSourceWorkerHolder")
+    , mEventSourceImpl(aEventSourceImpl)
+  {
+  }
+
+  bool Notify(WorkerStatus aStatus) override
+  {
+    MOZ_ASSERT(aStatus > Running);
+    if (aStatus >= Canceling) {
+      mEventSourceImpl->Close();
+    }
+    return true;
+  }
+
+private:
+  // Raw pointer because the EventSourceImpl object keeps alive the holder.
+  EventSourceImpl* mEventSourceImpl;
+};
 
 class WorkerRunnableDispatcher final : public WorkerRunnable
 {
@@ -1843,32 +1855,30 @@ private:
 
 } // namespace
 
-bool EventSourceImpl::CreateWorkerRef(WorkerPrivate* aWorkerPrivate)
+bool EventSourceImpl::RegisterWorkerHolder()
 {
   MOZ_ASSERT(!IsShutDown());
-  MOZ_ASSERT(!mWorkerRef);
-  MOZ_ASSERT(aWorkerPrivate);
-  aWorkerPrivate->AssertIsOnWorkerThread();
-
-  RefPtr<EventSourceImpl> self = this;
-  RefPtr<StrongWorkerRef> workerRef =
-    StrongWorkerRef::Create(aWorkerPrivate, "EventSource", [self]() {
-      self->Close();
-    });
-
-  if (NS_WARN_IF(!workerRef)) {
+  MOZ_ASSERT(mWorkerPrivate);
+  mWorkerPrivate->AssertIsOnWorkerThread();
+  MOZ_ASSERT(!mWorkerHolder);
+  mWorkerHolder = new EventSourceWorkerHolder(this);
+  if (NS_WARN_IF(!mWorkerHolder->HoldWorker(mWorkerPrivate, Canceling))) {
+    mWorkerHolder = nullptr;
     return false;
   }
-
-  mWorkerRef = new ThreadSafeWorkerRef(workerRef);
   return true;
 }
 
-void EventSourceImpl::ReleaseWorkerRef()
+void EventSourceImpl::UnregisterWorkerHolder()
 {
+  // RegisterWorkerHolder fail will destroy EventSourceImpl and invoke
+  // UnregisterWorkerHolder.
   MOZ_ASSERT(IsClosed());
-  MOZ_ASSERT(IsCurrentThreadRunningWorker());
-  mWorkerRef = nullptr;
+  MOZ_ASSERT(mWorkerPrivate);
+  mWorkerPrivate->AssertIsOnWorkerThread();
+  // The DTOR of this WorkerHolder will release the worker for us.
+  mWorkerHolder = nullptr;
+  mWorkerPrivate = nullptr;
 }
 
 //-----------------------------------------------------------------------------
@@ -1892,11 +1902,11 @@ EventSourceImpl::Dispatch(already_AddRefed<nsIRunnable> aEvent, uint32_t aFlags)
   if (IsShutDown()) {
     return NS_OK;
   }
-
+  MOZ_ASSERT(mWorkerPrivate);
   // If the target is a worker, we have to use a custom WorkerRunnableDispatcher
   // runnable.
   RefPtr<WorkerRunnableDispatcher> event =
-    new WorkerRunnableDispatcher(this, mWorkerRef->Private(), event_ref.forget());
+    new WorkerRunnableDispatcher(this, mWorkerPrivate, event_ref.forget());
 
   if (!event->Dispatch()) {
     return NS_ERROR_FAILURE;
@@ -1946,9 +1956,8 @@ EventSource::CreateAndDispatchSimpleEvent(const nsAString& aName)
   // it doesn't bubble, and it isn't cancelable
   event->InitEvent(aName, false, false);
   event->SetTrusted(true);
-  ErrorResult rv;
-  DispatchEvent(*event, rv);
-  return rv.StealNSResult();
+  bool dummy;
+  return DispatchEvent(event, &dummy);
 }
 
 /* static */ already_AddRefed<EventSource>
@@ -1979,53 +1988,23 @@ EventSource::Constructor(const GlobalObject& aGlobal, const nsAString& aURL,
       return nullptr;
     }
     eventSourceImp->Init(principal, aURL, aRv);
+  } else {
+    // In workers we have to keep the worker alive using a WorkerHolder in order
+    // to dispatch messages correctly.
+    if (!eventSourceImp->RegisterWorkerHolder()) {
+      aRv.Throw(NS_ERROR_FAILURE);
+      return nullptr;
+    }
+    RefPtr<InitRunnable> runnable = new InitRunnable(eventSourceImp, aURL);
+    runnable->Dispatch(Terminating, aRv);
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
-
-    eventSourceImp->InitChannelAndRequestEventSource();
-    return eventSource.forget();
+    aRv = runnable->ErrorCode();
   }
-
-  // Worker side.
-  WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
-  MOZ_ASSERT(workerPrivate);
-
-  RefPtr<InitRunnable> initRunnable =
-    new InitRunnable(workerPrivate, eventSourceImp, aURL);
-  initRunnable->Dispatch(Terminating, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
-
-  aRv = initRunnable->ErrorCode();
-  if (NS_WARN_IF(aRv.Failed())) {
-    return nullptr;
-  }
-
-  // In workers we have to keep the worker alive using a WorkerRef in order
-  // to dispatch messages correctly.
-  if (!eventSourceImp->CreateWorkerRef(workerPrivate)) {
-    // The worker is already shutting down. Let's return an already closed
-    // object, but marked as Connecting.
-    eventSource->Close();
-
-    // EventSourceImpl must be released before returning the object, otherwise
-    // it will set EventSource to a CLOSED state in its DTOR.
-    eventSourceImp = nullptr;
-
-    eventSource->mReadyState = EventSourceImpl::CONNECTING;
-    return eventSource.forget();
-  }
-
-  // Let's connect to the server.
-  RefPtr<ConnectRunnable> connectRunnable =
-    new ConnectRunnable(workerPrivate, eventSourceImp);
-  connectRunnable->Dispatch(Terminating, aRv);
-  if (NS_WARN_IF(aRv.Failed())) {
-    return nullptr;
-  }
-
   return eventSource.forget();
 }
 

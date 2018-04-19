@@ -159,7 +159,7 @@ HTMLSelectOptionAccessible::NativeName(nsString& aName)
   // CASE #2 -- no label parameter, get the first child,
   // use it if it is a text node
   nsIContent* text = mContent->GetFirstChild();
-  if (text && text->IsText()) {
+  if (text && text->IsNodeOfType(nsINode::eTEXT)) {
     nsTextEquivUtils::AppendTextEquivFromTextContent(text, &aName);
     aName.CompressWhitespace();
     return aName.IsEmpty() ? eNameOK : eNameFromSubtree;
@@ -186,7 +186,7 @@ HTMLSelectOptionAccessible::NativeState()
     return state;
 
   // Are we selected?
-  HTMLOptionElement* option = HTMLOptionElement::FromNode(mContent);
+  HTMLOptionElement* option = HTMLOptionElement::FromContent(mContent);
   bool selected = option && option->Selected();
   if (selected)
     state |= states::SELECTED;
@@ -283,7 +283,7 @@ HTMLSelectOptionAccessible::DoAction(uint8_t aIndex)
 void
 HTMLSelectOptionAccessible::SetSelected(bool aSelect)
 {
-  HTMLOptionElement* option = HTMLOptionElement::FromNode(mContent);
+  HTMLOptionElement* option = HTMLOptionElement::FromContent(mContent);
   if (option)
     option->SetSelected(aSelect);
 }
@@ -519,7 +519,7 @@ HTMLComboboxAccessible::SetCurrentItem(Accessible* aItem)
 Accessible*
 HTMLComboboxAccessible::SelectedOption() const
 {
-  HTMLSelectElement* select = HTMLSelectElement::FromNode(mContent);
+  HTMLSelectElement* select = HTMLSelectElement::FromContent(mContent);
   int32_t selectedIndex = select->SelectedIndex();
 
   if (selectedIndex >= 0) {

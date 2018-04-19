@@ -12,12 +12,13 @@ includes: [propertyHelper.js]
 var obj = {};
 
 Object.defineProperties(obj, {
-  property: {
-    writable: +0
-  }
+    property: {
+        writable: +0
+    }
 });
 
 assert(obj.hasOwnProperty("property"));
 verifyNotWritable(obj, "property");
+
 
 reportCompare(0, 0);

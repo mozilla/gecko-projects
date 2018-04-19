@@ -224,9 +224,9 @@ var E10SUtils = {
     // Allow history load if loaded in this process before.
     let webNav = aDocShell.QueryInterface(Ci.nsIWebNavigation);
     let sessionHistory = webNav.sessionHistory;
-    let requestedIndex = sessionHistory.legacySHistory.requestedIndex;
+    let requestedIndex = sessionHistory.requestedIndex;
     if (requestedIndex >= 0) {
-      if (sessionHistory.legacySHistory.getEntryAtIndex(requestedIndex, false).loadedInThisProcess) {
+      if (sessionHistory.getEntryAtIndex(requestedIndex, false).loadedInThisProcess) {
         return true;
       }
 
@@ -265,7 +265,7 @@ var E10SUtils = {
                              : null,
         reloadInFreshProcess: !!aFreshProcess,
       },
-      historyIndex: sessionHistory.legacySHistory.requestedIndex,
+      historyIndex: sessionHistory.requestedIndex,
     });
     return false;
   },

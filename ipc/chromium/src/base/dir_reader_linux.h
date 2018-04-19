@@ -40,7 +40,7 @@ class DirReaderLinux {
 
   ~DirReaderLinux() {
     if (fd_ >= 0) {
-      if (IGNORE_EINTR(close(fd_)))
+      if (HANDLE_EINTR(close(fd_)))
         DLOG(ERROR) << "Failed to close directory handle";
     }
   }

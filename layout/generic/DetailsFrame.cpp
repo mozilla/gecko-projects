@@ -24,15 +24,15 @@ NS_QUERYFRAME_HEAD(DetailsFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsBlockFrame)
 
 nsBlockFrame*
-NS_NewDetailsFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
+NS_NewDetailsFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
-  return new (aPresShell) DetailsFrame(aStyle);
+  return new (aPresShell) DetailsFrame(aContext);
 }
 
 namespace mozilla {
 
-DetailsFrame::DetailsFrame(ComputedStyle* aStyle)
-  : nsBlockFrame(aStyle, kClassID)
+DetailsFrame::DetailsFrame(nsStyleContext* aContext)
+  : nsBlockFrame(aContext, kClassID)
 {
 }
 
@@ -58,7 +58,7 @@ DetailsFrame::CheckValidMainSummary(const nsFrameList& aFrameList) const
 {
   for (nsIFrame* child : aFrameList) {
     HTMLSummaryElement* summary =
-      HTMLSummaryElement::FromNode(child->GetContent());
+      HTMLSummaryElement::FromContent(child->GetContent());
 
     if (child == aFrameList.FirstChild()) {
       if (summary && summary->IsMainSummary()) {
@@ -91,7 +91,7 @@ DetailsFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroy
 nsresult
 DetailsFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
 {
-  auto* details = HTMLDetailsElement::FromNode(GetContent());
+  auto* details = HTMLDetailsElement::FromContent(GetContent());
   if (details->GetFirstSummary()) {
     return NS_OK;
   }

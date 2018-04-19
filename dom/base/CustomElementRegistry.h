@@ -138,7 +138,7 @@ private:
   RefPtr<CustomElementDefinition> mCustomElementDefinition;
 };
 
-#define ALREADY_CONSTRUCTED_MARKER nullptr
+#define ALEADY_CONSTRUCTED_MARKER nullptr
 
 // The required information for a custom element as defined in:
 // https://html.spec.whatwg.org/multipage/scripting.html#custom-element-definition
@@ -363,8 +363,11 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(CustomElementRegistry)
 
 public:
-  static bool IsCustomElementEnabled(JSContext* aCx, JSObject* aObject);
-  static bool IsCustomElementEnabled(nsIDocument* aDoc);
+  static bool IsCustomElementEnabled(JSContext* aCx = nullptr,
+                                     JSObject* aObject = nullptr)
+  {
+    return nsContentUtils::IsCustomElementsEnabled();
+  }
 
   explicit CustomElementRegistry(nsPIDOMWindowInner* aWindow);
 
@@ -421,8 +424,7 @@ private:
 
   typedef nsRefPtrHashtable<nsRefPtrHashKey<nsAtom>, CustomElementDefinition>
     DefinitionMap;
-  typedef nsClassHashtable<nsRefPtrHashKey<nsAtom>,
-                           nsTHashtable<nsRefPtrHashKey<nsIWeakReference>>>
+  typedef nsClassHashtable<nsRefPtrHashKey<nsAtom>, nsTArray<nsWeakPtr>>
     CandidateMap;
   typedef JS::GCHashMap<JS::Heap<JSObject*>,
                         RefPtr<nsAtom>,

@@ -11,6 +11,7 @@
 #include "mozilla/css/SheetParsingMode.h"
 #include "mozilla/Encoding.h"
 #include "mozilla/NotNull.h"
+#include "nsIUnicharStreamLoader.h"
 #include "nsIThreadInternal.h"
 
 namespace mozilla {
@@ -36,6 +37,7 @@ static_assert(eAuthorSheetFeatures == 0 && eUserSheetFeatures == 1 &&
 
 class SheetLoadData final
   : public nsIRunnable
+  , public nsIUnicharStreamLoaderObserver
   , public nsIThreadObserver
 {
 protected:
@@ -87,6 +89,7 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIRUNNABLE
   NS_DECL_NSITHREADOBSERVER
+  NS_DECL_NSIUNICHARSTREAMLOADEROBSERVER
 
   // Hold a ref to the CSSLoader so we can call back to it to let it
   // know the load finished

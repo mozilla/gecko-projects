@@ -449,7 +449,7 @@ public:
     , mReceivedLoadStart(false)
   {
     AssertIsOnMainThread();
-    mEventType.AssignASCII(sEventStrings[STRING_loadstart]);
+    CopyASCIItoUTF16(sEventStrings[STRING_loadstart], mEventType);
   }
 
   NS_DECL_ISUPPORTS_INHERITED
@@ -461,7 +461,7 @@ public:
   {
     AssertIsOnMainThread();
 
-    if (NS_FAILED(mXHR->AddEventListener(mEventType, this, false, false))) {
+    if (NS_FAILED(mXHR->AddEventListener(mEventType, this, false, false, 2))) {
       NS_WARNING("Failed to add event listener!");
       return false;
     }
@@ -947,11 +947,12 @@ Proxy::AddRemoveEventListeners(bool aUpload, bool aAdd)
                (!mUploadEventListenersAttached && aAdd),
                "Messed up logic for upload listeners!");
 
-  RefPtr<DOMEventTargetHelper> targetHelper =
+  DOMEventTargetHelper* targetHelper =
     aUpload ?
     static_cast<XMLHttpRequestUpload*>(mXHRUpload.get()) :
     static_cast<XMLHttpRequestEventTarget*>(mXHR.get());
   MOZ_ASSERT(targetHelper, "This should never fail!");
+  nsCOMPtr<nsIDOMEventTarget> target = targetHelper;
 
   uint32_t lastEventType = aUpload ? STRING_LAST_EVENTTARGET : STRING_LAST_XHR;
 
@@ -959,12 +960,12 @@ Proxy::AddRemoveEventListeners(bool aUpload, bool aAdd)
   for (uint32_t index = 0; index <= lastEventType; index++) {
     eventType = NS_ConvertASCIItoUTF16(sEventStrings[index]);
     if (aAdd) {
-      if (NS_FAILED(targetHelper->AddEventListener(eventType, this, false))) {
+      if (NS_FAILED(target->AddEventListener(eventType, this, false))) {
         return false;
       }
     }
-    else {
-      targetHelper->RemoveEventListener(eventType, this, false);
+    else if (NS_FAILED(target->RemoveEventListener(eventType, this, false))) {
+      return false;
     }
   }
 
@@ -1061,7 +1062,9 @@ LoadStartDetectionRunnable::Run()
 {
   AssertIsOnMainThread();
 
-  mXHR->RemoveEventListener(mEventType, this, false);
+  if (NS_FAILED(mXHR->RemoveEventListener(mEventType, this, false))) {
+    NS_WARNING("Failed to remove event listener!");
+  }
 
   if (!mReceivedLoadStart) {
     if (mProxy->mOutstandingSendCount > 1) {
@@ -1352,7 +1355,8 @@ EventRunnable::WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
 
   event->SetTrusted(true);
 
-  target->DispatchEvent(*event);
+  bool dummy;
+  target->DispatchEvent(event, &dummy);
 
   // After firing the event set mResponse to JSVAL_NULL for chunked response
   // types.
@@ -1765,7 +1769,8 @@ XMLHttpRequestWorker::DispatchPrematureAbortEvent(EventTarget* aTarget,
 
   event->SetTrusted(true);
 
-  aTarget->DispatchEvent(*event);
+  bool dummy;
+  aTarget->DispatchEvent(event, &dummy);
 }
 
 void

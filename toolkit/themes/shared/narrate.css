@@ -52,14 +52,9 @@ body.dark .narrate-word-highlight {
   --border-color: #e5e5e5;
 }
 
-.narrate-toggle {
-  margin: 0;
-  background-image: url("chrome://global/skin/narrate/waveform.svg");
-}
-
-.speaking .narrate-toggle {
-  /* This shows with an animation. */
-  background-image: url("chrome://global/skin/narrate/waveform.svg#waveform");
+.narrate-toggle > svg {
+  display: block;
+  margin: 0 8px;
 }
 
 .narrate-dropdown > .dropdown-popup button {

@@ -18,8 +18,7 @@ class AnimationDetailHeader extends PureComponent {
     };
   }
 
-  onClick(event) {
-    event.stopPropagation();
+  onClick() {
     const { setDetailVisibility } = this.props;
     setDetailVisibility(false);
   }

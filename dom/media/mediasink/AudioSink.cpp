@@ -13,7 +13,7 @@
 #include "mozilla/CheckedInt.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/IntegerPrintfMacros.h"
-#include "mozilla/StaticPrefs.h"
+#include "MediaPrefs.h"
 
 namespace mozilla {
 
@@ -48,7 +48,7 @@ AudioSink::AudioSink(AbstractThread* aThread,
   , mIsAudioDataAudible(false)
   , mAudioQueue(aAudioQueue)
 {
-  bool resampling = StaticPrefs::MediaResamplingEnabled();
+  bool resampling = MediaPrefs::AudioSinkResampling();
 
   if (resampling) {
     mOutputRate = 48000;
@@ -64,7 +64,12 @@ AudioSink::AudioSink(AbstractThread* aThread,
   }
   MOZ_DIAGNOSTIC_ASSERT(mOutputRate, "output rate can't be 0.");
 
-  mOutputChannels = DecideAudioPlaybackChannels(mInfo);
+  bool monoAudioEnabled = MediaPrefs::MonoAudio();
+
+  mOutputChannels =
+    monoAudioEnabled
+    ? 1
+    : (MediaPrefs::AudioSinkForceStereo() ? 2 : mInfo.mChannels);
 }
 
 AudioSink::~AudioSink()
@@ -190,13 +195,12 @@ AudioSink::InitializeAudioStream(const PlaybackParams& aParams)
   mAudioStream = new AudioStream(*this);
   // When AudioQueue is empty, there is no way to know the channel layout of
   // the coming audio data, so we use the predefined channel map instead.
-  AudioConfig::ChannelLayout::ChannelMap channelMap =
-    mConverter ? mConverter->OutputConfig().Layout().Map()
-               : AudioConfig::ChannelLayout(mOutputChannels).Map();
+  uint32_t channelMap = mConverter
+                        ? mConverter->OutputConfig().Layout().Map()
+                        : AudioStream::GetPreferredChannelMap(mOutputChannels);
   // The layout map used here is already processed by mConverter with
   // mOutputChannels into SMPTE format, so there is no need to worry if
-  // StaticPrefs::accessibility_monoaudio_enable() or
-  // StaticPrefs::MediaForcestereoEnabled() is applied.
+  // MediaPrefs::MonoAudio() or MediaPrefs::AudioSinkForceStereo() is applied.
   nsresult rv = mAudioStream->Init(mOutputChannels, channelMap, mOutputRate);
   if (NS_FAILED(rv)) {
     mAudioStream->Shutdown();
@@ -391,17 +395,10 @@ AudioSink::NotifyAudioNeeded()
         mFramesParsed = result.value();
       }
 
-      const AudioConfig::ChannelLayout inputLayout =
-        data->mChannelMap
-          ? AudioConfig::ChannelLayout::SMPTEDefault(data->mChannelMap)
-          : AudioConfig::ChannelLayout(data->mChannels);
-      const AudioConfig::ChannelLayout outputLayout =
-        mOutputChannels == data->mChannels
-          ? inputLayout
-          : AudioConfig::ChannelLayout(mOutputChannels);
-      mConverter = MakeUnique<AudioConverter>(
-        AudioConfig(inputLayout, data->mChannels, data->mRate),
-        AudioConfig(outputLayout, mOutputChannels, mOutputRate));
+      mConverter =
+        MakeUnique<AudioConverter>(
+          AudioConfig(data->mChannels, data->mRate),
+          AudioConfig(mOutputChannels, mOutputRate));
     }
 
     // See if there's a gap in the audio. If there is, push silence into the

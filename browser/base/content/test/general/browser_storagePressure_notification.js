@@ -23,6 +23,7 @@ function openAboutPrefPromise() {
 // Test only displaying notification once within the given interval
 add_task(async function() {
   const TEST_NOTIFICATION_INTERVAL_MS = 2000;
+  await SpecialPowers.pushPrefEnv({set: [["browser.storageManager.enabled", true]]});
   await SpecialPowers.pushPrefEnv({set: [["browser.storageManager.pressureNotification.minIntervalMS", TEST_NOTIFICATION_INTERVAL_MS]]});
   // Commenting this to see if we really need it
   // await SpecialPowers.pushPrefEnv({set: [["privacy.reduceTimerPrecision", false]]});
@@ -46,6 +47,7 @@ add_task(async function() {
 
 // Test guiding user to the about:preferences when usage exceeds the given threshold
 add_task(async function() {
+  await SpecialPowers.pushPrefEnv({ set: [["browser.storageManager.enabled", true]] });
   await SpecialPowers.pushPrefEnv({ set: [["browser.storageManager.pressureNotification.minIntervalMS", 0]] });
   let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, "https://example.com");
 
@@ -65,13 +67,14 @@ add_task(async function() {
   let prefDoc = gBrowser.selectedBrowser.contentDocument;
   let siteDataGroup = prefDoc.getElementById("siteDataGroup");
   is_element_visible(siteDataGroup, "Should open to the siteDataGroup section in about:preferences");
-  BrowserTestUtils.removeTab(aboutPrefTab);
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(aboutPrefTab);
+  await BrowserTestUtils.removeTab(tab);
 });
 
 // Test not displaying the 2nd notification if one is already being displayed
 add_task(async function() {
   const TEST_NOTIFICATION_INTERVAL_MS = 0;
+  await SpecialPowers.pushPrefEnv({set: [["browser.storageManager.enabled", true]]});
   await SpecialPowers.pushPrefEnv({set: [["browser.storageManager.pressureNotification.minIntervalMS", TEST_NOTIFICATION_INTERVAL_MS]]});
 
   await notifyStoragePressure();

@@ -207,8 +207,7 @@ class ZoneCellIter<TenuredCell> {
 
     void init(JS::Zone* zone, AllocKind kind) {
         MOZ_ASSERT_IF(IsNurseryAllocable(kind),
-                      (zone->isAtomsZone() ||
-                       zone->runtimeFromMainThread()->gc.nursery().isEmpty()));
+                      zone->isAtomsZone() || zone->group()->nursery().isEmpty());
         initForTenuredIteration(zone, kind);
     }
 
@@ -238,7 +237,7 @@ class ZoneCellIter<TenuredCell> {
         // If we are iterating a nursery-allocated kind then we need to
         // evict first so that we can see all things.
         if (IsNurseryAllocable(kind))
-            zone->runtimeFromMainThread()->gc.evictNursery();
+            zone->runtimeFromActiveCooperatingThread()->gc.evictNursery();
 
         init(zone, kind);
     }

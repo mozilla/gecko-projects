@@ -23,7 +23,7 @@ var httpserv = null;
   // Commented by default as it relies on external ressources
   //test_ftp_channel,
   end
-].forEach(f => add_test(f));
+].forEach(add_test);
 
 // Utility functions
 

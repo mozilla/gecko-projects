@@ -65,8 +65,7 @@ async function testLink(aLinkIndexOrFunction, pinTab, expectNewTab, testSubFrame
   if (expectNewTab) {
     promise = BrowserTestUtils.waitForNewTab(gBrowser).then(tab => {
       let loaded = tab.linkedBrowser.documentURI.spec;
-      BrowserTestUtils.removeTab(tab);
-      return loaded;
+      return BrowserTestUtils.removeTab(tab).then(() => loaded);
     });
   } else {
     promise = BrowserTestUtils.browserLoaded(browser, testSubFrame);
@@ -75,6 +74,7 @@ async function testLink(aLinkIndexOrFunction, pinTab, expectNewTab, testSubFrame
   let href;
   if (typeof aLinkIndexOrFunction === "function") {
     ok(!browser.isRemoteBrowser, "don't pass a function for a remote browser");
+    // eslint-disable-next-line mozilla/no-cpows-in-tests
     let link = aLinkIndexOrFunction(browser.contentDocument);
     info("Clicking " + link.textContent);
     link.click();
@@ -93,5 +93,5 @@ async function testLink(aLinkIndexOrFunction, pinTab, expectNewTab, testSubFrame
   info(`Waiting on load of ${href}`);
   let loaded = await promise;
   is(loaded, href, "loaded the right document");
-  BrowserTestUtils.removeTab(appTab);
+  await BrowserTestUtils.removeTab(appTab);
 }

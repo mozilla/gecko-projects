@@ -14,9 +14,8 @@ use dom::globalscope::GlobalScope;
 use dom::windowproxy::WindowProxy;
 use dom_struct::dom_struct;
 use ipc_channel::ipc;
-use js::jsapi::JSContext;
+use js::jsapi::{JSContext, HandleValue};
 use js::jsval::{JSVal, UndefinedValue};
-use js::rust::HandleValue;
 use msg::constellation_msg::PipelineId;
 use script_traits::ScriptMsg;
 use servo_url::ImmutableOrigin;
@@ -192,13 +191,9 @@ impl DissimilarOriginWindowMethods for DissimilarOriginWindow {
 
 impl DissimilarOriginWindow {
     pub fn post_message(&self, origin: Option<ImmutableOrigin>, data: StructuredCloneData) {
-        let incumbent = match GlobalScope::incumbent() {
-            None => return warn!("postMessage called with no incumbent global"),
-            Some(incumbent) => incumbent,
-        };
         let msg = ScriptMsg::PostMessage(self.window_proxy.browsing_context_id(),
                                                 origin,
                                                 data.move_to_arraybuffer());
-        let _ = incumbent.script_to_constellation_chan().send(msg);
+        let _ = self.upcast::<GlobalScope>().script_to_constellation_chan().send(msg);
     }
 }

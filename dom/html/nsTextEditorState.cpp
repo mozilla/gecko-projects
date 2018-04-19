@@ -14,6 +14,7 @@
 #include "nsEditorCID.h"
 #include "nsLayoutCID.h"
 #include "nsITextControlFrame.h"
+#include "nsIDOMCharacterData.h"
 #include "nsIDOMDocument.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsTextControlFrame.h"
@@ -42,7 +43,6 @@
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/HTMLTextAreaElement.h"
-#include "mozilla/dom/Text.h"
 #include "nsNumberControlFrame.h"
 #include "nsFrameSelection.h"
 #include "mozilla/ErrorResult.h"
@@ -173,23 +173,16 @@ public:
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     MOZ_ASSERT(mTextEditor);
 
-    mPreviousEnabled = mTextEditor->IsUndoRedoEnabled();
-    DebugOnly<bool> disabledUndoRedo = mTextEditor->DisableUndoRedo();
-    NS_WARNING_ASSERTION(disabledUndoRedo,
-      "Failed to disable undo/redo transactions");
+    bool canUndo;
+    DebugOnly<nsresult> rv = mTextEditor->CanUndo(&mPreviousEnabled, &canUndo);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+
+    mTextEditor->EnableUndo(false);
   }
 
   ~AutoDisableUndo()
   {
-    if (mPreviousEnabled) {
-      DebugOnly<bool> enabledUndoRedo = mTextEditor->EnableUndoRedo();
-      NS_WARNING_ASSERTION(enabledUndoRedo,
-        "Failed to enable undo/redo transactions");
-    } else {
-      DebugOnly<bool> disabledUndoRedo = mTextEditor->DisableUndoRedo();
-      NS_WARNING_ASSERTION(disabledUndoRedo,
-        "Failed to disable undo/redo transactions");
-    }
+    mTextEditor->EnableUndo(mPreviousEnabled);
   }
 
 private:
@@ -890,12 +883,12 @@ DoCommandCallback(Command aCommand, void* aData)
   nsIContent *content = frame->GetContent();
 
   nsCOMPtr<nsIControllers> controllers;
-  HTMLInputElement* input = HTMLInputElement::FromNode(content);
+  HTMLInputElement* input = HTMLInputElement::FromContent(content);
   if (input) {
     input->GetControllers(getter_AddRefs(controllers));
   } else {
     HTMLTextAreaElement* textArea =
-      HTMLTextAreaElement::FromNode(content);
+      HTMLTextAreaElement::FromContent(content);
 
     if (textArea) {
       textArea->GetControllers(getter_AddRefs(controllers));
@@ -995,8 +988,8 @@ TextInputListener::OnEditActionHandled()
   RefPtr<TextEditor> textEditor = frame->GetTextEditor();
 
   // Get the number of undo / redo items
-  size_t numUndoItems = textEditor->NumberOfUndoItems();
-  size_t numRedoItems = textEditor->NumberOfRedoItems();
+  int32_t numUndoItems = textEditor->NumberOfUndoItems();
+  int32_t numRedoItems = textEditor->NumberOfRedoItems();
   if ((numUndoItems && !mHadUndoItems) || (!numUndoItems && mHadUndoItems) ||
       (numRedoItems && !mHadRedoItems) || (!numRedoItems && mHadRedoItems)) {
     // Modify the menu if undo or redo items are different
@@ -1422,12 +1415,12 @@ nsTextEditorState::PrepareEditor(const nsAString *aValue)
     nsCOMPtr<nsIControllers> controllers;
     nsCOMPtr<nsIContent> content = do_QueryInterface(mTextCtrlElement);
     HTMLInputElement* inputElement =
-      HTMLInputElement::FromNodeOrNull(content);
+      HTMLInputElement::FromContentOrNull(content);
     if (inputElement) {
       rv = inputElement->GetControllers(getter_AddRefs(controllers));
     } else {
       HTMLTextAreaElement* textAreaElement =
-        HTMLTextAreaElement::FromNodeOrNull(content);
+        HTMLTextAreaElement::FromContentOrNull(content);
 
       if (!textAreaElement)
         return NS_ERROR_FAILURE;
@@ -1516,20 +1509,22 @@ nsTextEditorState::PrepareEditor(const nsAString *aValue)
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
+  nsCOMPtr<nsITransactionManager> transactionManager =
+    newTextEditor->GetTransactionManager();
+  if (NS_WARN_IF(!transactionManager)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  transactionManager->SetMaxTransactionCount(
+                        nsITextControlElement::DEFAULT_UNDO_CAP);
+
   if (IsPasswordTextControl()) {
-    // Disable undo for <input type="password">.  Note that we want to do this
-    // at the very end of InitEditor(), so the calls to EnableUndoRedo() when
-    // setting the default value don't screw us up.  Since changing the
-    // control type does a reframe, we don't have to worry about dynamic type
-    // changes here.
-    DebugOnly<bool> disabledUndoRedo = newTextEditor->DisableUndoRedo();
-    NS_WARNING_ASSERTION(disabledUndoRedo,
-      "Failed to disable undo/redo transaction");
-  } else {
-    DebugOnly<bool> enabledUndoRedo =
-      newTextEditor->EnableUndoRedo(nsITextControlElement::DEFAULT_UNDO_CAP);
-    NS_WARNING_ASSERTION(enabledUndoRedo,
-      "Failed to enable undo/redo transaction");
+    // Disable undo for password textfields.  Note that we want to do this at
+    // the very end of InitEditor, so the calls to EnableUndo when setting the
+    // default value don't screw us up.
+    // Since changing the control type does a reframe, we don't have to worry
+    // about dynamic type changes here.
+    newTextEditor->EnableUndo(false);
   }
 
   if (!mEditorInitialized) {
@@ -1992,7 +1987,7 @@ nsTextEditorState::GetParentNumberControl(nsFrame* aFrame) const
   if (!parentOfParent) {
     return nullptr;
   }
-  HTMLInputElement* input = HTMLInputElement::FromNode(parentOfParent);
+  HTMLInputElement* input = HTMLInputElement::FromContent(parentOfParent);
   if (input) {
     // This function might be called during frame reconstruction as a result
     // of changing the input control's type from number to something else. In
@@ -2079,13 +2074,13 @@ nsTextEditorState::UnbindFromFrame(nsTextControlFrame* aFrame)
     nsCOMPtr<nsIControllers> controllers;
     nsCOMPtr<nsIContent> content = do_QueryInterface(mTextCtrlElement);
     HTMLInputElement* inputElement =
-      HTMLInputElement::FromNodeOrNull(content);
+      HTMLInputElement::FromContentOrNull(content);
     if (inputElement)
       inputElement->GetControllers(getter_AddRefs(controllers));
     else
     {
       HTMLTextAreaElement* textAreaElement =
-        HTMLTextAreaElement::FromNodeOrNull(content);
+        HTMLTextAreaElement::FromContentOrNull(content);
       if (textAreaElement) {
         textAreaElement->GetControllers(getter_AddRefs(controllers));
       }
@@ -2158,7 +2153,7 @@ nsTextEditorState::GetMaxLength()
 {
   nsCOMPtr<nsIContent> content = do_QueryInterface(mTextCtrlElement);
   nsGenericHTMLElement* element =
-    nsGenericHTMLElement::FromNodeOrNull(content);
+    nsGenericHTMLElement::FromContentOrNull(content);
   if (NS_WARN_IF(!element)) {
     return -1;
   }
@@ -2586,7 +2581,7 @@ nsTextEditorState::SetPreviewText(const nsAString& aValue, bool aNotify)
 
   nsContentUtils::RemoveNewlines(previewValue);
   MOZ_ASSERT(previewDiv->GetFirstChild(), "preview div has no child");
-  previewDiv->GetFirstChild()->AsText()->SetText(previewValue, aNotify);
+  previewDiv->GetFirstChild()->SetText(previewValue, aNotify);
 
   UpdateOverlayTextVisibility(aNotify);
 }

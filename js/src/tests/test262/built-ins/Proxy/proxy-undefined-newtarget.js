@@ -17,4 +17,5 @@ assert.throws(TypeError, function() {
   Proxy({}, {});
 });
 
+
 reportCompare(0, 0);

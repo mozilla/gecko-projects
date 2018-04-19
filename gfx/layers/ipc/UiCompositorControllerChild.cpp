@@ -44,7 +44,7 @@ namespace layers {
 
 // public:
 /* static */ RefPtr<UiCompositorControllerChild>
-UiCompositorControllerChild::CreateForSameProcess(const LayersId& aRootLayerTreeId)
+UiCompositorControllerChild::CreateForSameProcess(const int64_t& aRootLayerTreeId)
 {
   RefPtr<UiCompositorControllerChild> child = new UiCompositorControllerChild(0);
   child->mParent = new UiCompositorControllerParent(aRootLayerTreeId);

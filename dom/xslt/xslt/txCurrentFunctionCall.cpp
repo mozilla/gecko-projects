@@ -55,9 +55,11 @@ CurrentFunctionCall::isSensitiveTo(ContextSensitivity aContext)
 }
 
 #ifdef TX_TO_STRING
-void
-CurrentFunctionCall::appendName(nsAString& aDest)
+nsresult
+CurrentFunctionCall::getNameAtom(nsAtom** aAtom)
 {
-    aDest.Append(nsGkAtoms::current->GetUTF16String());
+    *aAtom = nsGkAtoms::current;
+    NS_ADDREF(*aAtom);
+    return NS_OK;
 }
 #endif

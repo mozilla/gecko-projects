@@ -26,7 +26,6 @@
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
 #include "mozilla/dom/ServiceWorkerRegistrarTypes.h"
 #include "mozilla/dom/ServiceWorkerRegistrationInfo.h"
-#include "mozilla/dom/ServiceWorkerUtils.h"
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "nsClassHashtable.h"
 #include "nsDataHashtable.h"
@@ -86,6 +85,7 @@ class ServiceWorkerManager final
   : public nsIServiceWorkerManager
   , public nsIObserver
 {
+  friend class GetReadyPromiseRunnable;
   friend class GetRegistrationsRunnable;
   friend class GetRegistrationRunnable;
   friend class ServiceWorkerJob;
@@ -118,19 +118,6 @@ public:
   };
 
   nsClassHashtable<nsIDHashKey, ControlledClientData> mControlledClients;
-
-  struct PendingReadyData
-  {
-    RefPtr<ClientHandle> mClientHandle;
-    RefPtr<ServiceWorkerRegistrationPromise::Private> mPromise;
-
-    explicit PendingReadyData(ClientHandle* aClientHandle)
-      : mClientHandle(aClientHandle)
-      , mPromise(new ServiceWorkerRegistrationPromise::Private(__func__))
-    { }
-  };
-
-  nsTArray<UniquePtr<PendingReadyData>> mPendingReadyList;
 
   bool
   IsAvailable(nsIPrincipal* aPrincipal, nsIURI* aURI);
@@ -323,14 +310,8 @@ public:
   void
   WorkerIsIdle(ServiceWorkerInfo* aWorker);
 
-  RefPtr<ServiceWorkerRegistrationPromise>
-  WhenReady(const ClientInfo& aClientInfo);
-
   void
   CheckPendingReadyPromises();
-
-  void
-  RemovePendingReadyPromise(const ClientInfo& aClientInfo);
 
 private:
   ServiceWorkerManager();
@@ -387,20 +368,17 @@ private:
   StopControllingRegistration(ServiceWorkerRegistrationInfo* aRegistration);
 
   already_AddRefed<ServiceWorkerRegistrationInfo>
-  GetServiceWorkerRegistrationInfo(nsPIDOMWindowInner* aWindow) const;
+  GetServiceWorkerRegistrationInfo(nsPIDOMWindowInner* aWindow);
 
   already_AddRefed<ServiceWorkerRegistrationInfo>
-  GetServiceWorkerRegistrationInfo(nsIDocument* aDoc) const;
+  GetServiceWorkerRegistrationInfo(nsIDocument* aDoc);
 
   already_AddRefed<ServiceWorkerRegistrationInfo>
-  GetServiceWorkerRegistrationInfo(const ClientInfo& aClientInfo) const;
-
-  already_AddRefed<ServiceWorkerRegistrationInfo>
-  GetServiceWorkerRegistrationInfo(nsIPrincipal* aPrincipal, nsIURI* aURI) const;
+  GetServiceWorkerRegistrationInfo(nsIPrincipal* aPrincipal, nsIURI* aURI);
 
   already_AddRefed<ServiceWorkerRegistrationInfo>
   GetServiceWorkerRegistrationInfo(const nsACString& aScopeKey,
-                                   nsIURI* aURI) const;
+                                   nsIURI* aURI);
 
   // This method generates a key using appId and isInElementBrowser from the
   // principal. We don't use the origin because it can change during the
@@ -436,6 +414,26 @@ private:
 
   void
   UpdateClientControllers(ServiceWorkerRegistrationInfo* aRegistration);
+
+  void
+  StorePendingReadyPromise(nsPIDOMWindowInner* aWindow, nsIURI* aURI,
+                           Promise* aPromise);
+
+  bool
+  CheckReadyPromise(nsPIDOMWindowInner* aWindow, nsIURI* aURI,
+                    Promise* aPromise);
+
+  struct PendingReadyPromise final
+  {
+    PendingReadyPromise(nsIURI* aURI, Promise* aPromise)
+      : mURI(aURI), mPromise(aPromise)
+    {}
+
+    nsCOMPtr<nsIURI> mURI;
+    RefPtr<Promise> mPromise;
+  };
+
+  nsClassHashtable<nsISupportsHashKey, PendingReadyPromise> mPendingReadyPromises;
 
   void
   MaybeRemoveRegistration(ServiceWorkerRegistrationInfo* aRegistration);

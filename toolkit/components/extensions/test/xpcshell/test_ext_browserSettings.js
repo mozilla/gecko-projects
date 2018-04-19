@@ -30,7 +30,6 @@ add_task(async function test_browser_settings() {
     "image.animation_mode": "none",
     "permissions.default.desktop-notification": PERM_UNKNOWN_ACTION,
     "ui.context_menus.after_mouseup": false,
-    "browser.tabs.closeTabByDblclick": false,
     "browser.tabs.loadBookmarksInTabs": false,
     "browser.search.openintab": false,
     "network.proxy.type": proxySvc.PROXYCONFIG_SYSTEM,
@@ -48,9 +47,6 @@ add_task(async function test_browser_settings() {
     "network.proxy.no_proxies_on": "localhost, 127.0.0.1",
     "network.proxy.autoconfig_url": "",
     "signon.autologin.proxy": false,
-    "browser.tabs.insertRelatedAfterCurrent": true,
-    "browser.tabs.insertAfterCurrent": false,
-    "browser.display.document_color_use": 1,
   };
 
   async function background() {
@@ -168,34 +164,6 @@ add_task(async function test_browser_settings() {
       {"ui.context_menus.after_mouseup": false});
   }
 
-  if (AppConstants.platform !== "android") {
-    await testSetting(
-      "closeTabsByDoubleClick", true,
-      {"browser.tabs.closeTabByDblclick": true});
-    await testSetting(
-      "closeTabsByDoubleClick", false,
-      {"browser.tabs.closeTabByDblclick": false});
-  }
-
-  await testSetting(
-    "newTabPosition", "afterCurrent",
-    {
-      "browser.tabs.insertRelatedAfterCurrent": false,
-      "browser.tabs.insertAfterCurrent": true,
-    });
-  await testSetting(
-    "newTabPosition", "atEnd",
-    {
-      "browser.tabs.insertRelatedAfterCurrent": false,
-      "browser.tabs.insertAfterCurrent": false,
-    });
-  await testSetting(
-    "newTabPosition", "relatedAfterCurrent",
-    {
-      "browser.tabs.insertRelatedAfterCurrent": true,
-      "browser.tabs.insertAfterCurrent": false,
-    });
-
   await testSetting(
     "openBookmarksInNewTabs", true,
     {"browser.tabs.loadBookmarksInTabs": true});
@@ -209,16 +177,6 @@ add_task(async function test_browser_settings() {
   await testSetting(
     "openSearchResultsInNewTabs", false,
     {"browser.search.openintab": false});
-
-  await testSetting(
-    "overrideDocumentColors", "high-contrast-only",
-    {"browser.display.document_color_use": 0});
-  await testSetting(
-    "overrideDocumentColors", "never",
-    {"browser.display.document_color_use": 1});
-  await testSetting(
-    "overrideDocumentColors", "always",
-    {"browser.display.document_color_use": 2});
 
   async function testProxy(config, expectedPrefs) {
     // proxyConfig is not supported on Android.
@@ -377,52 +335,6 @@ add_task(async function test_bad_value() {
       browser.browserSettings.contextMenuShowEvent.set({value: "bad"}),
       /bad is not a valid value for contextMenuShowEvent/,
       "contextMenuShowEvent.set rejects with an invalid value.");
-
-    await browser.test.assertRejects(
-      browser.browserSettings.overrideDocumentColors.set({value: 2}),
-      /2 is not a valid value for overrideDocumentColors/,
-      "overrideDocumentColors.set rejects with an invalid value.");
-
-    await browser.test.assertRejects(
-      browser.browserSettings.overrideDocumentColors.set({value: "bad"}),
-      /bad is not a valid value for overrideDocumentColors/,
-      "overrideDocumentColors.set rejects with an invalid value.");
-
-    browser.test.sendMessage("done");
-  }
-
-  let extension = ExtensionTestUtils.loadExtension({
-    background,
-    manifest: {
-      permissions: ["browserSettings"],
-    },
-  });
-
-  await extension.startup();
-  await extension.awaitMessage("done");
-  await extension.unload();
-});
-
-add_task(async function test_bad_value_android() {
-  if (AppConstants.platform !== "android") {
-    return;
-  }
-
-  async function background() {
-    await browser.test.assertRejects(
-      browser.browserSettings.closeTabsByDoubleClick.set({value: true}),
-      /android is not a supported platform for the closeTabsByDoubleClick setting/,
-      "closeTabsByDoubleClick.set rejects on Android.");
-
-    await browser.test.assertRejects(
-      browser.browserSettings.closeTabsByDoubleClick.get({}),
-      /android is not a supported platform for the closeTabsByDoubleClick setting/,
-      "closeTabsByDoubleClick.get rejects on Android.");
-
-    await browser.test.assertRejects(
-      browser.browserSettings.closeTabsByDoubleClick.clear({}),
-      /android is not a supported platform for the closeTabsByDoubleClick setting/,
-      "closeTabsByDoubleClick.clear rejects on Android.");
 
     browser.test.sendMessage("done");
   }

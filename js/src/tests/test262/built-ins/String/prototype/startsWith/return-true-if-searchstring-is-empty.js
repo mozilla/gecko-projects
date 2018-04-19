@@ -38,5 +38,4 @@ assert(
   str.startsWith('', Infinity),
   'str.startsWith("", Infinity) returns true'
 );
-
 reportCompare(0, 0);

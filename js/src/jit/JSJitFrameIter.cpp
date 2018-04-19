@@ -216,7 +216,8 @@ JSJitFrameIter::machineState() const
         for (uint32_t a = 0; a < (*iter).numAlignedAliased(); a++) {
             // Only say that registers that actually start here start here.
             // e.g. d0 should not start at s1, only at s0.
-            FloatRegister ftmp = (*iter).alignedAliased(a);
+            FloatRegister ftmp;
+            (*iter).alignedAliased(a, &ftmp);
             machine.setRegisterLocation(ftmp, (double*)floatSpill);
         }
     }

@@ -8,11 +8,9 @@ description: >
     converts to a string (value is negative number)
 ---*/
 
-var obj = {
-  "-20": 1
-};
+        var obj = { "-20": 1 };
 
-var desc = Object.getOwnPropertyDescriptor(obj, -20);
+        var desc = Object.getOwnPropertyDescriptor(obj, -20);
 
 assert.sameValue(desc.value, 1, 'desc.value');
 

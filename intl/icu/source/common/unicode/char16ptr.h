@@ -30,23 +30,25 @@ U_NAMESPACE_BEGIN
 #   define U_ALIASING_BARRIER(ptr) asm volatile("" : : "rm"(ptr) : "memory")
 #endif
 
+// Do not use #ifndef U_HIDE_DRAFT_API for the following class, it
+// is now used in place of UChar* in several stable C++ methods
 /**
  * char16_t * wrapper with implicit conversion from distinct but bit-compatible pointer types.
- * @stable ICU 59
+ * @draft ICU 59
  */
 class U_COMMON_API Char16Ptr U_FINAL {
 public:
     /**
      * Copies the pointer.
      * @param p pointer
-     * @stable ICU 59
+     * @draft ICU 59
      */
     inline Char16Ptr(char16_t *p);
 #if !U_CHAR16_IS_TYPEDEF
     /**
      * Converts the pointer to char16_t *.
      * @param p pointer to be converted
-     * @stable ICU 59
+     * @draft ICU 59
      */
     inline Char16Ptr(uint16_t *p);
 #endif
@@ -55,32 +57,32 @@ public:
      * Converts the pointer to char16_t *.
      * (Only defined if U_SIZEOF_WCHAR_T==2.)
      * @param p pointer to be converted
-     * @stable ICU 59
+     * @draft ICU 59
      */
     inline Char16Ptr(wchar_t *p);
 #endif
     /**
      * nullptr constructor.
      * @param p nullptr
-     * @stable ICU 59
+     * @draft ICU 59
      */
     inline Char16Ptr(std::nullptr_t p);
     /**
      * Destructor.
-     * @stable ICU 59
+     * @draft ICU 59
      */
     inline ~Char16Ptr();
 
     /**
      * Pointer access.
      * @return the wrapped pointer
-     * @stable ICU 59
+     * @draft ICU 59
      */
     inline char16_t *get() const;
     /**
      * char16_t pointer access via type conversion (e.g., static_cast).
      * @return the wrapped pointer
-     * @stable ICU 59
+     * @draft ICU 59
      */
     inline operator char16_t *() const { return get(); }
 
@@ -135,23 +137,25 @@ char16_t *Char16Ptr::get() const { return u_.cp; }
 
 #endif
 
+// Do not use #ifndef U_HIDE_DRAFT_API for the following class, it is
+// now used in place of const UChar* in several stable C++ methods
 /**
  * const char16_t * wrapper with implicit conversion from distinct but bit-compatible pointer types.
- * @stable ICU 59
+ * @draft ICU 59
  */
 class U_COMMON_API ConstChar16Ptr U_FINAL {
 public:
     /**
      * Copies the pointer.
      * @param p pointer
-     * @stable ICU 59
+     * @draft ICU 59
      */
     inline ConstChar16Ptr(const char16_t *p);
 #if !U_CHAR16_IS_TYPEDEF
     /**
      * Converts the pointer to char16_t *.
      * @param p pointer to be converted
-     * @stable ICU 59
+     * @draft ICU 59
      */
     inline ConstChar16Ptr(const uint16_t *p);
 #endif
@@ -160,33 +164,33 @@ public:
      * Converts the pointer to char16_t *.
      * (Only defined if U_SIZEOF_WCHAR_T==2.)
      * @param p pointer to be converted
-     * @stable ICU 59
+     * @draft ICU 59
      */
     inline ConstChar16Ptr(const wchar_t *p);
 #endif
     /**
      * nullptr constructor.
      * @param p nullptr
-     * @stable ICU 59
+     * @draft ICU 59
      */
     inline ConstChar16Ptr(const std::nullptr_t p);
 
     /**
      * Destructor.
-     * @stable ICU 59
+     * @draft ICU 59
      */
     inline ~ConstChar16Ptr();
 
     /**
      * Pointer access.
      * @return the wrapped pointer
-     * @stable ICU 59
+     * @draft ICU 59
      */
     inline const char16_t *get() const;
     /**
      * char16_t pointer access via type conversion (e.g., static_cast).
      * @return the wrapped pointer
-     * @stable ICU 59
+     * @draft ICU 59
      */
     inline operator const char16_t *() const { return get(); }
 
@@ -246,7 +250,7 @@ const char16_t *ConstChar16Ptr::get() const { return u_.cp; }
  * Includes an aliasing barrier if available.
  * @param p pointer
  * @return p as const UChar *
- * @stable ICU 59
+ * @draft ICU 59
  */
 inline const UChar *toUCharPtr(const char16_t *p) {
 #ifdef U_ALIASING_BARRIER
@@ -260,7 +264,7 @@ inline const UChar *toUCharPtr(const char16_t *p) {
  * Includes an aliasing barrier if available.
  * @param p pointer
  * @return p as UChar *
- * @stable ICU 59
+ * @draft ICU 59
  */
 inline UChar *toUCharPtr(char16_t *p) {
 #ifdef U_ALIASING_BARRIER
@@ -274,7 +278,7 @@ inline UChar *toUCharPtr(char16_t *p) {
  * Includes an aliasing barrier if available.
  * @param p pointer
  * @return p as const OldUChar *
- * @stable ICU 59
+ * @draft ICU 59
  */
 inline const OldUChar *toOldUCharPtr(const char16_t *p) {
 #ifdef U_ALIASING_BARRIER
@@ -288,7 +292,7 @@ inline const OldUChar *toOldUCharPtr(const char16_t *p) {
  * Includes an aliasing barrier if available.
  * @param p pointer
  * @return p as OldUChar *
- * @stable ICU 59
+ * @draft ICU 59
  */
 inline OldUChar *toOldUCharPtr(char16_t *p) {
 #ifdef U_ALIASING_BARRIER

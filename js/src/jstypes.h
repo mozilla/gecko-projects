@@ -32,6 +32,33 @@
 // SpiderMonkey code.  However, Gecko doesn't do this!  See bug 909576.
 #include "js-config.h"
 
+/***********************************************************************
+** MACROS:      JS_EXTERN_API
+**              JS_EXPORT_API
+** DESCRIPTION:
+**      These are only for externally visible routines and globals.  For
+**      internal routines, just use "extern" for type checking and that
+**      will not export internal cross-file or forward-declared symbols.
+**      Define a macro for declaring procedures return types. We use this to
+**      deal with windoze specific type hackery for DLL definitions. Use
+**      JS_EXTERN_API when the prototype for the method is declared. Use
+**      JS_EXPORT_API for the implementation of the method.
+**
+** Example:
+**   in dowhim.h
+**     JS_EXTERN_API( void ) DoWhatIMean( void );
+**   in dowhim.c
+**     JS_EXPORT_API( void ) DoWhatIMean( void ) { return; }
+**
+**
+***********************************************************************/
+
+#define JS_EXTERN_API(type)  extern MOZ_EXPORT type
+#define JS_EXPORT_API(type)  MOZ_EXPORT type
+#define JS_EXPORT_DATA(type) MOZ_EXPORT type
+#define JS_IMPORT_API(type)  MOZ_IMPORT_API type
+#define JS_IMPORT_DATA(type) MOZ_IMPORT_DATA type
+
 /*
  * The linkage of JS API functions differs depending on whether the file is
  * used within the JS library or not. Any source file within the JS
@@ -82,7 +109,14 @@
 **      behave syntactically more like functions when called.
 ***********************************************************************/
 #define JS_BEGIN_MACRO  do {
-#define JS_END_MACRO   } while (0)
+
+#if defined(_MSC_VER)
+# define JS_END_MACRO                                                         \
+    } __pragma(warning(push)) __pragma(warning(disable:4127))                 \
+    while (0) __pragma(warning(pop))
+#else
+# define JS_END_MACRO   } while (0)
+#endif
 
 /***********************************************************************
 ** MACROS:      JS_BIT
@@ -101,6 +135,9 @@
 ***********************************************************************/
 #define JS_HOWMANY(x,y) (((x)+(y)-1)/(y))
 #define JS_ROUNDUP(x,y) (JS_HOWMANY(x,y)*(y))
+
+#define JS_BITS_PER_BYTE 8
+#define JS_BITS_PER_BYTE_LOG2 3
 
 #if defined(JS_64BIT)
 # define JS_BITS_PER_WORD 64
@@ -126,5 +163,13 @@
 
 #define JS_FUNC_TO_DATA_PTR(type, fun)  (mozilla::BitwiseCast<type>(fun))
 #define JS_DATA_TO_FUNC_PTR(type, ptr)  (mozilla::BitwiseCast<type>(ptr))
+
+#ifdef __GNUC__
+# define JS_EXTENSION __extension__
+# define JS_EXTENSION_(s) __extension__ ({ s; })
+#else
+# define JS_EXTENSION
+# define JS_EXTENSION_(s) s
+#endif
 
 #endif /* jstypes_h */

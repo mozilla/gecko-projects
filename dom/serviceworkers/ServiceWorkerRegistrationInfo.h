@@ -50,8 +50,6 @@ class ServiceWorkerRegistrationInfo final
   // pendingUninstall and when all controlling documents go away, removed.
   bool mPendingUninstall;
 
-  bool mCorrupt;
-
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSISERVICEWORKERREGISTRATIONINFO
@@ -115,12 +113,6 @@ public:
 
   void
   Clear();
-
-  void
-  ClearAsCorrupt();
-
-  bool
-  IsCorrupt() const;
 
   void
   TryToActivateAsync();

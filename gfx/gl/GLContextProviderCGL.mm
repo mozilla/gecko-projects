@@ -282,7 +282,8 @@ GLContextProviderCGL::CreateForWindow(nsIWidget* aWidget,
         return nullptr;
     }
 
-    GLint opaque = gfxPrefs::CompositorGLContextOpaque();
+    // make the context transparent
+    GLint opaque = 0;
     [context setValues:&opaque forParameter:NSOpenGLCPSurfaceOpacity];
 
     RefPtr<GLContextCGL> glContext = new GLContextCGL(CreateContextFlags::NONE,

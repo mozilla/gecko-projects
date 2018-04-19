@@ -5,11 +5,11 @@ package org.mozilla.gecko.db;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.RobolectricTestRunner;
+import org.mozilla.gecko.background.testhelpers.TestRunner;
 
 import static org.junit.Assert.*;
 
-@RunWith(RobolectricTestRunner.class)
+@RunWith(TestRunner.class)
 public class BrowserContractTest {
     @Test
     /**

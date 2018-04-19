@@ -11,12 +11,12 @@
 
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsINode.h"
+#include "nsIDOMNode.h"
+#include "nsIDOMRange.h"
 #include "nsIContentIterator.h"
 #include "mozilla/intl/WordBreaker.h"
 
 class nsIContent;
-class nsRange;
 
 #define NS_FIND_CONTRACTID "@mozilla.org/embedcomp/rangefind;1"
 
@@ -47,26 +47,26 @@ protected:
   RefPtr<mozilla::intl::WordBreaker> mWordBreaker;
 
   int32_t mIterOffset;
-  nsCOMPtr<nsINode> mIterNode;
+  nsCOMPtr<nsIDOMNode> mIterNode;
 
   // Last block parent, so that we will notice crossing block boundaries:
-  nsCOMPtr<nsINode> mLastBlockParent;
-  nsresult GetBlockParent(nsINode* aNode, nsINode** aParent);
+  nsCOMPtr<nsIDOMNode> mLastBlockParent;
+  nsresult GetBlockParent(nsIDOMNode* aNode, nsIDOMNode** aParent);
 
   // Utility routines:
   bool IsBlockNode(nsIContent* aNode);
   bool SkipNode(nsIContent* aNode);
-  bool IsVisibleNode(nsINode* aNode);
+  bool IsVisibleNode(nsIDOMNode* aNode);
 
   // Move in the right direction for our search:
-  nsresult NextNode(nsRange* aSearchRange,
-                    nsRange* aStartPoint, nsRange* aEndPoint,
+  nsresult NextNode(nsIDOMRange* aSearchRange,
+                    nsIDOMRange* aStartPoint, nsIDOMRange* aEndPoint,
                     bool aContinueOk);
 
   // Get the first character from the next node (last if mFindBackward).
-  char16_t PeekNextChar(nsRange* aSearchRange,
-                        nsRange* aStartPoint,
-                        nsRange* aEndPoint);
+  char16_t PeekNextChar(nsIDOMRange* aSearchRange,
+                        nsIDOMRange* aStartPoint,
+                        nsIDOMRange* aEndPoint);
 
   // Reset variables before returning -- don't hold any references.
   void ResetAll();

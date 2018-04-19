@@ -27,19 +27,20 @@ interface nsPIPlacesDatabase : nsISupports
   readonly attribute mozIStorageConnection DBConnection;
 
   /**
-   * Asynchronously executes the statement created from a query.
+   * Asynchronously executes the statement created from queries.
    *
-   * @see nsINavHistoryService::executeQuery
+   * @see nsINavHistoryService::executeQueries
    * @note THIS IS A TEMPORARY API.  Don't rely on it, since it will be replaced
    *       in future versions by a real async querying API.
    * @note Results obtained from this method differ from results obtained from
-   *       executeQuery, because there is additional filtering and sorting
-   *       done by the latter.  Thus you should use executeQuery, unless you
+   *       executeQueries, because there is additional filtering and sorting
+   *       done by the latter.  Thus you should use executeQueries, unless you
    *       are absolutely sure that the returned results are fine for
    *       your use-case.
    */
-  mozIStoragePendingStatement asyncExecuteLegacyQuery(
-    in nsINavHistoryQuery aQuery,
+  mozIStoragePendingStatement asyncExecuteLegacyQueries(
+    [array, size_is(aQueryCount)] in nsINavHistoryQuery aQueries,
+    in unsigned long aQueryCount,
     in nsINavHistoryQueryOptions aOptions,
     in mozIStorageStatementCallback aCallback);
 

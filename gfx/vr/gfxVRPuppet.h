@@ -98,6 +98,7 @@ private:
   uint64_t mButtonPressState;
   uint64_t mButtonTouchState;
   float mAxisMoveState[3];
+  float mAxisMove[3];
   dom::GamepadPoseState mPoseState;
 };
 

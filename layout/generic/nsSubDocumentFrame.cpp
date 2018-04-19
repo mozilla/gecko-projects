@@ -59,8 +59,8 @@ GetDocumentFromView(nsView* aView)
   return ps ? ps->GetDocument() : nullptr;
 }
 
-nsSubDocumentFrame::nsSubDocumentFrame(ComputedStyle* aStyle)
-  : nsAtomicContainerFrame(aStyle, kClassID)
+nsSubDocumentFrame::nsSubDocumentFrame(nsStyleContext* aContext)
+  : nsAtomicContainerFrame(aContext, kClassID)
   , mOuterView(nullptr)
   , mInnerView(nullptr)
   , mIsInline(false)
@@ -248,7 +248,8 @@ nsSubDocumentFrame::GetSubdocumentPresShellForPainting(uint32_t aFlags)
       // If we don't have a frame we use this roundabout way to get the pres shell.
       if (!mFrameLoader)
         return nullptr;
-      nsIDocShell* docShell = mFrameLoader->GetDocShell(IgnoreErrors());
+      nsCOMPtr<nsIDocShell> docShell;
+      mFrameLoader->GetDocShell(getter_AddRefs(docShell));
       if (!docShell)
         return nullptr;
       presShell = docShell->GetPresShell();
@@ -447,6 +448,18 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   }
 
   if (aBuilder->IsRetainingDisplayList()) {
+    // The value of needsOwnLayer can change between builds without
+    // an invalidation recorded for this frame (like if the root
+    // scrollframe becomes active). If this happens,
+    // then we need to notify the builder so that merging can
+    // happen correctly.
+    if (!mPreviouslyNeededLayer ||
+        mPreviouslyNeededLayer.value() != needsOwnLayer) {
+      dirty = visible;
+      aBuilder->MarkCurrentFrameModifiedDuringBuilding();
+    }
+    mPreviouslyNeededLayer = Some(needsOwnLayer);
+
     // Caret frame changed, rebuild the entire subdoc.
     // We could just invalidate the old and new frame
     // areas and save some work here. RetainedDisplayListBuilder
@@ -454,14 +467,7 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     // subdocs in advance.
     if (mPreviousCaret != aBuilder->GetCaretFrame()) {
       dirty = visible;
-      aBuilder->RebuildAllItemsInCurrentSubtree();
-      // Mark the old caret frame as invalid so that we remove the
-      // old nsDisplayCaret. We don't mark the current frame as invalid
-      // since we want the nsDisplaySubdocument to retain it's place
-      // in the retained display list.
-      if (mPreviousCaret) {
-        aBuilder->MarkFrameModifiedDuringBuilding(mPreviousCaret);
-      }
+      aBuilder->MarkCurrentFrameModifiedDuringBuilding();
     }
     mPreviousCaret = aBuilder->GetCaretFrame();
   }
@@ -923,9 +929,9 @@ nsSubDocumentFrame::AttributeChanged(int32_t aNameSpaceID,
 }
 
 nsIFrame*
-NS_NewSubDocumentFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
+NS_NewSubDocumentFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
-  return new (aPresShell) nsSubDocumentFrame(aStyle);
+  return new (aPresShell) nsSubDocumentFrame(aContext);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSubDocumentFrame)
@@ -1030,7 +1036,7 @@ CSSIntSize
 nsSubDocumentFrame::GetMarginAttributes()
 {
   CSSIntSize result(-1, -1);
-  nsGenericHTMLElement *content = nsGenericHTMLElement::FromNode(mContent);
+  nsGenericHTMLElement *content = nsGenericHTMLElement::FromContent(mContent);
   if (content) {
     const nsAttrValue* attr = content->GetParsedAttr(nsGkAtoms::marginwidth);
     if (attr && attr->Type() == nsAttrValue::eInteger)
@@ -1060,14 +1066,13 @@ nsSubDocumentFrame::FrameLoader()
 
 // XXX this should be called ObtainDocShell or something like that,
 // to indicate that it could have side effects
-nsIDocShell*
-nsSubDocumentFrame::GetDocShell()
+nsresult
+nsSubDocumentFrame::GetDocShell(nsIDocShell **aDocShell)
 {
-  // How can FrameLoader() return null???
-  if (NS_WARN_IF(!FrameLoader())) {
-    return nullptr;
-  }
-  return mFrameLoader->GetDocShell(IgnoreErrors());
+  *aDocShell = nullptr;
+
+  NS_ENSURE_STATE(FrameLoader());
+  return mFrameLoader->GetDocShell(aDocShell);
 }
 
 static void
@@ -1292,7 +1297,8 @@ nsSubDocumentFrame::ObtainIntrinsicSizeFrame()
     // Try to get an nsIFrame for our sub-document's document element
     nsIFrame* subDocRoot = nullptr;
 
-    nsIDocShell* docShell = GetDocShell();
+    nsCOMPtr<nsIDocShell> docShell;
+    GetDocShell(getter_AddRefs(docShell));
     if (docShell) {
       nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
       if (presShell) {

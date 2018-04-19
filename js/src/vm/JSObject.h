@@ -34,6 +34,10 @@ class RelocationOverlay;
 
 /******************************************************************************/
 
+extern const Class IntlClass;
+extern const Class JSONClass;
+extern const Class MathClass;
+
 class GlobalObject;
 class NewObjectCache;
 
@@ -184,6 +188,7 @@ class JSObject : public js::gc::Cell
     }
 
     inline bool isBoundFunction() const;
+    inline bool hasSpecialEquality() const;
 
     // A "qualified" varobj is the object on which "qualified" variable
     // declarations (i.e., those defined with "var") are kept.
@@ -642,6 +647,22 @@ JSObject::writeBarrierPost(void* cellp, JSObject* prev, JSObject* next)
         buffer->unputCell(static_cast<js::gc::Cell**>(cellp));
 }
 
+class JSValueArray {
+  public:
+    const js::Value* array;
+    size_t length;
+
+    JSValueArray(const js::Value* v, size_t c) : array(v), length(c) {}
+};
+
+class ValueArray {
+  public:
+    js::Value* array;
+    size_t length;
+
+    ValueArray(js::Value* v, size_t c) : array(v), length(c) {}
+};
+
 namespace js {
 
 /*** Standard internal methods ********************************************************************
@@ -1025,7 +1046,7 @@ GetThisValueOfWith(JSObject* env);
 
 /* * */
 
-using ClassInitializerOp = JSObject* (*)(JSContext* cx, Handle<GlobalObject*> global);
+typedef JSObject* (*ClassInitializerOp)(JSContext* cx, JS::HandleObject obj);
 
 } /* namespace js */
 
@@ -1232,7 +1253,7 @@ ToObjectFromStack(JSContext* cx, HandleValue vp)
 }
 
 template<XDRMode mode>
-XDRResult
+bool
 XDRObjectLiteral(XDRState<mode>* xdr, MutableHandleObject obj);
 
 /*

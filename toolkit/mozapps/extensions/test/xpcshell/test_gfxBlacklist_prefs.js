@@ -2,13 +2,17 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-// Test whether the blacklist successfully adds and removes the prefs that store
+// Test whether the blacklist succesfully adds and removes the prefs that store
 // its decisions when the remote blacklist is changed.
 // Uses test_gfxBlacklist.xml and test_gfxBlacklist2.xml
 
-var gTestserver = AddonTestUtils.createHttpServer({hosts: ["example.com"]});
+ChromeUtils.import("resource://testing-common/httpd.js");
+
+var gTestserver = new HttpServer();
+gTestserver.start(-1);
 gPort = gTestserver.identity.primaryPort;
-gTestserver.registerDirectory("/data/", do_get_file("data"));
+mapFile("/data/test_gfxBlacklist.xml", gTestserver);
+mapFile("/data/test_gfxBlacklist2.xml", gTestserver);
 
 function load_blocklist(file) {
   Services.prefs.setCharPref("extensions.blocklist.url", "http://localhost:" +
@@ -107,7 +111,7 @@ function run_test() {
 
     Assert.ok(!exists);
 
-    do_test_finished();
+    gTestserver.stop(do_test_finished);
   }
 
   Services.obs.addObserver(blacklistAdded, "blocklist-data-gfxItems");

@@ -25,10 +25,7 @@ info: |
     properties.
 ---*/
 
-var ThrowTypeError = Object.getOwnPropertyDescriptor(function() {
-  "use strict";
-  return arguments;
-}(), "callee").get;
+var ThrowTypeError = Object.getOwnPropertyDescriptor(function(){ "use strict"; return arguments; }(), "callee").get;
 
 assert.sameValue(Object.prototype.hasOwnProperty.call(ThrowTypeError, "arguments"), false);
 

@@ -2,6 +2,7 @@
 // This code is governed by the BSD license found in the LICENSE file.
 /*---
 esid: sec-%typedarray%.prototype.copywithin
+es6id: 22.2.3.5
 description: >
   start argument is coerced to an integer value.
 info: |
@@ -22,7 +23,6 @@ info: |
   5. Let relativeStart be ? ToInteger(start).
   ...
 includes: [compareArray.js, testTypedArray.js]
-features: [TypedArray]
 ---*/
 
 testWithTypedArrayConstructors(function(TA) {

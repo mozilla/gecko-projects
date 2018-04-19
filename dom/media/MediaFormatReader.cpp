@@ -17,14 +17,10 @@
 #include "mozilla/NotNull.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/SharedThreadPool.h"
-#include "mozilla/StaticPrefs.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Unused.h"
 #include "nsContentUtils.h"
 #include "nsPrintfCString.h"
-#ifdef MOZ_WIDGET_ANDROID
-#include "mozilla/jni/Utils.h"
-#endif
 
 #include <algorithm>
 #include <map>
@@ -1309,10 +1305,8 @@ MediaFormatReader::MediaFormatReader(MediaFormatReaderInit& aInit,
   : mTaskQueue(new TaskQueue(GetMediaThreadPool(MediaThreadType::PLAYBACK),
                              "MediaFormatReader::mTaskQueue",
                              /* aSupportsTailDispatch = */ true))
-  , mAudio(this, MediaData::AUDIO_DATA,
-           StaticPrefs::MediaAudioMaxDecodeError())
-  , mVideo(this, MediaData::VIDEO_DATA,
-           StaticPrefs::MediaVideoMaxDecodeError())
+  , mAudio(this, MediaData::AUDIO_DATA, MediaPrefs::MaxAudioDecodeError())
+  , mVideo(this, MediaData::VIDEO_DATA, MediaPrefs::MaxVideoDecodeError())
   , mDemuxer(new DemuxerProxy(aDemuxer))
   , mDemuxerInitDone(false)
   , mPendingNotifyDataArrived(false)
@@ -1588,7 +1582,7 @@ MediaFormatReader::OnDemuxerInitDone(const MediaResult& aResult)
   MOZ_ASSERT(OnTaskQueue());
   mDemuxerInitRequest.Complete();
 
-  if (NS_FAILED(aResult) && StaticPrefs::MediaPlaybackWarningsAsErrors()) {
+  if (NS_FAILED(aResult) && MediaPrefs::MediaWarningsAsErrors()) {
     mMetadataPromise.Reject(aResult, __func__);
     return;
   }
@@ -1788,7 +1782,7 @@ MediaFormatReader::ShouldSkip(TimeUnit aTimeThreshold)
 {
   MOZ_ASSERT(HasVideo());
 
-  if (!StaticPrefs::MediaDecoderSkipToNextKeyFrameEnabled()) {
+  if (!MediaPrefs::MFRSkipToNextKeyFrameEnabled()) {
     return false;
   }
 
@@ -2409,7 +2403,7 @@ MediaFormatReader::HandleDemuxedSamples(
   if (info && decoder.mLastStreamSourceID != info->GetID()) {
     nsTArray<RefPtr<MediaRawData>> samples;
     if (decoder.mDecoder) {
-      bool recyclable = StaticPrefs::MediaDecoderRecycleEnabled() &&
+      bool recyclable = MediaPrefs::MediaDecoderCheckRecycling() &&
                         decoder.mDecoder->SupportDecoderRecycling();
       if (!recyclable && decoder.mTimeThreshold.isNothing() &&
           (decoder.mNextStreamSourceID.isNothing() ||

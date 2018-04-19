@@ -36,7 +36,7 @@ HTMLPictureElement::RemoveChildAt_Deprecated(uint32_t aIndex, bool aNotify)
   nsCOMPtr<nsIContent> child = GetChildAt_Deprecated(aIndex);
 
   if (child && child->IsHTMLElement(nsGkAtoms::img)) {
-    HTMLImageElement* img = HTMLImageElement::FromNode(child);
+    HTMLImageElement* img = HTMLImageElement::FromContent(child);
     if (img) {
       img->PictureSourceRemoved(child->AsContent());
     }
@@ -45,7 +45,7 @@ HTMLPictureElement::RemoveChildAt_Deprecated(uint32_t aIndex, bool aNotify)
     nsCOMPtr<nsIContent> nextSibling = child->GetNextSibling();
     if (nextSibling && nextSibling->GetParentNode() == this) {
       do {
-        HTMLImageElement* img = HTMLImageElement::FromNode(nextSibling);
+        HTMLImageElement* img = HTMLImageElement::FromContent(nextSibling);
         if (img) {
           img->PictureSourceRemoved(child->AsContent());
         }
@@ -60,7 +60,7 @@ void
 HTMLPictureElement::RemoveChildNode(nsIContent* aKid, bool aNotify)
 {
   if (aKid && aKid->IsHTMLElement(nsGkAtoms::img)) {
-    HTMLImageElement* img = HTMLImageElement::FromNode(aKid);
+    HTMLImageElement* img = HTMLImageElement::FromContent(aKid);
     if (img) {
       img->PictureSourceRemoved(aKid->AsContent());
     }
@@ -69,7 +69,7 @@ HTMLPictureElement::RemoveChildNode(nsIContent* aKid, bool aNotify)
     nsCOMPtr<nsIContent> nextSibling = aKid->GetNextSibling();
     if (nextSibling && nextSibling->GetParentNode() == this) {
       do {
-        HTMLImageElement* img = HTMLImageElement::FromNode(nextSibling);
+        HTMLImageElement* img = HTMLImageElement::FromContent(nextSibling);
         if (img) {
           img->PictureSourceRemoved(aKid->AsContent());
         }
@@ -91,7 +91,7 @@ HTMLPictureElement::InsertChildBefore(nsIContent* aKid, nsIContent* aBeforeThis,
   NS_ENSURE_TRUE(aKid, rv);
 
   if (aKid->IsHTMLElement(nsGkAtoms::img)) {
-    HTMLImageElement* img = HTMLImageElement::FromNode(aKid);
+    HTMLImageElement* img = HTMLImageElement::FromContent(aKid);
     if (img) {
       img->PictureSourceAdded(aKid->AsContent());
     }
@@ -100,7 +100,7 @@ HTMLPictureElement::InsertChildBefore(nsIContent* aKid, nsIContent* aBeforeThis,
     nsCOMPtr<nsIContent> nextSibling = aKid->GetNextSibling();
     if (nextSibling && nextSibling->GetParentNode() == this) {
       do {
-        HTMLImageElement* img = HTMLImageElement::FromNode(nextSibling);
+        HTMLImageElement* img = HTMLImageElement::FromContent(nextSibling);
         if (img) {
           img->PictureSourceAdded(aKid->AsContent());
         }
@@ -120,7 +120,7 @@ HTMLPictureElement::InsertChildAt_Deprecated(nsIContent* aKid, uint32_t aIndex, 
   NS_ENSURE_TRUE(aKid, rv);
 
   if (aKid->IsHTMLElement(nsGkAtoms::img)) {
-    HTMLImageElement* img = HTMLImageElement::FromNode(aKid);
+    HTMLImageElement* img = HTMLImageElement::FromContent(aKid);
     if (img) {
       img->PictureSourceAdded(aKid->AsContent());
     }
@@ -129,7 +129,7 @@ HTMLPictureElement::InsertChildAt_Deprecated(nsIContent* aKid, uint32_t aIndex, 
     nsCOMPtr<nsIContent> nextSibling = aKid->GetNextSibling();
     if (nextSibling && nextSibling->GetParentNode() == this) {
       do {
-        HTMLImageElement* img = HTMLImageElement::FromNode(nextSibling);
+        HTMLImageElement* img = HTMLImageElement::FromContent(nextSibling);
         if (img) {
           img->PictureSourceAdded(aKid->AsContent());
         }

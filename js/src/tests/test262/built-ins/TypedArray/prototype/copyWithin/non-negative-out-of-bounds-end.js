@@ -2,6 +2,7 @@
 // This code is governed by the BSD license found in the LICENSE file.
 /*---
 esid: sec-%typedarray%.prototype.copywithin
+es6id: 22.2.3.5
 description: >
   Max value of end position is the this.length.
 info: |
@@ -16,7 +17,6 @@ info: |
 
   ...
 includes: [compareArray.js, testTypedArray.js]
-features: [TypedArray]
 ---*/
 
 testWithTypedArrayConstructors(function(TA) {

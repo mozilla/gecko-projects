@@ -21,7 +21,6 @@
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/dom/WorkerRunnable.h"
-#include "mozilla/dom/WorkerRef.h"
 
 #include "jsfriendapi.h"
 #include "js/StructuredClone.h"
@@ -498,7 +497,7 @@ Promise::ReportRejectedPromise(JSContext* aCx, JS::HandleObject aPromise)
   RefPtr<xpc::ErrorReport> xpcReport = new xpc::ErrorReport();
   bool isMainThread = MOZ_LIKELY(NS_IsMainThread());
   bool isChrome = isMainThread ? nsContentUtils::IsSystemPrincipal(nsContentUtils::ObjectPrincipal(aPromise))
-                               : IsCurrentThreadRunningChromeWorker();
+                               : GetCurrentThreadWorkerPrivate()->IsChromeWorker();
   nsGlobalWindowInner* win = isMainThread
     ? xpc::WindowGlobalOrNull(aPromise)
     : nullptr;
@@ -576,6 +575,30 @@ private:
   PromiseWorkerProxy::RunCallbackFunc mFunc;
 };
 
+class PromiseWorkerHolder final : public WorkerHolder
+{
+  // RawPointer because this proxy keeps alive the holder.
+  PromiseWorkerProxy* mProxy;
+
+public:
+  explicit PromiseWorkerHolder(PromiseWorkerProxy* aProxy)
+    : WorkerHolder("PromiseWorkerHolder")
+    , mProxy(aProxy)
+  {
+    MOZ_ASSERT(aProxy);
+  }
+
+  bool
+  Notify(WorkerStatus aStatus) override
+  {
+    if (aStatus >= Canceling) {
+      mProxy->CleanUp();
+    }
+
+    return true;
+  }
+};
+
 /* static */
 already_AddRefed<PromiseWorkerProxy>
 PromiseWorkerProxy::Create(WorkerPrivate* aWorkerPrivate,
@@ -588,36 +611,27 @@ PromiseWorkerProxy::Create(WorkerPrivate* aWorkerPrivate,
   MOZ_ASSERT_IF(aCb, !!aCb->Write && !!aCb->Read);
 
   RefPtr<PromiseWorkerProxy> proxy =
-    new PromiseWorkerProxy(aWorkerPromise, aCb);
+    new PromiseWorkerProxy(aWorkerPrivate, aWorkerPromise, aCb);
 
   // We do this to make sure the worker thread won't shut down before the
   // promise is resolved/rejected on the worker thread.
-  RefPtr<StrongWorkerRef> workerRef =
-    StrongWorkerRef::Create(aWorkerPrivate, "PromiseWorkerProxy", [proxy]() {
-      proxy->CleanUp();
-    });
-
-  if (NS_WARN_IF(!workerRef)) {
+  if (!proxy->AddRefObject()) {
     // Probably the worker is terminating. We cannot complete the operation
     // and we have to release all the resources.
     proxy->CleanProperties();
     return nullptr;
   }
 
-  proxy->mWorkerRef = new ThreadSafeWorkerRef(workerRef);
-
-  // Maintain a reference so that we have a valid object to clean up when
-  // removing the feature.
-  proxy.get()->AddRef();
-
   return proxy.forget();
 }
 
 NS_IMPL_ISUPPORTS0(PromiseWorkerProxy)
 
-PromiseWorkerProxy::PromiseWorkerProxy(Promise* aWorkerPromise,
+PromiseWorkerProxy::PromiseWorkerProxy(WorkerPrivate* aWorkerPrivate,
+                                       Promise* aWorkerPromise,
                                        const PromiseWorkerProxyStructuredCloneCallbacks* aCallbacks)
-  : mWorkerPromise(aWorkerPromise)
+  : mWorkerPrivate(aWorkerPrivate)
+  , mWorkerPromise(aWorkerPromise)
   , mCleanedUp(false)
   , mCallbacks(aCallbacks)
   , mCleanUpLock("cleanUpLock")
@@ -627,23 +641,46 @@ PromiseWorkerProxy::PromiseWorkerProxy(Promise* aWorkerPromise,
 PromiseWorkerProxy::~PromiseWorkerProxy()
 {
   MOZ_ASSERT(mCleanedUp);
+  MOZ_ASSERT(!mWorkerHolder);
   MOZ_ASSERT(!mWorkerPromise);
-  MOZ_ASSERT(!mWorkerRef);
+  MOZ_ASSERT(!mWorkerPrivate);
 }
 
 void
 PromiseWorkerProxy::CleanProperties()
 {
-  MOZ_ASSERT(IsCurrentThreadRunningWorker());
-
+#ifdef DEBUG
+  WorkerPrivate* worker = GetCurrentThreadWorkerPrivate();
+  MOZ_ASSERT(worker);
+  worker->AssertIsOnWorkerThread();
+#endif
   // Ok to do this unprotected from Create().
   // CleanUp() holds the lock before calling this.
   mCleanedUp = true;
   mWorkerPromise = nullptr;
-  mWorkerRef = nullptr;
+  mWorkerPrivate = nullptr;
 
   // Clear the StructuredCloneHolderBase class.
   Clear();
+}
+
+bool
+PromiseWorkerProxy::AddRefObject()
+{
+  MOZ_ASSERT(mWorkerPrivate);
+  mWorkerPrivate->AssertIsOnWorkerThread();
+
+  MOZ_ASSERT(!mWorkerHolder);
+  mWorkerHolder.reset(new PromiseWorkerHolder(this));
+  if (NS_WARN_IF(!mWorkerHolder->HoldWorker(mWorkerPrivate, Canceling))) {
+    mWorkerHolder = nullptr;
+    return false;
+  }
+
+  // Maintain a reference so that we have a valid object to clean up when
+  // removing the feature.
+  AddRef();
+  return true;
 }
 
 WorkerPrivate*
@@ -657,15 +694,19 @@ PromiseWorkerProxy::GetWorkerPrivate() const
   // Safe to check this without a lock since we assert lock ownership on the
   // main thread above.
   MOZ_ASSERT(!mCleanedUp);
-  MOZ_ASSERT(mWorkerRef);
+  MOZ_ASSERT(mWorkerHolder);
 
-  return mWorkerRef->Private();
+  return mWorkerPrivate;
 }
 
 Promise*
 PromiseWorkerProxy::WorkerPromise() const
 {
-  MOZ_ASSERT(IsCurrentThreadRunningWorker());
+#ifdef DEBUG
+  WorkerPrivate* worker = GetCurrentThreadWorkerPrivate();
+  MOZ_ASSERT(worker);
+  worker->AssertIsOnWorkerThread();
+#endif
   MOZ_ASSERT(mWorkerPromise);
   return mWorkerPromise;
 }
@@ -716,17 +757,21 @@ PromiseWorkerProxy::CleanUp()
   {
     MutexAutoLock lock(Lock());
 
+    // |mWorkerPrivate| is not safe to use anymore if we have already
+    // cleaned up and RemoveWorkerHolder(), so we need to check |mCleanedUp|
+    // first.
     if (CleanedUp()) {
       return;
     }
 
-    MOZ_ASSERT(mWorkerRef);
-    mWorkerRef->Private()->AssertIsOnWorkerThread();
+    MOZ_ASSERT(mWorkerPrivate);
+    mWorkerPrivate->AssertIsOnWorkerThread();
 
     // Release the Promise and remove the PromiseWorkerProxy from the holders of
     // the worker thread since the Promise has been resolved/rejected or the
     // worker thread has been cancelled.
-    mWorkerRef = nullptr;
+    MOZ_ASSERT(mWorkerHolder);
+    mWorkerHolder = nullptr;
 
     CleanProperties();
   }

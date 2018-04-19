@@ -76,6 +76,8 @@ fn fold_derive_input(&mut self, i: DeriveInput) -> DeriveInput { fold_derive_inp
 # [ cfg ( any ( feature = "full" , feature = "derive" ) ) ]
 fn fold_expr(&mut self, i: Expr) -> Expr { fold_expr(self, i) }
 # [ cfg ( feature = "full" ) ] # [ cfg ( any ( feature = "full" , feature = "derive" ) ) ]
+fn fold_expr_addr_of(&mut self, i: ExprAddrOf) -> ExprAddrOf { fold_expr_addr_of(self, i) }
+# [ cfg ( feature = "full" ) ] # [ cfg ( any ( feature = "full" , feature = "derive" ) ) ]
 fn fold_expr_array(&mut self, i: ExprArray) -> ExprArray { fold_expr_array(self, i) }
 # [ cfg ( feature = "full" ) ] # [ cfg ( any ( feature = "full" , feature = "derive" ) ) ]
 fn fold_expr_assign(&mut self, i: ExprAssign) -> ExprAssign { fold_expr_assign(self, i) }
@@ -129,8 +131,6 @@ fn fold_expr_paren(&mut self, i: ExprParen) -> ExprParen { fold_expr_paren(self,
 fn fold_expr_path(&mut self, i: ExprPath) -> ExprPath { fold_expr_path(self, i) }
 # [ cfg ( feature = "full" ) ] # [ cfg ( any ( feature = "full" , feature = "derive" ) ) ]
 fn fold_expr_range(&mut self, i: ExprRange) -> ExprRange { fold_expr_range(self, i) }
-# [ cfg ( feature = "full" ) ] # [ cfg ( any ( feature = "full" , feature = "derive" ) ) ]
-fn fold_expr_reference(&mut self, i: ExprReference) -> ExprReference { fold_expr_reference(self, i) }
 # [ cfg ( feature = "full" ) ] # [ cfg ( any ( feature = "full" , feature = "derive" ) ) ]
 fn fold_expr_repeat(&mut self, i: ExprRepeat) -> ExprRepeat { fold_expr_repeat(self, i) }
 # [ cfg ( feature = "full" ) ] # [ cfg ( any ( feature = "full" , feature = "derive" ) ) ]
@@ -394,13 +394,9 @@ fn fold_un_op(&mut self, i: UnOp) -> UnOp { fold_un_op(self, i) }
 # [ cfg ( feature = "full" ) ]
 fn fold_use_glob(&mut self, i: UseGlob) -> UseGlob { fold_use_glob(self, i) }
 # [ cfg ( feature = "full" ) ]
-fn fold_use_group(&mut self, i: UseGroup) -> UseGroup { fold_use_group(self, i) }
-# [ cfg ( feature = "full" ) ]
-fn fold_use_name(&mut self, i: UseName) -> UseName { fold_use_name(self, i) }
+fn fold_use_list(&mut self, i: UseList) -> UseList { fold_use_list(self, i) }
 # [ cfg ( feature = "full" ) ]
 fn fold_use_path(&mut self, i: UsePath) -> UsePath { fold_use_path(self, i) }
-# [ cfg ( feature = "full" ) ]
-fn fold_use_rename(&mut self, i: UseRename) -> UseRename { fold_use_rename(self, i) }
 # [ cfg ( feature = "full" ) ]
 fn fold_use_tree(&mut self, i: UseTree) -> UseTree { fold_use_tree(self, i) }
 # [ cfg ( any ( feature = "full" , feature = "derive" ) ) ]
@@ -423,8 +419,7 @@ fn fold_where_predicate(&mut self, i: WherePredicate) -> WherePredicate { fold_w
 macro_rules! fold_span_only {
     ($f:ident : $t:ident) => {
         pub fn $f<V: Fold + ?Sized>(_visitor: &mut V, mut _i: $t) -> $t {
-            let span = _visitor.fold_span(_i.span());
-            _i.set_span(span);
+            _i.span = _visitor.fold_span(_i.span);
             _i
         }
     }
@@ -490,13 +485,12 @@ pub fn fold_arg_self_ref<V: Fold + ?Sized>(_visitor: &mut V, _i: ArgSelfRef) -> 
 pub fn fold_arm<V: Fold + ?Sized>(_visitor: &mut V, _i: Arm) -> Arm {
     Arm {
         attrs: FoldHelper::lift(_i . attrs, |it| { _visitor.fold_attribute(it) }),
-        leading_vert: (_i . leading_vert).map(|it| { Token ! [ | ](tokens_helper(_visitor, &(it).0)) }),
         pats: FoldHelper::lift(_i . pats, |it| { _visitor.fold_pat(it) }),
         guard: (_i . guard).map(|it| { (
             Token ! [ if ](tokens_helper(_visitor, &(( it ) . 0).0)),
             Box::new(_visitor.fold_expr(* ( it ) . 1)),
         ) }),
-        fat_arrow_token: Token ! [ => ](tokens_helper(_visitor, &(_i . fat_arrow_token).0)),
+        rocket_token: Token ! [ => ](tokens_helper(_visitor, &(_i . rocket_token).0)),
         body: Box::new(_visitor.fold_expr(* _i . body)),
         comma: (_i . comma).map(|it| { Token ! [ , ](tokens_helper(_visitor, &(it).0)) }),
     }
@@ -920,9 +914,9 @@ pub fn fold_expr<V: Fold + ?Sized>(_visitor: &mut V, _i: Expr) -> Expr {
                 _visitor.fold_expr_path(_binding_0),
             )
         }
-        Expr::Reference(_binding_0, ) => {
-            Expr::Reference (
-                full!(_visitor.fold_expr_reference(_binding_0)),
+        Expr::AddrOf(_binding_0, ) => {
+            Expr::AddrOf (
+                full!(_visitor.fold_expr_addr_of(_binding_0)),
             )
         }
         Expr::Break(_binding_0, ) => {
@@ -985,6 +979,15 @@ pub fn fold_expr<V: Fold + ?Sized>(_visitor: &mut V, _i: Expr) -> Expr {
                 _visitor.fold_expr_verbatim(_binding_0),
             )
         }
+    }
+}
+# [ cfg ( feature = "full" ) ] # [ cfg ( any ( feature = "full" , feature = "derive" ) ) ]
+pub fn fold_expr_addr_of<V: Fold + ?Sized>(_visitor: &mut V, _i: ExprAddrOf) -> ExprAddrOf {
+    ExprAddrOf {
+        attrs: FoldHelper::lift(_i . attrs, |it| { _visitor.fold_attribute(it) }),
+        and_token: Token ! [ & ](tokens_helper(_visitor, &(_i . and_token).0)),
+        mutability: (_i . mutability).map(|it| { Token ! [ mut ](tokens_helper(_visitor, &(it).0)) }),
+        expr: Box::new(_visitor.fold_expr(* _i . expr)),
     }
 }
 # [ cfg ( feature = "full" ) ] # [ cfg ( any ( feature = "full" , feature = "derive" ) ) ]
@@ -1077,7 +1080,6 @@ pub fn fold_expr_catch<V: Fold + ?Sized>(_visitor: &mut V, _i: ExprCatch) -> Exp
 pub fn fold_expr_closure<V: Fold + ?Sized>(_visitor: &mut V, _i: ExprClosure) -> ExprClosure {
     ExprClosure {
         attrs: FoldHelper::lift(_i . attrs, |it| { _visitor.fold_attribute(it) }),
-        movability: (_i . movability).map(|it| { Token ! [ static ](tokens_helper(_visitor, &(it).0)) }),
         capture: (_i . capture).map(|it| { Token ! [ move ](tokens_helper(_visitor, &(it).0)) }),
         or1_token: Token ! [ | ](tokens_helper(_visitor, &(_i . or1_token).0)),
         inputs: FoldHelper::lift(_i . inputs, |it| { _visitor.fold_fn_arg(it) }),
@@ -1142,7 +1144,7 @@ pub fn fold_expr_if_let<V: Fold + ?Sized>(_visitor: &mut V, _i: ExprIfLet) -> Ex
         attrs: FoldHelper::lift(_i . attrs, |it| { _visitor.fold_attribute(it) }),
         if_token: Token ! [ if ](tokens_helper(_visitor, &(_i . if_token).0)),
         let_token: Token ! [ let ](tokens_helper(_visitor, &(_i . let_token).0)),
-        pats: FoldHelper::lift(_i . pats, |it| { _visitor.fold_pat(it) }),
+        pat: Box::new(_visitor.fold_pat(* _i . pat)),
         eq_token: Token ! [ = ](tokens_helper(_visitor, &(_i . eq_token).0)),
         expr: Box::new(_visitor.fold_expr(* _i . expr)),
         then_branch: _visitor.fold_block(_i . then_branch),
@@ -1241,15 +1243,6 @@ pub fn fold_expr_range<V: Fold + ?Sized>(_visitor: &mut V, _i: ExprRange) -> Exp
     }
 }
 # [ cfg ( feature = "full" ) ] # [ cfg ( any ( feature = "full" , feature = "derive" ) ) ]
-pub fn fold_expr_reference<V: Fold + ?Sized>(_visitor: &mut V, _i: ExprReference) -> ExprReference {
-    ExprReference {
-        attrs: FoldHelper::lift(_i . attrs, |it| { _visitor.fold_attribute(it) }),
-        and_token: Token ! [ & ](tokens_helper(_visitor, &(_i . and_token).0)),
-        mutability: (_i . mutability).map(|it| { Token ! [ mut ](tokens_helper(_visitor, &(it).0)) }),
-        expr: Box::new(_visitor.fold_expr(* _i . expr)),
-    }
-}
-# [ cfg ( feature = "full" ) ] # [ cfg ( any ( feature = "full" , feature = "derive" ) ) ]
 pub fn fold_expr_repeat<V: Fold + ?Sized>(_visitor: &mut V, _i: ExprRepeat) -> ExprRepeat {
     ExprRepeat {
         attrs: FoldHelper::lift(_i . attrs, |it| { _visitor.fold_attribute(it) }),
@@ -1342,7 +1335,7 @@ pub fn fold_expr_while_let<V: Fold + ?Sized>(_visitor: &mut V, _i: ExprWhileLet)
         label: (_i . label).map(|it| { _visitor.fold_label(it) }),
         while_token: Token ! [ while ](tokens_helper(_visitor, &(_i . while_token).0)),
         let_token: Token ! [ let ](tokens_helper(_visitor, &(_i . let_token).0)),
-        pats: FoldHelper::lift(_i . pats, |it| { _visitor.fold_pat(it) }),
+        pat: Box::new(_visitor.fold_pat(* _i . pat)),
         eq_token: Token ! [ = ](tokens_helper(_visitor, &(_i . eq_token).0)),
         expr: Box::new(_visitor.fold_expr(* _i . expr)),
         body: _visitor.fold_block(_i . body),
@@ -1962,6 +1955,7 @@ pub fn fold_item_use<V: Fold + ?Sized>(_visitor: &mut V, _i: ItemUse) -> ItemUse
         vis: _visitor.fold_visibility(_i . vis),
         use_token: Token ! [ use ](tokens_helper(_visitor, &(_i . use_token).0)),
         leading_colon: (_i . leading_colon).map(|it| { Token ! [ :: ](tokens_helper(_visitor, &(it).0)) }),
+        prefix: FoldHelper::lift(_i . prefix, |it| { _visitor.fold_ident(it) }),
         tree: _visitor.fold_use_tree(_i . tree),
         semi_token: Token ! [ ; ](tokens_helper(_visitor, &(_i . semi_token).0)),
     }
@@ -2044,6 +2038,7 @@ pub fn fold_lit_bool<V: Fold + ?Sized>(_visitor: &mut V, _i: LitBool) -> LitBool
 pub fn fold_lit_verbatim<V: Fold + ?Sized>(_visitor: &mut V, _i: LitVerbatim) -> LitVerbatim {
     LitVerbatim {
         token: _i . token,
+        span: _visitor.fold_span(_i . span),
     }
 }
 # [ cfg ( any ( feature = "full" , feature = "derive" ) ) ] # [ cfg ( feature = "full" ) ]
@@ -2051,7 +2046,7 @@ pub fn fold_local<V: Fold + ?Sized>(_visitor: &mut V, _i: Local) -> Local {
     Local {
         attrs: FoldHelper::lift(_i . attrs, |it| { _visitor.fold_attribute(it) }),
         let_token: Token ! [ let ](tokens_helper(_visitor, &(_i . let_token).0)),
-        pats: FoldHelper::lift(_i . pats, |it| { _visitor.fold_pat(it) }),
+        pat: Box::new(_visitor.fold_pat(* _i . pat)),
         ty: (_i . ty).map(|it| { (
             Token ! [ : ](tokens_helper(_visitor, &(( it ) . 0).0)),
             Box::new(_visitor.fold_type(* ( it ) . 1)),
@@ -2483,7 +2478,6 @@ pub fn fold_stmt<V: Fold + ?Sized>(_visitor: &mut V, _i: Stmt) -> Stmt {
 # [ cfg ( any ( feature = "full" , feature = "derive" ) ) ]
 pub fn fold_trait_bound<V: Fold + ?Sized>(_visitor: &mut V, _i: TraitBound) -> TraitBound {
     TraitBound {
-        paren_token: (_i . paren_token).map(|it| { Paren(tokens_helper(_visitor, &(it).0)) }),
         modifier: _visitor.fold_trait_bound_modifier(_i . modifier),
         lifetimes: (_i . lifetimes).map(|it| { _visitor.fold_bound_lifetimes(it) }),
         path: _visitor.fold_path(_i . path),
@@ -2830,32 +2824,20 @@ pub fn fold_use_glob<V: Fold + ?Sized>(_visitor: &mut V, _i: UseGlob) -> UseGlob
     }
 }
 # [ cfg ( feature = "full" ) ]
-pub fn fold_use_group<V: Fold + ?Sized>(_visitor: &mut V, _i: UseGroup) -> UseGroup {
-    UseGroup {
+pub fn fold_use_list<V: Fold + ?Sized>(_visitor: &mut V, _i: UseList) -> UseList {
+    UseList {
         brace_token: Brace(tokens_helper(_visitor, &(_i . brace_token).0)),
         items: FoldHelper::lift(_i . items, |it| { _visitor.fold_use_tree(it) }),
-    }
-}
-# [ cfg ( feature = "full" ) ]
-pub fn fold_use_name<V: Fold + ?Sized>(_visitor: &mut V, _i: UseName) -> UseName {
-    UseName {
-        ident: _visitor.fold_ident(_i . ident),
     }
 }
 # [ cfg ( feature = "full" ) ]
 pub fn fold_use_path<V: Fold + ?Sized>(_visitor: &mut V, _i: UsePath) -> UsePath {
     UsePath {
         ident: _visitor.fold_ident(_i . ident),
-        colon2_token: Token ! [ :: ](tokens_helper(_visitor, &(_i . colon2_token).0)),
-        tree: Box::new(_visitor.fold_use_tree(* _i . tree)),
-    }
-}
-# [ cfg ( feature = "full" ) ]
-pub fn fold_use_rename<V: Fold + ?Sized>(_visitor: &mut V, _i: UseRename) -> UseRename {
-    UseRename {
-        ident: _visitor.fold_ident(_i . ident),
-        as_token: Token ! [ as ](tokens_helper(_visitor, &(_i . as_token).0)),
-        rename: _visitor.fold_ident(_i . rename),
+        rename: (_i . rename).map(|it| { (
+            Token ! [ as ](tokens_helper(_visitor, &(( it ) . 0).0)),
+            _visitor.fold_ident(( it ) . 1),
+        ) }),
     }
 }
 # [ cfg ( feature = "full" ) ]
@@ -2866,24 +2848,14 @@ pub fn fold_use_tree<V: Fold + ?Sized>(_visitor: &mut V, _i: UseTree) -> UseTree
                 _visitor.fold_use_path(_binding_0),
             )
         }
-        UseTree::Name(_binding_0, ) => {
-            UseTree::Name (
-                _visitor.fold_use_name(_binding_0),
-            )
-        }
-        UseTree::Rename(_binding_0, ) => {
-            UseTree::Rename (
-                _visitor.fold_use_rename(_binding_0),
-            )
-        }
         UseTree::Glob(_binding_0, ) => {
             UseTree::Glob (
                 _visitor.fold_use_glob(_binding_0),
             )
         }
-        UseTree::Group(_binding_0, ) => {
-            UseTree::Group (
-                _visitor.fold_use_group(_binding_0),
+        UseTree::List(_binding_0, ) => {
+            UseTree::List (
+                _visitor.fold_use_list(_binding_0),
             )
         }
     }
@@ -2903,6 +2875,8 @@ pub fn fold_variant<V: Fold + ?Sized>(_visitor: &mut V, _i: Variant) -> Variant 
 # [ cfg ( any ( feature = "full" , feature = "derive" ) ) ]
 pub fn fold_vis_crate<V: Fold + ?Sized>(_visitor: &mut V, _i: VisCrate) -> VisCrate {
     VisCrate {
+        pub_token: Token ! [ pub ](tokens_helper(_visitor, &(_i . pub_token).0)),
+        paren_token: Paren(tokens_helper(_visitor, &(_i . paren_token).0)),
         crate_token: Token ! [ crate ](tokens_helper(_visitor, &(_i . crate_token).0)),
     }
 }

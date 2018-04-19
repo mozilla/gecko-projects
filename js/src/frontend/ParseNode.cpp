@@ -691,7 +691,6 @@ NullaryNode::dump(GenericPrinter& out)
       }
 
       case ParseNodeKind::String:
-      case ParseNodeKind::ObjectPropertyName:
         pn_atom->dumpCharsNoNewline(out);
         break;
 

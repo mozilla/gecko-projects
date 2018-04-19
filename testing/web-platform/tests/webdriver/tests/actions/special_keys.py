@@ -2,7 +2,6 @@
 
 import pytest
 import time
-from tests.support.fixtures import configuration
 from tests.actions.support.keys import ALL_EVENTS, Keys
 from tests.actions.support.refine import filter_dict, get_keys, get_events
 from webdriver import error
@@ -21,9 +20,6 @@ def test_webdriver_special_key_sends_keydown(session,
             document.body.addEventListener("keydown",
                     function(e) { e.preventDefault() });
         """)
-    if (session.capabilities["browserName"] == 'internet explorer'):
-        key_reporter.click()
-        session.execute_script("resetEvents();")
     key_chain.key_down(getattr(Keys, name)).perform()
 
     # only interested in keydown

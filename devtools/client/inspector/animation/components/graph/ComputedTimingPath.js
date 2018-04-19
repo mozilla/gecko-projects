@@ -16,7 +16,6 @@ class ComputedTimingPath extends TimingPath {
       animation: PropTypes.object.isRequired,
       durationPerPixel: PropTypes.number.isRequired,
       keyframes: PropTypes.object.isRequired,
-      offset: PropTypes.number.isRequired,
       opacity: PropTypes.number.isRequired,
       simulateAnimation: PropTypes.func.isRequired,
       totalDuration: PropTypes.number.isRequired,
@@ -28,7 +27,6 @@ class ComputedTimingPath extends TimingPath {
       animation,
       durationPerPixel,
       keyframes,
-      offset,
       opacity,
       simulateAnimation,
       totalDuration,
@@ -80,6 +78,7 @@ class ComputedTimingPath extends TimingPath {
     const helper = new SummaryGraphHelper(state, keyframes,
                                           totalDuration, durationPerPixel,
                                           getValueFunc, toPathStringFunc);
+    const offset = state.previousStartTime ? state.previousStartTime : 0;
 
     return dom.g(
       {

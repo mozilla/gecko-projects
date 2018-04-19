@@ -54,10 +54,11 @@ class LanguageBreakEngine : public UMemory {
   * a particular kind of break.</p>
   *
   * @param c A character which begins a run that the engine might handle
+  * @param breakType The type of text break which the caller wants to determine
   * @return TRUE if this engine handles the particular character and break
   * type.
   */
-  virtual UBool handles(UChar32 c) const = 0;
+  virtual UBool handles(UChar32 c, int32_t breakType) const = 0;
 
  /**
   * <p>Find any breaks within a run in the supplied text.</p>
@@ -67,12 +68,14 @@ class LanguageBreakEngine : public UMemory {
   * is capable of handling.
   * @param startPos The start of the run within the supplied text.
   * @param endPos The end of the run within the supplied text.
+  * @param breakType The type of break desired, or -1.
   * @param foundBreaks A Vector of int32_t to receive the breaks.
   * @return The number of breaks found.
   */
   virtual int32_t findBreaks( UText *text,
                               int32_t startPos,
                               int32_t endPos,
+                              int32_t breakType,
                               UVector32 &foundBreaks ) const = 0;
 
 };
@@ -122,9 +125,11 @@ class LanguageBreakFactory : public UMemory {
   *
   * @param c A character that begins a run for which a LanguageBreakEngine is
   * sought.
+  * @param breakType The kind of text break for which a LanguageBreakEngine is
+  * sought.
   * @return A LanguageBreakEngine with the desired characteristics, or 0.
   */
-  virtual const LanguageBreakEngine *getEngineFor(UChar32 c) = 0;
+  virtual const LanguageBreakEngine *getEngineFor(UChar32 c, int32_t breakType) = 0;
 
 };
 
@@ -147,11 +152,11 @@ class UnhandledEngine : public LanguageBreakEngine {
  private:
 
     /**
-     * The sets of characters handled.
+     * The sets of characters handled, for each break type
      * @internal
      */
 
-  UnicodeSet    *fHandled;
+  UnicodeSet    *fHandled[4];
 
  public:
 
@@ -171,10 +176,11 @@ class UnhandledEngine : public LanguageBreakEngine {
   * a particular kind of break.</p>
   *
   * @param c A character which begins a run that the engine might handle
+  * @param breakType The type of text break which the caller wants to determine
   * @return TRUE if this engine handles the particular character and break
   * type.
   */
-  virtual UBool handles(UChar32 c) const;
+  virtual UBool handles(UChar32 c, int32_t breakType) const;
 
  /**
   * <p>Find any breaks within a run in the supplied text.</p>
@@ -184,20 +190,23 @@ class UnhandledEngine : public LanguageBreakEngine {
   * is capable of handling.
   * @param startPos The start of the run within the supplied text.
   * @param endPos The end of the run within the supplied text.
+  * @param breakType The type of break desired, or -1.
   * @param foundBreaks An allocated C array of the breaks found, if any
   * @return The number of breaks found.
   */
   virtual int32_t findBreaks( UText *text,
                               int32_t startPos,
                               int32_t endPos,
+                              int32_t breakType,
                               UVector32 &foundBreaks ) const;
 
  /**
   * <p>Tell the engine to handle a particular character and break type.</p>
   *
   * @param c A character which the engine should handle
+  * @param breakType The type of text break for which the engine should handle c
   */
-  virtual void handleCharacter(UChar32 c);
+  virtual void handleCharacter(UChar32 c, int32_t breakType);
 
 };
 
@@ -241,9 +250,11 @@ class ICULanguageBreakFactory : public LanguageBreakFactory {
   *
   * @param c A character that begins a run for which a LanguageBreakEngine is
   * sought.
+  * @param breakType The kind of text break for which a LanguageBreakEngine is
+  * sought.
   * @return A LanguageBreakEngine with the desired characteristics, or 0.
   */
-  virtual const LanguageBreakEngine *getEngineFor(UChar32 c);
+  virtual const LanguageBreakEngine *getEngineFor(UChar32 c, int32_t breakType);
 
 protected:
  /**
@@ -252,17 +263,21 @@ protected:
   *
   * @param c A character that begins a run for which a LanguageBreakEngine is
   * sought.
+  * @param breakType The kind of text break for which a LanguageBreakEngine is
+  * sought.
   * @return A LanguageBreakEngine with the desired characteristics, or 0.
   */
-  virtual const LanguageBreakEngine *loadEngineFor(UChar32 c);
+  virtual const LanguageBreakEngine *loadEngineFor(UChar32 c, int32_t breakType);
 
   /**
    * <p>Create a DictionaryMatcher for the specified script and break type.</p>
    * @param script An ISO 15924 script code that identifies the dictionary to be
    * created.
+   * @param breakType The kind of text break for which a dictionary is 
+   * sought.
    * @return A DictionaryMatcher with the desired characteristics, or NULL.
    */
-  virtual DictionaryMatcher *loadDictionaryMatcherFor(UScriptCode script);
+  virtual DictionaryMatcher *loadDictionaryMatcherFor(UScriptCode script, int32_t breakType);
 };
 
 U_NAMESPACE_END

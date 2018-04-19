@@ -2,7 +2,6 @@ use super::ToTokens;
 use std::fmt::{self, Debug, Display};
 use std::hash::{Hash, Hasher};
 
-#[cfg(feature = "proc-macro")]
 use proc_macro;
 use proc_macro2::{TokenStream, TokenTree};
 
@@ -109,7 +108,6 @@ impl From<Tokens> for TokenStream {
     }
 }
 
-#[cfg(feature = "proc-macro")]
 impl From<Tokens> for proc_macro::TokenStream {
     fn from(tokens: Tokens) -> proc_macro::TokenStream {
         TokenStream::from(tokens).into()
@@ -127,8 +125,8 @@ impl IntoIterator for Tokens {
 }
 
 mod private {
-    use proc_macro2::TokenTree;
     use std::vec;
+    use proc_macro2::TokenTree;
 
     pub struct IntoIter(vec::IntoIter<TokenTree>);
 
@@ -172,11 +170,11 @@ impl Debug for Tokens {
 }
 
 fn tt_eq(a: &TokenTree, b: &TokenTree) -> bool {
-    use proc_macro2::{Delimiter, Spacing};
+    use proc_macro2::{TokenNode, Delimiter, Spacing};
 
-    match (a, b) {
-        (&TokenTree::Group(ref s1), &TokenTree::Group(ref s2)) => {
-            match (s1.delimiter(), s2.delimiter()) {
+    match (&a.kind, &b.kind) {
+        (&TokenNode::Group(d1, ref s1), &TokenNode::Group(d2, ref s2)) => {
+            match (d1, d2) {
                 (Delimiter::Parenthesis, Delimiter::Parenthesis)
                 | (Delimiter::Brace, Delimiter::Brace)
                 | (Delimiter::Bracket, Delimiter::Bracket)
@@ -184,8 +182,8 @@ fn tt_eq(a: &TokenTree, b: &TokenTree) -> bool {
                 _ => return false,
             }
 
-            let s1 = s1.stream().clone().into_iter();
-            let mut s2 = s2.stream().clone().into_iter();
+            let s1 = s1.clone().into_iter();
+            let mut s2 = s2.clone().into_iter();
 
             for item1 in s1 {
                 let item2 = match s2.next() {
@@ -198,16 +196,16 @@ fn tt_eq(a: &TokenTree, b: &TokenTree) -> bool {
             }
             s2.next().is_none()
         }
-        (&TokenTree::Op(ref o1), &TokenTree::Op(ref o2)) => {
-            o1.op() == o2.op() && match (o1.spacing(), o2.spacing()) {
+        (&TokenNode::Op(o1, k1), &TokenNode::Op(o2, k2)) => {
+            o1 == o2 && match (k1, k2) {
                 (Spacing::Alone, Spacing::Alone) | (Spacing::Joint, Spacing::Joint) => true,
                 _ => false,
             }
         }
-        (&TokenTree::Literal(ref l1), &TokenTree::Literal(ref l2)) => {
+        (&TokenNode::Literal(ref l1), &TokenNode::Literal(ref l2)) => {
             l1.to_string() == l2.to_string()
         }
-        (&TokenTree::Term(ref s1), &TokenTree::Term(ref s2)) => s1.as_str() == s2.as_str(),
+        (&TokenNode::Term(ref s1), &TokenNode::Term(ref s2)) => s1.as_str() == s2.as_str(),
         _ => false,
     }
 }
@@ -226,33 +224,33 @@ impl PartialEq for Tokens {
 }
 
 fn tt_hash<H: Hasher>(tt: &TokenTree, h: &mut H) {
-    use proc_macro2::{Delimiter, Spacing};
+    use proc_macro2::{TokenNode, Delimiter, Spacing};
 
-    match *tt {
-        TokenTree::Group(ref g) => {
+    match tt.kind {
+        TokenNode::Group(delim, ref stream) => {
             0u8.hash(h);
-            match g.delimiter() {
+            match delim {
                 Delimiter::Parenthesis => 0u8.hash(h),
                 Delimiter::Brace => 1u8.hash(h),
                 Delimiter::Bracket => 2u8.hash(h),
                 Delimiter::None => 3u8.hash(h),
             }
 
-            for item in g.stream().clone() {
+            for item in stream.clone() {
                 tt_hash(&item, h);
             }
             0xffu8.hash(h); // terminator w/ a variant we don't normally hash
         }
-        TokenTree::Op(ref t) => {
+        TokenNode::Op(op, kind) => {
             1u8.hash(h);
-            t.op().hash(h);
-            match t.spacing() {
+            op.hash(h);
+            match kind {
                 Spacing::Alone => 0u8.hash(h),
                 Spacing::Joint => 1u8.hash(h),
             }
         }
-        TokenTree::Literal(ref lit) => (2u8, lit.to_string()).hash(h),
-        TokenTree::Term(ref word) => (3u8, word.as_str()).hash(h),
+        TokenNode::Literal(ref lit) => (2u8, lit.to_string()).hash(h),
+        TokenNode::Term(ref word) => (3u8, word.as_str()).hash(h),
     }
 }
 

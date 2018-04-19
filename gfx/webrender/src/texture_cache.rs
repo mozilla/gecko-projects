@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{DeviceUintPoint, DeviceUintRect, DeviceUintSize};
-use api::{ExternalImageType, ImageData, ImageFormat};
+use api::{ColorF, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
+use api::{ExternalImageType, ImageData, ImageFormat, PremultipliedColorF};
 use api::ImageDescriptor;
 use device::TextureFilter;
 use freelist::{FreeList, FreeListHandle, UpsertResult, WeakFreeListHandle};
@@ -14,10 +14,8 @@ use internal_types::{RenderTargetInfo, SourceTexture, TextureUpdate, TextureUpda
 use profiler::{ResourceProfileCounter, TextureCacheProfileCounters};
 use render_backend::FrameId;
 use resource_cache::CacheItem;
-use std::cell::Cell;
 use std::cmp;
 use std::mem;
-use std::rc::Rc;
 
 // The fixed number of layers for the shared texture cache.
 // There is one array texture per image format, allocated lazily.
@@ -83,9 +81,6 @@ enum EntryKind {
     },
 }
 
-#[derive(Debug)]
-pub enum CacheEntryMarker {}
-
 // Stores information related to a single entry in the texture
 // cache. This is stored for each item whether it's in the shared
 // cache or a standalone texture.
@@ -108,8 +103,8 @@ struct CacheEntry {
     filter: TextureFilter,
     // The actual device texture ID this is part of.
     texture_id: CacheTextureId,
-    // Optional notice when the entry is evicted from the cache.
-    eviction_notice: Option<EvictionNotice>,
+    // Color to modulate this cache item by.
+    color: PremultipliedColorF,
 }
 
 impl CacheEntry {
@@ -131,7 +126,7 @@ impl CacheEntry {
             format,
             filter,
             uv_rect_handle: GpuCacheHandle::new(),
-            eviction_notice: None,
+            color: ColorF::new(1.0, 1.0, 1.0, 1.0).premultiplied(),
         }
     }
 
@@ -152,21 +147,16 @@ impl CacheEntry {
             let image_source = ImageSource {
                 p0: origin.to_f32(),
                 p1: (origin + self.size).to_f32(),
+                color: self.color,
                 texture_layer: layer_index,
                 user_data: self.user_data,
             };
             image_source.write_gpu_blocks(&mut request);
         }
     }
-
-    fn evict(&self) {
-        if let Some(eviction_notice) = self.eviction_notice.as_ref() {
-            eviction_notice.notify();
-        }
-    }
 }
 
-type WeakCacheEntryHandle = WeakFreeListHandle<CacheEntryMarker>;
+type WeakCacheEntryHandle = WeakFreeListHandle<CacheEntry>;
 
 // A texture cache handle is a weak reference to a cache entry.
 // If the handle has not been inserted into the cache yet, the
@@ -175,7 +165,7 @@ type WeakCacheEntryHandle = WeakFreeListHandle<CacheEntryMarker>;
 // In this case, the cache handle needs to re-upload this item
 // to the texture cache (see request() below).
 #[derive(Debug)]
-#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "capture", derive(Clone, Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct TextureCacheHandle {
     entry: Option<WeakCacheEntryHandle>,
@@ -184,34 +174,6 @@ pub struct TextureCacheHandle {
 impl TextureCacheHandle {
     pub fn new() -> Self {
         TextureCacheHandle { entry: None }
-    }
-}
-
-// An eviction notice is a shared condition useful for detecting
-// when a TextureCacheHandle gets evicted from the TextureCache.
-// It is optionally installed to the TextureCache when an update()
-// is scheduled. A single notice may be shared among any number of
-// TextureCacheHandle updates. The notice may then be subsequently
-// checked to see if any of the updates using it have been evicted.
-#[derive(Clone, Debug, Default)]
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-pub struct EvictionNotice {
-    evicted: Rc<Cell<bool>>,
-}
-
-impl EvictionNotice {
-    fn notify(&self) {
-        self.evicted.set(true);
-    }
-
-    pub fn check(&self) -> bool {
-        if self.evicted.get() {
-            self.evicted.set(false);
-            true
-        } else {
-            false
-        }
     }
 }
 
@@ -243,17 +205,17 @@ pub struct TextureCache {
 
     // Maintains the list of all current items in
     // the texture cache.
-    entries: FreeList<CacheEntry, CacheEntryMarker>,
+    entries: FreeList<CacheEntry>,
 
     // A list of the strong handles of items that were
     // allocated in the standalone texture pool. Used
     // for evicting old standalone textures.
-    standalone_entry_handles: Vec<FreeListHandle<CacheEntryMarker>>,
+    standalone_entry_handles: Vec<FreeListHandle<CacheEntry>>,
 
     // A list of the strong handles of items that were
     // allocated in the shared texture cache. Used
     // for evicting old cache items.
-    shared_entry_handles: Vec<FreeListHandle<CacheEntryMarker>>,
+    shared_entry_handles: Vec<FreeListHandle<CacheEntry>>,
 }
 
 impl TextureCache {
@@ -281,56 +243,6 @@ impl TextureCache {
             entries: FreeList::new(),
             standalone_entry_handles: Vec::new(),
             shared_entry_handles: Vec::new(),
-        }
-    }
-
-    pub fn clear(&mut self) {
-        let standalone_entry_handles = mem::replace(
-            &mut self.standalone_entry_handles,
-            Vec::new(),
-        );
-
-        for handle in standalone_entry_handles {
-            let entry = self.entries.free(handle);
-            entry.evict();
-            self.free(entry);
-        }
-
-        let shared_entry_handles = mem::replace(
-            &mut self.shared_entry_handles,
-            Vec::new(),
-        );
-
-        for handle in shared_entry_handles {
-            let entry = self.entries.free(handle);
-            entry.evict();
-            self.free(entry);
-        }
-
-        assert!(self.entries.len() == 0);
-
-        if let Some(texture_id) = self.array_a8_linear.clear() {
-            self.pending_updates.push(TextureUpdate {
-                id: texture_id,
-                op: TextureUpdateOp::Free,
-            });
-            self.cache_textures.free(texture_id, self.array_a8_linear.format);
-        }
-
-        if let Some(texture_id) = self.array_rgba8_linear.clear() {
-            self.pending_updates.push(TextureUpdate {
-                id: texture_id,
-                op: TextureUpdateOp::Free,
-            });
-            self.cache_textures.free(texture_id, self.array_rgba8_linear.format);
-        }
-
-        if let Some(texture_id) = self.array_rgba8_nearest.clear() {
-            self.pending_updates.push(TextureUpdate {
-                id: texture_id,
-                op: TextureUpdateOp::Free,
-            });
-            self.cache_textures.free(texture_id, self.array_rgba8_nearest.format);
         }
     }
 
@@ -393,7 +305,6 @@ impl TextureCache {
         user_data: [f32; 3],
         mut dirty_rect: Option<DeviceUintRect>,
         gpu_cache: &mut GpuCache,
-        eviction_notice: Option<&EvictionNotice>,
     ) {
         // Determine if we need to allocate texture cache memory
         // for this item. We need to reallocate if any of the following
@@ -431,9 +342,6 @@ impl TextureCache {
         let entry = self.entries
             .get_opt_mut(handle.entry.as_ref().unwrap())
             .expect("BUG: handle must be valid now");
-
-        // Install the new eviction notice for this update, if applicable.
-        entry.eviction_notice = eviction_notice.cloned();
 
         // Invalidate the contents of the resource rect in the GPU cache.
         // This ensures that the update_gpu_cache below will add
@@ -500,7 +408,7 @@ impl TextureCache {
     // Retrieve the details of an item in the cache. This is used
     // during batch creation to provide the resource rect address
     // to the shaders and texture ID to the batching logic.
-    // This function will assert in debug modes if the caller
+    // This function will asssert in debug modes if the caller
     // tries to get a handle that was not requested this frame.
     pub fn get(&self, handle: &TextureCacheHandle) -> CacheItem {
         match handle.entry {
@@ -594,7 +502,6 @@ impl TextureCache {
         // Free the selected items
         for handle in eviction_candidates {
             let entry = self.entries.free(handle);
-            entry.evict();
             self.free(entry);
         }
 
@@ -649,7 +556,6 @@ impl TextureCache {
                 retained_entries.push(handle);
             } else {
                 let entry = self.entries.free(handle);
-                entry.evict();
                 if let Some(region) = self.free(entry) {
                     found_matching_slab |= region.slab_size == needed_slab_size;
                     freed_complete_page |= region.is_empty();
@@ -1066,12 +972,6 @@ impl TextureArray {
         }
     }
 
-    fn clear(&mut self) -> Option<CacheTextureId> {
-        self.is_allocated = false;
-        self.regions.clear();
-        self.texture_id.take()
-    }
-
     fn update_profile(&self, counter: &mut ResourceProfileCounter) {
         if self.is_allocated {
             let size = self.layer_count as u32 * TEXTURE_LAYER_DIMENSIONS *
@@ -1173,7 +1073,7 @@ impl TextureArray {
                 format: self.format,
                 filter: self.filter,
                 texture_id: self.texture_id.unwrap(),
-                eviction_notice: None,
+                color: ColorF::new(1.0, 1.0, 1.0, 1.0).premultiplied(),
             }
         })
     }

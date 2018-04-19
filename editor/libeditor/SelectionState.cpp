@@ -7,13 +7,14 @@
 
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc.
 #include "mozilla/EditorUtils.h"        // for EditorUtils
-#include "mozilla/dom/RangeBinding.h"
 #include "mozilla/dom/Selection.h"      // for Selection
 #include "nsAString.h"                  // for nsAString::Length
 #include "nsCycleCollectionParticipant.h"
 #include "nsDebug.h"                    // for NS_ENSURE_TRUE, etc.
 #include "nsError.h"                    // for NS_OK, etc.
 #include "nsIContent.h"                 // for nsIContent
+#include "nsIDOMCharacterData.h"        // for nsIDOMCharacterData
+#include "nsIDOMNode.h"                 // for nsIDOMNode
 #include "nsISupportsImpl.h"            // for nsRange::Release
 #include "nsRange.h"                    // for nsRange
 
@@ -28,16 +29,6 @@ using namespace dom;
  * { {startnode, startoffset} , {endnode, endoffset} } tuples.  Can't store
  * ranges since dom gravity will possibly change the ranges.
  ******************************************************************************/
-
-template nsresult
-RangeUpdater::SelAdjCreateNode(const EditorDOMPoint& aPoint);
-template nsresult
-RangeUpdater::SelAdjCreateNode(const EditorRawDOMPoint& aPoint);
-template nsresult
-RangeUpdater::SelAdjInsertNode(const EditorDOMPoint& aPoint);
-template nsresult
-RangeUpdater::SelAdjInsertNode(const EditorRawDOMPoint& aPoint);
-
 SelectionState::SelectionState()
 {
 }
@@ -79,7 +70,7 @@ SelectionState::RestoreSelection(Selection* aSel)
   NS_ENSURE_TRUE(aSel, NS_ERROR_NULL_POINTER);
 
   // clear out selection
-  aSel->RemoveAllRanges(IgnoreErrors());
+  aSel->RemoveAllRanges();
 
   // set the selection ranges anew
   size_t arrayCount = mArray.Length();
@@ -87,10 +78,9 @@ SelectionState::RestoreSelection(Selection* aSel)
     RefPtr<nsRange> range = mArray[i]->GetRange();
     NS_ENSURE_TRUE(range, NS_ERROR_UNEXPECTED);
 
-    ErrorResult rv;
-    aSel->AddRange(*range, rv);
-    if (rv.Failed()) {
-      return rv.StealNSResult();
+    nsresult rv = aSel->AddRange(range);
+    if (NS_FAILED(rv)) {
+      return rv;
     }
   }
   return NS_OK;
@@ -124,15 +114,14 @@ SelectionState::IsEqual(SelectionState* aSelState)
     RefPtr<nsRange> itsRange = aSelState->mArray[i]->GetRange();
     NS_ENSURE_TRUE(myRange && itsRange, false);
 
-    IgnoredErrorResult rv;
-    int16_t compResult =
-      myRange->CompareBoundaryPoints(RangeBinding::START_TO_START, *itsRange, rv);
-    if (rv.Failed() || compResult) {
+    int16_t compResult;
+    nsresult rv;
+    rv = myRange->CompareBoundaryPoints(nsIDOMRange::START_TO_START, itsRange, &compResult);
+    if (NS_FAILED(rv) || compResult) {
       return false;
     }
-    compResult =
-      myRange->CompareBoundaryPoints(RangeBinding::END_TO_END, *itsRange, rv);
-    if (rv.Failed() || compResult) {
+    rv = myRange->CompareBoundaryPoints(nsIDOMRange::END_TO_END, itsRange, &compResult);
+    if (NS_FAILED(rv) || compResult) {
       return false;
     }
   }
@@ -223,9 +212,8 @@ RangeUpdater::DropSelectionState(SelectionState& aSelState)
 
 // gravity methods:
 
-template<typename PT, typename CT>
 nsresult
-RangeUpdater::SelAdjCreateNode(const EditorDOMPointBase<PT, CT>& aPoint)
+RangeUpdater::SelAdjCreateNode(const EditorRawDOMPoint& aPoint)
 {
   if (mLock) {
     // lock set by Will/DidReplaceParent, etc...
@@ -256,9 +244,8 @@ RangeUpdater::SelAdjCreateNode(const EditorDOMPointBase<PT, CT>& aPoint)
   return NS_OK;
 }
 
-template<typename PT, typename CT>
 nsresult
-RangeUpdater::SelAdjInsertNode(const EditorDOMPointBase<PT, CT>& aPoint)
+RangeUpdater::SelAdjInsertNode(const EditorRawDOMPoint& aPoint)
 {
   return SelAdjCreateNode(aPoint);
 }
@@ -492,6 +479,15 @@ RangeUpdater::SelAdjDeleteText(nsIContent* aTextNode,
 }
 
 nsresult
+RangeUpdater::SelAdjDeleteText(nsIDOMCharacterData* aTextNode,
+                               int32_t aOffset,
+                               int32_t aLength)
+{
+  nsCOMPtr<nsIContent> textNode = do_QueryInterface(aTextNode);
+  return SelAdjDeleteText(textNode, aOffset, aLength);
+}
+
+nsresult
 RangeUpdater::WillReplaceContainer()
 {
   if (mLock) {
@@ -573,6 +569,17 @@ RangeUpdater::DidRemoveContainer(nsINode* aNode,
     }
   }
   return NS_OK;
+}
+
+nsresult
+RangeUpdater::DidRemoveContainer(nsIDOMNode* aNode,
+                                 nsIDOMNode* aParent,
+                                 int32_t aOffset,
+                                 uint32_t aNodeOrigLen)
+{
+  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
+  nsCOMPtr<nsINode> parent = do_QueryInterface(aParent);
+  return DidRemoveContainer(node, parent, aOffset, aNodeOrigLen);
 }
 
 nsresult

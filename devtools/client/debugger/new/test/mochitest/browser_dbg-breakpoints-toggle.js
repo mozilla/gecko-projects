@@ -1,12 +1,12 @@
 function toggleBreakpoint(dbg, index) {
-  const bp = findAllElements(dbg, "breakpointItems")[index];
+  const bp = findElement(dbg, "breakpointItem", index);
   const input = bp.querySelector("input");
   input.click();
 }
 
 async function removeBreakpoint(dbg, index) {
   const removed = waitForDispatch(dbg, "REMOVE_BREAKPOINT");
-  const bp = findAllElements(dbg, "breakpointItems")[index];
+  const bp = findElement(dbg, "breakpointItem", index);
   bp.querySelector(".close-btn").click();
   await removed;
 }
@@ -28,13 +28,13 @@ function toggleBreakpoints(dbg, count) {
 }
 
 function disableBreakpoints(dbg, count) {
-  const toggled = waitForDispatch(dbg, "DISABLE_ALL_BREAKPOINTS", count);
+  const toggled = waitForDispatch(dbg, "DISABLE_BREAKPOINT", count);
   toggleBreakpoints(dbg);
   return toggled;
 }
 
 function enableBreakpoints(dbg, count) {
-  const enabled = waitForDispatch(dbg, "ENABLE_ALL_BREAKPOINTS", count);
+  const enabled = waitForDispatch(dbg, "ENABLE_BREAKPOINT", count);
   toggleBreakpoints(dbg);
   return enabled;
 }
@@ -60,7 +60,7 @@ add_task(async function() {
   await addBreakpoint(dbg, "simple2", 5);
 
   // Disable all of the breakpoints
-  await disableBreakpoints(dbg, 1);
+  await disableBreakpoints(dbg, 2);
   let bp1 = findBreakpoint(dbg, "simple2", 3);
   let bp2 = findBreakpoint(dbg, "simple2", 5);
 
@@ -72,7 +72,7 @@ add_task(async function() {
   is(bp2.disabled, true, "second breakpoint is disabled");
 
   // Enable all of the breakpoints
-  await enableBreakpoints(dbg, 1);
+  await enableBreakpoints(dbg, 2);
   bp1 = findBreakpoint(dbg, "simple2", 3);
   bp2 = findBreakpoint(dbg, "simple2", 5);
 
@@ -80,10 +80,8 @@ add_task(async function() {
   is(bp2.disabled, false, "second breakpoint is enabled");
 
   // Remove the breakpoints
-  await removeBreakpoint(dbg, 0);
-  await removeBreakpoint(dbg, 0);
-
+  await removeBreakpoint(dbg, 1);
+  await removeBreakpoint(dbg, 1);
   const bps = findBreakpoints(dbg);
-
   is(bps.size, 0, "breakpoints are removed");
 });

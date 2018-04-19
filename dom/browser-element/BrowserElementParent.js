@@ -81,7 +81,7 @@ BrowserElementParent.prototype = {
   setFrameLoader: function(frameLoader) {
     debug("Setting frameLoader");
     this._frameLoader = frameLoader;
-    this._frameElement = frameLoader.ownerElement;
+    this._frameElement = frameLoader.QueryInterface(Ci.nsIFrameLoader).ownerElement;
     if (!this._frameElement) {
       debug("No frame element?");
       return;

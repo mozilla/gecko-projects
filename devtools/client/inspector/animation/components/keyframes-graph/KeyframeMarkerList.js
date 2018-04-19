@@ -13,18 +13,18 @@ const KeyframeMarkerItem = createFactory(require("./KeyframeMarkerItem"));
 class KeyframeMarkerList extends PureComponent {
   static get propTypes() {
     return {
-      keyframes: PropTypes.array.isRequired,
+      values: PropTypes.array.isRequired,
     };
   }
 
   render() {
-    const { keyframes } = this.props;
+    const { values } = this.props;
 
     return dom.ul(
       {
         className: "keyframe-marker-list"
       },
-      keyframes.map(keyframe => KeyframeMarkerItem({ keyframe }))
+      values.map(value => KeyframeMarkerItem({ keyframe: value }))
     );
   }
 }

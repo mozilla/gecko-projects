@@ -141,6 +141,7 @@ class AudioNodeModel extends EventEmitter {
   }
 }
 
+
 /**
  * Constructor for a Collection of `AudioNodeModel` models.
  *
@@ -180,7 +181,6 @@ class AudioNodesCollection extends EventEmitter {
    * @return AudioNodeModel
    */
   add(obj) {
-    // eslint-disable-next-line new-cap
     let node = new this.model(obj);
     node.collection = this;
 

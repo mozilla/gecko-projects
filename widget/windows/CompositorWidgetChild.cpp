@@ -46,7 +46,7 @@ CompositorWidgetChild::OnDestroyWindow()
 void
 CompositorWidgetChild::UpdateTransparency(nsTransparencyMode aMode)
 {
-  Unused << SendUpdateTransparency(aMode);
+  Unused << SendUpdateTransparency(static_cast<int32_t>(aMode));
 }
 
 void

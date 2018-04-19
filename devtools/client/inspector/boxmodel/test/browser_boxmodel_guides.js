@@ -17,33 +17,33 @@ const TEST_URL = "data:text/html;charset=utf-8," + encodeURIComponent(HTML);
 
 var highlightedNodeFront, highlighterOptions;
 
-add_task(async function() {
+add_task(async function () {
   await addTab(TEST_URL);
-  let {toolbox, inspector, boxmodel} = await openLayoutView();
+  let {toolbox, inspector, view} = await openBoxModelView();
   await selectNode("div", inspector);
 
   // Mock the highlighter by replacing the showBoxModel method.
-  toolbox.highlighter.showBoxModel = function(nodeFront, options) {
+  toolbox.highlighter.showBoxModel = function (nodeFront, options) {
     highlightedNodeFront = nodeFront;
     highlighterOptions = options;
   };
 
-  let elt = boxmodel.document.querySelector(".boxmodel-margins");
-  await testGuideOnLayoutHover(elt, "margin", inspector);
+  let elt = view.document.querySelector(".boxmodel-margins");
+  await testGuideOnLayoutHover(elt, "margin", inspector, view);
 
-  elt = boxmodel.document.querySelector(".boxmodel-borders");
-  await testGuideOnLayoutHover(elt, "border", inspector);
+  elt = view.document.querySelector(".boxmodel-borders");
+  await testGuideOnLayoutHover(elt, "border", inspector, view);
 
-  elt = boxmodel.document.querySelector(".boxmodel-paddings");
-  await testGuideOnLayoutHover(elt, "padding", inspector);
+  elt = view.document.querySelector(".boxmodel-paddings");
+  await testGuideOnLayoutHover(elt, "padding", inspector, view);
 
-  elt = boxmodel.document.querySelector(".boxmodel-content");
-  await testGuideOnLayoutHover(elt, "content", inspector);
+  elt = view.document.querySelector(".boxmodel-content");
+  await testGuideOnLayoutHover(elt, "content", inspector, view);
 });
 
 async function testGuideOnLayoutHover(elt, expectedRegion, inspector) {
   info("Synthesizing mouseover on the boxmodel-view");
-  EventUtils.synthesizeMouse(elt, 50, 2, {type: "mouseover"},
+  EventUtils.synthesizeMouse(elt, 2, 2, {type: "mouseover"},
     elt.ownerDocument.defaultView);
 
   info("Waiting for the node-highlight event from the toolbox");

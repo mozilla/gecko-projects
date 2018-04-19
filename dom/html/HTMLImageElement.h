@@ -49,7 +49,7 @@ public:
   // EventTarget
   virtual void AsyncEventRunning(AsyncEventDispatcher* aEvent) override;
 
-  NS_IMPL_FROMNODE_HTML_WITH_TAG(HTMLImageElement, img)
+  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLImageElement, img)
 
   // override from nsImageLoadingContent
   CORSMode GetCORSMode() override;
@@ -65,7 +65,8 @@ public:
   NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const override;
   virtual nsMapRuleToAttributesFunc GetAttributeMappingFunction() const override;
 
-  void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
+  virtual nsresult GetEventTargetParent(
+                     EventChainPreVisitor& aVisitor) override;
 
   bool IsHTMLFocusable(bool aWithMouse, bool *aIsFocusable, int32_t *aTabIndex) override;
 
@@ -248,9 +249,9 @@ public:
   }
 
 #ifdef DEBUG
-  HTMLFormElement* GetForm() const;
+  nsIDOMHTMLFormElement* GetForm() const;
 #endif
-  void SetForm(HTMLFormElement* aForm);
+  void SetForm(nsIDOMHTMLFormElement* aForm);
   void ClearForm(bool aRemoveFromForm);
 
   virtual void DestroyContent() override;

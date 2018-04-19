@@ -39,8 +39,8 @@
  *        Controls whether the transaction is committed or rolled back when
  *        this object goes out of scope.
  * @param aType [optional]
- *        The transaction type, as defined in mozIStorageConnection. Uses the
- *        default transaction behavior for the connection if unspecified.
+ *        The transaction type, as defined in mozIStorageConnection.  Defaults
+ *        to TRANSACTION_DEFERRED.
  * @param aAsyncCommit [optional]
  *        Whether commit should be executed asynchronously on the helper thread.
  *        This is a special option introduced as an interim solution to reduce
@@ -63,7 +63,7 @@ class mozStorageTransaction
 public:
   mozStorageTransaction(mozIStorageConnection* aConnection,
                         bool aCommitOnComplete,
-                        int32_t aType = mozIStorageConnection::TRANSACTION_DEFAULT,
+                        int32_t aType = mozIStorageConnection::TRANSACTION_DEFERRED,
                         bool aAsyncCommit = false)
     : mConnection(aConnection),
       mHasTransaction(false),
@@ -73,11 +73,7 @@ public:
   {
     if (mConnection) {
       nsAutoCString query("BEGIN");
-      int32_t type = aType;
-      if (type == mozIStorageConnection::TRANSACTION_DEFAULT) {
-        MOZ_ALWAYS_SUCCEEDS(mConnection->GetDefaultTransactionType(&type));
-      }
-      switch (type) {
+      switch(aType) {
         case mozIStorageConnection::TRANSACTION_IMMEDIATE:
           query.AppendLiteral(" IMMEDIATE");
           break;

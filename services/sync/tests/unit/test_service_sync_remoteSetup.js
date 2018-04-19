@@ -155,12 +155,11 @@ add_task(async function run_test() {
     Assert.equal(meta_global.data.syncID, Service.syncID);
     Assert.equal(meta_global.data.storageVersion, STORAGE_VERSION);
     Assert.equal(meta_global.data.engines.clients.version, Service.clientsEngine.version);
-    Assert.equal(meta_global.data.engines.clients.syncID, await Service.clientsEngine.getSyncID());
+    Assert.equal(meta_global.data.engines.clients.syncID, Service.clientsEngine.syncID);
 
     _("Set the collection info hash so that sync() will remember the modified times for future runs.");
-    let lastSync = await Service.clientsEngine.getLastSync();
-    collections.meta = lastSync;
-    collections.clients = lastSync;
+    collections.meta = Service.clientsEngine.lastSync;
+    collections.clients = Service.clientsEngine.lastSync;
     await Service.sync();
 
     _("Sync again and verify that meta/global wasn't downloaded again");

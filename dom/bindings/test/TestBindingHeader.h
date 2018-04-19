@@ -213,9 +213,9 @@ public:
   int8_t CachedWritableByte();
   void SetCachedWritableByte(int8_t);
   int8_t SideEffectFreeByte();
-  void SetSideEffectFreeByte(int8_t);
+  int8_t SetSideEffectFreeByte(int8_t);
   int8_t DomDependentByte();
-  void SetDomDependentByte(int8_t);
+  int8_t SetDomDependentByte(int8_t);
   int8_t ConstantByte();
   int8_t DeviceStateDependentByte();
   int8_t ReturnByteSideEffectFree();
@@ -828,7 +828,7 @@ public:
 
   // Deprecated methods and attributes
   int8_t DeprecatedAttribute();
-  void SetDeprecatedAttribute(int8_t);
+  int8_t SetDeprecatedAttribute(int8_t);
   int8_t DeprecatedMethod();
   int8_t DeprecatedMethodWithContext(JSContext*, const JS::Value&);
 
@@ -841,9 +841,9 @@ public:
 
   // Deprecated static methods and attributes
   static int8_t StaticDeprecatedAttribute(const GlobalObject&);
-  static void SetStaticDeprecatedAttribute(const GlobalObject&, int8_t);
-  static void StaticDeprecatedMethod(const GlobalObject&);
-  static void StaticDeprecatedMethodWithContext(const GlobalObject&, const JS::Value&);
+  static int8_t SetStaticDeprecatedAttribute(const GlobalObject&, int8_t);
+  static int8_t StaticDeprecatedMethod(const GlobalObject&);
+  static int8_t StaticDeprecatedMethodWithContext(const GlobalObject&, const JS::Value&);
 
   // Overload resolution tests
   bool Overload1(TestInterface&);

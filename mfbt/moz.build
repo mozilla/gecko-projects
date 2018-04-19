@@ -12,7 +12,6 @@ TEST_DIRS += ['tests']
 Library('mfbt')
 
 EXPORTS.mozilla = [
-    'Algorithm.h',
     'Alignment.h',
     'AllocPolicy.h',
     'AlreadyAddRefed.h',
@@ -44,6 +43,7 @@ EXPORTS.mozilla = [
     'FStream.h',
     'GuardObjects.h',
     'HashFunctions.h',
+    'IndexSequence.h',
     'IntegerPrintfMacros.h',
     'IntegerRange.h',
     'IntegerTypeTraits.h',

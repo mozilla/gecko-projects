@@ -238,6 +238,7 @@ async function runTest(test, observances) {
 
   await openPreferencesViaOpenPreferencesAPI("panePrivacy", {leaveOpen: true});
 
+  // eslint-disable-next-line mozilla/no-cpows-in-tests
   let doc = gBrowser.contentDocument;
   let historyMode = doc.getElementById("historyMode");
   historyMode.value = "custom";
@@ -271,7 +272,7 @@ async function runTest(test, observances) {
 
   await test(params, observeAllPromise, () => btnApplyChanges.doCommand());
 
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 }
 
 function createObserveAllPromise(observances) {

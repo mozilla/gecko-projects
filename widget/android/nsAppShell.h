@@ -77,7 +77,7 @@ public:
         T lambda;
 
     public:
-        explicit LambdaEvent(T&& l) : lambda(mozilla::Move(l)) {}
+        LambdaEvent(T&& l) : lambda(mozilla::Move(l)) {}
         void Run() override { return lambda(); }
     };
 
@@ -87,7 +87,7 @@ public:
         mozilla::UniquePtr<Event> baseEvent;
 
     public:
-        explicit ProxyEvent(mozilla::UniquePtr<Event>&& event)
+        ProxyEvent(mozilla::UniquePtr<Event>&& event)
             : baseEvent(mozilla::Move(event))
         {}
 
@@ -182,7 +182,7 @@ protected:
         nsAppShell* const appShell;
 
     public:
-        explicit NativeCallbackEvent(nsAppShell* as) : appShell(as) {}
+        NativeCallbackEvent(nsAppShell* as) : appShell(as) {}
         void Run() override { appShell->NativeEventCallback(); }
     };
 

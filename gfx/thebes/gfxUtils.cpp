@@ -938,13 +938,13 @@ gfxUtils::GetColorForFrameNumber(uint64_t aFrameNumber)
     return colors[aFrameNumber % sNumFrameColors];
 }
 
-/* static */ nsresult
-gfxUtils::EncodeSourceSurface(SourceSurface* aSurface,
-                              const nsACString& aMimeType,
-                              const nsAString& aOutputOptions,
-                              BinaryOrData aBinaryOrData,
-                              FILE* aFile,
-                              nsACString* aStrOut)
+static nsresult
+EncodeSourceSurfaceInternal(SourceSurface* aSurface,
+                           const nsACString& aMimeType,
+                           const nsAString& aOutputOptions,
+                           gfxUtils::BinaryOrData aBinaryOrData,
+                           FILE* aFile,
+                           nsCString* aStrOut)
 {
   MOZ_ASSERT(aBinaryOrData == gfxUtils::eDataURIEncode || aFile || aStrOut,
              "Copying binary encoding to clipboard not currently supported");
@@ -1057,9 +1057,7 @@ gfxUtils::EncodeSourceSurface(SourceSurface* aSurface,
   rv = Base64Encode(Substring(imgData.begin(), imgSize), encodedImg);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCString stringBuf;
-  nsACString& string = aStrOut ? *aStrOut : stringBuf;
-  string.AppendLiteral("data:");
+  nsCString string("data:");
   string.Append(aMimeType);
   string.AppendLiteral(";base64,");
   string.Append(encodedImg);
@@ -1080,7 +1078,9 @@ gfxUtils::EncodeSourceSurface(SourceSurface* aSurface,
     }
 #endif
     fprintf(aFile, "%s", string.BeginReading());
-  } else if (!aStrOut) {
+  } else if (aStrOut) {
+    *aStrOut = string;
+  } else {
     nsCOMPtr<nsIClipboardHelper> clipboard(do_GetService("@mozilla.org/widget/clipboardhelper;1", &rv));
     if (clipboard) {
       clipboard->CopyString(NS_ConvertASCIItoUTF16(string));
@@ -1093,10 +1093,21 @@ static nsCString
 EncodeSourceSurfaceAsPNGURI(SourceSurface* aSurface)
 {
   nsCString string;
-  gfxUtils::EncodeSourceSurface(aSurface, NS_LITERAL_CSTRING("image/png"),
-                                EmptyString(), gfxUtils::eDataURIEncode,
-                                nullptr, &string);
+  EncodeSourceSurfaceInternal(aSurface, NS_LITERAL_CSTRING("image/png"),
+                              EmptyString(), gfxUtils::eDataURIEncode,
+                              nullptr, &string);
   return string;
+}
+
+/* static */ nsresult
+gfxUtils::EncodeSourceSurface(SourceSurface* aSurface,
+                              const nsACString& aMimeType,
+                              const nsAString& aOutputOptions,
+                              BinaryOrData aBinaryOrData,
+                              FILE* aFile)
+{
+  return EncodeSourceSurfaceInternal(aSurface, aMimeType, aOutputOptions,
+                                     aBinaryOrData, aFile, nullptr);
 }
 
 // https://jdashg.github.io/misc/colors/from-coeffs.html

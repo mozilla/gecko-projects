@@ -10,6 +10,9 @@
 #include "mozilla/HTMLEditor.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/DeclarationBlockInlines.h"
+#ifdef MOZ_OLD_STYLE
+#include "mozilla/css/StyleRule.h"
+#endif
 #include "mozilla/dom/Element.h"
 #include "mozilla/mozalloc.h"
 #include "nsAString.h"
@@ -23,6 +26,7 @@
 #include "nsAtom.h"
 #include "nsIContent.h"
 #include "nsICSSDeclaration.h"
+#include "nsIDOMNode.h"
 #include "nsIDOMWindow.h"
 #include "nsIDocument.h"
 #include "nsIEditor.h"

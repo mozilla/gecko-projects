@@ -17,8 +17,6 @@ ChromeUtils.defineModuleGetter(this, "fxAccounts",
   "resource://gre/modules/FxAccounts.jsm");
 ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
   "resource://gre/modules/PrivateBrowsingUtils.jsm");
-ChromeUtils.defineModuleGetter(this, "SessionStore",
-  "resource:///modules/sessionstore/SessionStore.jsm");
 
 // Url to fetch snippets, in the urlFormatter service format.
 const SNIPPETS_URL_PREF = "browser.aboutHomeSnippets.updateUrl";
@@ -110,8 +108,10 @@ var AboutHome = {
 
     switch (aMessage.name) {
       case "AboutHome:RestorePreviousSession":
-        if (SessionStore.canRestoreLastSession) {
-          SessionStore.restoreLastSession();
+        let ss = Cc["@mozilla.org/browser/sessionstore;1"].
+                 getService(Ci.nsISessionStore);
+        if (ss.canRestoreLastSession) {
+          ss.restoreLastSession();
         }
         break;
 
@@ -156,9 +156,14 @@ var AboutHome = {
   // Send all the chrome-privileged data needed by about:home. This
   // gets re-sent when the search engine changes.
   sendAboutHomeData(target) {
-    SessionStore.promiseInitialized.then(function() {
+    let wrapper = {};
+    ChromeUtils.import("resource:///modules/sessionstore/SessionStore.jsm",
+      wrapper);
+    let ss = wrapper.SessionStore;
+
+    ss.promiseInitialized.then(function() {
       let data = {
-        showRestoreLastSession: SessionStore.canRestoreLastSession,
+        showRestoreLastSession: ss.canRestoreLastSession,
         snippetsURL: AboutHomeUtils.snippetsURL,
         showKnowYourRights: AboutHomeUtils.showKnowYourRights,
         snippetsVersion: AboutHomeUtils.snippetsVersion,
@@ -173,7 +178,8 @@ var AboutHome = {
       if (target && target.messageManager) {
         target.messageManager.sendAsyncMessage("AboutHome:Update", data);
       } else {
-        Services.mm.broadcastAsyncMessage("AboutHome:Update", data);
+        let mm = Cc["@mozilla.org/globalmessagemanager;1"].getService(Ci.nsIMessageListenerManager);
+        mm.broadcastAsyncMessage("AboutHome:Update", data);
       }
     }).catch(function onError(x) {
       Cu.reportError("Error in AboutHome.sendAboutHomeData: " + x);

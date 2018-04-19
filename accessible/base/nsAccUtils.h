@@ -7,7 +7,6 @@
 #define nsAccUtils_h_
 
 #include "mozilla/a11y/Accessible.h"
-#include "mozilla/a11y/DocManager.h"
 
 #include "nsAccessibilityService.h"
 #include "nsCoreUtils.h"

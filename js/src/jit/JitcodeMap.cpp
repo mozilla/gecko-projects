@@ -742,8 +742,7 @@ JitcodeGlobalTable::traceForMinorGC(JSTracer* trc)
     MOZ_ASSERT(trc->runtime()->geckoProfiler().enabled());
     MOZ_ASSERT(JS::CurrentThreadIsHeapMinorCollecting());
 
-    JSContext* cx = trc->runtime()->mainContextFromOwnThread();
-    AutoSuppressProfilerSampling suppressSampling(cx);
+    AutoSuppressProfilerSampling suppressSampling(TlsContext.get());
     JitcodeGlobalEntry::IonEntry* entry = nurseryEntries_;
     while (entry) {
         entry->trace<Unconditionally>(trc);
@@ -831,7 +830,7 @@ JitcodeGlobalTable::markIteratively(GCMarker* marker)
 void
 JitcodeGlobalTable::sweep(JSRuntime* rt)
 {
-    AutoSuppressProfilerSampling suppressSampling(rt->mainContextFromOwnThread());
+    AutoSuppressProfilerSampling suppressSampling(TlsContext.get());
     for (Enum e(*this, rt); !e.empty(); e.popFront()) {
         JitcodeGlobalEntry* entry = e.front();
 

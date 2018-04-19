@@ -11,12 +11,10 @@
 
 namespace js {
 
-class GlobalObject;
-
 class WeakSetObject : public WeakCollectionObject
 {
   public:
-    static JSObject* initClass(JSContext* cx, Handle<GlobalObject*> global);
+    static JSObject* initClass(JSContext* cx, HandleObject obj);
     static const Class class_;
 
   private:
@@ -30,7 +28,7 @@ class WeakSetObject : public WeakCollectionObject
 };
 
 extern JSObject*
-InitWeakSetClass(JSContext* cx, Handle<GlobalObject*> global);
+InitWeakSetClass(JSContext* cx, HandleObject obj);
 
 } // namespace js
 

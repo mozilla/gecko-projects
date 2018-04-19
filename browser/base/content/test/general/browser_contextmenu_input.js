@@ -254,5 +254,5 @@ add_task(async function test_text_input_readonly() {
 });
 
 add_task(async function test_cleanup() {
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });

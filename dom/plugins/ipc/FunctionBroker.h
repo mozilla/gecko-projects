@@ -9,7 +9,6 @@
 
 #include <map>
 #include <algorithm>
-#include <utility>
 #include "base/task.h"
 #include "mozilla/ipc/ProcessChild.h"
 #include "FunctionBrokerChild.h"
@@ -1264,7 +1263,7 @@ protected:
                         IpdlTuple *aOutTuple) const
   {
     return BrokerCallServer(aClientId, aInTuple, aOutTuple,
-                             std::index_sequence_for<ParamTypes...>{});
+                             typename IndexSequenceFor<ParamTypes...>::Type());
   }
 
   bool BrokerCallClient(uint32_t& aWinError, ResultType& aResult, ParamTypes&... aParameters) const;
@@ -1304,7 +1303,7 @@ protected:
 
   template<size_t... Indices>
   bool BrokerCallServer(base::ProcessId aClientId, const IpdlTuple &aInTuple,
-                         IpdlTuple *aOutTuple, std::index_sequence<Indices...>) const
+                         IpdlTuple *aOutTuple, IndexSequence<Indices...>) const
   {
     TupleParamTypes paramTuple;
     return BrokerCallServer(aClientId, aInTuple, aOutTuple,

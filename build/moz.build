@@ -5,7 +5,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 with Files('**'):
-    BUG_COMPONENT = ('Firefox Build System', 'General')
+    BUG_COMPONENT = ('Core', 'Build Config')
 
 # This cannot be named "build" because of bug 922191.
 SPHINX_TREES['buildsystem'] = 'docs'
@@ -116,4 +116,11 @@ if CONFIG['MOZ_VALGRIND']:
         'valgrind/cross-architecture.sup',
         'valgrind/i386-pc-linux-gnu.sup',
         'valgrind/x86_64-pc-linux-gnu.sup',
+    ]
+
+if CONFIG['MOZ_ARTIFACT_BUILDS']:
+    # Ensure a pre-built interfaces.xpt installed to the objdir by the artifact
+    # code is included by the top-level chrome.manifest.
+    EXTRA_COMPONENTS += [
+        'prebuilt-interfaces.manifest',
     ]

@@ -251,6 +251,7 @@ typedef struct sslOptionsStr {
     unsigned int enableFalseStart : 1;
     unsigned int cbcRandomIV : 1;
     unsigned int enableOCSPStapling : 1;
+    unsigned int enableNPN : 1;
     unsigned int enableALPN : 1;
     unsigned int reuseServerECDHEKey : 1;
     unsigned int enableFallbackSCSV : 1;
@@ -260,7 +261,6 @@ typedef struct sslOptionsStr {
     unsigned int requireDHENamedGroups : 1;
     unsigned int enable0RttData : 1;
     unsigned int enableTls13CompatMode : 1;
-    unsigned int enableDtlsShortHeader : 1;
 } sslOptions;
 
 typedef enum { sslHandshakingUndetermined = 0,
@@ -325,11 +325,9 @@ struct sslGatherStr {
     ** than into buf or inbuf, while in the GS_HEADER state.
     ** The portion of the SSL record header put here always comes off the wire
     ** as plaintext, never ciphertext.
-    ** For SSL3/TLS, the plaintext portion is 5 bytes long. For DTLS it
-    ** varies based on version and header type.
+    ** For SSL3/TLS, the plaintext portion is 5 bytes long. For DTLS it is 13.
     */
     unsigned char hdr[13];
-    unsigned int hdrLen;
 
     /* Buffer for DTLS data read off the wire as a single datagram */
     sslBuffer dtlsPacket;
@@ -442,7 +440,7 @@ struct sslSessionIDStr {
             */
             SECItem signedCertTimestamps;
 
-            /* The ALPN value negotiated in the original connection.
+            /* The NPN/ALPN value negotiated in the original connection.
              * Used for TLS 1.3. */
             SECItem alpnSelection;
 
@@ -782,13 +780,9 @@ struct ssl3StateStr {
 #define IS_DTLS(ss) (ss->protocolVariant == ssl_variant_datagram)
 
 typedef struct {
-    /* |seqNum| eventually contains the reconstructed sequence number. */
-    sslSequenceNumber seqNum;
-    /* The header of the cipherText. */
-    const PRUint8 *hdr;
-    unsigned int hdrLen;
-
-    /* |buf| is the payload of the ciphertext. */
+    SSL3ContentType type;
+    SSL3ProtocolVersion version;
+    sslSequenceNumber seq_num; /* DTLS only */
     sslBuffer *buf;
 } SSL3Ciphertext;
 
@@ -1381,11 +1375,8 @@ SECStatus ssl3_SendClientHello(sslSocket *ss, sslClientHelloType type);
 /*
  * input into the SSL3 machinery from the actualy network reading code
  */
-SECStatus ssl3_HandleRecord(sslSocket *ss, SSL3Ciphertext *cipher);
-SECStatus ssl3_HandleNonApplicationData(sslSocket *ss, SSL3ContentType rType,
-                                        DTLSEpoch epoch,
-                                        sslSequenceNumber seqNum,
-                                        sslBuffer *databuf);
+SECStatus ssl3_HandleRecord(
+    sslSocket *ss, SSL3Ciphertext *cipher, sslBuffer *out);
 SECStatus ssl_RemoveTLSCBCPadding(sslBuffer *plaintext, unsigned int macSize);
 
 int ssl3_GatherAppDataRecord(sslSocket *ss, int flags);
@@ -1546,8 +1537,8 @@ SECStatus ssl_GetSelfEncryptKeys(sslSocket *ss, unsigned char *keyName,
                                  PK11SymKey **encKey, PK11SymKey **macKey);
 void ssl_ResetSelfEncryptKeys();
 
-extern SECStatus ssl3_ValidateAppProtocol(const unsigned char *data,
-                                          unsigned int length);
+extern SECStatus ssl3_ValidateNextProtoNego(const unsigned char *data,
+                                            unsigned int length);
 
 /* Construct a new NSPR socket for the app to use */
 extern PRFileDesc *ssl_NewPRSocket(sslSocket *ss, PRFileDesc *fd);
@@ -1645,9 +1636,6 @@ SSLHashType ssl_SignatureSchemeToHashType(SSLSignatureScheme scheme);
 KeyType ssl_SignatureSchemeToKeyType(SSLSignatureScheme scheme);
 
 SECStatus ssl3_SetupCipherSuite(sslSocket *ss, PRBool initHashes);
-SECStatus ssl_InsertRecordHeader(const sslSocket *ss, ssl3CipherSpec *cwSpec,
-                                 SSL3ContentType contentType, sslBuffer *wrBuf,
-                                 PRBool *needsLength);
 
 /* Pull in DTLS functions */
 #include "dtlscon.h"

@@ -4,7 +4,7 @@
 
 "use strict";
 
-const { Component } = require("devtools/client/shared/vendor/react");
+const { PureComponent } = require("devtools/client/shared/vendor/react");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const { translateNodeFrontToGrip } = require("devtools/client/inspector/shared/utils");
@@ -13,7 +13,7 @@ const { REPS, MODE } = require("devtools/client/shared/components/reps/reps");
 const { Rep } = REPS;
 const ElementNode = REPS.ElementNode;
 
-class AnimationTarget extends Component {
+class AnimationTarget extends PureComponent {
   static get propTypes() {
     return {
       animation: PropTypes.object.isRequired,
@@ -98,8 +98,7 @@ class AnimationTarget extends Component {
           object: translateNodeFrontToGrip(nodeFront),
           onDOMNodeMouseOut: () => onHideBoxModelHighlighter(),
           onDOMNodeMouseOver: () => onShowBoxModelHighlighterForNode(nodeFront),
-          onInspectIconClick: () => setSelectedNode(nodeFront,
-            { reason: "animation-panel" }),
+          onInspectIconClick: () => setSelectedNode(nodeFront, "animation-panel"),
         }
       )
     );

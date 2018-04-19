@@ -64,7 +64,7 @@ async function testNewTab(browser) {
   let targetURL = browser.currentURI.spec;
   let dialogAppeared = promiseHelperAppDialog();
   let tabOpened = BrowserTestUtils.waitForEvent(gBrowser.tabContainer, "TabOpen").then((event) => {
-    return [ event.target, BrowserTestUtils.waitForTabClosing(event.target) ];
+    return [ event.target, BrowserTestUtils.tabRemoved(event.target) ];
   });
 
   await BrowserTestUtils.synthesizeMouseAtCenter("#target_blank", {}, browser);
@@ -72,8 +72,8 @@ async function testNewTab(browser) {
   let windowContext = await dialogAppeared;
   is(windowContext.gBrowser.selectedBrowser.currentURI.spec, targetURL,
      "got the right windowContext");
-  let [ tab, closingPromise ] = await tabOpened;
-  await closingPromise;
+  let [ tab, closed ] = await tabOpened;
+  await closed;
   is(tab.linkedBrowser, null, "tab was opened and closed");
 }
 
@@ -92,7 +92,7 @@ add_task(async function new_window() {
   // window as the window context.
   await BrowserTestUtils.withNewTab({ gBrowser, url: URL }, async function(browser) {
     let dialogAppeared = promiseHelperAppDialog();
-    let windowOpened = BrowserTestUtils.waitForNewWindow();
+    let windowOpened = BrowserTestUtils.waitForNewWindow(false);
 
     await BrowserTestUtils.synthesizeMouseAtCenter("#new_window", {}, browser);
 
@@ -122,7 +122,7 @@ add_task(async function nested_window_opens() {
     await testNewTab(nestedBrowser);
 
     isnot(secondTab.linkedBrowser, null, "the page that triggered the download is still open");
-    BrowserTestUtils.removeTab(secondTab);
+    await BrowserTestUtils.removeTab(secondTab);
   });
 });
 

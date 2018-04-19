@@ -27,7 +27,7 @@ add_task(async function test_onboarding_overlay_button() {
       "Onboarding button icon should have presentation only semantics");
   });
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });
 
 add_task(async function test_onboarding_notification_bar() {
@@ -58,7 +58,7 @@ add_task(async function test_onboarding_notification_bar() {
         "Element is only used for presentation"));
   });
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });
 
 add_task(async function test_onboarding_overlay_dialog() {
@@ -85,5 +85,5 @@ add_task(async function test_onboarding_overlay_dialog() {
   await promiseOnboardingOverlayClosed(browser);
   await assertModalDialog(browser, { visible: false });
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

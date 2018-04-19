@@ -287,7 +287,7 @@ pl{
         minimumGroupingDigits{"2"}
         native{"latn"}
     }
-    Version{"2.1.39.15"}
+    Version{"2.1.37.5"}
     calendar{
         buddhist{
             eras{
@@ -1710,10 +1710,6 @@ pl{
             1,
         }
         relative:intvector{
-            1,
-            1,
-        }
-        typographicNames:intvector{
             1,
             1,
         }

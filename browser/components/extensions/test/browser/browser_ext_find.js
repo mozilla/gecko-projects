@@ -1,6 +1,7 @@
 /* global browser */
 "use strict";
 
+/* eslint-disable mozilla/no-cpows-in-tests */
 function frameScript() {
   function getSelectedText() {
     let frame = this.content.frames[0].frames[1];
@@ -28,6 +29,7 @@ function frameScript() {
   }
   getSelectedText();
 }
+/* eslint-enable mozilla/no-cpows-in-tests */
 
 function waitForMessage(messageManager, topic) {
   return new Promise(resolve => {
@@ -180,5 +182,5 @@ add_task(async function testAboutFind() {
   await extension.startup();
   await extension.awaitMessage("done");
   await extension.unload();
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

@@ -371,8 +371,8 @@ class TestBuildReader(unittest.TestCase):
         v = reader.files_info(['bug_component/simple/moz.build'])
         self.assertEqual(len(v), 1)
         flags = v['bug_component/simple/moz.build']
-        self.assertEqual(flags['BUG_COMPONENT'].product, 'Firefox Build System')
-        self.assertEqual(flags['BUG_COMPONENT'].component, 'General')
+        self.assertEqual(flags['BUG_COMPONENT'].product, 'Core')
+        self.assertEqual(flags['BUG_COMPONENT'].component, 'Build Config')
 
     def test_files_bug_component_different_matchers(self):
         reader = self.reader('files-info')
@@ -403,9 +403,9 @@ class TestBuildReader(unittest.TestCase):
         self.assertEqual(v['bug_component/final/foo']['BUG_COMPONENT'],
             BugzillaComponent('default_product', 'default_component'))
         self.assertEqual(v['bug_component/final/Makefile.in']['BUG_COMPONENT'],
-            BugzillaComponent('Firefox Build System', 'General'))
+            BugzillaComponent('Core', 'Build Config'))
         self.assertEqual(v['bug_component/final/subcomponent/Makefile.in']['BUG_COMPONENT'],
-            BugzillaComponent('Firefox Build System', 'General'))
+            BugzillaComponent('Core', 'Build Config'))
         self.assertEqual(v['bug_component/final/subcomponent/bar']['BUG_COMPONENT'],
             BugzillaComponent('Another', 'Component'))
 

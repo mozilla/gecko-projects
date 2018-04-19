@@ -78,7 +78,8 @@ type WorkUnit<N> = ArrayVec<[SendNode<N>; WORK_UNIT_MAX]>;
 fn create_thread_local_context<'scope, E, D>(
     traversal: &'scope D,
     slot: &mut Option<ThreadLocalStyleContext<E>>,
-) where
+)
+where
     E: TElement + 'scope,
     D: DomTraversal<E>,
 {
@@ -108,7 +109,8 @@ fn top_down_dom<'a, 'scope, E, D>(
     pool: &'scope rayon::ThreadPool,
     traversal: &'scope D,
     tls: &'scope ScopedTLS<'scope, ThreadLocalStyleContext<E>>,
-) where
+)
+where
     E: TElement + 'scope,
     D: DomTraversal<E>,
 {
@@ -126,9 +128,8 @@ fn top_down_dom<'a, 'scope, E, D>(
     {
         // Scope the borrow of the TLS so that the borrow is dropped before
         // a potential recursive call when we pass TailCall.
-        let mut tlc = tls.ensure(|slot: &mut Option<ThreadLocalStyleContext<E>>| {
-            create_thread_local_context(traversal, slot)
-        });
+        let mut tlc = tls.ensure(
+            |slot: &mut Option<ThreadLocalStyleContext<E>>| create_thread_local_context(traversal, slot));
 
         // Check that we're not in danger of running out of stack.
         recursion_ok = !tlc.stack_limit_checker.limit_exceeded();
@@ -179,17 +180,15 @@ fn top_down_dom<'a, 'scope, E, D>(
             if discovered_child_nodes.len() >= WORK_UNIT_MAX {
                 let mut traversal_data_copy = traversal_data.clone();
                 traversal_data_copy.current_dom_depth += 1;
-                traverse_nodes(
-                    discovered_child_nodes.drain(),
-                    DispatchMode::NotTailCall,
-                    recursion_ok,
-                    root,
-                    traversal_data_copy,
-                    scope,
-                    pool,
-                    traversal,
-                    tls,
-                );
+                traverse_nodes(discovered_child_nodes.drain(),
+                               DispatchMode::NotTailCall,
+                               recursion_ok,
+                               root,
+                               traversal_data_copy,
+                               scope,
+                               pool,
+                               traversal,
+                               tls);
             }
 
             let node = **n;
@@ -200,7 +199,8 @@ fn top_down_dom<'a, 'scope, E, D>(
                 discovered_child_nodes.push(send_n);
             });
 
-            traversal.handle_postorder_traversal(&mut context, root, node, children_to_process);
+            traversal.handle_postorder_traversal(&mut context, root, node,
+                                                 children_to_process);
         }
     }
 
@@ -209,17 +209,15 @@ fn top_down_dom<'a, 'scope, E, D>(
     // worth of them) directly on this thread by passing TailCall.
     if !discovered_child_nodes.is_empty() {
         traversal_data.current_dom_depth += 1;
-        traverse_nodes(
-            discovered_child_nodes.drain(),
-            DispatchMode::TailCall,
-            recursion_ok,
-            root,
-            traversal_data,
-            scope,
-            pool,
-            traversal,
-            tls,
-        );
+        traverse_nodes(discovered_child_nodes.drain(),
+                       DispatchMode::TailCall,
+                       recursion_ok,
+                       root,
+                       traversal_data,
+                       scope,
+                       pool,
+                       traversal,
+                       tls);
     }
 }
 
@@ -234,9 +232,7 @@ pub enum DispatchMode {
 }
 
 impl DispatchMode {
-    fn is_tail_call(&self) -> bool {
-        matches!(*self, DispatchMode::TailCall)
-    }
+    fn is_tail_call(&self) -> bool { matches!(*self, DispatchMode::TailCall) }
 }
 
 /// Enqueues |nodes| for processing, possibly on this thread if the tail call
@@ -251,11 +247,12 @@ pub fn traverse_nodes<'a, 'scope, E, D, I>(
     scope: &'a rayon::Scope<'scope>,
     pool: &'scope rayon::ThreadPool,
     traversal: &'scope D,
-    tls: &'scope ScopedTLS<'scope, ThreadLocalStyleContext<E>>,
-) where
+    tls: &'scope ScopedTLS<'scope, ThreadLocalStyleContext<E>>
+)
+where
     E: TElement + 'scope,
     D: DomTraversal<E>,
-    I: ExactSizeIterator<Item = SendNode<E::ConcreteNode>>,
+    I: ExactSizeIterator<Item = SendNode<E::ConcreteNode>>
 {
     debug_assert_ne!(nodes.len(), 0);
 
@@ -266,19 +263,22 @@ pub fn traverse_nodes<'a, 'scope, E, D, I>(
     // overflow due to excessive tail recursion. The stack overflow avoidance
     // isn't observable to content -- we're still completely correct, just not
     // using tail recursion any more. See Gecko bugs 1368302 and 1376883.
-    let may_dispatch_tail =
-        mode.is_tail_call() && recursion_ok && !pool.current_thread_has_pending_tasks().unwrap();
+    let may_dispatch_tail = mode.is_tail_call() &&
+        recursion_ok &&
+        !pool.current_thread_has_pending_tasks().unwrap();
 
     // In the common case, our children fit within a single work unit, in which
     // case we can pass the SmallVec directly and avoid extra allocation.
     if nodes.len() <= WORK_UNIT_MAX {
         let work: WorkUnit<E::ConcreteNode> = nodes.collect();
         if may_dispatch_tail {
-            top_down_dom(&work, root, traversal_data, scope, pool, traversal, tls);
+            top_down_dom(&work, root,
+                         traversal_data, scope, pool, traversal, tls);
         } else {
             scope.spawn(move |scope| {
                 let work = work;
-                top_down_dom(&work, root, traversal_data, scope, pool, traversal, tls);
+                top_down_dom(&work, root,
+                             traversal_data, scope, pool, traversal, tls);
             });
         }
     } else {
@@ -287,7 +287,8 @@ pub fn traverse_nodes<'a, 'scope, E, D, I>(
             let traversal_data_copy = traversal_data.clone();
             scope.spawn(move |scope| {
                 let n = nodes;
-                top_down_dom(&*n, root, traversal_data_copy, scope, pool, traversal, tls)
+                top_down_dom(&*n, root,
+                             traversal_data_copy, scope, pool, traversal, tls)
             });
         }
     }

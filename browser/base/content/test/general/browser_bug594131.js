@@ -11,9 +11,7 @@ function test() {
     gBrowser.pinTab(newTab);
     gBrowser.selectedTab = newTab;
 
-    openTrustedLinkIn("http://example.org/", "current", {
-      inBackground: true,
-    });
+    openUILinkIn("http://example.org/", "current", { inBackground: true });
     isnot(gBrowser.selectedTab, newTab, "shouldn't load in background");
 
     gBrowser.removeTab(newTab);

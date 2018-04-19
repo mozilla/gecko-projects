@@ -122,10 +122,6 @@ fo{
             "CLP",
             "Kili peso",
         }
-        CNH{
-            "CNH",
-            "kinesiskur yuan (úr landi)",
-        }
         CNY{
             "CN¥",
             "kinesiskur yuan",
@@ -252,7 +248,7 @@ fo{
         }
         ILS{
             "₪",
-            "Ísrael new shekel",
+            "Ísrael new sheqel",
         }
         INR{
             "₹",
@@ -368,10 +364,6 @@ fo{
         }
         MRO{
             "MRO",
-            "Móritania ouguiya (1973–2017)",
-        }
-        MRU{
-            "MRU",
             "Móritania ouguiya",
         }
         MUR{
@@ -520,10 +512,6 @@ fo{
         }
         STD{
             "STD",
-            "Sao Tome & Prinsipi dobra (1977–2017)",
-        }
-        STN{
-            "STN",
             "Sao Tome & Prinsipi dobra",
         }
         SYP{
@@ -735,7 +723,7 @@ fo{
         SHP{"£"}
         SRD{"$"}
         SSP{"£"}
-        STN{"Db"}
+        STD{"Db"}
         SYP{"£"}
         THB{"฿"}
         TOP{"T$"}
@@ -875,10 +863,6 @@ fo{
             one{"Kili peso"}
             other{"Kili peso"}
         }
-        CNH{
-            one{"kinesiskur yuan (úr landi)"}
-            other{"kinesiskur yuan (úr landi)"}
-        }
         CNY{
             one{"kinesiskur yuan"}
             other{"kinesiskir yuan"}
@@ -1004,8 +988,8 @@ fo{
             other{"Indonesia rupiah"}
         }
         ILS{
-            one{"Ísrael new shekel"}
-            other{"Ísrael new shekel"}
+            one{"Ísrael new sheqel"}
+            other{"Ísrael new sheqel"}
         }
         INR{
             one{"indiskur rupi"}
@@ -1120,10 +1104,6 @@ fo{
             other{"Makao pataca"}
         }
         MRO{
-            one{"Móritania ouguiya (1973–2017)"}
-            other{"Móritania ouguiya (1973–2017)"}
-        }
-        MRU{
             one{"Móritania ouguiya"}
             other{"Móritania ouguiya"}
         }
@@ -1272,10 +1252,6 @@ fo{
             other{"Suðursudan pund"}
         }
         STD{
-            one{"Sao Tome & Prinsipi dobra (1977–2017)"}
-            other{"Sao Tome & Prinsipi dobra (1977–2017)"}
-        }
-        STN{
             one{"Sao Tome & Prinsipi dobra"}
             other{"Sao Tome & Prinsipi dobra"}
         }
@@ -1412,5 +1388,5 @@ fo{
         one{"{0} {1}"}
         other{"{0} {1}"}
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.37.5"}
 }

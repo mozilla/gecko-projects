@@ -519,7 +519,7 @@ BEGIN_TEST(testAssemblerBuffer_ARM64)
     TempAllocator alloc(&lifo);
     JitContext jc(cx, &alloc);
     cx->runtime()->getJitRuntime(cx);
-    StackMacroAssembler masm;
+    MacroAssembler masm;
 
     // Branches to an unbound label.
     Label lab1;

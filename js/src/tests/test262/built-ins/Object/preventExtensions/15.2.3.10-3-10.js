@@ -19,4 +19,5 @@ verifyNotWritable(errObj, "0", "nocheck");
 
 assert(!errObj.hasOwnProperty("0"));
 
+
 reportCompare(0, 0);

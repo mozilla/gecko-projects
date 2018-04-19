@@ -10,7 +10,6 @@
 #include "MediaFormatReader.h"
 #include "BaseMediaResource.h"
 #include "MediaShutdownManager.h"
-#include "mozilla/StaticPrefs.h"
 
 namespace mozilla {
 
@@ -168,9 +167,9 @@ ChannelMediaDecoder::NotifyPrincipalChanged()
     return;
   }
   if (!mSameOriginMedia &&
-      Preferences::GetBool("media.block-midflight-redirects", true)) {
-    // Block mid-flight redirects to non CORS same origin destinations.
-    // See bugs 1441153, 1443942.
+      DecoderTraits::CrossOriginRedirectsProhibited(ContainerType())) {
+    // For some content types we block mid-flight channel redirects to cross
+    // origin destinations due to security constraints. See bug 1441153.
     LOG("ChannnelMediaDecoder prohibited cross origin redirect blocked.");
     NetworkError(MediaResult(NS_ERROR_DOM_BAD_URI,
                              "Prohibited cross origin redirect blocked"));
@@ -534,7 +533,7 @@ ChannelMediaDecoder::ShouldThrottleDownload(const MediaStatistics& aStats)
 
   int64_t length = aStats.mTotalBytes;
   if (length > 0 &&
-      length <= int64_t(StaticPrefs::MediaMemoryCacheMaxSize()) * 1024) {
+      length <= int64_t(MediaPrefs::MediaMemoryCacheMaxSize()) * 1024) {
     // Don't throttle the download of small resources. This is to speed
     // up seeking, as seeks into unbuffered ranges would require starting
     // up a new HTTP transaction, which adds latency.

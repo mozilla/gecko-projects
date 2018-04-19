@@ -685,10 +685,6 @@ yue_Hans{
         }
         MRO{
             "MRO",
-            "茅利塔尼亚乌吉亚 (1973–2017)",
-        }
-        MRU{
-            "MRU",
             "茅利塔尼亚乌吉亚",
         }
         MTL{
@@ -921,10 +917,6 @@ yue_Hans{
         }
         STD{
             "STD",
-            "圣多美岛和普林西比岛多布拉 (1977–2017)",
-        }
-        STN{
-            "STN",
             "圣多美岛和普林西比岛多布拉",
         }
         SUR{
@@ -1290,7 +1282,7 @@ yue_Hans{
         SHP{"£"}
         SRD{"$"}
         SSP{"£"}
-        STN{"Db"}
+        STD{"Db"}
         SYP{"£"}
         THB{"฿"}
         TOP{"T$"}
@@ -1819,9 +1811,6 @@ yue_Hans{
             other{"澳门元"}
         }
         MRO{
-            other{"茅利塔尼亚乌吉亚 (1973–2017)"}
-        }
-        MRU{
             other{"茅利塔尼亚乌吉亚"}
         }
         MTL{
@@ -1996,9 +1985,6 @@ yue_Hans{
             other{"南苏丹镑"}
         }
         STD{
-            other{"圣多美岛和普林西比岛多布拉 (1977–2017)"}
-        }
-        STN{
             other{"圣多美岛和普林西比岛多布拉"}
         }
         SUR{
@@ -2215,5 +2201,5 @@ yue_Hans{
     CurrencyUnitPatterns{
         other{"{0} {1}"}
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.37.8"}
 }

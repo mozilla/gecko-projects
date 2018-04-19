@@ -30,7 +30,6 @@
 namespace mozilla {
 namespace dom {
 class DOMStringList;
-class Event;
 } // namespace dom
 } // namespace mozilla
 
@@ -166,7 +165,7 @@ private:
   char **mCachedKeys;
   uint32_t mCachedKeysCount;
 
-  nsCOMArray<mozilla::dom::Event> mPendingEvents;
+  nsCOMArray<nsIDOMEvent> mPendingEvents;
 };
 
 #endif

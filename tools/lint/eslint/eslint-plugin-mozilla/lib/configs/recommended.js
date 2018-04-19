@@ -22,10 +22,7 @@ module.exports = {
     "Cr": false,
     "Cu": false,
     "DOMRequest": false,
-    "Debugger": false,
     "DedicatedWorkerGlobalScope": false,
-    "DominatorTree": false,
-    "HeapSnapshot": false,
     "IDBFileRequest": false,
     "IDBLocaleAwareKeyRange": false,
     "IDBMutableFile": false,
@@ -56,7 +53,6 @@ module.exports = {
     "console": true,
     "dump": true,
     "openDialog": false,
-    "saveStack": false,
     "sizeToContent": false,
     // Specific to Firefox
     // eslint-disable-next-line max-len

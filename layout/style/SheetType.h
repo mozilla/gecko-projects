@@ -23,6 +23,7 @@ enum class SheetType : uint8_t {
   User, // CSS
   PresHint,
   Doc, // CSS
+  ScopedDoc, // CSS
   StyleAttr,
   Override, // CSS
   Animation,
@@ -41,6 +42,7 @@ IsCSSSheetType(SheetType aSheetType)
     case SheetType::Agent:
     case SheetType::User:
     case SheetType::Doc:
+    case SheetType::ScopedDoc:
     case SheetType::Override:
       return true;
     default:

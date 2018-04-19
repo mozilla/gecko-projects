@@ -193,14 +193,9 @@ ee{
                 superscriptingExponent{"×"}
             }
         }
-        minimalPairs{
-            ordinal{
-                other{"{0}lia"}
-            }
-        }
         minimumGroupingDigits{"3"}
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.37.1"}
     calendar{
         generic{
             DateTimePatterns{
@@ -431,8 +426,8 @@ ee{
                 yQQQ{"QQQ y"}
                 yQQQQ{"QQQQ y"}
                 yw{
-                    one{"'kɔsiɖa' w 'lia' 'le' 'ƒe' y 'me'"}
-                    other{"'kɔsiɖa' w 'lia' 'le' 'ƒe' y 'me'"}
+                    one{"'kɔsiɖa' w 'lia' 'le' 'ƒe' Y 'me'"}
+                    other{"'kɔsiɖa' w 'lia' 'le' 'ƒe' Y 'me'"}
                 }
             }
             dayNames{

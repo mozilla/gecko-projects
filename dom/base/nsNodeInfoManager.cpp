@@ -110,7 +110,7 @@ nsNodeInfoManager::Init(nsIDocument *aDocument)
   NS_PRECONDITION(!mPrincipal,
                   "Being inited when we already have a principal?");
 
-  mPrincipal = NullPrincipal::CreateWithoutOriginAttributes();
+  mPrincipal = NullPrincipal::Create();
 
   if (aDocument) {
     mBindingManager = new nsBindingManager(aDocument);

@@ -931,7 +931,6 @@ SchedulingComponents = ContextDerivedTypedRecord(
 GeneratedFilesList = StrictOrderingOnAppendListWithFlagsFactory({
     'script': unicode,
     'inputs': list,
-    'force': bool,
     'flags': list, })
 
 
@@ -986,7 +985,7 @@ class Files(SubContext):
             """The bug component that tracks changes to these files.
 
             Values are a 2-tuple of unicode describing the Bugzilla product and
-            component. e.g. ``('Firefox Build System', 'General')``.
+            component. e.g. ``('Core', 'Build Config')``.
             """),
 
         'FINAL': (bool, bool,
@@ -1277,8 +1276,8 @@ VARIABLES = {
 
         This variable contains a list of files for the build system to
         generate at export time. The generation method may be declared
-        with optional ``script``, ``inputs``, ``flags``, and ``force``
-        attributes on individual entries.
+        with optional ``script``, ``inputs`` and ``flags`` attributes on
+        individual entries.
         If the optional ``script`` attribute is not present on an entry, it
         is assumed that rules for generating the file are present in
         the associated Makefile.in.
@@ -1316,11 +1315,6 @@ VARIABLES = {
 
         When the ``flags`` attribute is present, the given list of flags is
         passed as extra arguments following the inputs.
-
-        When the ``force`` attribute is present, the file is generated every
-        build, regardless of whether it is stale.  This is special to the
-        RecursiveMake backend and intended for special situations only (e.g.,
-        localization).  Please consult a build peer before using ``force``.
         """),
 
     'DEFINES': (InitializedDefines, dict,
@@ -1467,7 +1461,7 @@ VARIABLES = {
            which provides the locale in use, i.e. ``en-US``.
         2. The ``inputs`` list may contain paths to files that will be taken from the locale
            source directory (see ``LOCALIZED_FILES`` for a discussion of the specifics). Paths
-           in ``inputs`` starting with ``en-US/`` or containing ``locales/en-US/`` are considered
+           in ``inputs`` starting with ``en-US/`` or containing ``/locales/en-US/`` are considered
            localized files.
 
         To place the generated output file in a specific location, list its objdir path in
@@ -1777,6 +1771,14 @@ VARIABLES = {
         This is the name of the ``.xpt`` file that is created by linking
         ``XPIDL_SOURCES`` together. If unspecified, it defaults to be the same
         as ``MODULE``.
+        """),
+
+    'XPIDL_NO_MANIFEST': (bool, bool,
+        """Indicate that the XPIDL module should not be added to a manifest.
+
+        This flag exists primarily to prevent test-only XPIDL modules from being
+        added to the application's chrome manifest. Most XPIDL modules should
+        not use this flag.
         """),
 
     'PREPROCESSED_IPDL_SOURCES': (StrictOrderingOnAppendList, list,

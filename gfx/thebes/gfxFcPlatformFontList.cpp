@@ -160,40 +160,40 @@ GetFaceNames(FcPattern* aFont, const nsAString& aFamilyName,
     }
 }
 
-static FontWeight
+static uint16_t
 MapFcWeight(int aFcWeight)
 {
   if (aFcWeight <= (FC_WEIGHT_THIN + FC_WEIGHT_EXTRALIGHT) / 2) {
-    return FontWeight(100);
+    return 100;
   }
   if (aFcWeight <= (FC_WEIGHT_EXTRALIGHT + FC_WEIGHT_LIGHT) / 2) {
-    return FontWeight(200);
+    return 200;
   }
   if (aFcWeight <= (FC_WEIGHT_LIGHT + FC_WEIGHT_BOOK) / 2) {
-    return FontWeight(300);
+    return 300;
   }
   if (aFcWeight <= (FC_WEIGHT_REGULAR + FC_WEIGHT_MEDIUM) / 2) {
     // This includes FC_WEIGHT_BOOK
-    return FontWeight(400);
+    return 400;
   }
   if (aFcWeight <= (FC_WEIGHT_MEDIUM + FC_WEIGHT_DEMIBOLD) / 2) {
-    return FontWeight(500);
+    return 500;
   }
   if (aFcWeight <= (FC_WEIGHT_DEMIBOLD + FC_WEIGHT_BOLD) / 2) {
-    return FontWeight(600);
+    return 600;
   }
   if (aFcWeight <= (FC_WEIGHT_BOLD + FC_WEIGHT_EXTRABOLD) / 2) {
-    return FontWeight(700);
+    return 700;
   }
   if (aFcWeight <= (FC_WEIGHT_EXTRABOLD + FC_WEIGHT_BLACK) / 2) {
-    return FontWeight(800);
+    return 800;
   }
   if (aFcWeight <= FC_WEIGHT_BLACK) {
-    return FontWeight(900);
+    return 900;
   }
 
   // including FC_WEIGHT_EXTRABLACK
-  return FontWeight(901);
+  return 901;
 }
 
 static int16_t
@@ -311,8 +311,8 @@ CreateFaceForPattern(FcPattern* aPattern)
 }
 
 gfxFontconfigFontEntry::gfxFontconfigFontEntry(const nsAString& aFaceName,
-                                               FontWeight aWeight,
-                                               uint16_t aStretch,
+                                               uint16_t aWeight,
+                                               int16_t aStretch,
                                                uint8_t aStyle,
                                                const uint8_t *aData,
                                                uint32_t aLength,
@@ -334,8 +334,8 @@ gfxFontconfigFontEntry::gfxFontconfigFontEntry(const nsAString& aFaceName,
 
 gfxFontconfigFontEntry::gfxFontconfigFontEntry(const nsAString& aFaceName,
                                                FcPattern* aFontPattern,
-                                               FontWeight aWeight,
-                                               uint16_t aStretch,
+                                               uint16_t aWeight,
+                                               int16_t aStretch,
                                                uint8_t aStyle)
         : gfxFontEntry(aFaceName), mFontPattern(aFontPattern),
           mFTFace(nullptr), mFTFaceInitialized(false),
@@ -1202,13 +1202,13 @@ gfxFontconfigFontFamily::FindStyleVariations(FontInfoData *aFontInfoData)
 
         if (LOG_FONTLIST_ENABLED()) {
             LOG_FONTLIST(("(fontlist) added (%s) to family (%s)"
-                 " with style: %s weight: %g stretch: %d"
+                 " with style: %s weight: %d stretch: %d"
                  " psname: %s fullname: %s",
                  NS_ConvertUTF16toUTF8(fontEntry->Name()).get(),
                  NS_ConvertUTF16toUTF8(Name()).get(),
                  (fontEntry->IsItalic()) ?
                   "italic" : (fontEntry->IsOblique() ? "oblique" : "normal"),
-                 fontEntry->Weight().ToFloat(), fontEntry->Stretch(),
+                 fontEntry->Weight(), fontEntry->Stretch(),
                  NS_ConvertUTF16toUTF8(psname).get(),
                  NS_ConvertUTF16toUTF8(fullname).get()));
         }
@@ -1857,8 +1857,8 @@ gfxFcPlatformFontList::GetDefaultFontForPlatform(const gfxFontStyle* aStyle)
 
 gfxFontEntry*
 gfxFcPlatformFontList::LookupLocalFont(const nsAString& aFontName,
-                                       FontWeight aWeight,
-                                       uint16_t aStretch,
+                                       uint16_t aWeight,
+                                       int16_t aStretch,
                                        uint8_t aStyle)
 {
     nsAutoString keyName(aFontName);
@@ -1876,8 +1876,8 @@ gfxFcPlatformFontList::LookupLocalFont(const nsAString& aFontName,
 
 gfxFontEntry*
 gfxFcPlatformFontList::MakePlatformFont(const nsAString& aFontName,
-                                        FontWeight aWeight,
-                                        uint16_t aStretch,
+                                        uint16_t aWeight,
+                                        int16_t aStretch,
                                         uint8_t aStyle,
                                         const uint8_t* aFontData,
                                         uint32_t aLength)

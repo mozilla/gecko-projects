@@ -11,17 +11,24 @@
 namespace IPC {
 
 void
-ParamTraits<nsIPrincipal>::Write(Message* aMsg, nsIPrincipal* aParam)
-{
-  bool isNull = !aParam;
+ParamTraits<Principal>::Write(Message* aMsg, const paramType& aParam) {
+  bool isNull = !aParam.mPrincipal;
   WriteParam(aMsg, isNull);
   if (isNull) {
     return;
   }
 
+  bool isSerialized = false;
   nsCString principalString;
-  nsresult rv = NS_SerializeToString(aParam, principalString);
-  if (NS_FAILED(rv)) {
+  nsCOMPtr<nsISerializable> serializable = do_QueryInterface(aParam.mPrincipal);
+  if (serializable) {
+    nsresult rv = NS_SerializeToString(serializable, principalString);
+    if (NS_SUCCEEDED(rv)) {
+      isSerialized = true;
+    }
+  }
+
+  if (!isSerialized) {
     MOZ_CRASH("Unable to serialize principal.");
     return;
   }
@@ -30,9 +37,7 @@ ParamTraits<nsIPrincipal>::Write(Message* aMsg, nsIPrincipal* aParam)
 }
 
 bool
-ParamTraits<nsIPrincipal>::Read(const Message* aMsg,
-                                PickleIterator* aIter,
-                                RefPtr<nsIPrincipal>* aResult)
+ParamTraits<Principal>::Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
 {
   bool isNull;
   if (!ReadParam(aMsg, aIter, &isNull)) {
@@ -40,7 +45,7 @@ ParamTraits<nsIPrincipal>::Read(const Message* aMsg,
   }
 
   if (isNull) {
-    *aResult = nullptr;
+    aResult->mPrincipal = nullptr;
     return true;
   }
 
@@ -56,7 +61,7 @@ ParamTraits<nsIPrincipal>::Read(const Message* aMsg,
   nsCOMPtr<nsIPrincipal> principal = do_QueryInterface(iSupports);
   NS_ENSURE_TRUE(principal, false);
 
-  *aResult = principal.forget();
+  principal.swap(aResult->mPrincipal);
   return true;
 }
 

@@ -1,12 +1,13 @@
 // Copyright (C) 2014 the V8 project authors. All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
 /*---
-esid: sec-gettemplateobject
+es6id: 12.2.8
 description: Template caching using distinct expressions within `eval`
-info: >
-    1. For each element _e_ of _templateRegistry_, do
-      1. If _e_.[[Site]] is the same Parse Node as _templateLiteral_, then
-        1. Return _e_.[[Array]].
+info: |
+    Previously-created template objects should be retrieved from the internal
+    template registry when their source is identical but their expressions
+    evaluate to different values and the tagged template is being evaluated in
+    an `eval` context.
 ---*/
 function tag(templateObject) {
   previousObject = templateObject;
@@ -22,6 +23,6 @@ assert(firstObject !== null);
 previousObject = null;
 
 eval('tag`head${b}tail`');
-assert.notSameValue(previousObject, firstObject);
+assert.sameValue(previousObject, firstObject);
 
 reportCompare(0, 0);

@@ -16,6 +16,7 @@
 #undef PostMessage
 #endif
 
+class nsIDOMEvent;
 class nsPIDOMWindowInner;
 
 namespace mozilla {
@@ -25,7 +26,6 @@ namespace dom {
 class MessagePort;
 class StringOrWorkerOptions;
 class WorkerPrivate;
-class Event;
 
 namespace workerinternals {
 class RuntimeService;
@@ -40,7 +40,7 @@ class SharedWorker final : public DOMEventTargetHelper
 
   RefPtr<WorkerPrivate> mWorkerPrivate;
   RefPtr<MessagePort> mMessagePort;
-  nsTArray<RefPtr<Event>> mFrozenEvents;
+  nsTArray<nsCOMPtr<nsIDOMEvent>> mFrozenEvents;
   bool mFrozen;
 
 public:
@@ -64,7 +64,7 @@ public:
   Thaw();
 
   void
-  QueueEvent(Event* aEvent);
+  QueueEvent(nsIDOMEvent* aEvent);
 
   void
   Close();
@@ -77,7 +77,8 @@ public:
   virtual JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
+  virtual nsresult
+  GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
 
   WorkerPrivate*
   GetWorkerPrivate() const

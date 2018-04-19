@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-extern crate serde_bytes;
-
 use app_units::Au;
 use channel::{self, MsgSender, Payload, PayloadSender, PayloadSenderHelperMethods};
 use std::cell::Cell;
@@ -288,8 +286,9 @@ impl Transaction {
         &mut self,
         scroll_location: ScrollLocation,
         cursor: WorldPoint,
+        phase: ScrollEventPhase,
     ) {
-        self.frame_ops.push(FrameMsg::Scroll(scroll_location, cursor));
+        self.frame_ops.push(FrameMsg::Scroll(scroll_location, cursor, phase));
     }
 
     pub fn scroll_node_with_id(
@@ -313,6 +312,10 @@ impl Transaction {
         self.frame_ops.push(FrameMsg::SetPan(pan));
     }
 
+    pub fn tick_scrolling_bounce_animations(&mut self) {
+        self.frame_ops.push(FrameMsg::TickScrollingBounce);
+    }
+
     /// Generate a new frame.
     pub fn generate_frame(&mut self) {
         self.generate_frame = true;
@@ -324,23 +327,10 @@ impl Transaction {
         self.frame_ops.push(FrameMsg::UpdateDynamicProperties(properties));
     }
 
-    /// Add to the list of animated property bindings that should be used to
-    /// resolve bindings in the current display list. This is a convenience method
-    /// so the caller doesn't have to figure out all the dynamic properties before
-    /// setting them on the transaction but can do them incrementally.
-    pub fn append_dynamic_properties(&mut self, properties: DynamicProperties) {
-        self.frame_ops.push(FrameMsg::AppendDynamicProperties(properties));
-    }
-
     /// Enable copying of the output of this pipeline id to
     /// an external texture for callers to consume.
     pub fn enable_frame_output(&mut self, pipeline_id: PipelineId, enable: bool) {
         self.frame_ops.push(FrameMsg::EnableFrameOutput(pipeline_id, enable));
-    }
-
-    /// Consumes this object and just returns the frame ops.
-    pub fn get_frame_ops(self) -> Vec<FrameMsg> {
-        self.frame_ops
     }
 
     fn finalize(self) -> (TransactionMsg, Vec<Payload>) {
@@ -415,11 +405,7 @@ pub struct UpdateImage {
 
 #[derive(Clone, Deserialize, Serialize)]
 pub enum AddFont {
-    Raw(
-        FontKey,
-        #[serde(with = "serde_bytes")] Vec<u8>,
-        u32
-    ),
+    Raw(FontKey, Vec<u8>, u32),
     Native(FontKey, NativeFontHandle),
 }
 
@@ -495,11 +481,11 @@ pub enum FrameMsg {
     HitTest(Option<PipelineId>, WorldPoint, HitTestFlags, MsgSender<HitTestResult>),
     SetPan(DeviceIntPoint),
     EnableFrameOutput(PipelineId, bool),
-    Scroll(ScrollLocation, WorldPoint),
+    Scroll(ScrollLocation, WorldPoint, ScrollEventPhase),
     ScrollNodeWithId(LayoutPoint, ExternalScrollId, ScrollClamping),
+    TickScrollingBounce,
     GetScrollNodeState(MsgSender<Vec<ScrollNodeState>>),
     UpdateDynamicProperties(DynamicProperties),
-    AppendDynamicProperties(DynamicProperties),
 }
 
 impl fmt::Debug for SceneMsg {
@@ -524,10 +510,10 @@ impl fmt::Debug for FrameMsg {
             FrameMsg::SetPan(..) => "FrameMsg::SetPan",
             FrameMsg::Scroll(..) => "FrameMsg::Scroll",
             FrameMsg::ScrollNodeWithId(..) => "FrameMsg::ScrollNodeWithId",
+            FrameMsg::TickScrollingBounce => "FrameMsg::TickScrollingBounce",
             FrameMsg::GetScrollNodeState(..) => "FrameMsg::GetScrollNodeState",
             FrameMsg::EnableFrameOutput(..) => "FrameMsg::EnableFrameOutput",
             FrameMsg::UpdateDynamicProperties(..) => "FrameMsg::UpdateDynamicProperties",
-            FrameMsg::AppendDynamicProperties(..) => "FrameMsg::AppendDynamicProperties",
         })
     }
 }
@@ -550,7 +536,6 @@ bitflags!{
         const GLYPHS = 0x2;
         const GLYPH_DIMENSIONS = 0x4;
         const RENDER_TASKS = 0x8;
-        const TEXTURE_CACHE = 0x16;
     }
 }
 
@@ -630,7 +615,6 @@ pub enum ApiMsg {
     /// Wakes the render backend's event loop up. Needed when an event is communicated
     /// through another channel.
     WakeUp,
-    WakeSceneBuilder,
     ShutDown,
 }
 
@@ -650,7 +634,6 @@ impl fmt::Debug for ApiMsg {
             ApiMsg::DebugCommand(..) => "ApiMsg::DebugCommand",
             ApiMsg::ShutDown => "ApiMsg::ShutDown",
             ApiMsg::WakeUp => "ApiMsg::WakeUp",
-            ApiMsg::WakeSceneBuilder => "ApiMsg::WakeSceneBuilder",
         })
     }
 }
@@ -707,7 +690,7 @@ unsafe impl Send for ExternalEvent {}
 
 impl ExternalEvent {
     pub fn from_raw(raw: usize) -> Self {
-        ExternalEvent { raw }
+        ExternalEvent { raw: raw }
     }
     /// Consumes self to make it obvious that the event should be forwarded only once.
     pub fn unwrap(self) -> usize {
@@ -756,7 +739,7 @@ impl RenderApiSender {
         RenderApi {
             api_sender: self.api_sender.clone(),
             payload_sender: self.payload_sender.clone(),
-            namespace_id,
+            namespace_id: namespace_id,
             next_id: Cell::new(ResourceId(0)),
         }
     }
@@ -959,10 +942,6 @@ impl RenderApi {
         rx.recv().unwrap()
     }
 
-    pub fn wake_scene_builder(&self) {
-        self.send_message(ApiMsg::WakeSceneBuilder);
-    }
-
     /// Save a capture of the current frame state for debugging.
     pub fn save_capture(&self, path: PathBuf, bits: CaptureBits) {
         let msg = ApiMsg::DebugCommand(DebugCommand::SaveCapture(path, bits));
@@ -993,6 +972,17 @@ impl Drop for RenderApi {
         let msg = ApiMsg::ClearNamespace(self.namespace_id);
         let _ = self.api_sender.send(msg);
     }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub enum ScrollEventPhase {
+    /// The user started scrolling.
+    Start,
+    /// The user performed a scroll. The Boolean flag indicates whether the user's fingers are
+    /// down, if a touchpad is in use. (If false, the event is a touchpad fling.)
+    Move(bool),
+    /// The user ended scrolling.
+    End,
 }
 
 #[derive(Clone, Deserialize, Serialize)]

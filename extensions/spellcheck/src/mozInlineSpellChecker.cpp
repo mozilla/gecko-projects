@@ -41,7 +41,6 @@
 #include "mozilla/TextEditor.h"
 #include "mozilla/dom/KeyboardEvent.h"
 #include "mozilla/dom/KeyboardEventBinding.h"
-#include "mozilla/dom/MouseEvent.h"
 #include "mozilla/dom/Selection.h"
 #include "mozInlineSpellWordUtil.h"
 #include "mozISpellI18NManager.h"
@@ -51,6 +50,7 @@
 #include "nsIDOMNode.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMElement.h"
+#include "nsIDOMMouseEvent.h"
 #include "nsIDOMNode.h"
 #include "nsIDOMNodeList.h"
 #include "nsIDOMEvent.h"
@@ -69,7 +69,6 @@
 #include "nsThreadUtils.h"
 #include "nsUnicharUtils.h"
 #include "nsIContent.h"
-#include "nsIContentInlines.h"
 #include "nsRange.h"
 #include "nsContentUtils.h"
 #include "nsIObserverService.h"
@@ -354,22 +353,20 @@ mozInlineSpellStatus::FinishNavigationEvent(mozInlineSpellWordUtil& aWordUtil)
   }
 
   NS_ASSERTION(mAnchorRange, "No anchor for navigation!");
+  nsCOMPtr<nsIDOMNode> newAnchorNode, oldAnchorNode;
 
   // get the DOM position of the old caret, the range should be collapsed
-  ErrorResult err;
-  nsCOMPtr<nsINode> oldAnchorNode =
-    mOldNavigationAnchorRange->GetStartContainer(err);
-  if (NS_WARN_IF(err.Failed())) {
-    return err.StealNSResult();
-  }
+  nsresult rv = mOldNavigationAnchorRange->GetStartContainer(
+      getter_AddRefs(oldAnchorNode));
+  NS_ENSURE_SUCCESS(rv, rv);
   uint32_t oldAnchorOffset = mOldNavigationAnchorRange->StartOffset();
 
   // find the word on the old caret position, this is the one that we MAY need
   // to check
   RefPtr<nsRange> oldWord;
-  nsresult rv = aWordUtil.GetRangeForWord(oldAnchorNode->AsDOMNode(),
-                                          static_cast<int32_t>(oldAnchorOffset),
-                                          getter_AddRefs(oldWord));
+  rv = aWordUtil.GetRangeForWord(oldAnchorNode,
+                                 static_cast<int32_t>(oldAnchorOffset),
+                                 getter_AddRefs(oldWord));
   NS_ENSURE_SUCCESS(rv, rv);
 
   // aWordUtil.GetRangeForWord flushes pending notifications, check editor again.
@@ -378,22 +375,19 @@ mozInlineSpellStatus::FinishNavigationEvent(mozInlineSpellWordUtil& aWordUtil)
   }
 
   // get the DOM position of the new caret, the range should be collapsed
-  nsCOMPtr<nsINode> newAnchorNode = mAnchorRange->GetStartContainer(err);
-  if (NS_WARN_IF(err.Failed())) {
-    return err.StealNSResult();
-  }
+  rv = mAnchorRange->GetStartContainer(getter_AddRefs(newAnchorNode));
+  NS_ENSURE_SUCCESS(rv, rv);
   uint32_t newAnchorOffset = mAnchorRange->StartOffset();
 
   // see if the new cursor position is in the word of the old cursor position
   bool isInRange = false;
   if (! mForceNavigationWordCheck) {
-    isInRange =
-      oldWord->IsPointInRange(*newAnchorNode,
-                              newAnchorOffset + mNewNavigationPositionOffset,
-                              err);
-    if (NS_WARN_IF(err.Failed())) {
-      return err.StealNSResult();
-    }
+    rv = oldWord->IsPointInRange(
+                    newAnchorNode,
+                    static_cast<int32_t>(
+                      newAnchorOffset + mNewNavigationPositionOffset),
+                    &isInRange);
+    NS_ENSURE_SUCCESS(rv, rv);
   }
 
   if (isInRange) {
@@ -421,14 +415,12 @@ nsresult
 mozInlineSpellStatus::FillNoCheckRangeFromAnchor(
     mozInlineSpellWordUtil& aWordUtil)
 {
-  ErrorResult err;
-  nsCOMPtr<nsINode> anchorNode = mAnchorRange->GetStartContainer(err);
-  if (NS_WARN_IF(err.Failed())) {
-    return err.StealNSResult();
-  }
+  nsCOMPtr<nsIDOMNode> anchorNode;
+  nsresult rv = mAnchorRange->GetStartContainer(getter_AddRefs(anchorNode));
+  NS_ENSURE_SUCCESS(rv, rv);
 
   uint32_t anchorOffset = mAnchorRange->StartOffset();
-  return aWordUtil.GetRangeForWord(anchorNode->AsDOMNode(),
+  return aWordUtil.GetRangeForWord(anchorNode,
                                    static_cast<int32_t>(anchorOffset),
                                    getter_AddRefs(mNoCheckRange));
 }
@@ -615,7 +607,7 @@ nsresult mozInlineSpellChecker::Cleanup(bool aDestroyingFrames)
     rv = NS_ERROR_FAILURE;
   } else {
     if (!aDestroyingFrames) {
-      spellCheckSelection->RemoveAllRanges(IgnoreErrors());
+      spellCheckSelection->RemoveAllRanges();
     }
 
     rv = UnregisterEventListeners();
@@ -959,14 +951,17 @@ mozInlineSpellChecker::ReplaceWord(nsIDOMNode *aNode, int32_t aOffset,
     // This range was retrieved from the spellchecker selection. As
     // ranges cannot be shared between selections, we must clone it
     // before adding it to the editor's selection.
-    RefPtr<nsRange> editorRange = static_cast<nsRange*>(range.get())->CloneRange();
+    nsCOMPtr<nsIDOMRange> editorRange;
+    res = range->CloneRange(getter_AddRefs(editorRange));
+    NS_ENSURE_SUCCESS(res, res);
 
     AutoPlaceholderBatch phb(mTextEditor, nullptr);
 
-    RefPtr<Selection> selection = mTextEditor->GetSelection();
-    NS_ENSURE_TRUE(selection, NS_ERROR_UNEXPECTED);
-    selection->RemoveAllRanges(IgnoreErrors());
-    selection->AddRange(*editorRange, IgnoreErrors());
+    nsCOMPtr<nsISelection> selection;
+    res = mTextEditor->GetSelection(getter_AddRefs(selection));
+    NS_ENSURE_SUCCESS(res, res);
+    selection->RemoveAllRanges();
+    selection->AddRange(editorRange);
 
     MOZ_ASSERT(mTextEditor);
     mTextEditor->InsertText(newword);
@@ -1308,7 +1303,7 @@ mozInlineSpellChecker::DoSpellCheckSelection(mozInlineSpellWordUtil& aWordUtil,
   // provides better performance. By ensuring that no ranges need to be
   // removed in DoSpellCheck, we can save checking range inclusion which is
   // slow.
-  aSpellCheckSelection->RemoveAllRanges(IgnoreErrors());
+  aSpellCheckSelection->RemoveAllRanges();
 
   // We use this state object for all calls, and just update its range. Note
   // that we don't need to call FinishInit since we will be filling in the
@@ -1502,7 +1497,7 @@ nsresult mozInlineSpellChecker::DoSpellCheck(mozInlineSpellWordUtil& aWordUtil,
 
     // check spelling and add to selection if misspelled
     bool isMisspelled;
-    mozInlineSpellWordUtil::NormalizeWord(wordText);
+    aWordUtil.NormalizeWord(wordText);
     nsresult rv = mSpellCheck->CheckCurrentWordNoSuggest(wordText,
                                                          &isMisspelled);
     if (NS_FAILED(rv))
@@ -1711,8 +1706,8 @@ mozInlineSpellChecker::RemoveRange(Selection *aSpellCheckSelection,
 //    bound, stop adding the ranges
 
 nsresult
-mozInlineSpellChecker::AddRange(Selection* aSpellCheckSelection,
-                                nsRange* aRange)
+mozInlineSpellChecker::AddRange(nsISelection* aSpellCheckSelection,
+                                nsIDOMRange* aRange)
 {
   NS_ENSURE_ARG_POINTER(aSpellCheckSelection);
   NS_ENSURE_ARG_POINTER(aRange);
@@ -1721,13 +1716,9 @@ mozInlineSpellChecker::AddRange(Selection* aSpellCheckSelection,
 
   if (!SpellCheckSelectionIsFull())
   {
-    IgnoredErrorResult err;
-    aSpellCheckSelection->AddRange(*aRange, err);
-    if (err.Failed()) {
-      rv = err.StealNSResult();
-    } else {
+    rv = aSpellCheckSelection->AddRange(aRange);
+    if (NS_SUCCEEDED(rv))
       mNumWordsInSpellSelection++;
-    }
   }
 
   return rv;
@@ -1863,12 +1854,14 @@ mozInlineSpellChecker::OnBlur(nsIDOMEvent* aEvent)
 nsresult
 mozInlineSpellChecker::OnMouseClick(nsIDOMEvent *aMouseEvent)
 {
-  MouseEvent* mouseEvent = aMouseEvent->InternalDOMEvent()->AsMouseEvent();
+  nsCOMPtr<nsIDOMMouseEvent>mouseEvent = do_QueryInterface(aMouseEvent);
   NS_ENSURE_TRUE(mouseEvent, NS_OK);
 
   // ignore any errors from HandleNavigationEvent as we don't want to prevent
   // anyone else from seeing this event.
-  HandleNavigationEvent(mouseEvent->Button() != 0);
+  int16_t button;
+  mouseEvent->GetButton(&button);
+  HandleNavigationEvent(button != 0);
   return NS_OK;
 }
 

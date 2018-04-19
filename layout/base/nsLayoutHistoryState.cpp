@@ -12,11 +12,8 @@
 #include "nsILayoutHistoryState.h"
 #include "nsWeakReference.h"
 #include "nsClassHashtable.h"
-#include "mozilla/PresState.h"
+#include "nsPresState.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/UniquePtr.h"
-
-using namespace mozilla;
 
 class nsLayoutHistoryState final : public nsILayoutHistoryState,
                                    public nsSupportsWeakReference
@@ -34,7 +31,7 @@ private:
   ~nsLayoutHistoryState() {}
   bool mScrollPositionOnly;
 
-  nsDataHashtable<nsCStringHashKey, UniquePtr<PresState>> mStates;
+  nsClassHashtable<nsCStringHashKey,nsPresState> mStates;
 };
 
 
@@ -82,17 +79,17 @@ nsLayoutHistoryState::GetPresState(const nsACString& aKey,
                                    bool* aAllowScrollOriginDowngrade,
                                    float* aRes, bool* aScaleToRes)
 {
-  PresState* state = GetState(nsCString(aKey));
+  nsPresState* state = GetState(nsCString(aKey));
 
   if (!state) {
     return NS_ERROR_FAILURE;
   }
 
-  *aScrollX = state->scrollState().x;
-  *aScrollY = state->scrollState().y;
-  *aAllowScrollOriginDowngrade = state->allowScrollOriginDowngrade();
-  *aRes = state->resolution();
-  *aScaleToRes = state->scaleToResolution();
+  *aScrollX = state->GetScrollPosition().x;
+  *aScrollY = state->GetScrollPosition().y;
+  *aAllowScrollOriginDowngrade = state->GetAllowScrollOriginDowngrade();
+  *aRes = state->GetResolution();
+  *aScaleToRes = state->GetScaleToResolution();
 
   return NS_OK;
 }
@@ -103,36 +100,32 @@ nsLayoutHistoryState::AddNewPresState(const nsACString& aKey,
                                       bool aAllowScrollOriginDowngrade,
                                       float aRes, bool aScaleToRes)
 {
-  UniquePtr<PresState> newState = NewPresState();
-  newState->scrollState() = nsPoint(aScrollX, aScrollY);
-  newState->allowScrollOriginDowngrade() = aAllowScrollOriginDowngrade;
-  newState->resolution() = aRes;
-  newState->scaleToResolution() = aScaleToRes;
+  nsPresState* newState = new nsPresState();
+  newState->SetScrollState(nsPoint(aScrollX, aScrollY));
+  newState->SetAllowScrollOriginDowngrade(aAllowScrollOriginDowngrade);
+  newState->SetResolution(aRes);
+  newState->SetScaleToResolution(aScaleToRes);
 
-  mStates.Put(nsCString(aKey), Move(newState));
+  mStates.Put(nsCString(aKey), newState);
 
   return NS_OK;
 }
 
 void
-nsLayoutHistoryState::AddState(const nsCString& aStateKey, UniquePtr<PresState> aState)
+nsLayoutHistoryState::AddState(const nsCString& aStateKey, nsPresState* aState)
 {
-  mStates.Put(aStateKey, Move(aState));
+  mStates.Put(aStateKey, aState);
 }
 
-PresState*
+nsPresState*
 nsLayoutHistoryState::GetState(const nsCString& aKey)
 {
-  UniquePtr<PresState>* statePtr = mStates.GetValue(aKey);
-  if (!statePtr) {
-    return nullptr;
-  }
-  PresState* state = statePtr->get();
+  nsPresState* state = nullptr;
+  bool entryExists = mStates.Get(aKey, &state);
 
-  if (mScrollPositionOnly) {
+  if (entryExists && mScrollPositionOnly) {
     // Ensure any state that shouldn't be restored is removed
-    state->contentData() = void_t();
-    state->disabledSet() = false;
+    state->ClearNonScrollState();
   }
 
   return state;
@@ -160,25 +153,9 @@ void
 nsLayoutHistoryState::ResetScrollState()
 {
   for (auto iter = mStates.Iter(); !iter.Done(); iter.Next()) {
-    PresState* state = iter.Data().get();
+    nsPresState* state = iter.UserData();
     if (state) {
-      state->scrollState() = nsPoint(0, 0);
+      state->SetScrollState(nsPoint(0, 0));
     }
   }
 }
-
-namespace mozilla {
-UniquePtr<PresState>
-NewPresState()
-{
-  return MakeUnique<PresState>(
-      /* contentData */ mozilla::void_t(),
-      /* scrollState */ nsPoint(0, 0),
-      /* allowScrollOriginDowngrade */ true,
-      /* resolution */ 1.0,
-      /* scaleToResolution */ false,
-      /* disabledSet */ false,
-      /* disabled */ false,
-      /* droppedDown */ false);
-}
-} // namespace mozilla

@@ -10,7 +10,7 @@
 
 const TEST_DATA = [
   {
-    targetClass: "multi-types",
+    targetName: "multi-types",
     properties: [
       {
         name: "background-color",
@@ -106,7 +106,7 @@ const TEST_DATA = [
     ],
   },
   {
-    targetClass: "narrow-offsets",
+    targetName: "narrow-offsets",
     properties: [
       {
         name: "opacity",
@@ -133,24 +133,28 @@ const TEST_DATA = [
   }
 ];
 
-add_task(async function() {
+add_task(async function () {
   await addTab(URL_ROOT + "doc_multi_keyframes.html");
-  await removeAnimatedElementsExcept(TEST_DATA.map(t => `.${ t.targetClass }`));
-  const { animationInspector, panel } = await openAnimationInspector();
 
-  for (const { properties, targetClass } of TEST_DATA) {
-    info(`Checking keyframe marker for ${ targetClass }`);
-    await clickOnAnimationByTargetSelector(animationInspector,
-                                           panel, `.${ targetClass }`);
+  const { inspector, panel } = await openAnimationInspector();
 
-    for (const { name, expectedValues } of properties) {
-      const testTarget = `${ name } in ${ targetClass }`;
+  for (const { properties, targetName } of TEST_DATA) {
+    info(`Checking keyframe marker for ${ targetName }`);
+    await selectNodeAndWaitForAnimations(`#${ targetName }`, inspector);
+
+    for (const property of properties) {
+      const {
+        name,
+        expectedValues,
+      } = property;
+
+      const testTarget = `${ name } in ${ targetName }`;
       info(`Checking keyframe marker for ${ testTarget }`);
       info(`Checking keyframe marker existence for ${ testTarget }`);
       const markerEls = panel.querySelectorAll(`.${ name } .keyframe-marker-item`);
       is(markerEls.length, expectedValues.length,
-        `Count of keyframe marker elements of ${ testTarget } ` +
-        `should be ${ expectedValues.length }`);
+        `Count of keyframe marker elements of ${ testTarget } `
+        + `should be ${ expectedValues.length }`);
 
       for (let i = 0; i < expectedValues.length; i++) {
         const hintTarget = `.keyframe-marker-item[${ i }] of ${ testTarget }`;
@@ -161,11 +165,11 @@ add_task(async function() {
 
         info(`Checking title in ${ hintTarget }`);
         is(markerEl.getAttribute("title"), expectedValue.title,
-         `title in ${ hintTarget } should be ${ expectedValue.title }`);
+          `title in ${ hintTarget } should be ${ expectedValue.title }`);
 
         info(`Checking left style in ${ hintTarget }`);
         is(markerEl.style.left, expectedValue.left,
-         `left in ${ hintTarget } should be ${ expectedValue.left }`);
+          `left in ${ hintTarget } should be ${ expectedValue.left }`);
       }
     }
   }

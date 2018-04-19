@@ -6,8 +6,6 @@
 #ifndef GFX_DWRITEFONTLIST_H
 #define GFX_DWRITEFONTLIST_H
 
-#include "mozilla/FontPropertyTypes.h"
-#include "mozilla/MathAlgorithms.h"
 #include "mozilla/MemoryReporting.h"
 #include "gfxDWriteCommon.h"
 #include "dwrite_3.h"
@@ -48,8 +46,6 @@ class gfxDWriteFontEntry;
 class gfxDWriteFontFamily : public gfxFontFamily
 {
 public:
-    typedef mozilla::FontWeight FontWeight;
-
     /**
      * Constructs a new DWriteFont Family.
      *
@@ -119,10 +115,11 @@ public:
                   (dwriteStyle == DWRITE_FONT_STYLE_OBLIQUE ?
                    NS_FONT_STYLE_OBLIQUE : NS_FONT_STYLE_NORMAL));
         mStretch = FontStretchFromDWriteStretch(aFont->GetStretch());
-        int weight = NS_ROUNDUP(aFont->GetWeight() - 50, 100);
+        uint16_t weight = NS_ROUNDUP(aFont->GetWeight() - 50, 100);
 
-        weight = mozilla::Clamp(weight, 100, 900);
-        mWeight = FontWeight(weight);
+        weight = std::max<uint16_t>(100, weight);
+        weight = std::min<uint16_t>(900, weight);
+        mWeight = weight;
 
         mIsCJK = UNINITIALIZED_VALUE;
     }
@@ -140,8 +137,8 @@ public:
      */
     gfxDWriteFontEntry(const nsAString& aFaceName,
                               IDWriteFont *aFont,
-                              FontWeight aWeight,
-                              uint16_t aStretch,
+                              uint16_t aWeight,
+                              int16_t aStretch,
                               uint8_t aStyle)
       : gfxFontEntry(aFaceName), mFont(aFont), mFontFile(nullptr),
         mIsSystemFont(false), mForceGDIClassic(false),
@@ -167,8 +164,8 @@ public:
     gfxDWriteFontEntry(const nsAString& aFaceName,
                               IDWriteFontFile *aFontFile,
                               IDWriteFontFileStream *aFontFileStream,
-                              FontWeight aWeight,
-                              uint16_t aStretch,
+                              uint16_t aWeight,
+                              int16_t aStretch,
                               uint8_t aStyle)
       : gfxFontEntry(aFaceName), mFont(nullptr),
         mFontFile(aFontFile), mFontFileStream(aFontFileStream),
@@ -404,13 +401,13 @@ public:
     gfxFontFamily* CreateFontFamily(const nsAString& aName) const override;
 
     virtual gfxFontEntry* LookupLocalFont(const nsAString& aFontName,
-                                          FontWeight aWeight,
-                                          uint16_t aStretch,
+                                          uint16_t aWeight,
+                                          int16_t aStretch,
                                           uint8_t aStyle);
 
     virtual gfxFontEntry* MakePlatformFont(const nsAString& aFontName,
-                                           FontWeight aWeight,
-                                           uint16_t aStretch,
+                                           uint16_t aWeight,
+                                           int16_t aStretch,
                                            uint8_t aStyle,
                                            const uint8_t* aFontData,
                                            uint32_t aLength);

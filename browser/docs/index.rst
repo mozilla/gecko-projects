@@ -9,4 +9,3 @@ This is the nascent documentation of the Firefox front-end code.
 
    UITelemetry
    BrowserUsageTelemetry
-   BrowserErrorReporter

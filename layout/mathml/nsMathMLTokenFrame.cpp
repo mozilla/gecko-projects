@@ -8,14 +8,17 @@
 #include "nsPresContext.h"
 #include "nsContentUtils.h"
 #include "nsTextFrame.h"
+#ifdef MOZ_OLD_STYLE
+#include "mozilla/GeckoRestyleManager.h"
+#endif
 #include <algorithm>
 
 using namespace mozilla;
 
 nsIFrame*
-NS_NewMathMLTokenFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
+NS_NewMathMLTokenFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
-  return new (aPresShell) nsMathMLTokenFrame(aStyle);
+  return new (aPresShell) nsMathMLTokenFrame(aContext);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLTokenFrame)

@@ -69,6 +69,8 @@ public:
   void SetXmlspace(const nsAString & aXmlspace, ErrorResult& rv);
   void GetMedia(nsAString & aMedia);
   void SetMedia(const nsAString& aMedia, ErrorResult& rv);
+  bool Scoped() const;
+  void SetScoped(bool aScoped, ErrorResult& rv);
   void GetType(nsAString & aType);
   void SetType(const nsAString& aType, ErrorResult& rv);
   void GetTitle(nsAString & aTitle);
@@ -84,15 +86,14 @@ protected:
   }
 
   // nsStyleLinkElement overrides
-  already_AddRefed<nsIURI>
-    GetStyleSheetURL(bool* aIsInline, nsIPrincipal** aTriggeringPrincipal) final;
+  already_AddRefed<nsIURI> GetStyleSheetURL(bool* aIsInline, nsIPrincipal** aTriggeringPrincipal) override;
 
   void GetStyleSheetInfo(nsAString& aTitle,
                          nsAString& aType,
                          nsAString& aMedia,
-                         bool* aIsAlternate) final;
-
-  CORSMode GetCORSMode() const final;
+                         bool* aIsScoped,
+                         bool* aIsAlternate) override;
+  virtual CORSMode GetCORSMode() const override;
 
   /**
    * Common method to call from the various mutation observer methods.

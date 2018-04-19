@@ -14,30 +14,28 @@ use ipc_channel::ipc::{self, IpcSharedMemory};
 use libc::c_void;
 use msg::constellation_msg::{PipelineId, PipelineIndex, PipelineNamespaceId};
 use net_traits::image::base::{Image, PixelFormat};
-use nonzero::NonZeroU32;
+use nonzero::NonZero;
 use profile_traits::time::{self, ProfilerCategory, profile};
 use script_traits::{AnimationState, AnimationTickType, ConstellationMsg, LayoutControlMsg};
 use script_traits::{MouseButton, MouseEventType, ScrollState, TouchEventType, TouchId};
 use script_traits::{UntrustedNodeAddress, WindowSizeData, WindowSizeType};
 use script_traits::CompositorEvent::{MouseMoveEvent, MouseButtonEvent, TouchEvent};
 use servo_config::opts;
-use servo_geometry::{DeviceIndependentPixel, DeviceUintLength};
+use servo_geometry::DeviceIndependentPixel;
 use std::collections::HashMap;
-use std::env;
-use std::fs::{File, create_dir_all};
-use std::io::Write;
+use std::fs::File;
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 use style_traits::{CSSPixel, DevicePixel, PinchZoomFactor};
 use style_traits::cursor::CursorKind;
 use style_traits::viewport::ViewportConstraints;
-use time::{now, precise_time_ns, precise_time_s};
+use time::{precise_time_ns, precise_time_s};
 use touch::{TouchHandler, TouchAction};
 use webrender;
-use webrender_api::{self, DeviceIntPoint, DevicePoint, HitTestFlags, HitTestResult};
+use webrender_api::{self, DeviceUintRect, DeviceUintSize, HitTestFlags, HitTestResult};
 use webrender_api::{LayoutVector2D, ScrollEventPhase, ScrollLocation};
-use windowing::{self, EmbedderCoordinates, MouseWindowEvent, WebRenderDebugOption, WindowMethods};
+use windowing::{self, MouseWindowEvent, WebRenderDebugOption, WindowMethods};
 
 #[derive(Debug, PartialEq)]
 enum UnableToComposite {
@@ -64,7 +62,7 @@ impl ConvertPipelineIdFromWebRender for webrender_api::PipelineId {
     fn from_webrender(&self) -> PipelineId {
         PipelineId {
             namespace_id: PipelineNamespaceId(self.0),
-            index: PipelineIndex(NonZeroU32::new(self.1).expect("Webrender pipeline zero?")),
+            index: PipelineIndex(NonZero::new(self.1).expect("Webrender pipeline zero?")),
         }
     }
 }
@@ -111,6 +109,12 @@ pub struct IOCompositor<Window: WindowMethods> {
     /// The scene scale, to allow for zooming and high-resolution painting.
     scale: TypedScale<f32, LayerPixel, DevicePixel>,
 
+    /// The size of the rendering area.
+    frame_size: DeviceUintSize,
+
+    /// The position and size of the window within the rendering area.
+    window_rect: DeviceUintRect,
+
     /// "Mobile-style" zoom that does not reflow the page.
     viewport_zoom: PinchZoomFactor,
 
@@ -120,6 +124,9 @@ pub struct IOCompositor<Window: WindowMethods> {
 
     /// "Desktop-style" zoom that resizes the viewport to fit the window.
     page_zoom: TypedScale<f32, CSSPixel, DeviceIndependentPixel>,
+
+    /// The device pixel ratio for this window.
+    scale_factor: TypedScale<f32, DeviceIndependentPixel, DevicePixel>,
 
     /// The type of composition to perform
     composite_target: CompositeTarget,
@@ -185,9 +192,6 @@ pub struct IOCompositor<Window: WindowMethods> {
     /// these frames, it records the paint time for each of them and sends the
     /// metric to the corresponding layout thread.
     pending_paint_metrics: HashMap<PipelineId, Epoch>,
-
-    /// The coordinates of the native window, its view and the screen.
-    embedder_coordinates: EmbedderCoordinates,
 }
 
 #[derive(Clone, Copy)]
@@ -197,7 +201,7 @@ struct ScrollZoomEvent {
     /// Scroll by this offset, or to Start or End
     scroll_location: ScrollLocation,
     /// Apply changes to the frame at this location
-    cursor: DeviceIntPoint,
+    cursor: TypedPoint2D<i32, DevicePixel>,
     /// The scroll event phase.
     phase: ScrollEventPhase,
     /// The number of OS events that have been coalesced together into this one event.
@@ -270,15 +274,15 @@ impl RenderTargetInfo {
     }
 }
 
-fn initialize_png(gl: &gl::Gl, width: DeviceUintLength, height: DeviceUintLength) -> RenderTargetInfo {
+fn initialize_png(gl: &gl::Gl, width: usize, height: usize) -> RenderTargetInfo {
     let framebuffer_ids = gl.gen_framebuffers(1);
     gl.bind_framebuffer(gl::FRAMEBUFFER, framebuffer_ids[0]);
 
     let texture_ids = gl.gen_textures(1);
     gl.bind_texture(gl::TEXTURE_2D, texture_ids[0]);
 
-    gl.tex_image_2d(gl::TEXTURE_2D, 0, gl::RGB as gl::GLint, width.get() as gl::GLsizei,
-                    height.get() as gl::GLsizei, 0, gl::RGB, gl::UNSIGNED_BYTE, None);
+    gl.tex_image_2d(gl::TEXTURE_2D, 0, gl::RGB as gl::GLint, width as gl::GLsizei,
+                    height as gl::GLsizei, 0, gl::RGB, gl::UNSIGNED_BYTE, None);
     gl.tex_parameter_i(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as gl::GLint);
     gl.tex_parameter_i(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as gl::GLint);
 
@@ -292,8 +296,8 @@ fn initialize_png(gl: &gl::Gl, width: DeviceUintLength, height: DeviceUintLength
     gl.bind_renderbuffer(gl::RENDERBUFFER, depth_rb);
     gl.renderbuffer_storage(gl::RENDERBUFFER,
                             gl::DEPTH_COMPONENT24,
-                            width.get() as gl::GLsizei,
-                            height.get() as gl::GLsizei);
+                            width as gl::GLsizei,
+                            height as gl::GLsizei);
     gl.framebuffer_renderbuffer(gl::FRAMEBUFFER,
                                 gl::DEPTH_ATTACHMENT,
                                 gl::RENDERBUFFER,
@@ -345,6 +349,9 @@ impl webrender_api::RenderNotifier for RenderNotifier {
 impl<Window: WindowMethods> IOCompositor<Window> {
     fn new(window: Rc<Window>, state: InitialCompositorState)
            -> IOCompositor<Window> {
+        let frame_size = window.framebuffer_size();
+        let window_rect = window.window_rect();
+        let scale_factor = window.hidpi_factor();
         let composite_target = match opts::get().output_file {
             Some(_) => CompositeTarget::PngFile,
             None => CompositeTarget::Window
@@ -352,12 +359,14 @@ impl<Window: WindowMethods> IOCompositor<Window> {
 
         IOCompositor {
             gl: window.gl(),
-            embedder_coordinates: window.get_coordinates(),
             window: window,
             port: state.receiver,
             root_pipeline: None,
             pipeline_details: HashMap::new(),
+            frame_size: frame_size,
+            window_rect: window_rect,
             scale: TypedScale::new(1.0),
+            scale_factor: scale_factor,
             composition_request: CompositionRequest::NoCompositingNecessary,
             touch_handler: TouchHandler::new(),
             pending_scroll_zoom_events: Vec::new(),
@@ -538,24 +547,6 @@ impl<Window: WindowMethods> IOCompositor<Window> {
                 self.pending_paint_metrics.insert(pipeline_id, epoch);
             }
 
-            (Msg::GetClientWindow(req), ShutdownState::NotShuttingDown) => {
-                if let Err(e) = req.send(self.embedder_coordinates.window) {
-                    warn!("Sending response to get client window failed ({}).", e);
-                }
-            }
-
-            (Msg::GetScreenSize(req), ShutdownState::NotShuttingDown) => {
-                if let Err(e) = req.send(self.embedder_coordinates.screen) {
-                    warn!("Sending response to get screen size failed ({}).", e);
-                }
-            }
-
-            (Msg::GetScreenAvailSize(req), ShutdownState::NotShuttingDown) => {
-                if let Err(e) = req.send(self.embedder_coordinates.screen_avail) {
-                    warn!("Sending response to get screen avail size failed ({}).", e);
-                }
-            }
-
             // When we are shutting_down, we need to avoid performing operations
             // such as Paint that may crash because we have begun tearing down
             // the rest of our resources.
@@ -642,24 +633,22 @@ impl<Window: WindowMethods> IOCompositor<Window> {
     }
 
     fn send_window_size(&self, size_type: WindowSizeType) {
-        let dppx = self.page_zoom * self.embedder_coordinates.hidpi_factor;
+        let dppx = self.page_zoom * self.hidpi_factor();
 
         self.webrender_api.set_window_parameters(self.webrender_document,
-                                                 self.embedder_coordinates.framebuffer,
-                                                 self.embedder_coordinates.viewport,
-                                                 self.embedder_coordinates.hidpi_factor.get());
+                                                 self.frame_size,
+                                                 self.window_rect,
+                                                 self.hidpi_factor().get());
 
-        let initial_viewport = self.embedder_coordinates.viewport.size.to_f32() / dppx;
+        let initial_viewport = self.window_rect.size.to_f32() / dppx;
 
         let data = WindowSizeData {
             device_pixel_ratio: dppx,
             initial_viewport: initial_viewport,
         };
-
         let top_level_browsing_context_id = self.root_pipeline.as_ref().map(|pipeline| {
             pipeline.top_level_browsing_context_id
         });
-
         let msg = ConstellationMsg::WindowSize(top_level_browsing_context_id, data, size_type);
 
         if let Err(e) = self.constellation_chan.send(msg) {
@@ -670,18 +659,23 @@ impl<Window: WindowMethods> IOCompositor<Window> {
     pub fn on_resize_window_event(&mut self) {
         debug!("compositor resize requested");
 
-        let old_coords = self.embedder_coordinates;
-        self.embedder_coordinates = self.window.get_coordinates();
-
         // A size change could also mean a resolution change.
-        if self.embedder_coordinates.hidpi_factor != old_coords.hidpi_factor {
+        let new_scale_factor = self.window.hidpi_factor();
+        if self.scale_factor != new_scale_factor {
+            self.scale_factor = new_scale_factor;
             self.update_zoom_transform();
         }
 
-        if self.embedder_coordinates.viewport == old_coords.viewport &&
-           self.embedder_coordinates.framebuffer == old_coords.framebuffer {
+        let new_window_rect = self.window.window_rect();
+        let new_frame_size = self.window.framebuffer_size();
+
+        if self.window_rect == new_window_rect &&
+           self.frame_size == new_frame_size {
             return;
         }
+
+        self.frame_size = new_frame_size;
+        self.window_rect = new_window_rect;
 
         self.send_window_size(WindowSizeType::Resize);
     }
@@ -733,7 +727,7 @@ impl<Window: WindowMethods> IOCompositor<Window> {
         }
     }
 
-    fn hit_test_at_point(&self, point: DevicePoint) -> HitTestResult {
+    fn hit_test_at_point(&self, point: TypedPoint2D<f32, DevicePixel>) -> HitTestResult {
         let dppx = self.page_zoom * self.hidpi_factor();
         let scaled_point = (point / dppx).to_untyped();
 
@@ -747,7 +741,7 @@ impl<Window: WindowMethods> IOCompositor<Window> {
 
     }
 
-    pub fn on_mouse_window_move_event_class(&mut self, cursor: DevicePoint) {
+    pub fn on_mouse_window_move_event_class(&mut self, cursor: TypedPoint2D<f32, DevicePixel>) {
         if opts::get().convert_mouse_to_touch {
             self.on_touch_move(TouchId(0), cursor);
             return
@@ -756,7 +750,7 @@ impl<Window: WindowMethods> IOCompositor<Window> {
         self.dispatch_mouse_window_move_event_class(cursor);
     }
 
-    fn dispatch_mouse_window_move_event_class(&mut self, cursor: DevicePoint) {
+    fn dispatch_mouse_window_move_event_class(&mut self, cursor: TypedPoint2D<f32, DevicePixel>) {
         let root_pipeline_id = match self.get_root_pipeline_id() {
             Some(root_pipeline_id) => root_pipeline_id,
             None => return,
@@ -788,7 +782,7 @@ impl<Window: WindowMethods> IOCompositor<Window> {
         &self,
         event_type: TouchEventType,
         identifier: TouchId,
-        point: DevicePoint)
+        point: TypedPoint2D<f32, DevicePixel>)
     {
         let results = self.hit_test_at_point(point);
         if let Some(item) = results.items.first() {
@@ -809,7 +803,7 @@ impl<Window: WindowMethods> IOCompositor<Window> {
     pub fn on_touch_event(&mut self,
                           event_type: TouchEventType,
                           identifier: TouchId,
-                          location: DevicePoint) {
+                          location: TypedPoint2D<f32, DevicePixel>) {
         match event_type {
             TouchEventType::Down => self.on_touch_down(identifier, location),
             TouchEventType::Move => self.on_touch_move(identifier, location),
@@ -818,12 +812,12 @@ impl<Window: WindowMethods> IOCompositor<Window> {
         }
     }
 
-    fn on_touch_down(&mut self, identifier: TouchId, point: DevicePoint) {
+    fn on_touch_down(&mut self, identifier: TouchId, point: TypedPoint2D<f32, DevicePixel>) {
         self.touch_handler.on_touch_down(identifier, point);
         self.send_touch_event(TouchEventType::Down, identifier, point);
     }
 
-    fn on_touch_move(&mut self, identifier: TouchId, point: DevicePoint) {
+    fn on_touch_move(&mut self, identifier: TouchId, point: TypedPoint2D<f32, DevicePixel>) {
         match self.touch_handler.on_touch_move(identifier, point) {
             TouchAction::Scroll(delta) => {
                 match point.cast() {
@@ -854,7 +848,7 @@ impl<Window: WindowMethods> IOCompositor<Window> {
         }
     }
 
-    fn on_touch_up(&mut self, identifier: TouchId, point: DevicePoint) {
+    fn on_touch_up(&mut self, identifier: TouchId, point: TypedPoint2D<f32, DevicePixel>) {
         self.send_touch_event(TouchEventType::Up, identifier, point);
 
         if let TouchAction::Click = self.touch_handler.on_touch_up(identifier, point) {
@@ -862,14 +856,14 @@ impl<Window: WindowMethods> IOCompositor<Window> {
         }
     }
 
-    fn on_touch_cancel(&mut self, identifier: TouchId, point: DevicePoint) {
+    fn on_touch_cancel(&mut self, identifier: TouchId, point: TypedPoint2D<f32, DevicePixel>) {
         // Send the event to script.
         self.touch_handler.on_touch_cancel(identifier, point);
         self.send_touch_event(TouchEventType::Cancel, identifier, point);
     }
 
     /// <http://w3c.github.io/touch-events/#mouse-events>
-    fn simulate_mouse_click(&mut self, p: DevicePoint) {
+    fn simulate_mouse_click(&mut self, p: TypedPoint2D<f32, DevicePixel>) {
         let button = MouseButton::Left;
         self.dispatch_mouse_window_move_event_class(p);
         self.dispatch_mouse_window_event_class(MouseWindowEvent::MouseDown(button, p));
@@ -879,7 +873,7 @@ impl<Window: WindowMethods> IOCompositor<Window> {
 
     pub fn on_scroll_event(&mut self,
                            delta: ScrollLocation,
-                           cursor: DeviceIntPoint,
+                           cursor: TypedPoint2D<i32, DevicePixel>,
                            phase: TouchEventType) {
         match phase {
             TouchEventType::Move => self.on_scroll_window_event(delta, cursor),
@@ -894,7 +888,7 @@ impl<Window: WindowMethods> IOCompositor<Window> {
 
     fn on_scroll_window_event(&mut self,
                               scroll_location: ScrollLocation,
-                              cursor: DeviceIntPoint) {
+                              cursor: TypedPoint2D<i32, DevicePixel>) {
         let event_phase = match (self.scroll_in_progress, self.in_scroll_transaction) {
             (false, None) => ScrollEventPhase::Start,
             (false, Some(last_scroll)) if last_scroll.elapsed() > Duration::from_millis(80) =>
@@ -913,7 +907,7 @@ impl<Window: WindowMethods> IOCompositor<Window> {
 
     fn on_scroll_start_window_event(&mut self,
                                     scroll_location: ScrollLocation,
-                                    cursor: DeviceIntPoint) {
+                                    cursor: TypedPoint2D<i32, DevicePixel>) {
         self.scroll_in_progress = true;
         self.pending_scroll_zoom_events.push(ScrollZoomEvent {
             magnification: 1.0,
@@ -926,7 +920,7 @@ impl<Window: WindowMethods> IOCompositor<Window> {
 
     fn on_scroll_end_window_event(&mut self,
                                   scroll_location: ScrollLocation,
-                                  cursor: DeviceIntPoint) {
+                                  cursor: TypedPoint2D<i32, DevicePixel>) {
         self.scroll_in_progress = false;
         self.pending_scroll_zoom_events.push(ScrollZoomEvent {
             magnification: 1.0,
@@ -1099,7 +1093,7 @@ impl<Window: WindowMethods> IOCompositor<Window> {
             Some(device_pixels_per_px) => TypedScale::new(device_pixels_per_px),
             None => match opts::get().output_file {
                 Some(_) => TypedScale::new(1.0),
-                None => self.embedder_coordinates.hidpi_factor,
+                None => self.scale_factor
             }
         }
     }
@@ -1259,8 +1253,8 @@ impl<Window: WindowMethods> IOCompositor<Window> {
     fn composite_specific_target(&mut self,
                                  target: CompositeTarget)
                                  -> Result<Option<Image>, UnableToComposite> {
-        let width = self.embedder_coordinates.framebuffer.width_typed();
-        let height = self.embedder_coordinates.framebuffer.height_typed();
+        let (width, height) =
+            (self.frame_size.width as usize, self.frame_size.height as usize);
         if !self.window.prepare_for_composite(width, height) {
             return Err(UnableToComposite::WindowUnprepared)
         }
@@ -1295,7 +1289,7 @@ impl<Window: WindowMethods> IOCompositor<Window> {
 
             // Paint the scene.
             // TODO(gw): Take notice of any errors the renderer returns!
-            self.webrender.render(self.embedder_coordinates.framebuffer).ok();
+            self.webrender.render(self.frame_size).ok();
         });
 
         // If there are pending paint metrics, we check if any of the painted epochs is
@@ -1380,11 +1374,9 @@ impl<Window: WindowMethods> IOCompositor<Window> {
 
     fn draw_img(&self,
                 render_target_info: RenderTargetInfo,
-                width: DeviceUintLength,
-                height: DeviceUintLength)
+                width: usize,
+                height: usize)
                 -> RgbImage {
-        let width = width.get() as usize;
-        let height = height.get() as usize;
         // For some reason, OSMesa fails to render on the 3rd
         // attempt in headless mode, under some conditions.
         // I think this can only be some kind of synchronization
@@ -1537,34 +1529,6 @@ impl<Window: WindowMethods> IOCompositor<Window> {
         let mut txn = webrender_api::Transaction::new();
         txn.generate_frame();
         self.webrender_api.send_transaction(self.webrender_document, txn);
-    }
-
-    pub fn capture_webrender(&mut self) {
-        match env::current_dir() {
-            Ok(current_dir) => {
-                let capture_id = now().to_timespec().sec.to_string();
-                let capture_path = current_dir.join("capture_webrender").join(capture_id);
-                let revision_file_path = capture_path.join("wr.txt");
-
-                if let Err(err) = create_dir_all(&capture_path) {
-                    eprintln!("Unable to create path '{:?}' for capture: {:?}", capture_path, err);
-                    return
-                }
-
-                self.webrender_api.save_capture(capture_path, webrender_api::CaptureBits::all());
-
-                match File::create(revision_file_path) {
-                    Ok(mut file) => {
-                        let revision = include!(concat!(env!("OUT_DIR"), "/webrender_revision.rs"));
-                        if let Err(err) = write!(&mut file, "{}", revision) {
-                            eprintln!("Unable to write webrender revision: {:?}", err)
-                        }
-                    }
-                    Err(err) => eprintln!("Capture triggered, creating webrender revision info skipped: {:?}", err)
-                }
-            },
-            Err(err) => eprintln!("Unable to locate path to save captures: {:?}", err)
-        }
     }
 }
 

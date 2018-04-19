@@ -12,8 +12,7 @@ use dom::bindings::str::DOMString;
 use dom::event::Event;
 use dom::serviceworkerglobalscope::ServiceWorkerGlobalScope;
 use dom_struct::dom_struct;
-use js::jsapi::JSContext;
-use js::rust::HandleValue;
+use js::jsapi::{HandleValue, JSContext};
 use servo_atoms::Atom;
 
 // https://w3c.github.io/ServiceWorker/#extendable-event

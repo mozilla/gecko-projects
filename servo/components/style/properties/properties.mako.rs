@@ -424,8 +424,14 @@ impl NonCustomPropertyId {
     #[cfg(feature = "gecko")]
     fn to_nscsspropertyid(self) -> nsCSSPropertyID {
         static MAP: [nsCSSPropertyID; ${len(data.longhands) + len(data.shorthands) + len(data.all_aliases())}] = [
-            % for property in data.longhands + data.shorthands + data.all_aliases():
-                ${property.nscsspropertyid()},
+            % for property in data.longhands:
+                ${helpers.to_nscsspropertyid(property.ident)},
+            % endfor
+            % for property in data.shorthands:
+                ${helpers.to_nscsspropertyid(property.ident)},
+            % endfor
+            % for property in data.all_aliases():
+                ${helpers.alias_to_nscsspropertyid(property.ident)},
             % endfor
         ];
 
@@ -820,8 +826,7 @@ impl LonghandId {
         }
     }
 
-    /// Returns whether the longhand property is inherited by default.
-    pub fn inherited(&self) -> bool {
+    fn inherited(&self) -> bool {
         ${static_longhand_id_set("INHERITED", lambda p: p.style_struct.inherited)}
         INHERITED.contains(*self)
     }
@@ -1572,10 +1577,10 @@ impl PropertyId {
                 % for (kind, properties) in [("Longhand", data.longhands), ("Shorthand", data.shorthands)]:
                     % for property in properties:
                         "${property.name}" => StaticId::${kind}(${kind}Id::${property.camel_case}),
-                        % for alias in property.alias:
-                            "${alias.name}" => {
+                        % for name in property.alias:
+                            "${name}" => {
                                 StaticId::${kind}Alias(${kind}Id::${property.camel_case},
-                                                       AliasId::${alias.camel_case})
+                                                       AliasId::${to_camel_case(name)})
                             },
                         % endfor
                     % endfor
@@ -1611,39 +1616,33 @@ impl PropertyId {
         use gecko_bindings::structs::*;
         match id {
             % for property in data.longhands:
-                ${property.nscsspropertyid()} => {
+                ${helpers.to_nscsspropertyid(property.ident)} => {
                     Ok(PropertyId::Longhand(LonghandId::${property.camel_case}))
                 }
                 % for alias in property.alias:
-                    ${alias.nscsspropertyid()} => {
+                    ${helpers.alias_to_nscsspropertyid(alias)} => {
                         Ok(PropertyId::LonghandAlias(
                             LonghandId::${property.camel_case},
-                            AliasId::${alias.camel_case}
+                            AliasId::${to_camel_case(alias)}
                         ))
                     }
                 % endfor
             % endfor
             % for property in data.shorthands:
-                ${property.nscsspropertyid()} => {
+                ${helpers.to_nscsspropertyid(property.ident)} => {
                     Ok(PropertyId::Shorthand(ShorthandId::${property.camel_case}))
                 }
                 % for alias in property.alias:
-                    ${alias.nscsspropertyid()} => {
+                    ${helpers.alias_to_nscsspropertyid(alias)} => {
                         Ok(PropertyId::ShorthandAlias(
                             ShorthandId::${property.camel_case},
-                            AliasId::${alias.camel_case}
+                            AliasId::${to_camel_case(alias)}
                         ))
                     }
                 % endfor
             % endfor
             _ => Err(())
         }
-    }
-
-    /// Returns true if the property is a shorthand or shorthand alias.
-    #[inline]
-    pub fn is_shorthand(&self) -> bool {
-        self.as_shorthand().is_ok()
     }
 
     /// Given this property id, get it either as a shorthand or as a
@@ -2417,11 +2416,10 @@ pub struct ComputedValuesInner {
 pub struct ComputedValues {
     /// The actual computed values
     ///
-    /// In Gecko the outer ComputedValues is actually a ComputedStyle, whereas
-    /// ComputedValuesInner is the core set of computed values.
+    /// In Gecko the outer ComputedValues is actually a style context,
+    /// whereas ComputedValuesInner is the core set of computed values.
     ///
-    /// We maintain this distinction in servo to reduce the amount of special
-    /// casing.
+    /// We maintain this distinction in servo to reduce the amount of special casing.
     inner: ComputedValuesInner,
 }
 
@@ -3862,12 +3860,12 @@ macro_rules! css_properties_accessors {
             % for kind, props in [("Longhand", data.longhands), ("Shorthand", data.shorthands)]:
                 % for property in props:
                     % if property.enabled_in_content():
-                        % for prop in [property] + property.alias:
-                            % if '-' in prop.name:
-                                [${prop.ident.capitalize()}, Set${prop.ident.capitalize()},
+                        % for name in [property.name] + property.alias:
+                            % if '-' in name:
+                                [${to_rust_ident(name).capitalize()}, Set${to_rust_ident(name).capitalize()},
                                  PropertyId::${kind}(${kind}Id::${property.camel_case})],
                             % endif
-                            [${prop.camel_case}, Set${prop.camel_case},
+                            [${to_camel_case(name)}, Set${to_camel_case(name)},
                              PropertyId::${kind}(${kind}Id::${property.camel_case})],
                         % endfor
                     % endif

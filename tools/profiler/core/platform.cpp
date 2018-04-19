@@ -1008,7 +1008,7 @@ MergeStacks(uint32_t aFeatures, bool aIsSynchronous,
       } else {
         MOZ_ASSERT(jsFrame.kind == JS::ProfilingFrameIterator::Frame_Ion ||
                    jsFrame.kind == JS::ProfilingFrameIterator::Frame_Baseline);
-        aCollector.CollectJitReturnAddr(jsFrame.returnAddress);
+        aCollector.CollectJitReturnAddr(jsFrames[jsIndex].returnAddress);
       }
 
       jsIndex--;
@@ -2253,8 +2253,7 @@ locked_register_thread(PSLockRef aLock, const char* aName, void* aStackTop)
     if (ActivePS::FeatureJS(aLock)) {
       // This StartJSSampling() call is on-thread, so we can poll manually to
       // start JS sampling immediately.
-      registeredThread->StartJSSampling(
-        ActivePS::FeatureTrackOptimizations(aLock));
+      registeredThread->StartJSSampling();
       registeredThread->PollJSSampling();
       if (registeredThread->GetJSContext()) {
         profiledThreadData->NotifyReceivedJSContext(ActivePS::Buffer(aLock).mRangeEnd);
@@ -2853,8 +2852,7 @@ locked_profiler_start(PSLockRef aLock, uint32_t aEntries, double aInterval,
         ActivePS::AddLiveProfiledThread(aLock, registeredThread.get(),
           MakeUnique<ProfiledThreadData>(info, eventTarget));
       if (ActivePS::FeatureJS(aLock)) {
-        registeredThread->StartJSSampling(
-          ActivePS::FeatureTrackOptimizations(aLock));
+        registeredThread->StartJSSampling();
         if (info->ThreadId() == tid) {
           // We can manually poll the current thread so it starts sampling
           // immediately.
@@ -3145,11 +3143,7 @@ void
 profiler_unregister_thread()
 {
   MOZ_ASSERT_IF(NS_IsMainThread(), Scheduler::IsCooperativeThread());
-
-  if (!CorePS::Exists()) {
-    // This function can be called after the main thread has already shut down.
-    return;
-  }
+  MOZ_RELEASE_ASSERT(CorePS::Exists());
 
   PSAutoLock lock(gPSMutex);
 
@@ -3349,11 +3343,6 @@ profiler_add_marker_for_thread(int aThreadId,
 {
   MOZ_RELEASE_ASSERT(CorePS::Exists());
 
-  PSAutoLock lock(gPSMutex);
-  if (!ActivePS::Exists(lock)) {
-    return;
-  }
-
   // Create the ProfilerMarker which we're going to store.
   TimeStamp origin = (aPayload && !aPayload->GetStartTime().IsNull())
                    ? aPayload->GetStartTime()
@@ -3362,6 +3351,8 @@ profiler_add_marker_for_thread(int aThreadId,
   ProfilerMarker* marker =
     new ProfilerMarker(aMarkerName, aThreadId, Move(aPayload),
                        delta.ToMilliseconds());
+
+  PSAutoLock lock(gPSMutex);
 
 #ifdef DEBUG
   // Assert that our thread ID makes sense
@@ -3489,8 +3480,7 @@ profiler_clear_js_context()
 
       // Tell the thread that we'd like to have JS sampling on this
       // thread again, once it gets a new JSContext (if ever).
-      registeredThread->StartJSSampling(
-        ActivePS::FeatureTrackOptimizations(lock));
+      registeredThread->StartJSSampling();
       return;
     }
   }

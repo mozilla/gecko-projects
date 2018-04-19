@@ -5,7 +5,7 @@ add_task(async function() {
   await PlacesTestUtils.addVisits([{ uri, title: "" }]);
   registerCleanupFunction(async function() {
     await PlacesUtils.history.clear();
-    BrowserTestUtils.removeTab(tab);
+    await BrowserTestUtils.removeTab(tab);
   });
 
   await promiseAutocompleteResultPopup("bug1060642");

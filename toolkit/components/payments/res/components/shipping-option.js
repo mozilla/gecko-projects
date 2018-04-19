@@ -2,17 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import CurrencyAmount from "./currency-amount.js";
-import ObservedPropertiesMixin from "../mixins/ObservedPropertiesMixin.js";
-import RichOption from "./rich-option.js";
-
 /**
  * <rich-select>
  *  <shipping-option></shipping-option>
  * </rich-select>
  */
 
-export default class ShippingOption extends ObservedPropertiesMixin(RichOption) {
+/* global ObservedPropertiesMixin, RichOption */
+
+class ShippingOption extends ObservedPropertiesMixin(RichOption) {
   static get observedAttributes() {
     return RichOption.observedAttributes.concat([
       "label",
@@ -25,7 +23,7 @@ export default class ShippingOption extends ObservedPropertiesMixin(RichOption) 
     super();
 
     this.amount = null;
-    this._currencyAmount = new CurrencyAmount();
+    this._currencyAmount = document.createElement("currency-amount");
     this._currencyAmount.classList.add("amount");
     this._label = document.createElement("span");
     this._label.classList.add("label");

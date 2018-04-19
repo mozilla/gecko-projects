@@ -27,7 +27,7 @@ namespace js {
 class GenericPrinter;
 
 extern bool
-RuntimeFromMainThreadIsHeapMajorCollecting(JS::shadow::Zone* shadowZone);
+RuntimeFromActiveCooperatingThreadIsHeapMajorCollecting(JS::shadow::Zone* shadowZone);
 
 #ifdef DEBUG
 
@@ -45,7 +45,6 @@ namespace gc {
 class Arena;
 enum class AllocKind : uint8_t;
 struct Chunk;
-class StoreBuffer;
 class TenuredCell;
 
 // A GC cell is the base class for all GC things.
@@ -60,7 +59,7 @@ struct Cell
     MOZ_ALWAYS_INLINE bool isMarkedBlack() const;
     MOZ_ALWAYS_INLINE bool isMarkedGray() const;
 
-    inline JSRuntime* runtimeFromMainThread() const;
+    inline JSRuntime* runtimeFromActiveCooperatingThread() const;
 
     // Note: Unrestricted access to the runtime of a GC thing from an arbitrary
     // thread can easily lead to races. Use this method very carefully.
@@ -84,16 +83,12 @@ struct Cell
 
     template<class T>
     inline T* as() {
-        // |this|-qualify the |is| call below to avoid compile errors with even
-        // fairly recent versions of gcc, e.g. 7.1.1 according to bz.
         MOZ_ASSERT(this->is<T>());
         return static_cast<T*>(this);
     }
 
     template <class T>
     inline const T* as() const {
-        // |this|-qualify the |is| call below to avoid compile errors with even
-        // fairly recent versions of gcc, e.g. 7.1.1 according to bz.
         MOZ_ASSERT(this->is<T>());
         return static_cast<const T*>(this);
     }
@@ -152,17 +147,13 @@ class TenuredCell : public Cell
 
     template<class T>
     inline T* as() {
-        // |this|-qualify the |is| call below to avoid compile errors with even
-        // fairly recent versions of gcc, e.g. 7.1.1 according to bz.
-        MOZ_ASSERT(this->is<T>());
+        MOZ_ASSERT(is<T>());
         return static_cast<T*>(this);
     }
 
     template <class T>
     inline const T* as() const {
-        // |this|-qualify the |is| call below to avoid compile errors with even
-        // fairly recent versions of gcc, e.g. 7.1.1 according to bz.
-        MOZ_ASSERT(this->is<T>());
+        MOZ_ASSERT(is<T>());
         return static_cast<const T*>(this);
     }
 
@@ -213,7 +204,7 @@ Cell::isMarkedGray() const
 }
 
 inline JSRuntime*
-Cell::runtimeFromMainThread() const
+Cell::runtimeFromActiveCooperatingThread() const
 {
     JSRuntime* rt = chunk()->trailer.runtime;
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(rt));
@@ -384,7 +375,7 @@ TenuredCell::readBarrier(TenuredCell* thing)
     JS::shadow::Zone* shadowZone = thing->shadowZoneFromAnyThread();
     if (shadowZone->needsIncrementalBarrier()) {
         // Barriers are only enabled on the active thread and are disabled while collecting.
-        MOZ_ASSERT(!RuntimeFromMainThreadIsHeapMajorCollecting(shadowZone));
+        MOZ_ASSERT(!RuntimeFromActiveCooperatingThreadIsHeapMajorCollecting(shadowZone));
         Cell* tmp = thing;
         TraceManuallyBarrieredGenericPointerEdge(shadowZone->barrierTracer(), &tmp, "read barrier");
         MOZ_ASSERT(tmp == thing);
@@ -393,7 +384,7 @@ TenuredCell::readBarrier(TenuredCell* thing)
     if (thing->isMarkedGray()) {
         // There shouldn't be anything marked grey unless we're on the active thread.
         MOZ_ASSERT(CurrentThreadCanAccessRuntime(thing->runtimeFromAnyThread()));
-        if (!RuntimeFromMainThreadIsHeapMajorCollecting(shadowZone))
+        if (!RuntimeFromActiveCooperatingThreadIsHeapMajorCollecting(shadowZone))
             JS::UnmarkGrayGCThingRecursively(JS::GCCellPtr(thing, thing->getTraceKind()));
     }
 }
@@ -426,7 +417,7 @@ TenuredCell::writeBarrierPre(TenuredCell* thing)
 
     JS::shadow::Zone* shadowZone = thing->shadowZoneFromAnyThread();
     if (shadowZone->needsIncrementalBarrier()) {
-        MOZ_ASSERT(!RuntimeFromMainThreadIsHeapMajorCollecting(shadowZone));
+        MOZ_ASSERT(!RuntimeFromActiveCooperatingThreadIsHeapMajorCollecting(shadowZone));
         Cell* tmp = thing;
         TraceManuallyBarrieredGenericPointerEdge(shadowZone->barrierTracer(), &tmp, "pre barrier");
         MOZ_ASSERT(tmp == thing);

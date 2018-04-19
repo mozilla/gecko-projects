@@ -7,21 +7,23 @@
 #include "nsGfxButtonControlFrame.h"
 #include "nsIFormControl.h"
 #include "nsGkAtoms.h"
+#include "mozilla/StyleSetHandle.h"
+#include "mozilla/StyleSetHandleInlines.h"
 #include "mozilla/dom/HTMLInputElement.h"
 #include "nsContentUtils.h"
 #include "nsTextNode.h"
 
 using namespace mozilla;
 
-nsGfxButtonControlFrame::nsGfxButtonControlFrame(ComputedStyle* aStyle)
-  : nsHTMLButtonControlFrame(aStyle, kClassID)
+nsGfxButtonControlFrame::nsGfxButtonControlFrame(nsStyleContext* aContext)
+  : nsHTMLButtonControlFrame(aContext, kClassID)
 {
 }
 
 nsContainerFrame*
-NS_NewGfxButtonControlFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
+NS_NewGfxButtonControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
-  return new (aPresShell) nsGfxButtonControlFrame(aStyle);
+  return new (aPresShell) nsGfxButtonControlFrame(aContext);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsGfxButtonControlFrame)
@@ -106,7 +108,7 @@ nsGfxButtonControlFrame::GetLabel(nsString& aLabel)
 {
   // Get the text from the "value" property on our content if there is
   // one; otherwise set it to a default value (localized).
-  dom::HTMLInputElement* elt = dom::HTMLInputElement::FromNode(mContent);
+  dom::HTMLInputElement* elt = dom::HTMLInputElement::FromContent(mContent);
   if (elt && elt->HasAttr(kNameSpaceID_None, nsGkAtoms::value)) {
     elt->GetValue(aLabel, dom::CallerType::System);
   } else {

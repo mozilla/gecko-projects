@@ -174,8 +174,6 @@ public:
     void SchedulePaintIfDeviceReset() override;
     void CheckForContentOnlyDeviceReset();
 
-    bool AllowOpenGLCanvas() override;
-
     mozilla::gfx::BackendType GetContentBackendFor(mozilla::layers::LayersBackend aLayers) override;
 
     mozilla::gfx::BackendType GetPreferredCanvasBackend() override;
@@ -233,10 +231,6 @@ protected:
     void ImportContentDeviceData(const mozilla::gfx::ContentDeviceData& aData) override;
     void BuildContentDeviceData(mozilla::gfx::ContentDeviceData* aOut) override;
 
-    BackendPrefsData GetBackendPrefs() override;
-
-    bool CheckVariationFontSupport() override;
-
 protected:
     RenderMode mRenderMode;
 
@@ -267,8 +261,6 @@ private:
     RefPtr<mozilla::layers::ReadbackManagerD3D11> mD3D11ReadbackManager;
 
     nsTArray<D3D_FEATURE_LEVEL> mFeatureLevels;
-
-    bool mUsingDirectWrite;
 };
 
 #endif /* GFX_WINDOWS_PLATFORM_H */

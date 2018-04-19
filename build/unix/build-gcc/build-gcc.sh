@@ -29,15 +29,11 @@ prepare() {
     tar() { :; }
     sed() { :; }
     wget() {
-      # Get last argument given to wget.
-      eval echo \$$# >&3
+      echo $1
     }
 
-    # In GCC >= 7, the download_prerequisites script tried to do its own
-    # verification, but we have ours, so disable it.
-    set -- --no-verify
     . ./contrib/download_prerequisites
-  ) 3>&1 > /dev/null | while read url; do
+  ) | while read url; do
     file=$(basename $url)
     case "$file" in
     gmp-*.tar.*)
@@ -53,15 +49,7 @@ prepare() {
     mpc-*.tar.*)
       # If download_prerequisites wants 0.8.1, use 0.8.2 instead.
       file=${file/0.8.1/0.8.2}
-      case "$file" in
-      *-0.8.2.tar*|*-0.9.tar*|*-1.0.tar*)
-        ext=asc
-        ;;
-      *)
-        ext=sig
-        ;;
-      esac
-      download_and_check http://www.multiprecision.org/downloads $file.$ext
+      download_and_check http://www.multiprecision.org/downloads $file.asc
       ;;
     *)
       download $(dirname $url) $file

@@ -7,7 +7,6 @@
 #define PartiallySeekableInputStream_h
 
 #include "mozilla/Attributes.h"
-#include "mozilla/Mutex.h"
 #include "nsCOMPtr.h"
 #include "nsIAsyncInputStream.h"
 #include "nsICloneableInputStream.h"
@@ -54,7 +53,6 @@ private:
   nsIIPCSerializableInputStream* mWeakIPCSerializableInputStream;
   nsIAsyncInputStream* mWeakAsyncInputStream;
 
-  // Protected by mutex.
   nsCOMPtr<nsIInputStreamCallback> mAsyncWaitCallback;
 
   nsTArray<char> mCachedBuffer;
@@ -62,8 +60,6 @@ private:
   uint64_t mBufferSize;
   uint64_t mPos;
   bool mClosed;
-
-  Mutex mMutex;
 };
 
 } // net namespace

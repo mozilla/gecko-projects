@@ -37,5 +37,5 @@ add_task(async function test_unsigned() {
   let addon = await AddonManager.getAddonByID(ID);
   is(addon, null, "Extension is not installed");
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

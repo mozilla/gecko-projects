@@ -8,9 +8,8 @@
 #define mozilla_dom_serviceworkercontainer_h__
 
 #include "mozilla/DOMEventTargetHelper.h"
-#include "mozilla/dom/ServiceWorkerUtils.h"
 
-class nsIGlobalWindow;
+class nsPIDOMWindowInner;
 
 namespace mozilla {
 namespace dom {
@@ -32,8 +31,7 @@ public:
 
   static bool IsEnabled(JSContext* aCx, JSObject* aGlobal);
 
-  static already_AddRefed<ServiceWorkerContainer>
-  Create(nsIGlobalObject* aGlobal);
+  explicit ServiceWorkerContainer(nsPIDOMWindowInner* aWindow);
 
   virtual JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
@@ -69,16 +67,15 @@ public:
   ControllerChanged(ErrorResult& aRv);
 
 private:
-  explicit ServiceWorkerContainer(nsIGlobalObject* aGlobal);
-
   ~ServiceWorkerContainer();
+
+  void RemoveReadyPromise();
 
   // This only changes when a worker hijacks everything in its scope by calling
   // claim.
   RefPtr<ServiceWorker> mControllerWorker;
 
   RefPtr<Promise> mReadyPromise;
-  MozPromiseRequestHolder<ServiceWorkerRegistrationPromise> mReadyPromiseHolder;
 };
 
 } // namespace dom

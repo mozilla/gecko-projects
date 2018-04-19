@@ -35,7 +35,7 @@ window.gActivityStreamStrings = {
   "prefs_section_rows_option": "{num} 행",
   "prefs_search_header": "웹 검색",
   "prefs_topsites_description": "가장 많이 방문한 사이트",
-  "prefs_topstories_description2": "Great content from around the web, personalized for you",
+  "prefs_topstories_description": "놓칠 수 있는 높은 품질의 콘텐츠",
   "prefs_topstories_show_sponsored_label": "{provider} 제공 이야기",
   "prefs_topstories_sponsored_learn_more": "자세히 보기",
   "prefs_highlights_description": "저장하거나 방문한 사이트 모음",
@@ -89,6 +89,5 @@ window.gActivityStreamStrings = {
   "section_menu_action_add_topsite": "인기 사이트 추가",
   "section_menu_action_move_up": "위로 이동",
   "section_menu_action_move_down": "아래로 이동",
-  "section_menu_action_privacy_notice": "개인 정보 보호 정책",
-  "prefs_topstories_description": "놓칠 수 있는 높은 품질의 콘텐츠"
+  "section_menu_action_privacy_notice": "개인 정보 보호 정책"
 };

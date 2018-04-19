@@ -259,7 +259,8 @@ void nsPluginArray::NotifyHiddenPluginTouched(nsPluginElement* aHiddenElement)
   event->SetTarget(doc);
   event->SetTrusted(true);
   event->WidgetEventPtr()->mFlags.mOnlyChromeDispatch = true;
-  doc->DispatchEvent(*event);
+  bool dummy;
+  doc->DispatchEvent(event, &dummy);
 }
 
 uint32_t

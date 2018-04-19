@@ -11,9 +11,9 @@
 #include "mozilla/EventForwards.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/UniquePtr.h"
-#include "mozilla/dom/CharacterData.h"
 #include "nsFrame.h"
 #include "nsFrameSelection.h"
+#include "nsGenericDOMDataNode.h"
 #include "nsSplittableFrame.h"
 #include "nsLineBox.h"
 #include "gfxSkipChars.h"
@@ -52,8 +52,8 @@ class nsTextFrame : public nsFrame
   typedef gfxTextRun::Range Range;
 
 public:
-  explicit nsTextFrame(ComputedStyle* aStyle, ClassID aID = kClassID)
-    : nsFrame(aStyle, aID)
+  explicit nsTextFrame(nsStyleContext* aContext, ClassID aID = kClassID)
+    : nsFrame(aContext, aID)
     , mNextContinuation(nullptr)
     , mContentOffset(0)
     , mContentLengthHint(0)
@@ -157,13 +157,12 @@ public:
     if (mozilla::RubyUtils::IsRubyContentBox(GetParent()->Type())) {
       return true;
     }
-    return Style()->ShouldSuppressLineBreak();
+    return StyleContext()->ShouldSuppressLineBreak();
   }
 
-  void InvalidateFrame(uint32_t aDisplayItemKey = 0, bool aRebuildDisplayItems = true) override;
+  void InvalidateFrame(uint32_t aDisplayItemKey = 0) override;
   void InvalidateFrameWithRect(const nsRect& aRect,
-                               uint32_t aDisplayItemKey = 0,
-                               bool aRebuildDisplayItems = true) override;
+                               uint32_t aDisplayItemKey = 0) override;
 
 #ifdef DEBUG_FRAME_DUMP
   void List(FILE* out = stderr,

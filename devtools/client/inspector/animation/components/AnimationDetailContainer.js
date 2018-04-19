@@ -16,33 +16,23 @@ const AnimatedPropertyListContainer =
 class AnimationDetailContainer extends PureComponent {
   static get propTypes() {
     return {
-      addAnimationsCurrentTimeListener: PropTypes.func.isRequired,
       animation: PropTypes.object.isRequired,
       emitEventForTest: PropTypes.func.isRequired,
       getAnimatedPropertyMap: PropTypes.func.isRequired,
-      getAnimationsCurrentTime: PropTypes.func.isRequired,
       getComputedStyle: PropTypes.func.isRequired,
-      removeAnimationsCurrentTimeListener: PropTypes.func.isRequired,
       setDetailVisibility: PropTypes.func.isRequired,
       simulateAnimation: PropTypes.func.isRequired,
-      simulateAnimationForKeyframesProgressBar: PropTypes.func.isRequired,
-      timeScale: PropTypes.object.isRequired,
     };
   }
 
   render() {
     const {
-      addAnimationsCurrentTimeListener,
       animation,
       emitEventForTest,
       getAnimatedPropertyMap,
-      getAnimationsCurrentTime,
       getComputedStyle,
-      removeAnimationsCurrentTimeListener,
       setDetailVisibility,
       simulateAnimation,
-      simulateAnimationForKeyframesProgressBar,
-      timeScale,
     } = this.props;
 
     return dom.div(
@@ -61,16 +51,11 @@ class AnimationDetailContainer extends PureComponent {
       animation ?
         AnimatedPropertyListContainer(
           {
-            addAnimationsCurrentTimeListener,
             animation,
             emitEventForTest,
             getAnimatedPropertyMap,
-            getAnimationsCurrentTime,
             getComputedStyle,
-            removeAnimationsCurrentTimeListener,
             simulateAnimation,
-            simulateAnimationForKeyframesProgressBar,
-            timeScale,
           }
         )
       :

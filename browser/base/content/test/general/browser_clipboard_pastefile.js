@@ -55,5 +55,5 @@ add_task(async function() {
 
   document.documentElement.removeChild(textbox);
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

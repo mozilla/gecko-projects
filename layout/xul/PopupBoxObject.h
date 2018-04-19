@@ -29,6 +29,11 @@ class PopupBoxObject final : public BoxObject
 public:
   NS_INLINE_DECL_REFCOUNTING_INHERITED(PopupBoxObject, BoxObject)
 
+  // also in PopupBoxObject.webidl
+  static const uint32_t ROLLUP_DEFAULT = 0;   /* widget/platform default */
+  static const uint32_t ROLLUP_CONSUME = 1;   /* consume the rollup event */
+  static const uint32_t ROLLUP_NO_CONSUME = 2; /* don't consume the rollup event */
+
   PopupBoxObject();
 
   nsIContent* GetParentObject() const;
@@ -47,6 +52,12 @@ public:
   bool AutoPosition();
 
   void SetAutoPosition(bool aShouldAutoPosition);
+
+  void EnableKeyboardNavigator(bool aEnableKeyboardNavigator);
+
+  void EnableRollup(bool aShouldRollup);
+
+  void SetConsumeRollupEvent(uint32_t aConsume);
 
   void SizeTo(int32_t aWidth, int32_t aHeight);
 

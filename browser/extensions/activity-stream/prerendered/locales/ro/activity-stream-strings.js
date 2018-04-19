@@ -35,7 +35,7 @@ window.gActivityStreamStrings = {
   "prefs_section_rows_option": "{num} rând;{num} rânduri;{num} de rânduri",
   "prefs_search_header": "Căutare web",
   "prefs_topsites_description": "Site-urile pe care le vizitezi cel mai des",
-  "prefs_topstories_description2": "Great content from around the web, personalized for you",
+  "prefs_topstories_description": "Conținut de calitate pe care l-ai putea rata",
   "prefs_topstories_show_sponsored_label": "Conținut sponsorizat de {provider}",
   "prefs_topstories_sponsored_learn_more": "Află mai multe",
   "prefs_highlights_description": "O selecție a site-urilor pe care le-ai salvat sau vizitat",
@@ -89,6 +89,5 @@ window.gActivityStreamStrings = {
   "section_menu_action_add_topsite": "Adaugă site de top",
   "section_menu_action_move_up": "Mută în sus",
   "section_menu_action_move_down": "Mută în jos",
-  "section_menu_action_privacy_notice": "Politica de confidențialitate",
-  "prefs_topstories_description": "Conținut de calitate pe care l-ai putea rata"
+  "section_menu_action_privacy_notice": "Politica de confidențialitate"
 };

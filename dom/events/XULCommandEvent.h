@@ -4,18 +4,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// This class implements a XUL "command" event.  See XULCommandEvent.webidl
+// This class implements a XUL "command" event.  See nsIDOMXULCommandEvent.idl
 
 #ifndef mozilla_dom_XULCommandEvent_h_
 #define mozilla_dom_XULCommandEvent_h_
 
 #include "mozilla/dom/UIEvent.h"
 #include "mozilla/dom/XULCommandEventBinding.h"
+#include "nsIDOMXULCommandEvent.h"
 
 namespace mozilla {
 namespace dom {
 
-class XULCommandEvent : public UIEvent
+class XULCommandEvent : public UIEvent,
+                        public nsIDOMXULCommandEvent
 {
 public:
   XULCommandEvent(EventTarget* aOwner,
@@ -24,15 +26,14 @@ public:
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(XULCommandEvent, UIEvent)
+  NS_DECL_NSIDOMXULCOMMANDEVENT
+
+  // Forward our inherited virtual methods to the base class
+  NS_FORWARD_TO_UIEVENT
 
   virtual JSObject* WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {
     return XULCommandEventBinding::Wrap(aCx, this, aGivenProto);
-  }
-
-  virtual XULCommandEvent* AsXULCommandEvent() override
-  {
-    return this;
   }
 
   bool AltKey();
@@ -55,8 +56,12 @@ public:
                         bool aCtrlKey, bool aAltKey,
                         bool aShiftKey, bool aMetaKey,
                         Event* aSourceEvent,
-                        uint16_t aInputSource,
-                        ErrorResult& aRv);
+                        uint16_t aInputSource)
+  {
+    InitCommandEvent(aType, aCanBubble, aCancelable, aView->AsInner(),
+                     aDetail, aCtrlKey, aAltKey, aShiftKey, aMetaKey,
+                     aSourceEvent, aInputSource);
+  }
 
 protected:
   ~XULCommandEvent() {}

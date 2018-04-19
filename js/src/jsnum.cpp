@@ -12,9 +12,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/FloatingPoint.h"
-#include "mozilla/Maybe.h"
 #include "mozilla/RangedPtr.h"
-#include "mozilla/TextUtils.h"
 
 #ifdef HAVE_LOCALECONV
 #include <locale.h>
@@ -42,9 +40,6 @@ using namespace js;
 
 using mozilla::Abs;
 using mozilla::ArrayLength;
-using mozilla::AsciiAlphanumericToNumber;
-using mozilla::IsAsciiAlphanumeric;
-using mozilla::Maybe;
 using mozilla::MinNumberValue;
 using mozilla::NegativeInfinity;
 using mozilla::PositiveInfinity;
@@ -87,7 +82,7 @@ ComputeAccurateDecimalInteger(JSContext* cx, const CharT* start, const CharT* en
 
     for (size_t i = 0; i < length; i++) {
         char c = char(start[i]);
-        MOZ_ASSERT(IsAsciiAlphanumeric(c));
+        MOZ_ASSERT(('0' <= c && c <= '9') || ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z'));
         cstr[i] = c;
     }
     cstr[length] = 0;
@@ -125,8 +120,13 @@ class BinaryDigitReader
                 return -1;
 
             int c = *start++;
-            MOZ_ASSERT(IsAsciiAlphanumeric(c));
-            digit = AsciiAlphanumericToNumber(c);
+            MOZ_ASSERT(('0' <= c && c <= '9') || ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z'));
+            if ('0' <= c && c <= '9')
+                digit = c - '0';
+            else if ('a' <= c && c <= 'z')
+                digit = c - 'a' + 10;
+            else
+                digit = c - 'A' + 10;
             digitMask = base >> 1;
         }
 
@@ -224,14 +224,18 @@ js::GetPrefixInteger(JSContext* cx, const CharT* start, const CharT* end, int ba
     const CharT* s = start;
     double d = 0.0;
     for (; s < end; s++) {
+        int digit;
         CharT c = *s;
-        if (!IsAsciiAlphanumeric(c))
+        if ('0' <= c && c <= '9')
+            digit = c - '0';
+        else if ('a' <= c && c <= 'z')
+            digit = c - 'a' + 10;
+        else if ('A' <= c && c <= 'Z')
+            digit = c - 'A' + 10;
+        else
             break;
-
-        uint8_t digit = AsciiAlphanumericToNumber(c);
         if (digit >= base)
             break;
-
         d = d * base + digit;
     }
 
@@ -1188,13 +1192,17 @@ js::FinishRuntimeNumberState(JSRuntime* rt)
 #endif
 
 JSObject*
-js::InitNumberClass(JSContext* cx, Handle<GlobalObject*> global)
+js::InitNumberClass(JSContext* cx, HandleObject obj)
 {
-    Rooted<NumberObject*> numberProto(cx);
-    numberProto = GlobalObject::createBlankPrototype<NumberObject>(cx, global);
+    MOZ_ASSERT(obj->isNative());
+
+    Handle<GlobalObject*> global = obj.as<GlobalObject>();
+
+    RootedObject numberProto(cx, GlobalObject::createBlankPrototype(cx, global,
+                                                                    &NumberObject::class_));
     if (!numberProto)
         return nullptr;
-    numberProto->setPrimitiveValue(0);
+    numberProto->as<NumberObject>().setPrimitiveValue(0);
 
     RootedFunction ctor(cx);
     ctor = GlobalObject::createConstructor(cx, Number, cx->names().Number, 1);
@@ -1295,7 +1303,7 @@ FracNumberToCString(JSContext* cx, ToCStringBuf* cbuf, double d, int base = 10)
          */
         const double_conversion::DoubleToStringConverter& converter
             = double_conversion::DoubleToStringConverter::EcmaScriptConverter();
-        double_conversion::StringBuilder builder(cbuf->sbuf, js::ToCStringBuf::sbufSize);
+        double_conversion::StringBuilder builder(cbuf->sbuf, cbuf->sbufSize);
         converter.ToShortest(d, &builder);
         numStr = builder.Finalize();
     } else {

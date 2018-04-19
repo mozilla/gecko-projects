@@ -2,17 +2,8 @@
 codespell:
     description: Check code for common misspellings
     include:
-        - browser/base/content/docs/
-        - build/docs
-        - mobile/android/docs
-        - python/docs
-        - python/mozlint
-        - taskcluster/docs
-        - testing/mozbase/docs
-        - toolkit/components/extensions/docs
-        - toolkit/components/telemetry/docs/
-        - toolkit/crashreporter/docs
         - tools/lint
+        - python/mozlint
     exclude:
         - third_party
     # List of extensions coming from:
@@ -34,7 +25,5 @@ codespell:
         - py
         - properties
         - rst
-    support-files:
-        - 'tools/lint/spell/**'
     type: external
     payload: spell:lint

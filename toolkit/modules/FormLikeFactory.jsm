@@ -26,8 +26,8 @@ let FormLikeFactory = {
    * @throws Error if aForm isn't an HTMLFormElement
    */
   createFromForm(aForm) {
-    if (ChromeUtils.getClassName(aForm) !== "HTMLFormElement") {
-      throw new Error("createFromForm: aForm must be a HTMLFormElement");
+    if (!(aForm instanceof Ci.nsIDOMHTMLFormElement)) {
+      throw new Error("createFromForm: aForm must be a nsIDOMHTMLFormElement");
     }
 
     let formLike = {
@@ -68,7 +68,7 @@ let FormLikeFactory = {
     }
 
     let rootElement = this.findRootForField(aField);
-    if (ChromeUtils.getClassName(rootElement) === "HTMLFormElement") {
+    if (rootElement instanceof Ci.nsIDOMHTMLFormElement) {
       return this.createFromForm(rootElement);
     }
 

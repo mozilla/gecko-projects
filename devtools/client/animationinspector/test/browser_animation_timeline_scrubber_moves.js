@@ -12,16 +12,16 @@ requestLongerTimeout(2);
 // measures the position of the scrubber once, then waits for some time to pass
 // and measures its position again.
 
-add_task(async function() {
-  await addTab(URL_ROOT + "doc_simple_animation.html");
-  let {panel} = await openAnimationInspector();
+add_task(function* () {
+  yield addTab(URL_ROOT + "doc_simple_animation.html");
+  let {panel} = yield openAnimationInspector();
 
   let timeline = panel.animationsTimelineComponent;
   let scrubberEl = timeline.scrubberEl;
   let startPos = scrubberEl.getBoundingClientRect().left;
 
   info("Wait for some time to check that the scrubber moves");
-  await new Promise(r => setTimeout(r, 2000));
+  yield new Promise(r => setTimeout(r, 2000));
 
   let endPos = scrubberEl.getBoundingClientRect().left;
 

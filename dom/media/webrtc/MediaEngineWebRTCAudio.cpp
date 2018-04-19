@@ -14,7 +14,6 @@
 #include "MediaStreamGraphImpl.h"
 #include "MediaTrackConstraints.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/ErrorNames.h"
 #include "mtransport/runnable_utils.h"
 #include "nsAutoPtr.h"
 
@@ -235,24 +234,12 @@ MediaEngineWebRTCMicrophoneSource::Reconfigure(const RefPtr<AllocationHandle>& a
   NormalizedConstraints constraints(aConstraints);
   nsresult rv = ReevaluateAllocation(aHandle, &constraints, aPrefs, aDeviceId,
                                      aOutBadConstraint);
-  if (NS_FAILED(rv)) {
-    if (aOutBadConstraint) {
-      return NS_ERROR_INVALID_ARG;
-    }
-
-    nsAutoCString name;
-    GetErrorName(rv, name);
-    LOG(("Mic source %p Reconfigure() failed unexpectedly. rv=%s",
-         this, name.Data()));
-    Stop(aHandle);
-    return NS_ERROR_UNEXPECTED;
-  }
 
   size_t i = mAllocations.IndexOf(aHandle, 0, AllocationHandleComparator());
   MOZ_DIAGNOSTIC_ASSERT(i != mAllocations.NoIndex);
   ApplySettings(mNetPrefs, mAllocations[i].mStream->GraphImpl());
 
-  return NS_OK;
+  return rv;
 }
 
 bool operator == (const MediaEnginePrefs& a, const MediaEnginePrefs& b)
@@ -471,13 +458,17 @@ MediaEngineWebRTCMicrophoneSource::UpdateSingleSource(
 
     case kStarted:
     case kStopped:
+      if (prefs == mNetPrefs) {
+        return NS_OK;
+      }
+
       if (prefs.mChannels != mNetPrefs.mChannels) {
         // If the channel count changed, tell the MSG to open a new driver with
         // the correct channel count.
         MOZ_ASSERT(!mAllocations.IsEmpty());
         RefPtr<SourceMediaStream> stream;
         for (const Allocation& allocation : mAllocations) {
-          if (allocation.mStream && allocation.mStream->GraphImpl()) {
+          if (allocation.mStream) {
             stream = allocation.mStream;
             break;
           }
@@ -489,9 +480,18 @@ MediaEngineWebRTCMicrophoneSource::UpdateSingleSource(
         uint32_t channelCount = 0;
         mAudioInput->GetChannelCount(channelCount);
         MOZ_ASSERT(channelCount > 0 && mNetPrefs.mChannels > 0);
-        if (!stream->OpenNewAudioCallbackDriver(mListener)) {
+        if (mNetPrefs.mChannels != prefs.mChannels &&
+            !stream->OpenNewAudioCallbackDriver(mListener)) {
           MOZ_LOG(GetMediaManagerLog(), LogLevel::Error, ("Could not open a new AudioCallbackDriver for input"));
           return NS_ERROR_FAILURE;
+        }
+      }
+
+      if (MOZ_LOG_TEST(GetMediaManagerLog(), LogLevel::Debug)) {
+        if (mAllocations.IsEmpty()) {
+          LOG(("Audio device %d reallocated", mCapIndex));
+        } else {
+          LOG(("Audio device %d allocated shared", mCapIndex));
         }
       }
       break;
@@ -499,14 +499,6 @@ MediaEngineWebRTCMicrophoneSource::UpdateSingleSource(
     default:
       LOG(("Audio device %d in ignored state %d", mCapIndex, mState));
       break;
-  }
-
-  if (MOZ_LOG_TEST(GetMediaManagerLog(), LogLevel::Debug)) {
-    if (mAllocations.IsEmpty()) {
-      LOG(("Audio device %d reallocated", mCapIndex));
-    } else {
-      LOG(("Audio device %d allocated shared", mCapIndex));
-    }
   }
 
   if (sChannelsOpen > 0) {
@@ -578,7 +570,7 @@ MediaEngineWebRTCMicrophoneSource::Allocate(const dom::MediaTrackConstraints &aC
   AssertIsOnOwningThread();
   MOZ_ASSERT(aOutHandle);
   auto handle = MakeRefPtr<AllocationHandle>(aConstraints, aPrincipalInfo,
-                                             aDeviceId);
+                                             aPrefs, aDeviceId);
 
   LOG(("Mic source %p allocation %p Allocate()", this, handle.get()));
 

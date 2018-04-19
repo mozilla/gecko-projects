@@ -22,7 +22,6 @@
 Servo.app
 .config.mk.last
 /glfw
-capture_webrender/
 
 # Editors
 

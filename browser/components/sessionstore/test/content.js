@@ -54,7 +54,7 @@ var historyListener = {
 
 var {sessionHistory} = docShell.QueryInterface(Ci.nsIWebNavigation);
 if (sessionHistory) {
-  sessionHistory.legacySHistory.addSHistoryListener(historyListener);
+  sessionHistory.addSHistoryListener(historyListener);
 }
 
 /**

@@ -74,7 +74,7 @@ pk11_copyAttributes(PLArenaPool *arena,
             return SECFailure;
         }
         /* remove the unknown attributes. If we don't have enough attributes
-         * PK11_CreateNewObject() will fail */
+	 * PK11_CreateNewObject() will fail */
         for (i = 0, j = 0; i < copyTemplateCount; i++) {
             if (copyTemplate[i].ulValueLen != -1) {
                 newTemplate[j] = copyTemplate[i];
@@ -88,7 +88,6 @@ pk11_copyAttributes(PLArenaPool *arena,
     }
     if (crv != CKR_OK) {
         PORT_SetError(PK11_MapError(crv));
-        PORT_Free(newTemplate);
         return SECFailure;
     }
     if (targetID == CK_INVALID_HANDLE) {
@@ -101,7 +100,7 @@ pk11_copyAttributes(PLArenaPool *arena,
                                 copyTemplate, copyTemplateCount);
     }
     if (newTemplate) {
-        PORT_Free(newTemplate);
+        free(newTemplate);
     }
     return rv;
 }

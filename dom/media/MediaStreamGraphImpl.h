@@ -322,8 +322,9 @@ public:
 
   /**
    * Determine if we have any audio tracks, or are about to add any audiotracks.
+   * Also checks if we'll need the AEC running (i.e. microphone input tracks)
    */
-  bool AudioTrackPresent();
+  bool AudioTrackPresent(bool& aNeedsAEC);
 
   /**
    * Sort mStreams so that every stream not in a cycle is after any streams

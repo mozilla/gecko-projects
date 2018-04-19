@@ -33,7 +33,6 @@ enum MozContentPolicyType {
   "csp_report",
   "imageset",
   "web_manifest",
-  "speculative",
   "other"
 };
 

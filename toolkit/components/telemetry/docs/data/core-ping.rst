@@ -125,7 +125,7 @@ sessions. Note that showing a dialog (including a Firefox dialog) will
 take Firefox out of focus & end the current session.
 
 An implementation that records a session when Firefox is completely hidden is
-preferable (e.g. to avoid the dialog issue above), however, it's more complex
+preferrable (e.g. to avoid the dialog issue above), however, it's more complex
 to implement and so we chose not to, at least for the initial implementation.
 
 profileDate
@@ -179,7 +179,7 @@ we only record the search engine name when:
 
 accessibilityServices
 ~~~~~~~~~~~~~~~~~~~~~
-This describes which accessibility services are currently enabled on user's device and could be interacting with our
+This describes which accessibility services are currently enabled on user's device and could be interacting with out
 products. This is optional because users often do not have any accessibility services enabled. If present, the value is
 a list of accessibility service ids.
 

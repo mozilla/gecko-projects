@@ -342,7 +342,7 @@ _strFromWCS( UChar   *dest,
         pSrcLimit = src + srcLength;
 
         for(;;){
-            int32_t nulLen = 0;
+            register int32_t nulLen = 0;
 
             /* find nulls in the string */
             while(nulLen<srcLength && pSrc[nulLen++]!=0){

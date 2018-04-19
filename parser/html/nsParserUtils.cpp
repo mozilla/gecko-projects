@@ -3,45 +3,47 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsParserUtils.h"
-#include "NullPrincipal.h"
-#include "mozilla/dom/DocumentFragment.h"
-#include "mozilla/dom/ScriptLoader.h"
-#include "nsAttrName.h"
-#include "nsAutoPtr.h"
-#include "nsCOMPtr.h"
-#include "nsContentCID.h"
-#include "nsContentUtils.h"
-#include "nsEscape.h"
-#include "nsHTMLParts.h"
-#include "nsHtml5Module.h"
+#include "nsString.h"
 #include "nsIComponentManager.h"
-#include "nsIContent.h"
-#include "nsIContentSink.h"
-#include "nsIDOMDocument.h"
-#include "nsIDOMDocumentFragment.h"
-#include "nsIDOMElement.h"
-#include "nsIDOMNode.h"
-#include "nsIDOMNodeList.h"
-#include "nsIDTD.h"
-#include "nsIDocument.h"
-#include "nsIDocumentEncoder.h"
-#include "nsIFragmentContentSink.h"
-#include "nsIParser.h"
-#include "nsIScriptableUnescapeHTML.h"
+#include "nsCOMPtr.h"
+#include "nsXPCOM.h"
 #include "nsISupportsPrimitives.h"
+#include "nsEscape.h"
+#include "nsIParser.h"
+#include "nsIDTD.h"
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
 #include "nsParserCIID.h"
-#include "nsString.h"
+#include "nsContentUtils.h"
+#include "nsIContentSink.h"
+#include "nsIDocumentEncoder.h"
+#include "nsIDOMDocumentFragment.h"
+#include "nsIFragmentContentSink.h"
+#include "nsIDOMDocument.h"
+#include "nsIDOMNodeList.h"
+#include "nsIDOMNode.h"
+#include "nsIDOMElement.h"
+#include "nsIDocument.h"
+#include "nsIContent.h"
+#include "nsAttrName.h"
+#include "nsHTMLParts.h"
+#include "nsContentCID.h"
+#include "nsIScriptableUnescapeHTML.h"
+#include "nsParserUtils.h"
+#include "nsAutoPtr.h"
 #include "nsTreeSanitizer.h"
-#include "nsXPCOM.h"
+#include "nsHtml5Module.h"
+#include "mozilla/dom/DocumentFragment.h"
+#include "mozilla/dom/ScriptLoader.h"
+#include "NullPrincipal.h"
 
 #define XHTML_DIV_TAG "div xmlns=\"http://www.w3.org/1999/xhtml\""
 
 using namespace mozilla::dom;
 
-NS_IMPL_ISUPPORTS(nsParserUtils, nsIScriptableUnescapeHTML, nsIParserUtils)
+NS_IMPL_ISUPPORTS(nsParserUtils,
+                  nsIScriptableUnescapeHTML,
+                  nsIParserUtils)
 
 NS_IMETHODIMP
 nsParserUtils::ConvertToPlainText(const nsAString& aFromStr,
@@ -49,17 +51,20 @@ nsParserUtils::ConvertToPlainText(const nsAString& aFromStr,
                                   uint32_t aWrapCol,
                                   nsAString& aToStr)
 {
-  return nsContentUtils::ConvertToPlainText(aFromStr, aToStr, aFlags, aWrapCol);
+  return nsContentUtils::ConvertToPlainText(aFromStr,
+    aToStr,
+    aFlags,
+    aWrapCol);
 }
 
 NS_IMETHODIMP
-nsParserUtils::Unescape(const nsAString& aFromStr, nsAString& aToStr)
+nsParserUtils::Unescape(const nsAString& aFromStr,
+                        nsAString& aToStr)
 {
-  return nsContentUtils::ConvertToPlainText(
-    aFromStr,
+  return nsContentUtils::ConvertToPlainText(aFromStr,
     aToStr,
     nsIDocumentEncoder::OutputSelectionOnly |
-      nsIDocumentEncoder::OutputAbsoluteLinks,
+    nsIDocumentEncoder::OutputAbsoluteLinks,
     0);
 }
 
@@ -70,7 +75,7 @@ nsParserUtils::Sanitize(const nsAString& aFromStr,
 {
   nsCOMPtr<nsIURI> uri;
   NS_NewURI(getter_AddRefs(uri), "about:blank");
-  nsCOMPtr<nsIPrincipal> principal = NullPrincipal::CreateWithoutOriginAttributes();
+  nsCOMPtr<nsIPrincipal> principal = NullPrincipal::Create();
   nsCOMPtr<nsIDOMDocument> domDocument;
   nsresult rv = NS_NewDOMDocument(getter_AddRefs(domDocument),
                                   EmptyString(),
@@ -97,10 +102,10 @@ nsParserUtils::Sanitize(const nsAString& aFromStr,
   encoder->NativeInit(document,
                       NS_LITERAL_STRING("text/html"),
                       nsIDocumentEncoder::OutputDontRewriteEncodingDeclaration |
-                        nsIDocumentEncoder::OutputNoScriptContent |
-                        nsIDocumentEncoder::OutputEncodeBasicEntities |
-                        nsIDocumentEncoder::OutputLFLineBreak |
-                        nsIDocumentEncoder::OutputRaw);
+                      nsIDocumentEncoder::OutputNoScriptContent |
+                      nsIDocumentEncoder::OutputEncodeBasicEntities |
+                      nsIDocumentEncoder::OutputLFLineBreak |
+                      nsIDocumentEncoder::OutputRaw);
 
   return encoder->EncodeToString(aToStr);
 }
@@ -112,8 +117,12 @@ nsParserUtils::ParseFragment(const nsAString& aFragment,
                              nsIDOMElement* aContextElement,
                              nsIDOMDocumentFragment** aReturn)
 {
-  return nsParserUtils::ParseFragment(
-    aFragment, 0, aIsXML, aBaseURI, aContextElement, aReturn);
+  return nsParserUtils::ParseFragment(aFragment,
+                                      0,
+                                      aIsXML,
+                                      aBaseURI,
+                                      aContextElement,
+                                      aReturn);
 }
 
 NS_IMETHODIMP
@@ -153,14 +162,21 @@ nsParserUtils::ParseFragment(const nsAString& aFragment,
   if (aIsXML) {
     // XHTML
     tagStack.AppendElement(NS_LITERAL_STRING(XHTML_DIV_TAG));
-    rv = nsContentUtils::ParseFragmentXML(
-      aFragment, document, tagStack, true, aReturn);
+    rv = nsContentUtils::ParseFragmentXML(aFragment,
+                                          document,
+                                          tagStack,
+                                          true,
+                                          aReturn);
     fragment = do_QueryInterface(*aReturn);
   } else {
     NS_ADDREF(*aReturn = new DocumentFragment(document->NodeInfoManager()));
     fragment = do_QueryInterface(*aReturn);
-    rv = nsContentUtils::ParseFragmentHTML(
-      aFragment, fragment, nsGkAtoms::body, kNameSpaceID_XHTML, false, true);
+    rv = nsContentUtils::ParseFragmentHTML(aFragment,
+                                           fragment,
+                                           nsGkAtoms::body,
+                                           kNameSpaceID_XHTML,
+                                           false,
+                                           true);
   }
   if (fragment) {
     nsTreeSanitizer sanitizer(aFlags);

@@ -62,7 +62,8 @@ amContentHandler.prototype = {
         element = element.ownerGlobal.frameElement;
 
       if (element) {
-        let listener = Cc["@mozilla.org/addons/integration;1"].getService();
+        let listener = Cc["@mozilla.org/addons/integration;1"].
+                       getService(Ci.nsIMessageListener);
         listener.wrappedJSObject.receiveMessage({
           name: MSG_INSTALL_ADDON,
           target: element,

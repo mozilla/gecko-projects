@@ -17,6 +17,8 @@
 #include "nsString.h"
 #include "nscore.h"
 
+class nsIDOMNode;
+
 namespace mozilla {
 
 class AutoLockRulesSniffing;
@@ -226,9 +228,7 @@ protected:
    *                        inserted.
    * @return                Returns created <br> element.
    */
-  template<typename PT, typename CT>
-  already_AddRefed<Element>
-  CreateBR(const EditorDOMPointBase<PT, CT>& aPointToInsert)
+  already_AddRefed<Element> CreateBR(const EditorRawDOMPoint& aPointToInsert)
   {
     return CreateBRInternal(aPointToInsert, false);
   }
@@ -240,9 +240,7 @@ protected:
    *                        inserted.
    * @return                Returns created moz-<br> element.
    */
-  template<typename PT, typename CT>
-  already_AddRefed<Element>
-  CreateMozBR(const EditorDOMPointBase<PT, CT>& aPointToInsert)
+  already_AddRefed<Element> CreateMozBR(const EditorRawDOMPoint& aPointToInsert)
   {
     return CreateBRInternal(aPointToInsert, true);
   }
@@ -264,7 +262,8 @@ protected:
   void UndefineCaretBidiLevel(Selection* aSelection);
 
   nsresult CheckBidiLevelForDeletion(Selection* aSelection,
-                                     const EditorRawDOMPoint& aSelectionPoint,
+                                     nsINode* aSelNode,
+                                     int32_t aSelOffset,
                                      nsIEditor::EDirection aAction,
                                      bool* aCancel);
 

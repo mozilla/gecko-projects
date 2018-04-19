@@ -102,9 +102,7 @@ add_storage_task(async function checkNewUser(sm) {
     uid: "uid",
     email: "someone@somewhere.com",
     kXCS: "kXCS",
-    device: {
-      id: "device id"
-    }
+    deviceId: "device id"
   };
   sm.plainStorage = new MockedPlainStorage();
   if (sm.secureStorage) {
@@ -115,12 +113,12 @@ add_storage_task(async function checkNewUser(sm) {
   Assert.equal(accountData.uid, initialAccountData.uid);
   Assert.equal(accountData.email, initialAccountData.email);
   Assert.equal(accountData.kXCS, initialAccountData.kXCS);
-  Assert.deepEqual(accountData.device, initialAccountData.device);
+  Assert.equal(accountData.deviceId, initialAccountData.deviceId);
 
   // and it should have been written to storage.
   Assert.equal(sm.plainStorage.data.accountData.uid, initialAccountData.uid);
   Assert.equal(sm.plainStorage.data.accountData.email, initialAccountData.email);
-  Assert.deepEqual(sm.plainStorage.data.accountData.device, initialAccountData.device);
+  Assert.equal(sm.plainStorage.data.accountData.deviceId, initialAccountData.deviceId);
   // check secure
   if (sm.secureStorage) {
     Assert.equal(sm.secureStorage.data.accountData.kXCS, initialAccountData.kXCS);
@@ -134,10 +132,8 @@ add_storage_task(async function checkEverythingRead(sm) {
   sm.plainStorage = new MockedPlainStorage({
     uid: "uid",
     email: "someone@somewhere.com",
-    device: {
-      id: "wibble",
-      registrationVersion: null
-    }
+    deviceId: "wibble",
+    deviceRegistrationVersion: null
   });
   if (sm.secureStorage) {
     sm.secureStorage = new MockedSecureStorage(null);
@@ -147,7 +143,8 @@ add_storage_task(async function checkEverythingRead(sm) {
   Assert.ok(accountData, "read account data");
   Assert.equal(accountData.uid, "uid");
   Assert.equal(accountData.email, "someone@somewhere.com");
-  Assert.deepEqual(accountData.device, {id: "wibble", registrationVersion: null});
+  Assert.equal(accountData.deviceId, "wibble");
+  Assert.equal(accountData.deviceRegistrationVersion, null);
   // Update the data - we should be able to fetch it back and it should appear
   // in our storage.
   await sm.updateAccountData({
@@ -156,21 +153,21 @@ add_storage_task(async function checkEverythingRead(sm) {
     kXCS: "kXCS",
     kExtSync: "kExtSync",
     kExtKbHash: "kExtKbHash",
-    device: {
-      id: "wibble",
-      registrationVersion: DEVICE_REGISTRATION_VERSION
-    }
+    deviceRegistrationVersion: DEVICE_REGISTRATION_VERSION
   });
   accountData = await sm.getAccountData();
   Assert.equal(accountData.kSync, "kSync");
   Assert.equal(accountData.kXCS, "kXCS");
   Assert.equal(accountData.kExtSync, "kExtSync");
   Assert.equal(accountData.kExtKbHash, "kExtKbHash");
-  Assert.deepEqual(accountData.device, {id: "wibble", registrationVersion: DEVICE_REGISTRATION_VERSION});
+  Assert.equal(accountData.deviceId, "wibble");
+  Assert.equal(accountData.deviceRegistrationVersion, DEVICE_REGISTRATION_VERSION);
   // Check the new value was written to storage.
   await sm._promiseStorageComplete; // storage is written in the background.
+  // "verified", "deviceId" and "deviceRegistrationVersion" are plain-text fields.
   Assert.equal(sm.plainStorage.data.accountData.verified, true);
-  Assert.deepEqual(sm.plainStorage.data.accountData.device, {id: "wibble", registrationVersion: DEVICE_REGISTRATION_VERSION});
+  Assert.equal(sm.plainStorage.data.accountData.deviceId, "wibble");
+  Assert.equal(sm.plainStorage.data.accountData.deviceRegistrationVersion, DEVICE_REGISTRATION_VERSION);
   // derive keys are secure
   if (sm.secureStorage) {
     Assert.equal(sm.secureStorage.data.accountData.kExtKbHash, "kExtKbHash");

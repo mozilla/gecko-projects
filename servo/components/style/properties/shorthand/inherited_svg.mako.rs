@@ -7,12 +7,10 @@
 <%helpers:shorthand name="marker" products="gecko"
     sub_properties="marker-start marker-end marker-mid"
     spec="https://www.w3.org/TR/SVG2/painting.html#MarkerShorthand">
-    use values::specified::url::UrlOrNone;
+    use values::specified::UrlOrNone;
 
-    pub fn parse_value<'i, 't>(
-        context: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Longhands, ParseError<'i>> {
+    pub fn parse_value<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                               -> Result<Longhands, ParseError<'i>> {
         use parser::Parse;
         let url = UrlOrNone::parse(context, input)?;
 

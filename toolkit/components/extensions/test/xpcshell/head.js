@@ -15,8 +15,8 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ExtensionParent: "resource://gre/modules/ExtensionParent.jsm",
   ExtensionTestUtils: "resource://testing-common/ExtensionXPCShellUtils.jsm",
   FileUtils: "resource://gre/modules/FileUtils.jsm",
+  HttpServer: "resource://testing-common/httpd.js",
   NetUtil: "resource://gre/modules/NetUtil.jsm",
-  PromiseTestUtils: "resource://testing-common/PromiseTestUtils.jsm",
   Schemas: "resource://gre/modules/Schemas.jsm",
 });
 
@@ -34,10 +34,29 @@ add_task(function check_remote() {
 
 ExtensionTestUtils.init(this);
 
-var createHttpServer = (...args) => {
-  AddonTestUtils.maybeInit(this);
-  return AddonTestUtils.createHttpServer(...args);
-};
+/**
+ * Creates a new HttpServer for testing, and begins listening on the
+ * specified port. Automatically shuts down the server when the test
+ * unit ends.
+ *
+ * @param {integer} [port]
+ *        The port to listen on. If omitted, listen on a random
+ *        port. The latter is the preferred behavior.
+ *
+ * @returns {HttpServer}
+ */
+function createHttpServer(port = -1) {
+  let server = new HttpServer();
+  server.start(port);
+
+  registerCleanupFunction(() => {
+    return new Promise(resolve => {
+      server.stop(resolve);
+    });
+  });
+
+  return server;
+}
 
 if (AppConstants.platform === "android") {
   Services.io.offline = true;

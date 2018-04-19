@@ -217,15 +217,12 @@ const BackgroundPageThumbs = {
   },
 
   _init() {
-    Services.prefs.addObserver(ABOUT_NEWTAB_SEGREGATION_PREF, this);
     Services.obs.addObserver(this, "profile-before-change");
   },
 
   observe(subject, topic, data) {
     if (topic == "profile-before-change") {
       this._destroy();
-    } else if (topic == "nsPref:changed" && data == ABOUT_NEWTAB_SEGREGATION_PREF) {
-      BackgroundPageThumbs.renewThumbnailBrowser();
     }
   },
 
@@ -371,7 +368,13 @@ const BackgroundPageThumbs = {
   _destroyBrowserTimeout: DESTROY_BROWSER_TIMEOUT,
 };
 
-BackgroundPageThumbs._init();
+Services.prefs.addObserver(ABOUT_NEWTAB_SEGREGATION_PREF,
+  function(aSubject, aTopic, aData) {
+    if (aTopic == "nsPref:changed" && aData == ABOUT_NEWTAB_SEGREGATION_PREF) {
+      BackgroundPageThumbs.renewThumbnailBrowser();
+    }
+  });
+
 Object.defineProperty(this, "BackgroundPageThumbs", {
   value: BackgroundPageThumbs,
   enumerable: true,

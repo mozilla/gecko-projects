@@ -111,12 +111,6 @@ register("XULWindowAccessibleHighlighter", "xul-accessible");
  *         True if accessible object is defunct, false otherwise.
  */
 function isDefunct(accessible) {
-  // If accessibility is disabled, safely assume that the accessible object is
-  // now dead.
-  if (!Services.appinfo.accessibilityEnabled) {
-    return true;
-  }
-
   let defunct = false;
 
   try {
@@ -408,13 +402,11 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
     if (this.refMap.size > 0) {
       try {
         if (this.rootDoc) {
-          this.purgeSubtree(this.getRawAccessibleFor(this.rootDoc),
+          this.purgeSubtree(this.a11yService.getAccessibleFor(this.rootDoc),
                             this.rootDoc);
         }
       } catch (e) {
         // Accessibility service might be already destroyed.
-      } finally {
-        this.refMap.clear();
       }
     }
 
@@ -454,14 +446,10 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
   /**
    * Clean up accessible actors cache for a given accessible's subtree.
    *
-   * @param  {null|nsIAccessible} rawAccessible
+   * @param  {nsIAccessible} rawAccessible
    * @param  {null|Object}   rawNode
    */
   purgeSubtree(rawAccessible, rawNode) {
-    if (!rawAccessible) {
-      return;
-    }
-
     let actor = this.getRef(rawAccessible);
     if (actor && rawAccessible && !actor.isDefunct) {
       for (let child = rawAccessible.firstChild; child; child = child.nextSibling) {
@@ -502,11 +490,11 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
     }
 
     if (isXUL(this.rootWin)) {
-      let doc = this.addRef(this.getRawAccessibleFor(this.rootDoc));
+      let doc = this.addRef(this.a11yService.getAccessibleFor(this.rootDoc));
       return Promise.resolve(doc);
     }
 
-    let doc = this.getRawAccessibleFor(this.rootDoc);
+    let doc = this.a11yService.getAccessibleFor(this.rootDoc);
     let state = {};
     doc.getState(state, {});
     if (state.value & Ci.nsIAccessibleStates.STATE_BUSY) {
@@ -516,34 +504,10 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
     return Promise.resolve(this.addRef(doc));
   },
 
-  /**
-   * Get an accessible actor for a domnode actor.
-   * @param  {Object} domNode
-   *         domnode actor for which accessible actor is being created.
-   * @return {Promse}
-   *         A promise that resolves when accessible actor is created for a
-   *         domnode actor.
-   */
   getAccessibleFor(domNode) {
     // We need to make sure that the document is loaded processed by a11y first.
     return this.getDocument().then(() =>
-      this.addRef(this.getRawAccessibleFor(domNode.rawNode)));
-  },
-
-  /**
-   * Get a raw accessible object for a raw node.
-   * @param  {DOMNode} rawNode
-   *         Raw node for which accessible object is being retrieved.
-   * @return {nsIAccessible}
-   *         Accessible object for a given DOMNode.
-   */
-  getRawAccessibleFor(rawNode) {
-    // Accessible can only be retrieved iff accessibility service is enabled.
-    if (!Services.appinfo.accessibilityEnabled) {
-      return null;
-    }
-
-    return this.a11yService.getAccessibleFor(rawNode);
+      this.addRef(this.a11yService.getAccessibleFor(domNode.rawNode)));
   },
 
   async getAncestry(accessible) {
@@ -713,7 +677,7 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
   /**
    * Check is event handling is allowed.
    */
-  _isEventAllowed: function({ view }) {
+  _isEventAllowed: function ({ view }) {
     return this.rootWin instanceof Ci.nsIDOMChromeWindow ||
            isWindowIncluded(this.rootWin, view);
   },
@@ -835,7 +799,7 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
   /**
    * Picker method that starts picker content listeners.
    */
-  pick: function() {
+  pick: function () {
     if (!this._isPicking) {
       this._isPicking = true;
       this._startPickerListeners();
@@ -845,7 +809,7 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
   /**
    * This pick method also focuses the highlighter's target window.
    */
-  pickAndFocus: function() {
+  pickAndFocus: function () {
     this.pick();
     this.rootWin.focus();
   },
@@ -861,19 +825,11 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
    */
   async _findAndAttachAccessible(event) {
     let target = event.originalTarget || event.target;
-    let rawAccessible;
-    // Find a first accessible object in the target's ancestry, including
-    // target. Note: not all DOM nodes have corresponding accessible objects
-    // (for example, a <DIV> element that is used as a container for other
-    // things) thus we need to find one that does.
-    while (!rawAccessible && target) {
-      rawAccessible = this.getRawAccessibleFor(target);
-      target = target.parentNode;
-    }
+    let rawAccessible = this.a11yService.getAccessibleFor(target);
     // If raw accessible object is defunct or detached, no need to cache it and
     // its ancestry.
     if (!rawAccessible || isDefunct(rawAccessible) || rawAccessible.indexInParent < 0) {
-      return null;
+      return {};
     }
 
     const doc = await this.getDocument();
@@ -896,7 +852,7 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
   /**
    * Start picker content listeners.
    */
-  _startPickerListeners: function() {
+  _startPickerListeners: function () {
     let target = this.tabActor.chromeEventHandler;
     target.addEventListener("mousemove", this.onHovered, true);
     target.addEventListener("click", this.onPick, true);
@@ -910,7 +866,7 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
   /**
    * If content is still alive, stop picker content listeners.
    */
-  _stopPickerListeners: function() {
+  _stopPickerListeners: function () {
     let target = this.tabActor.chromeEventHandler;
 
     if (!target) {
@@ -929,7 +885,7 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
   /**
    * Cacncel picker pick. Remvoe all content listeners and hide the highlighter.
    */
-  cancelPick: function() {
+  cancelPick: function () {
     this.highlighter.hide();
 
     if (this._isPicking) {

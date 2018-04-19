@@ -66,8 +66,8 @@ public:
   //   Input expected;
   //   Result rv = expected.Init(EXPECTED_BYTES, sizeof EXPECTED_BYTES);
   template <size_type N>
-  explicit Input(const uint8_t (&aData)[N])
-    : data(aData)
+  explicit Input(const uint8_t (&data)[N])
+    : data(data)
     , len(N)
   {
   }
@@ -84,19 +84,19 @@ public:
 
   // Initialize the input. data must be non-null and len must be less than
   // 65536. Init may not be called more than once.
-  Result Init(const uint8_t* aData, size_t aLen)
+  Result Init(const uint8_t* data, size_t len)
   {
     if (this->data) {
       // already initialized
       return Result::FATAL_ERROR_INVALID_ARGS;
     }
-    if (!aData || aLen > 0xffffu) {
+    if (!data || len > 0xffffu) {
       // input too large
       return Result::ERROR_BAD_DER;
     }
 
-    this->data = aData;
-    this->len = aLen;
+    this->data = data;
+    this->len = len;
 
     return Success;
   }
@@ -153,19 +153,19 @@ public:
   {
   }
 
-  explicit Reader(Input aInput)
-    : input(aInput.UnsafeGetData())
-    , end(aInput.UnsafeGetData() + aInput.GetLength())
+  explicit Reader(Input input)
+    : input(input.UnsafeGetData())
+    , end(input.UnsafeGetData() + input.GetLength())
   {
   }
 
-  Result Init(Input aInput)
+  Result Init(Input input)
   {
     if (this->input) {
       return Result::FATAL_ERROR_INVALID_ARGS;
     }
-    this->input = aInput.UnsafeGetData();
-    this->end = aInput.UnsafeGetData() + aInput.GetLength();
+    this->input = input.UnsafeGetData();
+    this->end = input.UnsafeGetData() + input.GetLength();
     return Success;
   }
 
@@ -292,7 +292,7 @@ public:
     Mark(const Mark&) = default; // Intentionally not explicit.
   private:
     friend class Reader;
-    Mark(const Reader& aInput, const uint8_t* aMark) : input(aInput), mark(aMark) { }
+    Mark(const Reader& input, const uint8_t* mark) : input(input), mark(mark) { }
     const Reader& input;
     const uint8_t* const mark;
     void operator=(const Mark&) = delete;

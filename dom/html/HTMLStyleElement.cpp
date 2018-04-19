@@ -145,6 +145,10 @@ HTMLStyleElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
         aName == nsGkAtoms::media ||
         aName == nsGkAtoms::type) {
       UpdateStyleSheetInternal(nullptr, nullptr, true);
+    } else if (aName == nsGkAtoms::scoped &&
+               OwnerDoc()->IsScopedStyleEnabled()) {
+      bool isScoped = aValue;
+      UpdateStyleSheetScopedness(isScoped);
     }
   }
 
@@ -152,12 +156,13 @@ HTMLStyleElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
                                             aOldValue, aSubjectPrincipal, aNotify);
 }
 
-void
-HTMLStyleElement::GetInnerHTML(nsAString& aInnerHTML, OOMReporter& aError)
+NS_IMETHODIMP
+HTMLStyleElement::GetInnerHTML(nsAString& aInnerHTML)
 {
   if (!nsContentUtils::GetNodeTextContent(this, false, aInnerHTML, fallible)) {
-    aError.ReportOOM();
+    return NS_ERROR_OUT_OF_MEMORY;
   }
+  return NS_OK;
 }
 
 void
@@ -206,6 +211,7 @@ void
 HTMLStyleElement::GetStyleSheetInfo(nsAString& aTitle,
                                     nsAString& aType,
                                     nsAString& aMedia,
+                                    bool* aIsScoped,
                                     bool* aIsAlternate)
 {
   aTitle.Truncate();
@@ -224,6 +230,9 @@ HTMLStyleElement::GetStyleSheetInfo(nsAString& aTitle,
   nsContentUtils::ASCIIToLower(aMedia);
 
   GetAttr(kNameSpaceID_None, nsGkAtoms::type, aType);
+
+  *aIsScoped = HasAttr(kNameSpaceID_None, nsGkAtoms::scoped) &&
+               OwnerDoc()->IsScopedStyleEnabled();
 
   nsAutoString mimeType;
   nsAutoString notUsed;

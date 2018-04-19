@@ -10,14 +10,22 @@ ChromeUtils.import("resource://gre/modules/GeckoViewModule.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
+XPCOMUtils.defineLazyGetter(this, "dump", () =>
+  ChromeUtils.import("resource://gre/modules/AndroidLog.jsm", {})
+    .AndroidLog.d.bind(null, "ViewRemoteDebugger"));
+
 XPCOMUtils.defineLazyGetter(this, "DebuggerServer", () => {
   const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
   const { DebuggerServer } = require("devtools/server/main");
   return DebuggerServer;
 });
 
+function debug(aMsg) {
+  // dump(aMsg);
+}
+
 class GeckoViewRemoteDebugger extends GeckoViewModule {
-  onInit() {
+  init() {
     this._isEnabled = false;
     this._usbDebugger = new USBRemoteDebugger();
   }
@@ -26,13 +34,13 @@ class GeckoViewRemoteDebugger extends GeckoViewModule {
     let enabled = this.settings.useRemoteDebugger;
 
     if (enabled && !this._isEnabled) {
-      this.onEnable();
-    } else if (!enabled && this._isEnabled) {
-      this.onDisable();
+      this.register();
+    } else if (!enabled) {
+      this.unregister();
     }
   }
 
-  onEnable() {
+  register() {
     DebuggerServer.init();
     DebuggerServer.registerAllActors();
     DebuggerServer.registerModule("resource://gre/modules/dbg-browser-actors.js");
@@ -47,7 +55,7 @@ class GeckoViewRemoteDebugger extends GeckoViewModule {
     let dataDir = env.get("MOZ_ANDROID_DATA_DIR");
 
     if (!dataDir) {
-      warn `Missing env MOZ_ANDROID_DATA_DIR - aborting debugger server start`;
+      debug("Missing env MOZ_ANDROID_DATA_DIR - aborting debugger server start");
       return;
     }
 
@@ -58,7 +66,7 @@ class GeckoViewRemoteDebugger extends GeckoViewModule {
     this._usbDebugger.start(portOrPath);
   }
 
-  onDisable() {
+  unregister() {
     this._isEnabled = false;
     this._usbDebugger.stop();
   }
@@ -74,9 +82,9 @@ class USBRemoteDebugger {
       this._listener.portOrPath = aPortOrPath;
       this._listener.authenticator = authenticator;
       this._listener.open();
-      debug `USB remote debugger - listening on ${aPortOrPath}`;
+      debug(`USB remote debugger - listening on ${aPortOrPath}`);
     } catch (e) {
-      warn `Unable to start USB debugger server: ${e}`;
+      debug("Unable to start USB debugger server: " + e);
     }
   }
 
@@ -89,7 +97,7 @@ class USBRemoteDebugger {
       this._listener.close();
       this._listener = null;
     } catch (e) {
-      warn `Unable to stop USB debugger server: ${e}`;
+      debug("Unable to stop USB debugger server: " + e);
     }
   }
 

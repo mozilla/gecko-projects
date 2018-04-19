@@ -31,9 +31,9 @@ const EXPECTED_PROPERTIES = [
   "background-size"
 ].sort();
 
-add_task(async function() {
-  await addTab(URL_ROOT + "doc_keyframes.html");
-  let {panel} = await openAnimationInspector();
+add_task(function* () {
+  yield addTab(URL_ROOT + "doc_keyframes.html");
+  let {panel} = yield openAnimationInspector();
   let timeline = panel.animationsTimelineComponent;
   let propertiesList = timeline.rootWrapperEl
                                .querySelector(".animated-properties");
@@ -51,7 +51,7 @@ add_task(async function() {
      "The list of properties panel contains the right warnings");
 
   info("Click same animation again");
-  await clickOnAnimation(panel, 0, true);
+  yield clickOnAnimation(panel, 0, true);
   ok(isNodeVisible(propertiesList),
      "The list of properties panel keeps");
 });

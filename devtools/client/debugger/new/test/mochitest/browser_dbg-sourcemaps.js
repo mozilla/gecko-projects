@@ -3,7 +3,6 @@
 
 // Tests loading sourcemapped sources, setting breakpoints, and
 // stepping in them.
-requestLongerTimeout(2);
 
 function assertBreakpointExists(dbg, source, line) {
   const { selectors: { getBreakpoint }, getState } = dbg;
@@ -36,6 +35,8 @@ function clickGutter(dbg, line) {
 
 add_task(async function() {
   // NOTE: the CORS call makes the test run times inconsistent
+  requestLongerTimeout(2);
+
   const dbg = await initDebugger("doc-sourcemaps.html");
   const { selectors: { getBreakpoint, getBreakpoints }, getState } = dbg;
 
@@ -57,20 +58,25 @@ add_task(async function() {
 
   await selectSource(dbg, entrySrc);
   ok(
-    getCM(dbg).getValue().includes("window.keepMeAlive"),
+    dbg.win.cm.getValue().includes("window.keepMeAlive"),
     "Original source text loaded correctly"
   );
 
+  // Test that breakpoint sliding is not attempted. The breakpoint
+  // should not move anywhere.
+  await addBreakpoint(dbg, entrySrc, 13);
+  is(getBreakpoints(getState()).size, 1, "One breakpoint exists");
+  assertBreakpointExists(dbg, entrySrc, 13);
+
   // Test breaking on a breakpoint
   await addBreakpoint(dbg, "entry.js", 15);
-  is(getBreakpoints(getState()).size, 1, "One breakpoint exists");
+  is(getBreakpoints(getState()).size, 2, "Two breakpoints exist");
   assertBreakpointExists(dbg, entrySrc, 15);
 
   invokeInTab("keepMeAlive");
   await waitForPaused(dbg);
   assertPausedLocation(dbg);
 
-  await stepIn(dbg);
   await stepIn(dbg);
   assertPausedLocation(dbg);
 

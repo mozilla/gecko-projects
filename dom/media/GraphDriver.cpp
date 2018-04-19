@@ -365,7 +365,7 @@ SystemClockDriver::WaitForNextIteration()
 {
   mGraphImpl->GetMonitor().AssertCurrentThreadOwns();
 
-  TimeDuration timeout = TimeDuration::Forever();
+  PRIntervalTime timeout = PR_INTERVAL_NO_TIMEOUT;
   TimeStamp now = TimeStamp::Now();
 
   // This lets us avoid hitting the Atomic twice when we know we won't sleep
@@ -384,7 +384,7 @@ SystemClockDriver::WaitForNextIteration()
     // Make sure timeoutMS doesn't overflow 32 bits by waking up at
     // least once a minute, if we need to wake up at all
     timeoutMS = std::max<int64_t>(0, std::min<int64_t>(timeoutMS, 60*1000));
-    timeout = TimeDuration::FromMilliseconds(timeoutMS);
+    timeout = PR_MillisecondsToInterval(uint32_t(timeoutMS));
     LOG(LogLevel::Verbose,
         ("Waiting for next iteration; at %f, timeout=%f",
          (now - mInitialTimeStamp).ToSeconds(),
@@ -394,7 +394,7 @@ SystemClockDriver::WaitForNextIteration()
     }
     mWaitState = WAITSTATE_WAITING_FOR_NEXT_ITERATION;
   }
-  if (!timeout.IsZero()) {
+  if (timeout > 0) {
     mGraphImpl->GetMonitor().Wait(timeout);
     LOG(LogLevel::Verbose,
         ("Resuming after timeout; at %f, elapsed=%f",
@@ -493,8 +493,6 @@ AsyncCubebTask::Run()
       LOG(LogLevel::Debug,
           ("AsyncCubebOperation::INIT driver=%p", mDriver.get()));
       if (!mDriver->Init()) {
-        LOG(LogLevel::Warning,
-            ("AsyncCubebOperation::INIT failed for driver=%p", mDriver.get()));
         return NS_ERROR_FAILURE;
       }
       mDriver->CompleteAudioContextOperations(mOperation);
@@ -593,13 +591,10 @@ AudioCallbackDriver::Init()
   cubeb* cubebContext = CubebUtils::GetCubebContext();
   if (!cubebContext) {
     NS_WARNING("Could not get cubeb context.");
-    LOG(LogLevel::Warning, ("%s: Could not get cubeb context", __func__));
     if (!mFromFallback) {
       CubebUtils::ReportCubebStreamInitFailure(true);
     }
-    MonitorAutoLock lock(GraphImpl()->GetMonitor());
-    FallbackToSystemClockDriver();
-    return true;
+    return false;
   }
 
   cubeb_stream_params output;
@@ -609,7 +604,7 @@ AudioCallbackDriver::Init()
   MOZ_ASSERT(!NS_IsMainThread(),
       "This is blocking and should never run on the main thread.");
 
-  mSampleRate = output.rate = mGraphImpl->GraphRate();
+  mSampleRate = output.rate = CubebUtils::PreferredSampleRate();
 
   if (AUDIO_OUTPUT_FORMAT == AUDIO_FORMAT_S16) {
     output.format = CUBEB_SAMPLE_S16NE;
@@ -630,7 +625,7 @@ AudioCallbackDriver::Init()
   mScratchBuffer = SpillBuffer<AudioDataValue, WEBAUDIO_BLOCK_SIZE * 2>(mOutputChannels);
 
   output.channels = mOutputChannels;
-  output.layout = CUBEB_LAYOUT_UNDEFINED;
+  output.layout = CubebUtils::GetPreferredChannelLayoutOrSMPTE(cubebContext, mOutputChannels);
   output.prefs = CUBEB_STREAM_PREF_NONE;
 
   uint32_t latency_frames = CubebUtils::GetCubebMSGLatencyInFrames(&output);

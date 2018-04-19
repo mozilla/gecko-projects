@@ -16,6 +16,8 @@
 #include "vm/SharedMem.h"
 #include "wasm/WasmTypes.h"
 
+typedef struct JSProperty JSProperty;
+
 namespace js {
 
 class ArrayBufferViewObject;

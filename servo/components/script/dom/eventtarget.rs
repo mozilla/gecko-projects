@@ -34,9 +34,8 @@ use dom::virtualmethods::VirtualMethods;
 use dom::window::Window;
 use dom_struct::dom_struct;
 use fnv::FnvHasher;
-use js::jsapi::{JS_GetFunctionObject, JSAutoCompartment, JSFunction};
+use js::jsapi::{CompileFunction, JS_GetFunctionObject, JSAutoCompartment, JSFunction};
 use js::rust::{AutoObjectVectorWrapper, CompileOptionsWrapper};
-use js::rust::wrappers::CompileFunction;
 use libc::{c_char, size_t};
 use servo_atoms::Atom;
 use servo_url::ServoUrl;
@@ -454,7 +453,7 @@ impl EventTarget {
                             args.as_ptr(),
                             body.as_ptr(),
                             body.len() as size_t,
-                            handler.handle_mut().into())
+                            handler.handle_mut())
         };
         if !rv || handler.get().is_null() {
             // Step 1.8.2

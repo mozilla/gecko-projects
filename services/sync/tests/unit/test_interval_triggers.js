@@ -13,13 +13,12 @@ ChromeUtils.import("resource://services-sync/service.js");
 let scheduler;
 let clientsEngine;
 
-async function sync_httpd_setup() {
-  let clientsSyncID = await clientsEngine.resetLocalSyncID();
+function sync_httpd_setup() {
   let global = new ServerWBO("global", {
     syncID: Service.syncID,
     storageVersion: STORAGE_VERSION,
     engines: {clients: {version: clientsEngine.version,
-                        syncID: clientsSyncID}}
+                        syncID: clientsEngine.syncID}}
   });
   let clientsColl = new ServerCollection({}, true);
 
@@ -66,7 +65,7 @@ add_task(async function test_successful_sync_adjustSyncInterval() {
   }
   Svc.Obs.add("weave:service:sync:finish", onSyncFinish);
 
-  let server = await sync_httpd_setup();
+  let server = sync_httpd_setup();
   await setUp(server);
 
   // Confirm defaults
@@ -172,7 +171,7 @@ add_task(async function test_unsuccessful_sync_adjustSyncInterval() {
   // Force sync to fail.
   Svc.Prefs.set("firstSync", "notReady");
 
-  let server = await sync_httpd_setup();
+  let server = sync_httpd_setup();
   await setUp(server);
 
   // Confirm defaults
@@ -267,7 +266,7 @@ add_task(async function test_unsuccessful_sync_adjustSyncInterval() {
 add_task(async function test_back_triggers_sync() {
   enableValidationPrefs();
 
-  let server = await sync_httpd_setup();
+  let server = sync_httpd_setup();
   await setUp(server);
 
   // Single device: no sync triggered.
@@ -298,7 +297,7 @@ add_task(async function test_back_triggers_sync() {
 add_task(async function test_adjust_interval_on_sync_error() {
   enableValidationPrefs();
 
-  let server = await sync_httpd_setup();
+  let server = sync_httpd_setup();
   await setUp(server);
 
   let syncFailures = 0;
@@ -336,7 +335,7 @@ add_task(async function test_bug671378_scenario() {
   // scheduleNextSync() was called without a time interval parameter,
   // setting nextSync to a non-zero value and preventing the timer from
   // being adjusted in the next call to scheduleNextSync().
-  let server = await sync_httpd_setup();
+  let server = sync_httpd_setup();
   await setUp(server);
 
   let syncSuccesses = 0;

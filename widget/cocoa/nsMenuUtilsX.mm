@@ -13,12 +13,11 @@
 #include "nsCocoaUtils.h"
 #include "nsCocoaWindow.h"
 #include "nsGkAtoms.h"
-#include "nsGlobalWindowInner.h"
 #include "nsIDocument.h"
 #include "nsIDOMDocument.h"
+#include "nsIDOMXULCommandEvent.h"
 #include "nsPIDOMWindow.h"
 #include "nsQueryObject.h"
-#include "mozilla/dom/XULCommandEvent.h"
 
 using namespace mozilla;
 
@@ -28,20 +27,23 @@ void nsMenuUtilsX::DispatchCommandTo(nsIContent* aTargetContent)
 
   nsIDocument* doc = aTargetContent->OwnerDoc();
   if (doc) {
-    RefPtr<dom::XULCommandEvent> event =
-      new dom::XULCommandEvent(doc, doc->GetPresContext(), nullptr);
+    ErrorResult rv;
+    RefPtr<dom::Event> event =
+      doc->CreateEvent(NS_LITERAL_STRING("xulcommandevent"),
+                       dom::CallerType::System, rv);
+    nsCOMPtr<nsIDOMXULCommandEvent> command = do_QueryObject(event);
 
-    IgnoredErrorResult rv;
-    event->InitCommandEvent(NS_LITERAL_STRING("command"),
-                            true, true,
-                            nsGlobalWindowInner::Cast(doc->GetInnerWindow()),
-                            0, false, false, false,
-                            false, nullptr, 0, rv);
     // FIXME: Should probably figure out how to init this with the actual
     // pressed keys, but this is a big old edge case anyway. -dwh
-    if (!rv.Failed()) {
+    if (command &&
+        NS_SUCCEEDED(command->InitCommandEvent(NS_LITERAL_STRING("command"),
+                                               true, true,
+                                               doc->GetInnerWindow(), 0,
+                                               false, false, false,
+                                               false, nullptr, 0))) {
       event->SetTrusted(true);
-      aTargetContent->DispatchEvent(*event);
+      bool dummy;
+      aTargetContent->DispatchEvent(event, &dummy);
     }
   }
 }

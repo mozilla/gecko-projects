@@ -30,7 +30,7 @@ class CompositorWidget;
 }
 
 namespace layers {
-class CompositorBridgeParent;
+class CompositorBridgeParentBase;
 class WebRenderBridgeParent;
 }
 
@@ -77,7 +77,6 @@ public:
 
   void UpdateDynamicProperties(const nsTArray<wr::WrOpacityProperty>& aOpacityArray,
                                const nsTArray<wr::WrTransformProperty>& aTransformArray);
-  void AppendTransformProperties(const nsTArray<wr::WrTransformProperty>& aTransformArray);
 
   void SetWindowParameters(const LayoutDeviceIntSize& aWindowSize,
                            const LayoutDeviceIntRect& aDocRect);
@@ -153,9 +152,8 @@ class WebRenderAPI
 
 public:
   /// This can be called on the compositor thread only.
-  static already_AddRefed<WebRenderAPI> Create(layers::CompositorBridgeParent* aBridge,
+  static already_AddRefed<WebRenderAPI> Create(layers::CompositorBridgeParentBase* aBridge,
                                                RefPtr<widget::CompositorWidget>&& aWidget,
-                                               const wr::WrWindowId& aWindowId,
                                                LayoutDeviceIntSize aSize);
 
   already_AddRefed<WebRenderAPI> CreateDocument(LayoutDeviceIntSize aSize, int8_t aLayerIndex);
@@ -183,8 +181,6 @@ public:
 
   void Pause();
   bool Resume();
-
-  void WakeSceneBuilder();
 
   wr::WrIdNamespace GetNamespace();
   uint32_t GetMaxTextureSize() const { return mMaxTextureSize; }
@@ -248,7 +244,6 @@ public:
                 wr::BuiltDisplayList& aOutDisplayList);
 
   void PushStackingContext(const wr::LayoutRect& aBounds, // TODO: We should work with strongly typed rects
-                           const wr::WrClipId* aClipNodeId,
                            const wr::WrAnimationProperty* aAnimation,
                            const float* aOpacity,
                            const gfx::Matrix4x4* aTransform,

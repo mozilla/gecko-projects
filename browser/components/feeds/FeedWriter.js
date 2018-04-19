@@ -64,9 +64,6 @@ function convertByteUnits(aBytes) {
   return [aBytes, units[unitIndex]];
 }
 
-XPCOMUtils.defineLazyPreferenceGetter(this, "gCanFrameFeeds",
-  "browser.feeds.unsafelyFrameFeeds", false);
-
 function FeedWriter() {
   this._selectedApp = undefined;
   this._selectedAppMenuItem = null;
@@ -546,7 +543,7 @@ FeedWriter.prototype = {
     }
   },
 
-  // EventListener
+  // nsIDomEventListener
   handleEvent(event) {
     if (event.target.ownerDocument != this._document) {
       LOG("FeedWriter.handleEvent: Someone passed the feed writer as a listener to the events of another document!");
@@ -781,9 +778,6 @@ FeedWriter.prototype = {
   // BrowserFeedWriter WebIDL methods
   init(aWindow) {
     let window = aWindow;
-    if (window != window.top && !gCanFrameFeeds) {
-      return;
-    }
     this._feedURI = this._getOriginalURI(window);
     if (!this._feedURI)
       return;
@@ -883,9 +877,6 @@ FeedWriter.prototype = {
   },
 
   close() {
-    if (!this._window) {
-      return;
-    }
     this._document.getElementById("subscribeButton")
         .removeEventListener("click", this);
     this._handlersList
@@ -904,7 +895,7 @@ FeedWriter.prototype = {
   },
 
   _removeFeedFromCache() {
-    if (this._window && this._feedURI) {
+    if (this._feedURI) {
       let feedService = Cc["@mozilla.org/browser/feeds/result-service;1"].
                         getService(Ci.nsIFeedResultService);
       feedService.removeFeedResult(this._feedURI);
@@ -913,9 +904,6 @@ FeedWriter.prototype = {
   },
 
   subscribe() {
-    if (!this._window) {
-      return;
-    }
     let feedType = this._getFeedType();
 
     // Subscribe to the feed using the selected handler and save prefs
@@ -981,7 +969,7 @@ FeedWriter.prototype = {
   },
 
   classID: FEEDWRITER_CID,
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIDOMEventListener, Ci.nsIObserver,
                                          Ci.nsIDOMGlobalPropertyInitializer])
 };
 

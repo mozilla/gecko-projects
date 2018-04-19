@@ -178,7 +178,7 @@ private:
   bool                 mDoNotSearchInUpdates;
 };
 
-class FileOpenHelper final : public CacheFileIOListener
+class FileOpenHelper : public CacheFileIOListener
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS

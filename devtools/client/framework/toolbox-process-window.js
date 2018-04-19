@@ -53,7 +53,7 @@ function hideStatusMessage() {
   toggleStatusMessage(false);
 }
 
-var connect = async function() {
+var connect = async function () {
   // Initiate the connection
   let env = Cc["@mozilla.org/process/environment;1"]
     .getService(Ci.nsIEnvironment);
@@ -102,10 +102,11 @@ function setPrefDefaults() {
   // Bug 1225160 - Using source maps with browser debugging can lead to a crash
   Services.prefs.setBoolPref("devtools.debugger.source-maps-enabled", false);
   Services.prefs.setBoolPref("devtools.debugger.new-debugger-frontend", true);
+  Services.prefs.setBoolPref("devtools.webconsole.new-frontend-enabled", false);
   Services.prefs.setBoolPref("devtools.preference.new-panel-enabled", false);
   Services.prefs.setBoolPref("layout.css.emulate-moz-box-with-flex", false);
 }
-window.addEventListener("load", async function() {
+window.addEventListener("load", async function () {
   let cmdClose = document.getElementById("toolbox-cmd-close");
   cmdClose.addEventListener("command", onCloseCommand);
   setPrefDefaults();

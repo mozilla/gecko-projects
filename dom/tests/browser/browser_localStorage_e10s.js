@@ -65,7 +65,7 @@ async function openTestTabInOwnProcess(name, knownTabs) {
  */
 async function cleanupTabs(knownTabs) {
   for (let knownTab of knownTabs.byName.values()) {
-    BrowserTestUtils.removeTab(knownTab.tab);
+    await BrowserTestUtils.removeTab(knownTab.tab);
     knownTab.cleanup();
   }
   knownTabs.cleanup();

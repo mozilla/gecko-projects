@@ -10,10 +10,11 @@ description: >
 flags: [onlyStrict]
 ---*/
 
-function fn() {}
+"use strict";
+function _15_3_5_1_gs() {}
 
 assert.throws(TypeError, function() {
-  fn.caller;
+  _15_3_5_1_gs.caller;
 });
 
 reportCompare(0, 0);

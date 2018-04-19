@@ -4,7 +4,7 @@
 
 "use strict";
 
-const { Component, createFactory } = require("devtools/client/shared/vendor/react");
+const { createFactory, PureComponent } = require("devtools/client/shared/vendor/react");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const ReactDOM = require("devtools/client/shared/vendor/react-dom");
@@ -18,7 +18,7 @@ const { DEFAULT_GRAPH_HEIGHT } = require("../../utils/graph-helper");
 // Minimum opacity for semitransparent fill color for keyframes's easing graph.
 const MIN_KEYFRAMES_EASING_OPACITY = 0.5;
 
-class SummaryGraphPath extends Component {
+class SummaryGraphPath extends PureComponent {
   static get propTypes() {
     return {
       animation: PropTypes.object.isRequired,
@@ -35,26 +35,17 @@ class SummaryGraphPath extends Component {
     this.state = {
       // Duration which can display in one pixel.
       durationPerPixel: 0,
-      // To avoid rendering while the state is updating
-      // since we call an async function in updateState.
-      isStateUpdating: false,
       // List of keyframe which consists by only offset and easing.
       keyframesList: [],
     };
   }
 
   componentDidMount() {
-    // No need to set isStateUpdating state since paint sequence is finish here.
-    this.updateState(this.props);
+    this.updateState(this.props.animation);
   }
 
   componentWillReceiveProps(nextProps) {
-    this.setState({ isStateUpdating: true });
-    this.updateState(nextProps);
-  }
-
-  shouldComponentUpdate(nextProps, nextState) {
-    return !nextState.isStateUpdating;
+    this.updateState(nextProps.animation);
   }
 
   /**
@@ -150,38 +141,21 @@ class SummaryGraphPath extends Component {
     return true;
   }
 
-  async updateState(props) {
+  async updateState(animation) {
     const {
-      animation,
       emitEventForTest,
       getAnimatedPropertyMap,
       timeScale,
-    } = props;
+    } = this.props;
 
-    let animatedPropertyMap = null;
-
-    try {
-      animatedPropertyMap = await getAnimatedPropertyMap(animation);
-    } catch (e) {
-      // Expected if we've already been destroyed or other node have been selected
-      // in the meantime.
-      console.error(e);
-      return;
-    }
-
+    const animatedPropertyMap = await getAnimatedPropertyMap(animation);
     const keyframesList = this.getOffsetAndEasingOnlyKeyframes(animatedPropertyMap);
 
     const thisEl = ReactDOM.findDOMNode(this);
     const totalDuration = this.getTotalDuration(animation, timeScale);
     const durationPerPixel = totalDuration / thisEl.parentNode.clientWidth;
 
-    this.setState(
-      {
-        durationPerPixel,
-        isStateUpdating: false,
-        keyframesList
-      }
-    );
+    this.setState({ durationPerPixel, keyframesList });
 
     emitEventForTest("animation-summary-graph-rendered");
   }
@@ -200,9 +174,7 @@ class SummaryGraphPath extends Component {
     } = this.props;
 
     const totalDuration = this.getTotalDuration(animation, timeScale);
-    const { playbackRate, previousStartTime = 0 } = animation.state;
-    const startTime = timeScale.minStartTime * playbackRate;
-    const offset = previousStartTime * playbackRate;
+    const startTime = timeScale.minStartTime;
     const opacity = Math.max(1 / keyframesList.length, MIN_KEYFRAMES_EASING_OPACITY);
 
     return dom.svg(
@@ -218,7 +190,6 @@ class SummaryGraphPath extends Component {
             animation,
             durationPerPixel,
             keyframes,
-            offset,
             opacity,
             simulateAnimation,
             totalDuration,
@@ -230,7 +201,6 @@ class SummaryGraphPath extends Component {
           {
             animation,
             durationPerPixel,
-            offset,
             simulateAnimation,
             totalDuration,
           }
@@ -244,7 +214,6 @@ class SummaryGraphPath extends Component {
               animation,
               durationPerPixel,
               keyframes,
-              offset,
               simulateAnimation,
               totalDuration,
             }
@@ -259,7 +228,6 @@ class SummaryGraphPath extends Component {
               animation,
               durationPerPixel,
               keyframes,
-              offset,
               simulateAnimation,
               totalDuration,
             }

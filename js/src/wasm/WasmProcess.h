@@ -30,7 +30,7 @@ class CodeSegment;
 
 // These methods return the wasm::CodeSegment (resp. wasm::Code) containing
 // the given pc, if any exist in the process. These methods do not take a lock,
-// and thus are safe to use in a profiling context.
+// and thus are safe to use in a profiling or async interrupt context.
 
 const CodeSegment*
 LookupCodeSegment(const void* pc, const CodeRange** codeRange = nullptr);
@@ -52,11 +52,8 @@ RegisterCodeSegment(const CodeSegment* cs);
 void
 UnregisterCodeSegment(const CodeSegment* cs);
 
-// Called once before/after the last VM execution which could execute or compile
-// wasm.
-
 void
-ShutDown();
+ShutDownProcessStaticData();
 
 } // namespace wasm
 } // namespace js

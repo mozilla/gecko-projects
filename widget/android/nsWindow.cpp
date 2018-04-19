@@ -15,11 +15,9 @@
 #include "mozilla/TouchEvents.h"
 #include "mozilla/TypeTraits.h"
 #include "mozilla/WeakPtr.h"
-#include "mozilla/WheelHandlingHelper.h"    // for WheelDeltaAdjustmentStrategy
 
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/ContentChild.h"
-#include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/Unused.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/layers/RenderTrace.h"
@@ -59,7 +57,6 @@ using mozilla::Unused;
 #include "mozilla/layers/LayerManagerComposite.h"
 #include "mozilla/layers/AsyncCompositionManager.h"
 #include "mozilla/layers/APZEventState.h"
-#include "mozilla/layers/APZInputBridge.h"
 #include "mozilla/layers/APZThreadUtils.h"
 #include "mozilla/layers/IAPZCTreeManager.h"
 #include "GLContext.h"
@@ -148,7 +145,7 @@ public:
         , mInstance(Forward<InstanceType>(aInstance))
     {}
 
-    explicit WindowEvent(Lambda&& aLambda)
+    WindowEvent(Lambda&& aLambda)
         : Runnable("nsWindowEvent")
         , mLambda(mozilla::Move(aLambda))
         , mInstance(mLambda.GetThisArg())
@@ -230,7 +227,7 @@ class nsWindow::NativePtr<Impl>::Locked final : private MutexAutoLock
     Impl* const mImpl;
 
 public:
-    explicit Locked(NativePtr<Impl>& aPtr)
+    Locked(NativePtr<Impl>& aPtr)
         : MutexAutoLock(aPtr.mImplLock)
         , mImpl(aPtr.mImpl)
     {}
@@ -308,24 +305,24 @@ public:
 };
 
 /**
- * PanZoomController handles its native calls on the UI thread, so make
+ * NativePanZoomController handles its native calls on the UI thread, so make
  * it separate from GeckoViewSupport.
  */
 class nsWindow::NPZCSupport final
-    : public PanZoomController::Natives<NPZCSupport>
+    : public NativePanZoomController::Natives<NPZCSupport>
 {
     using LockedWindowPtr = WindowPtr<NPZCSupport>::Locked;
 
     static bool sNegateWheelScroll;
 
     WindowPtr<NPZCSupport> mWindow;
-    PanZoomController::GlobalRef mNPZC;
+    NativePanZoomController::GlobalRef mNPZC;
     int mPreviousButtons;
 
     template<typename Lambda>
     class InputEvent final : public nsAppShell::Event
     {
-        PanZoomController::GlobalRef mNPZC;
+        NativePanZoomController::GlobalRef mNPZC;
         Lambda mLambda;
 
     public:
@@ -340,7 +337,7 @@ class nsWindow::NPZCSupport final
 
             JNIEnv* const env = jni::GetGeckoThreadEnv();
             NPZCSupport* npzcSupport = GetNative(
-                    PanZoomController::LocalRef(env, mNPZC));
+                    NativePanZoomController::LocalRef(env, mNPZC));
 
             if (!npzcSupport || !npzcSupport->mWindow) {
                 // We already shut down.
@@ -368,10 +365,10 @@ class nsWindow::NPZCSupport final
     }
 
 public:
-    typedef PanZoomController::Natives<NPZCSupport> Base;
+    typedef NativePanZoomController::Natives<NPZCSupport> Base;
 
     NPZCSupport(NativePtr<NPZCSupport>* aPtr, nsWindow* aWindow,
-                const PanZoomController::LocalRef& aNPZC)
+                const NativePanZoomController::LocalRef& aNPZC)
         : mWindow(aPtr, aWindow)
         , mNPZC(aNPZC)
         , mPreviousButtons(0)
@@ -426,12 +423,12 @@ public:
         // release mWindow until the UI thread is done using it, thus avoiding
         // the race condition.
 
-        typedef PanZoomController::GlobalRef NPZCRef;
+        typedef NativePanZoomController::GlobalRef NPZCRef;
         auto callDestroy = [] (const NPZCRef& npzc) {
             npzc->SetAttached(false);
         };
 
-        PanZoomController::GlobalRef npzc = mNPZC;
+        NativePanZoomController::GlobalRef npzc = mNPZC;
         RefPtr<nsThread> uiThread = GetAndroidUiThread();
         if (!uiThread) {
             return;
@@ -442,7 +439,7 @@ public:
                 mozilla::Move(npzc)), nsIThread::DISPATCH_NORMAL);
     }
 
-    const PanZoomController::Ref& GetJavaNPZC() const
+    const NativePanZoomController::Ref& GetJavaNPZC() const
     {
         return mNPZC;
     }
@@ -489,17 +486,11 @@ public:
                                ScrollWheelInput::SCROLLDELTA_PIXEL,
                                origin,
                                aHScroll, aVScroll,
-                               false,
-                               // XXX Do we need to support auto-dir scrolling
-                               // for Android widgets with a wheel device?
-                               // Currently, I just leave it unimplemented. If
-                               // we need to implement it, what's the extra work
-                               // to do?
-                               WheelDeltaAdjustmentStrategy::eNone);
+                               false);
 
         ScrollableLayerGuid guid;
         uint64_t blockId;
-        nsEventStatus status = controller->InputBridge()->ReceiveInputEvent(input, &guid, &blockId);
+        nsEventStatus status = controller->ReceiveInputEvent(input, &guid, &blockId);
 
         if (status == nsEventStatus_eConsumeNoDefault) {
             return true;
@@ -609,11 +600,11 @@ public:
 
         ScreenPoint origin = ScreenPoint(aX, aY);
 
-        MouseInput input(mouseType, buttonType, MouseEventBinding::MOZ_SOURCE_MOUSE, ConvertButtons(buttons), origin, aTime, GetEventTimeStamp(aTime), GetModifiers(aMetaState));
+        MouseInput input(mouseType, buttonType, nsIDOMMouseEvent::MOZ_SOURCE_MOUSE, ConvertButtons(buttons), origin, aTime, GetEventTimeStamp(aTime), GetModifiers(aMetaState));
 
         ScrollableLayerGuid guid;
         uint64_t blockId;
-        nsEventStatus status = controller->InputBridge()->ReceiveInputEvent(input, &guid, &blockId);
+        nsEventStatus status = controller->ReceiveInputEvent(input, &guid, &blockId);
 
         if (status == nsEventStatus_eConsumeNoDefault) {
             return true;
@@ -628,7 +619,7 @@ public:
         return true;
     }
 
-    bool HandleMotionEvent(const PanZoomController::LocalRef& aInstance,
+    bool HandleMotionEvent(const NativePanZoomController::LocalRef& aInstance,
                            int32_t aAction, int32_t aActionIndex,
                            int64_t aTime, int32_t aMetaState,
                            jni::IntArray::Param aPointerId,
@@ -735,7 +726,7 @@ public:
         ScrollableLayerGuid guid;
         uint64_t blockId;
         nsEventStatus status =
-            controller->InputBridge()->ReceiveInputEvent(input, &guid, &blockId);
+            controller->ReceiveInputEvent(input, &guid, &blockId);
 
         if (status == nsEventStatus_eConsumeNoDefault) {
             return true;
@@ -802,7 +793,7 @@ class nsWindow::LayerViewSupport final
             return MakeUnique<LayerViewEvent>(mozilla::Move(event));
         }
 
-        explicit LayerViewEvent(UniquePtr<Event>&& event)
+        LayerViewEvent(UniquePtr<Event>&& event)
             : nsAppShell::ProxyEvent(mozilla::Move(event))
         {}
 
@@ -910,13 +901,13 @@ public:
         MOZ_ASSERT(aNPZC);
         MOZ_ASSERT(!mWindow->mNPZCSupport);
 
-        auto npzc = PanZoomController::LocalRef(
+        auto npzc = NativePanZoomController::LocalRef(
                 jni::GetGeckoThreadEnv(),
-                PanZoomController::Ref::From(aNPZC));
+                NativePanZoomController::Ref::From(aNPZC));
         mWindow->mNPZCSupport.Attach(npzc, mWindow, npzc);
 
         DispatchToUiThread("LayerViewSupport::AttachNPZC",
-                           [npzc = PanZoomController::GlobalRef(npzc)] {
+                           [npzc = NativePanZoomController::GlobalRef(npzc)] {
                                 npzc->SetAttached(true);
                            });
     }
@@ -985,7 +976,7 @@ public:
             LayerSession::Compositor::GlobalRef mCompositor;
 
         public:
-            explicit OnResumedEvent(LayerSession::Compositor::GlobalRef&& aCompositor)
+            OnResumedEvent(LayerSession::Compositor::GlobalRef&& aCompositor)
                 : mCompositor(mozilla::Move(aCompositor))
             {}
 
@@ -1496,10 +1487,10 @@ nsWindow::GetUiCompositorControllerChild()
     return mCompositorSession ? mCompositorSession->GetUiCompositorControllerChild() : nullptr;
 }
 
-mozilla::layers::LayersId
+int64_t
 nsWindow::GetRootLayerId() const
 {
-    return mCompositorSession ? mCompositorSession->RootLayerTreeId() : mozilla::layers::LayersId{0};
+    return mCompositorSession ? mCompositorSession->RootLayerTreeId() : 0;
 }
 
 void
@@ -2022,7 +2013,7 @@ nsWindow::DispatchHitTest(const WidgetTouchEvent& aEvent)
                                  WidgetMouseEvent::eReal);
         hittest.mRefPoint = aEvent.mTouches[0]->mRefPoint;
         hittest.mIgnoreRootScrollFrame = true;
-        hittest.inputSource = MouseEventBinding::MOZ_SOURCE_TOUCH;
+        hittest.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_TOUCH;
         nsEventStatus status;
         DispatchEvent(&hittest, status);
 
@@ -2171,7 +2162,7 @@ nsWindow::SynthesizeNativeTouchPoint(uint32_t aPointerId,
 
     DispatchToUiThread(
             "nsWindow::SynthesizeNativeTouchPoint",
-            [npzc = PanZoomController::GlobalRef(npzc),
+            [npzc = NativePanZoomController::GlobalRef(npzc),
              aPointerId, eventType, aPoint,
              aPointerPressure, aPointerOrientation] {
                 npzc->SynthesizeNativeTouchPoint(aPointerId, eventType,
@@ -2198,7 +2189,7 @@ nsWindow::SynthesizeNativeMouseEvent(LayoutDeviceIntPoint aPoint,
 
     DispatchToUiThread(
             "nsWindow::SynthesizeNativeMouseEvent",
-            [npzc = PanZoomController::GlobalRef(npzc),
+            [npzc = NativePanZoomController::GlobalRef(npzc),
              aNativeMessage, aPoint] {
                 npzc->SynthesizeNativeMouseEvent(aNativeMessage,
                                                  aPoint.x, aPoint.y);
@@ -2220,7 +2211,7 @@ nsWindow::SynthesizeNativeMouseMove(LayoutDeviceIntPoint aPoint,
 
     DispatchToUiThread(
             "nsWindow::SynthesizeNativeMouseMove",
-            [npzc = PanZoomController::GlobalRef(npzc), aPoint] {
+            [npzc = NativePanZoomController::GlobalRef(npzc), aPoint] {
                 npzc->SynthesizeNativeMouseEvent(sdk::MotionEvent::ACTION_HOVER_MOVE,
                                                  aPoint.x, aPoint.y);
             });

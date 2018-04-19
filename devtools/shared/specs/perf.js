@@ -3,17 +3,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const { Arg, Option, RetVal, generateActorSpec } = require("devtools/shared/protocol");
+const { RetVal, generateActorSpec } = require("devtools/shared/protocol");
 
 const perfDescription = {
   typeName: "perf",
 
   events: {
     "profiler-started": {
-      type: "profiler-started",
-      entries: Arg(0, "number"),
-      interval: Arg(1, "number"),
-      features: Arg(2, "number"),
+      type: "profiler-started"
     },
     "profiler-stopped": {
       type: "profiler-stopped"
@@ -28,12 +25,7 @@ const perfDescription = {
 
   methods: {
     startProfiler: {
-      request: {
-        entries: Option(0, "number"),
-        interval: Option(0, "number"),
-        features: Option(0, "array:string"),
-        threads: Option(0, "array:string"),
-      },
+      request: {},
       response: { value: RetVal("boolean") }
     },
 

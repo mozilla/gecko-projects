@@ -10,6 +10,7 @@
 #include "BufferReader.h"
 #include "ByteWriter.h"
 #include "MediaData.h"
+#include "nsAutoPtr.h"
 
 namespace mozilla
 {
@@ -54,7 +55,7 @@ AnnexB::ConvertSampleToAnnexB(mozilla::MediaRawData* aSample, bool aAddSPS)
     }
   }
 
-  UniquePtr<MediaRawDataWriter> samplewriter(aSample->CreateWriter());
+  nsAutoPtr<MediaRawDataWriter> samplewriter(aSample->CreateWriter());
 
   if (!samplewriter->Replace(tmp.Elements(), tmp.Length())) {
     return Err(NS_ERROR_OUT_OF_MEMORY);
@@ -258,7 +259,7 @@ AnnexB::ConvertSampleToAVCC(mozilla::MediaRawData* aSample)
   if (ParseNALUnits(writer, reader).isErr()) {
     return false;
   }
-  UniquePtr<MediaRawDataWriter> samplewriter(aSample->CreateWriter());
+  nsAutoPtr<MediaRawDataWriter> samplewriter(aSample->CreateWriter());
   if (!samplewriter->Replace(nalu.Elements(), nalu.Length())) {
     return false;
   }
@@ -312,7 +313,7 @@ AnnexB::ConvertSampleTo4BytesAVCC(mozilla::MediaRawData* aSample)
       return Err(NS_ERROR_OUT_OF_MEMORY);
     }
   }
-  UniquePtr<MediaRawDataWriter> samplewriter(aSample->CreateWriter());
+  nsAutoPtr<MediaRawDataWriter> samplewriter(aSample->CreateWriter());
   if (!samplewriter->Replace(dest.Elements(), dest.Length())) {
     return Err(NS_ERROR_OUT_OF_MEMORY);
   }

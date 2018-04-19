@@ -10,7 +10,6 @@
  */
 
 const expressionSelectors = {
-  plusIcon: ".watch-expressions-pane button.plus",
   input: "input.input-expression"
 };
 
@@ -34,7 +33,6 @@ function assertEmptyValue(dbg, index) {
 
 async function addExpression(dbg, input) {
   info("Adding an expression");
-  findElementWithSelector(dbg, expressionSelectors.plusIcon).click();
   findElementWithSelector(dbg, expressionSelectors.input).focus();
   type(dbg, input);
   pressKey(dbg, "Enter");
@@ -48,9 +46,8 @@ async function editExpression(dbg, input) {
   // Position cursor reliably at the end of the text.
   pressKey(dbg, "End");
   type(dbg, input);
-  const evaluated = waitForDispatch(dbg, "EVALUATE_EXPRESSIONS");
   pressKey(dbg, "Enter");
-  await evaluated;
+  await waitForDispatch(dbg, "EVALUATE_EXPRESSION");
 }
 
 add_task(async function() {

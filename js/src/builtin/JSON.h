@@ -14,15 +14,10 @@
 #include "js/RootingAPI.h"
 
 namespace js {
-
-struct Class;
-class GlobalObject;
 class StringBuffer;
 
-extern const Class JSONClass;
-
 extern JSObject*
-InitJSONClass(JSContext* cx, Handle<GlobalObject*> obj);
+InitJSONClass(JSContext* cx, HandleObject obj);
 
 enum class StringifyBehavior {
     Normal,

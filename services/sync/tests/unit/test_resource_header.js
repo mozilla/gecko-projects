@@ -49,9 +49,9 @@ add_task(async function test_headers_copied() {
   resource.setHeader("X-Foo", "foofoo");
 
   let result = await resource.get(TEST_URL);
-  _("Result: " + result.data);
+  _("Result: " + result);
 
-  Assert.equal(result.data, BODY);
+  Assert.equal(result, BODY);
   Assert.equal(auth, "Basic foobar");
   Assert.equal(foo, "foofoo");
 

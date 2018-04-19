@@ -10,6 +10,7 @@
 #include "AppleVTDecoder.h"
 #include "AppleVTLinker.h"
 #include "MacIOSurfaceImage.h"
+#include "MediaPrefs.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Logging.h"
 #include "mozilla/gfx/gfxVars.h"

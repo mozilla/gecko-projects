@@ -162,6 +162,9 @@ void
 nsStyledElement::NodeInfoChanged(nsIDocument* aOldDoc)
 {
   nsStyledElementBase::NodeInfoChanged(aOldDoc);
+  if (OwnerDoc()->GetStyleBackendType() != aOldDoc->GetStyleBackendType()) {
+    ReparseStyleAttribute(false, /* aForceIfAlreadyParsed */ true);
+  }
 }
 
 nsICSSDeclaration*

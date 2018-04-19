@@ -248,8 +248,6 @@ private:
 #undef GetClassName
 #undef GetBinaryType
 #undef RemoveDirectory
-#undef LoadImage
-#undef LoadIcon
 #endif
 
 #endif  // BASE_PROCESS_UTIL_H_

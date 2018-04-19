@@ -6,12 +6,13 @@ package org.mozilla.gecko.push.autopush.test;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mozilla.gecko.background.testhelpers.TestRunner;
+import org.mozilla.gecko.background.testhelpers.WaitHelper;
 import org.mozilla.gecko.push.autopush.AutopushClient;
 import org.mozilla.gecko.push.autopush.AutopushClientException;
 import org.mozilla.gecko.sync.Utils;
-import org.robolectric.RobolectricTestRunner;
 
-@RunWith(RobolectricTestRunner.class)
+@RunWith(TestRunner.class)
 public class TestAutopushClient {
     @Test
     public void testGetSenderID() throws Exception {

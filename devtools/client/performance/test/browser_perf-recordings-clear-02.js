@@ -13,8 +13,8 @@ const { startRecording, stopRecording } = require("devtools/client/performance/t
 const { times, once } = require("devtools/client/performance/test/helpers/event-utils");
 const { getRecordingsCount } = require("devtools/client/performance/test/helpers/recording-utils");
 
-add_task(async function() {
-  let { panel } = await initPanelInNewTab({
+add_task(function* () {
+  let { panel } = yield initPanelInNewTab({
     tool: "performance",
     url: SIMPLE_URL,
     win: window
@@ -22,8 +22,8 @@ add_task(async function() {
 
   let { EVENTS, PerformanceController, PerformanceView } = panel.panelWin;
 
-  await startRecording(panel);
-  await stopRecording(panel);
+  yield startRecording(panel);
+  yield stopRecording(panel);
 
   is(getRecordingsCount(panel), 1,
     "The recordings list should have one recording.");
@@ -32,7 +32,7 @@ add_task(async function() {
   isnot(PerformanceController.getCurrentRecording(), null,
     "There should be a current recording.");
 
-  await startRecording(panel);
+  yield startRecording(panel);
 
   is(getRecordingsCount(panel), 2,
     "The recordings list should have two recordings.");
@@ -43,13 +43,13 @@ add_task(async function() {
 
   let recordingDeleted = times(PerformanceController, EVENTS.RECORDING_DELETED, 2);
   let recordingStopped = once(PerformanceController, EVENTS.RECORDING_STATE_CHANGE, {
-    expectedArgs: ["recording-stopped"]
+    expectedArgs: { "1": "recording-stopped" }
   });
 
   PerformanceController.clearRecordings();
 
-  await recordingDeleted;
-  await recordingStopped;
+  yield recordingDeleted;
+  yield recordingStopped;
 
   is(getRecordingsCount(panel), 0,
     "The recordings list should be empty.");
@@ -59,11 +59,11 @@ add_task(async function() {
     "There should be no current recording.");
 
   // Bug 1169146: Try another recording after clearing mid-recording.
-  await startRecording(panel);
-  await stopRecording(panel);
+  yield startRecording(panel);
+  yield stopRecording(panel);
 
   is(getRecordingsCount(panel), 1,
     "The recordings list should have one recording.");
 
-  await teardownToolboxAndRemoveTab(panel);
+  yield teardownToolboxAndRemoveTab(panel);
 });

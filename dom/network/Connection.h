@@ -33,6 +33,8 @@ public:
   NS_DECL_NSINETWORKPROPERTIES
   NS_DECL_OWNINGTHREAD
 
+  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(DOMEventTargetHelper)
+
   static Connection*
   CreateForWindow(nsPIDOMWindowInner* aWindow);
 

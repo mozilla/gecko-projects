@@ -93,7 +93,7 @@ DocAllResultMatch(Element* aElement, int32_t aNamespaceID, nsAtom* aAtom,
     return true;
   }
 
-  nsGenericHTMLElement* elm = nsGenericHTMLElement::FromNode(aElement);
+  nsGenericHTMLElement* elm = nsGenericHTMLElement::FromContent(aElement);
   if (!elm) {
     return false;
   }
@@ -173,7 +173,7 @@ HTMLAllCollection::GetSupportedNames(nsTArray<nsString>& aNames)
       }
     }
 
-    nsGenericHTMLElement* el = nsGenericHTMLElement::FromNode(content);
+    nsGenericHTMLElement* el = nsGenericHTMLElement::FromContent(content);
     if (el) {
       // Note: nsINode::HasName means the name is exposed on the document,
       // which is false for options, so we don't check it here.

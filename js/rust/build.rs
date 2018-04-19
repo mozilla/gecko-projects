@@ -4,14 +4,22 @@
 
 extern crate bindgen;
 extern crate cmake;
-extern crate env_logger;
 extern crate glob;
+
+extern crate log;
+extern crate env_logger;
 
 use std::env;
 use std::path;
 
 fn main() {
-    env_logger::init();
+    log::set_logger(|max_log_level| {
+        use env_logger::Logger;
+        let env_logger = Logger::new();
+        max_log_level.set(env_logger.filter());
+        Box::new(env_logger)
+    }).expect("Failed to set logger.");
+
     build_jsapi_bindings();
     build_jsglue_cpp();
 }
@@ -237,7 +245,7 @@ const WHITELIST_VARS: &'static [&'static str] = &[
     "JS_STRUCTURED_CLONE_VERSION",
     "JSCLASS_.*",
     "JSFUN_.*",
-    "JSID_TYPE_VOID",
+    "JSID_VOID",
     "JSITER_.*",
     "JSPROP_.*",
     "JS::FalseHandleValue",

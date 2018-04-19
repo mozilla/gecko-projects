@@ -3,7 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const EventEmitter = require("devtools/shared/event-emitter");
+const {Task} = require("devtools/shared/task");
+const EventEmitter = require("devtools/shared/old-event-emitter");
 const {createNode} = require("devtools/client/animationinspector/utils");
 const { LocalizationHelper } = require("devtools/shared/l10n");
 
@@ -37,7 +38,7 @@ function DomNodePreview(inspector, options = {}) {
 exports.DomNodePreview = DomNodePreview;
 
 DomNodePreview.prototype = {
-  init: function(containerEl) {
+  init: function (containerEl) {
     let document = containerEl.ownerDocument;
 
     // Init the markup for displaying the target node.
@@ -171,7 +172,7 @@ DomNodePreview.prototype = {
     this.startListeners();
   },
 
-  startListeners: function() {
+  startListeners: function () {
     // Init events for highlighting and selecting the node.
     this.previewEl.addEventListener("mouseover", this.onPreviewMouseOver);
     this.previewEl.addEventListener("mouseout", this.onPreviewMouseOut);
@@ -185,7 +186,7 @@ DomNodePreview.prototype = {
     HighlighterLock.on("highlighted", this.onHighlighterLocked);
   },
 
-  stopListeners: function() {
+  stopListeners: function () {
     HighlighterLock.off("highlighted", this.onHighlighterLocked);
     this.inspector.off("markupmutation", this.onMarkupMutations);
     this.previewEl.removeEventListener("mouseover", this.onPreviewMouseOver);
@@ -194,7 +195,7 @@ DomNodePreview.prototype = {
     this.highlightNodeEl.removeEventListener("click", this.onHighlightElClick);
   },
 
-  destroy: function() {
+  destroy: function () {
     HighlighterLock.unhighlight().catch(console.error);
 
     this.stopListeners();
@@ -212,7 +213,7 @@ DomNodePreview.prototype = {
     return null;
   },
 
-  onPreviewMouseOver: function() {
+  onPreviewMouseOver: function () {
     if (!this.nodeFront || !this.highlighterUtils) {
       return;
     }
@@ -220,7 +221,7 @@ DomNodePreview.prototype = {
                          .catch(console.error);
   },
 
-  onPreviewMouseOut: function() {
+  onPreviewMouseOut: function () {
     if (!this.nodeFront || !this.highlighterUtils) {
       return;
     }
@@ -228,14 +229,14 @@ DomNodePreview.prototype = {
                          .catch(console.error);
   },
 
-  onSelectElClick: function() {
+  onSelectElClick: function () {
     if (!this.nodeFront) {
       return;
     }
-    this.inspector.selection.setNodeFront(this.nodeFront, { reason: "dom-node-preview" });
+    this.inspector.selection.setNodeFront(this.nodeFront, "dom-node-preview");
   },
 
-  onHighlightElClick: function(e) {
+  onHighlightElClick: function (e) {
     e.stopPropagation();
 
     let classList = this.highlightNodeEl.classList;
@@ -254,13 +255,13 @@ DomNodePreview.prototype = {
     }
   },
 
-  onHighlighterLocked: function(domNodePreview) {
+  onHighlighterLocked: function (e, domNodePreview) {
     if (domNodePreview !== this) {
       this.highlightNodeEl.classList.remove("selected");
     }
   },
 
-  onMarkupMutations: function(mutations) {
+  onMarkupMutations: function (e, mutations) {
     if (!this.nodeFront) {
       return;
     }
@@ -274,7 +275,7 @@ DomNodePreview.prototype = {
     }
   },
 
-  render: function(nodeFront) {
+  render: function (nodeFront) {
     this.nodeFront = nodeFront;
     let {displayName, attributes} = nodeFront;
 
@@ -326,26 +327,26 @@ var HighlighterLock = {
   highlighter: null,
   isShown: false,
 
-  async highlight(animationTargetNode) {
+  highlight: Task.async(function* (animationTargetNode) {
     if (!this.highlighter) {
       let util = animationTargetNode.inspector.toolbox.highlighterUtils;
-      this.highlighter = await util.getHighlighterByType("BoxModelHighlighter");
+      this.highlighter = yield util.getHighlighterByType("BoxModelHighlighter");
     }
 
-    await this.highlighter.show(animationTargetNode.nodeFront);
+    yield this.highlighter.show(animationTargetNode.nodeFront);
     this.isShown = true;
     this.emit("highlighted", animationTargetNode);
-  },
+  }),
 
-  async unhighlight() {
+  unhighlight: Task.async(function* () {
     if (!this.highlighter || !this.isShown) {
       return;
     }
 
-    await this.highlighter.hide();
+    yield this.highlighter.hide();
     this.isShown = false;
     this.emit("unhighlighted");
-  }
+  })
 };
 
 EventEmitter.decorate(HighlighterLock);

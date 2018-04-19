@@ -15,7 +15,7 @@ de_CH{
             }
         }
     }
-    Version{"2.1.39.37"}
+    Version{"2.1.37.8"}
     calendar{
         gregorian{
             dayNames{

@@ -8,10 +8,12 @@ use cssparser::{Parser, Token};
 use parser::{Parse, ParserContext};
 use std::fmt::{self, Write};
 use style_traits::{CssWriter, ParseError, StyleParseErrorKind, ToCss};
+use values::{Either, None_};
 #[cfg(feature = "gecko")]
 use values::CustomIdent;
 #[cfg(feature = "gecko")]
 use values::generics::CounterStyleOrNone;
+use values::specified::ImageUrlOrNone;
 
 /// Specified and computed `list-style-type` property.
 #[cfg(feature = "gecko")]
@@ -61,15 +63,38 @@ impl ListStyleType {
 impl Parse for ListStyleType {
     fn parse<'i, 't>(
         context: &ParserContext,
-        input: &mut Parser<'i, 't>,
+        input: &mut Parser<'i, 't>
     ) -> Result<Self, ParseError<'i>> {
         if let Ok(style) = input.try(|i| CounterStyleOrNone::parse(context, i)) {
-            return Ok(ListStyleType::CounterStyle(style));
+            return Ok(ListStyleType::CounterStyle(style))
         }
 
-        Ok(ListStyleType::String(
-            input.expect_string()?.as_ref().to_owned(),
-        ))
+        Ok(ListStyleType::String(input.expect_string()?.as_ref().to_owned()))
+    }
+}
+
+/// Specified and computed `list-style-image` property.
+#[derive(Clone, Debug, MallocSizeOf, PartialEq, ToCss)]
+pub struct ListStyleImage(pub ImageUrlOrNone);
+
+// FIXME(nox): This is wrong, there are different types for specified
+// and computed URLs in Servo.
+trivial_to_computed_value!(ListStyleImage);
+
+impl ListStyleImage {
+    /// Initial specified value for `list-style-image`.
+    #[inline]
+    pub fn none() -> ListStyleImage {
+        ListStyleImage(Either::Second(None_))
+    }
+}
+
+impl Parse for ListStyleImage {
+    fn parse<'i, 't>(
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<ListStyleImage, ParseError<'i>> {
+        ImageUrlOrNone::parse(context, input).map(ListStyleImage)
     }
 }
 
@@ -92,7 +117,7 @@ impl ToCss for Quotes {
                 l.to_css(dest)?;
                 dest.write_char(' ')?;
                 r.to_css(dest)?;
-            },
+            }
             None => return dest.write_str("none"),
         }
 
@@ -108,27 +133,24 @@ impl ToCss for Quotes {
 }
 
 impl Parse for Quotes {
-    fn parse<'i, 't>(
-        _: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Quotes, ParseError<'i>> {
-        if input
-            .try(|input| input.expect_ident_matching("none"))
-            .is_ok()
-        {
-            return Ok(Quotes(Vec::new().into_boxed_slice()));
+    fn parse<'i, 't>(_: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Quotes, ParseError<'i>> {
+        if input.try(|input| input.expect_ident_matching("none")).is_ok() {
+            return Ok(Quotes(Vec::new().into_boxed_slice()))
         }
 
         let mut quotes = Vec::new();
         loop {
             let location = input.current_source_location();
             let first = match input.next() {
-                Ok(&Token::QuotedString(ref value)) => value.as_ref().to_owned().into_boxed_str(),
+                Ok(&Token::QuotedString(ref value)) => {
+                    value.as_ref().to_owned().into_boxed_str()
+                },
                 Ok(t) => return Err(location.new_unexpected_token_error(t.clone())),
                 Err(_) => break,
             };
 
-            let second = input.expect_string()?.as_ref().to_owned().into_boxed_str();
+            let second =
+                input.expect_string()?.as_ref().to_owned().into_boxed_str();
             quotes.push((first, second))
         }
 

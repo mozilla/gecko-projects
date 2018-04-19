@@ -6,6 +6,7 @@
 
 "use strict";
 
+const {Task} = require("devtools/shared/task");
 const {createNode, getCssPropertyName} =
   require("devtools/client/animationinspector/utils");
 const {Keyframes} = require("devtools/client/animationinspector/components/keyframes");
@@ -35,18 +36,18 @@ AnimationDetails.prototype = {
   NON_PROPERTIES: ["easing", "composite", "computedOffset",
                    "offset", "simulateComputeValuesFailure"],
 
-  init: function(containerEl) {
+  init: function (containerEl) {
     this.containerEl = containerEl;
   },
 
-  destroy: function() {
+  destroy: function () {
     this.unrender();
     this.containerEl = null;
     this.serverTraits = null;
     this.progressIndicatorEl = null;
   },
 
-  unrender: function() {
+  unrender: function () {
     for (let component of this.keyframeComponents) {
       component.destroy();
     }
@@ -57,7 +58,7 @@ AnimationDetails.prototype = {
     }
   },
 
-  getPerfDataForProperty: function(animation, propertyName) {
+  getPerfDataForProperty: function (animation, propertyName) {
     let warning = "";
     let className = "";
     if (animation.state.propertyState) {
@@ -88,9 +89,9 @@ AnimationDetails.prototype = {
    *                  e.g. { "background-color": "color", }
    *                         "opacity": "float", ... }
    */
-  async getAnimationTypes(propertyNames) {
+  getAnimationTypes: Task.async(function* (propertyNames) {
     if (this.serverTraits.hasGetAnimationTypes) {
-      return this.animation.getAnimationTypes(propertyNames);
+      return yield this.animation.getAnimationTypes(propertyNames);
     }
     // Set animation type 'none' since does not support getAnimationTypes.
     const animationTypes = {};
@@ -98,9 +99,9 @@ AnimationDetails.prototype = {
       animationTypes[propertyName] = "none";
     });
     return Promise.resolve(animationTypes);
-  },
+  }),
 
-  async render(animation, tracks) {
+  render: Task.async(function* (animation, tracks) {
     this.unrender();
 
     if (!animation) {
@@ -116,7 +117,7 @@ AnimationDetails.prototype = {
     }
 
     // Get animation type for each CSS properties.
-    const animationTypes = await this.getAnimationTypes(Object.keys(this.tracks));
+    const animationTypes = yield this.getAnimationTypes(Object.keys(this.tracks));
 
     // Render progress indicator.
     this.renderProgressIndicator();
@@ -132,9 +133,9 @@ AnimationDetails.prototype = {
     });
     this.dummyAnimation =
       new this.win.Animation(new this.win.KeyframeEffect(null, null, timing), null);
-  },
+  }),
 
-  renderAnimatedPropertiesHeader: function() {
+  renderAnimatedPropertiesHeader: function () {
     // Add animated property header.
     const headerEl = createNode({
       parent: this.containerEl,
@@ -171,7 +172,7 @@ AnimationDetails.prototype = {
     }
   },
 
-  renderAnimatedPropertiesBody: function(animationTypes) {
+  renderAnimatedPropertiesBody: function (animationTypes) {
     // Add animated property body.
     const bodyEl = createNode({
       parent: this.containerEl,
@@ -236,7 +237,7 @@ AnimationDetails.prototype = {
     }
   },
 
-  renderProgressIndicator: function() {
+  renderProgressIndicator: function () {
     // The wrapper represents the area which the indicator is displayable.
     const progressIndicatorWrapperEl = createNode({
       parent: this.containerEl,
@@ -258,7 +259,7 @@ AnimationDetails.prototype = {
     });
   },
 
-  indicateProgress: function(time) {
+  indicateProgress: function (time) {
     if (!this.progressIndicatorEl) {
       // Not displayed yet.
       return;

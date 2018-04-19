@@ -362,8 +362,8 @@ this.IsolationTestTools = {
         }
 
         // Close Tabs.
-        BrowserTestUtils.removeTab(tabInfoA.tab);
-        BrowserTestUtils.removeTab(tabInfoB.tab);
+        await BrowserTestUtils.removeTab(tabInfoA.tab);
+        await BrowserTestUtils.removeTab(tabInfoB.tab);
       }
     });
   }

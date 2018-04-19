@@ -40,7 +40,7 @@ var ZoomManager = {
     let zoom = (this.useFullZoom || aBrowser.isSyntheticDocument)
                ? aBrowser.fullZoom : aBrowser.textZoom;
     // Round to remove any floating-point error.
-    return Number(zoom ? zoom.toFixed(2) : 1);
+    return Number(zoom.toFixed(2));
   },
 
   set zoom(aVal) {

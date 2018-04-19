@@ -4,21 +4,27 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifdef XP_WIN
+// Include Windows headers required for enabling high precision timers.
+#include "windows.h"
+#include "mmsystem.h"
+#endif
+
 #include <algorithm>
 #include <stdint.h>
-#include <utility>
 
 #include "mediasink/AudioSink.h"
 #include "mediasink/AudioSinkWrapper.h"
 #include "mediasink/DecodedStream.h"
 #include "mediasink/OutputStreamManager.h"
 #include "mediasink/VideoSink.h"
+#include "mozilla/IndexSequence.h"
 #include "mozilla/Logging.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/NotNull.h"
+#include "mozilla/Preferences.h"
 #include "mozilla/SharedThreadPool.h"
 #include "mozilla/Sprintf.h"
-#include "mozilla/StaticPrefs.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TaskQueue.h"
 #include "mozilla/Tuple.h"
@@ -29,6 +35,7 @@
 #include "MediaDecoder.h"
 #include "MediaDecoderStateMachine.h"
 #include "MediaShutdownManager.h"
+#include "MediaPrefs.h"
 #include "MediaTimer.h"
 #include "ReaderProxy.h"
 #include "TimeUnits.h"
@@ -159,7 +166,7 @@ static TimeDuration
 SuspendBackgroundVideoDelay()
 {
   return TimeDuration::FromMilliseconds(
-    StaticPrefs::MediaSuspendBkgndVideoDelayMs());
+    MediaPrefs::MDSMSuspendBackgroundVideoDelay());
 }
 
 class MediaDecoderStateMachine::StateObject
@@ -257,7 +264,7 @@ protected:
   auto
   CallEnterMemberFunction(S* aS,
                           Tuple<Args...>& aTuple,
-                          std::index_sequence<Indexes...>)
+                          IndexSequence<Indexes...>)
     -> decltype(ReturnTypeHelper(&S::Enter))
   {
     return aS->Enter(Move(Get<Indexes>(aTuple))...);
@@ -299,7 +306,7 @@ protected:
 
     master->mStateObj.reset(s);
     return CallEnterMemberFunction(s, copiedArgs,
-                                   std::index_sequence_for<Ts...>{});
+                                   typename IndexSequenceFor<Ts...>::Type());
   }
 
   RefPtr<MediaDecoder::SeekPromise>
@@ -760,7 +767,7 @@ private:
       return;
     }
 
-    auto timeout = StaticPrefs::MediaDormantOnPauseTimeoutMs();
+    auto timeout = MediaPrefs::DormantOnPauseTimeout();
     if (timeout < 0) {
       // Disabled when timeout is negative.
       return;
@@ -1234,7 +1241,7 @@ protected:
     RefPtr<AudioData> data(new AudioData(
       aAudio->mOffset, mSeekJob.mTarget->GetTime(),
       duration, frames, Move(audioData), channels,
-      aAudio->mRate, aAudio->mChannelMap));
+      aAudio->mRate));
     MOZ_ASSERT(AudioQueue().GetSize() == 0,
                "Should be the 1st sample after seeking");
     mMaster->PushAudio(data);
@@ -2203,7 +2210,7 @@ DecodeMetadataState::OnMetadataRead(MetadataHolder&& aMetadata)
 
   // Check whether the media satisfies the requirement of seamless looing.
   // (Before checking the media is audio only, we need to get metadata first.)
-  mMaster->mSeamlessLoopingAllowed = StaticPrefs::MediaSeamlessLooping() &&
+  mMaster->mSeamlessLoopingAllowed = MediaPrefs::SeamlessLooping() &&
                                      mMaster->HasAudio() &&
                                      !mMaster->HasVideo();
   mMaster->LoopingChanged();
@@ -2698,6 +2705,9 @@ MediaDecoderStateMachine::MediaDecoderStateMachine(MediaDecoder* aDecoder,
   INIT_CANONICAL(mDuration, NullableTimeUnit()),
   INIT_CANONICAL(mCurrentPosition, TimeUnit::Zero()),
   INIT_CANONICAL(mIsAudioDataAudible, false)
+#ifdef XP_WIN
+  , mShouldUseHiResTimers(Preferences::GetBool("media.hi-res-timers.enabled", true))
+#endif
 {
   MOZ_COUNT_CTOR(MediaDecoderStateMachine);
   NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
@@ -2715,6 +2725,10 @@ MediaDecoderStateMachine::~MediaDecoderStateMachine()
 {
   MOZ_ASSERT(NS_IsMainThread(), "Should be on main thread.");
   MOZ_COUNT_DTOR(MediaDecoderStateMachine);
+
+#ifdef XP_WIN
+  MOZ_ASSERT(!mHiResTimersRequested);
+#endif
 }
 
 void
@@ -2915,6 +2929,12 @@ MediaDecoderStateMachine::StopPlayback()
       MediaPlaybackEvent::PlaybackStopped, mPlaybackOffset });
     mMediaSink->SetPlaying(false);
     MOZ_ASSERT(!IsPlaying());
+#ifdef XP_WIN
+    if (mHiResTimersRequested) {
+      mHiResTimersRequested = false;
+      timeEndPeriod(1);
+    }
+#endif
   }
 }
 
@@ -2936,6 +2956,20 @@ void MediaDecoderStateMachine::MaybeStartPlayback()
 
   LOG("MaybeStartPlayback() starting playback");
   StartMediaSink();
+
+#ifdef XP_WIN
+  if (!mHiResTimersRequested && mShouldUseHiResTimers) {
+    mHiResTimersRequested = true;
+    // Ensure high precision timers are enabled on Windows, otherwise the state
+    // machine isn't woken up at reliable intervals to set the next frame, and we
+    // drop frames while painting. Note that each call must be matched by a
+    // corresponding timeEndPeriod() call. Enabling high precision timers causes
+    // the CPU to wake up more frequently on Windows 7 and earlier, which causes
+    // more CPU load and battery use. So we only enable high precision timers
+    // when we're actually playing.
+    timeBeginPeriod(1);
+  }
+#endif
 
   if (!IsPlaying()) {
     mMediaSink->SetPlaying(true);
@@ -3052,7 +3086,7 @@ void MediaDecoderStateMachine::SetVideoDecodeModeInternal(VideoDecodeMode aMode)
       mVideoDecodeSuspended ? 'T' : 'F');
 
   // Should not suspend decoding if we don't turn on the pref.
-  if (!StaticPrefs::MediaSuspendBkgndVideoEnabled() &&
+  if (!MediaPrefs::MDSMSuspendBackgroundVideoEnabled() &&
       aMode == VideoDecodeMode::Suspend) {
     LOG("SetVideoDecodeModeInternal(), early return because preference off and set to Suspend");
     return;

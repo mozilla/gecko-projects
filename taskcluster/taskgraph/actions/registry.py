@@ -11,10 +11,10 @@ import os
 import re
 import yaml
 from slugid import nice as slugid
+from mozbuild.util import memoize
 from types import FunctionType
 from collections import namedtuple
 from taskgraph import create, GECKO
-from taskgraph.generator import load_graph_config
 from taskgraph.util import taskcluster
 from taskgraph.parameters import Parameters
 
@@ -173,26 +173,19 @@ def register_callback_action(name, title, symbol, description, order=10000,
         assert cb.__name__ not in callbacks, 'callback name {} is not unique'.format(cb.__name__)
 
         @register_task_action(name, title, description, order, context, schema)
-        def build_callback_action_task(parameters, graph_config):
+        def build_callback_action_task(parameters):
             if not available(parameters):
                 return None
 
-            repo_param = '{}head_repository'.format(graph_config['project-repo-param-prefix'])
-            revision = parameters['{}head_rev'.format(graph_config['project-repo-param-prefix'])]
-            match = re.match(r'https://(hg.mozilla.org)/(.*?)/?$', parameters[repo_param])
+            match = re.match(r'https://(hg.mozilla.org)/(.*?)/?$', parameters['head_repository'])
             if not match:
-                raise Exception('Unrecognized {}'.format(repo_param))
+                raise Exception('Unrecognized head_repository')
             repo_scope = 'assume:repo:{}/{}:branch:default'.format(
                 match.group(1), match.group(2))
 
             task_group_id = os.environ.get('TASK_ID', slugid())
 
-            # FIXME: https://bugzilla.mozilla.org/show_bug.cgi?id=1454034
-            # trust-domain works, but isn't semantically correct here.
-            if graph_config['trust-domain'] == 'comm':
-                template = os.path.join(GECKO, 'comm', '.taskcluster.yml')
-            else:
-                template = os.path.join(GECKO, '.taskcluster.yml')
+            template = os.path.join(GECKO, '.taskcluster.yml')
 
             with open(template, 'r') as f:
                 taskcluster_yml = yaml.safe_load(f)
@@ -205,14 +198,14 @@ def register_callback_action(name, title, symbol, description, order=10000,
                     '$let': {
                         'tasks_for': 'action',
                         'repository': {
-                            'url': parameters[repo_param],
+                            'url': parameters['head_repository'],
                             'project': parameters['project'],
                             'level': parameters['level'],
                         },
                         'push': {
                             'owner': 'mozilla-taskcluster-maintenance@mozilla.com',
                             'pushlog_id': parameters['pushlog_id'],
-                            'revision': revision,
+                            'revision': parameters['head_rev'],
                         },
                         'action': {
                             'name': name,
@@ -232,7 +225,7 @@ def register_callback_action(name, title, symbol, description, order=10000,
     return register_callback
 
 
-def render_actions_json(parameters, graph_config):
+def render_actions_json(parameters):
     """
     Render JSON object for the ``public/actions.json`` artifact.
 
@@ -248,8 +241,8 @@ def render_actions_json(parameters, graph_config):
     """
     assert isinstance(parameters, Parameters), 'requires instance of Parameters'
     result = []
-    for action in sorted(_get_actions(graph_config), key=lambda action: action.order):
-        task = action.task_template_builder(parameters, graph_config)
+    for action in sorted(get_actions(), key=lambda action: action.order):
+        task = action.task_template_builder(parameters)
         if task:
             assert is_json(task), 'task must be a JSON compatible object'
             res = {
@@ -273,27 +266,26 @@ def render_actions_json(parameters, graph_config):
     }
 
 
-def trigger_action_callback(task_group_id, task_id, task, input, callback, parameters, root,
+def trigger_action_callback(task_group_id, task_id, task, input, callback, parameters,
                             test=False):
     """
     Trigger action callback with the given inputs. If `test` is true, then run
     the action callback in testing mode, without actually creating tasks.
     """
-    graph_config = load_graph_config(root)
-    callbacks = _get_callbacks(graph_config)
-    cb = callbacks.get(callback, None)
+    cb = get_callbacks().get(callback, None)
     if not cb:
         raise Exception('Unknown callback: {}. Known callbacks: {}'.format(
-            callback, callbacks))
+            callback, get_callbacks().keys()))
 
     if test:
         create.testing = True
         taskcluster.testing = True
 
-    cb(Parameters(**parameters), graph_config, input, task_group_id, task_id, task)
+    cb(Parameters(**parameters), input, task_group_id, task_id, task)
 
 
-def _load(graph_config):
+@memoize
+def _load():
     # Load all modules from this folder, relying on the side-effects of register_
     # functions to populate the action registry.
     actions_dir = os.path.dirname(__file__)
@@ -303,13 +295,13 @@ def _load(graph_config):
         if f.endswith('.yml'):
             with open(os.path.join(actions_dir, f), 'r') as d:
                 frontmatter, template = yaml.safe_load_all(d)
-                register_task_action(**frontmatter)(lambda _p, _g: template)
+                register_task_action(**frontmatter)(lambda _: template)
     return callbacks, actions
 
 
-def _get_callbacks(graph_config):
-    return _load(graph_config)[0]
+def get_callbacks():
+    return _load()[0]
 
 
-def _get_actions(graph_config):
-    return _load(graph_config)[1]
+def get_actions():
+    return _load()[1]

@@ -124,10 +124,6 @@ lag{
         }
         MRO{
             "MRO",
-            "Ungwíiya ya Moritánia (1973–2017)",
-        }
-        MRU{
-            "MRU",
             "Ungwíiya ya Moritánia",
         }
         MUR{
@@ -180,10 +176,6 @@ lag{
         }
         STD{
             "STD",
-            "Dóbura ya SaoTóome na Pirínsipe (1977–2017)",
-        }
-        STN{
-            "STN",
             "Dóbura ya SaoTóome na Pirínsipe",
         }
         SZL{
@@ -231,5 +223,5 @@ lag{
             "Dóola ya Simbáabwe",
         }
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.31.33"}
 }

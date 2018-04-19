@@ -7,7 +7,7 @@
  * Test if request and response body logging stays on after opening the console.
  */
 
-add_task(async function() {
+add_task(async function () {
   let { L10N } = require("devtools/client/netmonitor/src/utils/l10n");
 
   let { tab, monitor } = await initNetMonitor(JSON_LONG_URL);
@@ -23,7 +23,11 @@ add_task(async function() {
   store.dispatch(Actions.batchEnable(false));
 
   // Perform first batch of requests.
-  await performRequests(monitor, tab, 1);
+  let wait = waitForNetworkEvents(monitor, 1);
+  await ContentTask.spawn(tab.linkedBrowser, {}, async function () {
+    content.wrappedJSObject.performRequests();
+  });
+  await wait;
 
   await verifyRequest(0);
 
@@ -43,7 +47,11 @@ add_task(async function() {
   await wait;
 
   // Perform another batch of requests.
-  await performRequests(monitor, tab, 1);
+  wait = waitForNetworkEvents(monitor, 1);
+  await ContentTask.spawn(tab.linkedBrowser, {}, async function () {
+    content.wrappedJSObject.performRequests();
+  });
+  await wait;
 
   await verifyRequest(1);
 
@@ -53,7 +61,7 @@ add_task(async function() {
     let requestItems = document.querySelectorAll(".request-list-item");
     for (let requestItem of requestItems) {
       requestItem.scrollIntoView();
-      let requestsListStatus = requestItem.querySelector(".status-code");
+      let requestsListStatus = requestItem.querySelector(".requests-list-status");
       EventUtils.sendMouseEvent({ type: "mouseover" }, requestsListStatus);
       await waitUntil(() => requestsListStatus.title);
     }

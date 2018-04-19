@@ -64,7 +64,7 @@ pub type DisplayItem = GenericDisplayItem<SpecificDisplayItem>;
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PrimitiveInfo<T> {
     pub rect: TypedRect<f32, T>,
-    pub clip_rect: TypedRect<f32, T>,
+    pub local_clip: LocalClip,
     pub is_backface_visible: bool,
     pub tag: Option<ItemTag>,
 }
@@ -78,9 +78,13 @@ impl LayerPrimitiveInfo {
         rect: TypedRect<f32, LayerPixel>,
         clip_rect: TypedRect<f32, LayerPixel>,
     ) -> Self {
+        Self::with_clip(rect, LocalClip::from(clip_rect))
+    }
+
+    pub fn with_clip(rect: TypedRect<f32, LayerPixel>, clip: LocalClip) -> Self {
         PrimitiveInfo {
-            rect,
-            clip_rect,
+            rect: rect,
+            local_clip: clip,
             is_backface_visible: true,
             tag: None,
         }
@@ -418,10 +422,11 @@ pub struct GradientStop {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct RadialGradient {
-    pub center: LayoutPoint,
-    pub radius: LayoutSize,
-    pub start_offset: f32,
-    pub end_offset: f32,
+    pub start_center: LayoutPoint,
+    pub start_radius: f32,
+    pub end_center: LayoutPoint,
+    pub end_radius: f32,
+    pub ratio_xy: f32,
     pub extend_mode: ExtendMode,
 } // IMPLICIT stops: Vec<GradientStop>
 
@@ -451,7 +456,6 @@ pub struct StackingContext {
     pub perspective: Option<LayoutTransform>,
     pub mix_blend_mode: MixBlendMode,
     pub reference_frame_id: Option<ClipId>,
-    pub clip_node_id: Option<ClipId>,
 } // IMPLICIT: filters: Vec<FilterOp>
 
 #[repr(u32)]
@@ -628,7 +632,7 @@ impl LocalClip {
     pub fn clip_rect(&self) -> &LayoutRect {
         match *self {
             LocalClip::Rect(ref rect) => rect,
-            LocalClip::RoundedRect(ref rect, _) => rect,
+            LocalClip::RoundedRect(ref rect, _) => &rect,
         }
     }
 

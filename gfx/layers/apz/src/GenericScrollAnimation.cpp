@@ -30,9 +30,7 @@ GenericScrollAnimation::GenericScrollAnimation(AsyncPanZoomController& aApzc,
 }
 
 void
-GenericScrollAnimation::UpdateDelta(TimeStamp aTime,
-                                    const nsPoint& aDelta,
-                                    const nsSize& aCurrentVelocity)
+GenericScrollAnimation::UpdateDelta(TimeStamp aTime, nsPoint aDelta, const nsSize& aCurrentVelocity)
 {
   mFinalDestination += aDelta;
 
@@ -40,9 +38,7 @@ GenericScrollAnimation::UpdateDelta(TimeStamp aTime,
 }
 
 void
-GenericScrollAnimation::UpdateDestination(TimeStamp aTime,
-                                          const nsPoint& aDestination,
-                                          const nsSize& aCurrentVelocity)
+GenericScrollAnimation::UpdateDestination(TimeStamp aTime, nsPoint aDestination, const nsSize& aCurrentVelocity)
 {
   mFinalDestination = aDestination;
 

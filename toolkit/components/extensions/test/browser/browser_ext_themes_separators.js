@@ -43,7 +43,7 @@ add_task(async function test_support_separator_properties() {
   let mainWin = document.querySelector("#main-window");
   Assert.equal(
     window.getComputedStyle(mainWin).getPropertyValue("--urlbar-separator-color"),
-    `rgb(${hexToRGB(SEPARATOR_FIELD_COLOR).join(", ")})`,
+    SEPARATOR_FIELD_COLOR,
     "Toolbar field separator color properly set"
   );
 

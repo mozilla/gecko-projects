@@ -38,7 +38,7 @@ async function testDeviceConnected(deviceName) {
 
   Assert.equal(tab.linkedBrowser.currentURI.spec, DEVICES_URL);
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 }
 
 add_task(async function() {

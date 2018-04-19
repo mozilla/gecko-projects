@@ -124,10 +124,6 @@ bas{
         }
         MRO{
             "MRO",
-            "Ùgwiya mòrìtanìa (1973–2017)",
-        }
-        MRU{
-            "MRU",
             "Ùgwiya mòrìtanìa",
         }
         MUR{
@@ -184,10 +180,6 @@ bas{
         }
         STD{
             "STD",
-            "Dobrà sàotòme (1977–2017)",
-        }
-        STN{
-            "STN",
             "Dobrà sàotòme",
         }
         SZL{
@@ -235,5 +227,5 @@ bas{
             "Dɔ̀lâr sìmbàbwê",
         }
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.37.1"}
 }

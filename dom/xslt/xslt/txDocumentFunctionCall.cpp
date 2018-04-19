@@ -157,9 +157,11 @@ DocumentFunctionCall::isSensitiveTo(ContextSensitivity aContext)
 }
 
 #ifdef TX_TO_STRING
-void
-DocumentFunctionCall::appendName(nsAString& aDest)
+nsresult
+DocumentFunctionCall::getNameAtom(nsAtom** aAtom)
 {
-    aDest.Append(nsGkAtoms::document->GetUTF16String());
+    *aAtom = nsGkAtoms::document;
+    NS_ADDREF(*aAtom);
+    return NS_OK;
 }
 #endif

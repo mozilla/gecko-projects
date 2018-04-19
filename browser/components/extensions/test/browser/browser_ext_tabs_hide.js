@@ -101,11 +101,6 @@ add_task(async function test_tabs_showhide() {
   SessionStore.setBrowserState(JSON.stringify(sessData));
   await restored;
 
-  for (let win of BrowserWindowIterator()) {
-    let allTabsButton = win.document.getElementById("alltabs-button");
-    is(getComputedStyle(allTabsButton).visibility, "collapse", "The all tabs button is hidden");
-  }
-
   // Attempt to hide all the tabs, however the active tab in each window cannot
   // be hidden, so the result will be 3 hidden tabs.
   extension.sendMessage("hideall");
@@ -125,13 +120,10 @@ add_task(async function test_tabs_showhide() {
     ok(!tabs[0].hidden, "first tab not hidden");
     for (let i = 1; i < tabs.length; i++) {
       ok(tabs[i].hidden, "tab hidden value is correct");
-      let id = SessionStore.getCustomTabValue(tabs[i], "hiddenBy");
+      let id = SessionStore.getTabValue(tabs[i], "hiddenBy");
       is(id, extension.id, "tab hiddenBy value is correct");
       await TabStateFlusher.flush(tabs[i].linkedBrowser);
     }
-
-    let allTabsButton = win.document.getElementById("alltabs-button");
-    is(getComputedStyle(allTabsButton).visibility, "visible", "The all tabs button is visible");
   }
 
   // Close the other window then restore it to test that the tabs are
@@ -144,14 +136,14 @@ add_task(async function test_tabs_showhide() {
   ok(!tabs[0].hidden, "first tab not hidden");
   for (let i = 1; i < tabs.length; i++) {
     ok(tabs[i].hidden, "tab hidden value is correct");
-    let id = SessionStore.getCustomTabValue(tabs[i], "hiddenBy");
+    let id = SessionStore.getTabValue(tabs[i], "hiddenBy");
     is(id, extension.id, "tab hiddenBy value is correct");
   }
 
   // Test closing the last visible tab, the next tab which is hidden should become
   // the selectedTab and will be visible.
   ok(!otherwin.gBrowser.selectedTab.hidden, "selected tab is not hidden");
-  BrowserTestUtils.removeTab(otherwin.gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(otherwin.gBrowser.selectedTab);
   ok(!otherwin.gBrowser.selectedTab.hidden, "tab was unhidden");
 
   // Showall will unhide any remaining hidden tabs.
@@ -227,6 +219,6 @@ add_task(async function test_tabs_shutdown() {
   await extension.unload();
 
   Assert.ok(!tabs[0].hidden, "Tab is not hidden after unloading extension");
-  BrowserTestUtils.removeTab(tabs[0]);
-  BrowserTestUtils.removeTab(tabs[1]);
+  await BrowserTestUtils.removeTab(tabs[0]);
+  await BrowserTestUtils.removeTab(tabs[1]);
 });

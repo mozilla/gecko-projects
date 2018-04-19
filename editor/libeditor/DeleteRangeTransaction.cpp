@@ -146,8 +146,8 @@ DeleteRangeTransaction::CreateTxnsToDeleteBetween(
       MOZ_DIAGNOSTIC_ASSERT(numToDel > 0);
     }
 
-    RefPtr<CharacterData> charDataNode =
-      static_cast<CharacterData*>(aStart.Container());
+    RefPtr<nsGenericDOMDataNode> charDataNode =
+      static_cast<nsGenericDOMDataNode*>(aStart.Container());
 
     RefPtr<DeleteTextTransaction> deleteTextTransaction =
       DeleteTextTransaction::MaybeCreate(*mEditorBase, *charDataNode,
@@ -211,8 +211,8 @@ DeleteRangeTransaction::CreateTxnsToDeleteContent(
     return NS_OK;
   }
 
-  RefPtr<CharacterData> dataNode =
-    static_cast<CharacterData*>(aPoint.Container());
+  RefPtr<nsGenericDOMDataNode> dataNode =
+    static_cast<nsGenericDOMDataNode*>(aPoint.Container());
   RefPtr<DeleteTextTransaction> deleteTextTransaction =
     DeleteTextTransaction::MaybeCreate(*mEditorBase, *dataNode,
                                        startOffset, numToDelete);

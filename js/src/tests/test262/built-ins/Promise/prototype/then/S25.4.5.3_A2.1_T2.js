@@ -9,12 +9,13 @@ author: Sam Mikes
 description: Promise.prototype.then throw if 'this' is non-Promise Object
 ---*/
 
-function ZeroArgConstructor() {}
+function ZeroArgConstructor() {
+}
 
 var z = new ZeroArgConstructor();
 
 assert.throws(TypeError, function() {
-  Promise.then.call(z, function() {}, function() {});
+  Promise.then.call(z, function () {}, function () {});
 });
 
 reportCompare(0, 0);

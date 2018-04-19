@@ -4,6 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifdef MOZ_OLD_STYLE
+#include "nsIStyleRuleProcessor.h"
+#endif
 #include "nsIDocument.h"
 #include "nsIContent.h"
 #include "nsIServiceManager.h"
@@ -14,6 +17,10 @@
 #include "mozilla/css/Loader.h"
 #include "nsIURI.h"
 #include "nsLayoutCID.h"
+#ifdef MOZ_OLD_STYLE
+#include "nsCSSRuleProcessor.h"
+#include "nsStyleSet.h"
+#endif
 #include "mozilla/dom/URL.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/StyleSheet.h"
@@ -105,10 +112,21 @@ nsXBLPrototypeResources::FlushSkinSheets()
     mStyleSheetList.AppendElement(newSheet);
   }
 
-  // There may be no shell during unlink.
-  if (auto* shell = doc->GetShell()) {
-    MOZ_ASSERT(shell->GetPresContext());
-    ComputeServoStyles(*shell->StyleSet());
+  if (doc->IsStyledByServo()) {
+    // There may be no shell during unlink.
+    //
+    // FIXME(emilio): We shouldn't skip shadow root style updates just because?
+    // Though during unlink is fine I guess...
+    if (auto* shell = doc->GetShell()) {
+      MOZ_ASSERT(shell->GetPresContext());
+      ComputeServoStyles(*shell->StyleSet()->AsServo());
+    }
+  } else {
+#ifdef MOZ_OLD_STYLE
+    GatherRuleProcessor();
+#else
+    MOZ_CRASH("old style system disabled");
+#endif
   }
 
   return NS_OK;
@@ -128,6 +146,9 @@ nsXBLPrototypeResources::Traverse(nsCycleCollectionTraversalCallback &cb)
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "proto mResources mLoader");
   cb.NoteXPCOMChild(mLoader);
 
+#ifdef MOZ_OLD_STYLE
+  CycleCollectionNoteChild(cb, mRuleProcessor.get(), "mRuleProcessor");
+#endif
   ImplCycleCollectionTraverse(cb, mStyleSheetList, "mStyleSheetList");
 }
 
@@ -135,6 +156,9 @@ void
 nsXBLPrototypeResources::Unlink()
 {
   mStyleSheetList.Clear();
+#ifdef MOZ_OLD_STYLE
+  mRuleProcessor = nullptr;
+#endif
 }
 
 void
@@ -143,6 +167,24 @@ nsXBLPrototypeResources::ClearLoader()
   mLoader = nullptr;
 }
 
+#ifdef MOZ_OLD_STYLE
+void
+nsXBLPrototypeResources::GatherRuleProcessor()
+{
+  nsTArray<RefPtr<CSSStyleSheet>> sheets(mStyleSheetList.Length());
+  for (StyleSheet* sheet : mStyleSheetList) {
+    MOZ_ASSERT(sheet->IsGecko(),
+               "GatherRuleProcessor must only be called for "
+               "nsXBLPrototypeResources objects with Gecko-flavored style "
+               "backends");
+    sheets.AppendElement(sheet->AsGecko());
+  }
+  mRuleProcessor = new nsCSSRuleProcessor(Move(sheets),
+                                          SheetType::Doc,
+                                          nullptr,
+                                          mRuleProcessor);
+}
+#endif
 
 void
 nsXBLPrototypeResources::SyncServoStyles()
@@ -212,6 +254,9 @@ nsXBLPrototypeResources::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
   for (const auto& sheet : mStyleSheetList) {
     n += sheet->SizeOfIncludingThis(aMallocSizeOf);
   }
+#ifdef MOZ_OLD_STYLE
+  n += mRuleProcessor ? mRuleProcessor->SizeOfIncludingThis(aMallocSizeOf) : 0;
+#endif
   n += mServoStyles ? Servo_AuthorStyles_SizeOfIncludingThis(
       ServoAuthorStylesMallocSizeOf,
       ServoAuthorStylesMallocEnclosingSizeOf,

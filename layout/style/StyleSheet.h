@@ -10,11 +10,11 @@
 #include "mozilla/css/SheetParsingMode.h"
 #include "mozilla/dom/CSSStyleSheetBinding.h"
 #include "mozilla/net/ReferrerPolicy.h"
+#include "mozilla/StyleBackendType.h"
 #include "mozilla/CORSMode.h"
 #include "mozilla/ServoUtils.h"
 #include "nsICSSLoaderObserver.h"
 #include "nsWrapperCache.h"
-#include "StyleSheetInfo.h"
 
 class nsIDocument;
 class nsINode;
@@ -24,8 +24,8 @@ class nsCSSRuleProcessor;
 namespace mozilla {
 
 class CSSStyleSheet;
-class ServoStyleSet;
 class ServoStyleSheet;
+class StyleSetHandle;
 struct StyleSheetInfo;
 struct CSSStyleSheetInner;
 
@@ -33,7 +33,6 @@ namespace dom {
 class CSSImportRule;
 class CSSRuleList;
 class MediaList;
-class ShadowRoot;
 class SRIMetadata;
 } // namespace dom
 
@@ -49,7 +48,7 @@ class StyleSheet : public nsICSSLoaderObserver
                  , public nsWrapperCache
 {
 protected:
-  explicit StyleSheet(css::SheetParsingMode aParsingMode);
+  StyleSheet(StyleBackendType aType, css::SheetParsingMode aParsingMode);
   StyleSheet(const StyleSheet& aCopy,
              StyleSheet* aParentToUse,
              dom::CSSImportRule* aOwnerRuleToUse,
@@ -150,7 +149,6 @@ public:
 
   inline bool HasUniqueInner() const;
   void EnsureUniqueInner();
-  inline void AssertHasUniqueInner() const;
 
   // Append all of this sheet's child sheets to aArray.
   void AppendAllChildSheets(nsTArray<StyleSheet*>& aArray);
@@ -262,8 +260,8 @@ public:
   // it's owning media rule, plus it's used for the stylesheet media itself.
   void RuleChanged(css::Rule*);
 
-  void AddStyleSet(ServoStyleSet* aStyleSet);
-  void DropStyleSet(ServoStyleSet* aStyleSet);
+  void AddStyleSet(const StyleSetHandle& aStyleSet);
+  void DropStyleSet(const StyleSetHandle& aStyleSet);
 
   nsresult DeleteRuleFromGroup(css::GroupRule* aGroup, uint32_t aIndex);
   nsresult InsertRuleIntoGroup(const nsAString& aRule,
@@ -280,8 +278,6 @@ public:
   }
 
 private:
-  dom::ShadowRoot* GetContainingShadow() const;
-
   // Get a handle to the various stylesheet bits which live on the 'inner' for
   // gecko stylesheets and live on the StyleSheet for Servo stylesheets.
   inline StyleSheetInfo& SheetInfo();
@@ -300,8 +296,6 @@ protected:
 
   // Called when a rule is added to the sheet from CSSOM.
   void RuleRemoved(css::Rule&);
-
-  void ApplicableStateChanged(bool aApplicable);
 
   // Called from SetEnabled when the enabled state changed.
   void EnabledStateChanged();
@@ -354,6 +348,7 @@ protected:
   // and/or useful in user sheets.
   css::SheetParsingMode mParsingMode;
 
+  const StyleBackendType mType;
   bool                  mDisabled;
 
   enum dirtyFlagAttributes {
@@ -371,7 +366,7 @@ protected:
   // StyleSheet clones.
   StyleSheetInfo* mInner;
 
-  nsTArray<ServoStyleSet*> mStyleSets;
+  nsTArray<StyleSetHandle> mStyleSets;
 
   friend class ::nsCSSRuleProcessor;
 

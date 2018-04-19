@@ -9,7 +9,6 @@
 #include "InputData.h"                  // for InputData
 #include "mozilla/dom/TabParent.h"      // for TabParent
 #include "mozilla/layers/APZCCallbackHelper.h" // for APZCCallbackHelper
-#include "mozilla/layers/APZInputBridgeChild.h" // for APZInputBridgeChild
 #include "mozilla/layers/RemoteCompositorSession.h" // for RemoteCompositorSession
 
 namespace mozilla {
@@ -17,10 +16,6 @@ namespace layers {
 
 APZCTreeManagerChild::APZCTreeManagerChild()
   : mCompositorSession(nullptr)
-{
-}
-
-APZCTreeManagerChild::~APZCTreeManagerChild()
 {
 }
 
@@ -33,23 +28,115 @@ APZCTreeManagerChild::SetCompositorSession(RemoteCompositorSession* aSession)
   mCompositorSession = aSession;
 }
 
-void
-APZCTreeManagerChild::SetInputBridge(APZInputBridgeChild* aInputBridge)
+nsEventStatus
+APZCTreeManagerChild::ReceiveInputEvent(
+    InputData& aEvent,
+    ScrollableLayerGuid* aOutTargetGuid,
+    uint64_t* aOutInputBlockId)
 {
-  // The input bridge only exists from the UI process to the GPU process.
-  MOZ_ASSERT(XRE_IsParentProcess());
-  MOZ_ASSERT(!mInputBridge);
+  switch (aEvent.mInputType) {
+  case MULTITOUCH_INPUT: {
+    MultiTouchInput& event = aEvent.AsMultiTouchInput();
+    MultiTouchInput processedEvent;
 
-  mInputBridge = aInputBridge;
-}
+    nsEventStatus res;
+    SendReceiveMultiTouchInputEvent(event,
+                                    &res,
+                                    &processedEvent,
+                                    aOutTargetGuid,
+                                    aOutInputBlockId);
 
-void
-APZCTreeManagerChild::Destroy()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  if (mInputBridge) {
-    mInputBridge->Destroy();
-    mInputBridge = nullptr;
+    event = processedEvent;
+    return res;
+  }
+  case MOUSE_INPUT: {
+    MouseInput& event = aEvent.AsMouseInput();
+    MouseInput processedEvent;
+
+    nsEventStatus res;
+    SendReceiveMouseInputEvent(event,
+                               &res,
+                               &processedEvent,
+                               aOutTargetGuid,
+                               aOutInputBlockId);
+
+    event = processedEvent;
+    return res;
+  }
+  case PANGESTURE_INPUT: {
+    PanGestureInput& event = aEvent.AsPanGestureInput();
+    PanGestureInput processedEvent;
+
+    nsEventStatus res;
+    SendReceivePanGestureInputEvent(event,
+                                    &res,
+                                    &processedEvent,
+                                    aOutTargetGuid,
+                                    aOutInputBlockId);
+
+    event = processedEvent;
+    return res;
+  }
+  case PINCHGESTURE_INPUT: {
+    PinchGestureInput& event = aEvent.AsPinchGestureInput();
+    PinchGestureInput processedEvent;
+
+    nsEventStatus res;
+    SendReceivePinchGestureInputEvent(event,
+                                      &res,
+                                      &processedEvent,
+                                      aOutTargetGuid,
+                                      aOutInputBlockId);
+
+    event = processedEvent;
+    return res;
+  }
+  case TAPGESTURE_INPUT: {
+    TapGestureInput& event = aEvent.AsTapGestureInput();
+    TapGestureInput processedEvent;
+
+    nsEventStatus res;
+    SendReceiveTapGestureInputEvent(event,
+                                    &res,
+                                    &processedEvent,
+                                    aOutTargetGuid,
+                                    aOutInputBlockId);
+
+    event = processedEvent;
+    return res;
+  }
+  case SCROLLWHEEL_INPUT: {
+    ScrollWheelInput& event = aEvent.AsScrollWheelInput();
+    ScrollWheelInput processedEvent;
+
+    nsEventStatus res;
+    SendReceiveScrollWheelInputEvent(event,
+                                     &res,
+                                     &processedEvent,
+                                     aOutTargetGuid,
+                                     aOutInputBlockId);
+
+    event = processedEvent;
+    return res;
+  }
+  case KEYBOARD_INPUT: {
+    KeyboardInput& event = aEvent.AsKeyboardInput();
+    KeyboardInput processedEvent;
+
+    nsEventStatus res;
+    SendReceiveKeyboardInputEvent(event,
+                                  &res,
+                                  &processedEvent,
+                                  aOutTargetGuid,
+                                  aOutInputBlockId);
+
+    event = processedEvent;
+    return res;
+  }
+  default: {
+    MOZ_ASSERT_UNREACHABLE("Invalid InputData type.");
+    return nsEventStatus_eConsumeNoDefault;
+  }
   }
 }
 
@@ -134,13 +221,29 @@ APZCTreeManagerChild::SetLongTapEnabled(bool aTapGestureEnabled)
   SendSetLongTapEnabled(aTapGestureEnabled);
 }
 
-APZInputBridge*
-APZCTreeManagerChild::InputBridge()
+void
+APZCTreeManagerChild::ProcessTouchVelocity(uint32_t aTimestampMs, float aSpeedY)
 {
-  MOZ_ASSERT(XRE_IsParentProcess());
-  MOZ_ASSERT(mInputBridge);
+  SendProcessTouchVelocity(aTimestampMs, aSpeedY);
+}
 
-  return mInputBridge.get();
+void
+APZCTreeManagerChild::UpdateWheelTransaction(
+    LayoutDeviceIntPoint aRefPoint,
+    EventMessage aEventMessage)
+{
+  SendUpdateWheelTransaction(aRefPoint, aEventMessage);
+}
+
+void APZCTreeManagerChild::ProcessUnhandledEvent(
+    LayoutDeviceIntPoint* aRefPoint,
+    ScrollableLayerGuid*  aOutTargetGuid,
+    uint64_t*             aOutFocusSequenceNumber)
+{
+  SendProcessUnhandledEvent(*aRefPoint,
+                            aRefPoint,
+                            aOutTargetGuid,
+                            aOutFocusSequenceNumber);
 }
 
 mozilla::ipc::IPCResult

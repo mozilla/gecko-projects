@@ -111,7 +111,3 @@ FINAL_TARGET_FILES += [
 
 with Files("browser/browser_TelemetryUpdatePing.js"):
     BUG_COMPONENT = ("Toolkit", "Telemetry")
-
-if CONFIG['CC_TYPE'] == 'gcc':
-    CXXFLAGS += ['-Wno-format-truncation']
-

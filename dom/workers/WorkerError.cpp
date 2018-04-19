@@ -68,8 +68,9 @@ public:
           ErrorEvent::Constructor(aTarget, NS_LITERAL_STRING("error"), init);
         event->SetTrusted(true);
 
-        bool defaultActionEnabled =
-          aTarget->DispatchEvent(*event, CallerType::System, IgnoreErrors());
+        bool defaultActionEnabled;
+        aTarget->DispatchEvent(event, &defaultActionEnabled);
+
         if (!defaultActionEnabled) {
           return;
         }
@@ -322,8 +323,9 @@ WorkerErrorReport::ReportError(JSContext* aCx, WorkerPrivate* aWorkerPrivate,
         ErrorEvent::Constructor(aTarget, NS_LITERAL_STRING("error"), init);
       event->SetTrusted(true);
 
-      bool defaultActionEnabled =
-        aTarget->DispatchEvent(*event, CallerType::System, IgnoreErrors());
+      bool defaultActionEnabled;
+      aTarget->DispatchEvent(event, &defaultActionEnabled);
+
       if (!defaultActionEnabled) {
         return;
       }

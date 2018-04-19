@@ -19,7 +19,7 @@
         var holder = SpecialPowers.Cu.generateXPCWrappedJS(this, scope);
 
         // Now, QI |this|, which will generate an aggregated native.
-        SpecialPowers.wrap(this).QueryInterface(SpecialPowers.Ci.nsIObserver);
+        this.QueryInterface(Components.interfaces.nsIObserver);
 
         ok(true, "Didn't assert or crash");
 

@@ -20,7 +20,6 @@
 #include "mozilla/dom/WorkerLoadInfo.h"
 #include "mozilla/dom/workerinternals/JSSettings.h"
 #include "mozilla/dom/workerinternals/Queue.h"
-#include "mozilla/PerformanceCounter.h"
 
 class nsIConsoleReportCollector;
 class nsIThreadInternal;
@@ -264,10 +263,10 @@ public:
   IsOnCurrentThread();
 
   bool
-  CloseInternal()
+  CloseInternal(JSContext* aCx)
   {
     AssertIsOnWorkerThread();
-    return NotifyInternal(Closing);
+    return NotifyInternal(aCx, Closing);
   }
 
   bool
@@ -323,7 +322,7 @@ public:
                         const nsAString& aMessage);
 
   bool
-  NotifyInternal(WorkerStatus aStatus);
+  NotifyInternal(JSContext* aCx, WorkerStatus aStatus);
 
   void
   ReportError(JSContext* aCx, JS::ConstUTF8CharsZ aToStringResult,
@@ -423,9 +422,6 @@ public:
 
   void
   SetThread(WorkerThread* aThread);
-
-  bool
-  IsOnWorkerThread() const;
 
   void
   AssertIsOnWorkerThread() const
@@ -527,6 +523,9 @@ public:
     return mWorkerScriptExecutedSuccessfully;
   }
 
+  void
+  MaybeDispatchLoadFailedRunnable();
+
   // Get the event target to use when dispatching to the main thread
   // from this Worker thread.  This may be the main thread itself or
   // a ThrottledEventQueue to the main thread.
@@ -558,14 +557,6 @@ public:
   bool
   EnsureClientSource();
 
-  void
-  EnsurePerformanceStorage();
-
-#ifndef RELEASE_OR_BETA
-  void
-  EnsurePerformanceCounter();
-#endif
-
   const ClientInfo&
   GetClientInfo() const;
 
@@ -583,11 +574,6 @@ public:
 
   PerformanceStorage*
   GetPerformanceStorage();
-
-#ifndef RELEASE_OR_BETA
-  PerformanceCounter*
-  GetPerformanceCounter();
-#endif
 
   bool
   IsAcceptingEvents()
@@ -1058,6 +1044,12 @@ public:
     return mLoadInfo.mServiceWorkersTestingInWindow;
   }
 
+  already_AddRefed<nsIRunnable>
+  StealLoadFailedAsyncRunnable()
+  {
+    return mLoadInfo.mLoadFailedAsyncRunnable.forget();
+  }
+
   // This is used to handle importScripts(). When the worker is first loaded
   // and executed, it happens in a sync loop. At this point it sets
   // mLoadingWorkerScript to true. importScripts() calls that occur during the
@@ -1284,7 +1276,7 @@ private:
   DisableMemoryReporter();
 
   void
-  WaitForWorkerEvents();
+  WaitForWorkerEvents(PRIntervalTime interval = PR_INTERVAL_NO_TIMEOUT);
 
   void
   PostMessageToParentInternal(JSContext* aCx,
@@ -1302,7 +1294,7 @@ private:
   RunCurrentSyncLoop();
 
   bool
-  DestroySyncLoop(uint32_t aLoopIndex);
+  DestroySyncLoop(uint32_t aLoopIndex, nsIThreadInternal* aThread = nullptr);
 
   void
   InitializeGCTimers();
@@ -1327,7 +1319,7 @@ private:
   RemoveHolder(WorkerHolder* aHolder);
 
   void
-  NotifyHolders(WorkerStatus aStatus);
+  NotifyHolders(JSContext* aCx, WorkerStatus aStatus);
 
   bool
   HasActiveHolders()
@@ -1499,10 +1491,6 @@ private:
   // mIsInAutomation is true when we're running in test automation.
   // We expose some extra testing functions in that case.
   bool mIsInAutomation;
-
-#ifndef RELEASE_OR_BETA
-  RefPtr<mozilla::PerformanceCounter> mPerformanceCounter;
-#endif
 };
 
 class AutoSyncLoopHolder

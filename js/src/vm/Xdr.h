@@ -20,24 +20,11 @@ namespace js {
 
 class LifoAlloc;
 
-enum XDRMode {
-    XDR_ENCODE,
-    XDR_DECODE
-};
-
-using XDRResult = mozilla::Result<mozilla::Ok, JS::TranscodeResult>;
-
 class XDRBufferBase
 {
   public:
     explicit XDRBufferBase(JSContext* cx, size_t cursor = 0)
-      : context_(cx), cursor_(cursor)
-#ifdef DEBUG
-        // Note, when decoding the buffer can be set to a range, which does not
-        // have any alignment requirement as opposed to allocations.
-      , aligned_(false)
-#endif
-    { }
+      : context_(cx), cursor_(cursor) { }
 
     JSContext* cx() const {
         return context_;
@@ -47,24 +34,9 @@ class XDRBufferBase
         return cursor_;
     }
 
-#ifdef DEBUG
-    // This function records if the cursor got changed by codeAlign or by any
-    // other read/write of data. This is used for AutoXDRTree assertions, as a
-    // way to ensure that the last thing done is properly setting the alignment
-    // with codeAlign function.
-    void setAligned(bool aligned) { aligned_ = aligned; }
-    bool isAligned() const { return aligned_; }
-#else
-    void setAligned(bool) const {}
-    bool isAligned() const { return true; }
-#endif
-
   protected:
     JSContext* const context_;
     size_t cursor_;
-#ifdef DEBUG
-    bool aligned_;
-#endif
 };
 
 template <XDRMode mode>
@@ -80,7 +52,6 @@ class XDRBuffer<XDR_ENCODE> : public XDRBufferBase
 
     uint8_t* write(size_t n) {
         MOZ_ASSERT(n != 0);
-        setAligned(false);
         if (!buffer_.growByUninitialized(n)) {
             ReportOutOfMemory(cx());
             return nullptr;
@@ -93,11 +64,6 @@ class XDRBuffer<XDR_ENCODE> : public XDRBufferBase
     const uint8_t* read(size_t n) {
         MOZ_CRASH("Should never read in encode mode");
         return nullptr;
-    }
-
-    uintptr_t uptr() const {
-        // Note: Avoid bounds check assertion if the buffer is not yet allocated.
-        return reinterpret_cast<uintptr_t>(buffer_.begin() + cursor_);
     }
 
   private:
@@ -118,7 +84,6 @@ class XDRBuffer<XDR_DECODE> : public XDRBufferBase
 
     const uint8_t* read(size_t n) {
         MOZ_ASSERT(cursor_ < buffer_.length());
-        setAligned(false);
         uint8_t* ptr = &buffer_[cursor_];
         cursor_ += n;
 
@@ -134,19 +99,12 @@ class XDRBuffer<XDR_DECODE> : public XDRBufferBase
         return nullptr;
     }
 
-    uintptr_t uptr() const {
-        // Note: Avoid bounds check assertion at the end of the buffer.
-        return reinterpret_cast<uintptr_t>(buffer_.begin().get() + cursor_);
-    }
-
   private:
     const JS::TranscodeRange buffer_;
 };
 
 class XDRCoderBase;
 class XDRIncrementalEncoder;
-using XDRAlignment = char16_t;
-static const uint8_t AlignPadding[sizeof(XDRAlignment)] = { 0, 0 };
 
 // An AutoXDRTree is used to identify section encoded by an XDRIncrementalEncoder.
 //
@@ -191,36 +149,14 @@ class MOZ_RAII AutoXDRTree
 
 class XDRCoderBase
 {
-  private:
-#ifdef DEBUG
-    JS::TranscodeResult resultCode_;
-#endif
-
   protected:
-    XDRCoderBase()
-#ifdef DEBUG
-      : resultCode_(JS::TranscodeResult_Ok)
-#endif
-    {}
+    XDRCoderBase() {}
 
   public:
     virtual AutoXDRTree::Key getTopLevelTreeKey() const { return AutoXDRTree::noKey; }
     virtual AutoXDRTree::Key getTreeKey(JSFunction* fun) const { return AutoXDRTree::noKey; }
     virtual void createOrReplaceSubTree(AutoXDRTree* child) {};
     virtual void endSubTree() {};
-    virtual bool isAligned(size_t n) = 0;
-
-#ifdef DEBUG
-    // Record logical failures of XDR.
-    JS::TranscodeResult resultCode() const {
-        return resultCode_;
-    }
-    void setResultCode(JS::TranscodeResult code) {
-        MOZ_ASSERT(resultCode() == JS::TranscodeResult_Ok);
-        resultCode_ = code;
-    }
-    bool validateResultCode(JSContext* cx, JS::TranscodeResult code) const;
-#endif
 };
 
 /*
@@ -231,16 +167,20 @@ class XDRState : public XDRCoderBase
 {
   protected:
     XDRBuffer<mode> buf;
+  private:
+    JS::TranscodeResult resultCode_;
 
   public:
     XDRState(JSContext* cx, JS::TranscodeBuffer& buffer, size_t cursor = 0)
-      : buf(cx, buffer, cursor)
+      : buf(cx, buffer, cursor),
+        resultCode_(JS::TranscodeResult_Ok)
     {
     }
 
     template <typename RangeType>
     XDRState(JSContext* cx, const RangeType& range)
-      : buf(cx, range)
+      : buf(cx, range),
+        resultCode_(JS::TranscodeResult_Ok)
     {
     }
 
@@ -260,60 +200,26 @@ class XDRState : public XDRCoderBase
         MOZ_CRASH("does not have scriptSourceObjectOut.");
     }
 
-    XDRResult fail(JS::TranscodeResult code) {
-#ifdef DEBUG
-        MOZ_ASSERT(code != JS::TranscodeResult_Ok);
-        MOZ_ASSERT(validateResultCode(cx(), code));
-        setResultCode(code);
-#endif
-        return mozilla::Err(code);
+    // Record logical failures of XDR.
+    void postProcessContextErrors(JSContext* cx);
+    JS::TranscodeResult resultCode() const {
+        return resultCode_;
+    }
+    bool fail(JS::TranscodeResult code) {
+        MOZ_ASSERT(resultCode_ == JS::TranscodeResult_Ok);
+        resultCode_ = code;
+        return false;
     }
 
-    XDRResult peekData(const uint8_t** pptr, size_t length) {
+    bool peekData(const uint8_t** pptr, size_t length) {
         const uint8_t* ptr = buf.read(length);
         if (!ptr)
             return fail(JS::TranscodeResult_Failure_BadDecode);
         *pptr = ptr;
-        return Ok();
+        return true;
     }
 
-    // Alignment is required when doing memcpy of data which contains element
-    // largers than 1 byte.
-    bool isAligned(size_t n) override {
-        MOZ_ASSERT(mozilla::IsPowerOfTwo(n));
-        size_t mask = n - 1;
-        size_t offset = buf.uptr() & mask;
-        // In debug build, we not only check if the cursor is aligned, but also
-        // if the last cursor manipulation was made by the codeAlign function.
-        return offset == 0 && buf.isAligned();
-    }
-    XDRResult codeAlign(size_t n) {
-        MOZ_ASSERT(mozilla::IsPowerOfTwo(n));
-        size_t mask = n - 1;
-        MOZ_ASSERT_IF(mode == XDR_ENCODE, (buf.uptr() & mask) == (buf.cursor() & mask));
-        size_t offset = buf.uptr() & mask;
-        if (offset) {
-            size_t padding = n - offset;
-            MOZ_ASSERT(padding < sizeof(AlignPadding));
-            if (mode == XDR_ENCODE) {
-                uint8_t* ptr = buf.write(padding);
-                if (!ptr)
-                    return fail(JS::TranscodeResult_Throw);
-                memcpy(ptr, AlignPadding, padding);
-            } else {
-                const uint8_t* ptr = buf.read(padding);
-                if (!ptr)
-                    return fail(JS::TranscodeResult_Failure_BadDecode);
-                if (memcmp(ptr, AlignPadding, padding) != 0)
-                    return fail(JS::TranscodeResult_Failure_BadDecode);
-            }
-        }
-        buf.setAligned(true);
-        MOZ_ASSERT(isAligned(n));
-        return Ok();
-    }
-
-    XDRResult codeUint8(uint8_t* n) {
+    bool codeUint8(uint8_t* n) {
         if (mode == XDR_ENCODE) {
             uint8_t* ptr = buf.write(sizeof(*n));
             if (!ptr)
@@ -325,10 +231,10 @@ class XDRState : public XDRCoderBase
                 return fail(JS::TranscodeResult_Failure_BadDecode);
             *n = *ptr;
         }
-        return Ok();
+        return true;
     }
 
-    XDRResult codeUint16(uint16_t* n) {
+    bool codeUint16(uint16_t* n) {
         if (mode == XDR_ENCODE) {
             uint8_t* ptr = buf.write(sizeof(*n));
             if (!ptr)
@@ -340,10 +246,10 @@ class XDRState : public XDRCoderBase
                 return fail(JS::TranscodeResult_Failure_BadDecode);
             *n = mozilla::LittleEndian::readUint16(ptr);
         }
-        return Ok();
+        return true;
     }
 
-    XDRResult codeUint32(uint32_t* n) {
+    bool codeUint32(uint32_t* n) {
         if (mode == XDR_ENCODE) {
             uint8_t* ptr = buf.write(sizeof(*n));
             if (!ptr)
@@ -355,10 +261,10 @@ class XDRState : public XDRCoderBase
                 return fail(JS::TranscodeResult_Failure_BadDecode);
             *n = mozilla::LittleEndian::readUint32(ptr);
         }
-        return Ok();
+        return true;
     }
 
-    XDRResult codeUint64(uint64_t* n) {
+    bool codeUint64(uint64_t* n) {
         if (mode == XDR_ENCODE) {
             uint8_t* ptr = buf.write(sizeof(*n));
             if (!ptr)
@@ -370,7 +276,7 @@ class XDRState : public XDRCoderBase
                 return fail(JS::TranscodeResult_Failure_BadDecode);
             *n = mozilla::LittleEndian::readUint64(ptr);
         }
-        return Ok();
+        return true;
     }
 
     /*
@@ -379,7 +285,7 @@ class XDRState : public XDRCoderBase
      * as C++ will extract the parameterized from the argument list.
      */
     template <typename T>
-    XDRResult codeEnum32(T* val, typename mozilla::EnableIf<mozilla::IsEnum<T>::value, T>::Type * = NULL)
+    bool codeEnum32(T* val, typename mozilla::EnableIf<mozilla::IsEnum<T>::value, T>::Type * = NULL)
     {
         // Mix the enumeration value with a random magic number, such that a
         // corruption with a low-ranged value (like 0) is less likely to cause a
@@ -388,39 +294,42 @@ class XDRState : public XDRCoderBase
         uint32_t tmp;
         if (mode == XDR_ENCODE)
             tmp = uint32_t(*val) ^ MAGIC;
-        MOZ_TRY(codeUint32(&tmp));
+        if (!codeUint32(&tmp))
+            return false;
         if (mode == XDR_DECODE)
             *val = T(tmp ^ MAGIC);
-        return Ok();
+        return true;
     }
 
-    XDRResult codeDouble(double* dp) {
+    bool codeDouble(double* dp) {
         union DoublePun {
             double d;
             uint64_t u;
         } pun;
         if (mode == XDR_ENCODE)
             pun.d = *dp;
-        MOZ_TRY(codeUint64(&pun.u));
+        if (!codeUint64(&pun.u))
+            return false;
         if (mode == XDR_DECODE)
             *dp = pun.d;
-        return Ok();
+        return true;
     }
 
-    XDRResult codeMarker(uint32_t magic) {
+    bool codeMarker(uint32_t magic) {
         uint32_t actual = magic;
-        MOZ_TRY(codeUint32(&actual));
+        if (!codeUint32(&actual))
+            return false;
         if (actual != magic) {
             // Fail in debug, but only soft-fail in release
             MOZ_ASSERT(false, "Bad XDR marker");
             return fail(JS::TranscodeResult_Failure_BadDecode);
         }
-        return Ok();
+        return true;
     }
 
-    XDRResult codeBytes(void* bytes, size_t len) {
+    bool codeBytes(void* bytes, size_t len) {
         if (len == 0)
-            return Ok();
+            return true;
         if (mode == XDR_ENCODE) {
             uint8_t* ptr = buf.write(len);
             if (!ptr)
@@ -432,7 +341,7 @@ class XDRState : public XDRCoderBase
                 return fail(JS::TranscodeResult_Failure_BadDecode);
             memcpy(bytes, ptr, len);
         }
-        return Ok();
+        return true;
     }
 
     /*
@@ -441,11 +350,12 @@ class XDRState : public XDRCoderBase
      * decoding buffer and the caller must copy the string if it will outlive
      * the decoding buffer.
      */
-    XDRResult codeCString(const char** sp) {
+    bool codeCString(const char** sp) {
         uint64_t len64;
         if (mode == XDR_ENCODE)
             len64 = (uint64_t)(strlen(*sp) + 1);
-        MOZ_TRY(codeUint64(&len64));
+        if (!codeUint64(&len64))
+            return false;
         size_t len = (size_t) len64;
 
         if (mode == XDR_ENCODE) {
@@ -459,14 +369,15 @@ class XDRState : public XDRCoderBase
                 return fail(JS::TranscodeResult_Failure_BadDecode);
             *sp = reinterpret_cast<const char*>(ptr);
         }
-        return Ok();
+        return true;
     }
 
-    XDRResult codeChars(const JS::Latin1Char* chars, size_t nchars);
-    XDRResult codeChars(char16_t* chars, size_t nchars);
+    bool codeChars(const JS::Latin1Char* chars, size_t nchars);
+    bool codeChars(char16_t* chars, size_t nchars);
 
-    XDRResult codeFunction(JS::MutableHandleFunction objp, HandleScriptSource sourceObject = nullptr);
-    XDRResult codeScript(MutableHandleScript scriptp);
+    bool codeFunction(JS::MutableHandleFunction objp, HandleScriptSource sourceObject = nullptr);
+    bool codeScript(MutableHandleScript scriptp);
+    bool codeConstValue(MutableHandleValue vp);
 };
 
 using XDREncoder = XDRState<XDR_ENCODE>;
@@ -601,12 +512,8 @@ class XDRIncrementalEncoder : public XDREncoder
 
     // Append the content collected during the incremental encoding into the
     // buffer given as argument.
-    XDRResult linearize(JS::TranscodeBuffer& buffer);
+    MOZ_MUST_USE bool linearize(JS::TranscodeBuffer& buffer);
 };
-
-template<XDRMode mode>
-XDRResult
-XDRAtom(XDRState<mode>* xdr, js::MutableHandleAtom atomp);
 
 } /* namespace js */
 

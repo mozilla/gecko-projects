@@ -59,6 +59,7 @@ public:
   }
 
   void ResetPaintedAndValidState() override {
+    mPaintedRegion.SetEmpty();
     mValidRegion.SetEmpty();
     mTile.DiscardBuffers();
   }
@@ -77,11 +78,16 @@ public:
 
   SurfaceDescriptorTiles GetSurfaceDescriptorTiles();
 
+  void ClearPaintedRegion() {
+    mPaintedRegion.SetEmpty();
+  }
+
 private:
   TileClient mTile;
 
   RefPtr<ClientLayerManager> mManager;
 
+  nsIntRegion mPaintedRegion;
   nsIntRegion mValidRegion;
   bool mWasLastPaintProgressive;
 

@@ -121,16 +121,46 @@ nsDOMCSSDeclaration::SetCssText(const nsAString& aCssText,
   // rule (see stack in bug 209575).
   mozAutoDocConditionalContentUpdateBatch autoUpdate(DocToUpdate(), true);
 
-  ServoCSSParsingEnvironment servoEnv =
-    GetServoCSSParsingEnvironment(aSubjectPrincipal);
-  if (!servoEnv.mUrlExtraData) {
-    aRv.Throw(NS_ERROR_NOT_AVAILABLE);
-    return;
-  }
+  RefPtr<DeclarationBlock> newdecl;
+  if (olddecl->IsServo()) {
+    ServoCSSParsingEnvironment servoEnv = GetServoCSSParsingEnvironment(
+        aSubjectPrincipal);
+    if (!servoEnv.mUrlExtraData) {
+      aRv.Throw(NS_ERROR_NOT_AVAILABLE);
+      return;
+    }
 
-  RefPtr<DeclarationBlock> newdecl =
-    ServoDeclarationBlock::FromCssText(aCssText, servoEnv.mUrlExtraData,
-                                       servoEnv.mCompatMode, servoEnv.mLoader);
+    newdecl = ServoDeclarationBlock::FromCssText(aCssText, servoEnv.mUrlExtraData,
+                                                 servoEnv.mCompatMode, servoEnv.mLoader);
+  } else {
+#ifdef MOZ_OLD_STYLE
+    CSSParsingEnvironment geckoEnv;
+    GetCSSParsingEnvironment(geckoEnv, aSubjectPrincipal);
+    if (!geckoEnv.mPrincipal) {
+      aRv.Throw(NS_ERROR_NOT_AVAILABLE);
+      return;
+    }
+
+    RefPtr<css::Declaration> decl(new css::Declaration());
+    decl->InitializeEmpty();
+    nsCSSParser cssParser(geckoEnv.mCSSLoader);
+    bool changed;
+    nsresult result = cssParser.ParseDeclarations(aCssText, geckoEnv.mSheetURI,
+                                                  geckoEnv.mBaseURI, geckoEnv.mPrincipal,
+                                                  decl, &changed);
+    if (NS_FAILED(result)) {
+      aRv.Throw(result);
+      return;
+    }
+
+    if (!changed) {
+      return;
+    }
+    newdecl = decl.forget();
+#else
+    MOZ_CRASH("old style system disabled");
+#endif
+  }
 
   aRv = SetCSSDeclaration(newdecl);
 }
@@ -291,14 +321,27 @@ nsDOMCSSDeclaration::ModifyDeclaration(nsIPrincipal* aSubjectPrincipal,
   RefPtr<DeclarationBlock> decl = olddecl->EnsureMutable();
 
   bool changed;
-  ServoCSSParsingEnvironment servoEnv = GetServoCSSParsingEnvironment(
-      aSubjectPrincipal);
-  if (!servoEnv.mUrlExtraData) {
-    return NS_ERROR_NOT_AVAILABLE;
+  if (decl->IsGecko()) {
+#ifdef MOZ_OLD_STYLE
+    CSSParsingEnvironment geckoEnv;
+    GetCSSParsingEnvironment(geckoEnv, aSubjectPrincipal);
+    if (!geckoEnv.mPrincipal) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+
+    aGeckoFunc(decl->AsGecko(), geckoEnv, &changed);
+#else
+    MOZ_CRASH("old style system disabled");
+#endif
+  } else {
+    ServoCSSParsingEnvironment servoEnv = GetServoCSSParsingEnvironment(
+        aSubjectPrincipal);
+    if (!servoEnv.mUrlExtraData) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+
+    changed = aServoFunc(decl->AsServo(), servoEnv);
   }
-
-  changed = aServoFunc(decl->AsServo(), servoEnv);
-
   if (!changed) {
     // Parsing failed -- but we don't throw an exception for that.
     return NS_OK;
@@ -316,7 +359,14 @@ nsDOMCSSDeclaration::ParsePropertyValue(const nsCSSPropertyID aPropID,
   return ModifyDeclaration(
     aSubjectPrincipal,
     [&](css::Declaration* decl, CSSParsingEnvironment& env, bool* changed) {
+#ifdef MOZ_OLD_STYLE
+      nsCSSParser cssParser(env.mCSSLoader);
+      cssParser.ParseProperty(aPropID, aPropValue,
+                              env.mSheetURI, env.mBaseURI, env.mPrincipal,
+                              decl, changed, aIsImportant);
+#else
       MOZ_CRASH("old style system disabled");
+#endif
     },
     [&](ServoDeclarationBlock* decl, ServoCSSParsingEnvironment& env) {
       NS_ConvertUTF16toUTF8 value(aPropValue);
@@ -336,7 +386,15 @@ nsDOMCSSDeclaration::ParseCustomPropertyValue(const nsAString& aPropertyName,
   return ModifyDeclaration(
     aSubjectPrincipal,
     [&](css::Declaration* decl, CSSParsingEnvironment& env, bool* changed) {
+#ifdef MOZ_OLD_STYLE
+      nsCSSParser cssParser(env.mCSSLoader);
+      auto propName = Substring(aPropertyName, CSS_CUSTOM_NAME_PREFIX_LENGTH);
+      cssParser.ParseVariable(propName, aPropValue, env.mSheetURI,
+                              env.mBaseURI, env.mPrincipal, decl,
+                              changed, aIsImportant);
+#else
       MOZ_CRASH("old style system disabled");
+#endif
     },
     [&](ServoDeclarationBlock* decl, ServoCSSParsingEnvironment& env) {
       NS_ConvertUTF16toUTF8 property(aPropertyName);

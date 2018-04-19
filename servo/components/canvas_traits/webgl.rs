@@ -3,9 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use euclid::Size2D;
-use nonzero::NonZeroU32;
+use nonzero::NonZero;
 use offscreen_gl_context::{GLContextAttributes, GLLimits};
-use serde_bytes::ByteBuf;
 use std::fmt;
 use webrender_api::{DocumentId, ImageKey, PipelineId};
 
@@ -166,18 +165,18 @@ pub enum WebGLCommand {
     AttachShader(WebGLProgramId, WebGLShaderId),
     DetachShader(WebGLProgramId, WebGLShaderId),
     BindAttribLocation(WebGLProgramId, u32, String),
-    BufferData(u32, ByteBuf, u32),
-    BufferSubData(u32, isize, ByteBuf),
+    BufferData(u32, Vec<u8>, u32),
+    BufferSubData(u32, isize, Vec<u8>),
     Clear(u32),
     ClearColor(f32, f32, f32, f32),
-    ClearDepth(f32),
+    ClearDepth(f64),
     ClearStencil(i32),
     ColorMask(bool, bool, bool, bool),
     CullFace(u32),
     FrontFace(u32),
     DepthFunc(u32),
     DepthMask(bool),
-    DepthRange(f32, f32),
+    DepthRange(f64, f64),
     Enable(u32),
     Disable(u32),
     CompileShader(WebGLShaderId, String),
@@ -205,24 +204,24 @@ pub enum WebGLCommand {
     EnableVertexAttribArray(u32),
     FramebufferRenderbuffer(u32, u32, u32, Option<WebGLRenderbufferId>),
     FramebufferTexture2D(u32, u32, u32, Option<WebGLTextureId>, i32),
+    GetBufferParameter(u32, u32, WebGLSender<WebGLResult<WebGLParameter>>),
     GetExtensions(WebGLSender<String>),
     GetParameter(u32, WebGLSender<WebGLResult<WebGLParameter>>),
-    GetTexParameter(u32, u32, WebGLSender<i32>),
+    GetTexParameter(u32, u32, WebGLSender<WebGLResult<WebGLParameter>>),
     GetProgramParameter(WebGLProgramId, u32, WebGLSender<WebGLResult<WebGLParameter>>),
     GetShaderParameter(WebGLShaderId, u32, WebGLSender<WebGLResult<WebGLParameter>>),
-    GetShaderPrecisionFormat(u32, u32, WebGLSender<(i32, i32, i32)>),
+    GetShaderPrecisionFormat(u32, u32, WebGLSender<WebGLResult<(i32, i32, i32)>>),
     GetActiveAttrib(WebGLProgramId, u32, WebGLSender<WebGLResult<(i32, u32, String)>>),
     GetActiveUniform(WebGLProgramId, u32, WebGLSender<WebGLResult<(i32, u32, String)>>),
     GetAttribLocation(WebGLProgramId, String, WebGLSender<Option<i32>>),
     GetUniformLocation(WebGLProgramId, String, WebGLSender<Option<i32>>),
     GetVertexAttrib(u32, u32, WebGLSender<WebGLResult<WebGLParameter>>),
-    GetVertexAttribOffset(u32, u32, WebGLSender<isize>),
+    GetVertexAttribOffset(u32, u32, WebGLSender<WebGLResult<isize>>),
     GetShaderInfoLog(WebGLShaderId, WebGLSender<String>),
     GetProgramInfoLog(WebGLProgramId, WebGLSender<String>),
-    GetFramebufferAttachmentParameter(u32, u32, u32, WebGLSender<i32>),
     PolygonOffset(f32, f32),
     RenderbufferStorage(u32, u32, i32, i32),
-    ReadPixels(i32, i32, i32, i32, u32, u32, WebGLSender<ByteBuf>),
+    ReadPixels(i32, i32, i32, i32, u32, u32, WebGLSender<Vec<u8>>),
     SampleCoverage(f32, bool),
     Scissor(i32, i32, i32, i32),
     StencilFunc(u32, i32, u32),
@@ -260,12 +259,11 @@ pub enum WebGLCommand {
     VertexAttrib(u32, f32, f32, f32, f32),
     VertexAttribPointer(u32, i32, u32, bool, i32, u32),
     VertexAttribPointer2f(u32, i32, bool, i32, u32),
-    GetViewport(WebGLSender<(i32, i32, i32, i32)>),
-    SetViewport(i32, i32, i32, i32),
-    TexImage2D(u32, i32, i32, i32, i32, u32, u32, ByteBuf),
+    Viewport(i32, i32, i32, i32),
+    TexImage2D(u32, i32, i32, i32, i32, u32, u32, Vec<u8>),
     TexParameteri(u32, u32, i32),
     TexParameterf(u32, u32, f32),
-    TexSubImage2D(u32, i32, i32, i32, i32, i32, u32, u32, ByteBuf),
+    TexSubImage2D(u32, i32, i32, i32, i32, i32, u32, u32, Vec<u8>),
     DrawingBufferWidth(WebGLSender<i32>),
     DrawingBufferHeight(WebGLSender<i32>),
     Finish(WebGLSender<()>),
@@ -274,19 +272,18 @@ pub enum WebGLCommand {
     CreateVertexArray(WebGLSender<Option<WebGLVertexArrayId>>),
     DeleteVertexArray(WebGLVertexArrayId),
     BindVertexArray(Option<WebGLVertexArrayId>),
-    AliasedPointSizeRange(WebGLSender<(f32, f32)>),
 }
 
 macro_rules! define_resource_id_struct {
     ($name:ident) => {
         #[derive(Clone, Copy, Eq, Hash, PartialEq)]
-        pub struct $name(NonZeroU32);
+        pub struct $name(NonZero<u32>);
 
         impl $name {
             #[allow(unsafe_code)]
             #[inline]
             pub unsafe fn new(id: u32) -> Self {
-                $name(NonZeroU32::new_unchecked(id))
+                $name(NonZero::new_unchecked(id))
             }
 
             #[inline]
@@ -401,7 +398,7 @@ pub enum WebVRCommand {
     /// Start presenting to a VR device.
     Create(WebVRDeviceId),
     /// Synchronize the pose information to be used in the frame.
-    SyncPoses(WebVRDeviceId, f64, f64, WebGLSender<Result<ByteBuf, ()>>),
+    SyncPoses(WebVRDeviceId, f64, f64, WebGLSender<Result<Vec<u8>, ()>>),
     /// Submit the frame to a VR device using the specified texture coordinates.
     SubmitFrame(WebVRDeviceId, [f32; 4], [f32; 4]),
     /// Stop presenting to a VR device
@@ -478,6 +475,7 @@ impl fmt::Debug for WebGLCommand {
             EnableVertexAttribArray(..) => "EnableVertexAttribArray",
             FramebufferRenderbuffer(..) => "FramebufferRenderbuffer",
             FramebufferTexture2D(..) => "FramebufferTexture2D",
+            GetBufferParameter(..) => "GetBufferParameter",
             GetExtensions(..) => "GetExtensions",
             GetParameter(..) => "GetParameter",
             GetTexParameter(..) => "GetTexParameter",
@@ -492,7 +490,6 @@ impl fmt::Debug for WebGLCommand {
             GetProgramInfoLog(..) => "GetProgramInfoLog",
             GetVertexAttrib(..) => "GetVertexAttrib",
             GetVertexAttribOffset(..) => "GetVertexAttribOffset",
-            GetFramebufferAttachmentParameter(..) => "GetFramebufferAttachmentParameter",
             PolygonOffset(..) => "PolygonOffset",
             ReadPixels(..) => "ReadPixels",
             RenderbufferStorage(..) => "RenderbufferStorage",
@@ -533,8 +530,7 @@ impl fmt::Debug for WebGLCommand {
             VertexAttrib(..) => "VertexAttrib",
             VertexAttribPointer2f(..) => "VertexAttribPointer2f",
             VertexAttribPointer(..) => "VertexAttribPointer",
-            GetViewport(..) => "GetViewport",
-            SetViewport(..) => "SetViewport",
+            Viewport(..) => "Viewport",
             TexImage2D(..) => "TexImage2D",
             TexParameteri(..) => "TexParameteri",
             TexParameterf(..) => "TexParameterf",
@@ -546,8 +542,7 @@ impl fmt::Debug for WebGLCommand {
             GenerateMipmap(..) => "GenerateMipmap",
             CreateVertexArray(..) => "CreateVertexArray",
             DeleteVertexArray(..) => "DeleteVertexArray",
-            BindVertexArray(..) => "BindVertexArray",
-            AliasedPointSizeRange(..) => "AliasedPointSizeRange",
+            BindVertexArray(..) => "BindVertexArray"
         };
 
         write!(f, "CanvasWebGLMsg::{}(..)", name)

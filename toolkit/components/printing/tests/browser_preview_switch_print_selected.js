@@ -100,5 +100,5 @@ add_task(async function switch_print_preview_browsers() {
 
   PrintUtils.exitPrintPreview();
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

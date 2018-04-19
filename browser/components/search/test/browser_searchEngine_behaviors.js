@@ -184,5 +184,5 @@ async function testSearchEngine(engineDetails) {
   }
 
   engine.alias = undefined;
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 }

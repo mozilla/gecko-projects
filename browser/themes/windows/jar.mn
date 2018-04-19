@@ -6,6 +6,7 @@ browser.jar:
 % skin browser classic/1.0 %skin/classic/browser/
 #include ../shared/jar.inc.mn
   skin/classic/browser/sanitizeDialog.css
+  skin/classic/browser/aboutSessionRestore-window-icon.png
 * skin/classic/browser/syncedtabs/sidebar.css     (syncedtabs/sidebar.css)
 * skin/classic/browser/browser.css
 * skin/classic/browser/compacttheme.css
@@ -16,11 +17,13 @@ browser.jar:
 * skin/classic/browser/searchbar.css
   skin/classic/browser/setDesktopBackground.css
   skin/classic/browser/slowStartup-16.png
+  skin/classic/browser/sync-desktopIcon.svg  (../shared/sync-desktopIcon.svg)
+  skin/classic/browser/sync-mobileIcon.svg  (../shared/sync-mobileIcon.svg)
   skin/classic/browser/webRTC-indicator.css  (../shared/webRTC-indicator.css)
 * skin/classic/browser/controlcenter/panel.css                 (controlcenter/panel.css)
   skin/classic/browser/customizableui/menu-arrow.svg           (customizableui/menu-arrow.svg)
 * skin/classic/browser/customizableui/panelUI.css       (customizableui/panelUI.css)
-* skin/classic/browser/downloads/allDownloadsView.css   (downloads/allDownloadsView.css)
+* skin/classic/browser/downloads/allDownloadsViewOverlay.css   (downloads/allDownloadsViewOverlay.css)
 * skin/classic/browser/downloads/downloads.css                 (downloads/downloads.css)
   skin/classic/browser/feeds/feedIcon.png                      (feeds/feedIcon.png)
   skin/classic/browser/feeds/feedIcon16.png                    (feeds/feedIcon16.png)
@@ -33,7 +36,7 @@ browser.jar:
   skin/classic/browser/places/bookmarksMenu.png                (places/bookmarksMenu.png)
   skin/classic/browser/places/bookmarksToolbar.png             (places/bookmarksToolbar.png)
   skin/classic/browser/places/toolbarDropMarker.png            (places/toolbarDropMarker.png)
-  skin/classic/browser/places/editBookmark.css                 (places/editBookmark.css)
+  skin/classic/browser/places/editBookmarkOverlay.css          (places/editBookmarkOverlay.css)
   skin/classic/browser/places/libraryToolbar.png               (places/libraryToolbar.png)
   skin/classic/browser/places/tag.png                          (places/tag.png)
   skin/classic/browser/places/allBookmarks.png                 (places/allBookmarks.png)

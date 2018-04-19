@@ -9,7 +9,6 @@ DevToolsModules(
     'highlighters-overlay.js',
     'node-types.js',
     'reflow-tracker.js',
-    'style-change-tracker.js',
     'style-inspector-menu.js',
     'tooltips-overlay.js',
     'utils.js'

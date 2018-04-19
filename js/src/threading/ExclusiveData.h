@@ -7,6 +7,7 @@
 #ifndef threading_ExclusiveData_h
 #define threading_ExclusiveData_h
 
+#include "mozilla/Alignment.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Move.h"
 #include "mozilla/OperatorNewExtensions.h"
@@ -83,7 +84,7 @@ class ExclusiveData
 {
   protected:
     mutable Mutex lock_;
-    mutable T value_;
+    mutable mozilla::AlignedStorage2<T> value_;
 
     ExclusiveData(const ExclusiveData&) = delete;
     ExclusiveData& operator=(const ExclusiveData&) = delete;
@@ -98,24 +99,32 @@ class ExclusiveData
      */
     template <typename U>
     explicit ExclusiveData(const MutexId& id, U&& u)
-      : lock_(id),
-        value_(mozilla::Forward<U>(u))
-    {}
+      : lock_(id)
+    {
+        new (mozilla::KnownNotNull, value_.addr()) T(mozilla::Forward<U>(u));
+    }
 
     /**
      * Create a new `ExclusiveData`, constructing the protected value in place.
      */
     template <typename... Args>
     explicit ExclusiveData(const MutexId& id, Args&&... args)
-      : lock_(id),
-        value_(mozilla::Forward<Args>(args)...)
-    {}
+      : lock_(id)
+    {
+        new (mozilla::KnownNotNull, value_.addr()) T(mozilla::Forward<Args>(args)...);
+    }
+
+    ~ExclusiveData() {
+        acquire();
+        value_.addr()->~T();
+        release();
+    }
 
     ExclusiveData(ExclusiveData&& rhs)
-      : lock_(mozilla::Move(rhs.lock)),
-        value_(Move(rhs.value_))
+      : lock_(mozilla::Move(rhs.lock))
     {
         MOZ_ASSERT(&rhs != this, "self-move disallowed!");
+        new (mozilla::KnownNotNull, value_.addr()) T(mozilla::Move(*rhs.value_.addr()));
     }
 
     ExclusiveData& operator=(ExclusiveData&& rhs) {
@@ -161,7 +170,7 @@ class ExclusiveData
 
         T& get() const {
             MOZ_ASSERT(parent_);
-            return parent_->value_;
+            return *parent_->value_.addr();
         }
 
         operator T& () const { return get(); }

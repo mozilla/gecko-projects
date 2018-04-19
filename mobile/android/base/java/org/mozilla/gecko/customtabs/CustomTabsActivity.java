@@ -37,6 +37,7 @@ import org.mozilla.gecko.Clipboard;
 import org.mozilla.gecko.DoorHangerPopup;
 import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.FormAssistPopup;
+import org.mozilla.gecko.GeckoAccessibility;
 import org.mozilla.gecko.GeckoSharedPrefs;
 import org.mozilla.gecko.preferences.GeckoPreferences;
 import org.mozilla.gecko.R;
@@ -57,7 +58,6 @@ import org.mozilla.gecko.util.PackageUtil;
 import org.mozilla.gecko.webapps.WebApps;
 import org.mozilla.gecko.widget.ActionModePresenter;
 import org.mozilla.gecko.widget.GeckoPopupMenu;
-import org.mozilla.geckoview.GeckoRuntime;
 import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoSessionSettings;
 import org.mozilla.geckoview.GeckoView;
@@ -123,18 +123,14 @@ public class CustomTabsActivity extends AppCompatActivity
 
         mGeckoView = (GeckoView) findViewById(R.id.gecko_view);
 
-        final GeckoSessionSettings settings = new GeckoSessionSettings();
-        settings.setBoolean(GeckoSessionSettings.USE_MULTIPROCESS, false);
-        settings.setBoolean(
-            GeckoSessionSettings.USE_REMOTE_DEBUGGER,
-            GeckoSharedPrefs.forApp(this).getBoolean(
-                GeckoPreferences.PREFS_DEVTOOLS_REMOTE_USB_ENABLED, false));
-        mGeckoSession = new GeckoSession(settings);
+        GeckoAccessibility.setDelegate(mGeckoView);
+
+        mGeckoSession = new GeckoSession();
+        mGeckoView.setSession(mGeckoSession);
+
         mGeckoSession.setNavigationDelegate(this);
         mGeckoSession.setProgressDelegate(this);
         mGeckoSession.setContentDelegate(this);
-
-        mGeckoView.setSession(mGeckoSession, GeckoRuntime.getDefault(this));
 
         mPromptService = new PromptService(this, mGeckoView.getEventDispatcher());
         mDoorHangerPopup = new DoorHangerPopup(this, mGeckoView.getEventDispatcher());
@@ -144,6 +140,13 @@ public class CustomTabsActivity extends AppCompatActivity
 
         mTextSelection = TextSelection.Factory.create(mGeckoView, this);
         mTextSelection.create();
+
+        final GeckoSessionSettings settings = mGeckoView.getSettings();
+        settings.setBoolean(GeckoSessionSettings.USE_MULTIPROCESS, false);
+        settings.setBoolean(
+            GeckoSessionSettings.USE_REMOTE_DEBUGGER,
+            GeckoSharedPrefs.forApp(this).getBoolean(
+                GeckoPreferences.PREFS_DEVTOOLS_REMOTE_USB_ENABLED, false));
 
         if (intent != null && !TextUtils.isEmpty(intent.getDataString())) {
             mGeckoSession.loadUri(intent.getDataString());
@@ -602,20 +605,17 @@ public class CustomTabsActivity extends AppCompatActivity
     }
 
     @Override
-    public void onLoadRequest(final GeckoSession session, final String urlStr,
-                                 final int target,
-                                 final GeckoSession.Response<Boolean> response) {
+    public boolean onLoadRequest(final GeckoSession session, final String urlStr,
+                                 final int target) {
         if (target != GeckoSession.NavigationDelegate.TARGET_WINDOW_NEW) {
-            response.respond(false);
-            return;
+            return false;
         }
 
         final Uri uri = Uri.parse(urlStr);
         if (uri == null) {
             // We can't handle this, so deny it.
             Log.w(LOGTAG, "Failed to parse URL for navigation: " + urlStr);
-            response.respond(true);
-            return;
+            return true;
         }
 
         // Always use Fennec for these schemes.
@@ -640,7 +640,7 @@ public class CustomTabsActivity extends AppCompatActivity
             }
         }
 
-        response.respond(true);
+        return true;
     }
 
     @Override
@@ -704,8 +704,7 @@ public class CustomTabsActivity extends AppCompatActivity
 
     @Override
     public void onContextMenu(GeckoSession session, int screenX, int screenY,
-                              final String uri, int elementType,
-                              final String elementSrc) {
+                              final String uri, final String elementSrc) {
 
         final String content = uri != null ? uri : elementSrc != null ? elementSrc : "";
         final Uri validUri = WebApps.getValidURL(content);
@@ -721,9 +720,6 @@ public class CustomTabsActivity extends AppCompatActivity
         });
     }
 
-    @Override
-    public void onExternalResponse(final GeckoSession session, final GeckoSession.WebResponseInfo request) {
-    }
 
     @Override // ActionModePresenter
     public void startActionMode(final ActionMode.Callback callback) {

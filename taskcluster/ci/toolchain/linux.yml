@@ -180,23 +180,6 @@ linux64-gcc-6:
         toolchain-alias: linux64-gcc
         toolchain-artifact: public/build/gcc.tar.xz
 
-linux64-gcc-7:
-    description: "GCC 7 toolchain build"
-    treeherder:
-        kind: build
-        platform: toolchains/opt
-        symbol: TL(gcc7)
-        tier: 1
-    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
-    worker:
-        max-run-time: 36000
-    run:
-        using: toolchain-script
-        script: build-gcc-7-linux.sh
-        resources:
-            - 'build/unix/build-gcc/build-gcc.sh'
-        toolchain-artifact: public/build/gcc.tar.xz
-
 linux64-sixgill:
     description: "sixgill GCC plugin build"
     treeherder:
@@ -215,7 +198,7 @@ linux64-sixgill:
             - 'taskcluster/scripts/misc/build-gcc-sixgill-plugin-linux.sh'
         toolchain-artifact: public/build/sixgill.tar.xz
     toolchains:
-        - linux64-gcc-6
+        - linux64-gcc-4.9
 
 linux64-llvm-dsymutil:
     description: "llvm-dsymutil toolchain build"
@@ -382,7 +365,7 @@ linux64-android-gradle-dependencies:
         # Aliases aren't allowed for toolchains depending on toolchains.
         - linux64-android-sdk-linux-repack
 
-linux64-rust-1.25:
+linux64-rust-1.24:
     description: "rust repack"
     treeherder:
         kind: build
@@ -398,7 +381,7 @@ linux64-rust-1.25:
         using: toolchain-script
         script: repack_rust.py
         arguments: [
-            '--channel', '1.25.0',
+            '--channel', '1.24.0',
             '--host', 'x86_64-unknown-linux-gnu',
             '--target', 'x86_64-unknown-linux-gnu',
             '--target', 'i686-unknown-linux-gnu',
@@ -406,30 +389,7 @@ linux64-rust-1.25:
         toolchain-alias: linux64-rust
         toolchain-artifact: public/build/rustc.tar.xz
 
-linux64-rust-1.24:
-    description: "rust repack"
-    treeherder:
-        kind: build
-        platform: toolchains/opt
-        symbol: TL(rust-1.24)
-        tier: 1
-    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
-    worker:
-        max-run-time: 7200
-        env:
-            UPLOAD_DIR: artifacts
-    run:
-        using: toolchain-script
-        script: repack_rust.py
-        arguments: [
-            '--channel', '1.24.0',
-            '--host', 'x86_64-unknown-linux-gnu',
-            '--target', 'x86_64-unknown-linux-gnu',
-            '--target', 'i686-unknown-linux-gnu',
-        ]
-        toolchain-artifact: public/build/rustc.tar.xz
-
-linux64-rust-macos-1.25:
+linux64-rust-macos-1.24:
     description: "rust repack with macos-cross support"
     treeherder:
         kind: build
@@ -445,7 +405,7 @@ linux64-rust-macos-1.25:
         using: toolchain-script
         script: repack_rust.py
         arguments: [
-            '--channel', '1.25.0',
+            '--channel', '1.24.0',
             '--host', 'x86_64-unknown-linux-gnu',
             '--target', 'x86_64-unknown-linux-gnu',
             '--target', 'x86_64-apple-darwin',
@@ -453,7 +413,7 @@ linux64-rust-macos-1.25:
         toolchain-alias: linux64-rust-macos
         toolchain-artifact: public/build/rustc.tar.xz
 
-linux64-rust-android-1.25:
+linux64-rust-android-1.24:
     description: "rust repack with android-cross support"
     treeherder:
         kind: build
@@ -469,7 +429,7 @@ linux64-rust-android-1.25:
         using: toolchain-script
         script: repack_rust.py
         arguments: [
-            '--channel', '1.25.0',
+            '--channel', '1.24.0',
             '--host', 'x86_64-unknown-linux-gnu',
             '--target', 'x86_64-unknown-linux-gnu',
             '--target', 'armv7-linux-androideabi',
@@ -496,7 +456,7 @@ linux64-sccache:
             - 'taskcluster/scripts/misc/tooltool-download.sh'
         toolchain-artifact: public/build/sccache2.tar.xz
     toolchains:
-        - linux64-rust-1.25
+        - linux64-rust-1.24
 
 linux64-gn:
     description: "gn toolchain build"
@@ -516,28 +476,6 @@ linux64-gn:
             - 'taskcluster/scripts/misc/tooltool-download.sh'
             - 'taskcluster/scripts/misc/build-gn-common.sh'
         toolchain-artifact: public/build/gn.tar.xz
-    run-on-projects:
-        - trunk
-        - try
-    toolchains:
-        - linux64-gcc-4.9
-
-linux64-tup:
-    description: "tup toolchain build"
-    treeherder:
-        kind: build
-        platform: toolchains/opt
-        symbol: TL(tup)
-        tier: 2
-    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
-    worker:
-        max-run-time: 3600
-    run:
-        using: toolchain-script
-        script: build-tup-linux.sh
-        resources:
-            - 'taskcluster/scripts/misc/tooltool-download.sh'
-        toolchain-artifact: public/build/tup.tar.xz
     run-on-projects:
         - trunk
         - try

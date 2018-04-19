@@ -21,9 +21,6 @@ impl Parse for ColumnCount {
         if input.try(|i| i.expect_ident_matching("auto")).is_ok() {
             return Ok(GenericColumnCount::Auto);
         }
-        Ok(GenericColumnCount::Integer(PositiveInteger::parse(
-            context,
-            input,
-        )?))
+        Ok(GenericColumnCount::Integer(PositiveInteger::parse(context, input)?))
     }
 }

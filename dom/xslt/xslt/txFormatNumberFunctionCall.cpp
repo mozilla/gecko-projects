@@ -388,10 +388,12 @@ txFormatNumberFunctionCall::isSensitiveTo(ContextSensitivity aContext)
 }
 
 #ifdef TX_TO_STRING
-void
-txFormatNumberFunctionCall::appendName(nsAString& aDest)
+nsresult
+txFormatNumberFunctionCall::getNameAtom(nsAtom** aAtom)
 {
-    aDest.Append(nsGkAtoms::formatNumber->GetUTF16String());
+    *aAtom = nsGkAtoms::formatNumber;
+    NS_ADDREF(*aAtom);
+    return NS_OK;
 }
 #endif
 

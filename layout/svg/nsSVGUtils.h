@@ -34,6 +34,7 @@ class nsIContent;
 class nsIDocument;
 class nsIFrame;
 class nsPresContext;
+class nsStyleContext;
 class nsStyleSVGPaint;
 class nsSVGDisplayContainerFrame;
 class nsSVGElement;
@@ -70,6 +71,7 @@ class GeneralPattern;
 #define SVG_HIT_TEST_CHECK_MRECT 0x04
 
 
+bool NS_SVGPathCachingEnabled();
 bool NS_SVGDisplayListHitTestingEnabled();
 bool NS_SVGDisplayListPaintingEnabled();
 bool NS_SVGNewGetBBoxEnabled();
@@ -516,7 +518,7 @@ public:
                             std::min(double(INT32_MAX), aVal)));
   }
 
-  static nscolor GetFallbackOrPaintColor(mozilla::ComputedStyle *aComputedStyle,
+  static nscolor GetFallbackOrPaintColor(nsStyleContext *aStyleContext,
                                          nsStyleSVGPaint nsStyleSVG::*aFillOrStroke);
 
   static void

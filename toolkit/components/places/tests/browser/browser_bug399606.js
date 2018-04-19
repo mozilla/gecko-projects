@@ -46,7 +46,7 @@ add_task(async function() {
     await BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser, false, uri);
     await BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser, false, uri);
     PlacesUtils.history.removeObserver(historyObserver);
-    BrowserTestUtils.removeTab(tab);
+    await BrowserTestUtils.removeTab(tab);
   }
 
   for (let uri of URIS) {

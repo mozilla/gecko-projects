@@ -47,6 +47,7 @@ if CONFIG['CC_TYPE'] == 'gcc':
 # framework in a way we cannot otherwise work around.
 if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
   CXXFLAGS += [
+    '-Wno-error=shadow',
     '-Wno-old-style-cast',
   ]
   if CONFIG['CC_TYPE'] == 'clang':

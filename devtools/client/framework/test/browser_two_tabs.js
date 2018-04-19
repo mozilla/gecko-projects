@@ -102,6 +102,7 @@ function checkGetTabFailures() {
       }
     )
     .then(checkSelectedTabActor);
+
 }
 
 function checkSelectedTabActor() {
@@ -117,7 +118,7 @@ function checkSelectedTabActor() {
 function closeSecondTab() {
   // Close the second tab, currently selected
   let container = gBrowser.tabContainer;
-  container.addEventListener("TabClose", function() {
+  container.addEventListener("TabClose", function () {
     checkFirstTabActor();
   }, {once: true});
   gBrowser.removeTab(gTab2);
@@ -135,7 +136,7 @@ function checkFirstTabActor() {
 
 function cleanup() {
   let container = gBrowser.tabContainer;
-  container.addEventListener("TabClose", function() {
+  container.addEventListener("TabClose", function () {
     gClient.close().then(finish);
   }, {once: true});
   gBrowser.removeTab(gTab1);

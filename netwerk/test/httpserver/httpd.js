@@ -69,7 +69,7 @@ function NS_ASSERT(cond, msg)
     var stack = new Error().stack.split(/\n/);
     dumpn(stack.map(function(val) { return "###!!!   " + val; }).join("\n"));
 
-    throw Components.Exception("", Cr.NS_ERROR_ABORT);
+    throw Cr.NS_ERROR_ABORT;
   }
 }
 
@@ -509,7 +509,7 @@ nsHttpServer.prototype =
   _start: function(port, host)
   {
     if (this._socket)
-      throw Components.Exception("", Cr.NS_ERROR_ALREADY_INITIALIZED);
+      throw Cr.NS_ERROR_ALREADY_INITIALIZED;
 
     this._port = port;
     this._doQuit = this._socketClosed = false;
@@ -579,7 +579,7 @@ nsHttpServer.prototype =
     catch (e)
     {
       dump("\n!!! could not start server on port " + port + ": " + e + "\n\n");
-      throw Components.Exception("", Cr.NS_ERROR_NOT_AVAILABLE);
+      throw Cr.NS_ERROR_NOT_AVAILABLE;
     }
   },
 
@@ -588,16 +588,10 @@ nsHttpServer.prototype =
   //
   stop: function(callback)
   {
+    if (!callback)
+      throw Cr.NS_ERROR_NULL_POINTER;
     if (!this._socket)
-      throw Components.Exception("", Cr.NS_ERROR_UNEXPECTED);
-
-    // If no argument was provided to stop, return a promise.
-    let returnValue = undefined;
-    if (!callback) {
-      returnValue = new Promise(resolve => {
-        callback = resolve;
-      });
-    }
+      throw Cr.NS_ERROR_UNEXPECTED;
 
     this._stopCallback = typeof callback === "function"
                        ? callback
@@ -614,8 +608,6 @@ nsHttpServer.prototype =
     this._doQuit = false;
 
     // socket-close notification and pending request completion happen async
-
-    return returnValue;
   },
 
   //
@@ -624,7 +616,7 @@ nsHttpServer.prototype =
   registerFile: function(path, file)
   {
     if (file && (!file.exists() || file.isDirectory()))
-      throw Components.Exception("", Cr.NS_ERROR_INVALID_ARG);
+      throw Cr.NS_ERROR_INVALID_ARG;
 
     this._handler.registerFile(path, file);
   },
@@ -639,7 +631,7 @@ nsHttpServer.prototype =
         path.charAt(path.length - 1) != "/" ||
         (directory &&
          (!directory.exists() || !directory.isDirectory())))
-      throw Components.Exception("", Cr.NS_ERROR_INVALID_ARG);
+      throw Cr.NS_ERROR_INVALID_ARG;
 
     // XXX determine behavior of nonexistent /foo/bar when a /foo/bar/ mapping
     //     exists!
@@ -765,7 +757,7 @@ nsHttpServer.prototype =
         iid.equals(Ci.nsISupports))
       return this;
 
-    throw Components.Exception("", Cr.NS_ERROR_NO_INTERFACE);
+    throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
 
@@ -940,7 +932,7 @@ ServerIdentity.prototype =
   get primaryScheme()
   {
     if (this._primaryPort === -1)
-      throw Components.Exception("", Cr.NS_ERROR_NOT_INITIALIZED);
+      throw Cr.NS_ERROR_NOT_INITIALIZED;
     return this._primaryScheme;
   },
 
@@ -950,7 +942,7 @@ ServerIdentity.prototype =
   get primaryHost()
   {
     if (this._primaryPort === -1)
-      throw Components.Exception("", Cr.NS_ERROR_NOT_INITIALIZED);
+      throw Cr.NS_ERROR_NOT_INITIALIZED;
     return this._primaryHost;
   },
 
@@ -960,7 +952,7 @@ ServerIdentity.prototype =
   get primaryPort()
   {
     if (this._primaryPort === -1)
-      throw Components.Exception("", Cr.NS_ERROR_NOT_INITIALIZED);
+      throw Cr.NS_ERROR_NOT_INITIALIZED;
     return this._primaryPort;
   },
 
@@ -1056,7 +1048,7 @@ ServerIdentity.prototype =
     if (iid.equals(Ci.nsIHttpServerIdentity) || iid.equals(Ci.nsISupports))
       return this;
 
-    throw Components.Exception("", Cr.NS_ERROR_NO_INTERFACE);
+    throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
 
@@ -1126,17 +1118,17 @@ ServerIdentity.prototype =
     {
       dumpn("*** server only supports http/https schemes: '" + scheme + "'");
       dumpStack();
-      throw Components.Exception("", Cr.NS_ERROR_ILLEGAL_VALUE);
+      throw Cr.NS_ERROR_ILLEGAL_VALUE;
     }
     if (!HOST_REGEX.test(host))
     {
       dumpn("*** unexpected host: '" + host + "'");
-      throw Components.Exception("", Cr.NS_ERROR_ILLEGAL_VALUE);
+      throw Cr.NS_ERROR_ILLEGAL_VALUE;
     }
     if (port < 0 || port > 65535)
     {
       dumpn("*** unexpected port: '" + port + "'");
-      throw Components.Exception("", Cr.NS_ERROR_ILLEGAL_VALUE);
+      throw Cr.NS_ERROR_ILLEGAL_VALUE;
     }
   }
 };
@@ -1421,7 +1413,7 @@ RequestReader.prototype =
         aIID.equals(Ci.nsISupports))
       return this;
 
-    throw Components.Exception("", Cr.NS_ERROR_NO_INTERFACE);
+    throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
 
@@ -2504,7 +2496,7 @@ ServerHandler.prototype =
   {
     // XXX true path validation!
     if (path.charAt(0) != "/")
-      throw Components.Exception("", Cr.NS_ERROR_INVALID_ARG);
+      throw Cr.NS_ERROR_INVALID_ARG;
 
     this._handlerToField(handler, this._overridePaths, path);
   },
@@ -2516,7 +2508,7 @@ ServerHandler.prototype =
   {
     // XXX true path validation!
     if (path.charAt(0) != "/" || path.charAt(path.length - 1) != "/")
-      throw Components.Exception("", Cr.NS_ERROR_INVALID_ARG);
+      throw Cr.NS_ERROR_INVALID_ARG;
 
     this._handlerToField(handler, this._overridePrefixes, path);
   },
@@ -2535,7 +2527,7 @@ ServerHandler.prototype =
     // the path-to-directory mapping code requires that the first character not
     // be "/", or it will go into an infinite loop
     if (key.charAt(0) == "/")
-      throw Components.Exception("", Cr.NS_ERROR_INVALID_ARG);
+      throw Cr.NS_ERROR_INVALID_ARG;
 
     key = toInternalPath(key, false);
 
@@ -3199,7 +3191,7 @@ ServerHandler.prototype =
   _handleError: function(errorCode, metadata, response)
   {
     if (!metadata)
-      throw Components.Exception("", Cr.NS_ERROR_NULL_POINTER);
+      throw Cr.NS_ERROR_NULL_POINTER;
 
     var errorX00 = errorCode - (errorCode % 100);
 
@@ -3630,7 +3622,7 @@ Response.prototype =
   get bodyOutputStream()
   {
     if (this._finished)
-      throw Components.Exception("", Cr.NS_ERROR_NOT_AVAILABLE);
+      throw Cr.NS_ERROR_NOT_AVAILABLE;
 
     if (!this._bodyOutputStream)
     {
@@ -3651,7 +3643,7 @@ Response.prototype =
   write: function(data)
   {
     if (this._finished)
-      throw Components.Exception("", Cr.NS_ERROR_NOT_AVAILABLE);
+      throw Cr.NS_ERROR_NOT_AVAILABLE;
 
     var dataAsString = String(data);
     this.bodyOutputStream.write(dataAsString, dataAsString.length);
@@ -3663,11 +3655,11 @@ Response.prototype =
   setStatusLine: function(httpVersion, code, description)
   {
     if (!this._headers || this._finished || this._powerSeized)
-      throw Components.Exception("", Cr.NS_ERROR_NOT_AVAILABLE);
+      throw Cr.NS_ERROR_NOT_AVAILABLE;
     this._ensureAlive();
 
     if (!(code >= 0 && code < 1000))
-      throw Components.Exception("", Cr.NS_ERROR_INVALID_ARG);
+      throw Cr.NS_ERROR_INVALID_ARG;
 
     try
     {
@@ -3682,7 +3674,7 @@ Response.prototype =
     }
     catch (e)
     {
-      throw Components.Exception("", Cr.NS_ERROR_INVALID_ARG);
+      throw Cr.NS_ERROR_INVALID_ARG;
     }
 
     // Reason-Phrase = *<TEXT, excluding CR, LF>
@@ -3694,7 +3686,7 @@ Response.prototype =
       description = "";
     for (var i = 0; i < description.length; i++)
       if (isCTL(description.charCodeAt(i)) && description.charAt(i) != "\t")
-        throw Components.Exception("", Cr.NS_ERROR_INVALID_ARG);
+        throw Cr.NS_ERROR_INVALID_ARG;
 
     // set the values only after validation to preserve atomicity
     this._httpDescription = description;
@@ -3708,7 +3700,7 @@ Response.prototype =
   setHeader: function(name, value, merge)
   {
     if (!this._headers || this._finished || this._powerSeized)
-      throw Components.Exception("", Cr.NS_ERROR_NOT_AVAILABLE);
+      throw Cr.NS_ERROR_NOT_AVAILABLE;
     this._ensureAlive();
 
     this._headers.setHeader(name, value, merge);
@@ -3717,7 +3709,7 @@ Response.prototype =
   setHeaderNoCheck: function(name, value)
   {
     if (!this._headers || this._finished || this._powerSeized)
-      throw Components.Exception("", Cr.NS_ERROR_NOT_AVAILABLE);
+      throw Cr.NS_ERROR_NOT_AVAILABLE;
     this._ensureAlive();
 
     this._headers.setHeaderNoCheck(name, value);
@@ -3729,9 +3721,9 @@ Response.prototype =
   processAsync: function()
   {
     if (this._finished)
-      throw Components.Exception("", Cr.NS_ERROR_UNEXPECTED);
+      throw Cr.NS_ERROR_UNEXPECTED;
     if (this._powerSeized)
-      throw Components.Exception("", Cr.NS_ERROR_NOT_AVAILABLE);
+      throw Cr.NS_ERROR_NOT_AVAILABLE;
     if (this._processAsync)
       return;
     this._ensureAlive();
@@ -3762,9 +3754,9 @@ Response.prototype =
   seizePower: function()
   {
     if (this._processAsync)
-      throw Components.Exception("", Cr.NS_ERROR_NOT_AVAILABLE);
+      throw Cr.NS_ERROR_NOT_AVAILABLE;
     if (this._finished)
-      throw Components.Exception("", Cr.NS_ERROR_UNEXPECTED);
+      throw Cr.NS_ERROR_UNEXPECTED;
     if (this._powerSeized)
       return;
     this._ensureAlive();
@@ -3798,7 +3790,7 @@ Response.prototype =
   finish: function()
   {
     if (!this._processAsync && !this._powerSeized)
-      throw Components.Exception("", Cr.NS_ERROR_UNEXPECTED);
+      throw Cr.NS_ERROR_UNEXPECTED;
     if (this._finished)
       return;
 
@@ -3820,7 +3812,7 @@ Response.prototype =
     if (iid.equals(Ci.nsIHttpResponse) || iid.equals(Ci.nsISupports))
       return this;
 
-    throw Components.Exception("", Cr.NS_ERROR_NO_INTERFACE);
+    throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
 
@@ -4117,7 +4109,7 @@ Response.prototype =
           if (aIID.equals(Ci.nsIRequestObserver) || aIID.equals(Ci.nsISupports))
             return this;
 
-          throw Components.Exception("", Cr.NS_ERROR_NO_INTERFACE);
+          throw Cr.NS_ERROR_NO_INTERFACE;
         }
       };
 
@@ -4180,7 +4172,7 @@ Response.prototype =
           if (aIID.equals(Ci.nsIRequestObserver) || aIID.equals(Ci.nsISupports))
             return this;
 
-          throw Components.Exception("", Cr.NS_ERROR_NO_INTERFACE);
+          throw Cr.NS_ERROR_NO_INTERFACE;
         }
       };
 
@@ -4206,7 +4198,7 @@ Response.SEGMENT_SIZE = 8192;
 /** Serves double duty in WriteThroughCopier implementation. */
 function notImplemented()
 {
-  throw Components.Exception("", Cr.NS_ERROR_NOT_IMPLEMENTED);
+  throw Cr.NS_ERROR_NOT_IMPLEMENTED;
 }
 
 /** Returns true iff the given exception represents stream closure. */
@@ -4241,7 +4233,7 @@ function wouldBlock(e)
 function WriteThroughCopier(source, sink, observer, context)
 {
   if (!source || !sink || !observer)
-    throw Components.Exception("", Cr.NS_ERROR_NULL_POINTER);
+    throw Cr.NS_ERROR_NULL_POINTER;
 
   /** Stream from which data is being read. */
   this._source = source;
@@ -4309,7 +4301,7 @@ WriteThroughCopier.prototype =
       return this;
     }
 
-    throw Components.Exception("", Cr.NS_ERROR_NO_INTERFACE);
+    throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
 
@@ -4371,7 +4363,7 @@ WriteThroughCopier.prototype =
       // Handle the zero-data edge case in the same place as all other edge
       // cases are handled.
       if (bytesWanted === 0)
-        throw Components.Exception("", Cr.NS_BASE_STREAM_CLOSED);
+        throw Cr.NS_BASE_STREAM_CLOSED;
     }
     catch (e)
     {
@@ -4795,7 +4787,7 @@ const headerUtils =
     if (fieldName == "")
     {
       dumpn("*** Empty fieldName");
-      throw Components.Exception("", Cr.NS_ERROR_INVALID_ARG);
+      throw Cr.NS_ERROR_INVALID_ARG;
     }
 
     for (var i = 0, sz = fieldName.length; i < sz; i++)
@@ -4803,7 +4795,7 @@ const headerUtils =
       if (!IS_TOKEN_ARRAY[fieldName.charCodeAt(i)])
       {
         dumpn(fieldName + " is not a valid header field name!");
-        throw Components.Exception("", Cr.NS_ERROR_INVALID_ARG);
+        throw Cr.NS_ERROR_INVALID_ARG;
       }
     }
 
@@ -4852,7 +4844,7 @@ const headerUtils =
       if (isCTL(val.charCodeAt(i)))
       {
         dump("*** Char " + i + " has charcode " + val.charCodeAt(i));
-        throw Components.Exception("", Cr.NS_ERROR_INVALID_ARG);
+        throw Cr.NS_ERROR_INVALID_ARG;
       }
 
     // XXX disallows quoted-pair where CHAR is a CTL -- will not invalidly
@@ -5065,7 +5057,7 @@ nsHttpHeaders.prototype =
     if (name in this._headers)
       return this._headers[name];
     else
-      throw Components.Exception("", Cr.NS_ERROR_NOT_AVAILABLE);
+      throw Cr.NS_ERROR_NOT_AVAILABLE;
   },
 
   /**
@@ -5126,7 +5118,7 @@ nsSimpleEnumerator.prototype =
   getNext: function()
   {
     if (!this.hasMoreElements())
-      throw Components.Exception("", Cr.NS_ERROR_NOT_AVAILABLE);
+      throw Cr.NS_ERROR_NOT_AVAILABLE;
 
     return this._items[this._nextIndex++];
   },
@@ -5136,7 +5128,7 @@ nsSimpleEnumerator.prototype =
         Ci.nsISupports.equals(aIID))
       return this;
 
-    throw Components.Exception("", Cr.NS_ERROR_NO_INTERFACE);
+    throw Cr.NS_ERROR_NO_INTERFACE;
   }
 };
 
@@ -5312,7 +5304,7 @@ Request.prototype =
     if (iid.equals(Ci.nsIHttpRequest) || iid.equals(Ci.nsISupports))
       return this;
 
-    throw Components.Exception("", Cr.NS_ERROR_NO_INTERFACE);
+    throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
 

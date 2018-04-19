@@ -39,12 +39,10 @@ add_task(async function test_sessions_get_recently_closed_private() {
 
   // Open and close two tabs in the private window
   let tab = await BrowserTestUtils.openNewForegroundTab(privateWin.gBrowser, "http://example.com");
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 
   tab = await BrowserTestUtils.openNewForegroundTab(privateWin.gBrowser, "http://example.com");
-  let sessionPromise = BrowserTestUtils.waitForSessionStoreUpdate(tab);
-  BrowserTestUtils.removeTab(tab);
-  await sessionPromise;
+  await BrowserTestUtils.removeTab(tab);
 
   extension.sendMessage("check-sessions");
   recentlyClosed = await extension.awaitMessage("recentlyClosed");

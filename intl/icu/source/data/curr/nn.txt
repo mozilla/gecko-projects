@@ -612,10 +612,6 @@ nn{
         }
         MRO{
             "MRO",
-            "mauritanske ouguiya (1973–2017)",
-        }
-        MRU{
-            "MRU",
             "mauritanske ouguiya",
         }
         MTL{
@@ -844,10 +840,6 @@ nn{
         }
         STD{
             "STD",
-            "saotomesiske dobra (1977–2017)",
-        }
-        STN{
-            "STN",
             "saotomesiske dobra",
         }
         SUR{
@@ -880,7 +872,7 @@ nn{
         }
         TMM{
             "TMM",
-            "turkmensk manat (1993–2009)",
+            "turkmenske manat (1993–2009)",
         }
         TMT{
             "TMT",
@@ -1187,7 +1179,7 @@ nn{
         SHP{"£"}
         SRD{"$"}
         SSP{"£"}
-        STN{"Db"}
+        STD{"Db"}
         SYP{"£"}
         THB{"฿"}
         TOP{"T$"}
@@ -1724,10 +1716,6 @@ nn{
             other{"makaoiske pataca"}
         }
         MRO{
-            one{"mauritansk ouguiya (1973–2017)"}
-            other{"mauritanske ouguiya (1973–2017)"}
-        }
-        MRU{
             one{"mauritansk ouguiya"}
             other{"mauritanske ouguiya"}
         }
@@ -1956,10 +1944,6 @@ nn{
             other{"sørsudanske pund"}
         }
         STD{
-            one{"saotomesisk dobra (1977–2017)"}
-            other{"saotomesiske dobra (1977–2017)"}
-        }
-        STN{
             one{"saotomesisk dobra"}
             other{"saotomesiske dobra"}
         }
@@ -2204,5 +2188,5 @@ nn{
         one{"{0} {1}"}
         other{"{0} {1}"}
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.37.5"}
 }

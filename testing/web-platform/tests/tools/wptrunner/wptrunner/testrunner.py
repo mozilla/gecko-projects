@@ -108,7 +108,7 @@ class TestRunner(object):
             raise
 
     def wait(self):
-        self.executor.wait()
+        self.executor.protocol.wait()
         self.send_message("wait_finished")
 
     def send_message(self, command, *args):
@@ -304,7 +304,6 @@ class TestRunnerManager(threading.Thread):
         # This is started in the actual new thread
         self.logger = None
 
-        self.test_count = 0
         self.unexpected_count = 0
 
         # This may not really be what we want
@@ -570,7 +569,6 @@ class TestRunnerManager(threading.Thread):
             if self.browser.check_for_crashes():
                 status = "CRASH"
 
-        self.test_count += 1
         is_unexpected = expected != status
         if is_unexpected:
             self.unexpected_count += 1
@@ -589,8 +587,7 @@ class TestRunnerManager(threading.Thread):
                                ((subtest_unexpected or is_unexpected) and
                                 self.restart_on_unexpected))
 
-        if (not file_result.status == "CRASH" and
-            self.pause_after_test or
+        if (self.pause_after_test or
             (self.pause_on_unexpected and (subtest_unexpected or is_unexpected))):
             self.logger.info("Pausing until the browser exits")
             self.send_message("wait")
@@ -791,9 +788,6 @@ class ManagerGroup(object):
         as possible"""
         self.stop_flag.set()
         self.logger.debug("Stop flag set in ManagerGroup")
-
-    def test_count(self):
-        return sum(item.test_count for item in self.pool)
 
     def unexpected_count(self):
         return sum(item.unexpected_count for item in self.pool)

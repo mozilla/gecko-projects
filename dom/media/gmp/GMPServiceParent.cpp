@@ -9,7 +9,6 @@
 #include "base/task.h"
 #include "mozilla/AbstractThread.h"
 #include "mozilla/Logging.h"
-#include "mozilla/StaticPrefs.h"
 #include "mozilla/dom/ContentParent.h"
 #include "GMPParent.h"
 #include "GMPVideoDecoderParent.h"
@@ -39,6 +38,7 @@
 #include "nsIXULRuntime.h"
 #include "GMPDecoderModule.h"
 #include <limits>
+#include "MediaPrefs.h"
 #include "mozilla/SystemGroup.h"
 
 using mozilla::ipc::Transport;
@@ -818,7 +818,7 @@ CreateGMPParent(AbstractThread* aMainThread)
 {
 #if defined(XP_LINUX) && defined(MOZ_GMP_SANDBOX)
   if (!SandboxInfo::Get().CanSandboxMedia()) {
-    if (!StaticPrefs::MediaGmpInsecureAllow()) {
+    if (!MediaPrefs::GMPAllowInsecure()) {
       NS_WARNING("Denying media plugin load due to lack of sandboxing.");
       return nullptr;
     }

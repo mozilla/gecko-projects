@@ -45,7 +45,6 @@ class SidebarToggle extends Component {
 
   onClick(event) {
     event.stopPropagation();
-    this.setState({ collapsed: !this.state.collapsed });
     this.props.onClick(event);
   }
 

@@ -344,15 +344,9 @@ URLPreloader::ReadCache(LinkedList<URLEntry>& pendingURLs)
 void
 URLPreloader::BackgroundReadFiles()
 {
-    auto cleanup = MakeScopeExit([&] () {
-        NS_DispatchToMainThread(
-            NewRunnableMethod("nsIThread::Shutdown",
-                              mReaderThread, &nsIThread::Shutdown));
-        mReaderThread = nullptr;
-    });
-
     Vector<nsZipCursor> cursors;
     LinkedList<URLEntry> pendingURLs;
+
     {
         MonitorAutoLock mal(mMonitor);
 
@@ -444,6 +438,11 @@ URLPreloader::BackgroundReadFiles()
 
     // We're done reading pending entries, so clear the list.
     pendingURLs.clear();
+
+    NS_DispatchToMainThread(
+        NewRunnableMethod("nsIThread::Shutdown",
+                          mReaderThread, &nsIThread::Shutdown));
+    mReaderThread = nullptr;
 }
 
 void

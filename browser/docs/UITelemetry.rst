@@ -1,12 +1,8 @@
 .. _uitelemetry:
 
-==================================
-UITelemetry data format (obsolete)
-==================================
-
-.. note::
-
-    ``UITelemetry`` is deprecated. As of Firefox 61, ``UITelemetry`` is no longer reported.
+=======================
+UITelemetry data format
+=======================
 
 UI Telemetry sends its data as a JSON blob. This document describes the different parts
 of the JSON blob.

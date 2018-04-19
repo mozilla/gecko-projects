@@ -130,7 +130,7 @@ var TPS = {
   _tabsFinished: 0,
   _test: null,
   _triggeredSync: false,
-  _msSinceEpoch: 0,
+  _usSinceEpoch: 0,
   _requestedQuit: false,
   shouldValidateAddons: false,
   shouldValidateBookmarks: false,
@@ -323,7 +323,9 @@ var TPS = {
                      " on tab " + JSON.stringify(tab));
       switch (action) {
         case ACTION_ADD:
-          await BrowserTabs.Add(tab.uri);
+          await new Promise(resolve => {
+            BrowserTabs.Add(tab.uri, resolve);
+          });
           break;
         case ACTION_VERIFY:
           Logger.AssertTrue(typeof(tab.profile) != "undefined",
@@ -377,7 +379,7 @@ var TPS = {
     for (let datum of data) {
       Logger.logInfo("executing action " + action.toUpperCase() +
                      " on form entry " + JSON.stringify(datum));
-      let formdata = new FormData(datum, this._msSinceEpoch);
+      let formdata = new FormData(datum, this._usSinceEpoch);
       switch (action) {
         case ACTION_ADD:
           await formdata.Create();
@@ -409,17 +411,17 @@ var TPS = {
                        " on history entry " + entryString);
         switch (action) {
           case ACTION_ADD:
-            await HistoryEntry.Add(entry, this._msSinceEpoch);
+            await HistoryEntry.Add(entry, this._usSinceEpoch);
             break;
           case ACTION_DELETE:
-            await HistoryEntry.Delete(entry, this._msSinceEpoch);
+            await HistoryEntry.Delete(entry, this._usSinceEpoch);
             break;
           case ACTION_VERIFY:
-            Logger.AssertTrue((await HistoryEntry.Find(entry, this._msSinceEpoch)),
+            Logger.AssertTrue((await HistoryEntry.Find(entry, this._usSinceEpoch)),
               "Uri visits not found in history database: " + entryString);
             break;
           case ACTION_VERIFY_NOT:
-            Logger.AssertTrue(!(await HistoryEntry.Find(entry, this._msSinceEpoch)),
+            Logger.AssertTrue(!(await HistoryEntry.Find(entry, this._usSinceEpoch)),
               "Uri visits found in history database, but they shouldn't be: " + entryString);
             break;
           default:
@@ -818,7 +820,7 @@ var TPS = {
         // Places dislikes it if we add visits in the future. We pretend the
         // real time is 1 minute ago to avoid issues caused by places using a
         // different clock than the one that set the seconds_since_epoch pref.
-        this._msSinceEpoch = (this.seconds_since_epoch - 60) * 1000;
+        this._usSinceEpoch = (this.seconds_since_epoch - 60) * 1000 * 1000;
       } else {
         this.DumpError("seconds-since-epoch not set");
         return;

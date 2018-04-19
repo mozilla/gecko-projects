@@ -14,34 +14,29 @@
 #include "nsTArray.h"
 #include "SVGTextFrame.h"
 
-using namespace mozilla;
-
 static bool
-ComputedStyleContainsFont(ComputedStyle* aComputedStyle,
-                          nsPresContext* aPresContext,
-                          const gfxUserFontSet* aUserFontSet,
-                          const gfxUserFontEntry* aFont)
+StyleContextContainsFont(nsStyleContext* aStyleContext,
+                         const gfxUserFontSet* aUserFontSet,
+                         const gfxUserFontEntry* aFont)
 {
   // if the font is null, simply check to see whether fontlist includes
   // downloadable fonts
   if (!aFont) {
     const mozilla::FontFamilyList& fontlist =
-      aComputedStyle->StyleFont()->mFont.fontlist;
+      aStyleContext->StyleFont()->mFont.fontlist;
     return aUserFontSet->ContainsUserFontSetFonts(fontlist);
   }
 
   // first, check if the family name is in the fontlist
   const nsString& familyName = aFont->FamilyName();
-  if (!aComputedStyle->StyleFont()->mFont.fontlist.Contains(familyName)) {
+  if (!aStyleContext->StyleFont()->mFont.fontlist.Contains(familyName)) {
     return false;
   }
 
   // family name is in the fontlist, check to see if the font group
   // associated with the frame includes the specific userfont
   RefPtr<nsFontMetrics> fm =
-    nsLayoutUtils::GetFontMetricsForComputedStyle(aComputedStyle,
-                                                  aPresContext,
-                                                  1.0f);
+    nsLayoutUtils::GetFontMetricsForStyleContext(aStyleContext, 1.0f);
 
   if (fm->GetThebesFontGroup()->ContainsUserFont(aFont)) {
     return true;
@@ -53,19 +48,18 @@ ComputedStyleContainsFont(ComputedStyle* aComputedStyle,
 static bool
 FrameUsesFont(nsIFrame* aFrame, const gfxUserFontEntry* aFont)
 {
-  // check the style of the frame
-  nsPresContext* pc = aFrame->PresContext();
-  gfxUserFontSet* ufs = pc->GetUserFontSet();
-  if (ComputedStyleContainsFont(aFrame->Style(), pc, ufs, aFont)) {
+  // check the style context of the frame
+  gfxUserFontSet* ufs = aFrame->PresContext()->GetUserFontSet();
+  if (StyleContextContainsFont(aFrame->StyleContext(), ufs, aFont)) {
     return true;
   }
 
-  // check additional styles
+  // check additional style contexts
   int32_t contextIndex = 0;
-  for (ComputedStyle* extraContext;
-       (extraContext = aFrame->GetAdditionalComputedStyle(contextIndex));
+  for (nsStyleContext* extraContext;
+       (extraContext = aFrame->GetAdditionalStyleContext(contextIndex));
        ++contextIndex) {
-    if (ComputedStyleContainsFont(extraContext, pc, ufs, aFont)) {
+    if (StyleContextContainsFont(extraContext, ufs, aFont)) {
       return true;
     }
   }
@@ -121,14 +115,16 @@ nsFontFaceUtils::MarkDirtyForFontChange(nsIFrame* aSubtreeRoot,
   // check descendants, iterating over subtrees that may include
   // additional subtrees associated with placeholders
   do {
-    nsIFrame* subtreeRoot = subtrees.PopLastElement();
+    nsIFrame* subtreeRoot = subtrees.ElementAt(subtrees.Length() - 1);
+    subtrees.RemoveElementAt(subtrees.Length() - 1);
 
     // Check all descendants to see if they use the font
     AutoTArray<nsIFrame*, 32> stack;
     stack.AppendElement(subtreeRoot);
 
     do {
-      nsIFrame* f = stack.PopLastElement();
+      nsIFrame* f = stack.ElementAt(stack.Length() - 1);
+      stack.RemoveElementAt(stack.Length() - 1);
 
       // if this frame uses the font, mark its descendants dirty
       // and skip checking its children

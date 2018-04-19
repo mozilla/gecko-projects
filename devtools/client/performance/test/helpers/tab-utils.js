@@ -21,7 +21,7 @@ function getRandomInt(min, max) {
  * Adds a browser tab with the given url in the specified window and waits
  * for it to load.
  */
-exports.addTab = function({ url, win }, options = {}) {
+exports.addTab = function ({ url, win }, options = {}) {
   let id = getRandomInt(0, Number.MAX_SAFE_INTEGER - 1);
   url += `#${id}`;
 
@@ -35,18 +35,24 @@ exports.addTab = function({ url, win }, options = {}) {
 /**
  * Removes a browser tab from the specified window and waits for it to close.
  */
-exports.removeTab = function(tab) {
+exports.removeTab = function (tab, options = {}) {
   dump(`Removing tab: ${tab.linkedBrowser.currentURI.spec}.\n`);
 
-  BrowserTestUtils.removeTab(tab);
+  return new Promise(resolve => {
+    BrowserTestUtils.removeTab(tab).then(() => resolve(tab));
+
+    if (options.dontWaitForTabClose) {
+      resolve(tab);
+    }
+  });
 };
 
 /**
  * Adds a browser window with the provided options.
  */
-exports.addWindow = async function(options) {
+exports.addWindow = function* (options) {
   let { OpenBrowserWindow } = Services.wm.getMostRecentWindow(gDevTools.chromeWindowType);
   let win = OpenBrowserWindow(options);
-  await waitForDelayedStartupFinished(win);
+  yield waitForDelayedStartupFinished(win);
   return win;
 };

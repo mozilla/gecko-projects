@@ -10,9 +10,9 @@ requestLongerTimeout(2);
 // inspector-updated event. This means that the test verifies that the
 // inspector-updated event is emitted *after* the animation panel is ready.
 
-add_task(async function() {
-  await addTab(URL_ROOT + "doc_simple_animation.html");
-  let {inspector, panel, controller} = await openAnimationInspector();
+add_task(function* () {
+  yield addTab(URL_ROOT + "doc_simple_animation.html");
+  let {inspector, panel, controller} = yield openAnimationInspector();
 
   info("Listen for the players-updated, ui-updated and " +
        "inspector-updated events");
@@ -28,8 +28,8 @@ add_task(async function() {
   });
 
   info("Selecting an animated node");
-  let node = await getNodeFront(".animated", inspector);
-  await selectNodeAndWaitForAnimations(node, inspector);
+  let node = yield getNodeFront(".animated", inspector);
+  yield selectNodeAndWaitForAnimations(node, inspector);
 
   info("Check that all events were received");
   // Only assert that the inspector-updated event is last, the order of the

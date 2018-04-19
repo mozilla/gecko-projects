@@ -53,7 +53,7 @@ public:
        ErrorResult& aRv);
 
   virtual void
-  GetHref(nsAString& aHref) const override;
+  GetHref(nsAString& aHref, ErrorResult& aRv) const override;
 
   virtual void
   SetHref(const nsAString& aHref, ErrorResult& aRv) override;
@@ -62,60 +62,60 @@ public:
   GetOrigin(nsAString& aOrigin, ErrorResult& aRv) const override;
 
   virtual void
-  GetProtocol(nsAString& aProtocol) const override;
+  GetProtocol(nsAString& aProtocol, ErrorResult& aRv) const override;
 
   virtual void
   SetProtocol(const nsAString& aProtocol, ErrorResult& aRv) override;
 
   virtual void
-  GetUsername(nsAString& aUsername) const override;
+  GetUsername(nsAString& aUsername, ErrorResult& aRv) const override;
 
   virtual void
-  SetUsername(const nsAString& aUsername) override;
+  SetUsername(const nsAString& aUsername, ErrorResult& aRv) override;
 
   virtual void
-  GetPassword(nsAString& aPassword) const override;
+  GetPassword(nsAString& aPassword, ErrorResult& aRv) const override;
 
   virtual void
-  SetPassword(const nsAString& aPassword) override;
+  SetPassword(const nsAString& aPassword, ErrorResult& aRv) override;
 
   virtual void
-  GetHost(nsAString& aHost) const override;
+  GetHost(nsAString& aHost, ErrorResult& aRv) const override;
 
   virtual void
-  SetHost(const nsAString& aHost) override;
+  SetHost(const nsAString& aHost, ErrorResult& aRv) override;
 
   virtual void
-  GetHostname(nsAString& aHostname) const override;
+  GetHostname(nsAString& aHostname, ErrorResult& aRv) const override;
 
   virtual void
-  SetHostname(const nsAString& aHostname) override;
+  SetHostname(const nsAString& aHostname, ErrorResult& aRv) override;
 
   virtual void
-  GetPort(nsAString& aPort) const override;
+  GetPort(nsAString& aPort, ErrorResult& aRv) const override;
 
   virtual void
-  SetPort(const nsAString& aPort) override;
+  SetPort(const nsAString& aPort, ErrorResult& aRv) override;
 
   virtual void
-  GetPathname(nsAString& aPathname) const override;
+  GetPathname(nsAString& aPathname, ErrorResult& aRv) const override;
 
   virtual void
-  SetPathname(const nsAString& aPathname) override;
+  SetPathname(const nsAString& aPathname, ErrorResult& aRv) override;
 
   virtual void
-  GetSearch(nsAString& aSearch) const override;
+  GetSearch(nsAString& aSearch, ErrorResult& aRv) const override;
 
   virtual void
-  GetHash(nsAString& aHost) const override;
+  GetHash(nsAString& aHost, ErrorResult& aRv) const override;
 
   virtual void
-  SetHash(const nsAString& aHash) override;
+  SetHash(const nsAString& aHash, ErrorResult& aRv) override;
 
   virtual void UpdateURLSearchParams() override;
 
   virtual void
-  SetSearchInternal(const nsAString& aSearch) override;
+  SetSearchInternal(const nsAString& aSearch, ErrorResult& aRv) override;
 
 private:
   ~URLWorker();

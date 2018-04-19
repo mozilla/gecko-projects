@@ -3,11 +3,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const { PureComponent, createFactory } = require("devtools/client/shared/vendor/react");
-const { div, button, p, span, img } = require("devtools/client/shared/vendor/react-dom-factories");
+const { PureComponent } = require("devtools/client/shared/vendor/react");
+const { div, button } = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
-const PerfSettings = createFactory(require("devtools/client/performance-new/components/PerfSettings.js"));
-const { openLink } = require("devtools/client/shared/link");
 
 /**
  * The recordingState is one of the following:
@@ -34,7 +32,6 @@ const LOCKED_BY_PRIVATE_BROWSING = "locked-by-private-browsing";
 class Perf extends PureComponent {
   static get propTypes() {
     return {
-      toolbox: PropTypes.object.isRequired,
       perfFront: PropTypes.object.isRequired,
       receiveProfile: PropTypes.func.isRequired
     };
@@ -55,8 +52,6 @@ class Perf extends PureComponent {
     this.handleProfilerStopping = this.handleProfilerStopping.bind(this);
     this.handlePrivateBrowsingStarting = this.handlePrivateBrowsingStarting.bind(this);
     this.handlePrivateBrowsingEnding = this.handlePrivateBrowsingEnding.bind(this);
-    this.settingsComponentCreated = this.settingsComponentCreated.bind(this);
-    this.handleLinkClick = this.handleLinkClick.bind(this);
   }
 
   componentDidMount() {
@@ -117,15 +112,6 @@ class Perf extends PureComponent {
       default:
         throw new Error("Unhandled recording state.");
     }
-  }
-
-  /**
-   * Store a reference to the settings component. This gives the <Perf> component
-   * access to the `.getRecordingSettings()` method. At this time the recording panel
-   * is not doing much state management, so this avoid the overhead of redux.
-   */
-  settingsComponentCreated(settings) {
-    this.settings = settings;
   }
 
   getRecordingStateForTesting() {
@@ -249,21 +235,12 @@ class Perf extends PureComponent {
   }
 
   startRecording() {
-    const settings = this.settings;
-    if (!settings) {
-      console.error("Expected the PerfSettings panel to be rendered and available.");
-      return;
-    }
     this.setState({
       recordingState: REQUEST_TO_START_RECORDING,
       // Reset this error state since it's no longer valid.
       recordingUnexpectedlyStopped: false,
     });
-    this.props.perfFront.startProfiler(
-      // Pull out the recording settings from the child component. This approach avoids
-      // using Redux as a state manager.
-      settings.getRecordingSettings()
-    );
+    this.props.perfFront.startProfiler();
   }
 
   async getProfileAndStopProfiler() {
@@ -279,16 +256,24 @@ class Perf extends PureComponent {
     this.props.perfFront.stopProfilerAndDiscardProfile();
   }
 
-  renderButton() {
+  render() {
     const { recordingState, isSupportedPlatform } = this.state;
 
-    if (!isSupportedPlatform) {
-      return renderButton({
-        label: "Start recording",
-        disabled: true,
-        additionalMessage: "Your platform is not supported. The Gecko Profiler only " +
-                           "supports Tier-1 platforms."
-      });
+    // Handle the cases of platform support.
+    switch (isSupportedPlatform) {
+      case null:
+        // We don't know yet if this is a supported platform, wait for a response.
+        return null;
+      case false:
+        return renderButton({
+          label: "Start recording",
+          disabled: true,
+          additionalMessage: "Your platform is not supported. The Gecko Profiler only " +
+                             "supports Tier-1 platforms."
+        });
+      case true:
+        // Continue on and render the panel.
+        break;
     }
 
     // TODO - L10N all of the messages. Bug 1418056
@@ -299,14 +284,7 @@ class Perf extends PureComponent {
       case AVAILABLE_TO_RECORD:
         return renderButton({
           onClick: this.startRecording,
-          label: span(
-            null,
-            img({
-              className: "perf-button-image",
-              src: "chrome://devtools/skin/images/tool-profiler.svg"
-            }),
-            "Start recording",
-          ),
+          label: "Start recording",
           additionalMessage: this.state.recordingUnexpectedlyStopped
             ? div(null, "The recording was stopped by another tool.")
             : null
@@ -351,58 +329,6 @@ class Perf extends PureComponent {
         throw new Error("Unhandled recording state");
     }
   }
-
-  handleLinkClick(event) {
-    openLink(event.target.value, this.props.toolbox);
-  }
-
-  render() {
-    const { isSupportedPlatform } = this.state;
-
-    if (isSupportedPlatform === null) {
-      // We don't know yet if this is a supported platform, wait for a response.
-      return null;
-    }
-
-    return div(
-      { className: "perf" },
-      this.renderButton(),
-      PerfSettings({ ref: this.settingsComponentCreated }),
-      div(
-        { className: "perf-description" },
-        p(null,
-          "This new recording panel is a bit different from the existing " +
-            "performance panel. It records the entire browser, and then opens up " +
-            "and shares the profile with ",
-          button(
-            // Implement links as buttons to avoid any risk of loading the link in the
-            // the panel.
-            {
-              className: "perf-external-link",
-              value: "https://perf-html.io",
-              onClick: this.handleLinkClick
-            },
-            "perf-html.io"
-          ),
-          ", a Mozilla performance analysis tool."
-        ),
-        p(null,
-          "This is still a prototype. Join along or file bugs at: ",
-          button(
-            // Implement links as buttons to avoid any risk of loading the link in the
-            // the panel.
-            {
-              className: "perf-external-link",
-              value: "https://github.com/devtools-html/perf.html",
-              onClick: this.handleLinkClick
-            },
-            "github.com/devtools-html/perf.html"
-          ),
-          "."
-        )
-      ),
-    );
-  }
 }
 
 module.exports = Perf;
@@ -412,7 +338,7 @@ function renderButton(props) {
   const nbsp = "\u00A0";
 
   return div(
-    { className: "perf-button-container" },
+    { className: "perf" },
     div({ className: "perf-additional-message" }, additionalMessage || nbsp),
     div(
       null,

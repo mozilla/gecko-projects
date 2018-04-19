@@ -9,17 +9,16 @@
 <script>
 'use strict';
 
-function doTest(idl, dom) {
+function doTest(idls) {
   var idl_array = new IdlArray();
   idl_array.add_untested_idls('interface Navigator {};');
   idl_array.add_untested_idls('interface EventTarget {};');
-  idl_array.add_untested_idls('dictionary PermissionDescriptor {};');
-  idl_array.add_untested_idls(dom, { only: ['Event', 'EventInit'] });
-  idl_array.add_idls(idl);
+  for (let idl of idls) {
+    idl_array.add_idls(idl);
+  }
   idl_array.add_objects({
     Navigator: ['navigator'],
     Clipboard: ['navigator.clipboard'],
-    ClipboardEvent: ['new ClipboardEvent("x")'],
   });
   idl_array.test();
 };
@@ -29,11 +28,7 @@ function fetchText(url) {
 }
 
 promise_test(() => {
-  return Promise.all(
-    [
-      "/interfaces/clipboard-apis.idl",
-      "/interfaces/dom.idl",
-    ].map(fetchText))
-    .then(([idl, dom]) => doTest(idl, dom));
+  return Promise.all(["/interfaces/clipboard.idl"].map(fetchText))
+    .then(doTest);
 }, "Test driver");
 </script>

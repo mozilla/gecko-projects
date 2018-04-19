@@ -44,6 +44,7 @@
 #include "mozilla/RangeBoundary.h"
 #include "nsIContentPolicy.h"
 #include "nsIDocument.h"
+#include "nsIDOMMouseEvent.h"
 #include "nsPIDOMWindow.h"
 #include "nsRFPService.h"
 
@@ -82,6 +83,7 @@ class nsIInterfaceRequestor;
 class nsIIOService;
 class nsILoadInfo;
 class nsILoadGroup;
+class nsIMessageBroadcaster;
 class nsNameSpaceManager;
 class nsIObserver;
 class nsIParser;
@@ -128,7 +130,6 @@ class EventListenerManager;
 class HTMLEditor;
 
 namespace dom {
-class ChromeMessageBroadcaster;
 struct CustomElementDefinition;
 class DocumentFragment;
 class Element;
@@ -229,8 +230,7 @@ public:
   // Check whether the caller is system if you know you're on the main thread.
   static bool IsSystemCaller(JSContext* aCx);
 
-  // Check whether the caller is system if you might be on a worker or worklet
-  // thread.
+  // Check whether the caller is system if you might be on a worker thread.
   static bool ThreadsafeIsSystemCaller(JSContext* aCx);
 
   // In the traditional Gecko architecture, both C++ code and untrusted JS code
@@ -510,6 +510,14 @@ public:
   static nsIDocument* GetSubdocumentWithOuterWindowId(nsIDocument *aDocument,
                                                       uint64_t aOuterWindowId);
 
+  static uint32_t CopyNewlineNormalizedUnicodeTo(const nsAString& aSource,
+                                                 uint32_t aSrcOffset,
+                                                 char16_t* aDest,
+                                                 uint32_t aLength,
+                                                 bool& aLastCharCR);
+
+  static uint32_t CopyNewlineNormalizedUnicodeTo(nsReadingIterator<char16_t>& aSrcStart, const nsReadingIterator<char16_t>& aSrcEnd, nsAString& aDest);
+
   static const nsDependentSubstring TrimCharsInSet(const char* aSet,
                                                    const nsAString& aValue);
 
@@ -711,7 +719,7 @@ public:
    * Returns true if |aName| is a valid name to be registered via
    * customElements.define.
    */
-  static bool IsCustomElementName(nsAtom* aName, uint32_t aNameSpaceID);
+  static bool IsCustomElementName(nsAtom* aName);
 
   static nsresult CheckQName(const nsAString& aQualifiedName,
                              bool aNamespaceAware = true,
@@ -808,7 +816,7 @@ public:
    * Method to do security and content policy checks on the image URI
    *
    * @param aURI uri of the image to be loaded
-   * @param aNode, the context the image is loaded in (eg an element)
+   * @param aContext the context the image is loaded in (eg an element)
    * @param aLoadingDocument the document we belong to
    * @param aLoadingPrincipal the principal doing the load
    * @param [aContentPolicyType=nsIContentPolicy::TYPE_INTERNAL_IMAGE] (Optional)
@@ -823,7 +831,7 @@ public:
    *         false is returned.
    */
   static bool CanLoadImage(nsIURI* aURI,
-                           nsINode* aNode,
+                           nsISupports* aContext,
                            nsIDocument* aLoadingDocument,
                            nsIPrincipal* aLoadingPrincipal,
                            int16_t* aImageBlockingStatus = nullptr,
@@ -1000,8 +1008,7 @@ public:
    *   @param classification Name of the module reporting error
    */
   static void LogSimpleConsoleError(const nsAString& aErrorText,
-                                    const char * classification,
-                                    bool aFromPrivateWindow);
+                                    const char * classification);
 
   /**
    * Report a non-localized error message to the error console.
@@ -1991,8 +1998,6 @@ public:
    * run anything else, when this function returns false, but this is ok.
    */
   static bool IsSafeToRunScript() {
-    MOZ_ASSERT(NS_IsMainThread(),
-               "This static variable only makes sense on the main thread!");
     return sScriptBlockerCount == 0;
   }
 
@@ -2047,7 +2052,11 @@ public:
   static nsresult ProcessViewportInfo(nsIDocument *aDocument,
                                       const nsAString &viewportInfo);
 
+  static nsIScriptContext* GetContextForEventHandlers(nsINode* aNode,
+                                                      nsresult* aRv);
+
   static JSContext *GetCurrentJSContext();
+  static JSContext *GetCurrentJSContextForThread();
 
   /**
    * Case insensitive comparison between two strings. However it only ignores
@@ -2103,7 +2112,7 @@ public:
 
   /**
    * This method creates and dispatches "command" event, which implements
-   * XULCommandEvent.
+   * nsIDOMXULCommandEvent.
    * If aShell is not null, dispatching goes via
    * nsIPresShell::HandleDOMEventWithTarget.
    */
@@ -2115,9 +2124,7 @@ public:
                                      bool aAlt = false,
                                      bool aShift = false,
                                      bool aMeta = false,
-                                     // Including MouseEventBinding here leads
-                                     // to incude loops, unfortunately.
-                                     uint16_t inputSource = 0 /* MouseEventBinding::MOZ_SOURCE_UNKNOWN */);
+                                     uint16_t inputSource = nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN);
 
   static bool CheckMayLoad(nsIPrincipal* aPrincipal, nsIChannel* aChannel, bool aAllowIfInheritsPrincipal);
 
@@ -2399,6 +2406,15 @@ public:
   }
 
   /**
+   * Returns true if the DOM Animations API should report a pending animation
+   * using the separate 'pending' member instead of the 'playState' member.
+   */
+  static bool AnimationsAPIPendingMemberEnabled()
+  {
+    return sAnimationsAPIPendingMemberEnabled;
+  }
+
+  /**
    * Returns true if the getBoxQuads API should be enabled.
    */
   static bool GetBoxQuadsEnabled()
@@ -2427,6 +2443,14 @@ public:
 #else
     return sBypassCSSOMOriginCheck;
 #endif
+  }
+
+  /**
+   * Returns true if the <style scoped> enabling pref is true.
+   */
+  static bool IsScopedStylePrefEnabled()
+  {
+    return sIsScopedStyleEnabled;
   }
 
   /**
@@ -2870,7 +2894,6 @@ public:
    * Synthesize a mouse event to the given widget
    * (see nsIDOMWindowUtils.sendMouseEvent).
    */
-  MOZ_CAN_RUN_SCRIPT
   static nsresult SendMouseEvent(const nsCOMPtr<nsIPresShell>& aPresShell,
                                  const nsAString& aType,
                                  float aX,
@@ -3291,8 +3314,6 @@ public:
   // Get the current number of inner or outer windows.
   static int32_t GetCurrentInnerOrOuterWindowCount() { return sInnerOrOuterWindowCount; }
 
-  static bool CanShowPopup(nsIPrincipal* aPrincipal);
-
 private:
   static bool InitializeEventTable();
 
@@ -3344,7 +3365,7 @@ private:
                                                                       mozilla::dom::AutocompleteInfo& aInfo,
                                                                       bool aGrantAllValidValue = false);
 
-  static bool CallOnAllRemoteChildren(mozilla::dom::ChromeMessageBroadcaster* aManager,
+  static bool CallOnAllRemoteChildren(nsIMessageBroadcaster* aManager,
                                       CallOnRemoteChildFunction aCallback,
                                       void* aArg);
 
@@ -3420,7 +3441,6 @@ private:
 
   static bool sIsHandlingKeyBoardEvent;
   static bool sAllowXULXBL_for_file;
-  static bool sDisablePopups;
   static bool sIsFullScreenApiEnabled;
   static bool sIsUnprefixedFullscreenApiEnabled;
   static bool sTrustedFullScreenOnly;
@@ -3438,6 +3458,7 @@ private:
   static bool sUseActivityCursor;
   static bool sAnimationsAPICoreEnabled;
   static bool sAnimationsAPIElementAnimateEnabled;
+  static bool sAnimationsAPIPendingMemberEnabled;
   static bool sGetBoxQuadsEnabled;
   static bool sSkipCursorMoveForSameValueSet;
   static bool sRequestIdleCallbackEnabled;
@@ -3448,6 +3469,7 @@ private:
 #ifndef RELEASE_OR_BETA
   static bool sBypassCSSOMOriginCheck;
 #endif
+  static bool sIsScopedStyleEnabled;
   static bool sIsBytecodeCacheEnabled;
   static int32_t sBytecodeCacheStrategy;
   static uint32_t sCookiesLifetimePolicy;

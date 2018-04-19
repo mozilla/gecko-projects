@@ -315,12 +315,12 @@ var ExtensionTestCommon = class ExtensionTestCommon {
    */
   static serializeFunction(script) {
     // Serialization of object methods doesn't include `function` anymore.
-    const method = /^(async )?(?:(\w+)|"(\w+)\.js")\(/;
+    const method = /^(async )?(\w+)\(/;
 
     let code = script.toString();
     let match = code.match(method);
     if (match && match[2] !== "function") {
-      code = code.replace(method, "$1function $2$3(");
+      code = code.replace(method, "$1function $2(");
     }
     return code;
   }

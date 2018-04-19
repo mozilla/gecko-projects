@@ -21,12 +21,6 @@
 					margin-left: 2em;
 					width: 10em
 				}
-				div.wrapper {
-					display: inline-block;
-					border: 1px solid;
-					margin: 10px;
-					padding: 10px;
-				}
 				span.attention {
 					color: red;
 				}
@@ -37,62 +31,59 @@
 		<p>
 			Test passes if each pair of upper and lower text in the square box is identical.
 		</p>
-		<div class="wrapper">
-			<div>
-				Opening brackets
+		<hr />
+		<div>
+			Opening brackets
+		</div>
+		<div class="parent">
+			<div class="no-wrap">
+				<span class="hanging">「これは、満たすための</span><br />文字です。」
 			</div>
-			<div class="parent">
-				<div class="no-wrap">
-					<span class="hanging">「これは、満たすための</span><br />文字です。」
-				</div>
-				<br />
-				<div class="no-wrap">
-					<span class="hanging">「これは、満たすための</span><br />文字です。」
-				</div>
+			<br />
+			<div class="no-wrap">
+				<span class="hanging">「これは、満たすための</span><br />文字です。」
 			</div>
 		</div>
-		<div class="wrapper">
-			<div>
-				Closing brackets
+		<hr />
+		<div>
+			Closing brackets
+		</div>
+		<div class="parent">
+			<div class="no-wrap">
+				これは、「満たす文<br />字」です。
 			</div>
-			<div class="parent">
-				<div class="no-wrap">
-					これは、「満たす文<br />字」です。
-				</div>
-				<br />
-				<div class="no-wrap">
-					これは、「満たす文<br />字」です。
-				</div>
+			<br />
+			<div class="no-wrap">
+				これは、「満たす文<br />字」です。
 			</div>
 		</div>
-		<div class="wrapper">
-			<div>
-				Initial quotes
+		<hr />
+		<div>
+			Initial quotes
+		</div>
+		<div class="parent">
+			<div class="no-wrap">
+				<span class="hanging">“これは、満たすための</span><br />文字です。”
 			</div>
-			<div class="parent">
-				<div class="no-wrap">
-					<span class="hanging">“これは、満たすための</span><br />文字です。”
-				</div>
-				<br />
-				<div class="no-wrap">
-					<span class="hanging">“これは、満たすための</span><br />文字です。”
-				</div>
+			<br />
+			<div class="no-wrap">
+				<span class="hanging">“これは、満たすための</span><br />文字です。”
 			</div>
 		</div>
-		<div class="wrapper">
-			<div>
-				Final quotes
+		<hr />
+		<div>
+			Final quotes
+		</div>
+		<div class="parent">
+			<div class="no-wrap">
+				これは、“満たす文<br />字”です。
 			</div>
-			<div class="parent">
-				<div class="no-wrap">
-					これは、“満たす文<br />字”です。
-				</div>
-				<br />
-				<div class="no-wrap">
-					これは、“満たす文<br />字”です。
-				</div>
+			<br />
+			<div class="no-wrap">
+				これは、“満たす文<br />字”です。
 			</div>
 		</div>
+		<hr />
 		<p>
 			<span class="attention">* You will need a Japanese font.</span><br />
 			If you are unable to see font glyphs for certain characters using the browsers default font, install the <a href="http://ossipedia.ipa.go.jp/ipafont/">IPA Font(http://ossipedia.ipa.go.jp/ipafont/)</a> and reload this page.

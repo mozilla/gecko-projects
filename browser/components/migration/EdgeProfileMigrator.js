@@ -109,12 +109,12 @@ EdgeTypedURLMigrator.prototype = {
 
   migrate(aCallback) {
     let typedURLs = this._typedURLs;
-    let pageInfos = [];
+    let places = [];
     for (let [urlString, time] of typedURLs) {
-      let url;
+      let uri;
       try {
-        url = new URL(urlString);
-        if (!["http", "https", "ftp"].includes(url.scheme)) {
+        uri = Services.io.newURI(urlString);
+        if (!["http", "https", "ftp"].includes(uri.scheme)) {
           continue;
         }
       } catch (ex) {
@@ -122,23 +122,29 @@ EdgeTypedURLMigrator.prototype = {
         continue;
       }
 
-      pageInfos.push({
-        url,
-        visits: [{
-          transition: PlacesUtils.history.TRANSITIONS.TYPED,
-          date: time ? PlacesUtils.toDate(time) : new Date(),
-        }],
+      // Note that the time will be in microseconds (PRTime),
+      // and Date.now() returns milliseconds. Places expects PRTime,
+      // so we multiply the Date.now return value to make up the difference.
+      let visitDate = time || (Date.now() * 1000);
+      places.push({
+        uri,
+        visits: [{ transitionType: Ci.nsINavHistoryService.TRANSITION_TYPED,
+                   visitDate}],
       });
     }
 
-    if (pageInfos.length == 0) {
+    if (places.length == 0) {
       aCallback(typedURLs.size == 0);
       return;
     }
 
-    MigrationUtils.insertVisitsWrapper(pageInfos).then(
-      () => aCallback(true),
-      () => aCallback(false));
+    MigrationUtils.insertVisitsWrapper(places, {
+      ignoreErrors: true,
+      ignoreResults: true,
+      handleCompletion(updatedCount) {
+        aCallback(updatedCount > 0);
+      },
+    });
   },
 };
 

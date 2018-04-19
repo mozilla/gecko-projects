@@ -44,7 +44,7 @@ LayerTreeOwnerTracker::Get()
 }
 
 void
-LayerTreeOwnerTracker::Map(LayersId aLayersId, base::ProcessId aProcessId)
+LayerTreeOwnerTracker::Map(uint64_t aLayersId, base::ProcessId aProcessId)
 {
   MutexAutoLock lock(mLayerIdsLock);
 
@@ -53,7 +53,7 @@ LayerTreeOwnerTracker::Map(LayersId aLayersId, base::ProcessId aProcessId)
 }
 
 void
-LayerTreeOwnerTracker::Unmap(LayersId aLayersId, base::ProcessId aProcessId)
+LayerTreeOwnerTracker::Unmap(uint64_t aLayersId, base::ProcessId aProcessId)
 {
   MutexAutoLock lock(mLayerIdsLock);
 
@@ -62,7 +62,7 @@ LayerTreeOwnerTracker::Unmap(LayersId aLayersId, base::ProcessId aProcessId)
 }
 
 bool
-LayerTreeOwnerTracker::IsMapped(LayersId aLayersId, base::ProcessId aProcessId)
+LayerTreeOwnerTracker::IsMapped(uint64_t aLayersId, base::ProcessId aProcessId)
 {
   MutexAutoLock lock(mLayerIdsLock);
 
@@ -71,7 +71,7 @@ LayerTreeOwnerTracker::IsMapped(LayersId aLayersId, base::ProcessId aProcessId)
 }
 
 void
-LayerTreeOwnerTracker::Iterate(const std::function<void(LayersId aLayersId, base::ProcessId aProcessId)>& aCallback)
+LayerTreeOwnerTracker::Iterate(const std::function<void(uint64_t aLayersId, base::ProcessId aProcessId)>& aCallback)
 {
   MutexAutoLock lock(mLayerIdsLock);
 

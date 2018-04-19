@@ -290,10 +290,6 @@ DrawTargetCaptureImpl::PushLayer(bool aOpaque,
   mPushedLayers.push_back(layer);
   DrawTarget::SetPermitSubpixelAA(aOpaque);
 
-  if (aMask) {
-    aMask->GuaranteePersistance();
-  }
-
   AppendCommand(PushLayerCommand)(aOpaque,
                                   aOpacity,
                                   aMask,

@@ -320,6 +320,7 @@ TiledLayerBufferComposite::UseTiles(const SurfaceDescriptorTiles& aTiles,
     const TexturedTileDescriptor& texturedDesc = tileDesc.get_TexturedTileDescriptor();
 
     tile.mTextureHost = TextureHost::AsTextureHost(texturedDesc.textureParent());
+    tile.mTextureHost->SetTextureSourceProvider(aLayerManager->GetCompositor());
     if (texturedDesc.readLocked()) {
       tile.mTextureHost->SetReadLocked();
     }

@@ -73,7 +73,7 @@ public:
   using NativeCallbacks::DisposeNative;
   using NativeCallbacks::AttachNative;
 
-  explicit HLSDemuxerCallbacksSupport(HLSDemuxer* aDemuxer)
+  HLSDemuxerCallbacksSupport(HLSDemuxer* aDemuxer)
     : mMutex("HLSDemuxerCallbacksSupport")
     , mDemuxer(aDemuxer)
   {

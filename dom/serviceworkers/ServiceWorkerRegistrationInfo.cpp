@@ -80,19 +80,6 @@ ServiceWorkerRegistrationInfo::Clear()
   NotifyChromeRegistrationListeners();
 }
 
-void
-ServiceWorkerRegistrationInfo::ClearAsCorrupt()
-{
-  mCorrupt = true;
-  Clear();
-}
-
-bool
-ServiceWorkerRegistrationInfo::IsCorrupt() const
-{
-  return mCorrupt;
-}
-
 ServiceWorkerRegistrationInfo::ServiceWorkerRegistrationInfo(
     const nsACString& aScope,
     nsIPrincipal* aPrincipal,
@@ -106,7 +93,6 @@ ServiceWorkerRegistrationInfo::ServiceWorkerRegistrationInfo(
   , mCreationTimeStamp(TimeStamp::Now())
   , mLastUpdateTime(0)
   , mPendingUninstall(false)
-  , mCorrupt(false)
 {}
 
 ServiceWorkerRegistrationInfo::~ServiceWorkerRegistrationInfo()
@@ -141,16 +127,6 @@ ServiceWorkerRegistrationInfo::SetPendingUninstall()
 void
 ServiceWorkerRegistrationInfo::ClearPendingUninstall()
 {
-  // If we are resurrecting an uninstalling registration, then persist
-  // it to disk again.  We preemptively removed it earlier during
-  // unregister so that closing the window by shutting down the browser
-  // results in the registration being gone on restart.
-  if (mPendingUninstall && mActiveWorker) {
-    RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
-    if (swm) {
-      swm->StoreRegistration(mPrincipal, this);
-    }
-  }
   mPendingUninstall = false;
 }
 
@@ -332,6 +308,12 @@ ServiceWorkerRegistrationInfo::Activate()
   MOZ_DIAGNOSTIC_ASSERT(mActiveWorker);
   swm->UpdateClientControllers(this);
 
+  nsCOMPtr<nsIRunnable> failRunnable = NewRunnableMethod<bool>(
+    "dom::ServiceWorkerRegistrationInfo::FinishActivate",
+    this,
+    &ServiceWorkerRegistrationInfo::FinishActivate,
+    false /* success */);
+
   nsMainThreadPtrHandle<ServiceWorkerRegistrationInfo> handle(
     new nsMainThreadPtrHolder<ServiceWorkerRegistrationInfo>(
       "ServiceWorkerRegistrationInfoProxy", this));
@@ -340,14 +322,9 @@ ServiceWorkerRegistrationInfo::Activate()
   ServiceWorkerPrivate* workerPrivate = mActiveWorker->WorkerPrivate();
   MOZ_ASSERT(workerPrivate);
   nsresult rv = workerPrivate->SendLifeCycleEvent(NS_LITERAL_STRING("activate"),
-                                                  callback);
+                                                  callback, failRunnable);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    nsCOMPtr<nsIRunnable> failRunnable = NewRunnableMethod<bool>(
-      "dom::ServiceWorkerRegistrationInfo::FinishActivate",
-      this,
-      &ServiceWorkerRegistrationInfo::FinishActivate,
-      false /* success */);
-    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(failRunnable.forget()));
+    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(failRunnable));
     return;
   }
 }
@@ -617,8 +594,12 @@ ServiceWorkerRegistrationInfo::TransitionInstallingToWaiting()
 
   NotifyChromeRegistrationListeners();
 
-  // TODO: When bug 1426401 is implemented we will need to call
-  //       StoreRegistration() here to persist the waiting worker.
+  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+  if (!swm) {
+    // browser shutdown began
+    return;
+  }
+  swm->StoreRegistration(mPrincipal, this);
 }
 
 void

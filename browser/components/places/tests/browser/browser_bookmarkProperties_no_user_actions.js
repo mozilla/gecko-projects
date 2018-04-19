@@ -20,7 +20,7 @@ add_task(async function test_change_title_from_BookmarkStar() {
   });
 
   registerCleanupFunction(async () => {
-    BrowserTestUtils.removeTab(tab);
+    await BrowserTestUtils.removeTab(tab);
     await PlacesUtils.bookmarks.eraseEverything();
   });
 

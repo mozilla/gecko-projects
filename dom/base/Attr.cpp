@@ -307,10 +307,11 @@ Attr::RemoveChildNode(nsIContent* aKid, bool aNotify)
 {
 }
 
-void
+nsresult
 Attr::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   aVisitor.mCanHandle = true;
+  return NS_OK;
 }
 
 void

@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 
-from __future__ import print_function
-
 import os, sys, json
 from common_paths import *
 import spec_validator
@@ -138,7 +136,7 @@ def generate_test_source_files(spec_json, target):
                                        spec,
                                        html_template)
                 else:
-                    print('Excluding selection:', selection_path)
+                    print 'Excluding selection:', selection_path
 
 
 def main(target, spec_filename):

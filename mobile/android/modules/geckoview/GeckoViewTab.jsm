@@ -9,9 +9,17 @@ var EXPORTED_SYMBOLS = ["GeckoViewTab"];
 ChromeUtils.import("resource://gre/modules/GeckoViewModule.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
+XPCOMUtils.defineLazyGetter(this, "dump", () =>
+    ChromeUtils.import("resource://gre/modules/AndroidLog.jsm",
+                       {}).AndroidLog.d.bind(null, "ViewTab"));
+
+// function debug(aMsg) {
+//   dump(aMsg);
+// }
+
 // Stub BrowserApp implementation for WebExtensions support.
 class GeckoViewTab extends GeckoViewModule {
-  onInit() {
+  init() {
     this.browser.tab = { id: 0, browser: this.browser };
 
     this.window.gBrowser = this.window.BrowserApp = {

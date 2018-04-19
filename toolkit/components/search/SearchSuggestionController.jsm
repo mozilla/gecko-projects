@@ -9,6 +9,7 @@ var EXPORTED_SYMBOLS = ["SearchSuggestionController"];
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "NS_ASSERT", "resource://gre/modules/debug.js");
 
 Cu.importGlobalProperties(["XMLHttpRequest"]);
 

@@ -29,6 +29,7 @@
   position: absolute;
   white-space: pre;
   cursor: text;
+  -moz-transform-origin: 0% 0%;
   transform-origin: 0% 0%;
 }
 
@@ -56,9 +57,8 @@
   background-color: rgb(0, 100, 0);
 }
 
-.textLayer ::-moz-selection { background: rgb(0,0,255); }
-
 .textLayer ::selection { background: rgb(0,0,255); }
+.textLayer ::-moz-selection { background: rgb(0,0,255); }
 
 .textLayer .endOfContent {
   display: block;
@@ -70,7 +70,6 @@
   z-index: -1;
   cursor: default;
   -moz-user-select: none;
-       user-select: none;
 }
 
 .textLayer .endOfContent.active {
@@ -210,7 +209,7 @@
 .annotationLayer .buttonWidgetAnnotation.checkBox input,
 .annotationLayer .buttonWidgetAnnotation.radioButton input {
   -moz-appearance: none;
-       appearance: none;
+  appearance: none;
   padding: 0;
 }
 
@@ -366,7 +365,6 @@ select {
   overflow: hidden;
   cursor: none;
   -moz-user-select: none;
-       user-select: none;
 }
 
 #viewerContainer.pdfPresentationMode:fullscreen {
@@ -378,7 +376,6 @@ select {
   overflow: hidden;
   cursor: none;
   -moz-user-select: none;
-       user-select: none;
 }
 
 .pdfPresentationMode:-moz-full-screen a:not(.internalLink) {
@@ -442,7 +439,6 @@ html[dir='rtl'] #sidebarContainer {
   transition-duration: 0s;
   /* Prevent e.g. the thumbnails being selected when the sidebar is resized. */
   -moz-user-select: none;
-       user-select: none;
 }
 
 #outerContainer.sidebarMoving #sidebarContainer,
@@ -668,11 +664,13 @@ html[dir='rtl'] .findbar {
 
 .findbar label {
   -moz-user-select: none;
-       user-select: none;
 }
 
 #findInput {
   width: 200px;
+}
+#findInput::-moz-placeholder {
+  font-style: italic;
 }
 #findInput::placeholder {
   font-style: italic;
@@ -935,7 +933,6 @@ html[dir='rtl'] .splitToolbarButtonSeparator {
   font-size: 12px;
   line-height: 14px;
   -moz-user-select: none;
-       user-select: none;
   /* Opera does not support user-select, use <... unselectable="on"> instead */
   cursor: default;
   transition-property: background-color, border-color, box-shadow;
@@ -1367,7 +1364,6 @@ html[dir='rtl'] .verticalToolbarSeparator {
   line-height: 14px;
   text-align: left;
   -moz-user-select: none;
-       user-select: none;
   cursor: default;
 }
 
@@ -1456,7 +1452,6 @@ a:focus > .thumbnail > .thumbnailSelectionRing,
   bottom: 0;
   overflow: auto;
   -moz-user-select: none;
-       user-select: none;
 }
 
 #outlineView {
@@ -1490,7 +1485,6 @@ html[dir='rtl'] .outlineItem > .outlineItems {
   font-size: 13px;
   line-height: 15px;
   -moz-user-select: none;
-       user-select: none;
   white-space: normal;
 }
 
@@ -1585,8 +1579,8 @@ html[dir='rtl'] .outlineItemToggler::before {
 /* TODO: file FF bug to support ::-moz-selection:window-inactive
    so we can override the opaque grey background when the window is inactive;
    see https://bugzilla.mozilla.org/show_bug.cgi?id=706209 */
-::-moz-selection { background: rgba(0,0,255,0.3); }
 ::selection { background: rgba(0,0,255,0.3); }
+::-moz-selection { background: rgba(0,0,255,0.3); }
 
 #errorWrapper {
   background: none repeat scroll 0 0 #FF5555;

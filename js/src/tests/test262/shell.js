@@ -197,7 +197,7 @@ function verifyProperty(obj, name, desc, options) {
     }
   }
 
-  assert(!failures.length, failures.join('; '));
+  assert.sameValue(failures.length, 0, failures.join('; '));
 
   if (options && options.restore) {
     Object.defineProperty(obj, name, originalDesc);

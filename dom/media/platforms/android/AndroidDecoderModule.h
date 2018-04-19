@@ -19,7 +19,7 @@ public:
   already_AddRefed<MediaDataDecoder>
   CreateAudioDecoder(const CreateDecoderParams& aParams) override;
 
-  explicit AndroidDecoderModule(CDMProxy* aProxy = nullptr);
+  AndroidDecoderModule(CDMProxy* aProxy = nullptr);
 
   bool SupportsMimeType(const nsACString& aMimeType,
                         DecoderDoctorDiagnostics* aDiagnostics) const override;

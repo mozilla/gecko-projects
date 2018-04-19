@@ -16,6 +16,7 @@ let lastTab = null;
 
 var PermissionPrompts = {
   init(libDir) {
+    Services.prefs.setBoolPref("browser.storageManager.enabled", true);
     Services.prefs.setBoolPref("media.navigator.permission.fake", true);
     Services.prefs.setBoolPref("extensions.install.requireBuiltInCerts", false);
     Services.prefs.setBoolPref("signon.rememberSignons", true);
@@ -122,7 +123,7 @@ async function closeLastTab() {
   if (!lastTab) {
     return;
   }
-  BrowserTestUtils.removeTab(lastTab);
+  await BrowserTestUtils.removeTab(lastTab);
   lastTab = null;
 }
 

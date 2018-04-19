@@ -21,8 +21,8 @@ ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://testing-common/TestUtils.jsm");
 ChromeUtils.import("resource://testing-common/ContentTask.jsm");
 
-Services
-  .mm
+Cc["@mozilla.org/globalmessagemanager;1"]
+  .getService(Ci.nsIMessageListenerManager)
   .loadFrameScript(
     "chrome://mochikit/content/tests/BrowserTestUtils/content-utils.js", true);
 
@@ -108,7 +108,7 @@ var BrowserTestUtils = {
       // We shouldn't remove the newly opened tab in the same tick.
       // Wait for the next tick here.
       await TestUtils.waitForTick();
-      BrowserTestUtils.removeTab(tab);
+      await BrowserTestUtils.removeTab(tab);
     } else {
       Services.console.logStringMessage(
         "BrowserTestUtils.withNewTab: Tab was already closed before " +
@@ -259,16 +259,11 @@ var BrowserTestUtils = {
    *        If a function, takes a URL and returns true if that's the load we're
    *        interested in. If a string, gives the URL of the load we're interested
    *        in. If not present, the first load resolves the promise.
-   * @param {optional boolean} maybeErrorPage
-   *        If true, this uses DOMContentLoaded event instead of load event.
-   *        Also wantLoad will be called with visible URL, instead of
-   *        'about:neterror?...' for error page.
    *
    * @return {Promise}
    * @resolves When a load event is triggered for the browser.
    */
-  browserLoaded(browser, includeSubFrames=false, wantLoad=null,
-                maybeErrorPage=false) {
+  browserLoaded(browser, includeSubFrames=false, wantLoad=null) {
     // Passing a url as second argument is a common mistake we should prevent.
     if (includeSubFrames && typeof includeSubFrames != "boolean") {
       throw("The second argument to browserLoaded should be a boolean.");
@@ -294,17 +289,11 @@ var BrowserTestUtils = {
 
     return new Promise(resolve => {
       let mm = browser.ownerGlobal.messageManager;
-      let eventName = maybeErrorPage
-          ? "browser-test-utils:DOMContentLoadedEvent"
-          : "browser-test-utils:loadEvent";
-      mm.addMessageListener(eventName, function onLoad(msg) {
-        // See testing/mochitest/BrowserTestUtils/content/content-utils.js for
-        // the difference between visibleURL and internalURL.
+      mm.addMessageListener("browser-test-utils:loadEvent", function onLoad(msg) {
         if (msg.target == browser && (!msg.data.subframe || includeSubFrames) &&
-            isWanted(maybeErrorPage
-                     ? msg.data.visibleURL : msg.data.internalURL)) {
-          mm.removeMessageListener(eventName, onLoad);
-          resolve(msg.data.internalURL);
+            isWanted(msg.data.url)) {
+          mm.removeMessageListener("browser-test-utils:loadEvent", onLoad);
+          resolve(msg.data.url);
         }
       });
     });
@@ -491,79 +480,44 @@ var BrowserTestUtils = {
   /**
    * Waits for the next browser window to open and be fully loaded.
    *
-   * @param aParams
-   *        {
-   *          url: A string (optional). If set, we will wait until the initial
-   *               browser in the new window has loaded a particular page.
-   *               If unset, the initial browser may or may not have finished
-   *               loading its first page when the resulting Promise resolves.
-   *          anyWindow: True to wait for the url to be loaded in any new
-   *                     window, not just the next one opened.
-   *          maybeErrorPage: See browserLoaded function.
-   *        }
+   * @param {string} initialBrowserLoaded (optional)
+   *        If set, we will wait until the initial browser in the new
+   *        window has loaded a particular page. If unset, the initial
+   *        browser may or may not have finished loading its first page
+   *        when the resulting Promise resolves.
    * @return {Promise}
    *         A Promise which resolves the next time that a DOM window
    *         opens and the delayed startup observer notification fires.
    */
-  waitForNewWindow(aParams = {}) {
-    let {
-      url = null,
-      anyWindow = false,
-      maybeErrorPage = false,
-    } = aParams;
+  async waitForNewWindow(initialBrowserLoaded=null) {
+    let win = await this.domWindowOpened();
 
-    if (anyWindow && !url) {
-      throw new Error("url should be specified if anyWindow is true");
+    let promises = [
+      TestUtils.topicObserved("browser-delayed-startup-finished",
+                              subject => subject == win),
+    ];
+
+    if (initialBrowserLoaded) {
+      await this.waitForEvent(win, "DOMContentLoaded");
+
+      let browser = win.gBrowser.selectedBrowser;
+
+      // Retrieve the given browser's current process type.
+      let process =
+        browser.isRemoteBrowser ? Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT
+                                : Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
+      if (win.gMultiProcessBrowser &&
+          !E10SUtils.canLoadURIInProcess(initialBrowserLoaded, process)) {
+        await this.waitForEvent(browser, "XULFrameLoaderCreated");
+      }
+
+      let loadPromise = this.browserLoaded(browser, false, initialBrowserLoaded);
+      promises.push(loadPromise);
     }
 
-    return new Promise(resolve => {
-      let observe = async (win, topic, data) => {
-        if (topic != "domwindowopened") {
-          return;
-        }
+    await Promise.all(promises);
 
-        if (!anyWindow) {
-          Services.ww.unregisterNotification(observe);
-        }
-
-        if (url) {
-          await this.waitForEvent(win, "DOMContentLoaded");
-
-          if (win.document.documentURI != "chrome://browser/content/browser.xul") {
-            return;
-          }
-        }
-
-        let promises = [
-          TestUtils.topicObserved("browser-delayed-startup-finished",
-                                  subject => subject == win),
-        ];
-
-        if (url) {
-          let browser = win.gBrowser.selectedBrowser;
-
-          // Retrieve the given browser's current process type.
-          let process =
-              browser.isRemoteBrowser ? Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT
-              : Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
-          if (win.gMultiProcessBrowser &&
-              !E10SUtils.canLoadURIInProcess(url, process)) {
-            await this.waitForEvent(browser, "XULFrameLoaderCreated");
-          }
-
-          let loadPromise = this.browserLoaded(browser, false, url, maybeErrorPage);
-          promises.push(loadPromise);
-        }
-
-        await Promise.all(promises);
-
-        if (anyWindow) {
-          Services.ww.unregisterNotification(observe);
-        }
-        resolve(win);
-      };
-      Services.ww.registerNotification(observe);
-    });
+    return win;
   },
 
   /**
@@ -780,29 +734,6 @@ var BrowserTestUtils = {
     }
 
     return Promise.all(promises);
-  },
-
-  /**
-   * Returns a Promise that resolves once the SessionStore information for the
-   * given tab is updated and all listeners are called.
-   *
-   * @param (tab) tab
-   *        The tab that will be removed.
-   * @returns (Promise)
-   * @resolves When the SessionStore information is updated.
-   */
-  waitForSessionStoreUpdate(tab) {
-    return new Promise(resolve => {
-      let {messageManager: mm, frameLoader} = tab.linkedBrowser;
-      mm.addMessageListener("SessionStore:update", function onMessage(msg) {
-        if (msg.targetFrameLoader == frameLoader && msg.data.isFinal) {
-          mm.removeMessageListener("SessionStore:update", onMessage);
-          // Wait for the next event tick to make sure other listeners are
-          // called.
-          TestUtils.executeSoon(() => resolve());
-        }
-      }, true);
-    });
   },
 
   /**
@@ -1079,10 +1010,7 @@ var BrowserTestUtils = {
    * @param target
    *        One of the following:
    *        - a selector string that identifies the element to target. The syntax is as
-   *          for querySelector.
-   *        - An array of selector strings. Each selector after the first
-   *          selects for an element in the iframe specified by the previous
-   *          selector.
+   *        for querySelector.
    *        - a CPOW element (for easier test-conversion).
    *        - a function to be run in the content process that returns the element to
    *        target
@@ -1117,7 +1045,7 @@ var BrowserTestUtils = {
       if (typeof target == "function") {
         targetFn = target.toString();
         target = null;
-      } else if (typeof target != "string" && !Array.isArray(target)) {
+      } else if (typeof target != "string") {
         cpowObject = target;
         target = null;
       }
@@ -1171,28 +1099,45 @@ var BrowserTestUtils = {
   },
 
   /**
-   * Removes the given tab from its parent tabbrowser.
-   * This method doesn't SessionStore etc.
+   * Removes the given tab from its parent tabbrowser and
+   * waits until its final message has reached the parent.
    *
    * @param (tab) tab
    *        The tab to remove.
    * @param (Object) options
    *        Extra options to pass to tabbrowser's removeTab method.
+   * @returns (Promise)
+   * @resolves When the tab is removed. Does not get passed a value.
    */
   removeTab(tab, options = {}) {
-    tab.ownerGlobal.gBrowser.removeTab(tab, options);
+    let tabRemoved = BrowserTestUtils.tabRemoved(tab);
+    if (!tab.closing) {
+      tab.ownerGlobal.gBrowser.removeTab(tab, options);
+    }
+    return tabRemoved;
   },
 
   /**
-   * Returns a Promise that resolves once the tab starts closing.
+   * Returns a Promise that resolves once a tab has been removed.
    *
    * @param (tab) tab
    *        The tab that will be removed.
    * @returns (Promise)
-   * @resolves When the tab starts closing. Does not get passed a value.
+   * @resolves When the tab is removed. Does not get passed a value.
    */
-  waitForTabClosing(tab) {
-    return this.waitForEvent(tab, "TabClose");
+  tabRemoved(tab) {
+    return new Promise(resolve => {
+      let {messageManager: mm, frameLoader} = tab.linkedBrowser;
+      // FIXME! We shouldn't use "SessionStore:update" to know the tab was
+      // removed.  It will be processed before other "SessionStore:update"
+      // listeners hasn't been processed.
+      mm.addMessageListener("SessionStore:update", function onMessage(msg) {
+        if (msg.targetFrameLoader == frameLoader && msg.data.isFinal) {
+          mm.removeMessageListener("SessionStore:update", onMessage);
+          TestUtils.executeSoon(() => resolve());
+        }
+      }, true);
+    });
   },
 
   /**

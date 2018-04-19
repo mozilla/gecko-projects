@@ -4,25 +4,37 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-function run_test() {
-  // TODO: Improve testing coverage for QueryToQueryString and QueryStringToQuery
 
+// Get history service
+try {
+  var histsvc = Cc["@mozilla.org/browser/nav-history-service;1"].getService(Ci.nsINavHistoryService);
+} catch (ex) {
+  do_throw("Could not get history service\n");
+}
+
+// main
+function run_test() {
+  // XXX Full testing coverage for QueriesToQueryString and
+  // QueryStringToQueries
+
+  const NHQO = Ci.nsINavHistoryQueryOptions;
   // Bug 376798
-  let query = PlacesUtils.history.getNewQuery();
-  let options = PlacesUtils.history.getNewQueryOptions();
+  var query = histsvc.getNewQuery();
   query.setFolders([PlacesUtils.bookmarks.placesRoot], 1);
-  Assert.equal(PlacesUtils.history.queryToQueryString(query, options),
+  Assert.equal(histsvc.queriesToQueryString([query], 1, histsvc.getNewQueryOptions()),
                "place:folder=PLACES_ROOT");
 
   // Bug 378828
+  var options = histsvc.getNewQueryOptions();
   options.sortingAnnotation = "test anno";
-  options.sortingMode = Ci.nsINavHistoryQueryOptions.SORT_BY_ANNOTATION_DESCENDING;
+  options.sortingMode = NHQO.SORT_BY_ANNOTATION_DESCENDING;
   var placeURI =
-    "place:folder=PLACES_ROOT&sort=" + Ci.nsINavHistoryQueryOptions.SORT_BY_ANNOTATION_DESCENDING +
+    "place:folder=PLACES_ROOT&sort=" + NHQO.SORT_BY_ANNOTATION_DESCENDING +
     "&sortingAnnotation=test%20anno";
-  Assert.equal(PlacesUtils.history.queryToQueryString(query, options), placeURI);
+  Assert.equal(histsvc.queriesToQueryString([query], 1, options),
+               placeURI);
   options = {};
-  PlacesUtils.history.queryStringToQuery(placeURI, {}, options);
+  histsvc.queryStringToQueries(placeURI, { }, {}, options);
   Assert.equal(options.value.sortingAnnotation, "test anno");
-  Assert.equal(options.value.sortingMode, Ci.nsINavHistoryQueryOptions.SORT_BY_ANNOTATION_DESCENDING);
+  Assert.equal(options.value.sortingMode, NHQO.SORT_BY_ANNOTATION_DESCENDING);
 }

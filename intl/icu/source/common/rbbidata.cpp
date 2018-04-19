@@ -267,8 +267,8 @@ void  RBBIDataWrapper::printTable(const char *heading, const RBBIStateTable *tab
 #endif
 
 
-void  RBBIDataWrapper::printData() {
 #ifdef RBBI_DEBUG
+void  RBBIDataWrapper::printData() {
     RBBIDebugPrintf("RBBI Data at %p\n", (void *)fHeader);
     RBBIDebugPrintf("   Version = {%d %d %d %d}\n", fHeader->fFormatVersion[0], fHeader->fFormatVersion[1],
                                                     fHeader->fFormatVersion[2], fHeader->fFormatVersion[3]);
@@ -285,8 +285,8 @@ void  RBBIDataWrapper::printData() {
         RBBIDebugPrintf("%c", fRuleSource[c]);
     }
     RBBIDebugPrintf("\n\n");
-#endif
 }
+#endif
 
 
 U_NAMESPACE_END

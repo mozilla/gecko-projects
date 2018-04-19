@@ -725,8 +725,8 @@ ProxyObject::trace(JSTracer* trc, JSObject* obj)
     Proxy::trace(trc, obj);
 }
 
-static JSObject*
-proxy_WeakmapKeyDelegate(JSObject* obj)
+JSObject*
+js::proxy_WeakmapKeyDelegate(JSObject* obj)
 {
     MOZ_ASSERT(obj->is<ProxyObject>());
     return obj->as<ProxyObject>().handler()->weakmapKeyDelegate(obj);
@@ -843,14 +843,15 @@ ProxyObject::renew(const BaseProxyHandler* handler, const Value& priv)
         setReservedSlot(i, UndefinedValue());
 }
 
-JSObject*
-js::InitProxyClass(JSContext* cx, Handle<GlobalObject*> global)
+JS_FRIEND_API(JSObject*)
+js::InitProxyClass(JSContext* cx, HandleObject obj)
 {
     static const JSFunctionSpec static_methods[] = {
         JS_FN("revocable",      proxy_revocable,       2, 0),
         JS_FS_END
     };
 
+    Handle<GlobalObject*> global = obj.as<GlobalObject>();
     RootedFunction ctor(cx);
     ctor = GlobalObject::createConstructor(cx, proxy, cx->names().Proxy, 2);
     if (!ctor)
@@ -858,7 +859,7 @@ js::InitProxyClass(JSContext* cx, Handle<GlobalObject*> global)
 
     if (!JS_DefineFunctions(cx, ctor, static_methods))
         return nullptr;
-    if (!JS_DefineProperty(cx, global, "Proxy", ctor, JSPROP_RESOLVING))
+    if (!JS_DefineProperty(cx, obj, "Proxy", ctor, JSPROP_RESOLVING))
         return nullptr;
 
     global->setConstructor(JSProto_Proxy, ObjectValue(*ctor));

@@ -9,13 +9,13 @@ from tests.support.asserts import (
 )
 from tests.support.inline import inline
 
+
 def add_event_listeners(element):
     element.session.execute_script("""
-        var target = arguments[0];
+        let [target] = arguments;
         window.events = [];
-        var expectedEvents = ["focus", "blur", "change"];
-        for (var i = 0; i < expectedEvents.length; i++) {
-          target.addEventListener(expectedEvents[i], function (eventObject) { window.events.push(eventObject.type) });
+        for (let expected of ["focus", "blur", "change"]) {
+          target.addEventListener(expected, ({type}) => window.events.push(type));
         }
         """, args=(element,))
 
@@ -272,6 +272,7 @@ def test_contenteditable(session):
     assert_element_has_focus(session.execute_script("return document.body"))
 
 
+
 def test_designmode(session):
     session.url = inline("foobar")
     element = session.find.css("body", all=False)
@@ -322,7 +323,7 @@ def test_resettable_element_does_not_satisfy_validation_constraints(session, typ
 
     def is_valid(element):
         return session.execute_script("""
-            var input = arguments[0];
+            let [input] = arguments;
             return input.validity.valid;
             """, args=(element,))
 
@@ -360,12 +361,12 @@ def test_scroll_into_view(session):
         """)
     element = session.find.css("input", all=False)
     assert element.property("value") == "foobar"
-    assert session.execute_script("return window.pageYOffset") == 0
+    assert session.execute_script("return window.scrollY") == 0
 
     # scroll to the bottom right of the page
     session.execute_script("""
-        var body = document.body;
-        window.scrollTo(body.scrollWidth, body.scrollHeight);
+        let {scrollWidth, scrollHeight} = document.body;
+        window.scrollTo(scrollWidth, scrollHeight);
         """)
 
     # clear and scroll back to the top of the page
@@ -375,18 +376,12 @@ def test_scroll_into_view(session):
 
     # check if element cleared is scrolled into view
     rect = session.execute_script("""
-        var input = arguments[0];
-        var rect = input.getBoundingClientRect();
-        return {"top": rect.top,
-                "left": rect.left,
-                "height": rect.height,
-                "width": rect.width};
+        let [input] = arguments;
+        return input.getBoundingClientRect();
         """, args=(element,))
     window = session.execute_script("""
-        return {"innerHeight": window.innerHeight,
-                "innerWidth": window.innerWidth,
-                "pageXOffset": window.pageXOffset,
-                "pageYOffset": window.pageYOffset};
+        let {innerHeight, innerWidth, pageXOffset, pageYOffset} = window;
+        return {innerHeight, innerWidth, pageXOffset, pageYOffset};
         """)
 
     assert rect["top"] < (window["innerHeight"] + window["pageYOffset"]) and \

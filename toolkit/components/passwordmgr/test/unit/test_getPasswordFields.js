@@ -147,7 +147,7 @@ for (let tc of TESTCASES) {
           skipEmptyFields: testcase.skipEmptyFields,
         });
 
-        if (ChromeUtils.getClassName(formLikeFromInput.rootElement) === "HTMLFormElement") {
+        if (formLikeFromInput.rootElement instanceof Ci.nsIDOMHTMLFormElement) {
           let formLikeFromForm = LoginFormFactory.createFromForm(formLikeFromInput.rootElement);
           info("Checking that the FormLike created for the <form> matches" +
                " the one from a password field");

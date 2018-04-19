@@ -19,7 +19,6 @@ info: |
     kNumber).
   ...
 includes: [byteConversionValues.js, testTypedArray.js]
-features: [TypedArray]
 ---*/
 
 testTypedArrayConversions(byteConversionValues, function(TA, value, expected, initial) {

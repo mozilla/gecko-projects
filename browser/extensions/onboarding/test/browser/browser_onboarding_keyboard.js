@@ -82,7 +82,7 @@ add_task(async function test_tour_list_keyboard_navigation() {
     await assertOverlayState(tab.linkedBrowser, expected);
   }
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });
 
 add_task(async function test_buttons_keyboard_navigation() {
@@ -104,7 +104,7 @@ add_task(async function test_buttons_keyboard_navigation() {
     await assertOverlayState(tab.linkedBrowser, expected);
   }
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });
 
 add_task(async function test_overlay_dialog_keyboard_navigation() {
@@ -133,5 +133,5 @@ add_task(async function test_overlay_dialog_keyboard_navigation() {
   await assertModalDialog(browser,
     { visible: false, keyboardFocus: true, focusedId: "onboarding-overlay-button" });
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

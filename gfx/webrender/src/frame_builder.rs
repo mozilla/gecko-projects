@@ -4,26 +4,26 @@
 
 use api::{BuiltDisplayList, ColorF, DeviceIntPoint, DeviceIntRect, DevicePixelScale};
 use api::{DeviceUintPoint, DeviceUintRect, DeviceUintSize, DocumentLayer, FontRenderMode};
-use api::{LayerRect, LayerSize, PipelineId, WorldPoint};
+use api::{LayerRect, LayerSize, PipelineId, PremultipliedColorF, WorldPoint};
 use clip::{ClipChain, ClipStore};
 use clip_scroll_node::{ClipScrollNode};
 use clip_scroll_tree::{ClipScrollNodeIndex, ClipScrollTree};
 use display_list_flattener::{DisplayListFlattener};
 use gpu_cache::GpuCache;
-use gpu_types::{ClipChainRectIndex, ClipScrollNodeData};
+use gpu_types::{ClipChainRectIndex, ClipScrollNodeData, PictureType};
 use hit_test::{HitTester, HitTestingRun};
 use internal_types::{FastHashMap};
-use picture::PictureSurface;
+use picture::{ContentOrigin};
 use prim_store::{CachedGradient, PrimitiveIndex, PrimitiveRun, PrimitiveStore};
 use profiler::{FrameProfileCounters, GpuCacheProfileCounters, TextureCacheProfileCounters};
 use render_backend::FrameId;
-use render_task::{RenderTask, RenderTaskId, RenderTaskLocation, RenderTaskTree};
+use render_task::{ClearMode, RenderTask, RenderTaskId, RenderTaskLocation, RenderTaskTree};
 use resource_cache::{ResourceCache};
 use scene::{ScenePipeline, SceneProperties};
 use std::{mem, f32};
 use std::sync::Arc;
-use tiling::{Frame, RenderPass, RenderPassKind, RenderTargetContext};
-use tiling::{ScrollbarPrimitive, SpecialRenderPasses};
+use tiling::{Frame, RenderPass, RenderPassKind, RenderTargetContext, RenderTargetKind};
+use tiling::ScrollbarPrimitive;
 use util::{self, MaxRect, WorldToLayerFastTransform};
 
 #[derive(Clone, Copy)]
@@ -32,6 +32,7 @@ use util::{self, MaxRect, WorldToLayerFastTransform};
 pub struct FrameBuilderConfig {
     pub enable_scrollbars: bool,
     pub default_font_render_mode: FontRenderMode,
+    pub debug: bool,
     pub dual_source_blending_is_supported: bool,
     pub dual_source_blending_is_enabled: bool,
 }
@@ -66,29 +67,26 @@ pub struct FrameBuildingState<'a> {
     pub resource_cache: &'a mut ResourceCache,
     pub gpu_cache: &'a mut GpuCache,
     pub cached_gradients: &'a mut [CachedGradient],
-    pub special_render_passes: &'a mut SpecialRenderPasses,
 }
 
 pub struct PictureContext<'a> {
     pub pipeline_id: PipelineId,
+    pub perform_culling: bool,
     pub prim_runs: Vec<PrimitiveRun>,
     pub original_reference_frame_index: Option<ClipScrollNodeIndex>,
     pub display_list: &'a BuiltDisplayList,
+    pub draw_text_transformed: bool,
     pub inv_world_transform: Option<WorldToLayerFastTransform>,
-    pub apply_local_clip_rect: bool,
-    pub inflation_factor: f32,
 }
 
 pub struct PictureState {
     pub tasks: Vec<RenderTaskId>,
-    pub has_non_root_coord_system: bool,
 }
 
 impl PictureState {
     pub fn new() -> PictureState {
         PictureState {
             tasks: Vec::new(),
-            has_non_root_coord_system: false,
         }
     }
 }
@@ -127,6 +125,7 @@ impl FrameBuilder {
             config: FrameBuilderConfig {
                 enable_scrollbars: false,
                 default_font_render_mode: FontRenderMode::Mono,
+                debug: false,
                 dual_source_blending_is_enabled: true,
                 dual_source_blending_is_supported: false,
             },
@@ -161,7 +160,6 @@ impl FrameBuilder {
         resource_cache: &mut ResourceCache,
         gpu_cache: &mut GpuCache,
         render_tasks: &mut RenderTaskTree,
-        special_render_passes: &mut SpecialRenderPasses,
         profile_counters: &mut FrameProfileCounters,
         device_pixel_scale: DevicePixelScale,
         scene_properties: &SceneProperties,
@@ -170,7 +168,7 @@ impl FrameBuilder {
     ) -> Option<RenderTaskId> {
         profile_scope!("cull");
 
-        if self.prim_store.pictures.is_empty() {
+        if self.prim_store.cpu_pictures.is_empty() {
             return None
         }
 
@@ -199,18 +197,17 @@ impl FrameBuilder {
             local_clip_rects,
             resource_cache,
             gpu_cache,
-            special_render_passes,
             cached_gradients: &mut self.cached_gradients,
         };
 
         let pic_context = PictureContext {
             pipeline_id: root_clip_scroll_node.pipeline_id,
-            prim_runs: mem::replace(&mut self.prim_store.pictures[0].runs, Vec::new()),
+            perform_culling: true,
+            prim_runs: mem::replace(&mut self.prim_store.cpu_pictures[0].runs, Vec::new()),
             original_reference_frame_index: None,
             display_list,
+            draw_text_transformed: true,
             inv_world_transform: None,
-            apply_local_clip_rect: true,
-            inflation_factor: 0.0,
         };
 
         let mut pic_state = PictureState::new();
@@ -223,18 +220,22 @@ impl FrameBuilder {
             &mut frame_state,
         );
 
-        let pic = &mut self.prim_store.pictures[0];
+        let pic = &mut self.prim_store.cpu_pictures[0];
         pic.runs = pic_context.prim_runs;
 
         let root_render_task = RenderTask::new_picture(
             RenderTaskLocation::Fixed(frame_context.screen_rect),
             PrimitiveIndex(0),
-            DeviceIntPoint::zero(),
+            RenderTargetKind::Color,
+            ContentOrigin::Screen(DeviceIntPoint::zero()),
+            PremultipliedColorF::TRANSPARENT,
+            ClearMode::Transparent,
             pic_state.tasks,
+            PictureType::Image,
         );
 
         let render_task_id = frame_state.render_tasks.add(root_render_task);
-        pic.surface = Some(PictureSurface::RenderTask(render_task_id));
+        pic.surface = Some(render_task_id);
         Some(render_task_id)
     }
 
@@ -297,7 +298,7 @@ impl FrameBuilder {
 
         let mut node_data = Vec::with_capacity(clip_scroll_tree.nodes.len());
         let total_prim_runs =
-            self.prim_store.pictures.iter().fold(1, |count, pic| count + pic.runs.len());
+            self.prim_store.cpu_pictures.iter().fold(1, |count, ref pic| count + pic.runs.len());
         let mut clip_chain_local_clip_rects = Vec::with_capacity(total_prim_runs);
         clip_chain_local_clip_rects.push(LayerRect::max_rect());
 
@@ -314,10 +315,7 @@ impl FrameBuilder {
 
         self.update_scroll_bars(clip_scroll_tree, gpu_cache);
 
-        let mut render_tasks = RenderTaskTree::new(frame_id);
-
-        let screen_size = self.screen_rect.size.to_i32();
-        let mut special_render_passes = SpecialRenderPasses::new(&screen_size);
+        let mut render_tasks = RenderTaskTree::new();
 
         let main_render_task_id = self.build_layer_screen_rects_and_cull_layers(
             clip_scroll_tree,
@@ -325,7 +323,6 @@ impl FrameBuilder {
             resource_cache,
             gpu_cache,
             &mut render_tasks,
-            &mut special_render_passes,
             &mut profile_counters,
             device_pixel_scale,
             scene_properties,
@@ -333,14 +330,8 @@ impl FrameBuilder {
             &node_data,
         );
 
-        resource_cache.block_until_all_resources_added(gpu_cache,
-                                                       &mut render_tasks,
-                                                       texture_cache_profile);
-
-        let mut passes = vec![
-            special_render_passes.alpha_glyph_pass,
-            special_render_passes.color_glyph_pass,
-        ];
+        let mut passes = Vec::new();
+        resource_cache.block_until_all_resources_added(gpu_cache, texture_cache_profile);
 
         if let Some(main_render_task_id) = main_render_task_id {
             let mut required_pass_count = 0;
@@ -350,14 +341,14 @@ impl FrameBuilder {
             // Do the allocations now, assigning each tile's tasks to a render
             // pass and target as required.
             for _ in 0 .. required_pass_count - 1 {
-                passes.push(RenderPass::new_off_screen(screen_size));
+                passes.push(RenderPass::new_off_screen(self.screen_rect.size.to_i32()));
             }
-            passes.push(RenderPass::new_main_framebuffer(screen_size));
+            passes.push(RenderPass::new_main_framebuffer(self.screen_rect.size.to_i32()));
 
             render_tasks.assign_to_passes(
                 main_render_task_id,
                 required_pass_count - 1,
-                &mut passes[2..],
+                &mut passes,
             );
         }
 
@@ -367,7 +358,7 @@ impl FrameBuilder {
                                        self.config.dual_source_blending_is_supported;
 
         for pass in &mut passes {
-            let mut ctx = RenderTargetContext {
+            let ctx = RenderTargetContext {
                 device_pixel_scale,
                 prim_store: &self.prim_store,
                 resource_cache,
@@ -378,7 +369,7 @@ impl FrameBuilder {
             };
 
             pass.build(
-                &mut ctx,
+                &ctx,
                 gpu_cache,
                 &mut render_tasks,
                 &mut deferred_resolves,
@@ -392,7 +383,7 @@ impl FrameBuilder {
 
         let gpu_cache_frame_id = gpu_cache.end_frame(gpu_cache_profile);
 
-        render_tasks.write_task_data();
+        render_tasks.build();
 
         resource_cache.end_frame();
 
@@ -417,7 +408,7 @@ impl FrameBuilder {
     pub fn create_hit_tester(&mut self, clip_scroll_tree: &ClipScrollTree) -> HitTester {
         HitTester::new(
             &self.hit_testing_runs,
-            clip_scroll_tree,
+            &clip_scroll_tree,
             &self.clip_store
         )
     }

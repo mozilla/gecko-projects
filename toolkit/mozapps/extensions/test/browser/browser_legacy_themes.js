@@ -7,6 +7,7 @@ add_task(async function() {
     "special-powers@mozilla.org",
     "mochikit@mozilla.org",
     "workerbootstrap-test@mozilla.org",
+    "worker-test@mozilla.org",
   ];
 
   let exceptions = Services.prefs.getCharPref("extensions.legacy.exceptions");
@@ -72,7 +73,7 @@ add_task(async function() {
   button.click();
   let tab = await tabPromise;
   ok(true, "Find a replacement button opened SUMO page");
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 
   await close_manager(mgrWin);
 });

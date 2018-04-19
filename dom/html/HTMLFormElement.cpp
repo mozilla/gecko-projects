@@ -151,6 +151,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(HTMLFormElement,
                                              nsGenericHTMLElement,
+                                             nsIDOMHTMLFormElement,
                                              nsIForm,
                                              nsIWebProgressListener,
                                              nsIRadioGroupContainer)
@@ -314,7 +315,7 @@ static void
 CollectOrphans(nsINode* aRemovalRoot,
                const nsTArray<nsGenericHTMLFormElement*>& aArray
 #ifdef DEBUG
-               , HTMLFormElement* aThisForm
+               , nsIDOMHTMLFormElement* aThisForm
 #endif
                )
 {
@@ -348,7 +349,8 @@ CollectOrphans(nsINode* aRemovalRoot,
 
 #ifdef DEBUG
     if (!removed) {
-      HTMLFormElement* form = node->GetForm();
+      nsCOMPtr<nsIDOMHTMLFormElement> form;
+      node->GetForm(getter_AddRefs(form));
       NS_ASSERTION(form == aThisForm, "How did that happen?");
     }
 #endif /* DEBUG */
@@ -359,7 +361,7 @@ static void
 CollectOrphans(nsINode* aRemovalRoot,
                const nsTArray<HTMLImageElement*>& aArray
 #ifdef DEBUG
-               , HTMLFormElement* aThisForm
+               , nsIDOMHTMLFormElement* aThisForm
 #endif
                )
 {
@@ -388,7 +390,7 @@ CollectOrphans(nsINode* aRemovalRoot,
 
 #ifdef DEBUG
     if (!removed) {
-      HTMLFormElement* form = node->GetForm();
+      nsCOMPtr<nsIDOMHTMLFormElement> form = node->GetForm();
       NS_ASSERTION(form == aThisForm, "How did that happen?");
     }
 #endif /* DEBUG */
@@ -439,7 +441,7 @@ HTMLFormElement::UnbindFromTree(bool aDeep, bool aNullParent)
   ForgetCurrentSubmission();
 }
 
-void
+nsresult
 HTMLFormElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   aVisitor.mWantsWillHandleEvent = true;
@@ -448,7 +450,7 @@ HTMLFormElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
     if (msg == eFormSubmit) {
       if (mGeneratingSubmit) {
         aVisitor.mCanHandle = false;
-        return;
+        return NS_OK;
       }
       mGeneratingSubmit = true;
 
@@ -459,15 +461,15 @@ HTMLFormElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
     } else if (msg == eFormReset) {
       if (mGeneratingReset) {
         aVisitor.mCanHandle = false;
-        return;
+        return NS_OK;
       }
       mGeneratingReset = true;
     }
   }
-  nsGenericHTMLElement::GetEventTargetParent(aVisitor);
+  return nsGenericHTMLElement::GetEventTargetParent(aVisitor);
 }
 
-void
+nsresult
 HTMLFormElement::WillHandleEvent(EventChainPostVisitor& aVisitor)
 {
   // If this is the bubble stage and there is a nested form below us which
@@ -479,6 +481,7 @@ HTMLFormElement::WillHandleEvent(EventChainPostVisitor& aVisitor)
       aVisitor.mEvent->mOriginalTarget != static_cast<nsIContent*>(this)) {
     aVisitor.mEvent->StopPropagation();
   }
+  return NS_OK;
 }
 
 nsresult
@@ -979,7 +982,7 @@ HTMLFormElement::NotifySubmitObservers(nsIURI* aActionURL,
       nsCOMPtr<nsIFormSubmitObserver> formSubmitObserver(
                       do_QueryInterface(inst));
       if (formSubmitObserver) {
-        rv = formSubmitObserver->Notify(static_cast<nsIContent*>(this),
+        rv = formSubmitObserver->Notify(this,
                                         window ? window->GetCurrentInnerWindow() : nullptr,
                                         aActionURL,
                                         aCancelSubmit);
@@ -1448,7 +1451,8 @@ HTMLFormElement::RemoveElementFromTableInternal(
 
   list->RemoveElement(aChild);
 
-  uint32_t length = list->Length();
+  uint32_t length = 0;
+  list->GetLength(&length);
 
   if (!length) {
     // If the list is empty we remove if from our hash, this shouldn't
@@ -1623,11 +1627,11 @@ HTMLFormElement::GetActionURL(nsIURI** aActionURL,
                  "The originating element must be a submit form control!");
 #endif // DEBUG
 
-    HTMLInputElement* inputElement = HTMLInputElement::FromNode(aOriginatingElement);
+    HTMLInputElement* inputElement = HTMLInputElement::FromContent(aOriginatingElement);
     if (inputElement) {
       inputElement->GetFormAction(action);
     } else {
-      auto buttonElement = HTMLButtonElement::FromNode(aOriginatingElement);
+      auto buttonElement = HTMLButtonElement::FromContent(aOriginatingElement);
       if (buttonElement) {
         buttonElement->GetFormAction(action);
       } else {
@@ -1746,8 +1750,7 @@ HTMLFormElement::GetActionURL(nsIURI** aActionURL,
                         0, // aLineNumber
                         0, // aColumnNumber
                         nsIScriptError::warningFlag, "CSP",
-                        document->InnerWindowID(),
-                        !!document->NodePrincipal()->OriginAttributesRef().mPrivateBrowsingId);
+                        document->InnerWindowID());
   }
 
   //
@@ -1977,7 +1980,7 @@ HTMLFormElement::CheckValidFormSubmission()
         observer = do_QueryInterface(inst);
 
         if (observer) {
-          observer->NotifyInvalidSubmit(static_cast<nsIContent*>(this),
+          observer->NotifyInvalidSubmit(this,
                                         static_cast<nsIArray*>(invalidElements));
         }
       }
@@ -2187,7 +2190,8 @@ HTMLFormElement::GetNextRadioButton(const nsAString& aName,
     return NS_ERROR_FAILURE;
   }
 
-  uint32_t numRadios = radioGroup->Length();
+  uint32_t numRadios;
+  radioGroup->GetLength(&numRadios);
   RefPtr<HTMLInputElement> radio;
 
   bool isRadio = false;
@@ -2200,7 +2204,7 @@ HTMLFormElement::GetNextRadioButton(const nsAString& aName,
     else if (++index >= (int32_t)numRadios) {
       index = 0;
     }
-    radio = HTMLInputElement::FromNodeOrNull(radioGroup->Item(index));
+    radio = HTMLInputElement::FromContentOrNull(radioGroup->Item(index));
     isRadio = radio && radio->ControlType() == NS_FORM_INPUT_RADIO;
     if (!isRadio) {
       continue;
@@ -2257,13 +2261,15 @@ HTMLFormElement::WalkRadioGroup(const nsAString& aName,
     return NS_OK;
   }
 
-  nsCOMPtr<nsINodeList> nodeList = do_QueryInterface(item);
+  nsCOMPtr<nsIDOMNodeList> nodeList = do_QueryInterface(item);
   if (!nodeList) {
     return NS_OK;
   }
-  uint32_t length = nodeList->Length();
+  uint32_t length = 0;
+  nodeList->GetLength(&length);
   for (uint32_t i = 0; i < length; i++) {
-    nsIContent* node = nodeList->Item(i);
+    nsCOMPtr<nsIDOMNode> node;
+    nodeList->Item(i, getter_AddRefs(node));
     nsCOMPtr<nsIFormControl> formControl = do_QueryInterface(node);
     if (formControl && formControl->ControlType() == NS_FORM_INPUT_RADIO &&
         !aVisitor->Visit(formControl)) {

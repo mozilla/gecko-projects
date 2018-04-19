@@ -13,6 +13,7 @@ add_task(async function() {
   let prefs = await openPreferencesViaOpenPreferencesAPI("paneGeneral", {leaveOpen: true});
   is(prefs.selectedPane, "paneGeneral", "General pane was selected");
 
+  // eslint-disable-next-line mozilla/no-cpows-in-tests
   let doc = gBrowser.contentDocument;
   let useRecommendedPerformanceSettings = doc.querySelector("#useRecommendedPerformanceSettings");
 
@@ -71,13 +72,14 @@ add_task(async function() {
   is(performanceSettings.hidden, false, "performance settings section should be still shown");
 
   Services.prefs.setBoolPref("browser.preferences.defaultPerformanceSettings.enabled", true);
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
 add_task(async function() {
   let prefs = await openPreferencesViaOpenPreferencesAPI("paneGeneral", {leaveOpen: true});
   is(prefs.selectedPane, "paneGeneral", "General pane was selected");
 
+  // eslint-disable-next-line mozilla/no-cpows-in-tests
   let doc = gBrowser.contentDocument;
   let useRecommendedPerformanceSettings = doc.querySelector("#useRecommendedPerformanceSettings");
   let allowHWAccel = doc.querySelector("#allowHWAccel");
@@ -96,13 +98,14 @@ add_task(async function() {
   is(performanceSettings.hidden, true, "performance settings section should be still shown");
 
   Services.prefs.setBoolPref("browser.preferences.defaultPerformanceSettings.enabled", true);
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
 add_task(async function() {
   let prefs = await openPreferencesViaOpenPreferencesAPI("paneGeneral", {leaveOpen: true});
   is(prefs.selectedPane, "paneGeneral", "General pane was selected");
 
+  // eslint-disable-next-line mozilla/no-cpows-in-tests
   let doc = gBrowser.contentDocument;
   let performanceSettings = doc.querySelector("#performanceSettings");
 
@@ -113,7 +116,7 @@ add_task(async function() {
   is(performanceSettings.hidden, false, "performance settings section should be shown");
 
   Services.prefs.setBoolPref("browser.preferences.defaultPerformanceSettings.enabled", true);
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
 add_task(async function() {
@@ -122,6 +125,7 @@ add_task(async function() {
   let prefs = await openPreferencesViaOpenPreferencesAPI("paneGeneral", {leaveOpen: true});
   is(prefs.selectedPane, "paneGeneral", "General pane was selected");
 
+  // eslint-disable-next-line mozilla/no-cpows-in-tests
   let doc = gBrowser.contentDocument;
 
   let performanceSettings = doc.querySelector("#performanceSettings");
@@ -132,7 +136,7 @@ add_task(async function() {
   is(contentProcessCount.selectedItem.value, 7, "selected item should be 7");
 
   Services.prefs.setBoolPref("browser.preferences.defaultPerformanceSettings.enabled", true);
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
 add_task(async function() {
@@ -141,6 +145,7 @@ add_task(async function() {
   let prefs = await openPreferencesViaOpenPreferencesAPI("paneGeneral", {leaveOpen: true});
   is(prefs.selectedPane, "paneGeneral", "General pane was selected");
 
+  // eslint-disable-next-line mozilla/no-cpows-in-tests
   let doc = gBrowser.contentDocument;
 
   let performanceSettings = doc.querySelector("#performanceSettings");
@@ -152,5 +157,5 @@ add_task(async function() {
   ok(!allowHWAccel.checked, "checkbox should not be checked");
 
   Services.prefs.setBoolPref("browser.preferences.defaultPerformanceSettings.enabled", true);
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });

@@ -147,7 +147,7 @@ SVGScriptElement::FreezeExecutionAttrs(nsIDocument* aOwnerDoc)
   if (mStringAttributes[HREF].IsExplicitlySet() ||
       mStringAttributes[XLINK_HREF].IsExplicitlySet()) {
     // variation of this code in nsHTMLScriptElement - check if changes
-    // need to be transferred when modifying
+    // need to be transfered when modifying
     bool isHref = false;
     nsAutoString src;
     if (mStringAttributes[HREF].IsExplicitlySet()) {

@@ -7,7 +7,6 @@
 #ifndef mozilla_gfx_ipc_CompositorWidgetVsyncObserver_h
 #define mozilla_gfx_ipc_CompositorWidgetVsyncObserver_h
 
-#include "mozilla/layers/LayersTypes.h"
 #include "mozilla/VsyncDispatcher.h"
 
 namespace mozilla {
@@ -23,13 +22,13 @@ class CompositorWidgetVsyncObserver : public VsyncObserver
 
  public:
   CompositorWidgetVsyncObserver(RefPtr<VsyncBridgeChild> aVsyncBridge,
-                                const layers::LayersId& aRootLayerTreeId);
+                                const uint64_t& aRootLayerTreeId);
 
   bool NotifyVsync(TimeStamp aVsyncTimestamp) override;
 
  private:
   RefPtr<VsyncBridgeChild> mVsyncBridge;
-  layers::LayersId mRootLayerTreeId;
+  uint64_t mRootLayerTreeId;
 };
 
 } // namespace widget

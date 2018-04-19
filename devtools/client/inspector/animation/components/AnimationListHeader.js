@@ -10,47 +10,24 @@ const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 
 const AnimationTimelineTickList = createFactory(require("./AnimationTimelineTickList"));
-const CurrentTimeScrubberController =
-  createFactory(require("./CurrentTimeScrubberController"));
 
 class AnimationListHeader extends PureComponent {
   static get propTypes() {
     return {
-      addAnimationsCurrentTimeListener: PropTypes.func.isRequired,
-      removeAnimationsCurrentTimeListener: PropTypes.func.isRequired,
-      setAnimationsCurrentTime: PropTypes.func.isRequired,
       timeScale: PropTypes.object.isRequired,
     };
   }
 
   render() {
-    const {
-      addAnimationsCurrentTimeListener,
-      removeAnimationsCurrentTimeListener,
-      setAnimationsCurrentTime,
-      timeScale,
-    } = this.props;
+    const { timeScale } = this.props;
 
     return dom.div(
       {
-        className: "animation-list-header"
+        className: "animation-list-header devtools-toolbar"
       },
-      dom.div(
-        {
-          className: "devtools-toolbar"
-        }
-      ),
       AnimationTimelineTickList(
         {
           timeScale
-        }
-      ),
-      CurrentTimeScrubberController(
-        {
-          addAnimationsCurrentTimeListener,
-          removeAnimationsCurrentTimeListener,
-          setAnimationsCurrentTime,
-          timeScale,
         }
       )
     );

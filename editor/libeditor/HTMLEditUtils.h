@@ -50,6 +50,7 @@ public:
   static bool IsNamedAnchor(nsINode* aNode);
   static bool IsDiv(nsIDOMNode* aNode);
   static bool IsMozDiv(nsINode* aNode);
+  static bool IsMozDiv(nsIDOMNode* aNode);
   static bool IsMailCite(nsINode* aNode);
   static bool IsMailCite(nsIDOMNode* aNode);
   static bool IsFormWidget(nsINode* aNode);

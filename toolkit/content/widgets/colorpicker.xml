@@ -107,7 +107,7 @@
       -->
     </content>
 
-    <implementation>
+    <implementation implements="nsIDOMEventListener">
       <property name="color">
         <getter><![CDATA[
           return this.mSelectedCell ? this.mSelectedCell.getAttribute("color") : null;

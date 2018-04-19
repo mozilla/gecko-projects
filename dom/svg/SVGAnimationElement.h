@@ -62,6 +62,9 @@ public:
                                 nsIPrincipal* aSubjectPrincipal,
                                 bool aNotify) override;
 
+  const nsAttrValue* GetAnimAttr(nsAtom* aName) const;
+  bool GetAnimAttr(nsAtom* aAttName, nsAString& aResult) const;
+  bool HasAnimAttr(nsAtom* aAttName) const;
   Element* GetTargetElementContent();
   virtual bool GetTargetAttributeName(int32_t* aNamespaceID,
                                       nsAtom** aLocalName) const;

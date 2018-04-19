@@ -10,6 +10,8 @@ const CONTAINER_URL = "chrome://devtools/content/responsive.html/index.xhtml";
 
 const { TabStateFlusher } =
   ChromeUtils.import("resource:///modules/sessionstore/TabStateFlusher.jsm", {});
+const SessionStore =
+  Cc["@mozilla.org/browser/sessionstore;1"].getService(Ci.nsISessionStore);
 const { OUTER_FRAME_LOADER_SYMBOL } =
   require("devtools/client/responsive.html/browser/tunnel");
 
@@ -28,7 +30,7 @@ function flushContainerTabState(tab) {
   });
 }
 
-add_task(async function() {
+add_task(async function () {
   // Load test URL
   let tab = await addTab(TEST_URL);
   let browser = tab.linkedBrowser;

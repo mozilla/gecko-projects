@@ -10,7 +10,6 @@
 #include "IDBFileHandle.h"
 #include "IDBMutableFile.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/Mutex.h"
 #include "nsIAsyncInputStream.h"
 #include "nsICloneableInputStream.h"
 #include "nsIIPCSerializableInputStream.h"
@@ -37,10 +36,7 @@ class StreamWrapper final
   bool mFinished;
 
   // This is needed to call OnInputStreamReady() with the correct inputStream.
-  // It is protected by mutex.
   nsCOMPtr<nsIInputStreamCallback> mAsyncWaitCallback;
-
-  Mutex mMutex;
 
 public:
   StreamWrapper(nsIInputStream* aInputStream,
@@ -49,7 +45,6 @@ public:
     , mInputStream(aInputStream)
     , mFileHandle(aFileHandle)
     , mFinished(false)
-    , mMutex("StreamWrapper::mMutex")
   {
     AssertIsOnOwningThread();
     MOZ_ASSERT(aInputStream);
@@ -360,18 +355,17 @@ StreamWrapper::AsyncWait(nsIInputStreamCallback* aCallback,
     return NS_ERROR_NO_INTERFACE;
   }
 
-  nsCOMPtr<nsIInputStreamCallback> callback = aCallback ? this : nullptr;
-  {
-    MutexAutoLock lock(mMutex);
-
-    if (mAsyncWaitCallback && aCallback) {
-      return NS_ERROR_FAILURE;
-    }
-
-    mAsyncWaitCallback = aCallback;
+  if (mAsyncWaitCallback && aCallback) {
+    return NS_ERROR_FAILURE;
   }
 
-  return stream->AsyncWait(callback, aFlags, aRequestedCount, aEventTarget);
+  mAsyncWaitCallback = aCallback;
+
+  if (!mAsyncWaitCallback) {
+    return NS_OK;
+  }
+
+  return stream->AsyncWait(this, aFlags, aRequestedCount, aEventTarget);
 }
 
 // nsIInputStreamCallback
@@ -384,19 +378,14 @@ StreamWrapper::OnInputStreamReady(nsIAsyncInputStream* aStream)
     return NS_ERROR_NO_INTERFACE;
   }
 
-  nsCOMPtr<nsIInputStreamCallback> callback;
-  {
-    MutexAutoLock lock(mMutex);
-
-    // We have been canceled in the meanwhile.
-    if (!mAsyncWaitCallback) {
-      return NS_OK;
-    }
-
-    callback.swap(mAsyncWaitCallback);
+  // We have been canceled in the meanwhile.
+  if (!mAsyncWaitCallback) {
+    return NS_OK;
   }
 
-  MOZ_ASSERT(callback);
+  nsCOMPtr<nsIInputStreamCallback> callback;
+  callback.swap(mAsyncWaitCallback);
+
   return callback->OnInputStreamReady(this);
 }
 

@@ -60,7 +60,7 @@ available through ``this.extension.manifest``:
 
 .. code-block:: js
 
-   this.myapi = class extends ExtensionAPI {
+   class myapi extends ExtensionAPI {
      onManifestEntry(name) {
        let value = this.extension.manifest.my_api_property;
        /* do something with value... */

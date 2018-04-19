@@ -7,7 +7,7 @@
  * Tests if JSON responses with unusal/custom MIME types are handled correctly.
  */
 
-add_task(async function() {
+add_task(async function () {
   let { tab, monitor } = await initNetMonitor(JSON_CUSTOM_MIME_URL);
   info("Starting test... ");
 
@@ -21,11 +21,14 @@ add_task(async function() {
 
   store.dispatch(Actions.batchEnable(false));
 
-  // Execute requests.
-  await performRequests(monitor, tab, 1);
+  let wait = waitForNetworkEvents(monitor, 1);
+  await ContentTask.spawn(tab.linkedBrowser, {}, async function () {
+    content.wrappedJSObject.performRequests();
+  });
+  await wait;
 
   let requestItem = document.querySelector(".request-list-item");
-  let requestsListStatus = requestItem.querySelector(".status-code");
+  let requestsListStatus = requestItem.querySelector(".requests-list-status");
   EventUtils.sendMouseEvent({ type: "mouseover" }, requestsListStatus);
   await waitUntil(() => requestsListStatus.title);
 
@@ -45,7 +48,8 @@ add_task(async function() {
     });
 
   wait = waitForDOM(document, "#response-panel .CodeMirror-code");
-  store.dispatch(Actions.toggleNetworkDetails());
+  EventUtils.sendMouseEvent({ type: "click" },
+    document.querySelector(".network-details-panel-toggle"));
   EventUtils.sendMouseEvent({ type: "click" },
     document.querySelector("#response-tab"));
   await wait;

@@ -315,6 +315,38 @@ Assembler::bind(RepatchLabel* label)
 }
 
 void
+Assembler::bindLater(Label* label, wasm::OldTrapDesc target)
+{
+    if (label->used()) {
+        BufferOffset b(label);
+        do {
+            append(wasm::OldTrapSite(target, b.getOffset()));
+            b = NextLink(b);
+        } while (b.assigned());
+    }
+    label->reset();
+}
+
+void
+Assembler::trace(JSTracer* trc)
+{
+    for (size_t i = 0; i < pendingJumps_.length(); i++) {
+        RelativePatch& rp = pendingJumps_[i];
+        if (rp.kind == Relocation::JITCODE) {
+            JitCode* code = JitCode::FromExecutable((uint8_t*)rp.target);
+            TraceManuallyBarrieredEdge(trc, &code, "masmrel32");
+            MOZ_ASSERT(code == JitCode::FromExecutable((uint8_t*)rp.target));
+        }
+    }
+
+    // TODO: Trace.
+#if 0
+    if (tmpDataRelocations_.length())
+        ::TraceDataRelocations(trc, &armbuffer_, &tmpDataRelocations_);
+#endif
+}
+
+void
 Assembler::addJumpRelocation(BufferOffset src, Relocation::Kind reloc)
 {
     // Only JITCODE relocations are patchable at runtime.
@@ -359,7 +391,7 @@ Assembler::addPatchableJump(BufferOffset src, Relocation::Kind reloc)
 }
 
 void
-PatchJump(CodeLocationJump& jump_, CodeLocationLabel label)
+PatchJump(CodeLocationJump& jump_, CodeLocationLabel label, ReprotectCode reprotect)
 {
     MOZ_CRASH("PatchJump");
 }
@@ -573,11 +605,9 @@ Assembler::TraceJumpRelocations(JSTracer* trc, JitCode* code, CompactBufferReade
     }
 }
 
-/* static */ void
-Assembler::TraceDataRelocations(JSTracer* trc, JitCode* code, CompactBufferReader& reader)
+static void
+TraceDataRelocations(JSTracer* trc, uint8_t* buffer, CompactBufferReader& reader)
 {
-    uint8_t* buffer = code->raw();
-
     while (reader.more()) {
         size_t offset = reader.readUnsigned();
         Instruction* load = (Instruction*)&buffer[offset];
@@ -610,6 +640,50 @@ Assembler::TraceDataRelocations(JSTracer* trc, JitCode* code, CompactBufferReade
 
         // TODO: Flush caches at end?
     }
+}
+
+void
+Assembler::TraceDataRelocations(JSTracer* trc, JitCode* code, CompactBufferReader& reader)
+{
+    ::TraceDataRelocations(trc, code->raw(), reader);
+}
+
+void
+Assembler::FixupNurseryObjects(JSContext* cx, JitCode* code, CompactBufferReader& reader,
+                               const ObjectVector& nurseryObjects)
+{
+
+    MOZ_ASSERT(!nurseryObjects.empty());
+
+    uint8_t* buffer = code->raw();
+    bool hasNurseryPointers = false;
+
+    while (reader.more()) {
+        size_t offset = reader.readUnsigned();
+        Instruction* ins = (Instruction*)&buffer[offset];
+
+        uintptr_t* literalAddr = ins->LiteralAddress<uintptr_t*>();
+        uintptr_t literal = *literalAddr;
+
+        if (literal >> JSVAL_TAG_SHIFT)
+            continue; // This is a Value.
+
+        if (!(literal & 0x1))
+            continue;
+
+        uint32_t index = literal >> 1;
+        JSObject* obj = nurseryObjects[index];
+        *literalAddr = uintptr_t(obj);
+
+        // Either all objects are still in the nursery, or all objects are tenured.
+        MOZ_ASSERT_IF(hasNurseryPointers, IsInsideNursery(obj));
+
+        if (!hasNurseryPointers && IsInsideNursery(obj))
+            hasNurseryPointers = true;
+    }
+
+    if (hasNurseryPointers)
+        cx->zone()->group()->storeBuffer().putWholeCell(code);
 }
 
 void

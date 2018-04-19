@@ -378,7 +378,7 @@ class TraceLoggerThreadState
 #endif
 
     bool enabledTextIds[TraceLogger_Last];
-    bool mainThreadEnabled;
+    bool cooperatingThreadEnabled;
     bool helperThreadEnabled;
     bool graphSpewingEnabled;
     bool spewErrors;
@@ -405,7 +405,7 @@ class TraceLoggerThreadState
 #ifdef DEBUG
         initialized(false),
 #endif
-        mainThreadEnabled(false),
+        cooperatingThreadEnabled(false),
         helperThreadEnabled(false),
         graphSpewingEnabled(false),
         spewErrors(false),

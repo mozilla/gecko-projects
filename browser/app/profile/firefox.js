@@ -68,7 +68,7 @@ pref("extensions.geckoProfiler.acceptedExtensionIds", "geckoprofiler@mozilla.com
 #if defined(XP_LINUX) || defined (XP_MACOSX)
 pref("extensions.geckoProfiler.getSymbolRules", "localBreakpad,remoteBreakpad,nm");
 #else // defined(XP_WIN)
-pref("extensions.geckoProfiler.getSymbolRules", "localBreakpad,remoteBreakpad,dump_syms.exe");
+pref("extensions.geckoProfiler.getSymbolRules", "localBreakpad,remoteBreakpad");
 #endif
 
 
@@ -190,6 +190,9 @@ pref("extensions.update.url", "https://versioncheck.addons.mozilla.org/update/Ve
 pref("extensions.update.background.url", "https://versioncheck-bg.addons.mozilla.org/update/VersionCheck.php?reqVersion=%REQ_VERSION%&id=%ITEM_ID%&version=%ITEM_VERSION%&maxAppVersion=%ITEM_MAXAPPVERSION%&status=%ITEM_STATUS%&appID=%APP_ID%&appVersion=%APP_VERSION%&appOS=%APP_OS%&appABI=%APP_ABI%&locale=%APP_LOCALE%&currentAppVersion=%CURRENT_APP_VERSION%&updateType=%UPDATE_TYPE%&compatMode=%COMPATIBILITY_MODE%");
 pref("extensions.update.interval", 86400);  // Check for updates to Extensions and
                                             // Themes every day
+// Non-symmetric (not shared by extensions) extension-specific [update] preferences
+pref("extensions.dss.switchPending", false);    // Non-dynamic switch pending after next
+                                                // restart.
 
 pref("extensions.{972ce4c6-7e08-4474-a285-3208198ce6fd}.name", "chrome://browser/locale/browser.properties");
 pref("extensions.{972ce4c6-7e08-4474-a285-3208198ce6fd}.description", "chrome://browser/locale/browser.properties");
@@ -218,6 +221,8 @@ pref("browser.uitour.surveyDuration", 7200);
 
 pref("keyword.enabled", true);
 pref("browser.fixup.domainwhitelist.localhost", true);
+
+pref("general.skins.selectedSkin", "classic/1.0");
 
 pref("general.smoothScroll", true);
 #ifdef UNIX_BUT_NOT_MAC
@@ -255,12 +260,7 @@ pref("browser.startup.homepage",            "chrome://branding/locale/browsercon
 pref("browser.startup.firstrunSkipsHomepage", true);
 
 // Show an about:blank window as early as possible for quick startup feedback.
-#ifdef XP_MACOSX
-// Disabled on Mac because the bouncing dock icon already provides feedback.
 pref("browser.startup.blankWindow", false);
-#else
-pref("browser.startup.blankWindow", true);
-#endif
 
 pref("browser.slowStartup.notificationDisabled", false);
 pref("browser.slowStartup.timeThreshold", 20000);
@@ -458,19 +458,8 @@ pref("browser.link.open_newwindow.disabled_in_fullscreen", false);
 #endif
 
 // Tabbed browser
-pref("browser.tabs.20FpsThrobber", false);
-pref("browser.tabs.30FpsThrobber", false);
-pref("browser.tabs.closeTabByDblclick", false);
 pref("browser.tabs.closeWindowWithLastTab", true);
-// Open related links to a tab, e.g., link in current tab, at next to the
-// current tab if |insertRelatedAfterCurrent| is true.  Otherwise, always
-// append new tab to the end.
 pref("browser.tabs.insertRelatedAfterCurrent", true);
-// Open all links, e.g., bookmarks, history items at next to current tab
-// if |insertAfterCurrent| is true.  Otherwise, append new tab to the end
-// for non-related links. Note that if this is set to true, it will trump
-// the value of browser.tabs.insertRelatedAfterCurrent.
-pref("browser.tabs.insertAfterCurrent", false);
 pref("browser.tabs.warnOnClose", true);
 pref("browser.tabs.warnOnCloseOtherTabs", true);
 pref("browser.tabs.warnOnOpen", true);
@@ -491,6 +480,13 @@ pref("browser.tabs.drawInTitlebar", true);
 // Offer additional drag space to the user. The drag space
 // will only be shown if browser.tabs.drawInTitlebar is true.
 pref("browser.tabs.extraDragSpace", false);
+
+// 0 - Disable the tabbar session restore button.
+// 1 - Enable the tabbar session restore button.
+// 2 - Control group. The tabbar session restore button is disabled,
+// but we will record data on other session restore usage.
+// To be enabled with shield.
+pref("browser.tabs.restorebutton", 0);
 
 // When tabs opened by links in other tabs via a combination of
 // browser.link.open_newwindow being set to 3 and target="_blank" etc are
@@ -1067,12 +1063,6 @@ pref("security.sandbox.windows.log.stackTraceDepth", 0);
 // SetSecurityLevelForGPUProcess() in
 // security/sandbox/win/src/sandboxbroker/sandboxBroker.cpp
 pref("security.sandbox.gpu.level", 0);
-
-// Controls whether we disable win32k for the GMP processes.
-// true means that win32k system calls are not permitted.
-// Note: win32k is currently _not_ disabled due to intermittent test failures,
-// where the GMP process fails very early. See bug 1449348.
-pref("security.sandbox.gmp.win32k-disable", false);
 #endif
 
 #if defined(XP_MACOSX) && defined(MOZ_SANDBOX) && defined(MOZ_CONTENT_SANDBOX)
@@ -1094,33 +1084,28 @@ pref("security.sandbox.content.level", 3);
 #endif
 
 #if defined(NIGHTLY_BUILD) && defined(XP_MACOSX) && defined(MOZ_SANDBOX)
-// Controls whether and how the Mac NPAPI Flash plugin process is sandboxed.
-// On Mac these levels are:
-// 0 - "no sandbox"
-// 1 - "write access to some Flash-specific directories and global
-//      read access triggered by file dialog activity"
-// 2 - "no global read access, read and write access to some
-//      Flash-specific directories"
-pref("dom.ipc.plugins.sandbox-level.flash", 1);
-// Controls the sandbox level used by plugins other than Flash. On Mac,
-// no other plugins are supported and this pref is only used for test
-// plugins used in automated tests.
-pref("dom.ipc.plugins.sandbox-level.default", 1);
+pref("security.sandbox.mac.flash.enabled", false);
 #endif
 
 #if defined(XP_LINUX) && defined(MOZ_SANDBOX) && defined(MOZ_CONTENT_SANDBOX)
 // This pref is introduced as part of bug 742434, the naming is inspired from
 // its Windows/Mac counterpart, but on Linux it's an integer which means:
 // 0 -> "no sandbox"
-// 1 -> "content sandbox using seccomp-bpf when available" + ipc restrictions
+// 1 -> "content sandbox using seccomp-bpf when available"
 // 2 -> "seccomp-bpf + write file broker"
 // 3 -> "seccomp-bpf + read/write file brokering"
-// 4 -> all of the above + network/socket restrictions + chroot
+// 4 -> all of the above + network/socket restrictions
+// Content sandboxing on Linux is currently in the stage of
+// 'just getting it enabled', which includes a very permissive whitelist. We
+// enable seccomp-bpf on nightly to see if everything is running, or if we need
+// to whitelist more system calls.
 //
-// The purpose of this setting is to allow Linux users or distros to disable
-// the sandbox while we fix their problems, or to allow running Firefox with
-// exotic configurations we can't reasonably support out of the box.
+// So the purpose of this setting is to allow nightly users to disable the
+// sandbox while we fix their problems. This way, they won't have to wait for
+// another nightly release which disables seccomp-bpf again.
 //
+// This setting may not be required anymore once we decide to permanently
+// enable the content sandbox.
 pref("security.sandbox.content.level", 4);
 pref("security.sandbox.content.write_path_whitelist", "");
 pref("security.sandbox.content.read_path_whitelist", "");
@@ -1139,6 +1124,8 @@ pref("security.sandbox.content.tempDirSuffix", "");
 // logged.
 #if defined(XP_WIN) || defined(XP_MACOSX)
 pref("security.sandbox.logging.enabled", false);
+#else
+pref("security.sandbox.logging.enabled", true);
 #endif
 #endif
 
@@ -1441,6 +1428,20 @@ pref("identity.fxaccounts.migrateToDevEdition", false);
 pref("ui.key.menuAccessKeyFocuses", true);
 #endif
 
+// Encrypted media extensions.
+#ifdef XP_LINUX
+// On Linux EME is visible but disabled by default. This is so that the
+// "Play DRM content" checkbox in the Firefox UI is unchecked by default.
+// DRM requires downloading and installing proprietary binaries, which
+// users on an open source operating systems didn't opt into. The first
+// time a site using EME is encountered, the user will be prompted to
+// enable DRM, whereupon the EME plugin binaries will be downloaded if
+// permission is granted.
+pref("media.eme.enabled", false);
+#else
+pref("media.eme.enabled", true);
+#endif
+
 #ifdef NIGHTLY_BUILD
 pref("media.eme.vp9-in-mp4.enabled", true);
 #else
@@ -1496,6 +1497,13 @@ pref("toolkit.telemetry.bhrPing.enabled", true);
 // Enables using Hybrid Content Telemetry from Mozilla privileged pages.
 pref("toolkit.telemetry.hybridContent.enabled", true);
 
+// Telemetry experiments settings.
+pref("experiments.enabled", true);
+pref("experiments.manifest.fetchIntervalSeconds", 86400);
+pref("experiments.manifest.uri", "https://telemetry-experiment.cdn.mozilla.net/manifest/v1/firefox/%VERSION%/%CHANNEL%");
+// Whether experiments are supported by the current application profile.
+pref("experiments.supported", true);
+
 // Ping Centre Telemetry settings.
 pref("browser.ping-centre.telemetry", true);
 pref("browser.ping-centre.log", false);
@@ -1533,12 +1541,8 @@ pref("browser.tabs.remote.desktopbehavior", true);
 
 // For speculatively warming up tabs to improve perceived
 // performance while using the async tab switcher.
-#if defined(NIGHTLY_BUILD)
-pref("browser.tabs.remote.warmup.enabled", true);
-#else
+// Disabled until bug 1397426 is fixed.
 pref("browser.tabs.remote.warmup.enabled", false);
-#endif
-
 pref("browser.tabs.remote.warmup.maxTabs", 3);
 pref("browser.tabs.remote.warmup.unloadDelayMs", 2000);
 
@@ -1549,6 +1553,11 @@ pref("browser.tabs.crashReporting.requestEmail", false);
 pref("browser.tabs.crashReporting.emailMe", false);
 pref("browser.tabs.crashReporting.email", "");
 
+// But don't allow non-MPC extensions by default on Nightly
+#if defined(NIGHTLY_BUILD)
+pref("extensions.allow-non-mpc-extensions", false);
+#endif
+
 pref("extensions.legacy.enabled", false);
 
 // How often to check for CPOW timeouts. CPOWs are only timed out by
@@ -1557,6 +1566,12 @@ pref("dom.ipc.cpow.timeout", 500);
 
 // Causes access on unsafe CPOWs from browser code to throw by default.
 pref("dom.ipc.cpows.forbid-unsafe-from-browser", true);
+
+// Don't allow add-ons marked as multiprocessCompatible to use CPOWs.
+pref("dom.ipc.cpows.forbid-cpows-in-compat-addons", true);
+
+// ...except for these add-ons:
+pref("dom.ipc.cpows.allow-cpows-in-compat-addons", "{b9db16a4-6edc-47ec-a1f4-b86292ed211d},firegestures@xuldev.org,{DDC359D1-844A-42a7-9AA1-88A850A938A8},privateTab@infocatcher,mousegesturessuite@lemon_juice.addons.mozilla.org,treestyletab@piro.sakura.ne.jp,cliqz@cliqz.com,{AE93811A-5C9A-4d34-8462-F7B864FC4696},contextsearch2@lwz.addons.mozilla.org,{EF522540-89F5-46b9-B6FE-1829E2B572C6},{677a8f98-fd64-40b0-a883-b8c95d0cbf17},images@wink.su,fx-devtools,url_advisor@kaspersky.com,{d10d0bf8-f5b5-c8b4-a8b2-2b9879e08c5d},{dc572301-7619-498c-a57d-39143191b318},dta@downthemall.net,{86095750-AD15-46d8-BF32-C0789F7E6A32},screenwise-prod@google.com,{91aa5abe-9de4-4347-b7b5-322c38dd9271},secureLogin@blueimp.net,ich@maltegoetz.de,come.back.block.image.from@cat-in-136.blogspot.com,{7b1bf0b6-a1b9-42b0-b75d-252036438bdc},s3crypto@data,{1e0fd655-5aea-4b4c-a583-f76ef1e3af9c},akahuku.fx.sp@toshiakisp.github.io,{aff87fa2-a58e-4edd-b852-0a20203c1e17},{1018e4d6-728f-4b20-ad56-37578a4de76b},rehostimage@engy.us,lazarus@interclue.com,{b2e69492-2358-071a-7056-24ad0c3defb1},flashstopper@byo.co.il,{e4a8a97b-f2ed-450b-b12d-ee082ba24781},jid1-f3mYMbCpz2AZYl@jetpack,{8c550e28-88c9-4764-bb52-aa489cf2efcd},{37fa1426-b82d-11db-8314-0800200c9a66},{ac2cfa60-bc96-11e0-962b-0800200c9a66},igetter@presenta.net,killspinners@byo.co.il,abhere2@moztw.org,{fc6339b8-9581-4fc7-b824-dffcb091fcb7},wampi@wink.su,backtrack@byalexv.co.uk,Gladiator_X@mail.ru,{73a6fe31-595d-460b-a920-fcc0f8843232},{46551EC9-40F0-4e47-8E18-8E5CF550CFB8},acewebextension_unlisted@acestream.org,@screen_maker,yasearch@yandex.ru,sp@avast.com,s3google@translator,igetterextension@presenta.net,{C1A2A613-35F1-4FCF-B27F-2840527B6556},screenwise-testing@google.com,helper-sig@savefrom.net,ImageSaver@Merci.chao,proxtube@abz.agency,wrc@avast.com,{9AA46F4F-4DC7-4c06-97AF-5035170634FE},jid1-CikLKKPVkw6ipw@jetpack,artur.dubovoy@gmail.com,nlgfeb@nlgfeb.ext,{A065A84F-95B6-433A-A0C8-4C040B77CE8A},fdm_ffext@freedownloadmanager.org");
 
 // Enable e10s hang monitoring (slow script checking and plugin hang
 // detection).

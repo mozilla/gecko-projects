@@ -29,4 +29,5 @@ verifyNotEnumerable(Object.setPrototypeOf, 'name');
 verifyNotWritable(Object.setPrototypeOf, 'name');
 verifyConfigurable(Object.setPrototypeOf, 'name');
 
+
 reportCompare(0, 0);

@@ -74,7 +74,7 @@ var gViewSourceUtils = {
         utils.viewSourceInBrowser(aArgs);
       }, { once: true });
     });
-    window.top.openWebLinkIn("about:blank", "current");
+    window.top.openUILinkIn("about:blank", "current");
   },
 
   /**

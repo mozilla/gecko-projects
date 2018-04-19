@@ -92,6 +92,6 @@ add_task(async function() {
   item.doCommand();
   Assert.equal(getSnapShot().parent[kLivemarkItemOpened], 1, "Should count livemark item opening");
   popup.hidePopup();
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });
 

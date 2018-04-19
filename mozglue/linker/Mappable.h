@@ -76,7 +76,7 @@ public:
 
   virtual Kind GetKind() const { return MAPPABLE_FILE; };
 protected:
-  explicit MappableFile(int fd): fd(fd) { }
+  MappableFile(int fd): fd(fd) { }
 
 private:
   /* File descriptor */

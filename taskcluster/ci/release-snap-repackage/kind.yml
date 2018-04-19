@@ -47,8 +47,6 @@ job-defaults:
          BUILD_NUMBER: "{release_config[build_number]}"
          CANDIDATES_DIR:
             by-project:
-               jamun:
-                  https://net-mozaws-stage-delivery-firefox.s3.amazonaws.com/pub/{task[shipping-product]}/candidates
                maple:
                   https://net-mozaws-stage-delivery-firefox.s3.amazonaws.com/pub/{task[shipping-product]}/candidates
                default:
@@ -61,7 +59,5 @@ job-defaults:
 jobs:
    firefox:
       shipping-product: firefox
-      attributes:
-         build_platform: linux64-nightly
       treeherder:
          symbol: Snap(r)

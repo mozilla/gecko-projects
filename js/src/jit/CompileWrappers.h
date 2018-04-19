@@ -46,10 +46,7 @@ class CompileRuntime
     const Value& NaNValue();
     const Value& positiveInfinityValue();
     const WellKnownSymbols& wellKnownSymbols();
-
-    const void* mainContextPtr();
-    const void* addressOfJitStackLimit();
-    const void* addressOfInterrupt();
+    const void* addressOfActiveJSContext();
 
 #ifdef DEBUG
     bool isInsideNursery(gc::Cell* cell);
@@ -75,6 +72,7 @@ class CompileZone
     const void* addressOfIonBailAfter();
 #endif
 
+    const void* addressOfJSContext();
     const void* addressOfNeedsIncrementalBarrier();
     const void* addressOfFreeList(gc::AllocKind allocKind);
     const void* addressOfNurseryPosition();

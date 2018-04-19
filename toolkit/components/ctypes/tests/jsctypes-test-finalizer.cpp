@@ -1,5 +1,4 @@
 #include "errno.h"
-#include "string.h"
 
 #include "jsctypes-test.h"
 #include "jsctypes-test-finalizer.h"

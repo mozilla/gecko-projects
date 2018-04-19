@@ -56,12 +56,14 @@ typedef nsTArray<SurfaceDescriptor> BufferArray;
 typedef nsTArray<Edit> EditVector;
 typedef nsTHashtable<nsPtrHashKey<ShadowableLayer>> ShadowableLayerSet;
 typedef nsTArray<OpDestroy> OpDestroyVector;
+typedef nsTArray<ReadLockInit> ReadLockVector;
 
 class Transaction
 {
 public:
   Transaction()
-    : mTargetRotation(ROTATION_0)
+    : mReadLockSequenceNumber(0)
+    , mTargetRotation(ROTATION_0)
     , mOpen(false)
     , mRotationChanged(false)
   {}
@@ -80,6 +82,8 @@ public:
     }
     mTargetRotation = aRotation;
     mTargetOrientation = aOrientation;
+    mReadLockSequenceNumber = 0;
+    mReadLocks.AppendElement();
   }
   void AddEdit(const Edit& aEdit)
   {
@@ -106,6 +110,15 @@ public:
     MOZ_ASSERT(!Finished(), "forgot BeginTransaction?");
     mSimpleMutants.PutEntry(aLayer);
   }
+  ReadLockHandle AddReadLock(const ReadLockDescriptor& aReadLock)
+  {
+    ReadLockHandle handle(++mReadLockSequenceNumber);
+    if (mReadLocks.LastElement().Length() >= CompositableForwarder::GetMaxFileDescriptorsPerMessage()) {
+      mReadLocks.AppendElement();
+    }
+    mReadLocks.LastElement().AppendElement(ReadLockInit(aReadLock, handle));
+    return handle;
+  }
   void End()
   {
     mCset.Clear();
@@ -113,6 +126,7 @@ public:
     mMutants.Clear();
     mSimpleMutants.Clear();
     mDestroyedActors.Clear();
+    mReadLocks.Clear();
     mOpen = false;
     mRotationChanged = false;
   }
@@ -136,6 +150,8 @@ public:
   OpDestroyVector mDestroyedActors;
   ShadowableLayerSet mMutants;
   ShadowableLayerSet mSimpleMutants;
+  nsTArray<ReadLockVector> mReadLocks;
+  uint64_t mReadLockSequenceNumber;
   gfx::IntRect mTargetBounds;
   ScreenRotation mTargetRotation;
   dom::ScreenOrientationInternal mTargetOrientation;
@@ -764,6 +780,15 @@ ShadowLayerForwarder::EndTransaction(const nsIntRegion& aRegionToClear,
   if (startTime) {
     mPaintTiming.serializeMs() = (TimeStamp::Now() - startTime.value()).ToMilliseconds();
     startTime = Some(TimeStamp::Now());
+  }
+
+  for (ReadLockVector& locks : mTxn->mReadLocks) {
+    if (locks.Length()) {
+      if (!mShadowManager->SendInitReadLocks(locks)) {
+        MOZ_LAYERS_LOG(("[LayersForwarder] WARNING: sending read locks failed!"));
+        return false;
+      }
+    }
   }
 
   // We delay at the last possible minute, to give the paint thread a chance to

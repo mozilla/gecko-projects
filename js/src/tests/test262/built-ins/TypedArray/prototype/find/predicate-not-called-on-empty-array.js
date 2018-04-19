@@ -2,6 +2,7 @@
 // This code is governed by the BSD license found in the LICENSE file.
 /*---
 esid: sec-%typedarray%.prototype.find
+es6id: 22.2.3.10
 description: >
   Predicate is not called on empty instances
 info: |

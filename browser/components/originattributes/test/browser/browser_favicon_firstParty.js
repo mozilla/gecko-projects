@@ -187,7 +187,7 @@ async function assignCookiesUnderFirstParty(aURL, aFirstParty, aCookieValue) {
     content.document.cookie = value;
   });
 
-  BrowserTestUtils.removeTab(tabInfo.tab);
+  await BrowserTestUtils.removeTab(tabInfo.tab);
 }
 
 async function generateCookies(aThirdParty) {
@@ -234,10 +234,8 @@ async function doTest(aTestPage, aExpectedCookies, aFaviconURL) {
   // Waiting until favicon loaded.
   await promiseFaviconLoaded;
 
-  BrowserTestUtils.removeTab(tabInfo.tab);
-  // FIXME: We need to wait for the next event tick here to avoid observing
-  //        the previous tab info in the next step (bug 1446725).
-  await new Promise(executeSoon);
+  // Close the tab.
+  await BrowserTestUtils.removeTab(tabInfo.tab);
 
   // Start to observe the favicon requests earlier in case we miss it.
   promiseObserveFavicon = observeFavicon(FIRST_PARTY_TWO, aExpectedCookies[1], secondPageURI);
@@ -248,7 +246,7 @@ async function doTest(aTestPage, aExpectedCookies, aFaviconURL) {
   // Waiting until favicon requests are all made.
   await promiseObserveFavicon;
 
-  BrowserTestUtils.removeTab(tabInfo.tab);
+  await BrowserTestUtils.removeTab(tabInfo.tab);
 }
 
 async function doTestForAllTabsFavicon(aTestPage, aExpectedCookies, aIsThirdParty) {
@@ -291,7 +289,7 @@ async function doTestForAllTabsFavicon(aTestPage, aExpectedCookies, aIsThirdPart
   await allTabsPopupHiddenPromise;
 
   // Close the tab.
-  BrowserTestUtils.removeTab(tabInfo.tab);
+  await BrowserTestUtils.removeTab(tabInfo.tab);
 
   faviconURI = aIsThirdParty ? THIRD_PARTY_SITE + FAVICON_URI :
                                TEST_SITE_TWO + FAVICON_URI;
@@ -324,7 +322,7 @@ async function doTestForAllTabsFavicon(aTestPage, aExpectedCookies, aIsThirdPart
   await allTabsPopupHiddenPromise;
 
   // Close the tab.
-  BrowserTestUtils.removeTab(tabInfo.tab);
+  await BrowserTestUtils.removeTab(tabInfo.tab);
 
   // Reset the 'overflow' attribute to make the allTabs button hidden again.
   tabBrowser.removeAttribute("overflow");
@@ -435,7 +433,7 @@ add_task(async function test_favicon_cache_firstParty() {
   is(response.topic, "http-on-examine-response", "The favicon image should be loaded through network again.");
   is(response.firstPartyDomain, FIRST_PARTY_TWO, "We should only observe the network response for the second first party.");
 
-  BrowserTestUtils.removeTab(tabInfoA.tab);
-  BrowserTestUtils.removeTab(tabInfoB.tab);
-  BrowserTestUtils.removeTab(tabInfoC.tab);
+  await BrowserTestUtils.removeTab(tabInfoA.tab);
+  await BrowserTestUtils.removeTab(tabInfoB.tab);
+  await BrowserTestUtils.removeTab(tabInfoC.tab);
 });

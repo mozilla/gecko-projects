@@ -12,7 +12,7 @@ const { getStringifiableFragments } =
   require("devtools/server/actors/utils/css-grid-utils");
 
 loader.lazyRequireGetter(this, "nodeConstants", "devtools/shared/dom-node-constants");
-loader.lazyRequireGetter(this, "CssLogic", "devtools/server/actors/inspector/css-logic", true);
+loader.lazyRequireGetter(this, "CssLogic", "devtools/server/css-logic", true);
 
 /**
  * Set of actors the expose the CSS layout information to the devtools protocol clients.
@@ -142,20 +142,17 @@ const LayoutActor = ActorClassWithSpec(layoutSpec, {
   },
 
   /**
-   * Helper function for getCurrentGrid and getCurrentFlexbox. Returns the grid or
-   * flex container (whichever is requested) found by iterating on the given selected
-   * node. The current node can be a grid/flex container or grid/flex item. If it is a
-   * grid/flex item, returns the parent grid/flex container. Otherwise, returns null
-   * if the current or parent node is not a grid/flex container.
+   * Returns the flex container found by iterating on the given selected node. The current
+   * node can be a flex container or flex item. If it is a flex item, returns the parent
+   * flex container. Otherwise, return null if the current or parent node is not a flex
+   * container.
    *
    * @param  {Node|NodeActor} node
    *         The node to start iterating at.
-   * @param {String} type
-   *         Can be "grid" or "flex", the display type we are searching for.
-   * @return {GridActor|FlexboxActor|Null} The GridActor or FlexboxActor of the
-   * grid/flex container of the give node. Otherwise, returns null.
+   * @return {FlexboxActor|Null} The FlexboxActor of the flex container of the give node.
+   * Otherwise, returns null.
    */
-  getCurrentDisplay(node, type) {
+  getCurrentFlexbox(node) {
     if (isNodeDead(node)) {
       return null;
     }
@@ -174,12 +171,9 @@ const LayoutActor = ActorClassWithSpec(layoutSpec, {
       return null;
     }
 
-    if (type == "flex" &&
-        (displayType == "inline-flex" || displayType == "flex")) {
-      return new FlexboxActor(this, currentNode);
-    } else if (type == "grid" &&
-               (displayType == "inline-grid" || displayType == "grid")) {
-      return new GridActor(this, currentNode);
+    // Check if the current node is a flex container.
+    if (displayType == "inline-flex" || displayType == "flex") {
+      return new FlexboxActor(this, treeWalker.currentNode);
     }
 
     // Otherwise, check if this is a flex item or the parent node is a flex container.
@@ -190,51 +184,19 @@ const LayoutActor = ActorClassWithSpec(layoutSpec, {
 
       displayType = this.walker.getNode(currentNode).displayType;
 
-      if (type == "flex" &&
-          (displayType == "inline-flex" || displayType == "flex")) {
-        return new FlexboxActor(this, currentNode);
-      } else if (type == "grid" &&
-                 (displayType == "inline-grid" || displayType == "grid")) {
-        return new GridActor(this, currentNode);
-      } else if (displayType == "contents") {
-        // Continue walking up the tree since the parent node is a content element.
-        continue;
+      switch (displayType) {
+        case "inline-flex":
+        case "flex":
+          return new FlexboxActor(this, currentNode);
+        case "contents":
+          // Continue walking up the tree since the parent node is a content element.
+          continue;
       }
 
       break;
     }
 
     return null;
-  },
-
-  /**
-   * Returns the grid container found by iterating on the given selected node. The current
-   * node can be a grid container or grid item. If it is a grid item, returns the parent
-   * grid container. Otherwise, return null if the current or parent node is not a grid
-   * container.
-   *
-   * @param  {Node|NodeActor} node
-   *         The node to start iterating at.
-   * @return {GridActor|Null} The GridActor of the grid container of the give node.
-   * Otherwise, returns null.
-   */
-  getCurrentGrid(node) {
-    return this.getCurrentDisplay(node, "grid");
-  },
-
-  /**
-   * Returns the flex container found by iterating on the given selected node. The current
-   * node can be a flex container or flex item. If it is a flex item, returns the parent
-   * flex container. Otherwise, return null if the current or parent node is not a flex
-   * container.
-   *
-   * @param  {Node|NodeActor} node
-   *         The node to start iterating at.
-   * @return {FlexboxActor|Null} The FlexboxActor of the flex container of the give node.
-   * Otherwise, returns null.
-   */
-  getCurrentFlexbox(node) {
-    return this.getCurrentDisplay(node, "flex");
   },
 
   /**

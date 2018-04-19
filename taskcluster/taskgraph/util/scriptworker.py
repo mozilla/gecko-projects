@@ -40,14 +40,12 @@ This is a list of list-pairs, for ordering.
 SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
     'all-nightly-branches', set([
         'mozilla-central',
-        'comm-central',
     ])
 ], [
     'all-release-branches', set([
         'mozilla-beta',
         'mozilla-release',
         'maple',
-        'comm-beta',
     ])
 ]]
 
@@ -147,7 +145,7 @@ BEETMOVER_ACTION_SCOPES = {
     'all-candidates-tasks': 'beetmover:action:push-to-candidates',
     'all-push-tasks': 'beetmover:action:push-to-releases',
     'all-nightly-tasks': 'beetmover:action:push-to-nightly',
-    'default': 'beetmover:action:push-to-nightly',
+    'default': 'beetmover:action:push-to-staging',
 }
 
 

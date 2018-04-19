@@ -22,7 +22,9 @@ NS_IMPL_ADDREF_INHERITED(nsHostObjectURI, mozilla::net::nsSimpleURI)
 NS_IMPL_RELEASE_INHERITED(nsHostObjectURI, mozilla::net::nsSimpleURI)
 
 NS_INTERFACE_MAP_BEGIN(nsHostObjectURI)
+  NS_INTERFACE_MAP_ENTRY(nsIURIWithBlobImpl)
   NS_INTERFACE_MAP_ENTRY(nsIURIWithPrincipal)
+  NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
   if (aIID.Equals(kHOSTOBJECTURICID))
     foundInterface = static_cast<nsIURI*>(this);
   else if (aIID.Equals(kThisSimpleURIImplementationCID)) {
@@ -35,14 +37,22 @@ NS_INTERFACE_MAP_BEGIN(nsHostObjectURI)
   else
 NS_INTERFACE_MAP_END_INHERITING(mozilla::net::nsSimpleURI)
 
+// nsIURIWithBlobImpl methods:
+
+NS_IMETHODIMP
+nsHostObjectURI::GetBlobImpl(nsISupports** aBlobImpl)
+{
+  RefPtr<mozilla::dom::BlobImpl> blobImpl(mBlobImpl);
+  blobImpl.forget(aBlobImpl);
+  return NS_OK;
+}
+
 // nsIURIWithPrincipal methods:
 
 NS_IMETHODIMP
 nsHostObjectURI::GetPrincipal(nsIPrincipal** aPrincipal)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-  nsCOMPtr<nsIPrincipal> principal = mPrincipal.get();
-  principal.forget(aPrincipal);
+  NS_IF_ADDREF(*aPrincipal = mPrincipal);
 
   return NS_OK;
 }
@@ -65,22 +75,14 @@ nsHostObjectURI::GetPrincipalUri(nsIURI** aUri)
 NS_IMETHODIMP
 nsHostObjectURI::Read(nsIObjectInputStream* aStream)
 {
-  NS_NOTREACHED("Use nsIURIMutator.read() instead");
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-nsresult
-nsHostObjectURI::ReadPrivate(nsIObjectInputStream *aStream)
-{
-  nsresult rv = mozilla::net::nsSimpleURI::ReadPrivate(aStream);
+  nsresult rv = mozilla::net::nsSimpleURI::Read(aStream);
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsISupports> supports;
   rv = NS_ReadOptionalObject(aStream, true, getter_AddRefs(supports));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIPrincipal> principal = do_QueryInterface(supports, &rv);
-  mPrincipal = new nsMainThreadPtrHolder<nsIPrincipal>("nsIPrincipal", principal, false);
+  mPrincipal = do_QueryInterface(supports, &rv);
   return rv;
 }
 
@@ -90,8 +92,7 @@ nsHostObjectURI::Write(nsIObjectOutputStream* aStream)
   nsresult rv = mozilla::net::nsSimpleURI::Write(aStream);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIPrincipal> principal = mPrincipal.get();
-  return NS_WriteOptionalCompoundObject(aStream, principal,
+  return NS_WriteOptionalCompoundObject(aStream, mPrincipal,
                                         NS_GET_IID(nsIPrincipal),
                                         true);
 }
@@ -108,10 +109,9 @@ nsHostObjectURI::Serialize(mozilla::ipc::URIParams& aParams)
   mozilla::net::nsSimpleURI::Serialize(simpleParams);
   hostParams.simpleParams() = simpleParams;
 
-  nsCOMPtr<nsIPrincipal> principal = mPrincipal.get();
-  if (principal) {
+  if (mPrincipal) {
     PrincipalInfo info;
-    nsresult rv = PrincipalToPrincipalInfo(principal, &info);
+    nsresult rv = PrincipalToPrincipalInfo(mPrincipal, &info);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return;
     }
@@ -144,11 +144,14 @@ nsHostObjectURI::Deserialize(const mozilla::ipc::URIParams& aParams)
     return true;
   }
 
-  nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(hostParams.principal().get_PrincipalInfo());
-  if (!principal) {
+  mPrincipal = PrincipalInfoToPrincipal(hostParams.principal().get_PrincipalInfo());
+  if (!mPrincipal) {
     return false;
   }
-  mPrincipal = new nsMainThreadPtrHolder<nsIPrincipal>("nsIPrincipal", principal, false);
+
+  // If this fails, we still want to complete the operation. Probably this
+  // blobURL has been revoked in the meantime.
+  NS_GetBlobForBlobURI(this, getter_AddRefs(mBlobImpl));
 
   return true;
 }
@@ -182,6 +185,9 @@ nsHostObjectURI::CloneInternal(mozilla::net::nsSimpleURI::RefHandlingEnum aRefHa
   nsHostObjectURI* u = static_cast<nsHostObjectURI*>(simpleClone.get());
 
   u->mPrincipal = mPrincipal;
+  u->mBlobImpl = mBlobImpl;
+
+  nsHostObjectProtocolHandler::StoreClonedURI(newRef, simpleClone);
 
   simpleClone.forget(aClone);
   return NS_OK;
@@ -210,6 +216,10 @@ nsHostObjectURI::EqualsInternal(nsIURI* aOther,
     return NS_OK;
   }
 
+  // Compare the piece of additional member data that we add to base class,
+  // but we cannot compare BlobImpl. This should not be a problem, because we
+  // don't support changing the underlying mBlobImpl.
+
   if (mPrincipal && otherUri->mPrincipal) {
     // Both of us have mPrincipals. Compare them.
     return mPrincipal->Equals(otherUri->mPrincipal, aResult);
@@ -219,12 +229,7 @@ nsHostObjectURI::EqualsInternal(nsIURI* aOther,
   return NS_OK;
 }
 
-// Queries this list of interfaces. If none match, it queries mURI.
-NS_IMPL_NSIURIMUTATOR_ISUPPORTS(nsHostObjectURI::Mutator,
-                                nsIURISetters,
-                                nsIURIMutator,
-                                nsIPrincipalURIMutator,
-                                nsISerializable)
+NS_IMPL_ISUPPORTS(nsHostObjectURI::Mutator, nsIURISetters, nsIURIMutator, nsIBlobURIMutator, nsIPrincipalURIMutator)
 
 NS_IMETHODIMP
 nsHostObjectURI::Mutate(nsIURIMutator** aMutator)
@@ -293,4 +298,11 @@ nsHostObjectURI::GetClassIDNoAlloc(nsCID *aClassIDNoAlloc)
 {
   *aClassIDNoAlloc = kHOSTOBJECTURICID;
   return NS_OK;
+}
+
+void
+nsHostObjectURI::ForgetBlobImpl()
+{
+  MOZ_ASSERT(mBlobImpl);
+  mBlobImpl = nullptr;
 }

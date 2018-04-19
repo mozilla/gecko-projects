@@ -2,7 +2,7 @@
 // This code is governed by the BSD license found in the LICENSE file.
 
 /*---
-esid: sec-%typedarray%.prototype.values
+es6id: 22.2.3.29
 description: >
   %TypedArray%.prototype.values.name is "values".
 info: |
@@ -17,7 +17,6 @@ info: |
     object, if it exists, has the attributes { [[Writable]]: false,
     [[Enumerable]]: false, [[Configurable]]: true }.
 includes: [propertyHelper.js, testTypedArray.js]
-features: [TypedArray]
 ---*/
 
 assert.sameValue(TypedArray.prototype.values.name, "values");

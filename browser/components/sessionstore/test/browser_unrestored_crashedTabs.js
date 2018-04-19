@@ -64,6 +64,6 @@ add_task(async function test() {
     await promiseTabRestored(originalTab);
 
     // Clean up.
-    BrowserTestUtils.removeTab(unrestoredTab);
+    await BrowserTestUtils.removeTab(unrestoredTab);
   });
 });

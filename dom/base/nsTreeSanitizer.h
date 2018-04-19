@@ -5,6 +5,9 @@
 #ifndef nsTreeSanitizer_h_
 #define nsTreeSanitizer_h_
 
+#ifdef MOZ_OLD_STYLE
+#include "mozilla/css/StyleRule.h"
+#endif
 #include "nsIPrincipal.h"
 #include "mozilla/dom/Element.h"
 
@@ -87,24 +90,6 @@ class MOZ_STACK_CLASS nsTreeSanitizer {
      */
     bool mLogRemovals;
 
-    /**
-     * We have various tables of static atoms for elements and attributes.
-     */
-    class AtomsTable : public nsTHashtable<nsPtrHashKey<const nsStaticAtom>>
-    {
-    public:
-        explicit AtomsTable(uint32_t aLength)
-          : nsTHashtable<nsPtrHashKey<const nsStaticAtom>>(aLength)
-        {}
-
-        bool Contains(nsAtom* aAtom)
-        {
-            // Because this table only contains static atoms, if aAtom isn't
-            // static we can immediately fail.
-            return aAtom->IsStatic() && GetEntry(aAtom->AsStatic());
-        }
-    };
-
     void SanitizeChildren(nsINode* aRoot);
 
     /**
@@ -135,7 +120,7 @@ class MOZ_STACK_CLASS nsTreeSanitizer {
      * @param aLocalName the name to search on the list
      * @return true if aLocalName is on the aURLs list and false otherwise
      */
-    bool IsURL(const nsStaticAtom* const* aURLs, nsAtom* aLocalName);
+    bool IsURL(nsStaticAtom** const* aURLs, nsAtom* aLocalName);
 
     /**
      * Removes dangerous attributes from the element. If the style attribute
@@ -152,8 +137,8 @@ class MOZ_STACK_CLASS nsTreeSanitizer {
      *                           attribute unsanitized
      */
     void SanitizeAttributes(mozilla::dom::Element* aElement,
-                            AtomsTable* aAllowed,
-                            const nsStaticAtom* const* aURLs,
+                            nsTHashtable<nsRefPtrHashKey<nsAtom>>* aAllowed,
+                            nsStaticAtom** const* aURLs,
                             bool aAllowXLink,
                             bool aAllowStyle,
                             bool aAllowDangerousSrc);
@@ -219,37 +204,37 @@ class MOZ_STACK_CLASS nsTreeSanitizer {
     /**
      * The whitelist of HTML elements.
      */
-    static AtomsTable* sElementsHTML;
+    static nsTHashtable<nsRefPtrHashKey<nsAtom>>* sElementsHTML;
 
     /**
      * The whitelist of non-presentational HTML attributes.
      */
-    static AtomsTable* sAttributesHTML;
+    static nsTHashtable<nsRefPtrHashKey<nsAtom>>* sAttributesHTML;
 
     /**
      * The whitelist of presentational HTML attributes.
      */
-    static AtomsTable* sPresAttributesHTML;
+    static nsTHashtable<nsRefPtrHashKey<nsAtom>>* sPresAttributesHTML;
 
     /**
      * The whitelist of SVG elements.
      */
-    static AtomsTable* sElementsSVG;
+    static nsTHashtable<nsRefPtrHashKey<nsAtom>>* sElementsSVG;
 
     /**
      * The whitelist of SVG attributes.
      */
-    static AtomsTable* sAttributesSVG;
+    static nsTHashtable<nsRefPtrHashKey<nsAtom>>* sAttributesSVG;
 
     /**
      * The whitelist of SVG elements.
      */
-    static AtomsTable* sElementsMathML;
+    static nsTHashtable<nsRefPtrHashKey<nsAtom>>* sElementsMathML;
 
     /**
      * The whitelist of MathML attributes.
      */
-    static AtomsTable* sAttributesMathML;
+    static nsTHashtable<nsRefPtrHashKey<nsAtom>>* sAttributesMathML;
 
     /**
      * Reusable null principal for URL checks.

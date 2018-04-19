@@ -60,6 +60,17 @@ MacroAssemblerCompat::asVIXL() const
     return *static_cast<const vixl::MacroAssembler*>(this);
 }
 
+void
+MacroAssemblerCompat::B(wasm::OldTrapDesc target, Condition cond)
+{
+    Label l;
+    if (cond == Always)
+        B(&l);
+    else
+        B(&l, cond);
+    bindLater(&l, target);
+}
+
 BufferOffset
 MacroAssemblerCompat::movePatchablePtr(ImmPtr ptr, Register dest)
 {
@@ -237,9 +248,8 @@ MacroAssemblerCompat::profilerEnterFrame(RegisterOrSP framePtr, Register scratch
 void
 MacroAssemblerCompat::breakpoint()
 {
-    // Note, other payloads are possible, but GDB is known to misinterpret them
-    // sometimes and iloop on the breakpoint instead of stopping properly.
-    Brk(0);
+    static int code = 0xA77;
+    Brk((code++) & 0xffff);
 }
 
 // Either `any` is valid or `sixtyfour` is valid.  Return a 32-bit ARMRegister
@@ -284,8 +294,7 @@ MacroAssemblerCompat::wasmLoadImpl(const wasm::MemoryAccessDesc& access, Registe
     asMasm().memoryBarrierBefore(access.sync());
 
     MemOperand srcAddr(memoryBase, ptr);
-
-    append(access, asMasm().currentOffset());
+    size_t loadOffset = asMasm().currentOffset();
     switch (access.type()) {
       case Scalar::Int8:
         Ldrsb(SelectGPReg(outany, out64), srcAddr);
@@ -325,6 +334,7 @@ MacroAssemblerCompat::wasmLoadImpl(const wasm::MemoryAccessDesc& access, Registe
       case Scalar::Int16x8:
         MOZ_CRASH("unexpected array type");
     }
+    append(access, loadOffset, framePushed());
 
     asMasm().memoryBarrierAfter(access.sync());
 }
@@ -347,8 +357,7 @@ MacroAssemblerCompat::wasmStoreImpl(const wasm::MemoryAccessDesc& access, AnyReg
     asMasm().memoryBarrierBefore(access.sync());
 
     MemOperand dstAddr(memoryBase, ptr);
-
-    append(access, asMasm().currentOffset());
+    size_t storeOffset = asMasm().currentOffset();
     switch (access.type()) {
       case Scalar::Int8:
       case Scalar::Uint8:
@@ -379,6 +388,7 @@ MacroAssemblerCompat::wasmStoreImpl(const wasm::MemoryAccessDesc& access, AnyReg
       case Scalar::MaxTypedArrayViewType:
         MOZ_CRASH("unexpected array type");
     }
+    append(access, storeOffset, framePushed());
 
     asMasm().memoryBarrierAfter(access.sync());
 }
@@ -571,6 +581,12 @@ MacroAssembler::Pop(const ValueOperand& val)
     adjustFrame(-1 * int64_t(sizeof(int64_t)));
 }
 
+void
+MacroAssembler::PopStackPtr()
+{
+    MOZ_CRASH("NYI");
+}
+
 // ===============================================================
 // Simple call functions.
 
@@ -694,10 +710,33 @@ MacroAssembler::patchFarJump(CodeOffset farJump, uint32_t targetOffset)
     inst2->SetInstructionBits((uint32_t)(distance >> 32));
 }
 
+void
+MacroAssembler::repatchFarJump(uint8_t* code, uint32_t farJumpOffset, uint32_t targetOffset)
+{
+    MOZ_CRASH("Unimplemented - never used");
+}
+
+CodeOffset
+MacroAssembler::nopPatchableToNearJump()
+{
+    MOZ_CRASH("Unimplemented - never used");
+}
+
+void
+MacroAssembler::patchNopToNearJump(uint8_t* jump, uint8_t* target)
+{
+    MOZ_CRASH("Unimplemented - never used");
+}
+
+void
+MacroAssembler::patchNearJumpToNop(uint8_t* jump)
+{
+    MOZ_CRASH("Unimplemented - never used");
+}
+
 CodeOffset
 MacroAssembler::nopPatchableToCall(const wasm::CallSiteDesc& desc)
 {
-    AutoForbidPools afp(this, /* max number of instructions in scope = */ 1);
     CodeOffset offset(currentOffset());
     Nop();
     append(desc, CodeOffset(currentOffset()));
@@ -1068,24 +1107,9 @@ MacroAssembler::comment(const char* msg)
 CodeOffset
 MacroAssembler::wasmTrapInstruction()
 {
-    AutoForbidPools afp(this, /* max number of instructions in scope = */ 1);
     CodeOffset offs(currentOffset());
     Unreachable();
     return offs;
-}
-
-void
-MacroAssembler::wasmBoundsCheck(Condition cond, Register index, Register boundsCheckLimit, Label* label)
-{
-    // Not used on ARM64, we rely on signal handling instead
-    MOZ_CRASH("NYI - wasmBoundsCheck");
-}
-
-void
-MacroAssembler::wasmBoundsCheck(Condition cond, Register index, Address boundsCheckLimit, Label* label)
-{
-    // Not used on ARM64, we rely on signal handling instead
-    MOZ_CRASH("NYI - wasmBoundsCheck");
 }
 
 // FCVTZU behaves as follows:
@@ -1362,28 +1386,6 @@ MacroAssembler::wasmStoreI64(const wasm::MemoryAccessDesc& access, Register64 va
                              Register memoryBase, Register ptr, Register ptrScratch)
 {
     wasmStoreImpl(access, AnyRegister(), value, memoryBase, ptr, ptrScratch);
-}
-
-void
-MacroAssembler::enterFakeExitFrameForWasm(Register cxreg, Register scratch, ExitFrameType type)
-{
-    // Wasm stubs use the native SP, not the PSP.  Setting up the fake exit
-    // frame leaves the SP mis-aligned, which is how we want it, but we must do
-    // that carefully.
-
-    linkExitFrame(cxreg, scratch);
-
-    MOZ_ASSERT(sp.Is(GetStackPointer64()));
-
-    const ARMRegister tmp(scratch, 64);
-
-    vixl::UseScratchRegisterScope temps(this);
-    const ARMRegister tmp2 = temps.AcquireX();
-
-    Sub(sp, sp, 8);
-    Mov(tmp, sp);           // SP may be unaligned, can't use it for memory op
-    Mov(tmp2, int32_t(type));
-    Str(tmp2, vixl::MemOperand(tmp, 0));
 }
 
 // ========================================================================

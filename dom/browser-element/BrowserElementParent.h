@@ -100,7 +100,7 @@ public:
                 const nsAString& aName,
                 const nsAString& aFeatures,
                 layers::TextureFactoryIdentifier* aTextureFactoryIdentifier,
-                layers::LayersId* aLayersId);
+                uint64_t* aLayersId);
 
   /**
    * Handle a window.open call from an in-process <iframe mozbrowser>.

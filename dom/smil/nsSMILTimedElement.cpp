@@ -10,6 +10,7 @@
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/dom/SVGAnimationElement.h"
 #include "mozilla/TaskCategory.h"
+#include "nsAutoPtr.h"
 #include "nsSMILTimedElement.h"
 #include "nsAttrValueInlines.h"
 #include "nsSMILAnimationFunction.h"
@@ -629,7 +630,7 @@ nsSMILTimedElement::DoSampleAt(nsSMILTime aContainerTime, bool aEndOnly)
          : STATE_POSTACTIVE;
         stateChanged = true;
         if (mElementState == STATE_WAITING) {
-          mCurrentInterval = MakeUnique<nsSMILInterval>(firstInterval);
+          mCurrentInterval = new nsSMILInterval(firstInterval);
           NotifyNewInterval();
         }
       }
@@ -672,7 +673,7 @@ nsSMILTimedElement::DoSampleAt(nsSMILTime aContainerTime, bool aEndOnly)
         if (mCurrentInterval->End()->Time() <= sampleTime) {
           nsSMILInterval newInterval;
           mElementState =
-            GetNextInterval(mCurrentInterval.get(), nullptr, nullptr, newInterval)
+            GetNextInterval(mCurrentInterval, nullptr, nullptr, newInterval)
             ? STATE_WAITING
             : STATE_POSTACTIVE;
           if (mClient) {
@@ -683,15 +684,15 @@ nsSMILTimedElement::DoSampleAt(nsSMILTime aContainerTime, bool aEndOnly)
             FireTimeEventAsync(eSMILEndEvent, 0);
           }
           mCurrentRepeatIteration = 0;
-          mOldIntervals.AppendElement(Move(mCurrentInterval));
+          mOldIntervals.AppendElement(mCurrentInterval.forget());
           SampleFillValue();
           if (mElementState == STATE_WAITING) {
-            mCurrentInterval = MakeUnique<nsSMILInterval>(newInterval);
+            mCurrentInterval = new nsSMILInterval(newInterval);
           }
           // We are now in a consistent state to dispatch notifications
           if (didApplyEarlyEnd) {
             NotifyChangedInterval(
-                mOldIntervals[mOldIntervals.Length() - 1].get(), false, true);
+                mOldIntervals[mOldIntervals.Length() - 1], false, true);
           }
           if (mElementState == STATE_WAITING) {
             NotifyNewInterval();
@@ -767,7 +768,7 @@ nsSMILTimedElement::HandleContainerTimeChange()
   // the nsSMILTimeValueSpec we'll check if anything has changed and if not, we
   // won't go any further.
   if (mElementState == STATE_WAITING || mElementState == STATE_ACTIVE) {
-    NotifyChangedInterval(mCurrentInterval.get(), false, false);
+    NotifyChangedInterval(mCurrentInterval, false, false);
   }
 }
 
@@ -1258,7 +1259,7 @@ nsSMILTimedElement::Traverse(nsCycleCollectionTraversalCallback* aCallback)
 {
   uint32_t count = mBeginSpecs.Length();
   for (uint32_t i = 0; i < count; ++i) {
-    nsSMILTimeValueSpec* beginSpec = mBeginSpecs[i].get();
+    nsSMILTimeValueSpec* beginSpec = mBeginSpecs[i];
     MOZ_ASSERT(beginSpec,
                "null nsSMILTimeValueSpec in list of begin specs");
     beginSpec->Traverse(aCallback);
@@ -1266,7 +1267,7 @@ nsSMILTimedElement::Traverse(nsCycleCollectionTraversalCallback* aCallback)
 
   count = mEndSpecs.Length();
   for (uint32_t j = 0; j < count; ++j) {
-    nsSMILTimeValueSpec* endSpec = mEndSpecs[j].get();
+    nsSMILTimeValueSpec* endSpec = mEndSpecs[j];
     MOZ_ASSERT(endSpec, "null nsSMILTimeValueSpec in list of end specs");
     endSpec->Traverse(aCallback);
   }
@@ -1280,7 +1281,7 @@ nsSMILTimedElement::Unlink()
   // Remove dependencies on other elements
   uint32_t count = mBeginSpecs.Length();
   for (uint32_t i = 0; i < count; ++i) {
-    nsSMILTimeValueSpec* beginSpec = mBeginSpecs[i].get();
+    nsSMILTimeValueSpec* beginSpec = mBeginSpecs[i];
     MOZ_ASSERT(beginSpec,
                "null nsSMILTimeValueSpec in list of begin specs");
     beginSpec->Unlink();
@@ -1288,7 +1289,7 @@ nsSMILTimedElement::Unlink()
 
   count = mEndSpecs.Length();
   for (uint32_t j = 0; j < count; ++j) {
-    nsSMILTimeValueSpec* endSpec = mEndSpecs[j].get();
+    nsSMILTimeValueSpec* endSpec = mEndSpecs[j];
     MOZ_ASSERT(endSpec, "null nsSMILTimeValueSpec in list of end specs");
     endSpec->Unlink();
   }
@@ -1322,10 +1323,11 @@ nsSMILTimedElement::SetBeginOrEndSpec(const nsAString& aSpec,
 
   bool hadFailure = false;
   while (tokenizer.hasMoreTokens()) {
-    auto spec = MakeUnique<nsSMILTimeValueSpec>(*this, aIsBegin);
+    nsAutoPtr<nsSMILTimeValueSpec>
+      spec(new nsSMILTimeValueSpec(*this, aIsBegin));
     nsresult rv = spec->SetSpec(tokenizer.nextToken(), aContextNode);
     if (NS_SUCCEEDED(rv)) {
-      timeSpecsList.AppendElement(Move(spec));
+      timeSpecsList.AppendElement(spec.forget());
     } else {
       hadFailure = true;
     }
@@ -1478,15 +1480,15 @@ nsSMILTimedElement::RebuildTimingState(RemovalTestFunction aRemove)
   MOZ_ASSERT(mElementState == STATE_STARTUP,
              "Rebuilding timing state from non-startup state");
 
-  if (mAnimationElement->HasAttr(nsGkAtoms::begin)) {
+  if (mAnimationElement->HasAnimAttr(nsGkAtoms::begin)) {
     nsAutoString attValue;
-    mAnimationElement->GetAttr(nsGkAtoms::begin, attValue);
+    mAnimationElement->GetAnimAttr(nsGkAtoms::begin, attValue);
     SetBeginSpec(attValue, mAnimationElement, aRemove);
   }
 
-  if (mAnimationElement->HasAttr(nsGkAtoms::end)) {
+  if (mAnimationElement->HasAnimAttr(nsGkAtoms::end)) {
     nsAutoString attValue;
-    mAnimationElement->GetAttr(nsGkAtoms::end, attValue);
+    mAnimationElement->GetAnimAttr(nsGkAtoms::end, attValue);
     SetEndSpec(attValue, mAnimationElement, aRemove);
   }
 
@@ -1611,7 +1613,7 @@ nsSMILTimedElement::FilterIntervals()
         (i < threshold || !interval->IsDependencyChainLink())) {
       interval->Unlink(true /*filtered, not deleted*/);
     } else {
-      filteredList.AppendElement(Move(mOldIntervals[i]));
+      filteredList.AppendElement(mOldIntervals[i].forget());
     }
   }
   mOldIntervals.Clear();
@@ -1736,7 +1738,7 @@ nsSMILTimedElement::GetNextInterval(const nsSMILInterval* aPrevInterval,
       // our ref-counting is not const-correct
       tempBegin = const_cast<nsSMILInstanceTime*>(aFixedBeginTime);
     } else if ((!mAnimationElement ||
-                !mAnimationElement->HasAttr(nsGkAtoms::begin)) &&
+                !mAnimationElement->HasAnimAttr(nsGkAtoms::begin)) &&
                beginAfter <= zeroTime) {
       tempBegin = new nsSMILInstanceTime(nsSMILTimeValue(0));
     } else {
@@ -2087,14 +2089,14 @@ nsSMILTimedElement::UpdateCurrentInterval(bool aForceChangeNotice)
                                       ? mCurrentInterval->Begin()
                                       : nullptr;
   nsSMILInterval updatedInterval;
-  if (GetNextInterval(GetPreviousInterval(), mCurrentInterval.get(),
+  if (GetNextInterval(GetPreviousInterval(), mCurrentInterval,
                       beginTime, updatedInterval)) {
 
     if (mElementState == STATE_POSTACTIVE) {
 
       MOZ_ASSERT(!mCurrentInterval,
                  "In postactive state but the interval has been set");
-      mCurrentInterval = MakeUnique<nsSMILInterval>(updatedInterval);
+      mCurrentInterval = new nsSMILInterval(updatedInterval);
       mElementState = STATE_WAITING;
       NotifyNewInterval();
 
@@ -2116,7 +2118,7 @@ nsSMILTimedElement::UpdateCurrentInterval(bool aForceChangeNotice)
       }
 
       if (beginChanged || endChanged || aForceChangeNotice) {
-        NotifyChangedInterval(mCurrentInterval.get(), beginChanged, endChanged);
+        NotifyChangedInterval(mCurrentInterval, beginChanged, endChanged);
       }
     }
 
@@ -2130,7 +2132,7 @@ nsSMILTimedElement::UpdateCurrentInterval(bool aForceChangeNotice)
       if (!mCurrentInterval->End()->SameTimeAndBase(*mCurrentInterval->Begin()))
       {
         mCurrentInterval->SetEnd(*mCurrentInterval->Begin());
-        NotifyChangedInterval(mCurrentInterval.get(), false, true);
+        NotifyChangedInterval(mCurrentInterval, false, true);
       }
       // The transition to the postactive state will take place on the next
       // sample (along with firing end events, clearing intervals etc.)
@@ -2338,7 +2340,7 @@ nsSMILTimedElement::NotifyNewInterval()
   }
 
   for (auto iter = mTimeDependents.Iter(); !iter.Done(); iter.Next()) {
-    nsSMILInterval* interval = mCurrentInterval.get();
+    nsSMILInterval* interval = mCurrentInterval;
     // It's possible that in notifying one new time dependent of a new interval
     // that a chain reaction is triggered which results in the original
     // interval disappearing. If that's the case we can skip sending further

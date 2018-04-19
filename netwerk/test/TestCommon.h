@@ -11,7 +11,7 @@
 
 //-----------------------------------------------------------------------------
 
-class WaitForCondition final : public nsIRunnable
+class WaitForCondition : public nsIRunnable
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS

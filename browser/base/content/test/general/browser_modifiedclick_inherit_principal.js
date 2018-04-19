@@ -25,6 +25,6 @@ add_task(async function() {
    await BrowserTestUtils.switchTab(gBrowser, newTab);
    info(gURLBar.value);
    isnot(gURLBar.value, "", "URL bar should not be empty.");
-   BrowserTestUtils.removeTab(newTab);
+   await BrowserTestUtils.removeTab(newTab);
  });
 });

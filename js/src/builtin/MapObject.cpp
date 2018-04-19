@@ -262,11 +262,11 @@ MapIteratorObject::create(JSContext* cx, HandleObject obj, ValueMap* data,
 void
 MapIteratorObject::finalize(FreeOp* fop, JSObject* obj)
 {
-    MOZ_ASSERT(fop->onMainThread());
+    MOZ_ASSERT(fop->onActiveCooperatingThread());
     MOZ_ASSERT(!IsInsideNursery(obj));
 
     auto range = MapIteratorObjectRange(&obj->as<NativeObject>());
-    MOZ_ASSERT(!fop->runtime()->gc.nursery().isInside(range));
+    MOZ_ASSERT(!obj->zone()->group()->nursery().isInside(range));
 
     fop->delete_(range);
 }
@@ -282,7 +282,7 @@ MapIteratorObject::objectMoved(JSObject* obj, JSObject* old)
     if (!range)
         return 0;
 
-    Nursery& nursery = iter->runtimeFromMainThread()->gc.nursery();
+    Nursery& nursery = iter->zone()->group()->nursery();
     if (!nursery.isInside(range)) {
         nursery.removeMallocedBuffer(range);
         return 0;
@@ -567,8 +567,7 @@ WriteBarrierPostImpl(ObjectT* obj, const Value& keyValue)
         if (!keys)
             return false;
 
-        JSRuntime* rt = key->runtimeFromMainThread();
-        rt->gc.storeBuffer().putGeneric(OrderedHashTableRef<ObjectT>(obj));
+        key->zone()->group()->storeBuffer().putGeneric(OrderedHashTableRef<ObjectT>(obj));
     }
 
     if (!keys->append(key))
@@ -658,7 +657,7 @@ MapObject::create(JSContext* cx, HandleObject proto /* = nullptr */)
 void
 MapObject::finalize(FreeOp* fop, JSObject* obj)
 {
-    MOZ_ASSERT(fop->onMainThread());
+    MOZ_ASSERT(fop->onActiveCooperatingThread());
     if (ValueMap* map = obj->as<MapObject>().getData())
         fop->delete_(map);
 }
@@ -1113,11 +1112,11 @@ SetIteratorObject::create(JSContext* cx, HandleObject obj, ValueSet* data,
 void
 SetIteratorObject::finalize(FreeOp* fop, JSObject* obj)
 {
-    MOZ_ASSERT(fop->onMainThread());
+    MOZ_ASSERT(fop->onActiveCooperatingThread());
     MOZ_ASSERT(!IsInsideNursery(obj));
 
     auto range = SetIteratorObjectRange(&obj->as<NativeObject>());
-    MOZ_ASSERT(!fop->runtime()->gc.nursery().isInside(range));
+    MOZ_ASSERT(!obj->zone()->group()->nursery().isInside(range));
 
     fop->delete_(range);
 }
@@ -1133,7 +1132,7 @@ SetIteratorObject::objectMoved(JSObject* obj, JSObject* old)
     if (!range)
         return 0;
 
-    Nursery& nursery = iter->runtimeFromMainThread()->gc.nursery();
+    Nursery& nursery = iter->zone()->group()->nursery();
     if (!nursery.isInside(range)) {
         nursery.removeMallocedBuffer(range);
         return 0;
@@ -1351,7 +1350,7 @@ SetObject::trace(JSTracer* trc, JSObject* obj)
 void
 SetObject::finalize(FreeOp* fop, JSObject* obj)
 {
-    MOZ_ASSERT(fop->onMainThread());
+    MOZ_ASSERT(fop->onActiveCooperatingThread());
     SetObject* setobj = static_cast<SetObject*>(obj);
     if (ValueSet* set = setobj->getData())
         fop->delete_(set);

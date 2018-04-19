@@ -232,41 +232,34 @@ function elemSection(elemArrays) {
     return { name: elemId, body };
 }
 
-function moduleNameSubsection(moduleName) {
-    var body = [];
-    body.push(...varU32(nameTypeModule));
-
-    var subsection = encodedString(moduleName);
-    body.push(...varU32(subsection.length));
-    body.push(...subsection);
-
-    return body;
-}
-
-function funcNameSubsection(funcNames) {
-    var body = [];
-    body.push(...varU32(nameTypeFunction));
-
-    var subsection = varU32(funcNames.length);
-
-    var funcIndex = 0;
-    for (let f of funcNames) {
-        subsection.push(...varU32(f.index ? f.index : funcIndex));
-        subsection.push(...encodedString(f.name, f.nameLen));
-        funcIndex++;
-    }
-
-    body.push(...varU32(subsection.length));
-    body.push(...subsection);
-    return body;
-}
-
-function nameSection(subsections) {
+function nameSection(moduleName, funcNames) {
     var body = [];
     body.push(...string(nameName));
 
-    for (let ss of subsections)
-        body.push(...ss);
+    if (moduleName) {
+        body.push(...varU32(nameTypeModule));
+
+        var subsection = encodedString(moduleName);
+
+        body.push(...varU32(subsection.length));
+        body.push(...subsection);
+    }
+
+    if (funcNames) {
+        body.push(...varU32(nameTypeFunction));
+
+        var subsection = varU32(funcNames.length);
+
+        var funcIndex = 0;
+        for (let f of funcNames) {
+            subsection.push(...varU32(f.index ? f.index : funcIndex));
+            subsection.push(...encodedString(f.name, f.nameLen));
+            funcIndex++;
+        }
+
+        body.push(...varU32(subsection.length));
+        body.push(...subsection);
+    }
 
     return { name: userDefinedId, body };
 }
@@ -402,7 +395,7 @@ wasmEval(moduleWithSections([tooBigNameSection]));
 var customDefSec = customSection("wee", 42, 13);
 var declSec = declSection([0]);
 var bodySec = bodySection([v2vBody]);
-var nameSec = nameSection([funcNameSubsection([{name:'hi'}])]);
+var nameSec = nameSection(null, [{name:'hi'}]);
 wasmEval(moduleWithSections([customDefSec, v2vSigSection, declSec, bodySec]));
 wasmEval(moduleWithSections([v2vSigSection, customDefSec, declSec, bodySec]));
 wasmEval(moduleWithSections([v2vSigSection, declSec, customDefSec, bodySec]));
@@ -438,26 +431,6 @@ checkCustomSection(arr[2], 6);
 var arr = Module.customSections(m, "name");
 assertEq(arr.length, 1);
 assertEq(arr[0].byteLength, nameSec.body.length - 5 /* 4name */);
-
-// Test name/custom section warnings:
-const nameWarning = /validated with warning.*'name' custom section/;
-const okNameSec = nameSection([]);
-assertNoWarning(() => wasmEval(moduleWithSections([v2vSigSection, declSec, bodySec, okNameSec])));
-const badNameSec1 = nameSection([]);
-badNameSec1.body.push(1);
-assertWarning(() => wasmEval(moduleWithSections([v2vSigSection, declSec, bodySec, badNameSec1])), nameWarning);
-const badNameSec2 = nameSection([funcNameSubsection([{name:'blah'}])]);
-badNameSec2.body.push(100, 20, 42, 83);
-assertWarning(() => wasmEval(moduleWithSections([v2vSigSection, declSec, bodySec, badNameSec2])), nameWarning);
-const badNameSec3 = nameSection([funcNameSubsection([{name:'blah'}])]);
-badNameSec3.body.pop();
-assertWarning(() => wasmEval(moduleWithSections([v2vSigSection, declSec, bodySec, badNameSec3])), nameWarning);
-assertNoWarning(() => wasmEval(moduleWithSections([nameSection([moduleNameSubsection('hi')])])));
-assertWarning(() => wasmEval(moduleWithSections([nameSection([moduleNameSubsection('hi'), moduleNameSubsection('boo')])])), nameWarning);
-// Unknown name subsection
-assertNoWarning(() => wasmEval(moduleWithSections([nameSection([moduleNameSubsection('hi'), [4, 0]])])));
-assertWarning(() => wasmEval(moduleWithSections([nameSection([moduleNameSubsection('hi'), [4, 1]])])), nameWarning);
-assertNoWarning(() => wasmEval(moduleWithSections([nameSection([moduleNameSubsection('hi'), [4, 1, 42]])])));
 
 // Diagnose nonstandard block signature types.
 for (var bad of [0xff, 0, 1, 0x3f])
@@ -526,14 +499,8 @@ function runStackTraceTest(moduleName, funcNames, expectedName) {
         customSection("whoa"),
         customSection("wee", 42),
     ];
-    if (moduleName || funcNames) {
-        var subsections = [];
-        if (moduleName)
-            subsections.push(moduleNameSubsection(moduleName));
-        if (funcNames)
-            subsections.push(funcNameSubsection(funcNames));
-        sections.push(nameSection(subsections));
-    }
+    if (moduleName || funcNames)
+        sections.push(nameSection(moduleName, funcNames));
     sections.push(customSection("yay", 13));
 
     var result = "";

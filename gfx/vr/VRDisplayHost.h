@@ -147,6 +147,10 @@ protected:
   virtual ~VRControllerHost();
 
   VRControllerInfo mControllerInfo;
+  // The current button pressed bit of button mask.
+  uint64_t mButtonPressed;
+  // The current button touched bit of button mask.
+  uint64_t mButtonTouched;
   uint64_t mVibrateIndex;
   dom::GamepadPoseState mPose;
 };

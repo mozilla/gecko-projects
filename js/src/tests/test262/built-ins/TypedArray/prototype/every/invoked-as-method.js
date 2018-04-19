@@ -1,7 +1,7 @@
 // Copyright (C) 2016 the V8 project authors. All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
 /*---
-esid: sec-%typedarray%.prototype.every
+es6id: 22.2.3.7
 description: Requires a [[TypedArrayName]] internal slot.
 info: |
   22.2.3.7 %TypedArray%.prototype.every ( callbackfn [ , thisArg ] )

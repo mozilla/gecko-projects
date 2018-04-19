@@ -216,8 +216,10 @@ var gPermissionManager = {
     this._type = aParams.permissionType;
     this._manageCapability = aParams.manageCapability;
 
-    let permissionsText = document.getElementById("permissionsText");
-    permissionsText.textContent = aParams.introText;
+    var permissionsText = document.getElementById("permissionsText");
+    while (permissionsText.hasChildNodes())
+      permissionsText.firstChild.remove();
+    permissionsText.appendChild(document.createTextNode(aParams.introText));
 
     document.title = aParams.windowTitle;
 

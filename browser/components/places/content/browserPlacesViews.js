@@ -53,9 +53,13 @@ PlacesViewBase.prototype = {
     this._place = val;
 
     let history = PlacesUtils.history;
-    let query = {}, options = {};
-    history.queryStringToQuery(val, query, options);
-    let result = history.executeQuery(query.value, options.value);
+    let queries = { }, options = { };
+    history.queryStringToQueries(val, queries, { }, options);
+    if (!queries.value.length)
+      queries.value = [history.getNewQuery()];
+
+    let result = history.executeQueries(queries.value, queries.value.length,
+                                        options.value);
     result.addObserver(this);
     return val;
   },
@@ -205,7 +209,10 @@ PlacesViewBase.prototype = {
         container = selectedNode.parent;
         index = container.getChildIndex(selectedNode);
         if (PlacesUtils.nodeIsTagQuery(container)) {
-          tagName = PlacesUtils.asQuery(container).query.tags[0];
+          tagName = container.title;
+          // TODO (Bug 1160193): properly support dropping on a tag root.
+          if (!tagName)
+            return null;
         }
       }
     }
@@ -436,8 +443,7 @@ PlacesViewBase.prototype = {
       }
       aPopup._siteURIMenuitem.setAttribute("targetURI", siteUrl);
       aPopup._siteURIMenuitem.setAttribute("oncommand",
-        "openUILink(this.getAttribute('targetURI'), event, {" +
-        " triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal({})});");
+        "openUILink(this.getAttribute('targetURI'), event);");
 
       // If a user middle-clicks this item we serve the oncommand event.
       // We are using checkForMiddleClick because of Bug 246720.
@@ -994,8 +1000,6 @@ function PlacesToolbar(aPlace) {
     this._addEventListeners(gBrowser.tabContainer, ["TabOpen", "TabClose"], false);
   }
 
-  this._updatingNodesVisibility = false;
-
   PlacesViewBase.call(this, aPlace);
 
   Services.telemetry.getHistogramById("FX_BOOKMARKS_TOOLBAR_INIT_MS")
@@ -1009,7 +1013,8 @@ PlacesToolbar.prototype = {
               "mousemove", "mouseover", "mouseout"],
 
   QueryInterface: function PT_QueryInterface(aIID) {
-    if (aIID.equals(Ci.nsITimerCallback))
+    if (aIID.equals(Ci.nsIDOMEventListener) ||
+        aIID.equals(Ci.nsITimerCallback))
       return this;
 
     return PlacesViewBase.prototype.QueryInterface.apply(this, arguments);
@@ -1248,55 +1253,34 @@ PlacesToolbar.prototype = {
     this._updateNodesVisibilityTimer = this._setTimer(100);
   },
 
-  async _updateNodesVisibilityTimerCallback() {
-    if (this._updatingNodesVisibility || window.closed) {
-      return;
-    }
-    this._updatingNodesVisibility = true;
-
-    let dwu = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                    .getInterface(Ci.nsIDOMWindowUtils);
-
-    let scrollRect =
-      await window.promiseDocumentFlushed(() => dwu.getBoundsWithoutFlushing(this._rootElt));
-
+  _updateNodesVisibilityTimerCallback: function PT__updateNodesVisibilityTimerCallback() {
+    let scrollRect = this._rootElt.getBoundingClientRect();
     let childOverflowed = false;
-
-    // We're about to potentially update a bunch of nodes, so we do it
-    // in a requestAnimationFrame so that other JS that's might execute
-    // in the same tick can avoid flushing styles and layout for these
-    // changes.
-    window.requestAnimationFrame(() => {
-      for (let child of this._rootElt.childNodes) {
-        // Once a child overflows, all the next ones will.
-        if (!childOverflowed) {
-          let childRect = dwu.getBoundsWithoutFlushing(child);
-          childOverflowed = this.isRTL ? (childRect.left < scrollRect.left)
-                                       : (childRect.right > scrollRect.right);
-        }
-
-        if (childOverflowed) {
-          child.removeAttribute("image");
-          child.style.visibility = "hidden";
-        } else {
-          let icon = child._placesNode.icon;
-          if (icon)
-            child.setAttribute("image", icon);
-          child.style.visibility = "visible";
-        }
+    for (let child of this._rootElt.childNodes) {
+      // Once a child overflows, all the next ones will.
+      if (!childOverflowed) {
+        let childRect = child.getBoundingClientRect();
+        childOverflowed = this.isRTL ? (childRect.left < scrollRect.left)
+                                     : (childRect.right > scrollRect.right);
       }
 
-      // We rebuild the chevron on popupShowing, so if it is open
-      // we must update it.
-      if (!this._chevron.collapsed && this._chevron.open) {
-        this._updateChevronPopupNodesVisibility();
+      if (childOverflowed) {
+        child.removeAttribute("image");
+        child.style.visibility = "hidden";
+      } else {
+        let icon = child._placesNode.icon;
+        if (icon)
+          child.setAttribute("image", icon);
+        child.style.visibility = "visible";
       }
+    }
 
-      let event = new CustomEvent("BookmarksToolbarVisibilityUpdated", {bubbles: true});
-      this._viewElt.dispatchEvent(event);
-    });
-
-    this._updatingNodesVisibility = false;
+    // We rebuild the chevron on popupShowing, so if it is open
+    // we must update it.
+    if (!this._chevron.collapsed && this._chevron.open)
+      this._updateChevronPopupNodesVisibility();
+    let event = new CustomEvent("BookmarksToolbarVisibilityUpdated", {bubbles: true});
+    this._viewElt.dispatchEvent(event);
   },
 
   nodeInserted:
@@ -1624,7 +1608,9 @@ PlacesToolbar.prototype = {
   notify: function PT_notify(aTimer) {
     if (aTimer == this._updateNodesVisibilityTimer) {
       this._updateNodesVisibilityTimer = null;
-      this._updateNodesVisibilityTimerCallback();
+      // Bug 1440070: This should use promiseDocumentFlushed, so that
+      // _updateNodesVisibilityTimerCallback can use getBoundsWithoutFlush.
+      window.requestAnimationFrame(this._updateNodesVisibilityTimerCallback.bind(this));
     } else if (aTimer == this._ibTimer) {
       // * Timer to turn off indicator bar.
       this._dropIndicator.collapsed = true;
@@ -1909,6 +1895,13 @@ function PlacesMenu(aPopupShowingEvent, aPlace, aOptions) {
 
 PlacesMenu.prototype = {
   __proto__: PlacesViewBase.prototype,
+
+  QueryInterface: function PM_QueryInterface(aIID) {
+    if (aIID.equals(Ci.nsIDOMEventListener))
+      return this;
+
+    return PlacesViewBase.prototype.QueryInterface.apply(this, arguments);
+  },
 
   _removeChild: function PM_removeChild(aChild) {
     PlacesViewBase.prototype._removeChild.apply(this, arguments);

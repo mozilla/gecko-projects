@@ -82,7 +82,7 @@ HTMLOptionElement::UpdateDisabledState(bool aNotify)
 
   if (!isDisabled) {
     nsIContent* parent = GetParent();
-    if (auto optGroupElement = HTMLOptGroupElement::FromNodeOrNull(parent)) {
+    if (auto optGroupElement = HTMLOptGroupElement::FromContentOrNull(parent)) {
       isDisabled = optGroupElement->IsDisabled();
     }
   }
@@ -247,8 +247,9 @@ HTMLOptionElement::GetText(nsAString& aText)
 
   nsIContent* child = nsINode::GetFirstChild();
   while (child) {
-    if (Text* textChild = child->GetAsText()) {
-      textChild->AppendTextTo(text);
+    if (child->NodeType() == TEXT_NODE ||
+        child->NodeType() == CDATA_SECTION_NODE) {
+      child->AppendTextTo(text);
     }
     if (child->IsHTMLElement(nsGkAtoms::script) ||
         child->IsSVGElement(nsGkAtoms::script)) {
@@ -317,7 +318,7 @@ HTMLOptionElement::GetSelect()
     return nullptr;
   }
 
-  HTMLSelectElement* select = HTMLSelectElement::FromNode(parent);
+  HTMLSelectElement* select = HTMLSelectElement::FromContent(parent);
   if (select) {
     return select;
   }
@@ -326,7 +327,7 @@ HTMLOptionElement::GetSelect()
     return nullptr;
   }
 
-  return HTMLSelectElement::FromNodeOrNull(parent->GetParent());
+  return HTMLSelectElement::FromContentOrNull(parent->GetParent());
 }
 
 already_AddRefed<HTMLOptionElement>

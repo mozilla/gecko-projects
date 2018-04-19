@@ -172,7 +172,7 @@ add_task(async function test_create_options() {
   await extension.awaitFinish("tabs.create");
   await extension.unload();
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });
 
 add_task(async function test_urlbar_focus() {

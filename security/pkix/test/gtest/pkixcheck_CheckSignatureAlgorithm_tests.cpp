@@ -203,8 +203,8 @@ class pkixcheck_CheckSignatureAlgorithm_TrustDomain final
 {
 public:
   explicit pkixcheck_CheckSignatureAlgorithm_TrustDomain(
-             unsigned int aPublicKeySizeInBits)
-    : publicKeySizeInBits(aPublicKeySizeInBits)
+             unsigned int publicKeySizeInBits)
+    : publicKeySizeInBits(publicKeySizeInBits)
     , checkedDigestAlgorithm(false)
     , checkedModulusSizeInBits(false)
   {
@@ -273,8 +273,8 @@ class pkixcheck_CheckSignatureAlgorithm_BuildCertChain_TrustDomain
 {
 public:
   explicit pkixcheck_CheckSignatureAlgorithm_BuildCertChain_TrustDomain(
-             const ByteString& aIssuer)
-    : issuer(aIssuer)
+             const ByteString& issuer)
+    : issuer(issuer)
   {
   }
 

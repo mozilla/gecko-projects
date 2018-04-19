@@ -426,9 +426,7 @@ class FilteringMessageManagerMap extends Map {
     broker = new this._constructor(this.messageName, this.callback, target);
     this.set(target, broker);
 
-    // XXXbz if target is really known to be a MessageListenerManager,
-    // do we need this isInstance check?
-    if (EventTarget.isInstance(target)) {
+    if (target instanceof Ci.nsIDOMEventTarget) {
       let onUnload = event => {
         target.removeEventListener("unload", onUnload);
         this.delete(target);
@@ -948,11 +946,6 @@ this.MessageChannel = {
           value,
         };
 
-        if (target.isDisconnected) {
-          // Target is disconnected. We can't send an error response, so
-          // don't even try.
-          return;
-        }
         target.sendAsyncMessage(MESSAGE_RESPONSE, response);
       },
       error => {

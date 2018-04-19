@@ -221,7 +221,11 @@ README_EOF
     fi
 
     # copy LICENSE
-    cp ${TOPSRCDIR}/LICENSE ${tgtpath}/
+    if [ -e ${TOPSRCDIR}/b2g/LICENSE ]; then
+        cp ${TOPSRCDIR}/b2g/LICENSE ${tgtpath}/
+    else
+        cp ${TOPSRCDIR}/LICENSE ${tgtpath}/
+    fi
 
     # copy patches dir, if it currently exists in STAGING
     if [ -d ${STAGING}/patches ]; then

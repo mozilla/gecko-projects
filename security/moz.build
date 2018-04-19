@@ -8,7 +8,7 @@ with Files("**"):
     BUG_COMPONENT = ("Core", "Security: PSM")
 
 with Files("generate*.py"):
-    BUG_COMPONENT = ("Firefox Build System", "General")
+    BUG_COMPONENT = ("Core", "Build Config")
 
 with Files("nss/**"):
     BUG_COMPONENT = ("NSS", "Libraries")

@@ -1615,9 +1615,8 @@ MediaRecorder::CreateAndDispatchBlobEvent(Blob* aBlob)
                            NS_LITERAL_STRING("dataavailable"),
                            init);
   event->SetTrusted(true);
-  ErrorResult rv;
-  DispatchEvent(*event, rv);
-  return rv.StealNSResult();
+  bool dummy;
+  return DispatchEvent(event, &dummy);
 }
 
 void
@@ -1633,9 +1632,9 @@ MediaRecorder::DispatchSimpleEvent(const nsAString & aStr)
   event->InitEvent(aStr, false, false);
   event->SetTrusted(true);
 
-  IgnoredErrorResult res;
-  DispatchEvent(*event, res);
-  if (res.Failed()) {
+  bool dummy;
+  rv = DispatchEvent(event, &dummy);
+  if (NS_FAILED(rv)) {
     NS_ERROR("Failed to dispatch the event!!!");
     return;
   }
@@ -1679,9 +1678,9 @@ MediaRecorder::NotifyError(nsresult aRv)
     this, NS_LITERAL_STRING("error"), init);
   event->SetTrusted(true);
 
-  IgnoredErrorResult res;
-  DispatchEvent(*event, res);
-  if (res.Failed()) {
+  bool dummy;
+  rv = DispatchEvent(event, &dummy);
+  if (NS_FAILED(rv)) {
     NS_ERROR("Failed to dispatch the error event!!!");
   }
 }

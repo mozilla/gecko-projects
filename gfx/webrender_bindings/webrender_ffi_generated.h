@@ -2,13 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* Generated with cbindgen:0.5.2 */
+/* Generated with cbindgen:0.5.0 */
 
 /* DO NOT MODIFY THIS MANUALLY! This file was generated using cbindgen.
  * To generate this file:
- *   1. Get the latest cbindgen using `cargo install --force cbindgen`
+ *   1. Get the latest cbindgen using `cargo +nightly install --force cbindgen`
  *      a. Alternatively, you can clone `https://github.com/eqrion/cbindgen` and use a tagged release
- *   2. Run `rustup run nightly cbindgen toolkit/library/rust/ --lockfile Cargo.lock --crate webrender_bindings -o gfx/webrender_bindings/webrender_ffi_generated.h`
+ *   2. Run `rustup run nightly cbindgen toolkit/library/rust/ --crate webrender_bindings -o gfx/webrender_bindings/webrender_ffi_generated.h`
  */
 
 #include <cstdint>
@@ -274,6 +274,8 @@ struct Vec;
 // Geometry in the document's coordinate space (logical pixels).
 struct WorldPixel;
 
+struct WrPipelineInfo;
+
 struct WrProgramCache;
 
 struct WrState;
@@ -313,89 +315,6 @@ using VecU8 = Vec<uint8_t>;
 
 using ArcVecU8 = Arc<VecU8>;
 
-struct WrWindowId {
-  uint64_t mHandle;
-
-  bool operator==(const WrWindowId& aOther) const {
-    return mHandle == aOther.mHandle;
-  }
-  bool operator<(const WrWindowId& aOther) const {
-    return mHandle < aOther.mHandle;
-  }
-  bool operator<=(const WrWindowId& aOther) const {
-    return mHandle <= aOther.mHandle;
-  }
-};
-
-// This type carries no valuable semantics for WR. However, it reflects the fact that
-// clients (Servo) may generate pipelines by different semi-independent sources.
-// These pipelines still belong to the same `IdNamespace` and the same `DocumentId`.
-// Having this extra Id field enables them to generate `PipelineId` without collision.
-using PipelineSourceId = uint32_t;
-
-// From the point of view of WR, `PipelineId` is completely opaque and generic as long as
-// it's clonable, serializable, comparable, and hashable.
-struct PipelineId {
-  PipelineSourceId mNamespace;
-  uint32_t mHandle;
-
-  bool operator==(const PipelineId& aOther) const {
-    return mNamespace == aOther.mNamespace &&
-           mHandle == aOther.mHandle;
-  }
-};
-
-using WrPipelineId = PipelineId;
-
-struct Epoch {
-  uint32_t mHandle;
-
-  bool operator==(const Epoch& aOther) const {
-    return mHandle == aOther.mHandle;
-  }
-  bool operator<(const Epoch& aOther) const {
-    return mHandle < aOther.mHandle;
-  }
-  bool operator<=(const Epoch& aOther) const {
-    return mHandle <= aOther.mHandle;
-  }
-};
-
-using WrEpoch = Epoch;
-
-struct WrPipelineEpoch {
-  WrPipelineId pipeline_id;
-  WrEpoch epoch;
-
-  bool operator==(const WrPipelineEpoch& aOther) const {
-    return pipeline_id == aOther.pipeline_id &&
-           epoch == aOther.epoch;
-  }
-};
-
-template<typename T>
-struct FfiVec {
-  const T *data;
-  uintptr_t length;
-  uintptr_t capacity;
-
-  bool operator==(const FfiVec& aOther) const {
-    return data == aOther.data &&
-           length == aOther.length &&
-           capacity == aOther.capacity;
-  }
-};
-
-struct WrPipelineInfo {
-  FfiVec<WrPipelineEpoch> epochs;
-  FfiVec<PipelineId> removed_pipelines;
-
-  bool operator==(const WrPipelineInfo& aOther) const {
-    return epochs == aOther.epochs &&
-           removed_pipelines == aOther.removed_pipelines;
-  }
-};
-
 template<typename T, typename U>
 struct TypedSize2D {
   T width;
@@ -425,7 +344,7 @@ struct BuiltDisplayListDescriptor {
   // The third IPC time stamp: just before sending
   uint64_t send_start_time;
   // The amount of clips ids assigned while building this display list.
-  uintptr_t total_clip_ids;
+  size_t total_clip_ids;
 
   bool operator==(const BuiltDisplayListDescriptor& aOther) const {
     return builder_start_time == aOther.builder_start_time &&
@@ -437,8 +356,8 @@ struct BuiltDisplayListDescriptor {
 
 struct WrVecU8 {
   uint8_t *data;
-  uintptr_t length;
-  uintptr_t capacity;
+  size_t length;
+  size_t capacity;
 
   bool operator==(const WrVecU8& aOther) const {
     return data == aOther.data &&
@@ -462,6 +381,26 @@ struct TypedPoint2D {
 };
 
 using WorldPoint = TypedPoint2D<float, WorldPixel>;
+
+// This type carries no valuable semantics for WR. However, it reflects the fact that
+// clients (Servo) may generate pipelines by different semi-independent sources.
+// These pipelines still belong to the same `IdNamespace` and the same `DocumentId`.
+// Having this extra Id field enables them to generate `PipelineId` without collision.
+using PipelineSourceId = uint32_t;
+
+// From the point of view of WR, `PipelineId` is completely opaque and generic as long as
+// it's clonable, serializable, comparable, and hashable.
+struct PipelineId {
+  PipelineSourceId mNamespace;
+  uint32_t mHandle;
+
+  bool operator==(const PipelineId& aOther) const {
+    return mNamespace == aOther.mNamespace &&
+           mHandle == aOther.mHandle;
+  }
+};
+
+using WrPipelineId = PipelineId;
 
 // A 2d Rectangle optionally tagged with a unit.
 template<typename T, typename U>
@@ -784,7 +723,7 @@ using WrLogLevelFilter = LevelFilter;
 
 struct ByteSlice {
   const uint8_t *buffer;
-  uintptr_t len;
+  size_t len;
 
   bool operator==(const ByteSlice& aOther) const {
     return buffer == aOther.buffer &&
@@ -794,17 +733,45 @@ struct ByteSlice {
 
 using TileOffset = TypedPoint2D<uint16_t, Tiles>;
 
-using DeviceUintRect = TypedRect<uint32_t, DevicePixel>;
-
 struct MutByteSlice {
   uint8_t *buffer;
-  uintptr_t len;
+  size_t len;
 
   bool operator==(const MutByteSlice& aOther) const {
     return buffer == aOther.buffer &&
            len == aOther.len;
   }
 };
+
+struct WrWindowId {
+  uint64_t mHandle;
+
+  bool operator==(const WrWindowId& aOther) const {
+    return mHandle == aOther.mHandle;
+  }
+  bool operator<(const WrWindowId& aOther) const {
+    return mHandle < aOther.mHandle;
+  }
+  bool operator<=(const WrWindowId& aOther) const {
+    return mHandle <= aOther.mHandle;
+  }
+};
+
+struct Epoch {
+  uint32_t mHandle;
+
+  bool operator==(const Epoch& aOther) const {
+    return mHandle == aOther.mHandle;
+  }
+  bool operator<(const Epoch& aOther) const {
+    return mHandle < aOther.mHandle;
+  }
+  bool operator<=(const Epoch& aOther) const {
+    return mHandle <= aOther.mHandle;
+  }
+};
+
+using WrEpoch = Epoch;
 
 struct WrDebugFlags {
   uint32_t mBits;
@@ -822,7 +789,7 @@ struct WrExternalImage {
   float u1;
   float v1;
   const uint8_t *buff;
-  uintptr_t size;
+  size_t size;
 
   bool operator==(const WrExternalImage& aOther) const {
     return image_type == aOther.image_type &&
@@ -942,10 +909,7 @@ struct FontInstancePlatformOptions {
 };
 #endif
 
-struct WrTransformProperty {
-  uint64_t id;
-  LayoutTransform transform;
-};
+using DeviceUintRect = TypedRect<uint32_t, DevicePixel>;
 
 struct WrOpacityProperty {
   uint64_t id;
@@ -957,18 +921,23 @@ struct WrOpacityProperty {
   }
 };
 
+struct WrTransformProperty {
+  uint64_t id;
+  LayoutTransform transform;
+};
+
 extern "C" {
 
 /* DO NOT MODIFY THIS MANUALLY! This file was generated using cbindgen.
  * To generate this file:
- *   1. Get the latest cbindgen using `cargo install --force cbindgen`
+ *   1. Get the latest cbindgen using `cargo +nightly install --force cbindgen`
  *      a. Alternatively, you can clone `https://github.com/eqrion/cbindgen` and use a tagged release
- *   2. Run `rustup run nightly cbindgen toolkit/library/rust/ --lockfile Cargo.lock --crate webrender_bindings -o gfx/webrender_bindings/webrender_ffi_generated.h`
+ *   2. Run `rustup run nightly cbindgen toolkit/library/rust/ --crate webrender_bindings -o gfx/webrender_bindings/webrender_ffi_generated.h`
  */
 
 extern void AddFontData(WrFontKey aKey,
                         const uint8_t *aData,
-                        uintptr_t aSize,
+                        size_t aSize,
                         uint32_t aIndex,
                         const ArcVecU8 *aVec);
 
@@ -977,17 +946,6 @@ extern void AddNativeFontHandle(WrFontKey aKey,
                                 uint32_t aIndex);
 
 extern void DeleteFontData(WrFontKey aKey);
-
-extern void apz_deregister_updater(WrWindowId aWindowId);
-
-extern void apz_post_scene_swap(WrWindowId aWindowId,
-                                WrPipelineInfo aPipelineInfo);
-
-extern void apz_pre_scene_swap(WrWindowId aWindowId);
-
-extern void apz_register_updater(WrWindowId aWindowId);
-
-extern void apz_run_updater(WrWindowId aWindowId);
 
 extern void gecko_printf_stderr_output(const char *aMsg);
 
@@ -1064,7 +1022,7 @@ WR_FUNC;
 
 WR_INLINE
 void wr_api_send_external_event(DocumentHandle *aDh,
-                                uintptr_t aEvt)
+                                size_t aEvt)
 WR_DESTRUCTOR_SAFE_FUNC;
 
 WR_INLINE
@@ -1075,10 +1033,6 @@ WR_FUNC;
 WR_INLINE
 void wr_api_shut_down(DocumentHandle *aDh)
 WR_DESTRUCTOR_SAFE_FUNC;
-
-WR_INLINE
-void wr_api_wake_scene_builder(DocumentHandle *aDh)
-WR_FUNC;
 
 WR_INLINE
 void wr_clear_item_tag(WrState *aState)
@@ -1093,34 +1047,34 @@ void wr_dp_clear_save(WrState *aState)
 WR_FUNC;
 
 WR_INLINE
-uintptr_t wr_dp_define_clip(WrState *aState,
-                            const uintptr_t *aAncestorScrollId,
-                            const uintptr_t *aAncestorClipId,
-                            LayoutRect aClipRect,
-                            const ComplexClipRegion *aComplex,
-                            uintptr_t aComplexCount,
-                            const WrImageMask *aMask)
+size_t wr_dp_define_clip(WrState *aState,
+                         const size_t *aAncestorScrollId,
+                         const size_t *aAncestorClipId,
+                         LayoutRect aClipRect,
+                         const ComplexClipRegion *aComplex,
+                         size_t aComplexCount,
+                         const WrImageMask *aMask)
 WR_FUNC;
 
 WR_INLINE
-uintptr_t wr_dp_define_scroll_layer(WrState *aState,
-                                    uint64_t aScrollId,
-                                    const uintptr_t *aAncestorScrollId,
-                                    const uintptr_t *aAncestorClipId,
-                                    LayoutRect aContentRect,
-                                    LayoutRect aClipRect)
+size_t wr_dp_define_scroll_layer(WrState *aState,
+                                 uint64_t aScrollId,
+                                 const size_t *aAncestorScrollId,
+                                 const size_t *aAncestorClipId,
+                                 LayoutRect aContentRect,
+                                 LayoutRect aClipRect)
 WR_FUNC;
 
 WR_INLINE
-uintptr_t wr_dp_define_sticky_frame(WrState *aState,
-                                    LayoutRect aContentRect,
-                                    const float *aTopMargin,
-                                    const float *aRightMargin,
-                                    const float *aBottomMargin,
-                                    const float *aLeftMargin,
-                                    StickyOffsetBounds aVerticalBounds,
-                                    StickyOffsetBounds aHorizontalBounds,
-                                    LayoutVector2D aAppliedOffset)
+size_t wr_dp_define_sticky_frame(WrState *aState,
+                                 LayoutRect aContentRect,
+                                 const float *aTopMargin,
+                                 const float *aRightMargin,
+                                 const float *aBottomMargin,
+                                 const float *aLeftMargin,
+                                 StickyOffsetBounds aVerticalBounds,
+                                 StickyOffsetBounds aHorizontalBounds,
+                                 LayoutVector2D aAppliedOffset)
 WR_FUNC;
 
 WR_INLINE
@@ -1165,7 +1119,7 @@ void wr_dp_push_border_gradient(WrState *aState,
                                 LayoutPoint aStartPoint,
                                 LayoutPoint aEndPoint,
                                 const GradientStop *aStops,
-                                uintptr_t aStopsCount,
+                                size_t aStopsCount,
                                 ExtendMode aExtendMode,
                                 SideOffsets2D<float> aOutset)
 WR_FUNC;
@@ -1192,7 +1146,7 @@ void wr_dp_push_border_radial_gradient(WrState *aState,
                                        LayoutPoint aCenter,
                                        LayoutSize aRadius,
                                        const GradientStop *aStops,
-                                       uintptr_t aStopsCount,
+                                       size_t aStopsCount,
                                        ExtendMode aExtendMode,
                                        SideOffsets2D<float> aOutset)
 WR_FUNC;
@@ -1218,13 +1172,13 @@ WR_FUNC;
 
 WR_INLINE
 void wr_dp_push_clip(WrState *aState,
-                     uintptr_t aClipId)
+                     size_t aClipId)
 WR_FUNC;
 
 WR_INLINE
 void wr_dp_push_clip_and_scroll_info(WrState *aState,
-                                     uintptr_t aScrollId,
-                                     const uintptr_t *aClipId)
+                                     size_t aScrollId,
+                                     const size_t *aClipId)
 WR_FUNC;
 
 WR_INLINE
@@ -1265,7 +1219,7 @@ void wr_dp_push_linear_gradient(WrState *aState,
                                 LayoutPoint aStartPoint,
                                 LayoutPoint aEndPoint,
                                 const GradientStop *aStops,
-                                uintptr_t aStopsCount,
+                                size_t aStopsCount,
                                 ExtendMode aExtendMode,
                                 LayoutSize aTileSize,
                                 LayoutSize aTileSpacing)
@@ -1279,7 +1233,7 @@ void wr_dp_push_radial_gradient(WrState *aState,
                                 LayoutPoint aCenter,
                                 LayoutSize aRadius,
                                 const GradientStop *aStops,
-                                uintptr_t aStopsCount,
+                                size_t aStopsCount,
                                 ExtendMode aExtendMode,
                                 LayoutSize aTileSize,
                                 LayoutSize aTileSpacing)
@@ -1295,7 +1249,7 @@ WR_FUNC;
 
 WR_INLINE
 void wr_dp_push_scroll_layer(WrState *aState,
-                             uintptr_t aScrollId)
+                             size_t aScrollId)
 WR_FUNC;
 
 WR_INLINE
@@ -1309,7 +1263,6 @@ WR_FUNC;
 WR_INLINE
 void wr_dp_push_stacking_context(WrState *aState,
                                  LayoutRect aBounds,
-                                 const uintptr_t *aClipNodeId,
                                  const WrAnimationProperty *aAnimation,
                                  const float *aOpacity,
                                  const LayoutTransform *aTransform,
@@ -1317,7 +1270,7 @@ void wr_dp_push_stacking_context(WrState *aState,
                                  const LayoutTransform *aPerspective,
                                  MixBlendMode aMixBlendMode,
                                  const WrFilterOp *aFilters,
-                                 uintptr_t aFilterCount,
+                                 size_t aFilterCount,
                                  bool aIsBackfaceVisible)
 WR_FUNC;
 
@@ -1391,11 +1344,10 @@ extern bool wr_moz2d_render_cb(ByteSlice aBlob,
                                ImageFormat aFormat,
                                const uint16_t *aTileSize,
                                const TileOffset *aTileOffset,
-                               const DeviceUintRect *aDirtyRect,
                                MutByteSlice aOutput);
 
 extern void wr_notifier_external_event(WrWindowId aWindowId,
-                                       uintptr_t aRawEvent);
+                                       size_t aRawEvent);
 
 extern void wr_notifier_new_frame_ready(WrWindowId aWindowId);
 
@@ -1405,8 +1357,19 @@ extern void wr_notifier_new_scroll_frame_ready(WrWindowId aWindowId,
 extern void wr_notifier_wake_up(WrWindowId aWindowId);
 
 WR_INLINE
-void wr_pipeline_info_delete(WrPipelineInfo aInfo)
+void wr_pipeline_info_delete(WrPipelineInfo *aInfo)
 WR_DESTRUCTOR_SAFE_FUNC;
+
+WR_INLINE
+bool wr_pipeline_info_next_epoch(WrPipelineInfo *aInfo,
+                                 WrPipelineId *aOutPipeline,
+                                 WrEpoch *aOutEpoch)
+WR_FUNC;
+
+WR_INLINE
+bool wr_pipeline_info_next_removed_pipeline(WrPipelineInfo *aInfo,
+                                            WrPipelineId *aOutPipeline)
+WR_FUNC;
 
 WR_INLINE
 void wr_program_cache_delete(WrProgramCache *aProgramCache)
@@ -1427,7 +1390,7 @@ void wr_renderer_delete(Renderer *aRenderer)
 WR_DESTRUCTOR_SAFE_FUNC;
 
 WR_INLINE
-WrPipelineInfo wr_renderer_flush_pipeline_info(Renderer *aRenderer)
+WrPipelineInfo *wr_renderer_flush_pipeline_info(Renderer *aRenderer)
 WR_FUNC;
 
 WR_INLINE
@@ -1439,7 +1402,7 @@ void wr_renderer_readback(Renderer *aRenderer,
                           uint32_t aWidth,
                           uint32_t aHeight,
                           uint8_t *aDstBuffer,
-                          uintptr_t aBufferSize)
+                          size_t aBufferSize)
 WR_FUNC;
 
 WR_INLINE
@@ -1566,10 +1529,6 @@ void wr_resource_updates_update_image(ResourceUpdates *aResources,
 WR_FUNC;
 
 WR_INLINE
-uintptr_t wr_root_scroll_node_id()
-WR_FUNC;
-
-WR_INLINE
 void wr_set_item_tag(WrState *aState,
                      uint64_t aScrollId,
                      uint16_t aHitInfo)
@@ -1586,7 +1545,7 @@ WR_DESTRUCTOR_SAFE_FUNC;
 WR_INLINE
 WrState *wr_state_new(WrPipelineId aPipelineId,
                       LayoutSize aContentSize,
-                      uintptr_t aCapacity)
+                      size_t aCapacity)
 WR_FUNC;
 
 WR_INLINE
@@ -1595,12 +1554,6 @@ WR_DESTRUCTOR_SAFE_FUNC;
 
 WR_INLINE
 WrThreadPool *wr_thread_pool_new()
-WR_FUNC;
-
-WR_INLINE
-void wr_transaction_append_transform_properties(Transaction *aTxn,
-                                                const WrTransformProperty *aTransformArray,
-                                                uintptr_t aTransformCount)
 WR_FUNC;
 
 WR_INLINE
@@ -1622,7 +1575,7 @@ bool wr_transaction_is_empty(const Transaction *aTxn)
 WR_FUNC;
 
 WR_INLINE
-Transaction *wr_transaction_new(bool aDoAsync)
+Transaction *wr_transaction_new()
 WR_FUNC;
 
 WR_INLINE
@@ -1663,9 +1616,9 @@ WR_FUNC;
 WR_INLINE
 void wr_transaction_update_dynamic_properties(Transaction *aTxn,
                                               const WrOpacityProperty *aOpacityArray,
-                                              uintptr_t aOpacityCount,
+                                              size_t aOpacityCount,
                                               const WrTransformProperty *aTransformArray,
-                                              uintptr_t aTransformCount)
+                                              size_t aTransformCount)
 WR_FUNC;
 
 WR_INLINE
@@ -1706,7 +1659,7 @@ WR_FUNC;
 
 /* DO NOT MODIFY THIS MANUALLY! This file was generated using cbindgen.
  * To generate this file:
- *   1. Get the latest cbindgen using `cargo install --force cbindgen`
+ *   1. Get the latest cbindgen using `cargo +nightly install --force cbindgen`
  *      a. Alternatively, you can clone `https://github.com/eqrion/cbindgen` and use a tagged release
- *   2. Run `rustup run nightly cbindgen toolkit/library/rust/ --lockfile Cargo.lock --crate webrender_bindings -o gfx/webrender_bindings/webrender_ffi_generated.h`
+ *   2. Run `rustup run nightly cbindgen toolkit/library/rust/ --crate webrender_bindings -o gfx/webrender_bindings/webrender_ffi_generated.h`
  */

@@ -104,7 +104,7 @@ assert_eq!(css_url.as_str(), "http://servo.github.io/rust-url/main.css");
 # run().unwrap();
 */
 
-#![doc(html_root_url = "https://docs.rs/url/1.7.0")]
+#![doc(html_root_url = "https://docs.rs/url/1.6.0")]
 
 #[cfg(feature="rustc-serialize")] extern crate rustc_serialize;
 #[macro_use] extern crate matches;
@@ -117,7 +117,7 @@ pub extern crate percent_encoding;
 use encoding::EncodingOverride;
 #[cfg(feature = "heapsize")] use heapsize::HeapSizeOf;
 use host::HostInternal;
-use parser::{Parser, Context, SchemeType, to_u32, ViolationFn};
+use parser::{Parser, Context, SchemeType, to_u32};
 use percent_encoding::{PATH_SEGMENT_ENCODE_SET, USERINFO_ENCODE_SET,
                        percent_encode, percent_decode, utf8_percent_encode};
 use std::borrow::Borrow;
@@ -135,7 +135,7 @@ use std::str;
 pub use origin::{Origin, OpaqueOrigin};
 pub use host::{Host, HostAndPort, SocketAddrs};
 pub use path_segments::PathSegmentsMut;
-pub use parser::{ParseError, SyntaxViolation};
+pub use parser::ParseError;
 pub use slicing::Position;
 
 mod encoding;
@@ -186,7 +186,7 @@ impl HeapSizeOf for Url {
 pub struct ParseOptions<'a> {
     base_url: Option<&'a Url>,
     encoding_override: encoding::EncodingOverride,
-    violation_fn: ViolationFn<'a>,
+    log_syntax_violation: Option<&'a Fn(&'static str)>,
 }
 
 impl<'a> ParseOptions<'a> {
@@ -209,47 +209,9 @@ impl<'a> ParseOptions<'a> {
         self
     }
 
-    /// Call the provided function or closure on non-fatal parse errors, passing
-    /// a static string description.  This method is deprecated in favor of
-    /// `syntax_violation_callback` and is implemented as an adaptor for the
-    /// latter, passing the `SyntaxViolation` description. Only the last value
-    /// passed to either method will be used by a parser.
-    #[deprecated]
+    /// Call the provided function or closure on non-fatal parse errors.
     pub fn log_syntax_violation(mut self, new: Option<&'a Fn(&'static str)>) -> Self {
-        self.violation_fn = match new {
-            Some(f) => ViolationFn::OldFn(f),
-            None => ViolationFn::NoOp
-        };
-        self
-    }
-
-    /// Call the provided function or closure for a non-fatal `SyntaxViolation`
-    /// when it occurs during parsing. Note that since the provided function is
-    /// `Fn`, the caller might need to utilize _interior mutability_, such as with
-    /// a `RefCell`, to collect the violations.
-    ///
-    /// ## Example
-    /// ```
-    /// use std::cell::RefCell;
-    /// use url::{Url, SyntaxViolation};
-    /// # use url::ParseError;
-    /// # fn run() -> Result<(), url::ParseError> {
-    /// let violations = RefCell::new(Vec::new());
-    /// let url = Url::options()
-    ///     .syntax_violation_callback(Some(&|v| violations.borrow_mut().push(v)))
-    ///     .parse("https:////example.com")?;
-    /// assert_eq!(url.as_str(), "https://example.com/");
-    /// assert_eq!(violations.into_inner(),
-    ///            vec!(SyntaxViolation::ExpectedDoubleSlash));
-    /// # Ok(())
-    /// # }
-    /// # run().unwrap();
-    /// ```
-    pub fn syntax_violation_callback(mut self, new: Option<&'a Fn(SyntaxViolation)>) -> Self {
-        self.violation_fn = match new {
-            Some(f) => ViolationFn::NewFn(f),
-            None => ViolationFn::NoOp
-        };
+        self.log_syntax_violation = new;
         self
     }
 
@@ -259,7 +221,7 @@ impl<'a> ParseOptions<'a> {
             serialization: String::with_capacity(input.len()),
             base_url: self.base_url,
             query_encoding_override: self.encoding_override,
-            violation_fn: self.violation_fn,
+            log_syntax_violation: self.log_syntax_violation,
             context: Context::UrlParser,
         }.parse_url(input)
     }
@@ -267,12 +229,11 @@ impl<'a> ParseOptions<'a> {
 
 impl<'a> Debug for ParseOptions<'a> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f,
-               "ParseOptions {{ base_url: {:?}, encoding_override: {:?}, \
-                violation_fn: {:?} }}",
-               self.base_url,
-               self.encoding_override,
-               self.violation_fn)
+        write!(f, "ParseOptions {{ base_url: {:?}, encoding_override: {:?}, log_syntax_violation: ", self.base_url, self.encoding_override)?;
+        match self.log_syntax_violation {
+            Some(_) => write!(f, "Some(Fn(&'static str)) }}"),
+            None => write!(f, "None }}")
+        }
     }
 }
 
@@ -291,7 +252,7 @@ impl Url {
     /// # }
     /// # run().unwrap();
     /// ```
-    ///
+    /// 
     /// # Errors
     ///
     /// If the function can not parse an absolute URL from the given string,
@@ -354,7 +315,7 @@ impl Url {
     /// ```rust
     /// use url::Url;
     /// # use url::ParseError;
-    ///
+    /// 
     /// # fn run() -> Result<(), ParseError> {
     /// let base = Url::parse("https://example.net/a/b.html")?;
     /// let url = base.join("c.png")?;
@@ -370,7 +331,7 @@ impl Url {
     ///
     /// # Errors
     ///
-    /// If the function can not parse an URL from the given string
+    /// If the function can not parse an URL from the given string 
     /// with this URL as the base URL, a [`ParseError`] variant will be returned.
     ///
     /// [`ParseError`]: enum.ParseError.html
@@ -402,7 +363,7 @@ impl Url {
         ParseOptions {
             base_url: None,
             encoding_override: EncodingOverride::utf8(),
-            violation_fn: ViolationFn::NoOp,
+            log_syntax_violation: None,
         }
     }
 
@@ -1216,11 +1177,11 @@ impl Url {
     /// assert_eq!(url.as_str(), "https://example.com/data.csv");
 
     /// url.set_fragment(Some("cell=4,1-6,2"));
-    /// assert_eq!(url.as_str(), "https://example.com/data.csv#cell=4,1-6,2");
+    /// assert_eq!(url.as_str(), "https://example.com/data.csv#cell=4,1-6,2");  
     /// assert_eq!(url.fragment(), Some("cell=4,1-6,2"));
     ///
     /// url.set_fragment(None);
-    /// assert_eq!(url.as_str(), "https://example.com/data.csv");
+    /// assert_eq!(url.as_str(), "https://example.com/data.csv");    
     /// assert!(url.fragment().is_none());
     /// # Ok(())
     /// # }
@@ -1273,7 +1234,7 @@ impl Url {
     /// assert_eq!(url.as_str(), "https://example.com/products");
     ///
     /// url.set_query(Some("page=2"));
-    /// assert_eq!(url.as_str(), "https://example.com/products?page=2");
+    /// assert_eq!(url.as_str(), "https://example.com/products?page=2");    
     /// assert_eq!(url.query(), Some("page=2"));
     /// # Ok(())
     /// # }
@@ -1369,12 +1330,12 @@ impl Url {
     /// # fn run() -> Result<(), ParseError> {
     /// let mut url = Url::parse("https://example.com")?;
     /// url.set_path("api/comments");
-    /// assert_eq!(url.as_str(), "https://example.com/api/comments");
+    /// assert_eq!(url.as_str(), "https://example.com/api/comments");    
     /// assert_eq!(url.path(), "/api/comments");
     ///
     /// let mut url = Url::parse("https://example.com/api")?;
     /// url.set_path("data/report.csv");
-    /// assert_eq!(url.as_str(), "https://example.com/data/report.csv");
+    /// assert_eq!(url.as_str(), "https://example.com/data/report.csv");    
     /// assert_eq!(url.path(), "/data/report.csv");
     /// # Ok(())
     /// # }
@@ -1466,8 +1427,7 @@ impl Url {
     /// # run().unwrap();
     /// ```
     pub fn set_port(&mut self, mut port: Option<u16>) -> Result<(), ()> {
-        // has_host implies !cannot_be_a_base
-        if !self.has_host() || self.host() == Some(Host::Domain("")) || self.scheme() == "file" {
+        if !self.has_host() || self.scheme() == "file" {
             return Err(())
         }
         if port.is_some() && port == parser::default_port(self.scheme()) {
@@ -1535,7 +1495,7 @@ impl Url {
     /// ```
     /// use url::Url;
     /// # use url::ParseError;
-    ///
+    /// 
     /// # fn run() -> Result<(), ParseError> {
     /// let mut url = Url::parse("foo://example.net")?;
     /// let result = url.set_host(None);
@@ -1551,7 +1511,7 @@ impl Url {
     /// ```
     /// use url::Url;
     /// # use url::ParseError;
-    ///
+    /// 
     /// # fn run() -> Result<(), ParseError> {
     /// let mut url = Url::parse("https://example.net")?;
     /// let result = url.set_host(None);
@@ -1567,7 +1527,7 @@ impl Url {
     /// ```
     /// use url::Url;
     /// # use url::ParseError;
-    ///
+    /// 
     /// # fn run() -> Result<(), ParseError> {
     /// let mut url = Url::parse("mailto:rms@example.net")?;
     ///
@@ -1598,11 +1558,7 @@ impl Url {
             if host == "" && SchemeType::from(self.scheme()).is_special() {
                 return Err(ParseError::EmptyHost);
             }
-            if SchemeType::from(self.scheme()).is_special() {
-                self.set_host_internal(Host::parse(host)?, None)
-            } else {
-                self.set_host_internal(Host::parse_opaque(host)?, None)
-            }
+            self.set_host_internal(Host::parse(host)?, None)
         } else if self.has_host() {
             if SchemeType::from(self.scheme()).is_special() {
                 return Err(ParseError::EmptyHost)
@@ -1735,8 +1691,7 @@ impl Url {
     /// # run().unwrap();
     /// ```
     pub fn set_password(&mut self, password: Option<&str>) -> Result<(), ()> {
-        // has_host implies !cannot_be_a_base
-        if !self.has_host() || self.host() == Some(Host::Domain("")) || self.scheme() == "file" {
+        if !self.has_host() {
             return Err(())
         }
         if let Some(password) = password {
@@ -1817,8 +1772,7 @@ impl Url {
     /// # run().unwrap();
     /// ```
     pub fn set_username(&mut self, username: &str) -> Result<(), ()> {
-        // has_host implies !cannot_be_a_base
-        if !self.has_host() || self.host() == Some(Host::Domain("")) || self.scheme() == "file" {
+        if !self.has_host() {
             return Err(())
         }
         let username_start = self.scheme_end + 3;
@@ -1877,7 +1831,7 @@ impl Url {
     /// ```
     /// use url::Url;
     /// # use url::ParseError;
-    ///
+    /// 
     /// # fn run() -> Result<(), ParseError> {
     /// let mut url = Url::parse("https://example.net")?;
     /// let result = url.set_scheme("foo");
@@ -1894,7 +1848,7 @@ impl Url {
     /// ```
     /// use url::Url;
     /// # use url::ParseError;
-    ///
+    /// 
     /// # fn run() -> Result<(), ParseError> {
     /// let mut url = Url::parse("https://example.net")?;
     /// let result = url.set_scheme("foõ");
@@ -1910,7 +1864,7 @@ impl Url {
     /// ```
     /// use url::Url;
     /// # use url::ParseError;
-    ///
+    /// 
     /// # fn run() -> Result<(), ParseError> {
     /// let mut url = Url::parse("mailto:rms@example.net")?;
     /// let result = url.set_scheme("https");
@@ -1959,7 +1913,7 @@ impl Url {
     /// ```
     /// # if cfg!(unix) {
     /// use url::Url;
-    ///
+    /// 
     /// # fn run() -> Result<(), ()> {
     /// let url = Url::from_file_path("/tmp/foo.txt")?;
     /// assert_eq!(url.as_str(), "file:///tmp/foo.txt");
@@ -1974,7 +1928,6 @@ impl Url {
     /// # run().unwrap();
     /// # }
     /// ```
-    #[cfg(any(unix, windows, target_os="redox"))]
     pub fn from_file_path<P: AsRef<Path>>(path: P) -> Result<Url, ()> {
         let mut serialization = "file://".to_owned();
         let host_start = serialization.len() as u32;
@@ -2010,7 +1963,6 @@ impl Url {
     ///
     /// Note that `std::path` does not consider trailing slashes significant
     /// and usually does not include them (e.g. in `Path::parent()`).
-    #[cfg(any(unix, windows, target_os="redox"))]
     pub fn from_directory_path<P: AsRef<Path>>(path: P) -> Result<Url, ()> {
         let mut url = Url::from_file_path(path)?;
         if !url.serialization.ends_with('/') {
@@ -2092,7 +2044,6 @@ impl Url {
     /// (That is, if the percent-decoded path contains a NUL byte or,
     /// for a Windows path, is not UTF-8.)
     #[inline]
-    #[cfg(any(unix, windows, target_os="redox"))]
     pub fn to_file_path(&self) -> Result<PathBuf, ()> {
         if let Some(segments) = self.path_segments() {
             let host = match self.host() {
@@ -2338,7 +2289,6 @@ fn path_to_file_url_segments_windows(path: &Path, serialization: &mut String)
     }
     Ok((host_end, host_internal))
 }
-
 
 #[cfg(any(unix, target_os = "redox"))]
 fn file_url_segments_to_pathbuf(host: Option<&str>, segments: str::Split<char>) -> Result<PathBuf, ()> {

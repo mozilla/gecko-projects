@@ -19,6 +19,8 @@ protected:
   virtual ~CSSSupportsRule() {}
 
 public:
+  int32_t GetType() const override { return css::Rule::SUPPORTS_RULE; }
+
   // WebIDL interface
   uint16_t Type() const override { return CSSRuleBinding::SUPPORTS_RULE; }
 

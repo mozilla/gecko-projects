@@ -138,7 +138,7 @@ public:
     nsXBLProtoImplMethod(aName)
   {}
 
-  nsresult Execute(nsIContent* aBoundElement, const nsXBLPrototypeBinding&);
+  nsresult Execute(nsIContent* aBoundElement, JSAddonId* aAddonId);
 
   // Override InstallMember; these methods never get installed as members on
   // binding instantiations (though they may hang out in mMembers on the

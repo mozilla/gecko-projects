@@ -12,6 +12,8 @@ ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.defineModuleGetter(this, "ContentSearch",
   "resource:///modules/ContentSearch.jsm");
 
+Cu.importGlobalProperties(["NodeFilter"]);
+
 const SIMPLETEST_OVERRIDES =
   ["ok", "is", "isnot", "todo", "todo_is", "todo_isnot", "info", "expectAssertions", "requestCompleteLog"];
 
@@ -108,13 +110,16 @@ function testInit() {
       prefs.setIntPref("dom.ipc.keepProcessesAlive.web", processCount);
     }
 
-    Services.mm.loadFrameScript("chrome://mochikit/content/shutdown-leaks-collector.js", true);
+    let globalMM = Cc["@mozilla.org/globalmessagemanager;1"]
+                     .getService(Ci.nsIMessageListenerManager);
+    globalMM.loadFrameScript("chrome://mochikit/content/shutdown-leaks-collector.js", true);
   } else {
     // In non-e10s, only run the ShutdownLeaksCollector in the parent process.
     ChromeUtils.import("chrome://mochikit/content/ShutdownLeaksCollector.jsm");
   }
 
-  Services.mm.loadFrameScript("chrome://mochikit/content/tests/SimpleTest/AsyncUtilsContent.js", true);
+  let gmm = Cc["@mozilla.org/globalmessagemanager;1"].getService(Ci.nsIMessageListenerManager);
+  gmm.loadFrameScript("chrome://mochikit/content/tests/SimpleTest/AsyncUtilsContent.js", true);
 
   var testSuite = Cc["@mozilla.org/process/environment;1"].
                     getService(Ci.nsIEnvironment).
@@ -374,16 +379,6 @@ function Tester(aTests, structuredLogger, aCallback) {
   this._scriptLoader = Services.scriptloader;
   this.EventUtils = {};
   this._scriptLoader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/EventUtils.js", this.EventUtils);
-
-  // In order to allow existing tests to continue using unsafe CPOWs
-  // with EventUtils, we need to load a separate copy into a sandbox
-  // which has unsafe CPOW usage whitelisted.
-  this.cpowSandbox = Cu.Sandbox(window, {sandboxPrototype: window});
-  Cu.permitCPOWsInScope(this.cpowSandbox);
-
-  this.cpowEventUtils = new this.cpowSandbox.Object();
-  this._scriptLoader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/EventUtils.js", this.cpowEventUtils);
-
   var simpleTestScope = {};
   this._scriptLoader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/specialpowersAPI.js", simpleTestScope);
   this._scriptLoader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/SpecialPowersObserverAPI.js", simpleTestScope);
@@ -533,15 +528,11 @@ Tester.prototype = {
     if (this.currentTest && window.gBrowser && gBrowser.tabs.length > 1) {
       while (gBrowser.tabs.length > 1) {
         let lastTab = gBrowser.tabContainer.lastChild;
-        if (!lastTab.closing) {
-          // Report the stale tab as an error only when they're not closing.
-          // Tests can finish without waiting for the closing tabs.
-          this.currentTest.addResult(new testResult({
-            name: baseMsg.replace("{elt}", "tab") + ": " +
-              lastTab.linkedBrowser.currentURI.spec,
-            allowFailure: this.currentTest.allowFailure,
-          }));
-        }
+        this.currentTest.addResult(new testResult({
+          name: baseMsg.replace("{elt}", "tab") + ": " +
+                lastTab.linkedBrowser.currentURI.spec,
+          allowFailure: this.currentTest.allowFailure,
+        }));
         gBrowser.removeTab(lastTab);
       }
     }
@@ -979,17 +970,16 @@ Tester.prototype = {
     let currentTest = this.currentTest;
 
     // Import utils in the test scope.
-    let {scope} = this.currentTest;
-    scope.EventUtils = this.currentTest.usesUnsafeCPOWs ? this.cpowEventUtils : this.EventUtils;
-    scope.SimpleTest = this.SimpleTest;
-    scope.gTestPath = this.currentTest.path;
-    scope.Task = this.Task;
-    scope.ContentTask = this.ContentTask;
-    scope.BrowserTestUtils = this.BrowserTestUtils;
-    scope.TestUtils = this.TestUtils;
-    scope.ExtensionTestUtils = this.ExtensionTestUtils;
+    this.currentTest.scope.EventUtils = this.EventUtils;
+    this.currentTest.scope.SimpleTest = this.SimpleTest;
+    this.currentTest.scope.gTestPath = this.currentTest.path;
+    this.currentTest.scope.Task = this.Task;
+    this.currentTest.scope.ContentTask = this.ContentTask;
+    this.currentTest.scope.BrowserTestUtils = this.BrowserTestUtils;
+    this.currentTest.scope.TestUtils = this.TestUtils;
+    this.currentTest.scope.ExtensionTestUtils = this.ExtensionTestUtils;
     // Pass a custom report function for mochitest style reporting.
-    scope.Assert = new this.Assert(function(err, message, stack) {
+    this.currentTest.scope.Assert = new this.Assert(function(err, message, stack) {
       currentTest.addResult(new testResult(err ? {
         name: err.message,
         ex: err.stack,
@@ -1006,7 +996,7 @@ Tester.prototype = {
     this.ContentTask.setTestScope(currentScope);
 
     // Allow Assert.jsm methods to be tacked to the current scope.
-    scope.export_assertions = function() {
+    this.currentTest.scope.export_assertions = function() {
       for (let func in this.Assert) {
         this[func] = this.Assert[func].bind(this.Assert);
       }
@@ -1015,11 +1005,11 @@ Tester.prototype = {
     // Override SimpleTest methods with ours.
     SIMPLETEST_OVERRIDES.forEach(function(m) {
       this.SimpleTest[m] = this[m];
-    }, scope);
+    }, this.currentTest.scope);
 
     //load the tools to work with chrome .jar and remote
     try {
-      this._scriptLoader.loadSubScript("chrome://mochikit/content/chrome-harness.js", scope);
+      this._scriptLoader.loadSubScript("chrome://mochikit/content/chrome-harness.js", this.currentTest.scope);
     } catch (ex) { /* no chrome-harness tools */ }
 
     // Import head.js script if it exists.
@@ -1027,7 +1017,7 @@ Tester.prototype = {
       this.currentTest.path.substr(0, this.currentTest.path.lastIndexOf("/"));
     var headPath = currentTestDirPath + "/head.js";
     try {
-      this._scriptLoader.loadSubScript(headPath, scope);
+      this._scriptLoader.loadSubScript(headPath, this.currentTest.scope);
     } catch (ex) {
       // Ignore if no head.js exists, but report all other errors.  Note this
       // will also ignore an existing head.js attempting to import a missing
@@ -1042,7 +1032,8 @@ Tester.prototype = {
 
     // Import the test script.
     try {
-      this._scriptLoader.loadSubScript(this.currentTest.path, scope);
+      this._scriptLoader.loadSubScript(this.currentTest.path,
+                                       this.currentTest.scope);
       // Run the test
       this.lastStartTime = Date.now();
       if (this.currentTest.scope.__tasks) {
@@ -1100,8 +1091,8 @@ Tester.prototype = {
           }
           this.finish();
         }.bind(currentScope));
-      } else if (typeof scope.test == "function") {
-        scope.test();
+      } else if (typeof this.currentTest.scope.test == "function") {
+        this.currentTest.scope.test();
       } else {
         throw "This test didn't call add_task, nor did it define a generatorTest() function, nor did it define a test() function, so we don't know how to run it.";
       }
@@ -1381,18 +1372,6 @@ function testScope(aTester, aTest, expected) {
       self.__tester.structuredLogger.activateBuffering();
     })
   };
-
-  // If we're running a test that requires unsafe CPOWs, create a
-  // separate sandbox scope, with CPOWS whitelisted, for that test, and
-  // mirror all of our properties onto it. Test files will be loaded
-  // into this sandbox.
-  //
-  // Otherwise, load test files directly into the testScope instance.
-  if (aTest.usesUnsafeCPOWs) {
-    let sandbox = this._createSandbox();
-    Cu.permitCPOWsInScope(sandbox);
-    return sandbox;
-  }
 }
 
 function decorateTaskFn(fn) {
@@ -1420,29 +1399,6 @@ testScope.prototype = {
   TestUtils: null,
   ExtensionTestUtils: null,
   Assert: null,
-
-  _createSandbox() {
-    let sandbox = Cu.Sandbox(window, {sandboxPrototype: window});
-
-    for (let prop in this) {
-      if (typeof this[prop] == "function") {
-        sandbox[prop] = this[prop].bind(this);
-      } else {
-        Object.defineProperty(sandbox, prop, {
-          configurable: true,
-          enumerable: true,
-          get: () => {
-            return this[prop];
-          },
-          set: (value) => {
-            this[prop] = value;
-          }
-        });
-      }
-    }
-
-    return sandbox;
-  },
 
   /**
    * Add a test function which is a Task function.

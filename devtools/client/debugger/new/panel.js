@@ -74,13 +74,11 @@ DebuggerPanel.prototype = {
     }
 
     const top = win.ownerDocument.defaultView.top;
-    if (!top || typeof top.openWebLink !== "function") {
+    if (!top || typeof top.openUILinkIn !== "function") {
       return;
     }
 
-    top.openWebLinkIn(url, "tab", {
-      triggeringPrincipal: win.document.nodePrincipal
-    });
+    top.openUILinkIn(url, "tab");
   },
 
   openWorkerToolbox: function(worker) {
@@ -116,10 +114,6 @@ DebuggerPanel.prototype = {
     });
 
     return { frames, selected };
-  },
-
-  getMappedExpression(expression) {
-    return this._actions.getMappedExpression(expression);
   },
 
   isPaused() {

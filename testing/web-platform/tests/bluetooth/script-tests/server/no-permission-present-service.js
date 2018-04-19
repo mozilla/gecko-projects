@@ -6,7 +6,7 @@ const expected = new DOMException(
     'to \'optionalServices\' in requestDevice() options. https://goo.gl/HxfxSQ',
     'SecurityError');
 
-bluetooth_test(() => getConnectedHealthThermometerDevice({
+bluetooth_test(() => getHealthThermometerDevice({
       filters: [{services: ['health_thermometer']}]
     })
     .then(({device}) => Promise.all([

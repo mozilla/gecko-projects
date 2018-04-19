@@ -4,6 +4,11 @@
 
 "use strict";
 
+ChromeUtils.defineModuleGetter(this, "ExtensionParent",
+                               "resource://gre/modules/ExtensionParent.jsm");
+
+const {WebExtensionPolicy} = ExtensionParent;
+
 const {
   WebExtensionInspectedWindowFront
 } = require("devtools/shared/fronts/webextension-inspected-window");
@@ -73,7 +78,7 @@ function consoleEvalJS(consoleClient, jsCode) {
 // Script used as the injectedScript option in the inspectedWindow.reload tests.
 function injectedScript() {
   if (!window.pageScriptExecutedFirst) {
-    window.addEventListener("DOMContentLoaded", function() {
+    window.addEventListener("DOMContentLoaded", function () {
       if (document.querySelector("pre")) {
         document.querySelector("pre").textContent = "injected script executed first";
       }

@@ -53,7 +53,7 @@ add_task(async function() {
     await setInputValue(browser, formValue);
 
     // Remove the tab.
-    await promiseRemoveTabAndSessionState(tab);
+    await promiseRemoveTab(tab);
   }
 
   // Test that valid CC numbers are not collected.

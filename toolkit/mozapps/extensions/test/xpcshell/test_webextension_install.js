@@ -7,7 +7,7 @@ add_task(async function setup() {
   profileDir.append("extensions");
 
   if (!profileDir.exists())
-    profileDir.create(Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
+    profileDir.create(AM_Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
 
   createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1.9.2");
   startupManager();
@@ -511,10 +511,7 @@ add_task(async function test_permissions_prompt() {
     return Promise.resolve();
   };
 
-  await Promise.all([
-    promiseCompleteInstall(install),
-    promiseWebExtensionStartup(),
-  ]);
+  await promiseCompleteInstall(install);
 
   notEqual(perminfo, undefined, "Permission handler was invoked");
   equal(perminfo.existingAddon, null, "Permission info does not include an existing addon");

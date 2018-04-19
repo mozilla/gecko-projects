@@ -19,4 +19,5 @@ assert.sameValue(obj[symA], 2, "The value of `obj[symA]` is `2`");
 assert.sameValue(delete obj[symA], false, "`delete obj[symA]` is `false`");
 assert.sameValue(obj[symB], undefined, "The value of `obj[symB]` is `undefined`");
 
+
 reportCompare(0, 0);

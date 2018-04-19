@@ -98,7 +98,7 @@ var gPluginHandler = {
     if (!url) {
       url = Services.blocklist.getPluginBlocklistURL(pluginTag);
     }
-    openTrustedLinkIn(url, "tab");
+    openUILinkIn(url, "tab");
   },
 
   submitReport: function submitReport(runID, keyVals, submitURLOptIn) {

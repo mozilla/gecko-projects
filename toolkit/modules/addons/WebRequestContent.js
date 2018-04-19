@@ -76,21 +76,15 @@ var ContentPolicy = {
     catMan.deleteCategoryEntry("content-policy", this._contractID, false);
   },
 
-  shouldLoad(contentLocation, loadInfo, mimeTypeGuess) {
-    let policyType = loadInfo.externalContentPolicyType;
-    let node = loadInfo.loadingContext;
-    let loadingPrincipal = loadInfo.loadingPrincipal;
-    let requestPrincipal = loadInfo.triggeringPrincipal;
-    let requestOrigin = null;
-    if (loadingPrincipal) {
-      requestOrigin = loadingPrincipal.URI;
-    }
-
+  shouldLoad(policyType, contentLocation, requestOrigin,
+             node, mimeTypeGuess, extra, requestPrincipal) {
     // Loads of TYPE_DOCUMENT and TYPE_SUBDOCUMENT perform a ConPol check
     // within docshell as well as within the ContentSecurityManager. To avoid
     // duplicate evaluations we ignore ConPol checks performed within docShell.
-    if (loadInfo.skipContentPolicyCheckForWebRequest) {
-      return Ci.nsIContentPolicy.ACCEPT;
+    if (extra instanceof Ci.nsISupportsString) {
+      if (extra.data === "conPolCheckFromDocShell") {
+        return Ci.nsIContentPolicy.ACCEPT;
+      }
     }
 
     if (requestPrincipal &&
@@ -127,8 +121,7 @@ var ContentPolicy = {
     }
 
     if (policyType == Ci.nsIContentPolicy.TYPE_SUBDOCUMENT ||
-        (ChromeUtils.getClassName(node) == "XULElement" &&
-         node.localName == "browser")) {
+        (node instanceof Ci.nsIDOMXULElement && node.localName == "browser")) {
       // Chrome sets frameId to the ID of the sub-window. But when
       // Firefox loads an iframe, it sets |node| to the <iframe>
       // element, whose window is the parent window. We adopt the
@@ -199,7 +192,7 @@ var ContentPolicy = {
     return Ci.nsIContentPolicy.ACCEPT;
   },
 
-  shouldProcess: function(contentLocation, loadInfo, mimeType) {
+  shouldProcess: function(contentType, contentLocation, requestOrigin, insecNode, mimeType, extra) {
     return Ci.nsIContentPolicy.ACCEPT;
   },
 

@@ -34,9 +34,7 @@ function preparePendingTab(aCallback) {
   let tab = BrowserTestUtils.addTab(gBrowser, URL);
 
   whenLoaded(tab.linkedBrowser, function() {
-    let sessionUpdatePromise = BrowserTestUtils.waitForSessionStoreUpdate(tab);
-    BrowserTestUtils.removeTab(tab);
-    sessionUpdatePromise.then(() => {
+    BrowserTestUtils.removeTab(tab).then(() => {
       let [{state}] = JSON.parse(SessionStore.getClosedTabData(window));
 
       tab = BrowserTestUtils.addTab(gBrowser, "about:blank");

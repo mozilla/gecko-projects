@@ -200,20 +200,23 @@ BinTokenReaderTester::readMaybeChars(Maybe<Chars>& out)
     if (current_ + byteLen > stop_)
         return raiseError("Not enough bytes to read chars");
 
+    // 3. Check null string (no allocation)
     if (byteLen == 2 && *current_ == 255 && *(current_ + 1) == 0) {
-        // 3. Special case: null string.
+        // Special case: null string.
         out = Nothing();
-    } else {
-        // 4. Other strings (bytes are copied)
-        out.emplace(cx_);
-        if (!out->resize(byteLen)) {
-            ReportOutOfMemory(cx_);
-            return false;
-        }
-        PodCopy(out->begin(), current_, byteLen);
+        current_ += byteLen;
+        return true;
     }
 
+    // 4. Other strings (bytes are copied)
+    out.emplace(cx_);
+    if (!out->resize(byteLen)) {
+        ReportOutOfMemory(cx_);
+        return false;
+    }
+    PodCopy(out->begin(), current_, byteLen);
     current_ += byteLen;
+
     if (!readConst("</string>"))
         return false;
 

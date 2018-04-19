@@ -48,7 +48,7 @@ public:
 
   void Shutdown();
 
-  void DataSaved(uint32_t aFileGeneration);
+  void DataSaved();
 
   static already_AddRefed<ServiceWorkerRegistrar> Get();
 
@@ -63,10 +63,10 @@ protected:
   // These methods are protected because we test this class using gTest
   // subclassing it.
   void LoadData();
-  nsresult SaveData(const nsTArray<ServiceWorkerRegistrationData>& aData);
+  void SaveData();
 
   nsresult ReadData();
-  nsresult WriteData(const nsTArray<ServiceWorkerRegistrationData>& aData);
+  nsresult WriteData();
   void DeleteData();
 
   void RegisterServiceWorkerInternal(const ServiceWorkerRegistrationData& aData);
@@ -78,12 +78,9 @@ private:
   void ProfileStarted();
   void ProfileStopped();
 
-  void MaybeScheduleSaveData();
+  void ScheduleSaveData();
   void ShutdownCompleted();
   void MaybeScheduleShutdownCompleted();
-
-  uint32_t GetNextGeneration();
-  void MaybeResetGeneration();
 
   nsCOMPtr<nsIAsyncShutdownClient> GetShutdownPhase() const;
 
@@ -98,11 +95,8 @@ protected:
   bool mDataLoaded;
 
   // PBackground thread only
-  uint32_t mDataGeneration;
-  uint32_t mFileGeneration;
-  uint32_t mRetryCount;
   bool mShuttingDown;
-  bool mRunnableDispatched;
+  uint32_t mRunnableCounter;
 };
 
 } // namespace dom

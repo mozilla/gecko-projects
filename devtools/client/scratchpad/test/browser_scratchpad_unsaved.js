@@ -6,13 +6,16 @@
 // only finish() when correct number of tests are done
 const expected = 4;
 var count = 0;
-function done() {
+function done()
+{
   if (++count == expected) {
     finish();
   }
 }
 
-function test() {
+
+function test()
+{
   waitForExplicitFinish();
 
   testListeners();
@@ -24,8 +27,9 @@ function test() {
   gBrowser.loadURI("data:text/html,<p>test star* UI for unsaved file changes");
 }
 
-function testListeners() {
-  openScratchpad(function(aWin, aScratchpad) {
+function testListeners()
+{
+  openScratchpad(function (aWin, aScratchpad) {
     aScratchpad.setText("new text");
     ok(isStar(aWin), "show star if scratchpad text changes");
 
@@ -53,14 +57,15 @@ function testListeners() {
   }, {noFocus: true});
 }
 
-function testRestoreNotFromFile() {
+function testRestoreNotFromFile()
+{
   let session = [{
     text: "test1",
     executionContext: 1
   }];
 
   let [win] = ScratchpadManager.restoreSession(session);
-  openScratchpad(function(aWin, aScratchpad) {
+  openScratchpad(function (aWin, aScratchpad) {
     aScratchpad.setText("new text");
     ok(isStar(win), "show star if restored scratchpad isn't from a file");
 
@@ -69,7 +74,8 @@ function testRestoreNotFromFile() {
   }, {window: win, noFocus: true});
 }
 
-function testRestoreFromFileSaved() {
+function testRestoreFromFileSaved()
+{
   let session = [{
     filename: "test.js",
     text: "test1",
@@ -78,7 +84,7 @@ function testRestoreFromFileSaved() {
   }];
 
   let [win] = ScratchpadManager.restoreSession(session);
-  openScratchpad(function(aWin, aScratchpad) {
+  openScratchpad(function (aWin, aScratchpad) {
     ok(!isStar(win), "no star before changing text in scratchpad restored from file");
 
     aScratchpad.setText("new text");
@@ -89,7 +95,8 @@ function testRestoreFromFileSaved() {
   }, {window: win, noFocus: true});
 }
 
-function testRestoreFromFileUnsaved() {
+function testRestoreFromFileUnsaved()
+{
   let session = [{
     filename: "test.js",
     text: "test1",
@@ -98,7 +105,7 @@ function testRestoreFromFileUnsaved() {
   }];
 
   let [win] = ScratchpadManager.restoreSession(session);
-  openScratchpad(function() {
+  openScratchpad(function () {
     ok(isStar(win), "star with scratchpad restored with unsaved text");
 
     win.close();
@@ -106,6 +113,7 @@ function testRestoreFromFileUnsaved() {
   }, {window: win, noFocus: true});
 }
 
-function isStar(win) {
+function isStar(win)
+{
   return win.document.title.match(/^\*[^\*]/);
 }

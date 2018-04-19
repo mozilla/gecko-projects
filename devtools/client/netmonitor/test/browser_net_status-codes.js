@@ -7,7 +7,7 @@
  * Tests if requests display the correct status code and text in the UI.
  */
 
-add_task(async function() {
+add_task(async function () {
   let { L10N } = require("devtools/client/netmonitor/src/utils/l10n");
 
   let { tab, monitor } = await initNetMonitor(STATUS_CODES_URL);
@@ -98,8 +98,11 @@ add_task(async function() {
     }
   ];
 
-  // Execute requests.
-  await performRequests(monitor, tab, 5);
+  let wait = waitForNetworkEvents(monitor, 5);
+  await ContentTask.spawn(tab.linkedBrowser, {}, async function () {
+    content.wrappedJSObject.performRequests();
+  });
+  await wait;
 
   info("Performing tests");
   await verifyRequests();
@@ -116,7 +119,7 @@ add_task(async function() {
     let requestListItems = document.querySelectorAll(".request-list-item");
     for (let requestItem of requestListItems) {
       requestItem.scrollIntoView();
-      let requestsListStatus = requestItem.querySelector(".status-code");
+      let requestsListStatus = requestItem.querySelector(".requests-list-status");
       EventUtils.sendMouseEvent({ type: "mouseover" }, requestsListStatus);
       await waitUntil(() => requestsListStatus.title);
     }
@@ -175,16 +178,13 @@ add_task(async function() {
     let panel = document.querySelector("#headers-panel");
     let summaryValues = panel.querySelectorAll(".tabpanel-summary-value.textbox-input");
     let { method, correctUri, details: { status, statusText } } = data;
-    let statusCode = panel.querySelector(".status-code");
-    EventUtils.sendMouseEvent({ type: "mouseover" }, statusCode);
-    await waitUntil(() => statusCode.title);
 
     is(summaryValues[0].value, correctUri,
       "The url summary value is incorrect.");
     is(summaryValues[1].value, method, "The method summary value is incorrect.");
-    is(statusCode.dataset.code, status,
+    is(panel.querySelector(".requests-list-status-icon").dataset.code, status,
       "The status summary code is incorrect.");
-    is(statusCode.getAttribute("title"), status + " " + statusText,
+    is(summaryValues[3].value, status + " " + statusText,
       "The status summary value is incorrect.");
   }
 

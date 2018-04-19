@@ -40,6 +40,7 @@ interface nsITransferable;
 interface nsIQueryContentEventResult;
 interface nsIDOMWindow;
 interface nsIFile;
+interface nsIDOMClientRect;
 interface nsIURI;
 interface nsIDOMEventTarget;
 interface nsIRunnable;
@@ -261,7 +262,7 @@ interface nsIDOMWindowUtils : nsISupports {
   /**
    * Following modifiers are for sent*Event() except sendNative*Event().
    * NOTE: MODIFIER_ALT, MODIFIER_CONTROL, MODIFIER_SHIFT and MODIFIER_META
-   *       are must be same values as EventBinding::*_MASK for backward
+   *       are must be same values as nsIDOMNSEvent::*_MASK for backward
    *       compatibility.
    */
   const long MODIFIER_ALT        = 0x0001;
@@ -314,7 +315,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * @param aIgnoreRootScrollFrame whether the event should ignore viewport bounds
    *                           during dispatch
    * @param aPressure touch input pressure: 0.0 -> 1.0
-   * @param aInputSourceArg input source, see MouseEvent for values,
+   * @param aInputSourceArg input source, see nsIDOMMouseEvent for values,
    *        defaults to mouse input.
    * @param aIsDOMEventSynthesized controls nsIDOMEvent.isSynthesized value
    *                               that helps identifying test related events,
@@ -425,8 +426,8 @@ interface nsIDOMWindowUtils : nsISupports {
    * @param aDeltaX            deltaX value.
    * @param aDeltaY            deltaY value.
    * @param aDeltaZ            deltaZ value.
-   * @param aDeltaMode         deltaMode value which must be one of the
-   *                           WheelEvent DOM_DELTA_* constants.
+   * @param aDeltaMode         deltaMode value which must be one of
+   *                           nsIDOMWheelEvent::DOM_DELTA_*.
    * @param aModifiers         modifiers pressed, using constants defined as
    *                           MODIFIER_*
    * @param aLineOrPageDeltaX  If you set this value non-zero for
@@ -723,7 +724,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * @param aY y offset in CSS pixels
    * @param aDirection direction, using constants defined in SimpleGestureEvent.webidl
    * @param aDelta  amount of magnification or rotation for magnify and rotation events
-   * @param aModifiers modifiers pressed, using constants defined in Event.webidl
+   * @param aModifiers modifiers pressed, using constants defined in nsIDOMNSEvent
    * @param aClickCount For tap gestures, the number of taps.
    */
   void sendSimpleGestureEvent(in AString aType,
@@ -842,9 +843,8 @@ interface nsIDOMWindowUtils : nsISupports {
 
   /**
    * Returns the given element's bounds without flushing pending layout changes.
-   * The returned object is a DOMRect (bug 1444991 may remove this walkaround).
    */
-  nsISupports getBoundsWithoutFlushing(in nsIDOMElement aElement);
+  nsIDOMClientRect getBoundsWithoutFlushing(in nsIDOMElement aElement);
 
   const long FLUSH_NONE = -1;
   const long FLUSH_STYLE = 0;
@@ -857,18 +857,11 @@ interface nsIDOMWindowUtils : nsISupports {
   bool needsFlush(in long aFlushtype);
 
   /**
-   * Flush pending layout-type notification without flushing throttled
-   * animations.
-   */
-  void flushLayoutWithoutThrottledAnimations();
-
-  /**
    * Returns the bounds of the window's currently loaded document. This will
    * generally be (0, 0, pageWidth, pageHeight) but in some cases (e.g. RTL
    * documents) may have a negative left value.
-   * The returned object is a DOMRect (bug 1444991 may remove this walkaround).
    */
-  nsISupports getRootBounds();
+  nsIDOMClientRect getRootBounds();
 
   /**
    * Get IME open state. TRUE means 'Open', otherwise, 'Close'.
@@ -1300,6 +1293,11 @@ interface nsIDOMWindowUtils : nsISupports {
   readonly attribute unsigned long currentMaxAudioChannels;
 
   /**
+   * Returns the preferred channel layout of the current audio device.
+   */
+  readonly attribute AString currentPreferredChannelLayout;
+
+  /**
    * Returns the preferred sample rate of the current audio device.
    */
   readonly attribute unsigned long currentPreferredSampleRate;
@@ -1655,8 +1653,7 @@ interface nsIDOMWindowUtils : nsISupports {
   readonly attribute boolean isHandlingUserInput;
 
   /**
-   * Returns milliseconds elapsed since last user input was started.
-   * Returns -1 if there wasn't any previous user input.
+   * Returns milliseconds elapsed since last user input was started
    *
    * This relies on EventStateManager::LatestUserInputStart()
    */
@@ -1923,7 +1920,7 @@ interface nsIDOMWindowUtils : nsISupports {
   /**
    * Whether the current document is styled by Servo's style engine.
    *
-   * Always true, pending removal.
+   * This calls nsIDocument::IsStyledByServo().
    */
   readonly attribute boolean isStyledByServo;
 

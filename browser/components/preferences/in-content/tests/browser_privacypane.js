@@ -1,6 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
+/* eslint-disable mozilla/no-cpows-in-tests */
+
 // Test the initial value of Browser Error collection checkbox
 add_task(async function testBrowserErrorInitialValue() {
   // Skip if non-Nightly since the checkbox will be missing.
@@ -19,7 +21,7 @@ add_task(async function testBrowserErrorInitialValue() {
     "Checkbox for collecting browser errors should be checked when the pref is true"
   );
 
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
   await SpecialPowers.popPrefEnv();
 });
 
@@ -43,6 +45,6 @@ add_task(async function testBrowserErrorLearnMore() {
     "Learn More link for browser error collection should have an href set by a pref"
   );
 
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
   await SpecialPowers.popPrefEnv();
 });

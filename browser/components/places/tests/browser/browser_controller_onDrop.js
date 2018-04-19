@@ -20,7 +20,7 @@ add_task(async function setup() {
     await PlacesUtils.history.clear();
   });
 
-  sandbox.stub(PlacesTransactions, "Move");
+  sandbox.stub(PlacesUIUtils, "getTransactionForData");
   sandbox.stub(PlacesTransactions, "batch");
 
   bookmarks = await PlacesUtils.bookmarks.insertTree({
@@ -64,7 +64,7 @@ async function run_drag_test(startBookmarkIndex, insertionIndex, newParentGuid,
   }
 
   // Reset the stubs so that previous test runs don't count against us.
-  PlacesTransactions.Move.reset();
+  PlacesUIUtils.getTransactionForData.reset();
   PlacesTransactions.batch.reset();
 
   let dragBookmark = bookmarks[startBookmarkIndex];
@@ -83,17 +83,11 @@ async function run_drag_test(startBookmarkIndex, insertionIndex, newParentGuid,
       orientation: Ci.nsITreeView.DROP_ON
     });
 
-    let dragData = Object.assign({
+    let bookmarkWithId = JSON.stringify(Object.assign({
       id: bookmarkIds.get(dragBookmark.guid),
       itemGuid: dragBookmark.guid,
       parent: PlacesUtils.unfiledBookmarksFolderId,
-      instanceId: PlacesUtils.instanceId,
-    }, dragBookmark);
-
-    // Force the type.
-    dragData.type = PlacesUtils.TYPE_X_MOZ_PLACE;
-    let bookmarkWithId = JSON.stringify(dragData);
-
+    }, dragBookmark));
 
     let dt = {
       dropEffect: "move",
@@ -111,22 +105,24 @@ async function run_drag_test(startBookmarkIndex, insertionIndex, newParentGuid,
     await PlacesControllerDragHelper.onDrop(ip, dt);
 
     if (!expectTransactionCreated) {
-      Assert.ok(PlacesTransactions.Move.notCalled,
+      Assert.ok(PlacesUIUtils.getTransactionForData.notCalled,
         "Should not have created transaction data");
       return;
     }
 
-    Assert.ok(PlacesTransactions.Move.calledOnce,
+    Assert.ok(PlacesUIUtils.getTransactionForData.calledOnce,
       "Should have called getTransactionForData at least once.");
 
-    let moveData = PlacesTransactions.Move.args[0][0];
+    let args = PlacesUIUtils.getTransactionForData.args[0];
 
-    Assert.deepEqual(moveData.guid, dragBookmark.guid,
+    Assert.deepEqual(args[0], JSON.parse(bookmarkWithId),
       "Should have called getTransactionForData with the correct unwrapped bookmark");
-    Assert.equal(moveData.newParentGuid, newParentGuid,
+    Assert.equal(args[1], newParentGuid,
       "Should have called getTransactionForData with the correct parent guid");
-    Assert.equal(moveData.newIndex, expectedInsertionIndex,
+    Assert.equal(args[2], expectedInsertionIndex,
       "Should have called getTransactionForData with the correct index");
+    Assert.equal(args[3], false,
+      "Should have called getTransactionForData with a move");
   });
 }
 

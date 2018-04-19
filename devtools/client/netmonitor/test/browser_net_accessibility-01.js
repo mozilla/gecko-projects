@@ -7,7 +7,7 @@
  * Tests if focus modifiers work for the SideMenuWidget.
  */
 
-add_task(async function() {
+add_task(async function () {
   let { tab, monitor } = await initNetMonitor(CUSTOM_GET_URL);
   info("Starting test... ");
 
@@ -30,8 +30,11 @@ add_task(async function() {
       "The network details panel should render correctly.");
   }
 
-  // Execute requests.
-  await performRequests(monitor, tab, 2);
+  let wait = waitForNetworkEvents(monitor, 2);
+  await ContentTask.spawn(tab.linkedBrowser, {}, async function () {
+    content.wrappedJSObject.performRequests(2);
+  });
+  await wait;
 
   check(-1, false);
 
@@ -50,8 +53,11 @@ add_task(async function() {
   store.dispatch(Actions.selectDelta(-10));
   check(0, true);
 
-  // Execute requests.
-  await performRequests(monitor, tab, 18);
+  wait = waitForNetworkEvents(monitor, 18);
+  await ContentTask.spawn(tab.linkedBrowser, {}, async function () {
+    content.wrappedJSObject.performRequests(18);
+  });
+  await wait;
 
   store.dispatch(Actions.selectDelta(+Infinity));
   check(19, true);

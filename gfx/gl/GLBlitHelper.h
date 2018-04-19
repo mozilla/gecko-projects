@@ -163,12 +163,10 @@ public:
     ~GLBlitHelper();
 
     void BlitFramebuffer(const gfx::IntSize& srcSize,
-                         const gfx::IntSize& destSize,
-                         GLuint filter = LOCAL_GL_NEAREST) const;
+                         const gfx::IntSize& destSize) const;
     void BlitFramebufferToFramebuffer(GLuint srcFB, GLuint destFB,
                                       const gfx::IntSize& srcSize,
-                                      const gfx::IntSize& destSize,
-                                      GLuint filter = LOCAL_GL_NEAREST) const;
+                                      const gfx::IntSize& destSize) const;
     void BlitFramebufferToTexture(GLuint destTex, const gfx::IntSize& srcSize,
                                   const gfx::IntSize& destSize,
                                   GLenum destTarget = LOCAL_GL_TEXTURE_2D) const;

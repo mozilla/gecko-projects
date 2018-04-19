@@ -16,14 +16,16 @@ window.gActivityStreamPrerenderedState = {
     "initialized": true,
     "values": {
       "migrationExpired": true,
-      "feeds.topsites": true,
+      "showTopSites": true,
       "showSearch": true,
       "topSitesRows": 1,
+      "collapseTopSites": false,
+      "section.highlights.collapsed": false,
+      "section.topstories.collapsed": false,
       "feeds.section.topstories": true,
       "feeds.section.highlights": true,
       "enableWideLayout": true,
-      "sectionOrder": "topsites,topstories,highlights",
-      "collapsed": false
+      "sectionOrder": "topsites,topstories,highlights"
     }
   },
   "Dialog": {
@@ -57,7 +59,7 @@ window.gActivityStreamPrerenderedState = {
       "initialized": false
     }
   ],
-  "Theme": {
-    "className": ""
+  "PreferencesPane": {
+    "visible": false
   }
 };

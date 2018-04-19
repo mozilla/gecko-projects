@@ -26,7 +26,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! quote = "0.5"
+//! quote = "0.4"
 //! ```
 //!
 //! ```
@@ -91,11 +91,10 @@
 //! An even higher limit may be necessary for especially large invocations.
 
 // Quote types in rustdoc of other crates get linked to here.
-#![doc(html_root_url = "https://docs.rs/quote/0.5.1")]
+#![doc(html_root_url = "https://docs.rs/quote/0.4.2")]
 
-#[cfg(feature = "proc-macro")]
-extern crate proc_macro;
 extern crate proc_macro2;
+extern crate proc_macro;
 
 mod tokens;
 pub use tokens::Tokens;
@@ -113,9 +112,17 @@ pub mod __rt {
     pub fn parse(tokens: &mut ::Tokens, span: Span, s: &str) {
         let s: TokenStream = s.parse().expect("invalid token stream");
         tokens.append_all(s.into_iter().map(|mut t| {
-            t.set_span(span);
+            t.span = span;
             t
         }));
+    }
+
+    // Not public API.
+    pub fn append_kind(tokens: &mut ::Tokens, span: Span, kind: TokenNode) {
+        tokens.append(TokenTree {
+            span: span,
+            kind: kind,
+        })
     }
 }
 
@@ -151,9 +158,9 @@ pub mod __rt {
 ///
 /// Any interpolated tokens preserve the `Span` information provided by their
 /// `ToTokens` implementation. Tokens that originate within the `quote!`
-/// invocation are spanned with [`Span::call_site()`].
+/// invocation are spanned with [`Span::def_site()`].
 ///
-/// [`Span::call_site()`]: https://docs.rs/proc-macro2/0.2/proc_macro2/struct.Span.html#method.call_site
+/// [`Span::def_site()`]: https://docs.rs/proc-macro2/0.2/proc_macro2/struct.Span.html#method.def_site
 ///
 /// A different span can be provided through the [`quote_spanned!`] macro.
 ///
@@ -162,10 +169,7 @@ pub mod __rt {
 /// # Example
 ///
 /// ```
-/// # #[cfg(feature = "proc-macro")]
 /// extern crate proc_macro;
-/// # #[cfg(not(feature = "proc-macro"))]
-/// # extern crate proc_macro2 as proc_macro;
 ///
 /// #[macro_use]
 /// extern crate quote;
@@ -202,7 +206,7 @@ pub mod __rt {
 /// ```
 #[macro_export]
 macro_rules! quote {
-    ($($tt:tt)*) => (quote_spanned!($crate::__rt::Span::call_site()=> $($tt)*));
+    ($($tt:tt)*) => (quote_spanned!($crate::__rt::Span::def_site()=> $($tt)*));
 }
 
 /// Same as `quote!`, but applies a given span to all tokens originating within
@@ -240,12 +244,6 @@ macro_rules! quote {
 /// # }
 /// ```
 ///
-/// The lack of space before the `=>` should look jarring to Rust programmers
-/// and this is intentional. The formatting is designed to be visibly
-/// off-balance and draw the eye a particular way, due to the span expression
-/// being evaluated in the context of the procedural macro and the remaining
-/// tokens being evaluated in the generated code.
-///
 /// # Hygiene
 ///
 /// Any interpolated tokens preserve the `Span` information provided by their
@@ -282,9 +280,9 @@ macro_rules! quote {
 /// #
 /// # fn main() {
 /// # let ty = Type;
-/// # let call_site = Span::call_site();
+/// # let def_site = Span::def_site();
 /// #
-/// let ty_span = ty.span();
+/// let ty_span = ty.span().resolved_at(def_site);
 /// let assert_sync = quote_spanned! {ty_span=>
 ///     struct _AssertSync where #ty: Sync;
 /// };
@@ -451,14 +449,12 @@ macro_rules! quote_each_token {
 
     ($tokens:ident $span:ident # [ $($inner:tt)* ] $($rest:tt)*) => {
         quote_each_token!($tokens $span #);
-        $tokens.append({
-            let mut g = $crate::__rt::Group::new(
+        $crate::__rt::append_kind(&mut $tokens,
+            $span,
+            $crate::__rt::TokenNode::Group(
                 $crate::__rt::Delimiter::Bracket,
-                quote_spanned!($span=> $($inner)*).into(),
-            );
-            g.set_span($span);
-            g
-        });
+                quote_spanned!($span=> $($inner)*).into()
+            ));
         quote_each_token!($tokens $span $($rest)*);
     };
 
@@ -468,38 +464,32 @@ macro_rules! quote_each_token {
     };
 
     ($tokens:ident $span:ident ( $($first:tt)* ) $($rest:tt)*) => {
-        $tokens.append({
-            let mut g = $crate::__rt::Group::new(
+        $crate::__rt::append_kind(&mut $tokens,
+            $span,
+            $crate::__rt::TokenNode::Group(
                 $crate::__rt::Delimiter::Parenthesis,
-                quote_spanned!($span=> $($first)*).into(),
-            );
-            g.set_span($span);
-            g
-        });
+                quote_spanned!($span=> $($first)*).into()
+            ));
         quote_each_token!($tokens $span $($rest)*);
     };
 
     ($tokens:ident $span:ident [ $($first:tt)* ] $($rest:tt)*) => {
-        $tokens.append({
-            let mut g = $crate::__rt::Group::new(
+        $crate::__rt::append_kind(&mut $tokens,
+            $span,
+            $crate::__rt::TokenNode::Group(
                 $crate::__rt::Delimiter::Bracket,
-                quote_spanned!($span=> $($first)*).into(),
-            );
-            g.set_span($span);
-            g
-        });
+                quote_spanned!($span=> $($first)*).into()
+            ));
         quote_each_token!($tokens $span $($rest)*);
     };
 
     ($tokens:ident $span:ident { $($first:tt)* } $($rest:tt)*) => {
-        $tokens.append({
-            let mut g = $crate::__rt::Group::new(
+        $crate::__rt::append_kind(&mut $tokens,
+            $span,
+            $crate::__rt::TokenNode::Group(
                 $crate::__rt::Delimiter::Brace,
-                quote_spanned!($span=> $($first)*).into(),
-            );
-            g.set_span($span);
-            g
-        });
+                quote_spanned!($span=> $($first)*).into()
+            ));
         quote_each_token!($tokens $span $($rest)*);
     };
 

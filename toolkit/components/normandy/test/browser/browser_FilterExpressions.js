@@ -141,16 +141,6 @@ add_task(async function testKeys() {
     undefined,
     "keys returns undefined for null",
   );
-
-  // Object properties are not cached
-  let pong = 0;
-  context = {ctxObject: {
-    get ping() {
-      return ++pong;
-    }
-  }};
-  await FilterExpressions.eval("ctxObject.ping == 0 || ctxObject.ping == 1", context);
-  is(pong, 2, "Properties are not reifed");
 });
 
 // intersect tests

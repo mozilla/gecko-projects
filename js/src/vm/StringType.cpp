@@ -11,7 +11,6 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/RangedPtr.h"
-#include "mozilla/TextUtils.h"
 #include "mozilla/TypeTraits.h"
 #include "mozilla/Unused.h"
 
@@ -28,7 +27,6 @@
 
 using namespace js;
 
-using mozilla::IsAsciiDigit;
 using mozilla::IsNegativeZero;
 using mozilla::IsSame;
 using mozilla::PodCopy;
@@ -55,7 +53,7 @@ JSString::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf)
     // JSExternalString: Ask the embedding to tell us what's going on.  If it
     // doesn't want to say, don't count, the chars could be stored anywhere.
     if (isExternal()) {
-        if (auto* cb = runtimeFromMainThread()->externalStringSizeofCallback.ref()) {
+        if (auto* cb = runtimeFromActiveCooperatingThread()->externalStringSizeofCallback.ref()) {
             // Our callback isn't supposed to cause GC.
             JS::AutoSuppressGCAnalysis nogc;
             return cb(this, mallocSizeOf);
@@ -512,7 +510,7 @@ JSRope::flattenInternal(JSContext* maybecx)
                 left.d.u1.flags = DEPENDENT_FLAGS | LATIN1_CHARS_BIT;
             left.d.s.u3.base = (JSLinearString*)this;  /* will be true on exit */
             BarrierMethods<JSString*>::postBarrier((JSString**)&left.d.s.u3.base, nullptr, this);
-            Nursery& nursery = runtimeFromMainThread()->gc.nursery();
+            Nursery& nursery = zone()->group()->nursery();
             if (isTenured() && !left.isTenured())
                 nursery.removeMallocedBuffer(wholeChars);
             else if (!isTenured() && left.isTenured())
@@ -528,7 +526,7 @@ JSRope::flattenInternal(JSContext* maybecx)
     }
 
     if (!isTenured()) {
-        Nursery& nursery = runtimeFromMainThread()->gc.nursery();
+        Nursery& nursery = zone()->group()->nursery();
         if (!nursery.registerMallocedBuffer(wholeChars)) {
             js_free(wholeChars);
             if (maybecx)
@@ -927,7 +925,7 @@ JSFlatString::isIndexSlow(const CharT* s, size_t length, uint32_t* indexp)
 {
     CharT ch = *s;
 
-    if (!IsAsciiDigit(ch))
+    if (!JS7_ISDEC(ch))
         return false;
 
     if (length > UINT32_CHAR_BUFFER_LENGTH)
@@ -945,7 +943,7 @@ JSFlatString::isIndexSlow(const CharT* s, size_t length, uint32_t* indexp)
     uint32_t c = 0;
 
     if (index != 0) {
-        while (IsAsciiDigit(*cp)) {
+        while (JS7_ISDEC(*cp)) {
             oldIndex = index;
             c = JS7_UNDEC(*cp);
             index = 10 * index + c;
@@ -1069,27 +1067,20 @@ StaticStrings::init(JSContext* cx)
     return true;
 }
 
-inline void
-TraceStaticString(JSTracer* trc, JSAtom* atom, const char* name)
-{
-    MOZ_ASSERT(atom->isPinned());
-    TraceProcessGlobalRoot(trc, atom, name);
-}
-
 void
 StaticStrings::trace(JSTracer* trc)
 {
     /* These strings never change, so barriers are not needed. */
 
     for (uint32_t i = 0; i < UNIT_STATIC_LIMIT; i++)
-        TraceStaticString(trc, unitStaticTable[i], "unit-static-string");
+        TraceProcessGlobalRoot(trc, unitStaticTable[i], "unit-static-string");
 
     for (uint32_t i = 0; i < NUM_SMALL_CHARS * NUM_SMALL_CHARS; i++)
-        TraceStaticString(trc, length2StaticTable[i], "length2-static-string");
+        TraceProcessGlobalRoot(trc, length2StaticTable[i], "length2-static-string");
 
     /* This may mark some strings more than once, but so be it. */
     for (uint32_t i = 0; i < INT_STATIC_LIMIT; i++)
-        TraceStaticString(trc, intStaticTable[i], "int-static-string");
+        TraceProcessGlobalRoot(trc, intStaticTable[i], "int-static-string");
 }
 
 template <typename CharT>
@@ -1909,8 +1900,7 @@ JSString::fillWithRepresentatives(JSContext* cx, HandleArrayObject array)
 /*** Conversions *********************************************************************************/
 
 const char*
-js::ValueToPrintableLatin1(JSContext* cx, const Value& vArg, JSAutoByteString* bytes,
-                           bool asSource)
+js::ValueToPrintable(JSContext* cx, const Value& vArg, JSAutoByteString* bytes, bool asSource)
 {
     RootedValue v(cx, vArg);
     JSString* str;
@@ -1924,20 +1914,6 @@ js::ValueToPrintableLatin1(JSContext* cx, const Value& vArg, JSAutoByteString* b
     if (!str)
         return nullptr;
     return bytes->encodeLatin1(cx, str);
-}
-
-const char*
-js::ValueToPrintableUTF8(JSContext* cx, const Value& vArg, JSAutoByteString* bytes, bool asSource)
-{
-    RootedValue v(cx, vArg);
-    JSString* str;
-    if (asSource)
-        str = ValueToSource(cx, v);
-    else
-        str = ToString<CanGC>(cx, v);
-    if (!str)
-        return nullptr;
-    return bytes->encodeUtf8(cx, RootedString(cx, str));
 }
 
 template <AllowGC allowGC>

@@ -37,7 +37,7 @@ SkipWhitespace(RangedPtr<const char16_t>& aIter,
                const RangedPtr<const char16_t>& aEnd)
 {
   while (aIter != aEnd) {
-    if (!nsContentUtils::IsHTMLWhitespace(*aIter)) {
+    if (!IsSVGWhitespace(*aIter)) {
       return true;
     }
     ++aIter;
@@ -279,7 +279,7 @@ MoveToNextToken(RangedPtr<const char16_t>& aIter,
 
   bool isCurrentCharEscaped = false;
 
-  while (aIter != aEnd && !nsContentUtils::IsHTMLWhitespace(*aIter)) {
+  while (aIter != aEnd && !IsSVGWhitespace(*aIter)) {
     if (isCurrentCharEscaped) {
       isCurrentCharEscaped = false;
     } else {
@@ -443,7 +443,7 @@ nsSMILParserUtils::TrimWhitespace(const nsAString& aString)
   aString.EndReading(end);
 
   // Skip whitespace characters at the beginning
-  while (start != end && nsContentUtils::IsHTMLWhitespace(*start)) {
+  while (start != end && IsSVGWhitespace(*start)) {
     ++start;
   }
 
@@ -451,7 +451,7 @@ nsSMILParserUtils::TrimWhitespace(const nsAString& aString)
   while (end != start) {
     --end;
 
-    if (!nsContentUtils::IsHTMLWhitespace(*end)) {
+    if (!IsSVGWhitespace(*end)) {
       // Step back to the last non-whitespace character.
       ++end;
 
@@ -466,11 +466,10 @@ bool
 nsSMILParserUtils::ParseKeySplines(const nsAString& aSpec,
                                    FallibleTArray<nsSMILKeySpline>& aKeySplines)
 {
-  nsCharSeparatedTokenizerTemplate<nsContentUtils::IsHTMLWhitespace>
-    controlPointTokenizer(aSpec, ';');
+  nsCharSeparatedTokenizerTemplate<IsSVGWhitespace> controlPointTokenizer(aSpec, ';');
   while (controlPointTokenizer.hasMoreTokens()) {
 
-    nsCharSeparatedTokenizerTemplate<nsContentUtils::IsHTMLWhitespace>
+    nsCharSeparatedTokenizerTemplate<IsSVGWhitespace>
       tokenizer(controlPointTokenizer.nextToken(), ',',
                 nsCharSeparatedTokenizer::SEPARATOR_OPTIONAL);
 
@@ -501,8 +500,7 @@ nsSMILParserUtils::ParseSemicolonDelimitedProgressList(const nsAString& aSpec,
                                                        bool aNonDecreasing,
                                                        FallibleTArray<double>& aArray)
 {
-  nsCharSeparatedTokenizerTemplate<nsContentUtils::IsHTMLWhitespace>
-    tokenizer(aSpec, ';');
+  nsCharSeparatedTokenizerTemplate<IsSVGWhitespace> tokenizer(aSpec, ';');
 
   double previousValue = -1.0;
 
@@ -581,8 +579,7 @@ bool
 nsSMILParserUtils::ParseValuesGeneric(const nsAString& aSpec,
                                       GenericValueParser& aParser)
 {
-  nsCharSeparatedTokenizerTemplate<nsContentUtils::IsHTMLWhitespace>
-    tokenizer(aSpec, ';');
+  nsCharSeparatedTokenizerTemplate<IsSVGWhitespace> tokenizer(aSpec, ';');
   if (!tokenizer.hasMoreTokens()) { // Empty list
     return false;
   }
@@ -668,7 +665,7 @@ nsSMILParserUtils::CheckForNegativeNumber(const nsAString& aStr)
   RangedPtr<const char16_t> end(SVGContentUtils::GetEndRangedPtr(aStr));
 
   // Skip initial whitespace
-  while (iter != end && nsContentUtils::IsHTMLWhitespace(*iter)) {
+  while (iter != end && IsSVGWhitespace(*iter)) {
     ++iter;
   }
 

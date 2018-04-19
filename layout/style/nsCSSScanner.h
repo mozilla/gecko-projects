@@ -206,6 +206,10 @@ class nsCSSScanner {
   nsCSSScanner(const nsAString& aBuffer, uint32_t aLineNumber);
   ~nsCSSScanner();
 
+  void SetErrorReporter(mozilla::css::ErrorReporter* aReporter) {
+    mReporter = aReporter;
+  }
+
   // Reset or check whether a BAD_URL or BAD_STRING token has been seen.
   void ClearSeenBadToken() { mSeenBadToken = false; }
   bool SeenBadToken() const { return mSeenBadToken; }
@@ -359,6 +363,8 @@ protected:
 
   uint32_t mRecordStartOffset;
   EOFCharacters mEOFCharacters;
+
+  mozilla::css::ErrorReporter *mReporter;
 
   bool mRecording;
   bool mSeenBadToken;

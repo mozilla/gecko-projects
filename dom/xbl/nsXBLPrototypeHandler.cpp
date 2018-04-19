@@ -15,6 +15,7 @@
 #include "nsGlobalWindowCommands.h"
 #include "nsIContent.h"
 #include "nsAtom.h"
+#include "nsIDOMMouseEvent.h"
 #include "nsNameSpaceManager.h"
 #include "nsIDocument.h"
 #include "nsIController.h"
@@ -33,6 +34,7 @@
 #include "nsReadableUtils.h"
 #include "nsGkAtoms.h"
 #include "nsIXPConnect.h"
+#include "mozilla/AddonPathService.h"
 #include "nsDOMCID.h"
 #include "nsUnicharUtils.h"
 #include "nsCRT.h"
@@ -49,7 +51,6 @@
 #include "mozilla/dom/HTMLTextAreaElement.h"
 #include "mozilla/dom/KeyboardEvent.h"
 #include "mozilla/dom/KeyboardEventBinding.h"
-#include "mozilla/dom/MouseEvent.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/layers/KeyboardMap.h"
 #include "xpcpublic.h"
@@ -347,7 +348,10 @@ nsXBLPrototypeHandler::ExecuteHandler(EventTarget* aTarget,
   rv = EnsureEventHandler(jsapi, onEventAtom, &handler);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  JS::Rooted<JSObject*> scopeObject(cx, xpc::GetXBLScopeOrGlobal(cx, boundGlobal->GetGlobalJSObject()));
+  JSAddonId* addonId = MapURIToAddonID(mPrototypeBinding->DocURI());
+
+  JS::Rooted<JSObject*> globalObject(cx, boundGlobal->GetGlobalJSObject());
+  JS::Rooted<JSObject*> scopeObject(cx, xpc::GetScopeForXBLExecution(cx, globalObject, addonId));
   NS_ENSURE_TRUE(scopeObject, NS_ERROR_OUT_OF_MEMORY);
 
   // Bind it to the bound element. Note that if we're using a separate XBL scope,
@@ -365,7 +369,7 @@ nsXBLPrototypeHandler::ExecuteHandler(EventTarget* aTarget,
   // Build a scope chain in the XBL scope.
   RefPtr<Element> targetElement = do_QueryObject(scriptTarget);
   JS::AutoObjectVector scopeChain(cx);
-  ok = nsJSUtils::GetScopeChainForXBL(cx, targetElement, *mPrototypeBinding, scopeChain);
+  ok = nsJSUtils::GetScopeChainForElement(cx, targetElement, scopeChain);
   NS_ENSURE_TRUE(ok, NS_ERROR_OUT_OF_MEMORY);
 
   // Next, clone the generic handler with our desired scope chain.
@@ -414,7 +418,9 @@ nsXBLPrototypeHandler::EnsureEventHandler(AutoJSAPI& jsapi, nsAtom* aName,
   nsDependentString handlerText(mHandlerText);
   NS_ENSURE_TRUE(!handlerText.IsEmpty(), NS_ERROR_FAILURE);
 
-  JS::Rooted<JSObject*> scopeObject(cx, xpc::GetXBLScopeOrGlobal(cx, globalObject));
+  JSAddonId* addonId = MapURIToAddonID(mPrototypeBinding->DocURI());
+
+  JS::Rooted<JSObject*> scopeObject(cx, xpc::GetScopeForXBLExecution(cx, globalObject, addonId));
   NS_ENSURE_TRUE(scopeObject, NS_ERROR_OUT_OF_MEMORY);
 
   nsAutoCString bindingURI;
@@ -664,19 +670,19 @@ nsXBLPrototypeHandler::GetController(EventTarget* aTarget)
 
   nsCOMPtr<nsIContent> targetContent(do_QueryInterface(aTarget));
   RefPtr<nsXULElement> xulElement =
-    nsXULElement::FromNodeOrNull(targetContent);
+    nsXULElement::FromContentOrNull(targetContent);
   if (xulElement) {
     controllers = xulElement->GetControllers(IgnoreErrors());
   }
 
   if (!controllers) {
-    HTMLTextAreaElement* htmlTextArea = HTMLTextAreaElement::FromNode(targetContent);
+    HTMLTextAreaElement* htmlTextArea = HTMLTextAreaElement::FromContent(targetContent);
     if (htmlTextArea)
       htmlTextArea->GetControllers(getter_AddRefs(controllers));
   }
 
   if (!controllers) {
-    HTMLInputElement* htmlInputElement = HTMLInputElement::FromNode(targetContent);
+    HTMLInputElement* htmlInputElement = HTMLInputElement::FromContent(targetContent);
     if (htmlInputElement)
       htmlInputElement->GetControllers(getter_AddRefs(controllers));
   }
@@ -728,18 +734,20 @@ nsXBLPrototypeHandler::KeyEventMatched(
 }
 
 bool
-nsXBLPrototypeHandler::MouseEventMatched(MouseEvent* aMouseEvent)
+nsXBLPrototypeHandler::MouseEventMatched(nsIDOMMouseEvent* aMouseEvent)
 {
   if (mDetail == -1 && mMisc == 0 && (mKeyMask & cAllModifiers) == 0)
     return true; // No filters set up. It's generic.
 
-  if (mDetail != -1 && (aMouseEvent->Button() != mDetail)) {
+  int16_t button;
+  aMouseEvent->GetButton(&button);
+  if (mDetail != -1 && (button != mDetail))
     return false;
-  }
 
-  if (mMisc != 0 && (aMouseEvent->Detail() != mMisc)) {
+  int32_t clickcount;
+  aMouseEvent->GetDetail(&clickcount);
+  if (mMisc != 0 && (clickcount != mMisc))
     return false;
-  }
 
   return ModifiersMatchMask(aMouseEvent, IgnoreModifierState());
 }
@@ -1023,10 +1031,10 @@ nsXBLPrototypeHandler::ReportKeyConflict(const char16_t* aKey, const char16_t* a
 
 bool
 nsXBLPrototypeHandler::ModifiersMatchMask(
-                         UIEvent* aEvent,
+                         nsIDOMUIEvent* aEvent,
                          const IgnoreModifierState& aIgnoreModifierState)
 {
-  WidgetInputEvent* inputEvent = aEvent->WidgetEventPtr()->AsInputEvent();
+  WidgetInputEvent* inputEvent = aEvent->AsEvent()->WidgetEventPtr()->AsInputEvent();
   NS_ENSURE_TRUE(inputEvent, false);
 
   if (mKeyMask & cMetaMask) {

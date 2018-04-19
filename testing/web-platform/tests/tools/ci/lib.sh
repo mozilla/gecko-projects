@@ -6,7 +6,15 @@ hosts_fixup() {
     echo "## /etc/hosts ##"
     cat /etc/hosts
     sudo sed -i 's/^::1\s*localhost/::1/' /etc/hosts
-    ./wpt make-hosts-file | sudo tee -a /etc/hosts
+    sudo sh -c 'echo "
+127.0.0.1 web-platform.test
+127.0.0.1 www.web-platform.test
+127.0.0.1 www1.web-platform.test
+127.0.0.1 www2.web-platform.test
+127.0.0.1 xn--n8j6ds53lwwkrqhv28a.web-platform.test
+127.0.0.1 xn--lve-6lad.web-platform.test
+0.0.0.0 nonexistent-origin.web-platform.test
+" >> /etc/hosts'
     echo "== /etc/hosts =="
     cat /etc/hosts
     echo "----------------"
@@ -15,8 +23,12 @@ hosts_fixup() {
 
 install_chrome() {
     channel=$1
+    # The package name for Google Chrome Dev uses "unstable", not "dev".
+    if [[ $channel == "dev" ]]; then
+        channel="unstable"
+    fi
     deb_archive=google-chrome-${channel}_current_amd64.deb
-    wget -q https://dl.google.com/linux/direct/$deb_archive
+    wget https://dl.google.com/linux/direct/$deb_archive
 
     # If the environment provides an installation of Google Chrome, the
     # existing binary may take precedence over the one introduced in this

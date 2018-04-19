@@ -102,21 +102,9 @@ CompileRuntime::wellKnownSymbols()
 }
 
 const void*
-CompileRuntime::mainContextPtr()
+CompileRuntime::addressOfActiveJSContext()
 {
-    return runtime()->mainContextFromAnyThread();
-}
-
-const void*
-CompileRuntime::addressOfJitStackLimit()
-{
-    return runtime()->mainContextFromAnyThread()->addressOfJitStackLimit();
-}
-
-const void*
-CompileRuntime::addressOfInterrupt()
-{
-    return runtime()->mainContextFromAnyThread()->addressOfInterrupt();
+    return runtime()->addressOfActiveContext();
 }
 
 #ifdef DEBUG
@@ -167,9 +155,15 @@ CompileZone::isAtomsZone()
 const void*
 CompileZone::addressOfIonBailAfter()
 {
-    return zone()->runtimeFromAnyThread()->jitRuntime()->addressOfIonBailAfter();
+    return zone()->group()->addressOfIonBailAfter();
 }
 #endif
+
+const void*
+CompileZone::addressOfJSContext()
+{
+    return zone()->group()->addressOfOwnerContext();
+}
 
 const void*
 CompileZone::addressOfNeedsIncrementalBarrier()
@@ -212,22 +206,21 @@ bool
 CompileZone::canNurseryAllocateStrings()
 {
     return nurseryExists() &&
-        zone()->runtimeFromAnyThread()->gc.nursery().canAllocateStrings() &&
+        zone()->group()->nursery().canAllocateStrings() &&
         zone()->allocNurseryStrings;
 }
 
 bool
 CompileZone::nurseryExists()
 {
-    return zone()->runtimeFromAnyThread()->gc.nursery().exists();
+    return zone()->group()->nursery().exists();
 }
 
 void
 CompileZone::setMinorGCShouldCancelIonCompilations()
 {
     MOZ_ASSERT(CurrentThreadCanAccessZone(zone()));
-    JSRuntime* rt = zone()->runtimeFromMainThread();
-    rt->gc.storeBuffer().setShouldCancelIonCompilations();
+    zone()->group()->storeBuffer().setShouldCancelIonCompilations();
 }
 
 JSCompartment*

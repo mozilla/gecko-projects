@@ -30,13 +30,19 @@
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/EnumTypeTraits.h"
 
+// Undefine LoadImage to prevent naming conflict with Windows.
+#undef LoadImage
+
 class nsIDocument;
-class nsIURI;
 class nsStyledElement;
 struct MiscContainer;
 
 namespace mozilla {
 class DeclarationBlock;
+namespace css {
+struct URLValue;
+struct ImageValue;
+} // namespace css
 } // namespace mozilla
 
 #define NS_ATTRVALUE_MAX_STRINGLENGTH_ATOM 12
@@ -144,7 +150,7 @@ public:
   void SetTo(double aValue, const nsAString* aSerialized);
   void SetTo(already_AddRefed<mozilla::DeclarationBlock> aValue,
              const nsAString* aSerialized);
-  void SetTo(nsIURI* aValue, const nsAString* aSerialized);
+  void SetTo(mozilla::css::URLValue* aValue, const nsAString* aSerialized);
   void SetTo(const nsIntMargin& aValue);
   void SetTo(const nsSVGAngle& aValue, const nsAString* aSerialized);
   void SetTo(const nsSVGIntegerPair& aValue, const nsAString* aSerialized);
@@ -195,7 +201,8 @@ public:
   inline float GetPercentValue() const;
   inline mozilla::AtomArray* GetAtomArrayValue() const;
   inline mozilla::DeclarationBlock* GetCSSDeclarationValue() const;
-  inline nsIURI* GetURLValue() const;
+  inline mozilla::css::URLValue* GetURLValue() const;
+  inline mozilla::css::ImageValue* GetImageValue() const;
   inline double GetDoubleValue() const;
   bool GetIntMarginValue(nsIntMargin& aMargin) const;
 
@@ -413,6 +420,13 @@ public:
    * @return whether the value could be parsed
    */
   bool ParseIntMarginValue(const nsAString& aString);
+
+  /**
+   * Convert a URL nsAttrValue to an Image nsAttrValue.
+   *
+   * @param aDocument the document this nsAttrValue belongs to.
+   */
+  void LoadImage(nsIDocument* aDocument);
 
   /**
    * Parse a string into a CSS style rule.

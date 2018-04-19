@@ -22,7 +22,7 @@ URLExtraData::InitDummy()
   RefPtr<nsIURI> referrer = baseURI;
   sDummy = new URLExtraData(baseURI.forget(),
                             referrer.forget(),
-                            NullPrincipal::CreateWithoutOriginAttributes());
+                            NullPrincipal::Create());
 }
 
 /* static */ void

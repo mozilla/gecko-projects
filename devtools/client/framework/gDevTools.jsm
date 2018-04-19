@@ -93,12 +93,18 @@ this.gDevTools = {
   get _tools() {
     return devtools._tools;
   },
+  *[Symbol.iterator ]() {
+    for (let toolbox of this._toolboxes) {
+      yield toolbox;
+    }
+  }
 };
 gDevToolsMethods.forEach(name => {
   this.gDevTools[name] = (...args) => {
     return devtools[name].apply(devtools, args);
   };
 });
+
 
 /**
  * gDevToolsBrowser exposes functions to connect the gDevTools instance with a

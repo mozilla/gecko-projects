@@ -107,13 +107,14 @@ NS_INTERFACE_MAP_END_INHERITING(DOMRequest)
 NS_IMPL_CYCLE_COLLECTION_INHERITED(IDBFileRequest, DOMRequest,
                                    mFileHandle)
 
-void
+nsresult
 IDBFileRequest::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   AssertIsOnOwningThread();
 
   aVisitor.mCanHandle = true;
   aVisitor.SetParentTarget(mFileHandle, false);
+  return NS_OK;
 }
 
 // virtual

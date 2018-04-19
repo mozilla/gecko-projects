@@ -49,5 +49,10 @@ NS_IMETHODIMP HeadlessSound::PlayEventSound(uint32_t aEventId)
   return NS_OK;
 }
 
+NS_IMETHODIMP HeadlessSound::PlaySystemSound(const nsAString &aSoundAlias)
+{
+  return NS_OK;
+}
+
 } // namespace widget
 } // namespace mozilla

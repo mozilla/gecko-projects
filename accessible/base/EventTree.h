@@ -9,14 +9,11 @@
 #include "AccEvent.h"
 #include "Accessible.h"
 
-#include "mozilla/a11y/DocAccessible.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
 
 namespace mozilla {
 namespace a11y {
-
-class NotificationController;
 
 /**
  * This class makes sure required tasks are done before and after tree

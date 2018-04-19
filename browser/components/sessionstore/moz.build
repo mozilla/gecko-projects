@@ -11,6 +11,7 @@ JAR_MANIFESTS += ['jar.mn']
 
 XPIDL_SOURCES += [
     'nsISessionStartup.idl',
+    'nsISessionStore.idl',
     'nsISessionStoreUtils.idl',
 ]
 
@@ -18,7 +19,8 @@ XPIDL_MODULE = 'sessionstore'
 
 EXTRA_COMPONENTS += [
     'nsSessionStartup.js',
-    'nsSessionStartup.manifest',
+    'nsSessionStore.js',
+    'nsSessionStore.manifest',
 ]
 
 EXTRA_JS_MODULES.sessionstore = [

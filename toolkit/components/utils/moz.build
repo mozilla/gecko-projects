@@ -11,7 +11,3 @@ EXTRA_COMPONENTS += [
     'simpleServices.js',
     'utils.manifest',
 ]
-
-EXTRA_JS_MODULES['components-utils'] = [
-    'ClientEnvironment.jsm'
-]

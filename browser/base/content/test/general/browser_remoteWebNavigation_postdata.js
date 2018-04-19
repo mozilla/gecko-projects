@@ -38,12 +38,10 @@ add_task(async function test_remoteWebNavigation_postdata() {
       "\r\n" +
       "success";
 
-    openTrustedLinkIn(path, "tab", {
-       allowThirdPartyFixup: null,
-       postData: makeInputStream(postdata),
-     });
+    openUILinkIn(path, "tab", null, makeInputStream(postdata));
+
   });
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 
   await new Promise(resolve => {
     server.stop(function() { resolve(); });

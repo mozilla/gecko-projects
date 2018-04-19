@@ -80,7 +80,7 @@ add_task(async function() {
   ]);
   is(beforeUnloadCount, 2, "Should have received two beforeunload events.");
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });
 
 /**
@@ -141,5 +141,5 @@ add_task(async function() {
   ]);
   is(beforeUnloadCount, 2, "Should have received two beforeunload events.");
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

@@ -16,7 +16,7 @@
  */
 
 
-/* fluent-dom@0.2.0 */
+/* fluent@0.6.3 */
 
 /* eslint no-console: ["error", { allow: ["warn", "error"] }] */
 /* global console */
@@ -101,7 +101,7 @@ class CachedIterable {
  * be localized into a different language - for example DevTools.
  */
 function defaultGenerateMessages(resourceIds) {
-  const appLocales = Services.locale.getAppLocalesAsBCP47();
+  const appLocales = Services.locale.getAppLocalesAsLangTags();
   return L10nRegistry.generateContexts(appLocales, resourceIds);
 }
 
@@ -247,6 +247,13 @@ class Localization {
   }
 
   /**
+   * Unregister observers on events that will trigger cache invalidation
+   */
+  unregisterObservers() {
+    Services.obs.removeObserver(this, "intl:app-locales-changed");
+  }
+
+  /**
    * Default observer handler method.
    *
    * @param {String} subject
@@ -327,15 +334,15 @@ function messageFromContext(ctx, errors, id, args) {
 
   const formatted = {
     value: ctx.format(msg, args, errors),
-    attributes: null,
+    attrs: null,
   };
 
   if (msg.attrs) {
-    formatted.attributes = [];
-    for (const [name, attr] of Object.entries(msg.attrs)) {
-      const value = ctx.format(attr, args, errors);
+    formatted.attrs = [];
+    for (const name in msg.attrs) {
+      const value = ctx.format(msg.attrs[name], args, errors);
       if (value !== null) {
-        formatted.attributes.push({name, value});
+        formatted.attrs.push({ name, value });
       }
     }
   }

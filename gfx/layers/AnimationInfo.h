@@ -8,7 +8,6 @@
 #define GFX_ANIMATIONINFO_H
 
 #include "mozilla/StyleAnimationValue.h"
-#include "nsDisplayItemTypes.h"
 
 namespace mozilla {
 namespace layers {
@@ -58,9 +57,6 @@ public:
   bool ApplyPendingUpdatesForThisTransaction();
   bool HasOpacityAnimation() const;
   bool HasTransformAnimation() const;
-
-  static Maybe<uint64_t> GetGenerationFromFrame(nsIFrame* aFrame,
-                                                DisplayItemType aDisplayItemKey);
 
 protected:
   LayerManager* mManager;

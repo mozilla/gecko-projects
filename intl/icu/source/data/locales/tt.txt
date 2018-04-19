@@ -40,7 +40,7 @@ tt{
         minimumGroupingDigits{"1"}
         native{"latn"}
     }
-    Version{"2.1.38.72"}
+    Version{"2.1.37.5"}
     calendar{
         generic{
             DateTimePatterns{
@@ -135,7 +135,7 @@ tt{
                 yQQQ{"QQQ, y 'ел'"}
                 yQQQQ{"QQQQ, y 'ел'"}
                 yw{
-                    other{"y 'елның' w 'атнасы'"}
+                    other{"Y 'елның' w 'атнасы'"}
                 }
             }
             dayNames{

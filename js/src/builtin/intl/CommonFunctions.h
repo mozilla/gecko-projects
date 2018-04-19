@@ -85,10 +85,11 @@ template <typename ICUStringFunction, size_t InlineCapacity>
 static int32_t
 CallICU(JSContext* cx, const ICUStringFunction& strFn, Vector<char16_t, InlineCapacity>& chars)
 {
-    MOZ_ASSERT(chars.length() >= InlineCapacity);
+    MOZ_ASSERT(chars.length() == 0);
+    MOZ_ALWAYS_TRUE(chars.resize(InlineCapacity));
 
     UErrorCode status = U_ZERO_ERROR;
-    int32_t size = strFn(chars.begin(), chars.length(), &status);
+    int32_t size = strFn(chars.begin(), InlineCapacity, &status);
     if (status == U_BUFFER_OVERFLOW_ERROR) {
         MOZ_ASSERT(size >= 0);
         if (!chars.resize(size_t(size)))
@@ -110,7 +111,6 @@ static JSString*
 CallICU(JSContext* cx, const ICUStringFunction& strFn)
 {
     Vector<char16_t, INITIAL_CHAR_BUFFER_SIZE> chars(cx);
-    MOZ_ALWAYS_TRUE(chars.resize(INITIAL_CHAR_BUFFER_SIZE));
 
     int32_t size = CallICU(cx, strFn, chars);
     if (size < 0)

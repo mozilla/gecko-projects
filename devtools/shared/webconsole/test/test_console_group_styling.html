@@ -33,8 +33,7 @@ window.onload = async function () {
     ok(false, `Error thrown: ${e.message}`);
   }
 
-  await closeDebugger(state);
-  SimpleTest.finish();
+  closeDebugger(state, () => SimpleTest.finish());
 };
 
 async function testSingleCustomStyleGroup(debuggerClient) {
@@ -113,6 +112,12 @@ async function testFormatterWithNoStyleGroupCollapsed(debuggerClient) {
     arguments: ["%cfoobaz"],
     styles: []
   });
+}
+
+function consoleAPICall(debuggerClient, consoleCall) {
+  const onConsoleAPICall = debuggerClient.addOneTimeListener("consoleAPICall");
+  consoleCall();
+  return onConsoleAPICall;
 }
 
   </script>

@@ -305,7 +305,6 @@ NS_IMPL_CI_INTERFACE_GETTER(nsBufferedInputStream,
 
 nsBufferedInputStream::nsBufferedInputStream()
    : nsBufferedStream()
-   , mMutex("nsBufferedInputStream::mMutex")
    , mIsIPCSerializable(true)
    , mIsAsyncInputStream(false)
    , mIsCloneableInputStream(false)
@@ -381,25 +380,12 @@ nsBufferedInputStream::Close()
 NS_IMETHODIMP
 nsBufferedInputStream::Available(uint64_t *result)
 {
+    nsresult rv = NS_OK;
     *result = 0;
-
-    if (!mStream) {
-        return NS_OK;
+    if (mStream) {
+        rv = Source()->Available(result);
     }
-
-    uint64_t avail = mFillPoint - mCursor;
-
-    uint64_t tmp;
-    nsresult rv = Source()->Available(&tmp);
-    if (NS_SUCCEEDED(rv)) {
-        avail += tmp;
-    }
-
-    if (avail) {
-        *result = avail;
-        return NS_OK;
-    }
-
+    *result += (mFillPoint - mCursor);
     return rv;
 }
 
@@ -680,36 +666,30 @@ nsBufferedInputStream::AsyncWait(nsIInputStreamCallback* aCallback,
         return NS_ERROR_FAILURE;
     }
 
-    nsCOMPtr<nsIInputStreamCallback> callback = aCallback ? this : nullptr;
-    {
-        MutexAutoLock lock(mMutex);
-
-        if (mAsyncWaitCallback && aCallback) {
-            return NS_ERROR_FAILURE;
-        }
-
-        mAsyncWaitCallback = aCallback;
+    if (mAsyncWaitCallback && aCallback) {
+        return NS_ERROR_FAILURE;
     }
 
-    return stream->AsyncWait(callback, aFlags, aRequestedCount, aEventTarget);
+    mAsyncWaitCallback = aCallback;
+
+    if (!mAsyncWaitCallback) {
+        return NS_OK;
+    }
+
+    return stream->AsyncWait(this, aFlags, aRequestedCount, aEventTarget);
 }
 
 NS_IMETHODIMP
 nsBufferedInputStream::OnInputStreamReady(nsIAsyncInputStream* aStream)
 {
-    nsCOMPtr<nsIInputStreamCallback> callback;
-    {
-        MutexAutoLock lock(mMutex);
-
-        // We have been canceled in the meanwhile.
-        if (!mAsyncWaitCallback) {
-            return NS_OK;
-        }
-
-        callback.swap(mAsyncWaitCallback);
+    // We have been canceled in the meanwhile.
+    if (!mAsyncWaitCallback) {
+        return NS_OK;
     }
 
-    MOZ_ASSERT(callback);
+    nsCOMPtr<nsIInputStreamCallback> callback;
+    callback.swap(mAsyncWaitCallback);
+
     return callback->OnInputStreamReady(this);
 }
 

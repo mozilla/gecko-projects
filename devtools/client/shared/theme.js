@@ -16,6 +16,7 @@ const variableFileContents = require("theme-loader!devtools/client/themes/variab
 const THEME_SELECTOR_STRINGS = {
   light: ":root.theme-light {",
   dark: ":root.theme-dark {",
+  firebug: ":root.theme-firebug {",
   root: ":root {",
 };
 const THEME_PREF = "devtools.theme";

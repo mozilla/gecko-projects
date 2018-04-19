@@ -419,12 +419,14 @@ struct FloatRegister {
         return numAliased();
     }
 
-    FloatRegister aliased(uint32_t aliasIdx) const {
+    // N.B. FloatRegister is an explicit outparam here because msvc-2010
+    // miscompiled it on win64 when the value was simply returned
+    void aliased(uint32_t aliasIdx, FloatRegister* ret) const {
         MOZ_ASSERT(aliasIdx < Codes::NumTypes);
-        return FloatRegister(reg_, Codes::ContentType((aliasIdx + type_) % Codes::NumTypes));
+        *ret = FloatRegister(reg_, Codes::ContentType((aliasIdx + type_) % Codes::NumTypes));
     }
-    FloatRegister alignedAliased(uint32_t aliasIdx) const {
-        return aliased(aliasIdx);
+    void alignedAliased(uint32_t aliasIdx, FloatRegister* ret) const {
+        aliased(aliasIdx, ret);
     }
 
     SetType alignedOrDominatedAliasedSet() const {

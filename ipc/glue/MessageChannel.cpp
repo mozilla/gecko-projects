@@ -674,9 +674,8 @@ void
 MessageChannel::WillDestroyCurrentMessageLoop()
 {
 #if defined(DEBUG)
-    CrashReporter::AnnotateCrashReport(
-        NS_LITERAL_CSTRING("IPCFatalErrorProtocol"),
-        nsDependentCString(mName));
+    CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("ProtocolName"),
+                                       nsDependentCString(mName));
     MOZ_CRASH("MessageLoop destroyed before MessageChannel that's bound to it");
 #endif
 
@@ -700,9 +699,8 @@ MessageChannel::Clear()
 
 #if !defined(ANDROID)
     if (!Unsound_IsClosed()) {
-        CrashReporter::AnnotateCrashReport(
-            NS_LITERAL_CSTRING("IPCFatalErrorProtocol"),
-            nsDependentCString(mName));
+        CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("ProtocolName"),
+                                           nsDependentCString(mName));
         switch (mChannelState) {
             case ChannelOpening:
                 MOZ_CRASH("MessageChannel destroyed without being closed " \
@@ -2318,6 +2316,13 @@ MessageChannel::EnqueuePendingMessages()
     RepostAllMessages();
 }
 
+static inline bool
+IsTimeoutExpired(PRIntervalTime aStart, PRIntervalTime aTimeout)
+{
+    return (aTimeout != PR_INTERVAL_NO_TIMEOUT) &&
+           (aTimeout <= (PR_IntervalNow() - aStart));
+}
+
 bool
 MessageChannel::WaitResponse(bool aWaitTimedOut)
 {
@@ -2347,14 +2352,17 @@ MessageChannel::WaitForSyncNotify(bool /* aHandleWindowsMessages */)
     }
 #endif
 
-    TimeDuration timeout = (kNoTimeout == mTimeoutMs) ?
-                           TimeDuration::Forever() :
-                           TimeDuration::FromMilliseconds(mTimeoutMs);
-    CVStatus status = mMonitor->Wait(timeout);
+    PRIntervalTime timeout = (kNoTimeout == mTimeoutMs) ?
+                             PR_INTERVAL_NO_TIMEOUT :
+                             PR_MillisecondsToInterval(mTimeoutMs);
+    // XXX could optimize away this syscall for "no timeout" case if desired
+    PRIntervalTime waitStart = PR_IntervalNow();
+
+    mMonitor->Wait(timeout);
 
     // If the timeout didn't expire, we know we received an event. The
     // converse is not true.
-    return WaitResponse(status == CVStatus::Timeout);
+    return WaitResponse(IsTimeoutExpired(waitStart, timeout));
 }
 
 bool
@@ -2845,7 +2853,6 @@ MessageChannel::RepostAllMessages()
     for (MessageTask* task : mPending) {
         if (!task->IsScheduled()) {
             needRepost = true;
-            break;
         }
     }
     if (!needRepost) {

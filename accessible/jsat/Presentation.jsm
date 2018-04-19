@@ -6,6 +6,7 @@
 
 "use strict";
 
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/accessibility/Utils.jsm");
 ChromeUtils.defineModuleGetter(this, "Logger", // jshint ignore:line
   "resource://gre/modules/accessibility/Utils.jsm");

@@ -51,10 +51,8 @@ add_task(async function() {
   ok(fourthNode.classList.contains("focused"), "4th node is focused");
   ok(
     selectedSource.includes("nested-source.js"),
-    "nested-source is selected"
+    "The right source is selected"
   );
-
-  await waitForSelectedSource(dbg, "nested-source");
 
   // Make sure new sources appear in the list.
   ContentTask.spawn(gBrowser.selectedBrowser, null, function() {

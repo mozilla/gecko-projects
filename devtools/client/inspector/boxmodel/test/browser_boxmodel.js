@@ -150,42 +150,42 @@ var res2 = [
   },
 ];
 
-add_task(async function() {
+add_task(function* () {
   let style = "div { position: absolute; top: 42px; left: 42px; " +
               "height: 100.111px; width: 100px; border: 10px solid black; " +
               "padding: 20px; margin: 30px auto;}";
   let html = "<style>" + style + "</style><div></div>";
 
-  await addTab("data:text/html," + encodeURIComponent(html));
-  let {inspector, boxmodel, testActor} = await openLayoutView();
-  await selectNode("div", inspector);
+  yield addTab("data:text/html," + encodeURIComponent(html));
+  let {inspector, view, testActor} = yield openBoxModelView();
+  yield selectNode("div", inspector);
 
-  await testInitialValues(inspector, boxmodel);
-  await testChangingValues(inspector, boxmodel, testActor);
+  yield testInitialValues(inspector, view);
+  yield testChangingValues(inspector, view, testActor);
 });
 
-function testInitialValues(inspector, boxmodel) {
+function* testInitialValues(inspector, view) {
   info("Test that the initial values of the box model are correct");
-  let doc = boxmodel.document;
+  let viewdoc = view.document;
 
   for (let i = 0; i < res1.length; i++) {
-    let elt = doc.querySelector(res1[i].selector);
+    let elt = viewdoc.querySelector(res1[i].selector);
     is(elt.textContent, res1[i].value,
        res1[i].selector + " has the right value.");
   }
 }
 
-async function testChangingValues(inspector, boxmodel, testActor) {
+function* testChangingValues(inspector, view, testActor) {
   info("Test that changing the document updates the box model");
-  let doc = boxmodel.document;
+  let viewdoc = view.document;
 
   let onUpdated = waitForUpdate(inspector);
-  await testActor.setAttribute("div", "style",
+  yield testActor.setAttribute("div", "style",
                                "height:150px;padding-right:50px;top:50px");
-  await onUpdated;
+  yield onUpdated;
 
   for (let i = 0; i < res2.length; i++) {
-    let elt = doc.querySelector(res2[i].selector);
+    let elt = viewdoc.querySelector(res2[i].selector);
     is(elt.textContent, res2[i].value,
        res2[i].selector + " has the right value after style update.");
   }

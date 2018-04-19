@@ -19,7 +19,6 @@
 #include "nsIPresShell.h"
 #include "nsPresContext.h"
 #include "nsIURI.h"
-#include "nsWindowSizes.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Anchor)
 
@@ -219,10 +218,10 @@ HTMLAnchorElement::IsHTMLFocusable(bool aWithMouse,
   return false;
 }
 
-void
+nsresult
 HTMLAnchorElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
-  GetEventTargetParentForAnchors(aVisitor);
+  return GetEventTargetParentForAnchors(aVisitor);
 }
 
 nsresult

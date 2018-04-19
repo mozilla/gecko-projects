@@ -22,7 +22,6 @@
 #include "mozilla/AlreadyAddRefed.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Array.h"
-#include "mozilla/dom/DocGroup.h"
 
 namespace mozilla {
 class CycleCollectedJSContext;
@@ -130,10 +129,6 @@ public:
     return mShutdownContext != nullptr;
   }
 
-#ifndef RELEASE_OR_BETA
-  virtual mozilla::PerformanceCounter* GetPerformanceCounter(nsIRunnable* aEvent);
-#endif
-
 private:
   void DoMainThreadSpecificProcessing(bool aReallyWait);
 
@@ -183,13 +178,7 @@ protected:
   bool mCanInvokeJS;
 
 #ifndef RELEASE_OR_BETA
-  bool GetSchedulerLoggingEnabled();
   mozilla::TimeStamp mNextIdleDeadline;
-  // Used to track which event is being executed by ProcessNextEvent
-  nsCOMPtr<nsIRunnable> mCurrentEvent;
-  mozilla::TimeStamp mCurrentEventStart;
-  uint32_t mCurrentEventLoopDepth;
-  RefPtr<mozilla::PerformanceCounter> mCurrentPerformanceCounter;
 #endif
 };
 

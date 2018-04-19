@@ -1,6 +1,6 @@
 /* vim: set ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
-http://creativecommons.org/publicdomain/zero/1.0/ */
+ http://creativecommons.org/publicdomain/zero/1.0/ */
 
 "use strict";
 
@@ -9,36 +9,27 @@ http://creativecommons.org/publicdomain/zero/1.0/ */
 // of elements should be working.
 const TEST_URL = URL_ROOT + "doc_markup_anonymous.html";
 
-add_task(async function() {
+add_task(function* () {
   Services.prefs.setBoolPref("dom.webcomponents.shadowdom.enabled", true);
 
-  let {inspector} = await openInspectorForURL(TEST_URL);
+  let {inspector} = yield openInspectorForURL(TEST_URL);
 
-  let shadowHostFront = await getNodeFront("#shadow", inspector.markup);
-  is(shadowHostFront.numChildren, 3, "Children of the shadow host are correct");
+  let shadow = yield getNodeFront("#shadow", inspector.markup);
+  let children = yield inspector.walker.children(shadow);
 
-  await inspector.markup.expandNode(shadowHostFront);
-  await waitForMultipleChildrenUpdates(inspector);
-
-  let shadowContainer = inspector.markup.getContainer(shadowHostFront);
-  let containers = shadowContainer.getChildContainers();
+  // Bug 1441535.
+  todo_is(shadow.numChildren, 3, "Children of the shadow root are counted");
+  is(children.nodes.length, 3, "Children returned from walker");
 
   info("Checking the ::before pseudo element");
-  let before = containers[1].node;
-  await isEditingMenuDisabled(before, inspector);
-
-  info("Checking shadow dom children");
-  let shadowRootFront = containers[0].node;
-  let children = await inspector.walker.children(shadowRootFront);
-
-  is(shadowRootFront.numChildren, 2, "Children of the shadow root are counted");
-  is(children.nodes.length, 2, "Children returned from walker");
+  let before = children.nodes[0];
+  yield isEditingMenuDisabled(before, inspector);
 
   info("Checking the <h3> shadow element");
-  let shadowChild1 = children.nodes[0];
-  await isEditingMenuDisabled(shadowChild1, inspector);
+  let shadowChild1 = children.nodes[1];
+  yield isEditingMenuDisabled(shadowChild1, inspector);
 
   info("Checking the <select> shadow element");
-  let shadowChild2 = children.nodes[1];
-  await isEditingMenuDisabled(shadowChild2, inspector);
+  let shadowChild2 = children.nodes[2];
+  yield isEditingMenuDisabled(shadowChild2, inspector);
 });

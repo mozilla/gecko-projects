@@ -12,29 +12,29 @@
 
 <script>
 test(() => {
-  const elements = setupStickyTest('right', 25);
+  const elements = setupStickyTest('right', 25, true);
   elements.scroller.scrollLeft = 200;
-  const nonStickyLeftX = elements.container.offsetLeft +
+  const nonStickyLeftY = elements.container.offsetLeft +
     elements.filler.clientWidth;
-  assert_equals(elements.sticky.offsetLeft, nonStickyLeftX);
+  assert_equals(elements.sticky.offsetLeft, nonStickyLeftY);
 }, 'before reaching the sticking point the sticky box should not be offset');
 
 test(() => {
-  const elements = setupStickyTest('right', 25);
+  const elements = setupStickyTest('right', 25, true);
   elements.scroller.scrollLeft = 75;
 
-  const nonStickyLeftX = elements.container.offsetLeft +
+  const nonStickyLeftY = elements.container.offsetLeft +
       elements.filler.clientWidth;
-  const nonStickyRightX = nonStickyLeftX + elements.sticky.clientWidth;
-  const targetRightX = elements.scroller.clientWidth +
+  const nonStickyBottomY = nonStickyLeftY + elements.sticky.clientWidth;
+  const targetBottomY = elements.scroller.clientWidth +
       elements.scroller.scrollLeft - 25;
-  const stickyOffset = nonStickyRightX - targetRightX;
+  const stickyOffset = nonStickyBottomY - targetBottomY;
 
-  assert_equals(elements.sticky.offsetLeft, nonStickyLeftX - stickyOffset);
+  assert_equals(elements.sticky.offsetLeft, nonStickyLeftY - stickyOffset);
 }, 'after reaching the sticking point the sticky box should be offset');
 
 test(() => {
-  const elements = setupStickyTest('right', 25);
+  const elements = setupStickyTest('right', 25, true);
   elements.scroller.scrollLeft = 15;
   assert_equals(elements.sticky.offsetLeft, elements.container.offsetLeft);
 }, 'the sticky box should not be pushed outside its containing block');

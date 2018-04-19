@@ -9,11 +9,11 @@
 // Mutate a test input.
 //===----------------------------------------------------------------------===//
 
-#include "FuzzerMutate.h"
 #include "FuzzerCorpus.h"
 #include "FuzzerDefs.h"
 #include "FuzzerExtFunctions.h"
 #include "FuzzerIO.h"
+#include "FuzzerMutate.h"
 #include "FuzzerOptions.h"
 
 namespace fuzzer {
@@ -43,6 +43,8 @@ MutationDispatcher::MutationDispatcher(Random &Rand,
           {&MutationDispatcher::Mutate_CrossOver, "CrossOver"},
           {&MutationDispatcher::Mutate_AddWordFromManualDictionary,
            "ManualDict"},
+          {&MutationDispatcher::Mutate_AddWordFromTemporaryAutoDictionary,
+           "TempAutoDict"},
           {&MutationDispatcher::Mutate_AddWordFromPersistentAutoDictionary,
            "PersAutoDict"},
       });
@@ -62,7 +64,7 @@ MutationDispatcher::MutationDispatcher(Random &Rand,
 
 static char RandCh(Random &Rand) {
   if (Rand.RandBool()) return Rand(256);
-  const char Special[] = "!*'();:@&=+$,/?%#[]012Az-`~.\xff\x00";
+  const char *Special = "!*'();:@&=+$,/?%#[]012Az-`~.\xff\x00";
   return Special[Rand(sizeof(Special) - 1)];
 }
 
@@ -163,6 +165,11 @@ size_t MutationDispatcher::Mutate_AddWordFromManualDictionary(uint8_t *Data,
   return AddWordFromDictionary(ManualDictionary, Data, Size, MaxSize);
 }
 
+size_t MutationDispatcher::Mutate_AddWordFromTemporaryAutoDictionary(
+    uint8_t *Data, size_t Size, size_t MaxSize) {
+  return AddWordFromDictionary(TempAutoDictionary, Data, Size, MaxSize);
+}
+
 size_t MutationDispatcher::ApplyDictionaryEntry(uint8_t *Data, size_t Size,
                                                 size_t MaxSize,
                                                 DictionaryEntry &DE) {
@@ -244,7 +251,7 @@ size_t MutationDispatcher::Mutate_AddWordFromTORC(
     uint8_t *Data, size_t Size, size_t MaxSize) {
   Word W;
   DictionaryEntry DE;
-  switch (Rand(4)) {
+  switch (Rand(3)) {
   case 0: {
     auto X = TPC.TORC8.Get(Rand.Rand());
     DE = MakeDictionaryEntryFromCMP(X.A, X.B, Data, Size);
@@ -259,10 +266,6 @@ size_t MutationDispatcher::Mutate_AddWordFromTORC(
   case 2: {
     auto X = TPC.TORCW.Get(Rand.Rand());
     DE = MakeDictionaryEntryFromCMP(X.A, X.B, Data, Size);
-  } break;
-  case 3: if (Options.UseMemmem) {
-    auto X = TPC.MMT.Get(Rand.Rand());
-    DE = DictionaryEntry(X);
   } break;
   default:
     assert(0);
@@ -466,7 +469,7 @@ void MutationDispatcher::RecordSuccessfulMutationSequence() {
 }
 
 void MutationDispatcher::PrintRecommendedDictionary() {
-  Vector<DictionaryEntry> V;
+  std::vector<DictionaryEntry> V;
   for (auto &DE : PersistentAutoDictionary)
     if (!ManualDictionary.ContainsWord(DE.GetW()))
       V.push_back(DE);
@@ -506,7 +509,7 @@ size_t MutationDispatcher::DefaultMutate(uint8_t *Data, size_t Size,
 // Mutates Data in place, returns new size.
 size_t MutationDispatcher::MutateImpl(uint8_t *Data, size_t Size,
                                       size_t MaxSize,
-                                      Vector<Mutator> &Mutators) {
+                                      const std::vector<Mutator> &Mutators) {
   assert(MaxSize > 0);
   // Some mutations may fail (e.g. can't insert more bytes if Size == MaxSize),
   // in which case they will return 0.
@@ -528,6 +531,16 @@ size_t MutationDispatcher::MutateImpl(uint8_t *Data, size_t Size,
 void MutationDispatcher::AddWordToManualDictionary(const Word &W) {
   ManualDictionary.push_back(
       {W, std::numeric_limits<size_t>::max()});
+}
+
+void MutationDispatcher::AddWordToAutoDictionary(DictionaryEntry DE) {
+  static const size_t kMaxAutoDictSize = 1 << 14;
+  if (TempAutoDictionary.size() >= kMaxAutoDictSize) return;
+  TempAutoDictionary.push_back(DE);
+}
+
+void MutationDispatcher::ClearAutoDictionary() {
+  TempAutoDictionary.clear();
 }
 
 }  // namespace fuzzer

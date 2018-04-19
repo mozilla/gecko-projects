@@ -1,7 +1,5 @@
 extern crate docopt;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
+extern crate rustc_serialize;
 extern crate walkdir;
 
 use std::io::{self, Write};
@@ -22,10 +20,9 @@ Options:
     --tree               Show output as a tree.
     --sort               Sort the output.
     -q, --ignore-errors  Ignore errors.
-    -d, --depth          Show directory's contents before the directory itself.
 ";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, RustcDecodable)]
 #[allow(dead_code)]
 struct Args {
     arg_dir: Option<String>,
@@ -36,28 +33,23 @@ struct Args {
     flag_tree: bool,
     flag_ignore_errors: bool,
     flag_sort: bool,
-    flag_depth: bool,
 }
 
 macro_rules! wout { ($($tt:tt)*) => { {writeln!($($tt)*)}.unwrap() } }
 
 fn main() {
-    let args: Args = Docopt::new(USAGE)
-        .and_then(|d| d.deserialize())
-        .unwrap_or_else(|e| e.exit());
+    let args: Args = Docopt::new(USAGE).and_then(|d| d.decode())
+                                       .unwrap_or_else(|e| e.exit());
     let mind = args.flag_min_depth.unwrap_or(0);
     let maxd = args.flag_max_depth.unwrap_or(::std::usize::MAX);
     let dir = args.arg_dir.clone().unwrap_or(".".to_owned());
     let mut walkdir = WalkDir::new(dir)
-        .max_open(args.flag_fd_max)
-        .follow_links(args.flag_follow_links)
-        .min_depth(mind)
-        .max_depth(maxd);
+                     .max_open(args.flag_fd_max)
+                     .follow_links(args.flag_follow_links)
+                     .min_depth(mind)
+                     .max_depth(maxd);
     if args.flag_sort {
-        walkdir = walkdir.sort_by(|a,b| a.file_name().cmp(b.file_name()));
-    }
-    if args.flag_depth {
-        walkdir = walkdir.contents_first(true)
+        walkdir = walkdir.sort_by(|a,b| a.cmp(b));
     }
     let it = walkdir.into_iter();
     let mut out = io::BufWriter::new(io::stdout());

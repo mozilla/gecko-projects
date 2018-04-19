@@ -22,7 +22,7 @@ registerCleanupFunction(function() {
 add_task(async function setup() {
   await openPreferencesViaOpenPreferencesAPI("privacy", { leaveOpen: true });
   registerCleanupFunction(async function() {
-    BrowserTestUtils.removeTab(gBrowser.selectedTab);
+    await BrowserTestUtils.removeTab(gBrowser.selectedTab);
   });
 });
 
@@ -45,6 +45,7 @@ add_task(async function() {
 
     // scroll the checkbox into view, otherwise the synthesizeMouseAtCenter will be ignored, and click it
     checkbox.scrollIntoView();
+    // eslint-disable-next-line mozilla/no-cpows-in-tests
     EventUtils.synthesizeMouseAtCenter(checkbox, {}, gBrowser.selectedBrowser.contentWindow);
 
     // check that setting is now turned on or off
@@ -84,6 +85,7 @@ add_task(async function() {
 
     // scroll the checkbox into view, otherwise the synthesizeMouseAtCenter will be ignored, and click it
     checkbox.scrollIntoView();
+    // eslint-disable-next-line mozilla/no-cpows-in-tests
     EventUtils.synthesizeMouseAtCenter(checkbox, {}, gBrowser.selectedBrowser.contentWindow);
 
     // check that both settings are now turned on or off

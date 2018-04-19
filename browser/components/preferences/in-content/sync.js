@@ -118,7 +118,7 @@ var gSyncPane = {
 
     // Use cached values while we wait for the up-to-date values
     let cachedComputerName = Services.prefs.getCharPref("services.sync.client.name", "");
-    document.getElementById("fxaEmailAddress").textContent = username;
+    document.querySelector(".fxaEmailAddress").value = username;
     this._populateComputerName(cachedComputerName);
     this.page = FXA_PAGE_LOGGED_IN;
   },
@@ -259,7 +259,7 @@ var gSyncPane = {
       .wrappedJSObject;
 
     let displayNameLabel = document.getElementById("fxaDisplayName");
-    let fxaEmailAddressLabels = document.querySelectorAll(".l10nArgsEmailAddress");
+    let fxaEmailAddressLabels = document.querySelectorAll(".fxaEmailAddress");
     displayNameLabel.hidden = true;
 
     // determine the fxa status...
@@ -288,11 +288,8 @@ var gSyncPane = {
       syncReady = true;
     }
     fxaEmailAddressLabels.forEach((label) => {
-      let l10nAttrs = document.l10n.getAttributes(label);
-      document.l10n.setAttributes(label, l10nAttrs.id, {email: state.email});
+      label.value = state.email;
     });
-    document.getElementById("fxaEmailAddress").textContent = state.email;
-
     this._populateComputerName(Weave.Service.clientsEngine.localName);
     let engines = document.getElementById("fxaSyncEngines");
     for (let checkbox of engines.querySelectorAll("checkbox")) {
@@ -345,7 +342,7 @@ var gSyncPane = {
   openContentInBrowser(url, options) {
     let win = Services.wm.getMostRecentWindow("navigator:browser");
     if (!win) {
-      openTrustedLinkIn(url, "tab");
+      openUILinkIn(url, "tab");
       return;
     }
     win.switchToTabHavingURI(url, true, options);

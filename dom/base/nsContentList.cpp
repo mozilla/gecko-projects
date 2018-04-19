@@ -87,6 +87,29 @@ NS_IMPL_CYCLE_COLLECTING_ADDREF(nsBaseContentList)
 NS_IMPL_CYCLE_COLLECTING_RELEASE_WITH_LAST_RELEASE(nsBaseContentList,
                                                    LastRelease())
 
+
+NS_IMETHODIMP
+nsBaseContentList::GetLength(uint32_t* aLength)
+{
+  *aLength = mElements.Length();
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsBaseContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
+{
+  nsISupports *tmp = Item(aIndex);
+
+  if (!tmp) {
+    *aReturn = nullptr;
+
+    return NS_OK;
+  }
+
+  return CallQueryInterface(tmp, aReturn);
+}
+
 nsIContent*
 nsBaseContentList::Item(uint32_t aIndex)
 {
@@ -125,7 +148,6 @@ nsSimpleContentList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto
 NS_IMPL_CYCLE_COLLECTION_INHERITED(nsEmptyContentList, nsBaseContentList, mRoot)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsEmptyContentList)
-  NS_INTERFACE_MAP_ENTRY(nsIHTMLCollection)
 NS_INTERFACE_MAP_END_INHERITING(nsBaseContentList)
 
 
@@ -135,7 +157,22 @@ NS_IMPL_RELEASE_INHERITED(nsEmptyContentList, nsBaseContentList)
 JSObject*
 nsEmptyContentList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLCollectionBinding::Wrap(cx, this, aGivenProto);
+  return NodeListBinding::Wrap(cx, this, aGivenProto);
+}
+
+NS_IMETHODIMP
+nsEmptyContentList::GetLength(uint32_t* aLength)
+{
+  *aLength = 0;
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsEmptyContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
+{
+  *aReturn = nullptr;
+  return NS_OK;
 }
 
 mozilla::dom::Element*
@@ -546,7 +583,7 @@ nsContentList::GetSupportedNames(nsTArray<nsString>& aNames)
       }
     }
 
-    nsGenericHTMLElement* el = nsGenericHTMLElement::FromNode(content);
+    nsGenericHTMLElement* el = nsGenericHTMLElement::FromContent(content);
     if (el) {
       // XXXbz should we be checking for particular tags here?  How
       // stable is this part of the spec?
@@ -607,6 +644,28 @@ nsContentList::LastRelease()
     mRootNode = nullptr;
   }
   SetDirty();
+}
+
+NS_IMETHODIMP
+nsContentList::GetLength(uint32_t* aLength)
+{
+  *aLength = Length(true);
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
+{
+  nsINode* node = Item(aIndex);
+
+  if (node) {
+    return CallQueryInterface(node, aReturn);
+  }
+
+  *aReturn = nullptr;
+
+  return NS_OK;
 }
 
 Element*

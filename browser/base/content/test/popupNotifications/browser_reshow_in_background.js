@@ -50,6 +50,6 @@ add_task(async function test_background_notifications_dont_reshow_in_foreground(
   PopupNotifications.remove(notification);
   await panelHidden;
 
-  BrowserTestUtils.removeTab(tabB);
-  BrowserTestUtils.removeTab(tabC);
+  await BrowserTestUtils.removeTab(tabB);
+  await BrowserTestUtils.removeTab(tabC);
 });

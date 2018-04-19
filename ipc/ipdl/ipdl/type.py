@@ -116,8 +116,6 @@ class VoidType(Type):
         return False
     def isAtom(self):
         return True
-    def isRefcounted(self):
-        return False
 
     def name(self): return 'void'
     def fullname(self): return 'void'
@@ -126,17 +124,14 @@ VOID = VoidType()
 
 ##--------------------
 class ImportedCxxType(Type):
-    def __init__(self, qname, refcounted):
+    def __init__(self, qname):
         assert isinstance(qname, QualifiedId)
         self.loc = qname.loc
         self.qname = qname
-        self.refcounted = refcounted
     def isCxx(self):
         return True
     def isAtom(self):
         return True
-    def isRefcounted(self):
-        return self.refcounted
 
     def name(self):
         return self.qname.baseid
@@ -749,12 +744,9 @@ class GatherDecls(TcheckVisitor):
         elif fullname == 'mozilla::ipc::FileDescriptor':
             ipdltype = FDType(using.type.spec)
         else:
-            ipdltype = ImportedCxxType(using.type.spec, using.isRefcounted())
+            ipdltype = ImportedCxxType(using.type.spec)
             existingType = self.symtab.lookup(ipdltype.fullname())
             if existingType and existingType.fullname == ipdltype.fullname():
-                if ipdltype.isRefcounted() != existingType.type.isRefcounted():
-                    self.error(using.loc, "inconsistent refcounted status of type `%s`",
-                               str(using.type))
                 using.decl = existingType
                 return
         using.decl = self.declare(

@@ -6,6 +6,9 @@
 
 #include "InspectorFontFace.h"
 
+#ifdef MOZ_OLD_STYLE
+#include "nsCSSRules.h"
+#endif
 #include "gfxTextRun.h"
 #include "gfxUserFontSet.h"
 #include "nsFontFaceLoader.h"
@@ -13,7 +16,6 @@
 #include "brotli/decode.h"
 #include "zlib.h"
 #include "mozilla/dom/FontFaceSet.h"
-#include "mozilla/ServoFontFaceRule.h"
 #include "mozilla/Unused.h"
 
 namespace mozilla {
@@ -54,35 +56,23 @@ InspectorFontFace::GetCSSFamilyName(nsAString& aCSSFamilyName)
   aCSSFamilyName = mFontEntry->FamilyName();
 }
 
-ServoFontFaceRule*
+nsCSSFontFaceRule*
 InspectorFontFace::GetRule()
 {
-  if (!mRule) {
-    // check whether this font entry is associated with an @font-face rule
-    // in the relevant font group's user font set
-    RawServoFontFaceRule* rule = nullptr;
-    if (mFontEntry->IsUserFont()) {
-      FontFaceSet::UserFontSet* fontSet =
-        static_cast<FontFaceSet::UserFontSet*>(mFontGroup->GetUserFontSet());
-      if (fontSet) {
-        FontFaceSet* fontFaceSet = fontSet->GetFontFaceSet();
-        if (fontFaceSet) {
-          rule = fontFaceSet->FindRuleForEntry(mFontEntry);
-        }
+  // check whether this font entry is associated with an @font-face rule
+  // in the relevant font group's user font set
+  nsCSSFontFaceRule* rule = nullptr;
+  if (mFontEntry->IsUserFont()) {
+    FontFaceSet::UserFontSet* fontSet =
+      static_cast<FontFaceSet::UserFontSet*>(mFontGroup->GetUserFontSet());
+    if (fontSet) {
+      FontFaceSet* fontFaceSet = fontSet->GetFontFaceSet();
+      if (fontFaceSet) {
+        rule = fontFaceSet->FindRuleForEntry(mFontEntry);
       }
     }
-    if (rule) {
-      // XXX It would be better if we can share this with CSSOM tree,
-      // but that may require us to create another map, which is not
-      // great either. As far as they would use the same backend, and
-      // we don't really support mutating @font-face rule via CSSOM,
-      // it's probably fine for now.
-      uint32_t line, column;
-      Servo_FontFaceRule_GetSourceLocation(rule, &line, &column);
-      mRule = new ServoFontFaceRule(do_AddRef(rule), line, column);
-    }
   }
-  return mRule;
+  return rule;
 }
 
 int32_t

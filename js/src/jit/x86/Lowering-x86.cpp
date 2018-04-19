@@ -6,7 +6,6 @@
 
 #include "jit/x86/Lowering-x86.h"
 
-#include "jit/Lowering.h"
 #include "jit/MIR.h"
 #include "jit/x86/Assembler-x86.h"
 
@@ -51,7 +50,7 @@ LIRGeneratorX86::tempByteOpRegister()
 }
 
 void
-LIRGenerator::visitBox(MBox* box)
+LIRGeneratorX86::visitBox(MBox* box)
 {
     MDefinition* inner = box->getOperand(0);
 
@@ -91,7 +90,7 @@ LIRGenerator::visitBox(MBox* box)
 }
 
 void
-LIRGenerator::visitUnbox(MUnbox* unbox)
+LIRGeneratorX86::visitUnbox(MUnbox* unbox)
 {
     MDefinition* inner = unbox->getOperand(0);
 
@@ -146,7 +145,7 @@ LIRGenerator::visitUnbox(MUnbox* unbox)
 }
 
 void
-LIRGenerator::visitReturn(MReturn* ret)
+LIRGeneratorX86::visitReturn(MReturn* ret)
 {
     MDefinition* opd = ret->getOperand(0);
     MOZ_ASSERT(opd->type() == MIRType::Value);
@@ -251,25 +250,25 @@ LIRGeneratorX86::lowerForMulInt64(LMulI64* ins, MMul* mir, MDefinition* lhs, MDe
 }
 
 void
-LIRGenerator::visitCompareExchangeTypedArrayElement(MCompareExchangeTypedArrayElement* ins)
+LIRGeneratorX86::visitCompareExchangeTypedArrayElement(MCompareExchangeTypedArrayElement* ins)
 {
     lowerCompareExchangeTypedArrayElement(ins, /* useI386ByteRegisters = */ true);
 }
 
 void
-LIRGenerator::visitAtomicExchangeTypedArrayElement(MAtomicExchangeTypedArrayElement* ins)
+LIRGeneratorX86::visitAtomicExchangeTypedArrayElement(MAtomicExchangeTypedArrayElement* ins)
 {
     lowerAtomicExchangeTypedArrayElement(ins, /*useI386ByteRegisters=*/ true);
 }
 
 void
-LIRGenerator::visitAtomicTypedArrayElementBinop(MAtomicTypedArrayElementBinop* ins)
+LIRGeneratorX86::visitAtomicTypedArrayElementBinop(MAtomicTypedArrayElementBinop* ins)
 {
     lowerAtomicTypedArrayElementBinop(ins, /* useI386ByteRegisters = */ true);
 }
 
 void
-LIRGenerator::visitWasmUnsignedToDouble(MWasmUnsignedToDouble* ins)
+LIRGeneratorX86::visitWasmUnsignedToDouble(MWasmUnsignedToDouble* ins)
 {
     MOZ_ASSERT(ins->input()->type() == MIRType::Int32);
     LWasmUint32ToDouble* lir = new(alloc()) LWasmUint32ToDouble(useRegisterAtStart(ins->input()), temp());
@@ -277,7 +276,7 @@ LIRGenerator::visitWasmUnsignedToDouble(MWasmUnsignedToDouble* ins)
 }
 
 void
-LIRGenerator::visitWasmUnsignedToFloat32(MWasmUnsignedToFloat32* ins)
+LIRGeneratorX86::visitWasmUnsignedToFloat32(MWasmUnsignedToFloat32* ins)
 {
     MOZ_ASSERT(ins->input()->type() == MIRType::Int32);
     LWasmUint32ToFloat32* lir = new(alloc()) LWasmUint32ToFloat32(useRegisterAtStart(ins->input()), temp());
@@ -285,7 +284,7 @@ LIRGenerator::visitWasmUnsignedToFloat32(MWasmUnsignedToFloat32* ins)
 }
 
 void
-LIRGenerator::visitWasmLoad(MWasmLoad* ins)
+LIRGeneratorX86::visitWasmLoad(MWasmLoad* ins)
 {
     MDefinition* base = ins->base();
     MOZ_ASSERT(base->type() == MIRType::Int32);
@@ -335,7 +334,7 @@ LIRGenerator::visitWasmLoad(MWasmLoad* ins)
 }
 
 void
-LIRGenerator::visitWasmStore(MWasmStore* ins)
+LIRGeneratorX86::visitWasmStore(MWasmStore* ins)
 {
     MDefinition* base = ins->base();
     MOZ_ASSERT(base->type() == MIRType::Int32);
@@ -396,7 +395,7 @@ LIRGenerator::visitWasmStore(MWasmStore* ins)
 }
 
 void
-LIRGenerator::visitAsmJSLoadHeap(MAsmJSLoadHeap* ins)
+LIRGeneratorX86::visitAsmJSLoadHeap(MAsmJSLoadHeap* ins)
 {
     MDefinition* base = ins->base();
     MOZ_ASSERT(base->type() == MIRType::Int32);
@@ -421,7 +420,7 @@ LIRGenerator::visitAsmJSLoadHeap(MAsmJSLoadHeap* ins)
 }
 
 void
-LIRGenerator::visitAsmJSStoreHeap(MAsmJSStoreHeap* ins)
+LIRGeneratorX86::visitAsmJSStoreHeap(MAsmJSStoreHeap* ins)
 {
     MDefinition* base = ins->base();
     MOZ_ASSERT(base->type() == MIRType::Int32);
@@ -470,7 +469,7 @@ LIRGenerator::visitAsmJSStoreHeap(MAsmJSStoreHeap* ins)
 }
 
 void
-LIRGenerator::visitWasmCompareExchangeHeap(MWasmCompareExchangeHeap* ins)
+LIRGeneratorX86::visitWasmCompareExchangeHeap(MWasmCompareExchangeHeap* ins)
 {
     MDefinition* base = ins->base();
     MOZ_ASSERT(base->type() == MIRType::Int32);
@@ -518,7 +517,7 @@ LIRGenerator::visitWasmCompareExchangeHeap(MWasmCompareExchangeHeap* ins)
 }
 
 void
-LIRGenerator::visitWasmAtomicExchangeHeap(MWasmAtomicExchangeHeap* ins)
+LIRGeneratorX86::visitWasmAtomicExchangeHeap(MWasmAtomicExchangeHeap* ins)
 {
     MDefinition* memoryBase = ins->memoryBase();
     MOZ_ASSERT(memoryBase->type() == MIRType::Pointer);
@@ -549,7 +548,7 @@ LIRGenerator::visitWasmAtomicExchangeHeap(MWasmAtomicExchangeHeap* ins)
 }
 
 void
-LIRGenerator::visitWasmAtomicBinopHeap(MWasmAtomicBinopHeap* ins)
+LIRGeneratorX86::visitWasmAtomicBinopHeap(MWasmAtomicBinopHeap* ins)
 {
     MDefinition* base = ins->base();
     MOZ_ASSERT(base->type() == MIRType::Int32);
@@ -700,7 +699,7 @@ LIRGeneratorX86::lowerUModI64(MMod* mod)
 }
 
 void
-LIRGenerator::visitSubstr(MSubstr* ins)
+LIRGeneratorX86::visitSubstr(MSubstr* ins)
 {
     // Due to lack of registers on x86, we reuse the string register as
     // temporary. As a result we only need two temporary registers and take a
@@ -716,7 +715,7 @@ LIRGenerator::visitSubstr(MSubstr* ins)
 }
 
 void
-LIRGenerator::visitRandom(MRandom* ins)
+LIRGeneratorX86::visitRandom(MRandom* ins)
 {
     LRandom *lir = new(alloc()) LRandom(temp(),
                                         temp(),
@@ -727,7 +726,7 @@ LIRGenerator::visitRandom(MRandom* ins)
 }
 
 void
-LIRGenerator::visitWasmTruncateToInt64(MWasmTruncateToInt64* ins)
+LIRGeneratorX86::visitWasmTruncateToInt64(MWasmTruncateToInt64* ins)
 {
     MDefinition* opd = ins->input();
     MOZ_ASSERT(opd->type() == MIRType::Double || opd->type() == MIRType::Float32);
@@ -737,7 +736,7 @@ LIRGenerator::visitWasmTruncateToInt64(MWasmTruncateToInt64* ins)
 }
 
 void
-LIRGenerator::visitInt64ToFloatingPoint(MInt64ToFloatingPoint* ins)
+LIRGeneratorX86::visitInt64ToFloatingPoint(MInt64ToFloatingPoint* ins)
 {
     MDefinition* opd = ins->input();
     MOZ_ASSERT(opd->type() == MIRType::Int64);
@@ -753,7 +752,7 @@ LIRGenerator::visitInt64ToFloatingPoint(MInt64ToFloatingPoint* ins)
 }
 
 void
-LIRGenerator::visitExtendInt32ToInt64(MExtendInt32ToInt64* ins)
+LIRGeneratorX86::visitExtendInt32ToInt64(MExtendInt32ToInt64* ins)
 {
     if (ins->isUnsigned()) {
         defineInt64(new(alloc()) LExtendInt32ToInt64(useRegisterAtStart(ins->input())), ins);
@@ -766,7 +765,7 @@ LIRGenerator::visitExtendInt32ToInt64(MExtendInt32ToInt64* ins)
 }
 
 void
-LIRGenerator::visitSignExtendInt64(MSignExtendInt64* ins)
+LIRGeneratorX86::visitSignExtendInt64(MSignExtendInt64* ins)
 {
     // Here we'll end up using cdq which requires input and output in (edx,eax).
     LSignExtendInt64* lir =

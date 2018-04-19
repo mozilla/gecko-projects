@@ -8,7 +8,9 @@
  * attribute/property changes.
  */
 
-export default function ObservedPropertiesMixin(superClass) {
+/* exported ObservedPropertiesMixin */
+
+function ObservedPropertiesMixin(superClass) {
   return class ObservedProperties extends superClass {
     constructor() {
       super();

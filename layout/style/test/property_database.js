@@ -1710,7 +1710,7 @@ var gCSSProperties = {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "normal" ],
-    other_values: [ "2px", "1em", "4em", "3%", "calc(3%)", "calc(1em - 3%)",
+    other_values: [ "2px", "1em", "4em",
       "calc(2px)",
       "calc(-2px)",
       "calc(0px)",
@@ -1721,7 +1721,7 @@ var gCSSProperties = {
       "calc(25px*3)",
       "calc(3*25px + 5em)",
     ],
-    invalid_values: [ "-3%", "-1px", "4" ]
+    invalid_values: [ "3%", "-1px", "4" ]
   },
   "-moz-column-gap": {
     domProp: "MozColumnGap",
@@ -3408,20 +3408,7 @@ var gCSSProperties = {
     inherited: true,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "auto" ],
-    other_values: [
-      "crosshair", "default", "pointer", "move", "e-resize", "ne-resize",
-      "nw-resize", "n-resize", "se-resize", "sw-resize", "s-resize", "w-resize",
-      "text", "wait", "help", "progress", "copy", "alias", "context-menu",
-      "cell", "not-allowed", "col-resize", "row-resize", "no-drop",
-      "vertical-text", "all-scroll", "nesw-resize", "nwse-resize", "ns-resize",
-      "ew-resize", "none", "grab", "grabbing", "zoom-in", "zoom-out",
-      "-moz-grab", "-moz-grabbing", "-moz-zoom-in", "-moz-zoom-out",
-      "url(foo.png), move",
-      "url(foo.png) 5 7, move",
-      "url(foo.png) 12 3, url(bar.png), no-drop",
-      "url(foo.png), url(bar.png) 7 2, wait",
-      "url(foo.png) 3 2, url(bar.png) 7 9, pointer",
-      "url(foo.png) calc(1 + 2) calc(3), pointer" ],
+    other_values: [ "crosshair", "default", "pointer", "move", "e-resize", "ne-resize", "nw-resize", "n-resize", "se-resize", "sw-resize", "s-resize", "w-resize", "text", "wait", "help", "progress", "copy", "alias", "context-menu", "cell", "not-allowed", "col-resize", "row-resize", "no-drop", "vertical-text", "all-scroll", "nesw-resize", "nwse-resize", "ns-resize", "ew-resize", "none", "grab", "grabbing", "zoom-in", "zoom-out", "-moz-grab", "-moz-grabbing", "-moz-zoom-in", "-moz-zoom-out", "url(foo.png), move", "url(foo.png) 5 7, move", "url(foo.png) 12 3, url(bar.png), no-drop", "url(foo.png), url(bar.png) 7 2, wait", "url(foo.png) 3 2, url(bar.png) 7 9, pointer" ],
     invalid_values: [ "url(foo.png)", "url(foo.png) 5 5" ]
   },
   "direction": {
@@ -4221,10 +4208,8 @@ var gCSSProperties = {
     prerequisites: { "display": "block", "contain": "none" },
     subproperties: [ "overflow-x", "overflow-y" ],
     initial_values: [ "visible" ],
-    other_values: [ "auto", "scroll", "hidden", "-moz-hidden-unscrollable", "-moz-scrollbars-none",
-                    "auto auto", "auto scroll", "hidden scroll", "auto hidden",
-                    "-moz-hidden-unscrollable -moz-hidden-unscrollable" ],
-    invalid_values: [ "-moz-hidden-unscrollable -moz-scrollbars-none" ]
+    other_values: [ "auto", "scroll", "hidden", "-moz-hidden-unscrollable", "-moz-scrollbars-none" ],
+    invalid_values: []
   },
   "overflow-x": {
     domProp: "overflowX",
@@ -4756,7 +4741,6 @@ var gCSSProperties = {
       "calc(50px/(2 - 1))",
     ],
     invalid_values: [ "none", "-2px",
-      "content",  /* (valid for 'flex-basis' but not 'width') */
       /* invalid calc() values */
       "calc(50%+ 2px)",
       "calc(50% +2px)",
@@ -5199,9 +5183,8 @@ var gCSSProperties = {
     initial_values: [ "normal" ],
     other_values: [ "normal start", "baseline end", "end end",
                     "space-between flex-end", "last baseline start",
-                    "space-evenly", "flex-start", "end", "unsafe start", "safe center",
-                    "baseline", "last baseline" ],
-    invalid_values: [ "none", "center safe", "right / end" ]
+                    "space-evenly", "flex-start", "end" ],
+    invalid_values: [ "none", "center safe", "unsafe start", "right / end" ]
   },
   "place-items": {
     domProp: "placeItems",
@@ -5210,10 +5193,9 @@ var gCSSProperties = {
     subproperties: [ "align-items", "justify-items" ],
     initial_values: [ "normal" ],
     other_values: [ "normal center", "baseline end", "end auto",
-                    "end", "flex-end left", "last baseline start", "stretch",
-                    "safe center", "end legacy left" ],
+                    "end", "flex-end left", "last baseline start", "stretch" ],
     invalid_values: [ "space-between", "start space-evenly", "none", "end/end",
-                      "center safe", "auto start" ]
+                      "center safe", "auto start", "end legacy left" ]
   },
   "place-self": {
     domProp: "placeSelf",
@@ -5274,14 +5256,12 @@ var gCSSProperties = {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ " auto" ],
-        // NOTE: Besides "content", this is cribbed directly from the "width"
-        // chunk, since this property takes the exact same values as width
-        // (plus 'content' & with different semantics on 'auto').
+        // NOTE: This is cribbed directly from the "width" chunk, since this
+        // property takes the exact same values as width (albeit with
+        // different semantics on 'auto').
         // XXXdholbert (Maybe these should get separated out into
         // a reusable array defined at the top of this file?)
-    other_values: [
-      "content",
-      "15px", "3em", "15%", "-moz-max-content", "-moz-min-content", "-moz-fit-content", "-moz-available",
+    other_values: [ "15px", "3em", "15%", "-moz-max-content", "-moz-min-content", "-moz-fit-content", "-moz-available",
       // valid calc() values
       "calc(-2px)",
       "calc(2px)",

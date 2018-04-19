@@ -252,11 +252,29 @@ def depth(directory):
     return level
 
 
-def tree(directory, sort_key=lambda x: x.lower()):
-    """Display tree directory structure for `directory`."""
-    vertical_line = u'│'
-    item_marker = u'├'
-    last_child = u'└'
+# ASCII delimeters
+ascii_delimeters = {
+    'vertical_line': '|',
+    'item_marker': '+',
+    'last_child': '\\'
+}
+
+# unicode delimiters
+unicode_delimeters = {
+    'vertical_line': '│',
+    'item_marker': '├',
+    'last_child': '└'
+}
+
+
+def tree(directory,
+         item_marker=unicode_delimeters['item_marker'],
+         vertical_line=unicode_delimeters['vertical_line'],
+         last_child=unicode_delimeters['last_child'],
+         sort_key=lambda x: x.lower()):
+    """
+    display tree directory structure for `directory`
+    """
 
     retval = []
     indent = []

@@ -41,7 +41,7 @@ function awaitFileSave(name, ext) {
       destFile.append(fileName);
       MockFilePicker.setFiles([destFile]);
       MockFilePicker.showCallback = null;
-      mockTransferCallback = function(downloadSuccess) {
+      mockTransferCallback = function (downloadSuccess) {
         ok(downloadSuccess, "JSON should have been downloaded successfully");
         ok(destFile.exists(), "The downloaded file should exist.");
         resolve(destFile);
@@ -52,7 +52,7 @@ function awaitFileSave(name, ext) {
 
 function getFileContents(file) {
   return new Promise((resolve, reject) => {
-    NetUtil.asyncFetch(file, function(inputStream, status) {
+    NetUtil.asyncFetch(file, function (inputStream, status) {
       if (Components.isSuccessCode(status)) {
         info("Fetched downloaded contents.");
         resolve(NetUtil.readInputStreamToString(inputStream, inputStream.available()));
@@ -77,24 +77,24 @@ function createTemporarySaveDirectory() {
 let destDir = createTemporarySaveDirectory();
 mockTransferRegisterer.register();
 MockFilePicker.displayDirectory = destDir;
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   mockTransferRegisterer.unregister();
   MockFilePicker.cleanup();
   destDir.remove(true);
   ok(!destDir.exists(), "Destination dir should be removed");
 });
 
-add_task(async function() {
+add_task(function* () {
   info("Test 1 save JSON started");
 
   const JSON_FILE = "simple_json.json";
   const TEST_JSON_URL = URL_ROOT + JSON_FILE;
-  await addJsonViewTab(TEST_JSON_URL);
+  yield addJsonViewTab(TEST_JSON_URL);
 
   let promise, rawJSON, prettyJSON;
-  await fetch(new Request(TEST_JSON_URL))
+  yield fetch(new Request(TEST_JSON_URL))
     .then(response => response.text())
-    .then(function(data) {
+    .then(function (data) {
       info("Fetched JSON contents.");
       rawJSON = data;
       prettyJSON = JSON.stringify(JSON.parse(data), null, "  ");
@@ -102,9 +102,9 @@ add_task(async function() {
 
   // Attempt to save original JSON via "Save As" command
   promise = awaitFileSave(JSON_FILE, "json");
-  await new Promise((resolve) => {
+  yield new Promise((resolve) => {
     info("Register to handle popupshown.");
-    document.addEventListener("popupshown", function(event) {
+    document.addEventListener("popupshown", function (event) {
       info("Context menu opened.");
       let savePageCommand = document.getElementById("context-savepage");
       savePageCommand.doCommand();
@@ -116,53 +116,53 @@ add_task(async function() {
     rightClick("body");
     info("Right clicked.");
   });
-  await promise.then(getFileContents).then(function(data) {
+  yield promise.then(getFileContents).then(function (data) {
     is(data, rawJSON, "Original JSON contents should have been saved.");
   });
 
   // Attempt to save original JSON via "Save" button
   promise = awaitFileSave(JSON_FILE, "json");
-  await click(saveButton);
+  yield click(saveButton);
   info("Clicked Save button.");
-  await promise.then(getFileContents).then(function(data) {
+  yield promise.then(getFileContents).then(function (data) {
     is(data, rawJSON, "Original JSON contents should have been saved.");
   });
 
   // Attempt to save prettified JSON via "Save" button
-  await selectJsonViewContentTab("rawdata");
+  yield selectJsonViewContentTab("rawdata");
   info("Switched to Raw Data tab.");
-  await click(prettifyButton);
+  yield click(prettifyButton);
   info("Clicked Pretty Print button.");
   promise = awaitFileSave(JSON_FILE, "json");
-  await click(saveButton);
+  yield click(saveButton);
   info("Clicked Save button.");
-  await promise.then(getFileContents).then(function(data) {
+  yield promise.then(getFileContents).then(function (data) {
     is(data, prettyJSON, "Prettified JSON contents should have been saved.");
   });
 });
 
-add_task(async function() {
+add_task(function* () {
   info("Test 2 save JSON started");
 
   const TEST_JSON_URL = "data:application/json,2";
-  await addJsonViewTab(TEST_JSON_URL);
+  yield addJsonViewTab(TEST_JSON_URL);
 
   info("Checking that application/json adds .json extension by default.");
   let promise = awaitFileSave("index.json", "json");
-  await click(saveButton);
+  yield click(saveButton);
   info("Clicked Save button.");
-  await promise.then(getFileContents);
+  yield promise.then(getFileContents);
 });
 
-add_task(async function() {
+add_task(function* () {
   info("Test 3 save JSON started");
 
   const TEST_JSON_URL = "data:application/manifest+json,3";
-  await addJsonViewTab(TEST_JSON_URL);
+  yield addJsonViewTab(TEST_JSON_URL);
 
   info("Checking that application/manifest+json does not add .json extension.");
   let promise = awaitFileSave("index", null);
-  await click(saveButton);
+  yield click(saveButton);
   info("Clicked Save button.");
-  await promise.then(getFileContents);
+  yield promise.then(getFileContents);
 });

@@ -2,16 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// <currency-amount> is used in the <template>
-import "../components/currency-amount.js";
-import PaymentDetailsItem from "../components/payment-details-item.js";
-import PaymentStateSubscriberMixin from "../mixins/PaymentStateSubscriberMixin.js";
+/* global PaymentStateSubscriberMixin, PaymentRequest */
+
+"use strict";
 
 /**
  * <order-details></order-details>
  */
 
-export default class OrderDetails extends PaymentStateSubscriberMixin(HTMLElement) {
+class OrderDetails extends PaymentStateSubscriberMixin(HTMLElement) {
   connectedCallback() {
     if (!this._contents) {
       let template = document.getElementById("order-details-template");
@@ -47,7 +46,7 @@ export default class OrderDetails extends PaymentStateSubscriberMixin(HTMLElemen
   static _populateList(listEl, items) {
     let fragment = document.createDocumentFragment();
     for (let item of items) {
-      let row = new PaymentDetailsItem();
+      let row = document.createElement("payment-details-item");
       row.label = item.label;
       row.amountValue = item.amount.value;
       row.amountCurrency = item.amount.currency;

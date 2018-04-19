@@ -38,7 +38,7 @@ public:
     WebGLFramebuffer* const mFB;
     const GLenum mAttachmentPoint;
 
-private:
+protected:
     WebGLRefPtr<WebGLTexture> mTexturePtr;
     WebGLRefPtr<WebGLRenderbuffer> mRenderbufferPtr;
     TexImageTarget mTexImageTarget;
@@ -49,7 +49,6 @@ private:
 
     WebGLFBAttachPoint();
     WebGLFBAttachPoint(WebGLFramebuffer* fb, GLenum attachmentPoint);
-    explicit WebGLFBAttachPoint(WebGLFBAttachPoint&) = default; // Make this private.
 
 public:
     ~WebGLFBAttachPoint();
@@ -258,22 +257,6 @@ public:
     GETTER(ResolvedCompleteData)
 
 #undef GETTER
-
-    const auto& ColorAttachment0() const {
-        return mColorAttachments[0];
-    }
-
-    const auto& AnyDepthAttachment() const {
-        if (mDepthStencilAttachment.IsDefined())
-            return mDepthStencilAttachment;
-        return mDepthAttachment;
-    }
-
-    const auto& AnyStencilAttachment() const {
-        if (mDepthStencilAttachment.IsDefined())
-            return mDepthStencilAttachment;
-        return mStencilAttachment;
-    }
 
     ////////////////
     // Invalidation

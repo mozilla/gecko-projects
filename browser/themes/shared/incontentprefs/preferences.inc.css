@@ -9,6 +9,10 @@
   -moz-user-select: text;
 }
 
+:root {
+  --in-content-category-background: #fafafc;
+}
+
 .main-content {
   padding-top: 0;
 }
@@ -147,10 +151,6 @@ button > hbox > label {
   list-style-image: url("chrome://browser/skin/preferences/in-content/general.svg");
 }
 
-#category-home > .category-icon {
-  list-style-image: url("chrome://browser/skin/home.svg");
-}
-
 #category-search > .category-icon {
   list-style-image: url("chrome://browser/skin/preferences/in-content/search.svg");
 }
@@ -184,6 +184,20 @@ button > hbox > label {
   padding-top: 32px;
 }
 
+#browserHomePage {
+  margin-inline-start: 0;
+  margin-inline-end: 0;
+  margin-bottom: 4px;
+}
+
+.homepage-button:first-of-type {
+  margin-inline-start: 0;
+}
+
+.homepage-button:last-of-type {
+  margin-inline-end: 0;
+}
+
 .extension-controlled-icon {
   height: 20px;
   margin: 2px 0 6px;
@@ -215,6 +229,11 @@ button > hbox > label {
 
 #downloadFolder {
   margin-inline-start: 0;
+}
+
+#browserHomePage:-moz-locale-dir(rtl) input {
+  unicode-bidi: plaintext;
+  direction: rtl;
 }
 
 #updateApp > .groupbox-body > label {
@@ -292,25 +311,6 @@ button > hbox > label {
   margin-inline-end: 8px !important;
 }
 
-/* Home Pane */
-#homepageGroup menulist,
-#homepageGroup textbox {
-  margin: 5px 0;
-}
-#homepageAndNewWindowsOption {
-  margin-top: 20px;
-}
-#homepageGroup:-moz-locale-dir(rtl) input {
-  unicode-bidi: plaintext;
-  direction: rtl;
-}
-.homepage-button:first-of-type {
-  margin-inline-start: 0;
-}
-.homepage-button:last-of-type {
-  margin-inline-end: 0;
-}
-
 /* Search Pane */
 
 #engineList {
@@ -383,12 +383,6 @@ button > hbox > label {
 
 #historyPane {
   margin-top: 4px;
-}
-
-#historyButtons {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
 }
 
 #acceptCookies {
@@ -611,6 +605,10 @@ button > hbox > label {
 
 #fxaDisplayName {
   margin-inline-end: 10px !important;
+}
+
+.fxaEmailAddress {
+  margin-inline-end: 8px !important;
 }
 
 .fxaLoginRejectedWarning {
@@ -840,7 +838,7 @@ button > hbox > label {
 }
 
 .visually-hidden {
-  visibility: collapse;
+  visibility: hidden;
 }
 
 menulist {
@@ -897,10 +895,4 @@ menulist[indicator=true] > menupopup menuitem[indicator=true]:not([image]) > .me
 
 .no-results-message[query*=🔥🦊] > .no-results-container {
   visibility: hidden;
-}
-
-/* Proxy port input */
-
-.proxy-port-input {
-  width: calc(5ch + 22px); /* 5 chars + 11px padding on both sides */
 }

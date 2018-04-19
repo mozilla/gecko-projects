@@ -9,9 +9,9 @@
 // displayed (which should be true as long as these animations apply to
 // different nodes).
 
-add_task(async function() {
-  await addTab(URL_ROOT + "doc_negative_animation.html");
-  const {controller, panel} = await openAnimationInspector();
+add_task(function* () {
+  yield addTab(URL_ROOT + "doc_negative_animation.html");
+  const {controller, panel} = yield openAnimationInspector();
   const timeline = panel.animationsTimelineComponent;
 
   const areTracksReady = () => timeline.animations.every(a => {
@@ -21,11 +21,11 @@ add_task(async function() {
   // We need to wait for all tracks to be ready, cause this is an async part of the init
   // of the panel.
   while (controller.animationPlayers.length < 3 || !areTracksReady()) {
-    await waitForAnimationTimelineRendering(panel);
+    yield waitForAnimationTimelineRendering(panel);
   }
 
   // Same for animation targets, they're retrieved asynchronously.
-  await waitForAllAnimationTargets(panel);
+  yield waitForAllAnimationTargets(panel);
 
   is(panel.animationsTimelineComponent.animations.length, 3,
      "The timeline shows 3 animations too");

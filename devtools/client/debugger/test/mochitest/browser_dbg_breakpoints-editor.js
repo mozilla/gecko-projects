@@ -67,10 +67,11 @@ function test() {
     let breakpointsRemoved = 0;
     let editorBreakpointChanges = 0;
 
-    function onEditorBreakpointAddFirst(aLine) {
+    function onEditorBreakpointAddFirst(aEvent, aLine) {
       editorBreakpointChanges++;
 
-      info("breakpoint1 added to the editor.");
+      ok(aEvent,
+         "breakpoint1 added to the editor.");
       is(aLine, 5,
          "Editor breakpoint line is correct.");
 
@@ -78,10 +79,11 @@ function test() {
          "editor.getBreakpoints().length is correct.");
     }
 
-    function onEditorBreakpointRemoveFirst(aLine) {
+    function onEditorBreakpointRemoveFirst(aEvent, aLine) {
       editorBreakpointChanges++;
 
-      info("breakpoint1 removed from the editor.");
+      ok(aEvent,
+         "breakpoint1 removed from the editor.");
       is(aLine, 5,
          "Editor breakpoint line is correct.");
 
@@ -157,10 +159,11 @@ function test() {
       gEditor.off("breakpointAdded", onEditorBreakpointAddBackgroundTrap);
     }
 
-    function onEditorBreakpointAddSwitch(aLine) {
+    function onEditorBreakpointAddSwitch(aEvent, aLine) {
       editorBreakpointChanges++;
 
-      info("breakpoint2 added to the editor.");
+      ok(aEvent,
+        "breakpoint2 added to the editor.");
       is(aLine, 4,
         "Editor breakpoint line is correct.");
 
@@ -204,10 +207,11 @@ function test() {
       utils.sendMouseEventToWindow("mouseup", left, top, 0, 1, 0, false, 0, 0);
     }
 
-    function onEditorBreakpointRemoveSecond(aLine) {
+    function onEditorBreakpointRemoveSecond(aEvent, aLine) {
       editorBreakpointChanges++;
 
-      info("breakpoint2 removed from the editor.");
+      ok(aEvent,
+        "breakpoint2 removed from the editor.");
       is(aLine, 4,
         "Editor breakpoint line is correct.");
 

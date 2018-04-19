@@ -140,8 +140,8 @@ protected:
   nsPluginFrame* mFrame;
 };
 
-nsPluginFrame::nsPluginFrame(ComputedStyle* aStyle)
-  : nsFrame(aStyle, kClassID)
+nsPluginFrame::nsPluginFrame(nsStyleContext* aContext)
+  : nsFrame(aContext, kClassID)
   , mInstanceOwner(nullptr)
   , mOuterView(nullptr)
   , mInnerView(nullptr)
@@ -221,7 +221,7 @@ nsPluginFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestro
 }
 
 /* virtual */ void
-nsPluginFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
+nsPluginFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
 {
   if (HasView()) {
     nsView* view = GetView();
@@ -233,7 +233,7 @@ nsPluginFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
     }
   }
 
-  nsFrame::DidSetComputedStyle(aOldComputedStyle);
+  nsFrame::DidSetStyleContext(aOldStyleContext);
 }
 
 #ifdef DEBUG_FRAME_DUMP
@@ -1442,12 +1442,8 @@ nsPluginFrame::CreateWebRenderCommands(nsDisplayItem* aItem,
   }
   lm->AddDidCompositeObserver(mDidCompositeObserver.get());
 
-  // If the image container is empty, we don't want to fallback. Any other
-  // failure will be due to resource constraints and fallback is unlikely to
-  // help us. Hence we can ignore the return value from PushImage.
   LayoutDeviceRect dest(r.x, r.y, size.width, size.height);
-  aManager->CommandBuilder().PushImage(aItem, container, aBuilder, aResources, aSc, dest);
-  return true;
+  return aManager->CommandBuilder().PushImage(aItem, container, aBuilder, aResources, aSc, dest);
 }
 
 
@@ -1817,9 +1813,9 @@ nsPluginFrame::EndSwapDocShells(nsISupports* aSupports, void*)
 }
 
 nsIFrame*
-NS_NewObjectFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
+NS_NewObjectFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
-  return new (aPresShell) nsPluginFrame(aStyle);
+  return new (aPresShell) nsPluginFrame(aContext);
 }
 
 bool

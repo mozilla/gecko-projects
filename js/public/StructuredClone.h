@@ -295,14 +295,6 @@ typedef bool (*TransferStructuredCloneOp)(JSContext* cx,
 typedef void (*FreeTransferStructuredCloneOp)(uint32_t tag, JS::TransferableOwnership ownership,
                                               void* content, uint64_t extraData, void* closure);
 
-/**
- * Called when the transferring objects are checked. If this function returns false, the
- * serialization ends throwing a DataCloneError exception.
- */
-typedef bool (*CanTransferStructuredCloneOp)(JSContext* cx,
-                                             JS::Handle<JSObject*> obj,
-                                             void* closure);
-
 struct JSStructuredCloneCallbacks {
     ReadStructuredCloneOp read;
     WriteStructuredCloneOp write;
@@ -310,7 +302,6 @@ struct JSStructuredCloneCallbacks {
     ReadTransferStructuredCloneOp readTransfer;
     TransferStructuredCloneOp writeTransfer;
     FreeTransferStructuredCloneOp freeTransfer;
-    CanTransferStructuredCloneOp canTransfer;
 };
 
 enum OwnTransferablePolicy {

@@ -20,8 +20,12 @@ function SpecialPowers(window) {
   this._crashDumpDir = null;
   this.DOMWindowUtils = bindDOMWindowUtils(window);
   Object.defineProperty(this, "Components", {
-      configurable: true, enumerable: true, value: this.getFullComponents()
-  });
+      configurable: true, enumerable: true, get() {
+          var win = this.window.get();
+          if (!win)
+              return null;
+          return getRawComponents(win);
+      }});
   this._pongHandlers = [];
   this._messageListener = this._messageReceived.bind(this);
   this._grandChildFrameMM = null;
@@ -193,6 +197,7 @@ SpecialPowers.prototype.nestedFrameSetup = function() {
   Services.obs.addObserver(function onRemoteBrowserShown(subject, topic, data) {
     let frameLoader = subject;
     // get a ref to the app <iframe>
+    frameLoader.QueryInterface(Ci.nsIFrameLoader);
     let frame = frameLoader.ownerElement;
     let frameId = frame.getAttribute("id");
     if (frameId === "nested-parent-frame") {

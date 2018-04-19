@@ -5,7 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/ArrayUtils.h"
-#include "mozilla/ComputedStyle.h"
 
 #include "nsCOMPtr.h"
 #include "nsNetUtil.h"
@@ -42,6 +41,7 @@
 #include "nsIPresShell.h"
 #include "nsIDocumentObserver.h"
 #include "nsFrameManager.h"
+#include "nsStyleContext.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIScriptError.h"
 #include "nsXBLSerialize.h"
@@ -54,7 +54,7 @@
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ServoStyleSet.h"
-#include "mozilla/RestyleManager.h"
+#include "mozilla/ServoRestyleManager.h"
 #include "mozilla/dom/ChildIterator.h"
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/Element.h"
@@ -389,7 +389,7 @@ nsXBLService::IsChromeOrResourceURI(nsIURI* aURI)
 static void
 EnsureSubtreeStyled(Element* aElement)
 {
-  if (!aElement->HasServoData()) {
+  if (!aElement->IsStyledByServo() || !aElement->HasServoData()) {
     return;
   }
 
@@ -402,7 +402,7 @@ EnsureSubtreeStyled(Element* aElement)
     return;
   }
 
-  ServoStyleSet* servoSet = presShell->StyleSet();
+  ServoStyleSet* servoSet = presShell->StyleSet()->AsServo();
   StyleChildrenIterator iter(aElement);
   for (nsIContent* child = iter.GetNextChild();
        child;
@@ -450,8 +450,8 @@ public:
   {
     MOZ_ASSERT(mResolveStyle);
     if (mHadData) {
-      RestyleManager::ClearServoDataFromSubtree(
-        mElement, RestyleManager::IncludeRoot::No);
+      ServoRestyleManager::ClearServoDataFromSubtree(
+        mElement, ServoRestyleManager::IncludeRoot::No);
     }
   }
 
@@ -465,7 +465,7 @@ public:
     if (*mResolveStyle) {
       mElement->ClearServoData();
 
-      ServoStyleSet* servoSet = presShell->StyleSet();
+      ServoStyleSet* servoSet = presShell->StyleSet()->AsServo();
       servoSet->StyleNewSubtree(mElement);
     }
   }
@@ -969,9 +969,16 @@ nsXBLService::LoadBindingDocumentInfo(nsIContent* aBoundElement,
   bool useXULCache = cache && cache->IsEnabled();
 
   if (!info && useXULCache) {
+    // Assume Gecko style backend for the XBL document without a bound
+    // document. The only case is loading platformHTMLBindings.xml which
+    // doesn't have any style sheets or style attributes.
+    StyleBackendType styleBackend
+      = aBoundDocument ? aBoundDocument->GetStyleBackendType()
+                       : StyleBackendType::Gecko;
+
     // This cache crosses the entire product, so that any XBL bindings that are
     // part of chrome will be reused across all XUL documents.
-    info = cache->GetXBLDocumentInfo(documentURI);
+    info = cache->GetXBLDocumentInfo(documentURI, styleBackend);
   }
 
   bool useStartupCache = useXULCache && IsChromeOrResourceURI(documentURI);
@@ -1034,6 +1041,12 @@ nsXBLService::LoadBindingDocumentInfo(nsIContent* aBoundElement,
     // document that has loaded some bindings.
     bindingManager->PutXBLDocumentInfo(info);
   }
+
+  MOZ_ASSERT(!aBoundDocument || !info ||
+             aBoundDocument->GetStyleBackendType() ==
+               info->GetDocument()->GetStyleBackendType(),
+             "Style backend type mismatched between the bound document and "
+             "the XBL document loaded.");
 
   info.forget(aResult);
 

@@ -46,3 +46,11 @@ add_task(async () => {
 
   return teardown(monitor);
 });
+
+async function performRequests(monitor, tab, count) {
+  let wait = waitForNetworkEvents(monitor, count);
+  await ContentTask.spawn(tab.linkedBrowser, count, requestCount => {
+    content.wrappedJSObject.performRequests(requestCount);
+  });
+  await wait;
+}

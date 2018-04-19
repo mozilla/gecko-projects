@@ -14,7 +14,7 @@
 
 #include "nsIDocShell.h"
 #include "nsStringFwd.h"
-#include "nsIFrameLoaderOwner.h"
+#include "nsIFrameLoader.h"
 #include "nsPoint.h"
 #include "nsSize.h"
 #include "nsWrapperCache.h"
@@ -22,36 +22,29 @@
 #include "nsFrameMessageManager.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/Element.h"
-#include "mozilla/dom/ParentSHistory.h"
 #include "mozilla/Attributes.h"
 #include "nsStubMutationObserver.h"
 #include "Units.h"
+#include "nsIWebBrowserPersistable.h"
 #include "nsIFrame.h"
 #include "nsPluginTags.h"
 
 class nsIURI;
 class nsSubDocumentFrame;
 class nsView;
-class nsInProcessTabChildGlobal;
+class nsIInProcessContentFrameMessageManager;
 class AutoResetInShow;
 class AutoResetInFrameSwap;
 class nsITabParent;
 class nsIDocShellTreeItem;
 class nsIDocShellTreeOwner;
-class nsILoadContext;
-class nsIMessageSender;
-class nsIPrintSettings;
-class nsIWebBrowserPersistDocumentReceiver;
-class nsIWebProgressListener;
 
 namespace mozilla {
 
 class OriginAttributes;
 
 namespace dom {
-class ChromeMessageSender;
 class ContentParent;
-class MessageSender;
 class PBrowserParent;
 class Promise;
 class TabParent;
@@ -72,12 +65,9 @@ class RenderFrameParent;
 typedef struct _GtkWidget GtkWidget;
 #endif
 
-// IID for nsFrameLoader, because some places want to QI to it.
-#define NS_FRAMELOADER_IID                                      \
-  { 0x297fd0ea, 0x1b4a, 0x4c9a,                                 \
-      { 0xa4, 0x04, 0xe5, 0x8b, 0xe8, 0x95, 0x10, 0x50 } }
-
-class nsFrameLoader final : public nsStubMutationObserver,
+class nsFrameLoader final : public nsIFrameLoader,
+                            public nsIWebBrowserPersistable,
+                            public nsStubMutationObserver,
                             public mozilla::dom::ipc::MessageManagerCallback,
                             public nsWrapperCache
 {
@@ -93,12 +83,11 @@ public:
                                bool aNetworkCreated,
                                int32_t aJSPluginID = nsFakePluginTag::NOT_JSPLUGIN);
 
-  NS_DECLARE_STATIC_IID_ACCESSOR(NS_FRAMELOADER_IID)
-
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsFrameLoader)
-
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(nsFrameLoader, nsIFrameLoader)
+  NS_DECL_NSIFRAMELOADER
   NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTECHANGED
+  NS_DECL_NSIWEBBROWSERPERSISTABLE
   nsresult CheckForRecursiveLoad(nsIURI* aURI);
   nsresult ReallyStartLoading();
   void StartDestroy();
@@ -106,36 +95,35 @@ public:
   void DestroyComplete();
   nsIDocShell* GetExistingDocShell() { return mDocShell; }
   mozilla::dom::EventTarget* GetTabChildGlobalAsEventTarget();
-  nsresult CreateStaticClone(nsFrameLoader* aDest);
-  nsresult UpdatePositionAndSize(nsSubDocumentFrame *aIFrame);
+  nsresult CreateStaticClone(nsIFrameLoader* aDest);
+
 
   // WebIDL methods
 
-  nsIDocShell* GetDocShell(mozilla::ErrorResult& aRv);
+  already_AddRefed<nsIDocShell> GetDocShell(mozilla::ErrorResult& aRv);
 
   already_AddRefed<nsITabParent> GetTabParent();
 
   already_AddRefed<nsILoadContext> LoadContext();
 
-  /**
-   * Start loading the frame. This method figures out what to load
-   * from the owner content in the frame loader.
-   */
-  void LoadFrame(bool aOriginalSrc);
+  void LoadFrame(bool aOriginalSrc, mozilla::ErrorResult& aRv);
+
+  void LoadURI(nsIURI* aURI, bool aOriginalSrc, mozilla::ErrorResult& aRv);
 
   /**
-   * Loads the specified URI in this frame. Behaves identically to loadFrame,
-   * except that this method allows specifying the URI to load.
+   * Triggers a load of the given URI.
+   *
+   * @param aURI The URI to load.
+   * @param aTriggeringPrincipal The triggering principal for the load. May be
+   *        null, in which case the node principal of the owner content will be
+   *        used.
    */
-  nsresult LoadURI(nsIURI* aURI, bool aOriginalSrc);
+  nsresult LoadURI(nsIURI* aURI, nsIPrincipal* aTriggeringPrincipal,
+                   bool aOriginalSrc);
 
   void AddProcessChangeBlockingPromise(mozilla::dom::Promise& aPromise, mozilla::ErrorResult& aRv);
 
-  /**
-   * Destroy the frame loader and everything inside it. This will
-   * clear the weak owner content reference.
-   */
-  void Destroy();
+  void Destroy(mozilla::ErrorResult& aRv);
 
   void ActivateRemoteFrame(mozilla::ErrorResult& aRv);
 
@@ -154,7 +142,7 @@ public:
                           bool aCapture,
                           mozilla::ErrorResult& aRv);
 
-  void RequestNotifyAfterRemotePaint();
+  void RequestNotifyAfterRemotePaint(mozilla::ErrorResult& aRv);
 
   void RequestFrameLoaderClose(mozilla::ErrorResult& aRv);
 
@@ -171,7 +159,9 @@ public:
 
   // WebIDL getters
 
-  already_AddRefed<mozilla::dom::MessageSender> GetMessageManager();
+  already_AddRefed<nsIMessageSender> GetMessageManager();
+
+  uint32_t EventMode() const { return mEventMode; }
 
   already_AddRefed<Element> GetOwnerElement();
 
@@ -182,10 +172,8 @@ public:
   uint64_t ChildID() const { return mChildID; }
 
   bool ClampScrollPosition() const { return mClampScrollPosition; }
-  void SetClampScrollPosition(bool aClamp);
 
   bool ClipSubdocument() const { return mClipSubdocument; }
-  void SetClipSubdocument(bool aClip);
 
   bool DepthTooGreat() const { return mDepthTooGreat; }
 
@@ -233,6 +221,8 @@ public:
    */
   void Hide();
 
+  nsresult CloneForStatic(nsIFrameLoader* aOriginal);
+
   // The guts of an nsIFrameLoaderOwner::SwapFrameLoader implementation.  A
   // frame loader owner needs to call this, and pass in the two references to
   // nsRefPtrs for frame loaders that need to be swapped.
@@ -278,14 +268,12 @@ public:
    */
   RenderFrameParent* GetCurrentRenderFrame() const;
 
-  mozilla::dom::ChromeMessageSender* GetFrameMessageManager() { return mMessageManager; }
+  nsFrameMessageManager* GetFrameMessageManager() { return mMessageManager; }
 
   mozilla::dom::Element* GetOwnerContent() { return mOwnerContent; }
   bool ShouldClipSubdocument() { return mClipSubdocument; }
 
   bool ShouldClampScrollPosition() { return mClampScrollPosition; }
-
-  mozilla::dom::ParentSHistory* GetParentSHistory() { return mParentSHistory; }
 
   /**
    * Tell this FrameLoader to use a particular remote browser.
@@ -328,11 +316,11 @@ public:
   // Properly retrieves documentSize of any subdocument type.
   nsresult GetWindowDimensions(nsIntRect& aRect);
 
-  virtual mozilla::dom::ChromeMessageSender* GetProcessMessageManager() const override;
+  virtual nsIMessageSender* GetProcessMessageManager() const override;
 
   // public because a callback needs these.
-  RefPtr<mozilla::dom::ChromeMessageSender> mMessageManager;
-  RefPtr<nsInProcessTabChildGlobal> mChildMessageManager;
+  RefPtr<nsFrameMessageManager> mMessageManager;
+  nsCOMPtr<nsIInProcessContentFrameMessageManager> mChildMessageManager;
 
   virtual JSObject* WrapObject(JSContext* cx, JS::Handle<JSObject*> aGivenProto) override;
 
@@ -436,17 +424,6 @@ private:
   // resolved which were added during the BrowserWillChangeProcess event.
   already_AddRefed<mozilla::dom::Promise> FireWillChangeProcessEvent();
 
-  /**
-   * Triggers a load of the given URI.
-   *
-   * @param aURI The URI to load.
-   * @param aTriggeringPrincipal The triggering principal for the load. May be
-   *        null, in which case the node principal of the owner content will be
-   *        used.
-   */
-  nsresult LoadURI(nsIURI* aURI, nsIPrincipal* aTriggeringPrincipal,
-                   bool aOriginalSrc);
-
   nsCOMPtr<nsIDocShell> mDocShell;
   nsCOMPtr<nsIURI> mURIToLoad;
   nsCOMPtr<nsIPrincipal> mTriggeringPrincipal;
@@ -475,14 +452,16 @@ private:
 
   int32_t mJSPluginID;
 
+  // See nsIFrameLoader.idl. EVENT_MODE_NORMAL_DISPATCH automatically
+  // forwards some input events to out-of-process content.
+  uint32_t mEventMode;
+
   // Holds the last known size of the frame.
   mozilla::ScreenIntSize mLazySize;
 
   // A stack-maintained reference to an array of promises which are blocking
   // grouped history navigation
   nsTArray<RefPtr<mozilla::dom::Promise>>* mBrowserChangingProcessBlockers;
-
-  RefPtr<mozilla::dom::ParentSHistory> mParentSHistory;
 
   bool mDepthTooGreat : 1;
   bool mIsTopLevelContent : 1;
@@ -508,13 +487,5 @@ private:
 
   bool mFreshProcess : 1;
 };
-
-NS_DEFINE_STATIC_IID_ACCESSOR(nsFrameLoader, NS_FRAMELOADER_IID)
-
-inline nsISupports*
-ToSupports(nsFrameLoader* aFrameLoader)
-{
-  return aFrameLoader;
-}
 
 #endif

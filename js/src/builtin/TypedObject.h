@@ -93,8 +93,6 @@
 
 namespace js {
 
-class GlobalObject;
-
 /*
  * Helper method for converting a double into other scalar
  * types in the same way that JavaScript would. In particular,
@@ -1023,7 +1021,7 @@ TypedObject::opaque() const
 }
 
 JSObject*
-InitTypedObjectModuleObject(JSContext* cx, JS::Handle<GlobalObject*> global);
+InitTypedObjectModuleObject(JSContext* cx, JS::HandleObject obj);
 
 } // namespace js
 

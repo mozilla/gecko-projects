@@ -50,12 +50,10 @@ static void syntaxError(const UnicodeString& pattern,
     parseError.preContext[stop-start] = 0;
 
     //for post-context
-    start = pattern.moveIndex32(pos, 1);
-    stop = pos + U_PARSE_CONTEXT_LEN - 1;
-    if (stop > pattern.length()) {
-        stop = pattern.length();
-    }
-    pattern.extract(start, stop - start, parseError.postContext, 0);
+    start = pos+1;
+    stop  = ((pos+U_PARSE_CONTEXT_LEN)<=pattern.length()) ? (pos+(U_PARSE_CONTEXT_LEN-1)) :
+        pattern.length();
+    pattern.extract(start,stop-start,parseError.postContext,0);
     //null terminate the buffer
     parseError.postContext[stop-start]= 0;
 }

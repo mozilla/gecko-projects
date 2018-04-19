@@ -221,11 +221,6 @@ bool nsWindow::OnPaint(HDC aDC, uint32_t aNestingLevel)
     return true;
   }
 
-  // Avoid starting the GPU process for the initial navigator:blank window.
-  if (mIsEarlyBlankWindow) {
-    return true;
-  }
-
   if (GetLayerManager()->AsKnowsCompositor() && !mBounds.IsEqualEdges(mLastPaintBounds)) {
     // Do an early async composite so that we at least have something on the
     // screen in the right place, even if the content is out of date.

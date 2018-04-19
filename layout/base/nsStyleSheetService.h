@@ -45,17 +45,17 @@ public:
 
   nsresult Init();
 
-  SheetArray* AgentStyleSheets()
+  SheetArray* AgentStyleSheets(mozilla::StyleBackendType aType)
   {
-    return &mSheets[AGENT_SHEET];
+    return &Sheets(aType)[AGENT_SHEET];
   }
-  SheetArray* UserStyleSheets()
+  SheetArray* UserStyleSheets(mozilla::StyleBackendType aType)
   {
-    return &mSheets[USER_SHEET];
+    return &Sheets(aType)[USER_SHEET];
   }
-  SheetArray* AuthorStyleSheets()
+  SheetArray* AuthorStyleSheets(mozilla::StyleBackendType aType)
   {
-    return &mSheets[AUTHOR_SHEET];
+    return &Sheets(aType)[AUTHOR_SHEET];
   }
 
   void RegisterPresShell(nsIPresShell* aPresShell);
@@ -74,14 +74,31 @@ private:
                                           nsISimpleEnumerator *aEnumerator,
                                           uint32_t             aSheetType);
 
-  int32_t FindSheetByURI(uint32_t aSheetType, nsIURI* aSheetURI);
+  int32_t FindSheetByURI(mozilla::StyleBackendType aBackendType,
+                         uint32_t aSheetType,
+                         nsIURI* aSheetURI);
 
   // Like LoadAndRegisterSheet, but doesn't notify.  If successful, the
   // new sheet will be the last sheet in mSheets[aSheetType].
   nsresult LoadAndRegisterSheetInternal(nsIURI *aSheetURI,
                                         uint32_t aSheetType);
 
-  mozilla::Array<SheetArray, 3> mSheets;
+  mozilla::Array<SheetArray, 3>& Sheets(mozilla::StyleBackendType aType)
+  {
+#ifdef MOZ_OLD_STYLE
+    if (aType == mozilla::StyleBackendType::Gecko) {
+      return mGeckoSheets;
+    }
+#else
+    MOZ_ASSERT(aType == mozilla::StyleBackendType::Servo);
+#endif
+    return mServoSheets;
+  }
+
+#ifdef MOZ_OLD_STYLE
+  mozilla::Array<SheetArray, 3> mGeckoSheets;
+#endif
+  mozilla::Array<SheetArray, 3> mServoSheets;
 
   // Registered PresShells that will be notified when sheets are added and
   // removed from the style sheet service.

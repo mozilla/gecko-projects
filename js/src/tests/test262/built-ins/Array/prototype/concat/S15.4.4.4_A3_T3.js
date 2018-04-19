@@ -63,4 +63,5 @@ if (b.hasOwnProperty('2') !== true) {
   $ERROR("expected b.hasOwnProperty('2') === true, actually " + b.hasOwnProperty('2'));
 }
 
+
 reportCompare(0, 0);

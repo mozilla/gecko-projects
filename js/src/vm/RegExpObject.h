@@ -211,7 +211,7 @@ RegExpToShared(JSContext* cx, HandleObject obj)
 }
 
 template<XDRMode mode>
-XDRResult
+bool
 XDRScriptRegExpObject(XDRState<mode>* xdr, MutableHandle<RegExpObject*> objp);
 
 extern JSObject*

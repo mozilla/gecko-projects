@@ -52,17 +52,7 @@ cron_yml_schema = Schema({
         # for the same job.
         'when': optionally_keyed_by(
             'project',
-            [
-                {
-                    'hour': int,
-                    'minute': All(int, even_15_minutes),
-                    # You probably don't want both day and weekday.
-                    'day': int,  # Day of the month, as used by datetime.
-                    'weekday': Any('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday',
-                                   'Saturday', 'Sunday')
-                }
-            ]
-        ),
+            [{'hour': int, 'minute': All(int, even_15_minutes)}]),
     }],
 })
 

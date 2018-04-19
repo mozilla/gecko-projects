@@ -31,7 +31,7 @@ SpecialPowers.pushPrefEnv({'set':[
     is(result.processType, SpecialPowers.Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT,
        "The frame script is running in a real distinct child process");
     ok(result.hasCorrectInterface,
-       "docshell.chromeEventHandler has EventTarget interface");
+       "docshell.chromeEventHandler has nsIDOMEventTarget interface");
   });
 
 
@@ -52,8 +52,7 @@ SpecialPowers.pushPrefEnv({'set':[
     var chromeEventHandler = docShell.chromeEventHandler;
     sendAsyncMessage("chromeEventHandler", {
       processType: Services.appinfo.processType,
-      hasCorrectInterface: chromeEventHandler &&
-                           EventTarget.isInstance(chromeEventHandler),
+      hasCorrectInterface: chromeEventHandler instanceof Ci.nsIDOMEventTarget
     });
 
     /*

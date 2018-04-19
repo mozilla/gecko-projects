@@ -18,7 +18,6 @@ DevToolsModules(
     'NotificationBox.css',
     'NotificationBox.js',
     'SearchBox.js',
-    'Sidebar.js',
     'SidebarToggle.css',
     'SidebarToggle.js',
     'StackTrace.js',

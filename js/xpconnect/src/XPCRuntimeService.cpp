@@ -8,6 +8,7 @@
 
 #include "nsContentUtils.h"
 #include "BackstagePass.h"
+#include "nsDOMClassInfo.h"
 #include "nsIPrincipal.h"
 #include "mozilla/dom/BindingUtils.h"
 

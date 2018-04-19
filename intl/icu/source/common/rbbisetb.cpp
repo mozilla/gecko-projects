@@ -91,7 +91,7 @@ RBBISetBuilder::~RBBISetBuilder()
 //                  from the Unicode Sets.
 //
 //------------------------------------------------------------------------
-void RBBISetBuilder::buildRanges() {
+void RBBISetBuilder::build() {
     RBBINode        *usetNode;
     RangeDescriptor *rlRange;
 
@@ -245,16 +245,11 @@ void RBBISetBuilder::buildRanges() {
 
     if (fRB->fDebugEnv && uprv_strstr(fRB->fDebugEnv, "rgroup")) {printRangeGroups();}
     if (fRB->fDebugEnv && uprv_strstr(fRB->fDebugEnv, "esets")) {printSets();}
-}
 
-
-//
-// Build the Trie table for mapping UChar32 values to the corresponding
-// range group number.
-//
-void RBBISetBuilder::buildTrie() {
-    RangeDescriptor *rlRange;
-
+    //
+    // Build the Trie table for mapping UChar32 values to the corresponding
+    //   range group number
+    //
     fTrie = utrie2_open(0,       //  Initial value for all code points.
                         0,       //  Error value for out-of-range input.
                         fStatus);
@@ -267,22 +262,6 @@ void RBBISetBuilder::buildTrie() {
                           TRUE,                    // Overwrite previously written values
                           fStatus);
     }
-}
-
-
-void RBBISetBuilder::mergeCategories(int32_t left, int32_t right) {
-    U_ASSERT(left >= 1);
-    U_ASSERT(right > left);
-    for (RangeDescriptor *rd = fRangeList; rd != nullptr; rd = rd->fNext) {
-        int32_t rangeNum = rd->fNum & ~DICT_BIT;
-        int32_t rangeDict = rd->fNum & DICT_BIT;
-        if (rangeNum == right) {
-            rd->fNum = left | rangeDict;
-        } else if (rangeNum > right) {
-            rd->fNum--;
-        }
-    }
-    --fGroupCount;
 }
 
 
@@ -467,7 +446,7 @@ void RBBISetBuilder::printRangeGroups() {
             lastPrintedGroupNum = groupNum;
             RBBIDebugPrintf("%2i  ", groupNum);
 
-            if (rlRange->fNum & DICT_BIT) { RBBIDebugPrintf(" <DICT> ");}
+            if (rlRange->fNum & 0x4000) { RBBIDebugPrintf(" <DICT> ");}
 
             for (i=0; i<rlRange->fIncludesSets->size(); i++) {
                 RBBINode       *usetNode    = (RBBINode *)rlRange->fIncludesSets->elementAt(i);
@@ -660,19 +639,19 @@ void RangeDescriptor::split(UChar32 where, UErrorCode &status) {
 void RangeDescriptor::setDictionaryFlag() {
     int i;
 
-    static const char16_t *dictionary = u"dictionary";
-    for (i=0; i<fIncludesSets->size(); i++) {
-        RBBINode *usetNode  = (RBBINode *)fIncludesSets->elementAt(i);
-        RBBINode *setRef = usetNode->fParent;
-        if (setRef != nullptr) {
+    for (i=0; i<this->fIncludesSets->size(); i++) {
+        RBBINode       *usetNode    = (RBBINode *)fIncludesSets->elementAt(i);
+        UnicodeString   setName;
+        RBBINode       *setRef = usetNode->fParent;
+        if (setRef != NULL) {
             RBBINode *varRef = setRef->fParent;
-            if (varRef && varRef->fType == RBBINode::varRef) {
-                const UnicodeString *setName = &varRef->fText;
-                if (setName->compare(dictionary, -1) == 0) {
-                    fNum |= RBBISetBuilder::DICT_BIT;
-                    break;
-                }
+            if (varRef != NULL  &&  varRef->fType == RBBINode::varRef) {
+                setName = varRef->fText;
             }
+        }
+        if (setName.compare(UNICODE_STRING("dictionary", 10)) == 0) {   // TODO:  no string literals.
+            this->fNum |= 0x4000;
+            break;
         }
     }
 }

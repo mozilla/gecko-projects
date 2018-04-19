@@ -33,9 +33,9 @@ using namespace mozilla::dom;
 using namespace mozilla::gfx;
 
 nsIFrame*
-NS_NewHTMLVideoFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
+NS_NewHTMLVideoFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
-  return new (aPresShell) nsVideoFrame(aStyle);
+  return new (aPresShell) nsVideoFrame(aContext);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsVideoFrame)
@@ -73,8 +73,8 @@ SwapScaleWidthHeightForRotation(IntSize& aSize, VideoInfo::Rotation aDegrees)
   }
 }
 
-nsVideoFrame::nsVideoFrame(ComputedStyle* aStyle)
-  : nsContainerFrame(aStyle, kClassID)
+nsVideoFrame::nsVideoFrame(nsStyleContext* aContext)
+  : nsContainerFrame(aContext, kClassID)
 {
   EnableVisibilityTracking();
 }
@@ -348,6 +348,20 @@ nsVideoFrame::Reflow(nsPresContext* aPresContext,
                         kidDesiredSize, &kidReflowInput,
                         posterRenderRect.x, posterRenderRect.y, 0);
 
+// Android still uses XUL media controls & hence needs this XUL-friendly
+// custom reflow code. This will go away in bug 1310907.
+#ifdef ANDROID
+    } else if (child->GetContent() == mVideoControls) {
+      // Reflow the video controls frame.
+      nsBoxLayoutState boxState(PresContext(), aReflowInput.mRenderingContext);
+      nsBoxFrame::LayoutChildAt(boxState,
+                                child,
+                                nsRect(borderPadding.left,
+                                       borderPadding.top,
+                                       aReflowInput.ComputedWidth(),
+                                       aReflowInput.ComputedHeight()));
+
+#endif // ANDROID
     } else if (child->GetContent() == mCaptionDiv ||
                child->GetContent() == mVideoControls) {
       // Reflow the caption and control bar frames.
@@ -480,12 +494,8 @@ public:
     SwapScaleWidthHeightForRotation(scaleHint, rotationDeg);
     container->SetScaleHint(scaleHint);
 
-    // If the image container is empty, we don't want to fallback. Any other
-    // failure will be due to resource constraints and fallback is unlikely to
-    // help us. Hence we can ignore the return value from PushImage.
     LayoutDeviceRect rect(destGFXRect.x, destGFXRect.y, destGFXRect.width, destGFXRect.height);
-    aManager->CommandBuilder().PushImage(this, container, aBuilder, aResources, aSc, rect);
-    return true;
+    return aManager->CommandBuilder().PushImage(this, container, aBuilder, aResources, aSc, rect);
   }
 
   // It would be great if we could override GetOpaqueRegion to return nonempty here,
@@ -607,6 +617,10 @@ nsVideoFrame::ComputeSize(gfxContext *aRenderingContext,
                           const LogicalSize& aPadding,
                           ComputeSizeFlags aFlags)
 {
+// When in no video scenario, it should fall back to inherited method.
+// We keep old codepath here since Android still uses XUL media controls.
+// This will go away in bug 1310907.
+#ifndef ANDROID
   if (!HasVideoElement()) {
     return nsContainerFrame::ComputeSize(aRenderingContext,
                                          aWM,
@@ -617,6 +631,7 @@ nsVideoFrame::ComputeSize(gfxContext *aRenderingContext,
                                          aPadding,
                                          aFlags);
   }
+#endif // ANDROID
 
   nsSize size = GetVideoIntrinsicSize(aRenderingContext);
 
@@ -723,6 +738,21 @@ nsVideoFrame::GetVideoIntrinsicSize(gfxContext *aRenderingContext)
 {
   // Defaulting size to 300x150 if no size given.
   nsIntSize size(300, 150);
+
+// All media controls have been converted to HTML except Android. Hence
+// we keep this codepath for Android until removal in bug 1310907.
+#ifdef ANDROID
+  if (!HasVideoElement()) {
+    if (!mFrames.FirstChild()) {
+      return nsSize(0, 0);
+    }
+
+    // Ask the controls frame what its preferred height is
+    nsBoxLayoutState boxState(PresContext(), aRenderingContext, 0);
+    nscoord prefHeight = mFrames.LastChild()->GetXULPrefSize(boxState).height;
+    return nsSize(nsPresContext::CSSPixelsToAppUnits(size.width), prefHeight);
+  }
+#endif // ANDROID
 
   HTMLVideoElement* element = static_cast<HTMLVideoElement*>(GetContent());
   if (NS_FAILED(element->GetVideoSize(&size)) && ShouldDisplayPoster()) {

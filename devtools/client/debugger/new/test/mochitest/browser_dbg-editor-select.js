@@ -3,12 +3,13 @@
 
 // Tests that the editor highlights the correct location when the
 // debugger pauses
-requestLongerTimeout(2);
 
 add_task(async function() {
   // This test runs too slowly on linux debug. I'd like to figure out
   // which is the slowest part of this and make it run faster, but to
   // fix a frequent failure allow a longer timeout.
+  requestLongerTimeout(2);
+
   const dbg = await initDebugger("doc-scripts.html");
   const { selectors: { getSelectedSource }, getState } = dbg;
   const simple1 = findSource(dbg, "simple1.js");
@@ -21,14 +22,13 @@ add_task(async function() {
   // Call the function that we set a breakpoint in.
   invokeInTab("main");
   await waitForPaused(dbg);
-  await waitForSelectedSource(dbg, "simple1");
+  await waitForLoadedSource(dbg, "simple1");
   assertPausedLocation(dbg);
 
   // Step through to another file and make sure it's paused in the
   // right place.
-  await stepOver(dbg);
   await stepIn(dbg);
-  await waitForSelectedSource(dbg, "simple2");
+  await waitForLoadedSource(dbg, "simple2");
   assertPausedLocation(dbg);
 
   // Step back out to the initial file.
@@ -44,7 +44,7 @@ add_task(async function() {
 
   invokeInTab("testModel");
   await waitForPaused(dbg);
-  await waitForSelectedSource(dbg, "long.js");
+  await waitForLoadedSource(dbg, "long.js");
 
   assertPausedLocation(dbg);
   ok(

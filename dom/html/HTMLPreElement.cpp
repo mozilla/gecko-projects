@@ -45,10 +45,12 @@ void
 HTMLPreElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
                                       GenericSpecifiedValues* aData)
 {
-  if (!aData->PropertyIsSet(eCSSProperty_white_space)) {
-    // wrap: empty
-    if (aAttributes->GetAttr(nsGkAtoms::wrap))
-      aData->SetKeywordValue(eCSSProperty_white_space, StyleWhiteSpace::PreWrap);
+  if (aData->ShouldComputeStyleStruct(NS_STYLE_INHERIT_BIT(Text))) {
+    if (!aData->PropertyIsSet(eCSSProperty_white_space)) {
+      // wrap: empty
+      if (aAttributes->GetAttr(nsGkAtoms::wrap))
+        aData->SetKeywordValue(eCSSProperty_white_space, StyleWhiteSpace::PreWrap);
+    }
   }
 
   nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);

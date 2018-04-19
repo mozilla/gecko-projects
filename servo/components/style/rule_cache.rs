@@ -94,7 +94,7 @@ impl RuleCache {
     /// and animations.
     fn get_rule_node_for_cache<'r>(
         guards: &StylesheetGuards,
-        mut rule_node: Option<&'r StrongRuleNode>,
+        mut rule_node: Option<&'r StrongRuleNode>
     ) -> Option<&'r StrongRuleNode> {
         while let Some(node) = rule_node {
             match *node.style_source() {
@@ -104,8 +104,8 @@ impl RuleCache {
                     if decls.contains_any_reset() {
                         break;
                     }
-                },
-                StyleSource::None => {},
+                }
+                StyleSource::None => {}
                 StyleSource::Style(_) => break,
             }
             rule_node = node.parent();
@@ -129,11 +129,9 @@ impl RuleCache {
 
         // A pseudo-element with property restrictions can result in different
         // computed values if it's also used for a non-pseudo.
-        if builder_with_early_props
-            .pseudo
-            .and_then(|p| p.property_restriction())
-            .is_some()
-        {
+        if builder_with_early_props.pseudo
+           .and_then(|p| p.property_restriction())
+           .is_some() {
             return None;
         }
 
@@ -144,7 +142,7 @@ impl RuleCache {
         for &(ref conditions, ref values) in cached_values.iter() {
             if conditions.matches(builder_with_early_props) {
                 debug!("Using cached reset style with conditions {:?}", conditions);
-                return Some(&**values);
+                return Some(&**values)
             }
         }
         None
@@ -181,10 +179,7 @@ impl RuleCache {
             None => return false,
         };
 
-        debug!(
-            "Inserting cached reset style with conditions {:?}",
-            conditions
-        );
+        debug!("Inserting cached reset style with conditions {:?}", conditions);
         self.map
             .entry(rules)
             .or_insert_with(SmallVec::new)
@@ -192,4 +187,5 @@ impl RuleCache {
 
         true
     }
+
 }

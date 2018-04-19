@@ -492,7 +492,8 @@ TCPSocket::FireErrorEvent(const nsAString& aName, const nsAString& aType)
     TCPSocketErrorEvent::Constructor(this, NS_LITERAL_STRING("error"), init);
   MOZ_ASSERT(event);
   event->SetTrusted(true);
-  DispatchEvent(*event);
+  bool dummy;
+  DispatchEvent(event, &dummy);
   return NS_OK;
 }
 
@@ -561,7 +562,8 @@ TCPSocket::FireDataEvent(JSContext* aCx, const nsAString& aType, JS::Handle<JS::
   RefPtr<TCPSocketEvent> event =
     TCPSocketEvent::Constructor(this, aType, init);
   event->SetTrusted(true);
-  DispatchEvent(*event);
+  bool dummy;
+  DispatchEvent(event, &dummy);
   return NS_OK;
 }
 

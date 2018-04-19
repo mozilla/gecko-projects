@@ -11,6 +11,7 @@ loader.lazyRequireGetter(this, "TargetFactory", "devtools/client/framework/targe
 loader.lazyRequireGetter(this, "gDevToolsBrowser", "devtools/client/framework/devtools-browser", true);
 loader.lazyRequireGetter(this, "Tools", "devtools/client/definitions", true);
 loader.lazyRequireGetter(this, "Telemetry", "devtools/client/shared/telemetry");
+loader.lazyRequireGetter(this, "WebConsoleFrame", "devtools/client/webconsole/webconsole", true);
 loader.lazyRequireGetter(this, "NewWebConsoleFrame", "devtools/client/webconsole/new-webconsole", true);
 loader.lazyRequireGetter(this, "gDevTools", "devtools/client/framework/devtools", true);
 loader.lazyRequireGetter(this, "DebuggerServer", "devtools/server/main", true);
@@ -192,6 +193,10 @@ HUD_SERVICE.prototype =
 
       win.document.title = l10n.getStr("browserConsole.title");
 
+      if (browserConsoleURL === Tools.webConsole.oldWebConsoleURL) {
+        return {iframeWindow: win, chromeWindow: win};
+      }
+
       let iframe = win.document.querySelector("iframe");
       await new Promise(resolve => {
         iframe.addEventListener("DOMContentLoaded", resolve, {once: true});
@@ -268,7 +273,11 @@ function WebConsole(target, iframeWindow, chromeWindow) {
   if (element.getAttribute("windowtype") != gDevTools.chromeWindowType) {
     this.browserWindow = HUDService.currentContext();
   }
-  this.ui = new NewWebConsoleFrame(this);
+  if (iframeWindow.location.href === Tools.webConsole.newWebConsoleURL) {
+    this.ui = new NewWebConsoleFrame(this);
+  } else {
+    this.ui = new WebConsoleFrame(this);
+  }
 }
 WebConsole.prototype = {
   iframeWindow: null,
@@ -372,11 +381,11 @@ WebConsole.prototype = {
    */
   openLink(link, e) {
     let isOSX = Services.appinfo.OS == "Darwin";
-    let where = "tab";
     if (e && (e.button === 1 || (e.button === 0 && (isOSX ? e.metaKey : e.ctrlKey)))) {
-      where = "tabshifted";
+      this.chromeUtilsWindow.openUILinkIn(link, "tabshifted");
+    } else {
+      this.chromeUtilsWindow.openUILinkIn(link, "tab");
     }
-    this.chromeUtilsWindow.openWebLinkIn(link, where);
   },
 
   /**
@@ -471,20 +480,6 @@ WebConsole.prototype = {
     }
 
     return panel.getFrames();
-  },
-
-  async getMappedExpression(expression) {
-    let toolbox = gDevTools.getToolbox(this.target);
-    if (!toolbox) {
-      return expression;
-    }
-    let panel = toolbox.getPanel("jsdebugger");
-
-    if (!panel) {
-      return expression;
-    }
-
-    return panel.getMappedExpression(expression);
   },
 
   /**

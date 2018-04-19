@@ -57,8 +57,7 @@ class GridInspector {
     this.getSwatchColorPickerTooltip = this.getSwatchColorPickerTooltip.bind(this);
     this.updateGridPanel = this.updateGridPanel.bind(this);
 
-    this.onHighlighterShown = this.onHighlighterShown.bind(this);
-    this.onHighlighterHidden = this.onHighlighterHidden.bind(this);
+    this.onHighlighterChange = this.onHighlighterChange.bind(this);
     this.onNavigate = this.onNavigate.bind(this);
     this.onReflow = throttle(this.onReflow, 500, this);
     this.onSetGridOverlayColor = this.onSetGridOverlayColor.bind(this);
@@ -83,13 +82,7 @@ class GridInspector {
       return;
     }
 
-    try {
-      this.layoutInspector = await this.inspector.walker.getLayoutInspector();
-    } catch (e) {
-      // This call might fail if called asynchrously after the toolbox is finished
-      // closing.
-      return;
-    }
+    this.layoutInspector = await this.inspector.walker.getLayoutInspector();
 
     this.loadHighlighterSettings();
 
@@ -102,8 +95,8 @@ class GridInspector {
       }
     );
 
-    this.highlighters.on("grid-highlighter-hidden", this.onHighlighterHidden);
-    this.highlighters.on("grid-highlighter-shown", this.onHighlighterShown);
+    this.highlighters.on("grid-highlighter-hidden", this.onHighlighterChange);
+    this.highlighters.on("grid-highlighter-shown", this.onHighlighterChange);
     this.inspector.sidebar.on("select", this.onSidebarSelect);
     this.inspector.on("new-root", this.onNavigate);
 
@@ -115,8 +108,8 @@ class GridInspector {
    * and cleans up references.
    */
   destroy() {
-    this.highlighters.off("grid-highlighter-hidden", this.onHighlighterHidden);
-    this.highlighters.off("grid-highlighter-shown", this.onHighlighterShown);
+    this.highlighters.off("grid-highlighter-hidden", this.onHighlighterChange);
+    this.highlighters.off("grid-highlighter-shown", this.onHighlighterChange);
     this.inspector.sidebar.off("select", this.onSidebarSelect);
     this.inspector.off("new-root", this.onNavigate);
 
@@ -362,49 +355,21 @@ class GridInspector {
     this.store.dispatch(updateGrids(grids));
     this.inspector.emit("grid-panel-updated");
   }
-  /**
-   * Handler for "grid-highlighter-shown" events emitted from the
-   * HighlightersOverlay. Passes nodefront and event name to handleHighlighterChange.
-   * Required since on and off events need the same reference object.
-   *
-   * @param  {NodeFront} nodeFront
-   *         The NodeFront of the flex container element for which the flexbox
-   *         highlighter is shown for.
-   * @param  {Object} options
-   *         The highlighter options used for the highlighter being shown/hidden.
-   */
-  onHighlighterShown(nodeFront, options) {
-    return this.onHighlighterChange(true, nodeFront, options);
-  }
-
-  /**
-   * Handler for "grid-highlighter-hidden" events emitted from the
-   * HighlightersOverlay. Passes nodefront and event name to handleHighlighterChange.
-   * Required since on and off events need the same reference object.
-   *
-   * @param  {NodeFront} nodeFront
-   *         The NodeFront of the flex container element for which the flexbox
-   *         highlighter is shown for.
-   * @param  {Object} options
-   *         The highlighter options used for the highlighter being shown/hidden.
-   */
-  onHighlighterHidden(nodeFront, options) {
-    return this.onHighlighterChange(false, nodeFront, options);
-  }
 
   /**
    * Handler for "grid-highlighter-shown" and "grid-highlighter-hidden" events emitted
    * from the HighlightersOverlay. Updates the NodeFront's grid highlighted state.
    *
-   * @param  {Boolean} highlighted
-   *         If the grid should be updated to highlight or hide.
+   * @param  {Event} event
+   *         Event that was triggered.
    * @param  {NodeFront} nodeFront
    *         The NodeFront of the grid container element for which the grid highlighter
    *         is shown for.
    * @param  {Object} options
    *         The highlighter options used for the highlighter being shown/hidden.
    */
-  onHighlighterChange(highlighted, nodeFront, options = {}) {
+  onHighlighterChange(event, nodeFront, options = {}) {
+    let highlighted = event === "grid-highlighter-shown";
     let { color } = options;
 
     // Only tell the store that the highlighter changed if it did change.

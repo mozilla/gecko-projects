@@ -23,12 +23,13 @@ using namespace mozilla::dom;
 // Class Methods
 nsSMILCSSProperty::nsSMILCSSProperty(nsCSSPropertyID aPropID,
                                      Element* aElement,
-                                     ComputedStyle* aBaseComputedStyle)
+                                     nsStyleContext* aBaseStyleContext)
   : mPropID(aPropID)
   , mElement(aElement)
-  , mBaseComputedStyle(aBaseComputedStyle)
+  , mBaseStyleContext(aBaseStyleContext)
 {
-  MOZ_ASSERT(IsPropertyAnimatable(mPropID),
+  MOZ_ASSERT(IsPropertyAnimatable(mPropID,
+               aElement->OwnerDoc()->GetStyleBackendType()),
              "Creating a nsSMILCSSProperty for a property "
              "that's not supported for animation");
 }
@@ -43,10 +44,10 @@ nsSMILCSSProperty::GetBaseValue() const
 
   // SPECIAL CASE: (a) Shorthands
   //               (b) 'display'
-  //               (c) No base ComputedStyle
+  //               (c) No base style context
   if (nsCSSProps::IsShorthand(mPropID) ||
       mPropID == eCSSProperty_display ||
-      !mBaseComputedStyle) {
+      !mBaseStyleContext) {
     // We can't look up the base (computed-style) value of shorthand
     // properties because they aren't guaranteed to have a consistent computed
     // value.
@@ -55,7 +56,7 @@ nsSMILCSSProperty::GetBaseValue() const
     // doing so involves clearing and resetting the property which can cause
     // frames to be recreated which we'd like to avoid.
     //
-    // Furthermore, if we don't (yet) have a base ComputedStyle we obviously
+    // Furthermore, if we don't (yet) have a base style context we obviously
     // can't resolve a base value.
     //
     // In any case, just return a dummy value (initialized with the right
@@ -66,11 +67,23 @@ nsSMILCSSProperty::GetBaseValue() const
   }
 
   AnimationValue computedValue;
-  computedValue.mServo =
-    Servo_ComputedValues_ExtractAnimationValue(mBaseComputedStyle, mPropID)
-    .Consume();
-  if (!computedValue.mServo) {
-    return baseValue;
+  if (mElement->IsStyledByServo()) {
+    computedValue.mServo =
+      Servo_ComputedValues_ExtractAnimationValue(mBaseStyleContext->AsServo(), mPropID)
+      .Consume();
+    if (!computedValue.mServo) {
+      return baseValue;
+    }
+  } else {
+#ifdef MOZ_OLD_STYLE
+    if (!StyleAnimationValue::ExtractComputedValue(mPropID,
+                                                   mBaseStyleContext->AsGecko(),
+                                                   computedValue.mGecko)) {
+      return baseValue;
+    }
+#else
+    MOZ_CRASH("old style system disabled");
+#endif
   }
 
   baseValue =
@@ -85,7 +98,9 @@ nsSMILCSSProperty::ValueFromString(const nsAString& aStr,
                                    nsSMILValue& aValue,
                                    bool& aPreventCachingOfSandwich) const
 {
-  NS_ENSURE_TRUE(IsPropertyAnimatable(mPropID), NS_ERROR_FAILURE);
+  NS_ENSURE_TRUE(IsPropertyAnimatable(mPropID,
+                   mElement->OwnerDoc()->GetStyleBackendType()),
+                 NS_ERROR_FAILURE);
 
   nsSMILCSSValueType::ValueFromString(mPropID, mElement, aStr, aValue,
       &aPreventCachingOfSandwich);
@@ -106,7 +121,9 @@ nsSMILCSSProperty::ValueFromString(const nsAString& aStr,
 nsresult
 nsSMILCSSProperty::SetAnimValue(const nsSMILValue& aValue)
 {
-  NS_ENSURE_TRUE(IsPropertyAnimatable(mPropID), NS_ERROR_FAILURE);
+  NS_ENSURE_TRUE(IsPropertyAnimatable(mPropID,
+                   mElement->OwnerDoc()->GetStyleBackendType()),
+                 NS_ERROR_FAILURE);
 
   // Convert nsSMILValue to string
   nsAutoString valStr;
@@ -138,10 +155,12 @@ nsSMILCSSProperty::ClearAnimValue()
 // Based on http://www.w3.org/TR/SVG/propidx.html
 // static
 bool
-nsSMILCSSProperty::IsPropertyAnimatable(nsCSSPropertyID aPropID)
+nsSMILCSSProperty::IsPropertyAnimatable(nsCSSPropertyID aPropID,
+                                        StyleBackendType aBackend)
 {
   // Bug 1353918: Drop this check
-  if (!Servo_Property_IsAnimatable(aPropID)) {
+  if (aBackend == StyleBackendType::Servo &&
+      !Servo_Property_IsAnimatable(aPropID)) {
     return false;
   }
 

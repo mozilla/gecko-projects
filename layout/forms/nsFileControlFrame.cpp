@@ -11,12 +11,8 @@
 #include "nsIDocument.h"
 #include "mozilla/dom/NodeInfo.h"
 #include "mozilla/dom/Element.h"
-#include "mozilla/dom/DOMPrefs.h"
-#include "mozilla/dom/DOMStringList.h"
 #include "mozilla/dom/DataTransfer.h"
-#include "mozilla/dom/Directory.h"
-#include "mozilla/dom/DragEvent.h"
-#include "mozilla/dom/FileList.h"
+#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/HTMLButtonElement.h"
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/MutationEventBinding.h"
@@ -25,21 +21,26 @@
 #include "nsContentCreatorFunctions.h"
 #include "nsContentUtils.h"
 #include "mozilla/EventStates.h"
+#include "mozilla/dom/DOMStringList.h"
+#include "mozilla/dom/Directory.h"
+#include "mozilla/dom/FileList.h"
+#include "nsIDOMDragEvent.h"
+#include "nsIDOMFileList.h"
 #include "nsTextNode.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 
 nsIFrame*
-NS_NewFileControlFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
+NS_NewFileControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
-  return new (aPresShell) nsFileControlFrame(aStyle);
+  return new (aPresShell) nsFileControlFrame(aContext);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsFileControlFrame)
 
-nsFileControlFrame::nsFileControlFrame(ComputedStyle* aStyle)
-  : nsBlockFrame(aStyle, kClassID)
+nsFileControlFrame::nsFileControlFrame(nsStyleContext* aContext)
+  : nsBlockFrame(aContext, kClassID)
 {
   AddStateBits(NS_BLOCK_FLOAT_MGR);
 }
@@ -107,7 +108,7 @@ MakeAnonButton(nsIDocument* aDoc, const char* labelKey,
   // Make sure access key and tab order for the element actually redirect to the
   // file picking button.
   RefPtr<HTMLButtonElement> buttonElement =
-    HTMLButtonElement::FromNodeOrNull(button);
+    HTMLButtonElement::FromContentOrNull(button);
 
   if (!aAccessKey.IsEmpty()) {
     buttonElement->SetAccessKey(aAccessKey, IgnoreErrors());
@@ -126,7 +127,7 @@ nsFileControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
 {
   nsCOMPtr<nsIDocument> doc = mContent->GetComposedDoc();
 
-  RefPtr<HTMLInputElement> fileContent = HTMLInputElement::FromNodeOrNull(mContent);
+  RefPtr<HTMLInputElement> fileContent = HTMLInputElement::FromContentOrNull(mContent);
 
   // The access key is transferred to the "Choose files..." button only. In
   // effect that access key allows access to the control via that button, then
@@ -153,7 +154,7 @@ nsFileControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
 
   // Update the displayed text to reflect the current element's value.
   nsAutoString value;
-  HTMLInputElement::FromNode(mContent)->GetDisplayFileName(value);
+  HTMLInputElement::FromContent(mContent)->GetDisplayFileName(value);
   UpdateDisplayedValue(value, false);
 
   if (!aElements.AppendElement(mTextContent)) {
@@ -237,24 +238,26 @@ nsFileControlFrame::DnDListener::HandleEvent(nsIDOMEvent* aEvent)
 {
   NS_ASSERTION(mFrame, "We should have been unregistered");
 
-  Event* event = aEvent->InternalDOMEvent();
-  if (event->DefaultPrevented()) {
+  bool defaultPrevented = false;
+  aEvent->GetDefaultPrevented(&defaultPrevented);
+  if (defaultPrevented) {
     return NS_OK;
   }
 
-  DragEvent* dragEvent = event->AsDragEvent();
+  nsCOMPtr<nsIDOMDragEvent> dragEvent = do_QueryInterface(aEvent);
   if (!dragEvent) {
     return NS_OK;
   }
 
-  RefPtr<DataTransfer> dataTransfer = dragEvent->GetDataTransfer();
+  nsCOMPtr<nsIDOMDataTransfer> dataTransfer;
+  dragEvent->GetDataTransfer(getter_AddRefs(dataTransfer));
   if (!IsValidDropData(dataTransfer)) {
     return NS_OK;
   }
 
 
   RefPtr<HTMLInputElement> inputElement =
-    HTMLInputElement::FromNode(mFrame->GetContent());
+    HTMLInputElement::FromContent(mFrame->GetContent());
   bool supportsMultiple =
     inputElement->HasAttr(kNameSpaceID_None, nsGkAtoms::multiple);
   if (!CanDropTheseFiles(dataTransfer, supportsMultiple)) {
@@ -275,8 +278,8 @@ nsFileControlFrame::DnDListener::HandleEvent(nsIDOMEvent* aEvent)
     aEvent->StopPropagation();
     aEvent->PreventDefault();
 
-    RefPtr<FileList> fileList =
-      dataTransfer->GetFiles(*nsContentUtils::GetSystemPrincipal());
+    nsCOMPtr<nsIDOMFileList> fileList;
+    dataTransfer->GetFiles(getter_AddRefs(fileList));
 
     RefPtr<BlobImpl> webkitDir;
     nsresult rv =
@@ -341,13 +344,13 @@ nsFileControlFrame::DnDListener::HandleEvent(nsIDOMEvent* aEvent)
 }
 
 nsresult
-nsFileControlFrame::DnDListener::GetBlobImplForWebkitDirectory(FileList* aFileList,
+nsFileControlFrame::DnDListener::GetBlobImplForWebkitDirectory(nsIDOMFileList* aFileList,
                                                                BlobImpl** aBlobImpl)
 {
   *aBlobImpl = nullptr;
 
   HTMLInputElement* inputElement =
-    HTMLInputElement::FromNode(mFrame->GetContent());
+    HTMLInputElement::FromContent(mFrame->GetContent());
   bool webkitDirPicker =
     DOMPrefs::WebkitBlinkDirectoryPickerEnabled() &&
     inputElement->HasAttr(kNameSpaceID_None, nsGkAtoms::webkitdirectory);
@@ -359,11 +362,12 @@ nsFileControlFrame::DnDListener::GetBlobImplForWebkitDirectory(FileList* aFileLi
     return NS_ERROR_FAILURE;
   }
 
+  FileList* files = static_cast<FileList*>(aFileList);
   // webkitdirectory doesn't care about the length of the file list but
   // only about the first item on it.
-  uint32_t len = aFileList->Length();
+  uint32_t len = files->Length();
   if (len) {
-    File* file = aFileList->Item(0);
+    File* file = files->Item(0);
     if (file) {
       BlobImpl* impl = file->Impl();
       if (impl && impl->IsDirectory()) {
@@ -378,21 +382,27 @@ nsFileControlFrame::DnDListener::GetBlobImplForWebkitDirectory(FileList* aFileLi
 }
 
 bool
-nsFileControlFrame::DnDListener::IsValidDropData(DataTransfer* aDataTransfer)
+nsFileControlFrame::DnDListener::IsValidDropData(nsIDOMDataTransfer* aDOMDataTransfer)
 {
+  nsCOMPtr<DataTransfer> dataTransfer = do_QueryInterface(aDOMDataTransfer);
+  NS_ENSURE_TRUE(dataTransfer, false);
+
   // We only support dropping files onto a file upload control
   nsTArray<nsString> types;
-  aDataTransfer->GetTypes(types, CallerType::System);
+  dataTransfer->GetTypes(types, CallerType::System);
 
   return types.Contains(NS_LITERAL_STRING("Files"));
 }
 
 bool
-nsFileControlFrame::DnDListener::CanDropTheseFiles(DataTransfer* aDataTransfer,
+nsFileControlFrame::DnDListener::CanDropTheseFiles(nsIDOMDataTransfer* aDOMDataTransfer,
                                                    bool aSupportsMultiple)
 {
-  RefPtr<FileList> fileList =
-    aDataTransfer->GetFiles(*nsContentUtils::GetSystemPrincipal());
+  nsCOMPtr<DataTransfer> dataTransfer = do_QueryInterface(aDOMDataTransfer);
+  NS_ENSURE_TRUE(dataTransfer, false);
+
+  nsCOMPtr<nsIDOMFileList> fileList;
+  dataTransfer->GetFiles(getter_AddRefs(fileList));
 
   RefPtr<BlobImpl> webkitDir;
   nsresult rv =
@@ -404,7 +414,7 @@ nsFileControlFrame::DnDListener::CanDropTheseFiles(DataTransfer* aDataTransfer,
 
   uint32_t listLength = 0;
   if (fileList) {
-    listLength = fileList->Length();
+    fileList->GetLength(&listLength);
   }
   return listLength <= 1 || aSupportsMultiple;
 }

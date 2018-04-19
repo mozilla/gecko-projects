@@ -35,7 +35,7 @@ window.gActivityStreamStrings = {
   "prefs_section_rows_option": "{num} row;{num} rows",
   "prefs_search_header": "Njiilaw Geese",
   "prefs_topsites_description": "Lowe ɗe ɓurɗaa waawde yillaade",
-  "prefs_topstories_description2": "Great content from around the web, personalized for you",
+  "prefs_topstories_description": "Loowdiiji baɗɗi faayiida ɗi mbaawɗaa ŋakkireede",
   "prefs_topstories_show_sponsored_label": "{provider} daarti tammbitaaɗi",
   "prefs_topstories_sponsored_learn_more": "Ɓeydu humpito",
   "prefs_highlights_description": "Suɓngo lowe ɗe ndannduɗaa walla ɗe njilliɗaa",
@@ -89,6 +89,5 @@ window.gActivityStreamStrings = {
   "section_menu_action_add_topsite": "Add Top Site",
   "section_menu_action_move_up": "Move Up",
   "section_menu_action_move_down": "Move Down",
-  "section_menu_action_privacy_notice": "Privacy Notice",
-  "prefs_topstories_description": "Loowdiiji baɗɗi faayiida ɗi mbaawɗaa ŋakkireede"
+  "section_menu_action_privacy_notice": "Privacy Notice"
 };

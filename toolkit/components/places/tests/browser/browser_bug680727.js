@@ -103,5 +103,5 @@ function reloadAsyncListener(aURI, aIsVisited) {
 registerCleanupFunction(async function() {
   Services.prefs.setIntPref("network.proxy.type", proxyPrefValue);
   Services.io.offline = false;
-  BrowserTestUtils.removeTab(ourTab);
+  await BrowserTestUtils.removeTab(ourTab);
 });

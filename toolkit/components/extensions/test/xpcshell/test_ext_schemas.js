@@ -512,7 +512,6 @@ let wrapper = {
 
 add_task(async function() {
   let url = "data:," + JSON.stringify(json);
-  Schemas._rootSchema = null;
   await Schemas.load(url);
 
   let root = {};
@@ -1056,7 +1055,6 @@ let deprecatedJson = [
 
 add_task(async function testDeprecation() {
   let url = "data:," + JSON.stringify(deprecatedJson);
-  Schemas._rootSchema = null;
   await Schemas.load(url);
 
   let root = {};
@@ -1213,7 +1211,6 @@ let choicesJson = [
 
 add_task(async function testChoices() {
   let url = "data:," + JSON.stringify(choicesJson);
-  Schemas._rootSchema = null;
   await Schemas.load(url);
 
   let root = {};
@@ -1303,7 +1300,6 @@ let permissionsJson = [
 
 add_task(async function testPermissions() {
   let url = "data:," + JSON.stringify(permissionsJson);
-  Schemas._rootSchema = null;
   await Schemas.load(url);
 
   let root = {};
@@ -1403,7 +1399,6 @@ let nestedNamespaceJson = [
 add_task(async function testNestedNamespace() {
   let url = "data:," + JSON.stringify(nestedNamespaceJson);
 
-  Schemas._rootSchema = null;
   await Schemas.load(url);
 
   let root = {};
@@ -1493,7 +1488,6 @@ let $importJson = [
 
 add_task(async function test_$import() {
   let url = "data:," + JSON.stringify($importJson);
-  Schemas._rootSchema = null;
   await Schemas.load(url);
 
   let root = {};
@@ -1632,7 +1626,6 @@ let defaultsJson = [
 
 add_task(async function testDefaults() {
   let url = "data:," + JSON.stringify(defaultsJson);
-  Schemas._rootSchema = null;
   await Schemas.load(url);
 
   let testingApiObj = {
@@ -1699,7 +1692,6 @@ let returnsJson = [{
 
 add_task(async function testReturns() {
   const url = "data:," + JSON.stringify(returnsJson);
-  Schemas._rootSchema = null;
   await Schemas.load(url);
 
   const apiObject = {

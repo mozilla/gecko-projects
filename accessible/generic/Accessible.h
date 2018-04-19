@@ -166,7 +166,11 @@ public:
    * Return DOM node associated with the accessible.
    */
   virtual nsINode* GetNode() const;
-
+  inline already_AddRefed<nsIDOMNode> DOMNode() const
+  {
+    nsCOMPtr<nsIDOMNode> DOMNode = do_QueryInterface(GetNode());
+    return DOMNode.forget();
+  }
   nsIContent* GetContent() const { return mContent; }
   mozilla::dom::Element* Elm() const
     { return mContent && mContent->IsElement() ? mContent->AsElement() : nullptr; }
@@ -645,10 +649,7 @@ public:
 
   bool IsTableRow() const { return HasGenericType(eTableRow); }
 
-  bool IsTextField() const { return mType == eHTMLTextFieldType ||
-                                    mType == eHTMLTextPasswordFieldType; }
-
-  bool IsPassword() const { return mType == eHTMLTextPasswordFieldType; }
+  bool IsTextField() const { return mType == eHTMLTextFieldType; }
 
   bool IsText() const { return mGenericTypes & eText; }
 

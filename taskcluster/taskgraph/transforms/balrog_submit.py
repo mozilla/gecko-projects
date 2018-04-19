@@ -50,7 +50,6 @@ def validate(config, jobs):
         validate_schema(
             balrog_description_schema, job,
             "In balrog ({!r} kind) task for {!r}:".format(config.kind, label))
-
         yield job
 
 
@@ -98,7 +97,7 @@ def make_task_description(config, jobs):
         task = {
             'label': label,
             'description': description,
-            'worker-type': 'scriptworker-prov-v1/balrog-dev',
+            'worker-type': 'scriptworker-prov-v1/balrogworker-v1',
             'worker': {
                 'implementation': 'balrog',
                 'upstream-artifacts': upstream_artifacts,

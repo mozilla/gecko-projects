@@ -10,19 +10,26 @@
 #include "mozilla/EventForwards.h"
 #include "mozilla/dom/ClipboardEventBinding.h"
 #include "mozilla/dom/Event.h"
+#include "nsIDOMClipboardEvent.h"
 
 namespace mozilla {
 namespace dom {
 class DataTransfer;
 
-class ClipboardEvent : public Event
+class ClipboardEvent : public Event,
+                       public nsIDOMClipboardEvent
 {
 public:
   ClipboardEvent(EventTarget* aOwner,
                  nsPresContext* aPresContext,
                  InternalClipboardEvent* aEvent);
 
-  NS_INLINE_DECL_REFCOUNTING_INHERITED(ClipboardEvent, Event)
+  NS_DECL_ISUPPORTS_INHERITED
+
+  NS_DECL_NSIDOMCLIPBOARDEVENT
+
+  // Forward to base class
+  NS_FORWARD_TO_EVENT
 
   virtual JSObject* WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {

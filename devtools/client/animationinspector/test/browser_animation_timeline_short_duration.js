@@ -8,9 +8,9 @@ requestLongerTimeout(2);
 
 // Test short duration (e.g. 1ms) animation.
 
-add_task(async function() {
-  await addTab(URL_ROOT + "doc_short_duration_animation.html");
-  const { panel, inspector } = await openAnimationInspector();
+add_task(function* () {
+  yield addTab(URL_ROOT + "doc_short_duration_animation.html");
+  const { panel, inspector } = yield openAnimationInspector();
 
   info("Check the listed time blocks");
   const timeBlocks = getAnimationTimeBlocks(panel);
@@ -22,14 +22,14 @@ add_task(async function() {
 
   info("Check the time block one by one");
   info("Check #onetime");
-  await selectNodeAndWaitForAnimations("#onetime", inspector);
+  yield selectNodeAndWaitForAnimations("#onetime", inspector);
   let timeBlock = getAnimationTimeBlocks(panel)[0];
   let containerEl = timeBlock.containerEl;
   let state = timeBlock.animation.state;
   checkSummaryGraph(containerEl, state, true);
 
   info("Check #infinite");
-  await selectNodeAndWaitForAnimations("#infinite", inspector);
+  yield selectNodeAndWaitForAnimations("#infinite", inspector);
   timeBlock = getAnimationTimeBlocks(panel)[0];
   containerEl = timeBlock.containerEl;
   state = timeBlock.animation.state;

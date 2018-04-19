@@ -81,7 +81,7 @@ UnboxedLayout::makeConstructorCode(JSContext* cx, HandleObjectGroup group)
 
     JitContext jitContext(cx, nullptr);
 
-    StackMacroAssembler masm;
+    MacroAssembler masm;
 
     Register propertiesReg, newKindReg;
 #ifdef JS_CODEGEN_X86
@@ -95,15 +95,7 @@ UnboxedLayout::makeConstructorCode(JSContext* cx, HandleObjectGroup group)
 #endif
 
 #ifdef JS_CODEGEN_ARM64
-    // ARM64 communicates stack address via sp, but uses a pseudo-sp (PSP) for
-    // addressing.  The register we use for PSP may however also be used by
-    // calling code, and it is nonvolatile, so save it.  Do this as a special
-    // case first because the generic save/restore code needs the PSP to be
-    // initialized already.
-    MOZ_ASSERT(PseudoStackPointer64.Is(masm.GetStackPointer64()));
-    masm.Str(PseudoStackPointer64, vixl::MemOperand(sp, -16, vixl::PreIndex));
-
-    // Initialize the PSP from the SP.
+    // ARM64 communicates stack address via sp, but uses a pseudo-sp for addressing.
     masm.initStackPtr();
 #endif
 
@@ -241,22 +233,7 @@ UnboxedLayout::makeConstructorCode(JSContext* cx, HandleObjectGroup group)
         masm.pop(ScratchDoubleReg);
     masm.PopRegsInMask(savedNonVolatileRegisters);
 
-#ifdef JS_CODEGEN_ARM64
-    // Now restore the value that was in the PSP register on entry, and return.
-
-    // Obtain the correct SP from the PSP.
-    masm.Mov(sp, PseudoStackPointer64);
-
-    // Restore the saved value of the PSP register, this value is whatever the
-    // caller had saved in it, not any actual SP value, and it must not be
-    // overwritten subsequently.
-    masm.Ldr(PseudoStackPointer64, vixl::MemOperand(sp, 16, vixl::PostIndex));
-
-    // Perform a plain Ret(), as abiret() will move SP <- PSP and that is wrong.
-    masm.Ret(vixl::lr);
-#else
     masm.abiret();
-#endif
 
     masm.bind(&failureStoreOther);
 
@@ -384,7 +361,7 @@ UnboxedPlainObject::ensureExpando(JSContext* cx, Handle<UnboxedPlainObject*> obj
     // convert the object to its native representation, we will end up with a
     // corrupted store buffer entry.
     if (IsInsideNursery(expando) && !IsInsideNursery(obj))
-        expando->storeBuffer()->putWholeCell(obj);
+        cx->zone()->group()->storeBuffer().putWholeCell(obj);
 
     obj->setExpandoUnsafe(expando);
     return expando;
@@ -599,7 +576,7 @@ UnboxedPlainObject::convertToNative(JSContext* cx, JSObject* obj)
     // writes to the expando (see WholeCellEdges::trace), so after conversion
     // we need to make sure the expando itself will still be traced.
     if (expando && !IsInsideNursery(expando))
-        cx->runtime()->gc.storeBuffer().putWholeCell(expando);
+        cx->zone()->group()->storeBuffer().putWholeCell(expando);
 
     obj->setGroup(layout.nativeGroup());
     obj->as<PlainObject>().setLastPropertyMakeNative(cx, layout.nativeShape());
@@ -1194,7 +1171,7 @@ UnboxedPlainObject::fillAfterConvert(JSContext* cx,
     initExpando();
     memset(data(), 0, layout().size());
     for (size_t i = 0; i < layout().properties().length(); i++)
-        MOZ_ALWAYS_TRUE(setValue(cx, layout().properties()[i], NextValue(values, valueCursor)));
+        JS_ALWAYS_TRUE(setValue(cx, layout().properties()[i], NextValue(values, valueCursor)));
 }
 
 bool

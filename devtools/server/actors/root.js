@@ -6,11 +6,15 @@
 
 "use strict";
 
-const { Cu } = require("chrome");
+const { Cc, Ci, Cu } = require("chrome");
 const Services = require("Services");
 const { ActorPool, appendExtraActors, createExtraActors } = require("devtools/server/actors/common");
 const { DebuggerServer } = require("devtools/server/main");
 
+loader.lazyGetter(this, "ppmm", () => {
+  return Cc["@mozilla.org/parentprocessmessagemanager;1"].getService(
+    Ci.nsIMessageBroadcaster);
+});
 loader.lazyRequireGetter(this, "WindowActor",
   "devtools/server/actors/window", true);
 
@@ -196,7 +200,7 @@ RootActor.prototype = {
   /**
    * Return a 'hello' packet as specified by the Remote Debugging Protocol.
    */
-  sayHello: function() {
+  sayHello: function () {
     return {
       from: this.actorID,
       applicationType: this.applicationType,
@@ -206,7 +210,7 @@ RootActor.prototype = {
     };
   },
 
-  forwardingCancelled: function(prefix) {
+  forwardingCancelled: function (prefix) {
     return {
       from: this.actorID,
       type: "forwardingCancelled",
@@ -217,7 +221,7 @@ RootActor.prototype = {
   /**
    * Destroys the actor from the browser window.
    */
-  destroy: function() {
+  destroy: function () {
     /* Tell the live lists we aren't watching any more. */
     if (this._parameters.tabList) {
       this._parameters.tabList.onListChanged = null;
@@ -252,7 +256,7 @@ RootActor.prototype = {
    * browser.  This can replace usages of `listTabs` that only wanted the global actors
    * and didn't actually care about tabs.
    */
-  onGetRoot: function() {
+  onGetRoot: function () {
     let reply = {
       from: this.actorID,
     };
@@ -282,7 +286,7 @@ RootActor.prototype = {
    * would trigger any lazy tabs to be loaded, greatly increasing resource usage.  Avoid
    * this method whenever possible.
    */
-  onListTabs: async function(request) {
+  onListTabs: async function (request) {
     let tabList = this._parameters.tabList;
     if (!tabList) {
       return { from: this.actorID, error: "noTabs",
@@ -336,7 +340,7 @@ RootActor.prototype = {
     return reply;
   },
 
-  onGetTab: async function(options) {
+  onGetTab: async function (options) {
     let tabList = this._parameters.tabList;
     if (!tabList) {
       return { error: "noTabs",
@@ -367,7 +371,7 @@ RootActor.prototype = {
     return { tab: tabActor.form() };
   },
 
-  onGetWindow: function({ outerWindowID }) {
+  onGetWindow: function ({ outerWindowID }) {
     if (!DebuggerServer.allowChromeProcess) {
       return {
         from: this.actorID,
@@ -399,13 +403,13 @@ RootActor.prototype = {
     };
   },
 
-  onTabListChanged: function() {
+  onTabListChanged: function () {
     this.conn.send({ from: this.actorID, type: "tabListChanged" });
     /* It's a one-shot notification; no need to watch any more. */
     this._parameters.tabList.onListChanged = null;
   },
 
-  onListAddons: function() {
+  onListAddons: function () {
     let addonList = this._parameters.addonList;
     if (!addonList) {
       return { from: this.actorID, error: "noAddons",
@@ -434,12 +438,12 @@ RootActor.prototype = {
     });
   },
 
-  onAddonListChanged: function() {
+  onAddonListChanged: function () {
     this.conn.send({ from: this.actorID, type: "addonListChanged" });
     this._parameters.addonList.onListChanged = null;
   },
 
-  onListWorkers: function() {
+  onListWorkers: function () {
     let workerList = this._parameters.workerList;
     if (!workerList) {
       return { from: this.actorID, error: "noWorkers",
@@ -466,12 +470,12 @@ RootActor.prototype = {
     });
   },
 
-  onWorkerListChanged: function() {
+  onWorkerListChanged: function () {
     this.conn.send({ from: this.actorID, type: "workerListChanged" });
     this._parameters.workerList.onListChanged = null;
   },
 
-  onListServiceWorkerRegistrations: function() {
+  onListServiceWorkerRegistrations: function () {
     let registrationList = this._parameters.serviceWorkerRegistrationList;
     if (!registrationList) {
       return { from: this.actorID, error: "noServiceWorkerRegistrations",
@@ -498,12 +502,12 @@ RootActor.prototype = {
     });
   },
 
-  onServiceWorkerRegistrationListChanged: function() {
+  onServiceWorkerRegistrationListChanged: function () {
     this.conn.send({ from: this.actorID, type: "serviceWorkerRegistrationListChanged" });
     this._parameters.serviceWorkerRegistrationList.onListChanged = null;
   },
 
-  onListProcesses: function() {
+  onListProcesses: function () {
     let { processList } = this._parameters;
     if (!processList) {
       return { from: this.actorID, error: "noProcesses",
@@ -515,12 +519,12 @@ RootActor.prototype = {
     };
   },
 
-  onProcessListChanged: function() {
+  onProcessListChanged: function () {
     this.conn.send({ from: this.actorID, type: "processListChanged" });
     this._parameters.processList.onListChanged = null;
   },
 
-  async onGetProcess(request) {
+  onGetProcess: function (request) {
     if (!DebuggerServer.allowChromeProcess) {
       return { error: "forbidden",
                message: "You are not allowed to debug chrome." };
@@ -543,7 +547,7 @@ RootActor.prototype = {
     }
 
     let { id } = request;
-    let mm = Services.ppmm.getChildAt(id);
+    let mm = ppmm.getChildAt(id);
     if (!mm) {
       return { error: "noProcess",
                message: "There is no process with id '" + id + "'." };
@@ -555,13 +559,14 @@ RootActor.prototype = {
     let onDestroy = () => {
       this._processActors.delete(id);
     };
-    form = await DebuggerServer.connectToContentProcess(this.conn, mm, onDestroy);
-    this._processActors.set(id, form);
-    return { form };
+    return DebuggerServer.connectToContent(this.conn, mm, onDestroy).then(formResult => {
+      this._processActors.set(id, formResult);
+      return { form: formResult };
+    });
   },
 
   /* This is not in the spec, but it's used by tests. */
-  onEcho: function(request) {
+  onEcho: function (request) {
     /*
      * Request packets are frozen. Copy request, so that
      * DebuggerServerConnection.onPacket can attach a 'from' property.
@@ -569,7 +574,7 @@ RootActor.prototype = {
     return Cu.cloneInto(request, {});
   },
 
-  onProtocolDescription: function() {
+  onProtocolDescription: function () {
     return require("devtools/shared/protocol").dumpProtocolSpec();
   },
 
@@ -581,7 +586,7 @@ RootActor.prototype = {
    * Remove the extra actor (added by DebuggerServer.addGlobalActor or
    * DebuggerServer.addTabActor) name |name|.
    */
-  removeActorByName: function(name) {
+  removeActorByName: function (name) {
     if (name in this._extraActors) {
       const actor = this._extraActors[name];
       if (this._globalActorPool.has(actor)) {

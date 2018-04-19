@@ -20,7 +20,7 @@ with Files("coverity/**"):
     BUG_COMPONENT = ("Core", "Rewriting and Analysis")
 
 with Files("docs/**"):
-    BUG_COMPONENT = ("Firefox Build System", "Generated Documentation")
+    BUG_COMPONENT = ("Core", "Build Config")
     SCHEDULES.exclusive = ['docs']
 
 with Files("lint/**"):
@@ -64,6 +64,5 @@ CRAMTEST_MANIFESTS += [
 ]
 
 PYTHON_UNITTEST_MANIFESTS += [
-    'lint/test/python.ini',
     'tryselect/test/python.ini',
 ]

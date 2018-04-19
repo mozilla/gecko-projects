@@ -289,14 +289,9 @@ interface nsIDocShell : nsIDocShellTreeItem
   attribute nsIDOMEventTarget chromeEventHandler;
 
   /**
-   * This allows chrome to set a custom User agent on a specific docshell
-   */
+    * This allows chrome to set a custom User agent on a specific docshell
+    */
   attribute DOMString customUserAgent;
-
-  /**
-   * Whether CSS error reporting is enabled.
-   */
-  attribute boolean cssErrorReportingEnabled;
 
   /**
    * Whether to allow plugin execution
@@ -586,6 +581,13 @@ interface nsIDocShell : nsIDocShellTreeItem
    * transition. This is set just before the pagehide/unload events fire.
    */
   readonly attribute boolean isInUnload;
+
+  /**
+   * Find out if the currently loaded document came from a suspicious channel
+   * (such as a JAR channel where the server-returned content type isn't a
+   * known JAR type).
+   */
+  readonly attribute boolean channelIsUnsafe;
 
   /**
    * This attribute determines whether Mixed Active Content is loaded on the
@@ -1186,12 +1188,6 @@ interface nsIDocShell : nsIDocShellTreeItem
 
   void getColorMatrix([optional] out unsigned long aMatrixLen,
                       [array, size_is(aMatrixLen), retval] out float aMatrix);
-
-  /**
-   * Initialize session history for this docshell. The docshell must be the root
-   * docshell.
-   */
-  void initSessionHistory();
 
 %{C++
   /**

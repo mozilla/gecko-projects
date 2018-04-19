@@ -10,7 +10,7 @@
       }
 
       connectedCallback() {
-        let shadow = this.attachShadow({ mode: "open" });
+        let shadow = this.createShadowRoot();
         if (this.template) {
           let te = document.createElement('template');
           te.innerHTML = this.template;

@@ -11,7 +11,7 @@ ar_DZ{
             }
         }
     }
-    Version{"2.1.38.39"}
+    Version{"2.1.37.1"}
     calendar{
         gregorian{
             monthNames{

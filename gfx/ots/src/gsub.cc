@@ -17,10 +17,8 @@
 
 namespace {
 
-// The GSUB header size for table version 1.0
-const size_t kGsubHeaderSize_1_0 = 4 + 3 * 2;
-// GSUB header size v1.1
-const size_t kGsubHeaderSize_1_1 = 4 + 3 * 2 + 4;
+// The GSUB header size
+const size_t kGsubHeaderSize = 4 + 3 * 2;
 
 enum GSUB_TYPE {
   GSUB_TYPE_SINGLE = 1,
@@ -582,34 +580,23 @@ bool OpenTypeGSUB::Parse(const uint8_t *data, size_t length) {
   Font *font = GetFont();
   Buffer table(data, length);
 
-  uint16_t version_major = 0, version_minor = 0;
+  uint32_t version = 0;
   uint16_t offset_script_list = 0;
   uint16_t offset_feature_list = 0;
   uint16_t offset_lookup_list = 0;
-  uint32_t offset_feature_variations = 0;
-  if (!table.ReadU16(&version_major) ||
-      !table.ReadU16(&version_minor) ||
+  if (!table.ReadU32(&version) ||
       !table.ReadU16(&offset_script_list) ||
       !table.ReadU16(&offset_feature_list) ||
       !table.ReadU16(&offset_lookup_list)) {
     return Error("Incomplete table");
   }
 
-  if (version_major != 1 || version_minor > 1) {
+  if (version != 0x00010000) {
     return Error("Bad version");
   }
 
-  if (version_minor > 0) {
-    if (!table.ReadU32(&offset_feature_variations)) {
-      return Error("Incomplete table");
-    }
-  }
-
-  const size_t header_size =
-    (version_minor == 0) ? kGsubHeaderSize_1_0 : kGsubHeaderSize_1_1;
-
   if (offset_lookup_list) {
-    if (offset_lookup_list < header_size || offset_lookup_list >= length) {
+    if (offset_lookup_list < kGsubHeaderSize || offset_lookup_list >= length) {
       return Error("Bad lookup list offset in table header");
     }
 
@@ -623,7 +610,7 @@ bool OpenTypeGSUB::Parse(const uint8_t *data, size_t length) {
 
   uint16_t num_features = 0;
   if (offset_feature_list) {
-    if (offset_feature_list < header_size || offset_feature_list >= length) {
+    if (offset_feature_list < kGsubHeaderSize || offset_feature_list >= length) {
       return Error("Bad feature list offset in table header");
     }
 
@@ -635,25 +622,13 @@ bool OpenTypeGSUB::Parse(const uint8_t *data, size_t length) {
   }
 
   if (offset_script_list) {
-    if (offset_script_list < header_size || offset_script_list >= length) {
+    if (offset_script_list < kGsubHeaderSize || offset_script_list >= length) {
       return Error("Bad script list offset in table header");
     }
 
     if (!ParseScriptListTable(font, data + offset_script_list,
                               length - offset_script_list, num_features)) {
       return Error("Failed to parse script list table");
-    }
-  }
-
-  if (offset_feature_variations) {
-    if (offset_feature_variations < header_size || offset_feature_variations >= length) {
-      return Error("Bad feature variations offset in table header");
-    }
-
-    if (!ParseFeatureVariationsTable(font, data + offset_feature_variations,
-                                     length - offset_feature_variations,
-                                     this->num_lookups)) {
-      return Error("Failed to parse feature variations table");
     }
   }
 

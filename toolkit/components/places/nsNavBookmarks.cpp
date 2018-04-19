@@ -14,7 +14,6 @@
 #include "nsNetUtil.h"
 #include "nsUnicharUtils.h"
 #include "nsPrintfCString.h"
-#include "nsQueryObject.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/storage.h"
 
@@ -140,7 +139,7 @@ DetermineInitialSyncStatus(uint16_t aSource) {
   if (aSource == nsINavBookmarksService::SOURCE_SYNC) {
     return nsINavBookmarksService::SYNC_STATUS_NORMAL;
   }
-  if (aSource == nsINavBookmarksService::SOURCE_RESTORE_ON_STARTUP) {
+  if (aSource == nsINavBookmarksService::SOURCE_IMPORT_REPLACE) {
     return nsINavBookmarksService::SYNC_STATUS_UNKNOWN;
   }
   return nsINavBookmarksService::SYNC_STATUS_NEW;
@@ -164,6 +163,7 @@ nsNavBookmarks::nsNavBookmarks()
   , mToolbarRoot(0)
   , mMobileRoot(0)
   , mCanNotify(false)
+  , mBatching(false)
 {
   NS_ASSERTION(!gBookmarksService,
                "Attempting to create two instances of the service!");
@@ -863,6 +863,48 @@ bool nsNavBookmarks::IsLivemark(int64_t aFolderId)
 }
 
 nsresult
+nsNavBookmarks::GetDescendantFolders(int64_t aFolderId,
+                                     nsTArray<int64_t>& aDescendantFoldersArray) {
+  nsresult rv;
+  // New descendant folders will be added from this index on.
+  uint32_t startIndex = aDescendantFoldersArray.Length();
+  {
+    nsCOMPtr<mozIStorageStatement> stmt = mDB->GetStatement(
+      "SELECT id "
+      "FROM moz_bookmarks "
+      "WHERE parent = :parent "
+      "AND type = :item_type "
+    );
+    NS_ENSURE_STATE(stmt);
+    mozStorageStatementScoper scoper(stmt);
+
+    rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("parent"), aFolderId);
+    NS_ENSURE_SUCCESS(rv, rv);
+    rv = stmt->BindInt32ByName(NS_LITERAL_CSTRING("item_type"), TYPE_FOLDER);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    bool hasMore = false;
+    while (NS_SUCCEEDED(stmt->ExecuteStep(&hasMore)) && hasMore) {
+      int64_t itemId;
+      rv = stmt->GetInt64(0, &itemId);
+      NS_ENSURE_SUCCESS(rv, rv);
+      aDescendantFoldersArray.AppendElement(itemId);
+    }
+  }
+
+  // Recursively call GetDescendantFolders for added folders.
+  // We start at startIndex since previous folders are checked
+  // by previous calls to this method.
+  uint32_t childCount = aDescendantFoldersArray.Length();
+  for (uint32_t i = startIndex; i < childCount; ++i) {
+    GetDescendantFolders(aDescendantFoldersArray[i], aDescendantFoldersArray);
+  }
+
+  return NS_OK;
+}
+
+
+nsresult
 nsNavBookmarks::GetDescendantChildren(int64_t aFolderId,
                                       const nsACString& aFolderGuid,
                                       int64_t aGrandParentId,
@@ -1542,7 +1584,7 @@ nsNavBookmarks::GetItemTitle(int64_t aItemId,
 }
 
 
-nsresult
+NS_IMETHODIMP
 nsNavBookmarks::GetBookmarkURI(int64_t aItemId,
                                nsIURI** _URI)
 {
@@ -1902,6 +1944,27 @@ nsNavBookmarks::GetBookmarksForURI(nsIURI* aURI,
 
 
 NS_IMETHODIMP
+nsNavBookmarks::RunInBatchMode(nsINavHistoryBatchCallback* aCallback,
+                               nsISupports* aUserData) {
+  AUTO_PROFILER_LABEL("nsNavBookmarks::RunInBatchMode", OTHER);
+
+  NS_ENSURE_ARG(aCallback);
+
+  mBatching = true;
+
+  // Just forward the request to history.  History service must exist for
+  // bookmarks to work and we are observing it, thus batch notifications will be
+  // forwarded to bookmarks observers.
+  nsNavHistory* history = nsNavHistory::GetHistoryService();
+  NS_ENSURE_TRUE(history, NS_ERROR_OUT_OF_MEMORY);
+  nsresult rv = history->RunInBatchMode(aCallback, aUserData);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  return NS_OK;
+}
+
+
+NS_IMETHODIMP
 nsNavBookmarks::AddObserver(nsINavBookmarkObserver* aObserver,
                             bool aOwnsWeak)
 {
@@ -2034,6 +2097,10 @@ nsNavBookmarks::OnBeginUpdateBatch()
 NS_IMETHODIMP
 nsNavBookmarks::OnEndUpdateBatch()
 {
+  if (mBatching) {
+    mBatching = false;
+  }
+
   NOTIFY_OBSERVERS(mCanNotify, mObservers,
                    nsINavBookmarkObserver, OnEndUpdateBatch());
   return NS_OK;
@@ -2140,17 +2207,15 @@ nsNavBookmarks::OnPageChanged(nsIURI* aURI,
       nsNavHistory* history = nsNavHistory::GetHistoryService();
       NS_ENSURE_TRUE(history, NS_ERROR_OUT_OF_MEMORY);
 
-      nsCOMPtr<nsINavHistoryQuery> query;
-      nsCOMPtr<nsINavHistoryQueryOptions> options;
-      rv = history->QueryStringToQuery(changeData.bookmark.url,
-                                       getter_AddRefs(query),
-                                       getter_AddRefs(options));
+      nsCOMArray<nsNavHistoryQuery> queries;
+      nsCOMPtr<nsNavHistoryQueryOptions> options;
+      rv = history->QueryStringToQueryArray(changeData.bookmark.url,
+                                            &queries, getter_AddRefs(options));
       NS_ENSURE_SUCCESS(rv, rv);
 
-      RefPtr<nsNavHistoryQuery> queryObj = do_QueryObject(query);
-      if (queryObj->Folders().Length() == 1) {
+      if (queries.Count() == 1 && queries[0]->Folders().Length() == 1) {
         // Fetch missing data.
-        rv = FetchItemInfo(queryObj->Folders()[0], changeData.bookmark);
+        rv = FetchItemInfo(queries[0]->Folders()[0], changeData.bookmark);
         NS_ENSURE_SUCCESS(rv, rv);
         NotifyItemChanged(changeData);
       }

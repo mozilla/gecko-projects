@@ -13,7 +13,7 @@ import mozprocess
 
 __all__ = ["SeleniumServer", "ChromeDriverServer", "OperaDriverServer",
            "GeckoDriverServer", "InternetExplorerDriverServer", "EdgeDriverServer",
-           "ServoDriverServer", "WebKitDriverServer", "WebDriverServer"]
+           "ServoDriverServer", "WebDriverServer"]
 
 
 class WebDriverServer(object):
@@ -60,22 +60,21 @@ class WebDriverServer(object):
             env=self.env,
             storeOutput=False)
 
-        self.logger.debug("Starting WebDriver: %s" % ' '.join(self._cmd))
         try:
             self._proc.run()
         except OSError as e:
             if e.errno == errno.ENOENT:
                 raise IOError(
-                    "WebDriver executable not found: %s" % self.binary)
+                    "WebDriver HTTP server executable not found: %s" % self.binary)
             raise
 
         self.logger.debug(
-            "Waiting for WebDriver to become accessible: %s" % self.url)
+            "Waiting for server to become accessible: %s" % self.url)
         try:
             wait_for_service((self.host, self.port))
         except Exception:
             self.logger.error(
-                "WebDriver was not accessible "
+                "WebDriver HTTP server was not accessible "
                 "within the timeout:\n%s" % traceback.format_exc())
             raise
 
@@ -138,9 +137,9 @@ class ChromeDriverServer(WebDriverServer):
 
 class EdgeDriverServer(WebDriverServer):
     def __init__(self, logger, binary="microsoftwebdriver.exe", port=None,
-                 base_path="", host="localhost", args=None):
+                 base_path="", args=None):
         WebDriverServer.__init__(
-            self, logger, binary, host=host, port=port, args=args)
+            self, logger, binary, port=port, base_path=base_path, args=args)
 
     def make_command(self):
         return [self.binary,
@@ -179,16 +178,6 @@ class GeckoDriverServer(WebDriverServer):
                 "--port", str(self.port)] + self._args
 
 
-class SafariDriverServer(WebDriverServer):
-    def __init__(self, logger, binary="safaridriver", port=None, args=None):
-        WebDriverServer.__init__(
-            self, logger, binary, port=port, args=args)
-
-    def make_command(self):
-        return [self.binary,
-                "--port=%s" % str(self.port)] + self._args
-
-
 class ServoDriverServer(WebDriverServer):
     def __init__(self, logger, binary="servo", binary_args=None, host="127.0.0.1",
                  port=None, args=None):
@@ -205,14 +194,6 @@ class ServoDriverServer(WebDriverServer):
         if self.binary_args:
             command += self.binary_args
         return command
-
-
-class WebKitDriverServer(WebDriverServer):
-    def __init__(self, logger, binary=None, port=None, args=None):
-        WebDriverServer.__init__(self, logger, binary, port=port, args=args)
-
-    def make_command(self):
-        return [self.binary, "--port=%s" % str(self.port)] + self._args
 
 
 def cmd_arg(name, value=None):

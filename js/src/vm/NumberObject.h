@@ -11,8 +11,6 @@
 
 namespace js {
 
-class GlobalObject;
-
 class NumberObject : public NativeObject
 {
     /* Stores this Number object's [[PrimitiveValue]]. */
@@ -41,7 +39,7 @@ class NumberObject : public NativeObject
 
     /* For access to init, as Number.prototype is special. */
     friend JSObject*
-    js::InitNumberClass(JSContext* cx, Handle<GlobalObject*> global);
+    js::InitNumberClass(JSContext* cx, HandleObject global);
 };
 
 } // namespace js

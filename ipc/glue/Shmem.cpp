@@ -247,7 +247,7 @@ Unprotect(SharedMemory* aSegment)
 // to touch the segment, it dies with SIGSEGV.
 //
 
-Shmem::Shmem(PrivateIPDLCaller,
+Shmem::Shmem(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
              SharedMemory* aSegment, id_t aId) :
     mSegment(aSegment),
     mData(nullptr),
@@ -300,7 +300,7 @@ Shmem::AssertInvariants() const
 }
 
 void
-Shmem::RevokeRights(PrivateIPDLCaller)
+Shmem::RevokeRights(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead)
 {
   AssertInvariants();
 
@@ -319,7 +319,7 @@ Shmem::RevokeRights(PrivateIPDLCaller)
 
 // static
 already_AddRefed<Shmem::SharedMemory>
-Shmem::Alloc(PrivateIPDLCaller,
+Shmem::Alloc(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
              size_t aNBytes,
              SharedMemoryType aType,
              bool aUnsafe,
@@ -360,7 +360,7 @@ Shmem::Alloc(PrivateIPDLCaller,
 
 // static
 already_AddRefed<Shmem::SharedMemory>
-Shmem::OpenExisting(PrivateIPDLCaller,
+Shmem::OpenExisting(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
                     const IPC::Message& aDescriptor,
                     id_t* aId,
                     bool aProtect)
@@ -396,7 +396,7 @@ Shmem::OpenExisting(PrivateIPDLCaller,
 
 // static
 void
-Shmem::Dealloc(PrivateIPDLCaller,
+Shmem::Dealloc(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
                SharedMemory* aSegment)
 {
   if (!aSegment)
@@ -422,7 +422,7 @@ Shmem::Dealloc(PrivateIPDLCaller,
 
 // static
 already_AddRefed<Shmem::SharedMemory>
-Shmem::Alloc(PrivateIPDLCaller,
+Shmem::Alloc(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
              size_t aNBytes,
              SharedMemoryType aType,
              bool /*unused*/,
@@ -440,7 +440,7 @@ Shmem::Alloc(PrivateIPDLCaller,
 
 // static
 already_AddRefed<Shmem::SharedMemory>
-Shmem::OpenExisting(PrivateIPDLCaller,
+Shmem::OpenExisting(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
                     const IPC::Message& aDescriptor,
                     id_t* aId,
                     bool /*unused*/)
@@ -461,7 +461,7 @@ Shmem::OpenExisting(PrivateIPDLCaller,
 
 // static
 void
-Shmem::Dealloc(PrivateIPDLCaller,
+Shmem::Dealloc(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
                SharedMemory* aSegment)
 {
   DestroySegment(aSegment);
@@ -470,7 +470,7 @@ Shmem::Dealloc(PrivateIPDLCaller,
 #endif  // if defined(DEBUG)
 
 IPC::Message*
-Shmem::ShareTo(PrivateIPDLCaller,
+Shmem::ShareTo(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
                base::ProcessId aTargetPid,
                int32_t routingId)
 {
@@ -486,7 +486,8 @@ Shmem::ShareTo(PrivateIPDLCaller,
 }
 
 IPC::Message*
-Shmem::UnshareFrom(PrivateIPDLCaller,
+Shmem::UnshareFrom(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
+                   base::ProcessId aTargetPid,
                    int32_t routingId)
 {
   AssertInvariants();
@@ -500,9 +501,9 @@ IPDLParamTraits<Shmem>::Write(IPC::Message* aMsg, IProtocol* aActor,
   WriteIPDLParam(aMsg, aActor, aParam.mId);
 
   aParam.RevokeRights(
-    Shmem::PrivateIPDLCaller());
+    Shmem::IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead());
   aParam.forget(
-    Shmem::PrivateIPDLCaller());
+    Shmem::IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead());
 }
 
 bool
@@ -517,7 +518,7 @@ IPDLParamTraits<Shmem>::Read(const IPC::Message* aMsg, PickleIterator* aIter,
   Shmem::SharedMemory* rawmem = aActor->LookupSharedMemory(id);
   if (rawmem) {
     *aResult = Shmem(
-      Shmem::PrivateIPDLCaller(),
+      Shmem::IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead(),
       rawmem, id);
     return true;
   }

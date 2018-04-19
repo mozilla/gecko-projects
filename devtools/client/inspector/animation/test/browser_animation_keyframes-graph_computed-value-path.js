@@ -9,11 +9,9 @@
 // * fill color by animation type
 // * stop color if the animation type is color
 
-requestLongerTimeout(2);
-
 const TEST_DATA = [
   {
-    targetClass: "multi-types",
+    targetName: "multi-types",
     properties: [
       {
         name: "background-color",
@@ -87,7 +85,7 @@ const TEST_DATA = [
     ],
   },
   {
-    targetClass: "multi-types-reverse",
+    targetName: "multi-types-reverse",
     properties: [
       {
         name: "background-color",
@@ -161,7 +159,7 @@ const TEST_DATA = [
     ],
   },
   {
-    targetClass: "middle-keyframe",
+    targetName: "middle-keyframe",
     properties: [
       {
         name: "background-color",
@@ -249,7 +247,7 @@ const TEST_DATA = [
     ],
   },
   {
-    targetClass: "steps-keyframe",
+    targetName: "steps-keyframe",
     properties: [
       {
         name: "background-color",
@@ -335,7 +333,7 @@ const TEST_DATA = [
     ],
   },
   {
-    targetClass: "steps-effect",
+    targetName: "steps-effect",
     properties: [
       {
         name: "opacity",
@@ -351,7 +349,7 @@ const TEST_DATA = [
     ],
   },
   {
-    targetClass: "frames-keyframe",
+    targetName: "frames-keyframe",
     properties: [
       {
         name: "opacity",
@@ -372,7 +370,7 @@ const TEST_DATA = [
     ],
   },
   {
-    targetClass: "narrow-offsets",
+    targetName: "narrow-offsets",
     properties: [
       {
         name: "opacity",
@@ -391,7 +389,7 @@ const TEST_DATA = [
     ],
   },
   {
-    targetClass: "duplicate-offsets",
+    targetName: "duplicate-offsets",
     properties: [
       {
         name: "opacity",
@@ -410,14 +408,14 @@ const TEST_DATA = [
   },
 ];
 
-add_task(async function() {
+add_task(async function () {
   await addTab(URL_ROOT + "doc_multi_keyframes.html");
-  const { animationInspector, panel } = await openAnimationInspector();
 
-  for (const { properties, targetClass } of TEST_DATA) {
-    info(`Checking keyframes graph for ${ targetClass }`);
-    await clickOnAnimationByTargetSelector(animationInspector,
-                                           panel, `.${ targetClass }`);
+  const { inspector, panel } = await openAnimationInspector();
+
+  for (const { properties, targetName } of TEST_DATA) {
+    info(`Checking keyframes graph for ${ targetName }`);
+    await selectNodeAndWaitForAnimations(`#${ targetName }`, inspector);
 
     for (const property of properties) {
       const {
@@ -427,7 +425,7 @@ add_task(async function() {
         expectedStopColors,
       } = property;
 
-      const testTarget = `${ name } in ${ targetClass }`;
+      const testTarget = `${ name } in ${ targetName }`;
       info(`Checking keyframes graph for ${ testTarget }`);
       info(`Checking keyframes graph path existence for ${ testTarget }`);
       const keyframesGraphPathEl = panel.querySelector(`.${ name }`);

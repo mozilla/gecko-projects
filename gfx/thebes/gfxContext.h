@@ -135,6 +135,11 @@ public:
     void MoveTo(const gfxPoint& pt);
 
     /**
+     * Returns the current point in the current path.
+     */
+    gfxPoint CurrentPoint();
+
+    /**
      * Draws a line from the current point to pt.
      *
      * @see MoveTo

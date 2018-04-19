@@ -17,7 +17,6 @@
 #include "mozilla/dom/CSSPrimitiveValueBinding.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/Element.h"
-#include "mozilla/dom/EventTarget.h"
 #include "mozilla/mozalloc.h"
 #include "nsAString.h"
 #include "nsAlgorithm.h"
@@ -30,6 +29,8 @@
 #include "nsROCSSPrimitiveValue.h"
 #include "nsIDOMElement.h"
 #include "nsIDOMEventListener.h"
+#include "nsIDOMEventTarget.h"
+#include "nsIDOMNode.h"
 #include "nsDOMCSSRGBColor.h"
 #include "nsIDOMWindow.h"
 #include "nsIHTMLObjectResizer.h"
@@ -47,6 +48,8 @@
 namespace mozilla {
 
 using namespace dom;
+
+#define  BLACK_BG_RGB_TRIGGER 0xd0
 
 nsresult
 HTMLEditor::SetSelectionToAbsoluteOrStatic(bool aEnabled)
@@ -219,8 +222,9 @@ HTMLEditor::CreateGrabber(nsIContent& aParentContent)
   }
 
   // add the mouse listener so we can detect a click on a resizer
-  ret->AddEventListener(NS_LITERAL_STRING("mousedown"),
-			mEventListener, false);
+  nsCOMPtr<nsIDOMEventTarget> evtTarget = do_QueryInterface(ret);
+  evtTarget->AddEventListener(NS_LITERAL_STRING("mousedown"),
+                              mEventListener, false);
 
   return ret;
 }
@@ -311,7 +315,7 @@ HTMLEditor::ShowGrabber(Element& aElement)
 }
 
 nsresult
-HTMLEditor::StartMoving()
+HTMLEditor::StartMoving(nsIDOMElement* aHandle)
 {
   nsCOMPtr<nsIContent> parentContent = mGrabber->GetParent();
   if (NS_WARN_IF(!parentContent) || NS_WARN_IF(!mAbsolutelyPositionedObject)) {
@@ -358,12 +362,12 @@ HTMLEditor::GrabberClicked()
     mMouseMotionListenerP = new ResizerMouseMotionListener(*this);
     if (!mMouseMotionListenerP) {return NS_ERROR_NULL_POINTER;}
 
-    EventTarget* piTarget = GetDOMEventTarget();
+    nsIDOMEventTarget* piTarget = GetDOMEventTarget();
     NS_ENSURE_TRUE(piTarget, NS_ERROR_FAILURE);
 
     rv = piTarget->AddEventListener(NS_LITERAL_STRING("mousemove"),
-				    mMouseMotionListenerP,
-				    false, false);
+                                     mMouseMotionListenerP,
+                                     false, false);
     NS_ASSERTION(NS_SUCCEEDED(rv),
                  "failed to register mouse motion listener");
   }
@@ -382,12 +386,14 @@ HTMLEditor::EndMoving()
 
     mPositioningShadow = nullptr;
   }
-  RefPtr<EventTarget> piTarget = GetDOMEventTarget();
+  nsCOMPtr<nsIDOMEventTarget> piTarget = GetDOMEventTarget();
 
   if (piTarget && mMouseMotionListenerP) {
-    piTarget->RemoveEventListener(NS_LITERAL_STRING("mousemove"),
-				  mMouseMotionListenerP,
-				  false);
+    DebugOnly<nsresult> rv =
+      piTarget->RemoveEventListener(NS_LITERAL_STRING("mousemove"),
+                                    mMouseMotionListenerP,
+                                    false);
+    NS_ASSERTION(NS_SUCCEEDED(rv), "failed to remove mouse motion listener");
   }
   mMouseMotionListenerP = nullptr;
 
@@ -613,25 +619,45 @@ HTMLEditor::GetTemporaryStyleForFocusedPositionedElement(Element& aElement,
     CSSEditUtils::GetComputedProperty(aElement, *nsGkAtoms::backgroundColor,
                                       bgColorStr);
   NS_ENSURE_SUCCESS(rv, rv);
-  if (!bgColorStr.EqualsLiteral("rgba(0, 0, 0, 0)")) {
+  if (!bgColorStr.EqualsLiteral("transparent")) {
     return NS_OK;
   }
 
-  RefPtr<ComputedStyle> style =
-    nsComputedDOMStyle::GetComputedStyle(&aElement, nullptr);
-  NS_ENSURE_STATE(style);
+  RefPtr<nsComputedDOMStyle> cssDecl =
+    CSSEditUtils::GetComputedStyle(&aElement);
+  NS_ENSURE_STATE(cssDecl);
 
-  const uint8_t kBlackBgTrigger = 0xd0;
+  // from these declarations, get the one we want and that one only
+  ErrorResult error;
+  RefPtr<dom::CSSValue> cssVal =
+    cssDecl->GetPropertyCSSValue(NS_LITERAL_STRING("color"), error);
+  NS_ENSURE_TRUE(!error.Failed(), error.StealNSResult());
 
-  nscolor color = style->StyleColor()->mColor;
-  if (NS_GET_R(color) >= kBlackBgTrigger &&
-      NS_GET_G(color) >= kBlackBgTrigger &&
-      NS_GET_B(color) >= kBlackBgTrigger) {
+  nsROCSSPrimitiveValue* val = cssVal->AsPrimitiveValue();
+  NS_ENSURE_TRUE(val, NS_ERROR_FAILURE);
+
+  if (CSSPrimitiveValueBinding::CSS_RGBCOLOR != val->PrimitiveType()) {
+    return NS_OK;
+  }
+
+  nsDOMCSSRGBColor* rgbVal = val->GetRGBColorValue(error);
+  NS_ENSURE_TRUE(!error.Failed(), error.StealNSResult());
+  float r = rgbVal->Red()->
+    GetFloatValue(CSSPrimitiveValueBinding::CSS_NUMBER, error);
+  NS_ENSURE_TRUE(!error.Failed(), error.StealNSResult());
+  float g = rgbVal->Green()->
+    GetFloatValue(CSSPrimitiveValueBinding::CSS_NUMBER, error);
+  NS_ENSURE_TRUE(!error.Failed(), error.StealNSResult());
+  float b = rgbVal->Blue()->
+    GetFloatValue(CSSPrimitiveValueBinding::CSS_NUMBER, error);
+  NS_ENSURE_TRUE(!error.Failed(), error.StealNSResult());
+  if (r >= BLACK_BG_RGB_TRIGGER &&
+      g >= BLACK_BG_RGB_TRIGGER &&
+      b >= BLACK_BG_RGB_TRIGGER) {
     aReturn.AssignLiteral("black");
   } else {
     aReturn.AssignLiteral("white");
   }
-
   return NS_OK;
 }
 

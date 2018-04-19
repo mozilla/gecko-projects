@@ -175,6 +175,7 @@ uplrules_selectWithFormat(const UPluralRules *uplrules,
 
 #endif  /* U_HIDE_INTERNAL_API */
 
+#ifndef U_HIDE_DRAFT_API
 /**
  * Creates a string enumeration of all plural rule keywords used in this
  * UPluralRules object. The rule "other" is always present by default.
@@ -183,11 +184,12 @@ uplrules_selectWithFormat(const UPluralRules *uplrules,
  * @param status A pointer to a UErrorCode to receive any errors.
  * @return a string enumeration over plural rule keywords, or NULL
  * upon error. The caller is responsible for closing the result.
- * @stable ICU 59
+ * @draft ICU 59
  */
-U_STABLE UEnumeration* U_EXPORT2
+U_DRAFT UEnumeration* U_EXPORT2
 uplrules_getKeywords(const UPluralRules *uplrules,
                      UErrorCode *status);
+#endif  /* U_HIDE_DRAFT_API */
 
 #endif /* #if !UCONFIG_NO_FORMATTING */
 

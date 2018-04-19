@@ -31,7 +31,7 @@
             <xul:description class="translation-welcome-body" anonid="welcomeBody"/>
             <xul:hbox align="center">
               <xul:label anonid="learnMore" class="plain text-link"
-                         onclick="openTrustedLinkIn('https://support.mozilla.org/kb/automatic-translation', 'tab'); this.parentNode.parentNode.parentNode.hidePopup();"/>
+                         onclick="openUILinkIn('https://support.mozilla.org/kb/automatic-translation', 'tab'); this.parentNode.parentNode.parentNode.hidePopup();"/>
               <xul:spacer flex="1"/>
               <xul:button class="translate-infobar-element" anonid="thanksButton"
                           onclick="this.parentNode.parentNode.parentNode.hidePopup();"/>
@@ -182,10 +182,9 @@
         <body>
           <![CDATA[
             this.translation = aTranslation;
-
+            let bundle = Services.strings.createBundle("chrome://global/locale/languageNames.properties");
             let sortByLocalizedName = function(aList) {
-              let names = Services.intl.getLanguageDisplayNames(undefined, aList);
-              return aList.map((code, i) => [code, names[i]])
+              return aList.map(code => [code, bundle.GetStringFromName(code)])
                           .sort((a, b) => a[1].localeCompare(b[1]));
             };
 
@@ -356,7 +355,9 @@
                 lang = this.translation.detectedLanguage;
             }
 
-            let langName = Services.intl.getLanguageDisplayNames(undefined, [lang])[0];
+            let langBundle =
+              Services.strings.createBundle("chrome://global/locale/languageNames.properties");
+            let langName = langBundle.GetStringFromName(lang);
 
             // Set the label and accesskey on the menuitem.
             let bundle =

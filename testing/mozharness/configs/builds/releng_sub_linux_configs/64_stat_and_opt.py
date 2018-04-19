@@ -11,6 +11,7 @@ config = {
     # decides whether we want to use moz_sign_cmd in env
     'enable_signing': False,
     'vcs_share_base': '/builds/hg-shared',
+    'enable_count_ctors': True,
     'perfherder_extra_options': ['static-analysis'],
     #########################################################################
 

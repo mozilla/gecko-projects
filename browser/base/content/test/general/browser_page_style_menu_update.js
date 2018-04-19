@@ -63,5 +63,5 @@ add_task(async function() {
   selected = menupopup.querySelector("menuitem[checked='true']");
   is(selected.getAttribute("label"), "1", "Should now have stylesheet 1 selected");
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

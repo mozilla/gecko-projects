@@ -2,7 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import PaymentsStore from "../PaymentsStore.js";
+"use strict";
+
+/* global PaymentsStore */
 
 /**
  * A mixin for a custom element to observe store changes to information about a payment request.
@@ -11,13 +13,10 @@ import PaymentsStore from "../PaymentsStore.js";
 /**
  * State of the payment request dialog.
  */
-export let requestStore = new PaymentsStore({
+let requestStore = new PaymentsStore({
   changesPrevented: false,
   completionState: "initial",
   orderDetailsShowing: false,
-  page: {
-    id: "payment-summary",
-  },
   request: {
     tabId: null,
     topLevelPrincipal: {URI: {displayHost: null}},
@@ -49,6 +48,8 @@ export let requestStore = new PaymentsStore({
 });
 
 
+/* exported PaymentStateSubscriberMixin */
+
 /**
  * A mixin to render UI based upon the requestStore and get updated when that store changes.
  *
@@ -56,7 +57,7 @@ export let requestStore = new PaymentsStore({
  * @param {class} superClass The class to extend
  * @returns {class}
  */
-export default function PaymentStateSubscriberMixin(superClass) {
+function PaymentStateSubscriberMixin(superClass) {
   return class PaymentStateSubscriber extends superClass {
     constructor() {
       super();

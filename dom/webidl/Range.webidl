@@ -73,7 +73,6 @@ interface Range {
   [Throws]
   boolean intersectsNode(Node node);
 
-  [Throws]
   stringifier;
 };
 

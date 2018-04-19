@@ -835,7 +835,7 @@ function awaitCSP(urlsPromise) {
       let report = body["csp-report"];
 
       let origURL = report["blocked-uri"];
-      if (origURL !== "self" && origURL !== "") {
+      if (origURL !== "self") {
         let {baseURL} = getOriginBase(origURL);
 
         if (expectedURLs.has(baseURL)) {

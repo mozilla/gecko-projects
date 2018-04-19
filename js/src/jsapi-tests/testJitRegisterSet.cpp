@@ -179,7 +179,8 @@ BEGIN_TEST(testJitRegisterSet_FPU_Aliases)
 
         uint32_t alias_bits = 0;
         for (uint32_t i = 0; i < reg.numAlignedAliased(); i++) {
-            FloatRegister alias = reg.alignedAliased(i);
+            FloatRegister alias;
+            reg.alignedAliased(i, &alias);
 
             if (alias.isSingle()) {
                 if (alias_bits <= 32)

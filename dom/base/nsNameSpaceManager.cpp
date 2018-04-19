@@ -13,7 +13,6 @@
 
 #include "nscore.h"
 #include "mozilla/dom/NodeInfo.h"
-#include "nsAtom.h"
 #include "nsCOMArray.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsGkAtoms.h"
@@ -94,21 +93,14 @@ nsresult
 nsNameSpaceManager::RegisterNameSpace(const nsAString& aURI,
                                       int32_t& aNameSpaceID)
 {
-  RefPtr<nsAtom> atom = NS_Atomize(aURI);
-  return RegisterNameSpace(atom.forget(), aNameSpaceID);
-}
-
-nsresult
-nsNameSpaceManager::RegisterNameSpace(already_AddRefed<nsAtom> aURI,
-                                      int32_t& aNameSpaceID)
-{
-  RefPtr<nsAtom> atom = aURI;
-  nsresult rv = NS_OK;
-  if (atom == nsGkAtoms::_empty) {
+  if (aURI.IsEmpty()) {
     aNameSpaceID = kNameSpaceID_None; // xmlns="", see bug 75700 for details
+
     return NS_OK;
   }
 
+  RefPtr<nsAtom> atom = NS_Atomize(aURI);
+  nsresult rv = NS_OK;
   if (!mURIToIDTable.Get(atom, &aNameSpaceID)) {
     aNameSpaceID = mURIArray.Length();
 

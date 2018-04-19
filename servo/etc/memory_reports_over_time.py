@@ -28,8 +28,7 @@ def extract_memory_reports(lines):
         elif line == 'End memory reports\n':
             in_report = False
         elif in_report:
-            if line.startswith('|'):
-                report_lines[-1].append(line.strip())
+            report_lines[-1].append(line.strip())
     return (report_lines, times)
 
 
@@ -73,17 +72,6 @@ def transform_report_for_test(report):
     return transformed
 
 
-def test_extract_memory_reports():
-    input = ["Begin memory reports",
-             "|",
-             "  154.56 MiB -- explicit\n",
-             "|     107.88 MiB -- system-heap-unclassified\n",
-             "End memory reports\n"]
-    expected = ([['|', '|     107.88 MiB -- system-heap-unclassified']], ['reports'])
-    assert(extract_memory_reports(input) == expected)
-    return 0
-
-
 def test():
     input = '''|
 |   23.89 MiB -- explicit
@@ -117,7 +105,6 @@ def test():
     assert(sorted(transformed.keys()) == sorted(expected.keys()))
     for k, v in transformed.items():
         assert(v == expected[k])
-    test_extract_memory_reports()
     return 0
 
 

@@ -18,7 +18,6 @@
 
 #include "js/Utility.h"
 #include "gfxASurface.h"
-#include "mozilla/ServoTraversalStatistics.h"
 
 namespace mozilla {
 namespace layers {
@@ -210,27 +209,6 @@ private:
   mozilla::TimeStamp mVsyncTimestamp;
 };
 
-class ScreenshotPayload : public ProfilerMarkerPayload
-{
-public:
-  explicit ScreenshotPayload(mozilla::TimeStamp aTimeStamp,
-                             nsCString&& aScreenshotDataURL,
-                             const mozilla::gfx::IntSize& aWindowSize,
-                             uintptr_t aWindowIdentifier)
-    : ProfilerMarkerPayload(aTimeStamp, mozilla::TimeStamp())
-    , mScreenshotDataURL(mozilla::Move(aScreenshotDataURL))
-    , mWindowSize(aWindowSize)
-    , mWindowIdentifier(aWindowIdentifier)
-  {}
-
-  DECL_STREAM_PAYLOAD
-
-private:
-  nsCString mScreenshotDataURL;
-  mozilla::gfx::IntSize mWindowSize;
-  uintptr_t mWindowIdentifier;
-};
-
 class GCSliceMarkerPayload : public ProfilerMarkerPayload
 {
 public:
@@ -289,27 +267,6 @@ public:
 
   DECL_STREAM_PAYLOAD
 private:
-};
-
-class StyleMarkerPayload : public ProfilerMarkerPayload
-{
-public:
-  StyleMarkerPayload(const mozilla::TimeStamp& aStartTime,
-                     const mozilla::TimeStamp& aEndTime,
-                     UniqueProfilerBacktrace aCause,
-                     const mozilla::ServoTraversalStatistics& aStats)
-    : ProfilerMarkerPayload(aStartTime, aEndTime)
-    , mStats(aStats)
-  {
-    if (aCause) {
-      SetStack(Move(aCause));
-    }
-  }
-
-  DECL_STREAM_PAYLOAD
-
-private:
-  mozilla::ServoTraversalStatistics mStats;
 };
 
 #endif // ProfilerMarkerPayload_h

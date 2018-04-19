@@ -8,10 +8,7 @@
 * sharedobject.cpp
 */
 #include "sharedobject.h"
-#include "mutex.h"
 #include "uassert.h"
-#include "umutex.h"
-#include "unifiedcache.h"
 
 U_NAMESPACE_BEGIN
 
@@ -20,41 +17,69 @@ SharedObject::~SharedObject() {}
 UnifiedCacheBase::~UnifiedCacheBase() {}
 
 void
-SharedObject::addRef() const {
-    umtx_atomic_inc(&hardRefCount);
-}
+SharedObject::addRef(UBool fromWithinCache) const {
+    umtx_atomic_inc(&totalRefCount);
 
-// removeRef Decrement the reference count and delete if it is zero.
-//           Note that SharedObjects with a non-null cachePtr are owned by the
-//           unified cache, and the cache will be responsible for the actual deletion.
-//           The deletion could be as soon as immediately following the
-//           update to the reference count, if another thread is running
-//           a cache eviction cycle concurrently.
-//           NO ACCESS TO *this PERMITTED AFTER REFERENCE COUNT == 0 for cached objects.
-//           THE OBJECT MAY ALREADY BE GONE.
-void
-SharedObject::removeRef() const {
-    const UnifiedCacheBase *cache = this->cachePtr;
-    int32_t updatedRefCount = umtx_atomic_dec(&hardRefCount);
-    U_ASSERT(updatedRefCount >= 0);
-    if (updatedRefCount == 0) {
-        if (cache) {
-            cache->handleUnreferencedObject();
-        } else {
-            delete this;
-        }
+    // Although items in use may not be correct immediately, it
+    // will be correct eventually.
+    if (umtx_atomic_inc(&hardRefCount) == 1 && cachePtr != NULL) {
+        // If this object is cached, and the hardRefCount goes from 0 to 1,
+        // then the increment must happen from within the cache while the
+        // cache global mutex is locked. In this way, we can be rest assured
+        // that data races can't happen if the cache performs some task if
+        // the hardRefCount is zero while the global cache mutex is locked.
+        (void)fromWithinCache;   // Suppress unused variable warning in non-debug builds.
+        U_ASSERT(fromWithinCache);
+        cachePtr->incrementItemsInUse();
     }
 }
 
+void
+SharedObject::removeRef(UBool fromWithinCache) const {
+    UBool decrementItemsInUse = (umtx_atomic_dec(&hardRefCount) == 0);
+    UBool allReferencesGone = (umtx_atomic_dec(&totalRefCount) == 0);
+
+    // Although items in use may not be correct immediately, it
+    // will be correct eventually.
+    if (decrementItemsInUse && cachePtr != NULL) {
+        if (fromWithinCache) {
+            cachePtr->decrementItemsInUse();
+        } else {
+            cachePtr->decrementItemsInUseWithLockingAndEviction();
+        }
+    }
+    if (allReferencesGone) {
+        delete this;
+    }
+}
+
+void
+SharedObject::addSoftRef() const {
+    umtx_atomic_inc(&totalRefCount);
+    ++softRefCount;
+}
+
+void
+SharedObject::removeSoftRef() const {
+    --softRefCount;
+    if (umtx_atomic_dec(&totalRefCount) == 0) {
+        delete this;
+    }
+}
 
 int32_t
 SharedObject::getRefCount() const {
+    return umtx_loadAcquire(totalRefCount);
+}
+
+int32_t
+SharedObject::getHardRefCount() const {
     return umtx_loadAcquire(hardRefCount);
 }
 
 void
 SharedObject::deleteIfZeroRefCount() const {
-    if (this->cachePtr == nullptr && getRefCount() == 0) {
+    if(getRefCount() == 0) {
         delete this;
     }
 }

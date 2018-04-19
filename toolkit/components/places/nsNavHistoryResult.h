@@ -101,6 +101,13 @@ class nsNavHistoryResult final : public nsSupportsWeakReference,
                                  public nsINavHistoryObserver
 {
 public:
+  static nsresult NewHistoryResult(nsINavHistoryQuery** aQueries,
+                                   uint32_t aQueryCount,
+                                   nsNavHistoryQueryOptions* aOptions,
+                                   nsNavHistoryContainerResultNode* aRoot,
+                                   bool aBatchInProgress,
+                                   nsNavHistoryResult** result);
+
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_NAVHISTORYRESULT_IID)
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -126,15 +133,16 @@ public:
                    const nsAString& aLastKnownTitle);
 
 public:
-  explicit nsNavHistoryResult(nsNavHistoryContainerResultNode* mRoot,
-                              const RefPtr<nsNavHistoryQuery>& aQuery,
-                              const RefPtr<nsNavHistoryQueryOptions>& aOptions,
-                              bool aBatchInProgress);
+  // two-stage init, use NewHistoryResult to construct
+  explicit nsNavHistoryResult(nsNavHistoryContainerResultNode* mRoot);
+  nsresult Init(nsINavHistoryQuery** aQueries,
+                uint32_t aQueryCount,
+                nsNavHistoryQueryOptions *aOptions);
 
   RefPtr<nsNavHistoryContainerResultNode> mRootNode;
 
-  RefPtr<nsNavHistoryQuery> mQuery;
-  RefPtr<nsNavHistoryQueryOptions> mOptions;
+  nsCOMArray<nsINavHistoryQuery> mQueries;
+  nsCOMPtr<nsNavHistoryQueryOptions> mOptions;
 
   // One of nsNavHistoryQueryOptions.SORY_BY_* This is initialized to mOptions.sortingMode,
   // but may be overridden if the user clicks on one of the columns.
@@ -225,7 +233,7 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsNavHistoryResult, NS_NAVHISTORYRESULT_IID)
 // short and we can save a virtual function call.
 //
 // (GetUri is redefined only by QueryResultNode and FolderResultNode because
-// the query might not necessarily be parsed. The rest just return the node's
+// the queries might not necessarily be parsed. The rest just return the node's
 // buffer.)
 #define NS_FORWARD_COMMON_RESULTNODE_TO_BASE \
   NS_IMPLEMENT_SIMPLE_RESULTNODE \
@@ -427,6 +435,9 @@ class nsNavHistoryContainerResultNode : public nsNavHistoryResultNode,
 public:
   nsNavHistoryContainerResultNode(
     const nsACString& aURI, const nsACString& aTitle,
+    uint32_t aContainerType, nsNavHistoryQueryOptions* aOptions);
+  nsNavHistoryContainerResultNode(
+    const nsACString& aURI, const nsACString& aTitle,
     PRTime aTime, uint32_t aContainerType, nsNavHistoryQueryOptions* aOptions);
 
   virtual nsresult Refresh();
@@ -477,8 +488,8 @@ public:
   // the direct parent of this container node, see SetAsParentOfNode. For
   // example, if the parent has excludeItems, options will have it too, even if
   // originally this object was not defined with that option.
-  RefPtr<nsNavHistoryQueryOptions> mOriginalOptions;
-  RefPtr<nsNavHistoryQueryOptions> mOptions;
+  nsCOMPtr<nsNavHistoryQueryOptions> mOriginalOptions;
+  nsCOMPtr<nsNavHistoryQueryOptions> mOptions;
 
   void FillStats();
   // Sets this container as parent of aNode, propagating the appropriate options.
@@ -616,10 +627,14 @@ class nsNavHistoryQueryResultNode final : public nsNavHistoryContainerResultNode
 {
 public:
   nsNavHistoryQueryResultNode(const nsACString& aTitle,
+                              const nsACString& aQueryURI);
+  nsNavHistoryQueryResultNode(const nsACString& aTitle,
+                              const nsCOMArray<nsNavHistoryQuery>& aQueries,
+                              nsNavHistoryQueryOptions* aOptions);
+  nsNavHistoryQueryResultNode(const nsACString& aTitle,
                               PRTime aTime,
-                              const nsACString& aQueryURI,
-                              const RefPtr<nsNavHistoryQuery>& aQuery,
-                              const RefPtr<nsNavHistoryQueryOptions>& aOptions);
+                              const nsCOMArray<nsNavHistoryQuery>& aQueries,
+                              nsNavHistoryQueryOptions* aOptions);
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_FORWARD_COMMON_RESULTNODE_TO_BASE
@@ -648,11 +663,18 @@ public:
   virtual void OnRemoving() override;
 
 public:
-  RefPtr<nsNavHistoryQuery> mQuery;
+  // this constructs lazily mURI from mQueries and mOptions, call
+  // VerifyQueriesSerialized either this or mQueries/mOptions should be valid
+  nsresult VerifyQueriesSerialized();
+
+  // these may be constructed lazily from mURI, call VerifyQueriesParsed
+  // either this or mURI should be valid
+  nsCOMArray<nsNavHistoryQuery> mQueries;
   uint32_t mLiveUpdate; // one of QUERYUPDATE_* in nsNavHistory.h
   bool mHasSearchTerms;
+  nsresult VerifyQueriesParsed();
 
-  // safe options getter, ensures query is parsed
+  // safe options getter, ensures queries are parsed
   nsNavHistoryQueryOptions* Options();
 
   // this indicates whether the query contents are valid, they don't go away
@@ -672,7 +694,7 @@ public:
 
   uint32_t mBatchChanges;
 
-  // Tracks transition type filters.
+  // Tracks transition type filters shared by all mQueries.
   nsTArray<uint32_t> mTransitions;
 
 protected:

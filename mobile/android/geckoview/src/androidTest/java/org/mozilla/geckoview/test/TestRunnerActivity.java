@@ -1,15 +1,10 @@
-/* -*- Mode: Java; c-basic-offset: 4; tab-width: 4; indent-tabs-mode: nil; -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
 package org.mozilla.geckoview.test;
 
+import org.mozilla.gecko.mozglue.GeckoLoader;
+import org.mozilla.gecko.mozglue.SafeIntent;
 import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoSessionSettings;
 import org.mozilla.geckoview.GeckoView;
-import org.mozilla.geckoview.GeckoRuntime;
-import org.mozilla.geckoview.GeckoRuntimeSettings;
 
 import android.app.Activity;
 import android.content.Intent;
@@ -19,11 +14,8 @@ import android.os.Bundle;
 public class TestRunnerActivity extends Activity {
     private static final String LOGTAG = "TestRunnerActivity";
 
-    static GeckoRuntime sRuntime;
-
-    private GeckoSession mSession;
-    private GeckoView mView;
-    private boolean mKillProcessOnDestroy;
+    GeckoSession mSession;
+    GeckoView mView;
 
     private GeckoSession.NavigationDelegate mNavigationDelegate = new GeckoSession.NavigationDelegate() {
         @Override
@@ -42,10 +34,9 @@ public class TestRunnerActivity extends Activity {
         }
 
         @Override
-        public void onLoadRequest(GeckoSession session, String uri, int target,
-                                  GeckoSession.Response<Boolean> response) {
+        public boolean onLoadRequest(GeckoSession session, String uri, int target) {
             // Allow Gecko to load all URIs
-            response.respond(false);
+            return false;
         }
 
         @Override
@@ -76,12 +67,8 @@ public class TestRunnerActivity extends Activity {
         }
 
         @Override
-        public void onContextMenu(GeckoSession session, int screenX, int screenY, String uri, int elementType, String elementSrc) {
+        public void onContextMenu(GeckoSession session, int screenX, int screenY, String uri, String elementSrc) {
 
-        }
-
-        @Override
-        public void onExternalResponse(GeckoSession session, GeckoSession.WebResponseInfo request) {
         }
     };
 
@@ -108,28 +95,13 @@ public class TestRunnerActivity extends Activity {
         super.onCreate(savedInstanceState);
 
         final Intent intent = getIntent();
+        GeckoSession.preload(this, new String[] { "-purgecaches" },
+                             intent.getExtras(), false /* no multiprocess, see below */);
 
-        if (sRuntime == null) {
-            final GeckoRuntimeSettings.Builder runtimeSettingsBuilder =
-                new GeckoRuntimeSettings.Builder();
-            runtimeSettingsBuilder.arguments(new String[] { "-purgecaches" });
-            final Bundle extras = intent.getExtras();
-            if (extras != null) {
-                runtimeSettingsBuilder.extras(extras);
-            }
-
-            sRuntime = GeckoRuntime.create(this, runtimeSettingsBuilder.build());
-            sRuntime.setDelegate(new GeckoRuntime.Delegate() {
-                @Override
-                public void onShutdown() {
-                    mKillProcessOnDestroy = true;
-                    finish();
-                }
-            });
-        }
-
+        // We can't use e10s because we get deadlocked when quickly creating and
+        // destroying sessions. Bug 1348361.
         mSession = createSession();
-        mSession.open(sRuntime);
+        mSession.open(this);
 
         // If we were passed a URI in the Intent, open it
         final Uri uri = intent.getData();
@@ -146,10 +118,6 @@ public class TestRunnerActivity extends Activity {
     protected void onDestroy() {
         mSession.close();
         super.onDestroy();
-
-        if (mKillProcessOnDestroy) {
-            android.os.Process.killProcess(android.os.Process.myPid());
-        }
     }
 
     public GeckoView getGeckoView() {

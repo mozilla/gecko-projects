@@ -139,12 +139,6 @@ WorkerGlobalScope::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
   MOZ_CRASH("We should never get here!");
 }
 
-void
-WorkerGlobalScope::NoteTerminating()
-{
-  DisconnectEventTargetObjects();
-}
-
 already_AddRefed<Console>
 WorkerGlobalScope::GetConsole(ErrorResult& aRv)
 {
@@ -641,10 +635,10 @@ DedicatedWorkerGlobalScope::PostMessage(JSContext* aCx,
 }
 
 void
-DedicatedWorkerGlobalScope::Close()
+DedicatedWorkerGlobalScope::Close(JSContext* aCx)
 {
   mWorkerPrivate->AssertIsOnWorkerThread();
-  mWorkerPrivate->CloseInternal();
+  mWorkerPrivate->CloseInternal(aCx);
 }
 
 SharedWorkerGlobalScope::SharedWorkerGlobalScope(WorkerPrivate* aWorkerPrivate,
@@ -669,10 +663,10 @@ SharedWorkerGlobalScope::WrapGlobalObject(JSContext* aCx,
 }
 
 void
-SharedWorkerGlobalScope::Close()
+SharedWorkerGlobalScope::Close(JSContext* aCx)
 {
   mWorkerPrivate->AssertIsOnWorkerThread();
-  mWorkerPrivate->CloseInternal();
+  mWorkerPrivate->CloseInternal(aCx);
 }
 
 NS_IMPL_CYCLE_COLLECTION_INHERITED(ServiceWorkerGlobalScope, WorkerGlobalScope,
@@ -794,10 +788,18 @@ ServiceWorkerGlobalScope::SetOnfetch(mozilla::dom::EventHandlerNonNull* aCallbac
 }
 
 void
-ServiceWorkerGlobalScope::EventListenerAdded(const nsAString& aType)
+ServiceWorkerGlobalScope::AddEventListener(
+                          const nsAString& aType,
+                          dom::EventListener* aListener,
+                          const dom::AddEventListenerOptionsOrBoolean& aOptions,
+                          const dom::Nullable<bool>& aWantsUntrusted,
+                          ErrorResult& aRv)
 {
   MOZ_ASSERT(mWorkerPrivate);
   mWorkerPrivate->AssertIsOnWorkerThread();
+
+  DOMEventTargetHelper::AddEventListener(aType, aListener, aOptions,
+                                         aWantsUntrusted, aRv);
 
   if (!aType.EqualsLiteral("fetch")) {
     return;
@@ -808,7 +810,9 @@ ServiceWorkerGlobalScope::EventListenerAdded(const nsAString& aType)
     mWorkerPrivate->DispatchToMainThread(r.forget());
   }
 
-  mWorkerPrivate->SetFetchHandlerWasAdded();
+  if (!aRv.Failed()) {
+    mWorkerPrivate->SetFetchHandlerWasAdded();
+  }
 }
 
 namespace {

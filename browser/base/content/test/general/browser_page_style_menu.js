@@ -93,5 +93,5 @@ add_task(async function() {
   ok(items.length, "At least one item in the menu");
   is(items.length, validLinks, "all valid links found");
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

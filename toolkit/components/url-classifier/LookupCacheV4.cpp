@@ -31,12 +31,13 @@ class VLPrefixSet
 {
 public:
   explicit VLPrefixSet(const PrefixStringMap& aMap);
+  explicit VLPrefixSet(const TableUpdateV4::PrefixStdStringMap& aMap);
 
   // This function will merge the prefix map in VLPrefixSet to aPrefixMap.
   void Merge(PrefixStringMap& aPrefixMap);
 
   // Find the smallest string from the map in VLPrefixSet.
-  bool GetSmallestPrefix(nsACString& aOutString);
+  bool GetSmallestPrefix(nsDependentCSubstring& aOutString);
 
   // Return the number of prefixes in the map
   uint32_t Count() const { return mCount; }
@@ -47,39 +48,19 @@ private:
   // |pos| increases each time GetSmallestPrefix finds the smallest string.
   struct PrefixString {
     PrefixString(const nsACString& aStr, uint32_t aSize)
-      : data(aStr)
-      , pos(0)
-      , size(aSize)
+     : pos(0)
+     , size(aSize)
     {
-      MOZ_ASSERT(data.Length() % size == 0,
-                 "PrefixString length must be a multiple of the prefix size.");
+      data.Rebind(aStr.BeginReading(), aStr.Length());
     }
 
-    void getRemainingString(nsACString& out) {
-      MOZ_ASSERT(out.IsEmpty());
-      if (remaining() > 0) {
-        out = Substring(data, pos);
-      }
+    const char* get() {
+      return pos < data.Length() ? data.BeginReading() + pos : nullptr;
     }
-    void getPrefix(nsACString& out) {
-      MOZ_ASSERT(out.IsEmpty());
-      if (remaining() >= size) {
-        out = Substring(data, pos, size);
-      } else {
-        MOZ_ASSERT(remaining() == 0,
-                   "Remaining bytes but not enough for a (size)-byte prefix.");
-      }
-    }
-    void next() {
-      pos += size;
-      MOZ_ASSERT(pos <= data.Length());
-    }
-    uint32_t remaining() {
-      return data.Length() - pos;
-      MOZ_ASSERT(pos <= data.Length());
-    }
+    void next() { pos += size; }
+    uint32_t remaining() { return data.Length() - pos; }
 
-    nsCString data;
+    nsDependentCSubstring data;
     uint32_t pos;
     uint32_t size;
   };
@@ -216,16 +197,15 @@ LookupCacheV4::SizeOfPrefixSet()
 }
 
 static nsresult
-AppendPrefixToMap(PrefixStringMap& prefixes, const nsACString& prefix)
+AppendPrefixToMap(PrefixStringMap& prefixes, nsDependentCSubstring& prefix)
 {
   uint32_t len = prefix.Length();
-  MOZ_ASSERT(len >= PREFIX_SIZE && len <= COMPLETE_SIZE);
   if (!len) {
     return NS_OK;
   }
 
   nsCString* prefixString = prefixes.LookupOrAdd(len);
-  if (!prefixString->Append(prefix, fallible)) {
+  if (!prefixString->Append(prefix.BeginReading(), len, fallible)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
@@ -271,8 +251,8 @@ LookupCacheV4::ApplyUpdate(TableUpdateV4* aTableUpdate,
   uint32_t removalIndex = 0;
   int32_t numOldPrefixPicked = -1;
 
-  nsAutoCString smallestOldPrefix;
-  nsAutoCString smallestAddPrefix;
+  nsDependentCSubstring smallestOldPrefix;
+  nsDependentCSubstring smallestAddPrefix;
 
   bool isOldMapEmpty = false, isAddMapEmpty = false;
 
@@ -409,7 +389,7 @@ LookupCacheV4::VerifyChecksum(const nsACString& aChecksum)
   VLPrefixSet loadPSet(map);
   uint32_t index = loadPSet.Count() + 1;
   for(;index > 0; index--) {
-    nsAutoCString prefix;
+    nsDependentCSubstring prefix;
     if (!loadPSet.GetSmallestPrefix(prefix)) {
       break;
     }
@@ -604,10 +584,18 @@ VLPrefixSet::VLPrefixSet(const PrefixStringMap& aMap)
 {
   for (auto iter = aMap.ConstIter(); !iter.Done(); iter.Next()) {
     uint32_t size = iter.Key();
-    MOZ_ASSERT(iter.Data()->Length() % size == 0,
-               "PrefixString must be a multiple of the prefix size.");
     mMap.Put(size, new PrefixString(*iter.Data(), size));
     mCount += iter.Data()->Length() / size;
+  }
+}
+
+VLPrefixSet::VLPrefixSet(const TableUpdateV4::PrefixStdStringMap& aMap)
+  : mCount(0)
+{
+  for (auto iter = aMap.ConstIter(); !iter.Done(); iter.Next()) {
+    uint32_t size = iter.Key();
+    mMap.Put(size, new PrefixString(iter.Data()->GetPrefixString(), size));
+    mCount += iter.Data()->GetPrefixString().Length() / size;
   }
 }
 
@@ -617,37 +605,31 @@ VLPrefixSet::Merge(PrefixStringMap& aPrefixMap) {
     nsCString* prefixString = aPrefixMap.LookupOrAdd(iter.Key());
     PrefixString* str = iter.Data();
 
-    nsAutoCString remainingString;
-    str->getRemainingString(remainingString);
-    if (!remainingString.IsEmpty()) {
-      MOZ_ASSERT(remainingString.Length() == str->remaining());
-      prefixString->Append(remainingString);
+    if (str->get()) {
+      prefixString->Append(str->get(), str->remaining());
     }
   }
 }
 
 bool
-VLPrefixSet::GetSmallestPrefix(nsACString& aOutString) {
+VLPrefixSet::GetSmallestPrefix(nsDependentCSubstring& aOutString) {
   PrefixString* pick = nullptr;
   for (auto iter = mMap.ConstIter(); !iter.Done(); iter.Next()) {
     PrefixString* str = iter.Data();
 
-    if (str->remaining() <= 0) {
+    if (!str->get()) {
       continue;
     }
 
     if (aOutString.IsEmpty()) {
-      str->getPrefix(aOutString);
-      MOZ_ASSERT(aOutString.Length() == iter.Key());
+      aOutString.Rebind(str->get(), iter.Key());
       pick = str;
       continue;
     }
 
-    nsAutoCString cur;
-    str->getPrefix(cur);
-    if (!cur.IsEmpty() && cur < aOutString) {
-      aOutString.Assign(cur);
-      MOZ_ASSERT(aOutString.Length() == iter.Key());
+    nsDependentCSubstring cur(str->get(), iter.Key());
+    if (cur < aOutString) {
+      aOutString.Rebind(str->get(), iter.Key());
       pick = str;
     }
   }

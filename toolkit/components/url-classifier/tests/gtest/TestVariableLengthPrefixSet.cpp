@@ -177,7 +177,7 @@ static void SetupPrefixMap(const _PrefixArray& array,
 
 
 // Test setting prefix set with only 4-bytes prefixes
-TEST(UrlClassifierVLPrefixSet, FixedLengthSet)
+TEST(VariableLengthPrefixSet, FixedLengthSet)
 {
   srand(time(nullptr));
 
@@ -215,7 +215,7 @@ TEST(UrlClassifierVLPrefixSet, FixedLengthSet)
 }
 
 // Test setting prefix set with only 5~32 bytes prefixes
-TEST(UrlClassifierVLPrefixSet, VariableLengthSet)
+TEST(VariableLengthPrefixSet, VariableLengthSet)
 {
   RefPtr<VariableLengthPrefixSet> pset = new VariableLengthPrefixSet;
   pset->Init(NS_LITERAL_CSTRING("test"));
@@ -258,7 +258,7 @@ TEST(UrlClassifierVLPrefixSet, VariableLengthSet)
 }
 
 // Test setting prefix set with both 4-bytes prefixes and 5~32 bytes prefixes
-TEST(UrlClassifierVLPrefixSet, MixedPrefixSet)
+TEST(VariableLengthPrefixSet, MixedPrefixSet)
 {
   RefPtr<VariableLengthPrefixSet> pset = new VariableLengthPrefixSet;
   pset->Init(NS_LITERAL_CSTRING("test"));
@@ -300,7 +300,7 @@ TEST(UrlClassifierVLPrefixSet, MixedPrefixSet)
 }
 
 // Test resetting prefix set
-TEST(UrlClassifierVLPrefixSet, ResetPrefix)
+TEST(VariableLengthPrefixSet, ResetPrefix)
 {
   RefPtr<VariableLengthPrefixSet> pset = new VariableLengthPrefixSet;
   pset->Init(NS_LITERAL_CSTRING("test"));
@@ -346,7 +346,7 @@ TEST(UrlClassifierVLPrefixSet, ResetPrefix)
 }
 
 // Test only set one 4-bytes prefix and one full-length prefix
-TEST(UrlClassifierVLPrefixSet, TinyPrefixSet)
+TEST(VariableLengthPrefixSet, TinyPrefixSet)
 {
   RefPtr<VariableLengthPrefixSet> pset = new VariableLengthPrefixSet;
   pset->Init(NS_LITERAL_CSTRING("test"));
@@ -367,7 +367,7 @@ TEST(UrlClassifierVLPrefixSet, TinyPrefixSet)
 }
 
 // Test empty prefix set and IsEmpty function
-TEST(UrlClassifierVLPrefixSet, EmptyPrefixSet)
+TEST(VariableLengthPrefixSet, EmptyPrefixSet)
 {
   RefPtr<VariableLengthPrefixSet> pset = new VariableLengthPrefixSet;
   pset->Init(NS_LITERAL_CSTRING("test"));
@@ -401,7 +401,7 @@ TEST(UrlClassifierVLPrefixSet, EmptyPrefixSet)
 }
 
 // Test prefix size should only between 4~32 bytes
-TEST(UrlClassifierVLPrefixSet, MinMaxPrefixSet)
+TEST(VariableLengthPrefixSet, MinMaxPrefixSet)
 {
   RefPtr<VariableLengthPrefixSet> pset = new VariableLengthPrefixSet;
   pset->Init(NS_LITERAL_CSTRING("test"));
@@ -437,7 +437,7 @@ TEST(UrlClassifierVLPrefixSet, MinMaxPrefixSet)
 }
 
 // Test save then load prefix set with only 4-bytes prefixes
-TEST(UrlClassifierVLPrefixSet, LoadSaveFixedLengthPrefixSet)
+TEST(VariableLengthPrefixSet, LoadSaveFixedLengthPrefixSet)
 {
   RefPtr<VariableLengthPrefixSet> save = new VariableLengthPrefixSet;
   save->Init(NS_LITERAL_CSTRING("test-save"));
@@ -477,7 +477,7 @@ TEST(UrlClassifierVLPrefixSet, LoadSaveFixedLengthPrefixSet)
 }
 
 // Test save then load prefix set with only 5~32 bytes prefixes
-TEST(UrlClassifierVLPrefixSet, LoadSaveVariableLengthPrefixSet)
+TEST(VariableLengthPrefixSet, LoadSaveVariableLengthPrefixSet)
 {
   RefPtr<VariableLengthPrefixSet> save = new VariableLengthPrefixSet;
   save->Init(NS_LITERAL_CSTRING("test-save"));
@@ -517,7 +517,7 @@ TEST(UrlClassifierVLPrefixSet, LoadSaveVariableLengthPrefixSet)
 }
 
 // Test save then load prefix with both 4 bytes prefixes and 5~32 bytes prefixes
-TEST(UrlClassifierVLPrefixSet, LoadSavePrefixSet)
+TEST(VariableLengthPrefixSet, LoadSavePrefixSet)
 {
   RefPtr<VariableLengthPrefixSet> save = new VariableLengthPrefixSet;
   save->Init(NS_LITERAL_CSTRING("test-save"));

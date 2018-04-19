@@ -138,8 +138,8 @@ js::WrapAsyncFunctionWithProto(JSContext* cx, HandleFunction unwrapped, HandleOb
     if (!wrapped)
         return nullptr;
 
-    if (unwrapped->hasInferredName())
-        wrapped->setInferredName(unwrapped->inferredName());
+    if (unwrapped->hasCompileTimeName())
+        wrapped->setCompileTimeName(unwrapped->compileTimeName());
 
     // Link them to each other to make GetWrappedAsyncFunction and
     // GetUnwrappedAsyncFunction work.

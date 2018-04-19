@@ -66,7 +66,7 @@ var HAWKAuthenticatedRESTRequest =
 HAWKAuthenticatedRESTRequest.prototype = {
   __proto__: RESTRequest.prototype,
 
-  async dispatch(method, data) {
+  dispatch: function dispatch(method, data, onComplete, onProgress) {
     let contentType = "text/plain";
     if (method == "POST" || method == "PUT" || method == "PATCH") {
       contentType = "application/json";
@@ -92,7 +92,9 @@ HAWKAuthenticatedRESTRequest.prototype = {
 
     this.setHeader("Accept-Language", this._intl.accept_languages);
 
-    return super.dispatch(method, data);
+    return RESTRequest.prototype.dispatch.call(
+      this, method, data, onComplete, onProgress
+    );
   }
 };
 

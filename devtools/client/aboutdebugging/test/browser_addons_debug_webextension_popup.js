@@ -41,7 +41,7 @@ function makeWidgetId(id) {
   return id.replace(/[^a-z0-9_-]/g, "_");
 }
 
-add_task(async function testWebExtensionsToolboxSwitchToPopup() {
+add_task(function* testWebExtensionsToolboxSwitchToPopup() {
   let onReadyForOpenPopup;
   let onPopupCustomMessage;
 
@@ -78,13 +78,13 @@ add_task(async function testWebExtensionsToolboxSwitchToPopup() {
 
   let {
     tab, document, debugBtn,
-  } = await setupTestAboutDebuggingWebExtension(ADDON_NAME, ADDON_MANIFEST_PATH);
+  } = yield setupTestAboutDebuggingWebExtension(ADDON_NAME, ADDON_MANIFEST_PATH);
 
   // Be careful, this JS function is going to be executed in the addon toolbox,
   // which lives in another process. So do not try to use any scope variable!
   let env = Cc["@mozilla.org/process/environment;1"].getService(Ci.nsIEnvironment);
 
-  let testScript = function() {
+  let testScript = function () {
     /* eslint-disable no-undef */
 
     let jsterm;
@@ -92,24 +92,12 @@ add_task(async function testWebExtensionsToolboxSwitchToPopup() {
 
     toolbox.selectTool("webconsole")
       .then(async (console) => {
-        const clickNoAutoHideMenu = () => {
-          return new Promise(resolve => {
-            toolbox.doc.getElementById("toolbox-meatball-menu-button").click();
-            toolbox.doc.addEventListener("popupshown", () => {
-              const menuItem =
-                toolbox.doc.getElementById("toolbox-meatball-menu-noautohide");
-              menuItem.click();
-              resolve();
-            }, { once: true });
-          });
-        };
-
-        dump(`Clicking the menu button\n`);
-        await clickNoAutoHideMenu();
-        dump(`Clicked the menu button\n`);
+        dump(`Clicking the noautohide button\n`);
+        toolbox.doc.getElementById("command-button-noautohide").click();
+        dump(`Clicked the noautohide button\n`);
 
         popupFramePromise = new Promise(resolve => {
-          let listener = data => {
+          let listener = (event, data) => {
             if (data.frames.some(({url}) => url && url.endsWith("popup.html"))) {
               toolbox.target.off("frame-update", listener);
               resolve();
@@ -177,7 +165,7 @@ add_task(async function testWebExtensionsToolboxSwitchToPopup() {
 
   debugBtn.click();
 
-  await onReadyForOpenPopup;
+  yield onReadyForOpenPopup;
 
   let browserActionId = makeWidgetId(ADDON_ID) + "-browser-action";
   let browserActionEl = window.document.getElementById(browserActionId);
@@ -186,16 +174,16 @@ add_task(async function testWebExtensionsToolboxSwitchToPopup() {
   browserActionEl.click();
   info("Clicked on the browserAction button");
 
-  let args = await onPopupCustomMessage;
+  let args = yield onPopupCustomMessage;
   ok(true, "Received console message from the popup page function as expected");
   is(args[0], "popupPageFunctionCalled", "Got the expected console message");
   is(args[1] && args[1].name, ADDON_NAME,
      "Got the expected manifest from WebExtension API");
 
-  await onToolboxClose;
+  yield onToolboxClose;
 
   ok(true, "Addon toolbox closed");
 
-  await uninstallAddon({document, id: ADDON_ID, name: ADDON_NAME});
-  await closeAboutDebugging(tab);
+  yield uninstallAddon({document, id: ADDON_ID, name: ADDON_NAME});
+  yield closeAboutDebugging(tab);
 });

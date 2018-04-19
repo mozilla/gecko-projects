@@ -31,7 +31,7 @@ class MediaDrmProxySupport final
 {
 public:
 
-  explicit MediaDrmProxySupport(const nsAString& aKeySystem);
+  MediaDrmProxySupport(const nsAString& aKeySystem);
   ~MediaDrmProxySupport();
 
   /*

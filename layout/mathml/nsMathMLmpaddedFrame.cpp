@@ -8,7 +8,6 @@
 #include "nsMathMLmpaddedFrame.h"
 #include "nsMathMLElement.h"
 #include "mozilla/gfx/2D.h"
-#include "mozilla/TextUtils.h"
 #include <algorithm>
 
 //
@@ -28,9 +27,9 @@
 #define NS_MATHML_PSEUDO_UNIT_NAMEDSPACE  5
 
 nsIFrame*
-NS_NewMathMLmpaddedFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
+NS_NewMathMLmpaddedFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
-  return new (aPresShell) nsMathMLmpaddedFrame(aStyle);
+  return new (aPresShell) nsMathMLmpaddedFrame(aContext);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmpaddedFrame)
@@ -161,7 +160,7 @@ nsMathMLmpaddedFrame::ParseAttribute(nsString&   aString,
 
     if (c == '.')
       gotDot = true;
-    else if (!IsAsciiDigit(c)) {
+    else if (!nsCRT::IsAsciiDigit(c)) {
       break;
     }
     number.Append(c);
@@ -292,7 +291,7 @@ nsMathMLmpaddedFrame::UpdateValue(int32_t                  aSign,
     else if (eCSSUnit_Percent == unit)
       amount = NSToCoordRound(float(scaler) * aCSSValue.GetPercentValue());
     else
-      amount = CalcLength(PresContext(), mComputedStyle, aCSSValue,
+      amount = CalcLength(PresContext(), mStyleContext, aCSSValue,
                           aFontSizeInflation);
 
     if (NS_MATHML_SIGN_PLUS == aSign)

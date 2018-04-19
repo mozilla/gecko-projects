@@ -261,20 +261,11 @@ static const char* const CLDR_FIELD_APPEND[] = {
     "Hour", "Minute", "Second", "*", "Timezone"
 };
 
-static const char* const CLDR_FIELD_NAME[UDATPG_FIELD_COUNT] = {
+static const char* const CLDR_FIELD_NAME[] = {
     "era", "year", "quarter", "month", "week", "weekOfMonth", "weekday",
     "dayOfYear", "weekdayOfMonth", "day", "dayperiod", // The UDATPG_x_FIELD constants and these fields have a different order than in ICU4J
     "hour", "minute", "second", "*", "zone"
 };
-
-static const char* const CLDR_FIELD_WIDTH[] = { // [UDATPG_WIDTH_COUNT]
-    "", "-short", "-narrow"
-};
-
-// TODO(ticket:13619): remove when definition uncommented in dtptngen.h.
-static const int32_t UDATPG_WIDTH_COUNT = UDATPG_NARROW + 1;
-static constexpr UDateTimePGDisplayWidth UDATPG_WIDTH_APPENDITEM = UDATPG_WIDE;
-static constexpr int32_t UDATPG_FIELD_KEY_MAX = 24; // max length of CLDR field tag (type + width)
 
 // For appendItems
 static const UChar UDATPG_ItemFormat[]= {0x7B, 0x30, 0x7D, 0x20, 0x251C, 0x7B, 0x32, 0x7D, 0x3A,
@@ -388,11 +379,10 @@ DateTimePatternGenerator::operator=(const DateTimePatternGenerator& other) {
     }
     for (int32_t i=0; i< UDATPG_FIELD_COUNT; ++i ) {
         appendItemFormats[i] = other.appendItemFormats[i];
-        appendItemFormats[i].getTerminatedBuffer(); // NUL-terminate for the C API.
-        for (int32_t j=0; j< UDATPG_WIDTH_COUNT; ++j ) {
-            fieldDisplayNames[i][j] = other.fieldDisplayNames[i][j];
-            fieldDisplayNames[i][j].getTerminatedBuffer(); // NUL-terminate for the C API.
-        }
+        appendItemNames[i] = other.appendItemNames[i];
+        // NUL-terminate for the C API.
+        appendItemFormats[i].getTerminatedBuffer();
+        appendItemNames[i].getTerminatedBuffer();
     }
     UErrorCode status = U_ZERO_ERROR;
     patternMap->copyFrom(*other.patternMap, status);
@@ -409,14 +399,10 @@ DateTimePatternGenerator::operator==(const DateTimePatternGenerator& other) cons
     if ((pLocale==other.pLocale) && (patternMap->equals(*other.patternMap)) &&
         (dateTimeFormat==other.dateTimeFormat) && (decimal==other.decimal)) {
         for ( int32_t i=0 ; i<UDATPG_FIELD_COUNT; ++i ) {
-            if (appendItemFormats[i] != other.appendItemFormats[i]) {
-                return FALSE;
-            }
-            for (int32_t j=0; j< UDATPG_WIDTH_COUNT; ++j ) {
-                if (fieldDisplayNames[i][j] != other.fieldDisplayNames[i][j]) {
-                    return FALSE;
-                }
-            }
+           if ((appendItemFormats[i] != other.appendItemFormats[i]) ||
+               (appendItemNames[i] != other.appendItemNames[i]) ) {
+               return FALSE;
+           }
         }
         return TRUE;
     }
@@ -838,16 +824,15 @@ struct DateTimePatternGenerator::AppendItemNamesSink : public ResourceSink {
         ResourceTable itemsTable = value.getTable(errorCode);
         if (U_FAILURE(errorCode)) { return; }
         for (int32_t i = 0; itemsTable.getKeyAndValue(i, key, value); ++i) {
-            UDateTimePGDisplayWidth width;
-            UDateTimePatternField field = dtpg.getFieldAndWidthIndices(key, &width);
+            UDateTimePatternField field = dtpg.getAppendNameNumber(key);
             if (field == UDATPG_FIELD_COUNT) { continue; }
             ResourceTable detailsTable = value.getTable(errorCode);
             if (U_FAILURE(errorCode)) { return; }
             for (int32_t j = 0; detailsTable.getKeyAndValue(j, key, value); ++j) {
                 if (uprv_strcmp(key, "dn") != 0) { continue; }
                 const UnicodeString& valueStr = value.getUnicodeString(errorCode);
-                if (dtpg.getFieldDisplayName(field,width).isEmpty() && !valueStr.isEmpty()) {
-                    dtpg.setFieldDisplayName(field,width,valueStr);
+                if (dtpg.getAppendItemName(field).isEmpty() && !valueStr.isEmpty()) {
+                    dtpg.setAppendItemName(field, valueStr);
                 }
                 break;
             }
@@ -856,7 +841,8 @@ struct DateTimePatternGenerator::AppendItemNamesSink : public ResourceSink {
 
     void fillInMissing() {
         for (int32_t i = 0; i < UDATPG_FIELD_COUNT; i++) {
-            UnicodeString& valueStr = dtpg.getMutableFieldDisplayName((UDateTimePatternField)i, UDATPG_WIDE);
+            UDateTimePatternField field = (UDateTimePatternField)i;
+            UnicodeString& valueStr = dtpg.getMutableAppendItemName(field);
             if (valueStr.isEmpty()) {
                 valueStr = CAP_F;
                 U_ASSERT(i < 20);
@@ -870,12 +856,6 @@ struct DateTimePatternGenerator::AppendItemNamesSink : public ResourceSink {
                 }
                 // NUL-terminate for the C API.
                 valueStr.getTerminatedBuffer();
-            }
-            for (int32_t j = 1; j < UDATPG_WIDTH_COUNT; j++) {
-                UnicodeString& valueStr = dtpg.getMutableFieldDisplayName((UDateTimePatternField)i, (UDateTimePGDisplayWidth)j);
-                if (valueStr.isEmpty()) {
-                    valueStr = dtpg.getFieldDisplayName((UDateTimePatternField)i, (UDateTimePGDisplayWidth)(j-1));
-                }
             }
         }
     }
@@ -989,35 +969,25 @@ DateTimePatternGenerator::getAppendItemFormat(UDateTimePatternField field) const
 
 void
 DateTimePatternGenerator::setAppendItemName(UDateTimePatternField field, const UnicodeString& value) {
-    setFieldDisplayName(field, UDATPG_WIDTH_APPENDITEM, value);
+    appendItemNames[field] = value;
+    // NUL-terminate for the C API.
+    appendItemNames[field].getTerminatedBuffer();
 }
 
 const UnicodeString&
 DateTimePatternGenerator::getAppendItemName(UDateTimePatternField field) const {
-    return fieldDisplayNames[field][UDATPG_WIDTH_APPENDITEM];
-}
-
-void
-DateTimePatternGenerator::setFieldDisplayName(UDateTimePatternField field, UDateTimePGDisplayWidth width, const UnicodeString& value) {
-    fieldDisplayNames[field][width] = value;
-    // NUL-terminate for the C API.
-    fieldDisplayNames[field][width].getTerminatedBuffer();
-}
-
-UnicodeString
-DateTimePatternGenerator::getFieldDisplayName(UDateTimePatternField field, UDateTimePGDisplayWidth width) const {
-    return fieldDisplayNames[field][width];
+    return appendItemNames[field];
 }
 
 UnicodeString&
-DateTimePatternGenerator::getMutableFieldDisplayName(UDateTimePatternField field, UDateTimePGDisplayWidth width) {
-    return fieldDisplayNames[field][width];
+DateTimePatternGenerator::getMutableAppendItemName(UDateTimePatternField field) {
+    return appendItemNames[field];
 }
 
 void
 DateTimePatternGenerator::getAppendName(UDateTimePatternField field, UnicodeString& value) {
     value = SINGLE_QUOTE;
-    value += fieldDisplayNames[field][UDATPG_WIDTH_APPENDITEM];
+    value += appendItemNames[field];
     value += SINGLE_QUOTE;
 }
 
@@ -1342,23 +1312,9 @@ DateTimePatternGenerator::getAppendFormatNumber(const char* field) const {
 }
 
 UDateTimePatternField
-DateTimePatternGenerator::getFieldAndWidthIndices(const char* key, UDateTimePGDisplayWidth* widthP) const {
-    char cldrFieldKey[UDATPG_FIELD_KEY_MAX + 1];
-    uprv_strncpy(cldrFieldKey, key, UDATPG_FIELD_KEY_MAX);
-    cldrFieldKey[UDATPG_FIELD_KEY_MAX]=0; // ensure termination
-    *widthP = UDATPG_WIDE;
-    char* hyphenPtr = uprv_strchr(cldrFieldKey, '-');
-    if (hyphenPtr) {
-        for (int32_t i=UDATPG_WIDTH_COUNT-1; i>0; --i) {
-            if (uprv_strcmp(CLDR_FIELD_WIDTH[i], hyphenPtr)==0) {
-                *widthP=(UDateTimePGDisplayWidth)i;
-                break;
-            }
-        }
-        *hyphenPtr = 0; // now delete width portion of key
-    }
+DateTimePatternGenerator::getAppendNameNumber(const char* field) const {
     for (int32_t i=0; i<UDATPG_FIELD_COUNT; ++i ) {
-        if (uprv_strcmp(CLDR_FIELD_NAME[i],cldrFieldKey)==0) {
+        if (uprv_strcmp(CLDR_FIELD_NAME[i],field)==0) {
             return (UDateTimePatternField)i;
         }
     }

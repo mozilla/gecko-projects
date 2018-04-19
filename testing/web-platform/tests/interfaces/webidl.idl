@@ -6,8 +6,7 @@ typedef (ArrayBufferView or ArrayBuffer) BufferSource;
 
 [
  Exposed=(Window,Worker),
- Constructor(optional DOMString message = "", optional DOMString name = "Error")
-]
+ Constructor(optional DOMString message = "", optional DOMString name = "Error")]
 interface DOMException { // but see below note about ECMAScript binding
   readonly attribute DOMString name;
   readonly attribute DOMString message;
@@ -41,7 +40,5 @@ interface DOMException { // but see below note about ECMAScript binding
 };
 
 typedef unsigned long long DOMTimeStamp;
-
 callback Function = any (any... arguments);
-
 callback VoidFunction = void ();

@@ -13,13 +13,12 @@
 namespace mozilla {
 namespace dom {
 
-VideoTrack::VideoTrack(nsIGlobalObject* aOwnerGlobal,
-                       const nsAString& aId,
+VideoTrack::VideoTrack(const nsAString& aId,
                        const nsAString& aKind,
                        const nsAString& aLabel,
                        const nsAString& aLanguage,
                        VideoStreamTrack* aStreamTarck)
-  : MediaTrack(aOwnerGlobal, aId, aKind, aLabel, aLanguage)
+  : MediaTrack(aId, aKind, aLabel, aLanguage)
   , mSelected(false)
   , mVideoStreamTrack(aStreamTarck)
 {

@@ -50,7 +50,6 @@ let contextMenuItems = {
   "context-viewinfo": "",
   "inspect-separator": "hidden",
   "context-inspect": "hidden",
-  "context-inspect-a11y": "hidden",
   "context-bookmarkpage": "hidden",
 };
 

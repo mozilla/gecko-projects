@@ -172,6 +172,7 @@ var gEMEHandler = {
     };
     PopupNotifications.show(browser, "drmContentPlaying", message, anchorId, mainAction, null, options);
   },
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIMessageListener])
 };
 
 XPCOMUtils.defineLazyGetter(gEMEHandler, "_brandShortName", function() {
@@ -320,7 +321,7 @@ let gDecoderDoctorHandler = {
             histogram.add(decoderDoctorReportId, TELEMETRY_DDSTAT_CLICKED);
 
             let baseURL = Services.urlFormatter.formatURLPref("app.support.baseURL");
-            openTrustedLinkIn(baseURL + sumo, "tab");
+            openUILinkIn(baseURL + sumo, "tab");
           }
         });
       }
@@ -350,7 +351,7 @@ let gDecoderDoctorHandler = {
             }
 
             params.append("details", JSON.stringify(details));
-            openTrustedLinkIn(endpoint + "?" + params.toString(), "tab");
+            openUILinkIn(endpoint + "?" + params.toString(), "tab");
           }
         });
       }

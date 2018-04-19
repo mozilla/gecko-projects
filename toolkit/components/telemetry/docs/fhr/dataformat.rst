@@ -749,7 +749,7 @@ plugin
 theme
     Integer count of installed themes.
 lwtheme
-    Integer count of installed lightweight themes.
+    Integer count of installed lightweigh themes.
 
 Notes
 ^^^^^

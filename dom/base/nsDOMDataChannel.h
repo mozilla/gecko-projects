@@ -12,6 +12,7 @@
 #include "mozilla/dom/RTCDataChannelBinding.h"
 #include "mozilla/dom/TypedArray.h"
 #include "mozilla/net/DataChannelListener.h"
+#include "nsIDOMDataChannel.h"
 #include "nsIInputStream.h"
 
 
@@ -24,6 +25,7 @@ class DataChannel;
 };
 
 class nsDOMDataChannel final : public mozilla::DOMEventTargetHelper,
+                               public nsIDOMDataChannel,
                                public mozilla::DataChannelListener
 {
 public:
@@ -33,6 +35,9 @@ public:
   nsresult Init(nsPIDOMWindowInner* aDOMWindow);
 
   NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_NSIDOMDATACHANNEL
+
+  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(mozilla::DOMEventTargetHelper)
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsDOMDataChannel,
                                            mozilla::DOMEventTargetHelper)

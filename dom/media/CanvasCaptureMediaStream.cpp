@@ -287,8 +287,7 @@ CanvasCaptureMediaStream::CreateSourceStream(nsPIDOMWindowInner* aWindow,
 {
   RefPtr<CanvasCaptureMediaStream> stream = new CanvasCaptureMediaStream(aWindow, aCanvas);
   MediaStreamGraph* graph =
-    MediaStreamGraph::GetInstance(MediaStreamGraph::SYSTEM_THREAD_DRIVER, aWindow,
-                                  MediaStreamGraph::REQUEST_DEFAULT_SAMPLE_RATE);
+    MediaStreamGraph::GetInstance(MediaStreamGraph::SYSTEM_THREAD_DRIVER, aWindow);
   stream->InitSourceStream(graph);
   return stream.forget();
 }

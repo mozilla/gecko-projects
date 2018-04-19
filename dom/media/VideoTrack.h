@@ -18,8 +18,7 @@ class VideoStreamTrack;
 class VideoTrack : public MediaTrack
 {
 public:
-  VideoTrack(nsIGlobalObject* aOwnerGlobal,
-             const nsAString& aId,
+  VideoTrack(const nsAString& aId,
              const nsAString& aKind,
              const nsAString& aLabel,
              const nsAString& aLanguage,

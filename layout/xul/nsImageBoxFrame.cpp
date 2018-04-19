@@ -14,7 +14,7 @@
 #include "gfxContext.h"
 #include "nsImageBoxFrame.h"
 #include "nsGkAtoms.h"
-#include "mozilla/ComputedStyle.h"
+#include "nsStyleContext.h"
 #include "nsStyleConsts.h"
 #include "nsStyleUtil.h"
 #include "nsCOMPtr.h"
@@ -126,9 +126,9 @@ FireImageDOMEvent(nsIContent* aContent, EventMessage aMessage)
 // Creates a new image frame and returns it
 //
 nsIFrame*
-NS_NewImageBoxFrame (nsIPresShell* aPresShell, ComputedStyle* aStyle)
+NS_NewImageBoxFrame (nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
-  return new (aPresShell) nsImageBoxFrame(aStyle);
+  return new (aPresShell) nsImageBoxFrame(aContext);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsImageBoxFrame)
@@ -152,8 +152,8 @@ nsImageBoxFrame::AttributeChanged(int32_t aNameSpaceID,
   return rv;
 }
 
-nsImageBoxFrame::nsImageBoxFrame(ComputedStyle* aStyle)
-  : nsLeafBoxFrame(aStyle, kClassID)
+nsImageBoxFrame::nsImageBoxFrame(nsStyleContext* aContext)
+  : nsLeafBoxFrame(aContext, kClassID)
   , mIntrinsicSize(0, 0)
   , mLoadFlags(nsIRequest::LOAD_NORMAL)
   , mRequestRegistered(false)
@@ -463,9 +463,9 @@ nsImageBoxFrame::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuild
                                                                       aBuilder, aResources,
                                                                       aSc, size, Nothing());
   if (key.isNothing()) {
-    return ImgDrawResult::NOT_READY;
+    return ImgDrawResult::BAD_IMAGE;
   }
-  wr::LayoutRect fill = wr::ToRoundedLayoutRect(fillRect);
+  wr::LayoutRect fill = aSc.ToRelativeLayoutRect(fillRect);
 
   LayoutDeviceSize gapSize(0, 0);
   SamplingFilter sampleFilter = nsLayoutUtils::GetSamplingFilterForFrame(aItem->Frame());
@@ -538,6 +538,26 @@ void nsDisplayXULImage::Paint(nsDisplayListBuilder* aBuilder,
     PaintImage(*aCtx, mVisibleRect, ToReferenceFrame(), flags);
 
   nsDisplayItemGenericImageGeometry::UpdateDrawResult(this, result);
+}
+
+LayerState
+nsDisplayXULImage::GetLayerState(nsDisplayListBuilder* aBuilder,
+                                 LayerManager* aManager,
+                                 const ContainerLayerParameters& aParameters)
+{
+  if (ShouldUseAdvancedLayer(aManager, gfxPrefs::LayersAllowImageLayers) &&
+      CanOptimizeToImageLayer(aManager, aBuilder)) {
+    return LAYER_ACTIVE;
+  }
+  return LAYER_NONE;
+}
+
+already_AddRefed<Layer>
+nsDisplayXULImage::BuildLayer(nsDisplayListBuilder* aBuilder,
+                           LayerManager* aManager,
+                           const ContainerLayerParameters& aContainerParameters)
+{
+  return BuildDisplayItemLayer(aBuilder, aManager, aContainerParameters);
 }
 
 bool
@@ -640,15 +660,14 @@ nsImageBoxFrame::CanOptimizeToImageLayer()
 }
 
 //
-// DidSetComputedStyle
+// DidSetStyleContext
 //
-// When the ComputedStyle changes, make sure that all of our image is up to
-// date.
+// When the style context changes, make sure that all of our image is up to date.
 //
 /* virtual */ void
-nsImageBoxFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
+nsImageBoxFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
 {
-  nsLeafBoxFrame::DidSetComputedStyle(aOldComputedStyle);
+  nsLeafBoxFrame::DidSetStyleContext(aOldStyleContext);
 
   // Fetch our subrect.
   const nsStyleList* myList = StyleList();
@@ -676,7 +695,7 @@ nsImageBoxFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
     return;
 
   UpdateImage();
-} // DidSetComputedStyle
+} // DidSetStyleContext
 
 void
 nsImageBoxFrame::GetImageSize()

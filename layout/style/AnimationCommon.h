@@ -13,7 +13,6 @@
 #include "mozilla/Attributes.h" // For MOZ_NON_OWNING_REF
 #include "mozilla/Assertions.h"
 #include "mozilla/TimingParams.h"
-#include "mozilla/dom/Nullable.h"
 #include "nsContentUtils.h"
 
 class nsIFrame;
@@ -172,7 +171,7 @@ PhaseType GetAnimationPhaseWithoutEffect(const dom::Animation& aAnimation)
 #undef GetCurrentTime
 #endif
 
-  dom::Nullable<TimeDuration> currentTime = aAnimation.GetCurrentTime();
+  Nullable<TimeDuration> currentTime = aAnimation.GetCurrentTime();
   if (currentTime.IsNull()) {
     return PhaseType::Idle;
   }

@@ -36,7 +36,6 @@
 //
 namespace mozilla {
 namespace net {
-void LogCallingScriptLocation(void* instance);
 extern LazyLogModule gHttpLog;
 }
 }

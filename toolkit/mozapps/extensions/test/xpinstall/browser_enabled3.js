@@ -46,7 +46,7 @@ function allow_blocked(installInfo) {
   return false;
 }
 
-function confirm_install(panel) {
+function confirm_install(window) {
   ok(false, "Should never see an install confirmation dialog");
   return false;
 }

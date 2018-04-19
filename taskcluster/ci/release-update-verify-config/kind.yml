@@ -66,22 +66,22 @@ job-defaults:
             # somebody is grepping the tree for things they need to do.
             birch:
                by-build-platform:
-                  linux*: "57.0"
-                  linux64*: "57.0"
-                  macosx64*: "57.0"
-                  win32*: "56.0"
-                  win64*: "56.0"
+                  linux: "57.0"
+                  linux64: "57.0"
+                  macosx64: "57.0"
+                  win32: "56.0"
+                  win64: "56.0"
                   default: null
             jamun: "56.0b3"
             maple: "56.0b3"
             mozilla-beta: "56.0b3"
             mozilla-release:
                by-build-platform:
-                  linux*: "57.0"
-                  linux64*: "57.0"
-                  macosx64*: "57.0"
-                  win32*: "56.0"
-                  win64*: "56.0"
+                  linux: "57.0"
+                  linux64: "57.0"
+                  macosx64: "57.0"
+                  win32: "56.0"
+                  win64: "56.0"
                   default: null
             default: null
 
@@ -94,7 +94,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux-nightly
+         build_platform: linux
       extra:
          product: firefox
          platform: linux-i686
@@ -122,7 +122,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux64-nightly
+         build_platform: linux64
       extra:
          product: firefox
          platform: linux-x86_64
@@ -150,7 +150,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: macosx64-nightly
+         build_platform: macosx64
       extra:
          product: firefox
          platform: mac
@@ -178,7 +178,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: win32-nightly
+         build_platform: win32
       extra:
          product: firefox
          platform: win32
@@ -206,7 +206,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: win64-nightly
+         build_platform: win64
       extra:
          product: firefox
          platform: win64
@@ -234,7 +234,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux-devedition-nightly
+         build_platform: linux-devedition
       extra:
          product: firefox
          platform: linux-i686
@@ -250,7 +250,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux64-devedition-nightly
+         build_platform: linux64-devedition
       extra:
          product: firefox
          platform: linux-x86_64
@@ -266,7 +266,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: macosx64-devedition-nightly
+         build_platform: macosx64-devedition
       extra:
          product: firefox
          platform: mac
@@ -282,7 +282,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: win32-devedition-nightly
+         build_platform: win32-devedition
       extra:
          product: firefox
          platform: win32
@@ -298,7 +298,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: win64-devedition-nightly
+         build_platform: win64-devedition
       extra:
          product: firefox
          platform: win64

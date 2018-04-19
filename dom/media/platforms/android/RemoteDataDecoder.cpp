@@ -93,7 +93,7 @@ public:
   class CallbacksSupport final : public JavaCallbacksSupport
   {
   public:
-    explicit CallbacksSupport(RemoteVideoDecoder* aDecoder) : mDecoder(aDecoder) { }
+    CallbacksSupport(RemoteVideoDecoder* aDecoder) : mDecoder(aDecoder) { }
 
     void HandleInput(int64_t aTimestamp, bool aProcessed) override
     {
@@ -316,7 +316,7 @@ private:
   class CallbacksSupport final : public JavaCallbacksSupport
   {
   public:
-    explicit CallbacksSupport(RemoteAudioDecoder* aDecoder) : mDecoder(aDecoder) { }
+    CallbacksSupport(RemoteAudioDecoder* aDecoder) : mDecoder(aDecoder) { }
 
     void HandleInput(int64_t aTimestamp, bool aProcessed) override
     {

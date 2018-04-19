@@ -48,7 +48,7 @@ namespace dom {
 
 ProcessingInstruction::ProcessingInstruction(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
                                              const nsAString& aData)
-  : CharacterData(Move(aNodeInfo))
+  : nsGenericDOMDataNode(Move(aNodeInfo))
 {
   MOZ_ASSERT(mNodeInfo->NodeType() == nsINode::PROCESSING_INSTRUCTION_NODE,
              "Bad NodeType in aNodeInfo");
@@ -62,12 +62,22 @@ ProcessingInstruction::~ProcessingInstruction()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED(ProcessingInstruction, CharacterData, nsIDOMNode)
+NS_IMPL_ISUPPORTS_INHERITED(ProcessingInstruction, nsGenericDOMDataNode,
+                            nsIDOMNode, nsIDOMCharacterData,
+                            nsIDOMProcessingInstruction)
 
 JSObject*
 ProcessingInstruction::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
   return ProcessingInstructionBinding::Wrap(aCx, this, aGivenProto);
+}
+
+NS_IMETHODIMP
+ProcessingInstruction::GetTarget(nsAString& aTarget)
+{
+  aTarget = NodeName();
+
+  return NS_OK;
 }
 
 bool
@@ -85,14 +95,14 @@ ProcessingInstruction::IsNodeOfType(uint32_t aFlags) const
   return !(aFlags & ~(ePROCESSING_INSTRUCTION | eDATA_NODE));
 }
 
-already_AddRefed<CharacterData>
+nsGenericDOMDataNode*
 ProcessingInstruction::CloneDataNode(mozilla::dom::NodeInfo *aNodeInfo,
                                      bool aCloneText) const
 {
   nsAutoString data;
-  GetData(data);
+  nsGenericDOMDataNode::GetData(data);
   RefPtr<mozilla::dom::NodeInfo> ni = aNodeInfo;
-  return do_AddRef(new ProcessingInstruction(ni.forget(), data));
+  return new ProcessingInstruction(ni.forget(), data);
 }
 
 #ifdef DEBUG

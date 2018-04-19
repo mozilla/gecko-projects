@@ -45,15 +45,12 @@ nsHtml5Tokenizer::EnsureBufferSpace(int32_t aLength)
       // reallocation once there are a few characters in the buffer.
       worstCase += 1;
     }
-    strBuf = jArray<char16_t, int32_t>::newFallibleJArray(
-      mozilla::RoundUpPow2(worstCase.value()));
+    strBuf = jArray<char16_t,int32_t>::newFallibleJArray(mozilla::RoundUpPow2(worstCase.value()));
     if (!strBuf) {
       return false;
     }
   } else if (worstCase.value() > strBuf.length) {
-    jArray<char16_t, int32_t> newBuf =
-      jArray<char16_t, int32_t>::newFallibleJArray(
-        mozilla::RoundUpPow2(worstCase.value()));
+    jArray<char16_t,int32_t> newBuf = jArray<char16_t,int32_t>::newFallibleJArray(mozilla::RoundUpPow2(worstCase.value()));
     if (!newBuf) {
       return false;
     }
@@ -352,8 +349,7 @@ void
 nsHtml5Tokenizer::errUnescapedAmpersandInterpretedAsCharacterReference()
 {
   if (MOZ_UNLIKELY(mViewSource)) {
-    mViewSource->AddErrorToCurrentAmpersand(
-      "errUnescapedAmpersandInterpretedAsCharacterReference");
+    mViewSource->AddErrorToCurrentAmpersand("errUnescapedAmpersandInterpretedAsCharacterReference");
   }
 }
 
@@ -569,8 +565,7 @@ void
 nsHtml5Tokenizer::errNoSpaceBetweenDoctypeSystemKeywordAndQuote()
 {
   if (MOZ_LIKELY(mViewSource)) {
-    mViewSource->AddErrorToCurrentNode(
-      "errNoSpaceBetweenDoctypeSystemKeywordAndQuote");
+    mViewSource->AddErrorToCurrentNode("errNoSpaceBetweenDoctypeSystemKeywordAndQuote");
   }
 }
 
@@ -586,7 +581,6 @@ void
 nsHtml5Tokenizer::errNoSpaceBetweenDoctypePublicKeywordAndQuote()
 {
   if (MOZ_LIKELY(mViewSource)) {
-    mViewSource->AddErrorToCurrentNode(
-      "errNoSpaceBetweenDoctypePublicKeywordAndQuote");
+    mViewSource->AddErrorToCurrentNode("errNoSpaceBetweenDoctypePublicKeywordAndQuote");
   }
 }

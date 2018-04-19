@@ -8,8 +8,7 @@ use dom::bindings::root::DomRoot;
 use dom::bindings::trace::JSTraceable;
 use dom::globalscope::GlobalScope;
 use dom_struct::dom_struct;
-use js::jsapi::JSContext;
-use js::rust::HandleValue;
+use js::jsapi::{JSContext, HandleValue};
 use malloc_size_of::MallocSizeOf;
 
 pub trait Callback: JSTraceable + MallocSizeOf {

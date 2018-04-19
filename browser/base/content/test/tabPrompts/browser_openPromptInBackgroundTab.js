@@ -81,5 +81,5 @@ add_task(async function() {
   // RemotePrompt.openTabPrompt() while 'DOMModalDialogClosed' event is fired.
   await TestUtils.waitForTick();
 
-  BrowserTestUtils.removeTab(openedTab);
+  await BrowserTestUtils.removeTab(openedTab);
 });

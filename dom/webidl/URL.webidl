@@ -19,25 +19,34 @@ interface URL {
   //  stringifier attribute USVString href;
 
   // Bug 824857 should remove this.
+  [Throws]
   stringifier;
 
-  [SetterThrows]
+  [Throws]
   attribute USVString href;
-  [GetterThrows]
+  [Throws]
   readonly attribute USVString origin;
-  [SetterThrows]
+  [Throws]
            attribute USVString protocol;
+  [Throws]
            attribute USVString username;
+  [Throws]
            attribute USVString password;
+  [Throws]
            attribute USVString host;
+  [Throws]
            attribute USVString hostname;
+  [Throws]
            attribute USVString port;
+  [Throws]
            attribute USVString pathname;
+  [Throws]
            attribute USVString search;
-  [SameObject]
-  readonly attribute URLSearchParams searchParams;
+  [SameObject] readonly attribute URLSearchParams searchParams;
+  [Throws]
            attribute USVString hash;
 
+  [Throws]
   USVString toJSON();
 };
 

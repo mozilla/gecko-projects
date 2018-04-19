@@ -15,7 +15,7 @@ function runTests() {
   var plugin = document.getElementById("plugin1");
 
   plugin.focus();
-  // FYI: "compositionstart" will be dispatched automatically.
+  synthesizeComposition({ type: "compositionstart", data: "" });
   let data = "composition";
   synthesizeCompositionChange({
     composition: {

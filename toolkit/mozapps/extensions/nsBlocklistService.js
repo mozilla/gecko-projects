@@ -19,8 +19,6 @@ try {
 } catch (e) {
 }
 
-ChromeUtils.defineModuleGetter(this, "CertUtils",
-                               "resource://gre/modules/CertUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "FileUtils",
                                "resource://gre/modules/FileUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "UpdateUtils",
@@ -30,17 +28,12 @@ ChromeUtils.defineModuleGetter(this, "OS",
 ChromeUtils.defineModuleGetter(this, "ServiceRequest",
                                "resource://gre/modules/ServiceRequest.jsm");
 
-// The remote settings updater is the new system in charge of fetching remote data
+// The blocklist updater is the new system in charge of fetching remote data
 // securely and efficiently. It will replace the current XML-based system.
 // See Bug 1257565 and Bug 1252456.
-const BlocklistClients = ChromeUtils.import("resource://services-common/blocklist-clients.js", {});
-XPCOMUtils.defineLazyGetter(this, "RemoteSettings", function() {
-  // Instantiate blocklist clients.
-  BlocklistClients.initialize();
-  // Import RemoteSettings for ``pollChanges()``
-  const { RemoteSettings } = ChromeUtils.import("resource://services-common/remote-settings.js", {});
-  return RemoteSettings;
-});
+const BlocklistUpdater = {};
+ChromeUtils.defineModuleGetter(BlocklistUpdater, "checkVersions",
+                               "resource://services-common/blocklist-updater.js");
 
 const TOOLKIT_ID                      = "toolkit@mozilla.org";
 const KEY_PROFILEDIR                  = "ProfD";
@@ -132,6 +125,13 @@ XPCOMUtils.defineLazyGetter(this, "gOSVersion", function() {
     osVersion = encodeURIComponent(osVersion);
   }
   return osVersion;
+});
+
+// shared code for suppressing bad cert dialogs
+XPCOMUtils.defineLazyGetter(this, "gCertUtils", function() {
+  let temp = { };
+  ChromeUtils.import("resource://gre/modules/CertUtils.jsm", temp);
+  return temp;
 });
 
 /**
@@ -288,6 +288,12 @@ Blocklist.prototype = {
   },
 
   /* See nsIBlocklistService */
+  isAddonBlocklisted(addon, appVersion, toolkitVersion) {
+    return this.getAddonBlocklistState(addon, appVersion, toolkitVersion) ==
+                   Ci.nsIBlocklistService.STATE_BLOCKED;
+  },
+
+  /* See nsIBlocklistService */
   getAddonBlocklistState(addon, appVersion, toolkitVersion) {
     if (!this.isLoaded)
       this._loadBlocklist();
@@ -344,8 +350,9 @@ Blocklist.prototype = {
     return null;
   },
 
-  async getAddonBlocklistEntry(addon, appVersion, toolkitVersion) {
-    await this.loadBlocklistAsync();
+  getAddonBlocklistEntry(addon, appVersion, toolkitVersion) {
+    if (!this.isLoaded)
+      this._loadBlocklist();
     return this._getAddonBlocklistEntry(addon, this._addonEntries,
                                         appVersion, toolkitVersion);
   },
@@ -424,6 +431,15 @@ Blocklist.prototype = {
        }
      }
      return null;
+  },
+
+  /* See nsIBlocklistService */
+  getAddonBlocklistURL(addon, appVersion, toolkitVersion) {
+    if (!this.isLoaded)
+      this._loadBlocklist();
+
+    let entry = this._getAddonBlocklistEntry(addon, this._addonEntries);
+    return entry && entry.url;
   },
 
   _createBlocklistURL(id) {
@@ -530,7 +546,7 @@ Blocklist.prototype = {
     LOG("Blocklist::notify: Requesting " + uri.spec);
     let request = new ServiceRequest();
     request.open("GET", uri.spec, true);
-    request.channel.notificationCallbacks = new CertUtils.BadCertHandler();
+    request.channel.notificationCallbacks = new gCertUtils.BadCertHandler();
     request.overrideMimeType("text/xml");
 
     // The server will return a `304 Not Modified` response if the blocklist was
@@ -554,7 +570,7 @@ Blocklist.prototype = {
     // If blocklist update via Kinto is enabled, poll for changes and sync.
     // Currently certificates blocklist relies on it by default.
     if (Services.prefs.getBoolPref(PREF_BLOCKLIST_UPDATE_ENABLED)) {
-      RemoteSettings.pollChanges().catch(() => {
+      BlocklistUpdater.checkVersions().catch(() => {
         // Bug 1254099 - Telemetry (success or errors) will be collected during this process.
       });
     }
@@ -563,7 +579,7 @@ Blocklist.prototype = {
   async onXMLLoad(aEvent) {
     let request = aEvent.target;
     try {
-      CertUtils.checkCert(request.channel);
+      gCertUtils.checkCert(request.channel);
     } catch (e) {
       LOG("Blocklist::onXMLLoad: " + e);
       return;
@@ -765,20 +781,9 @@ Blocklist.prototype = {
     this._addonEntries = null;
     this._gfxEntries = null;
     this._pluginEntries = null;
-    delete this._preloadPromise;
   },
 
   async loadBlocklistAsync() {
-    if (this.isLoaded) {
-      return;
-    }
-    if (!this._preloadPromise) {
-      this._preloadPromise = this._loadBlocklistAsyncInternal();
-    }
-    await this._preloadPromise;
-  },
-
-  async _loadBlocklistAsyncInternal() {
     let profPath = OS.Path.join(OS.Constants.Path.profileDir, FILE_BLOCKLIST);
     try {
       await this._preloadBlocklistFile(profPath);
@@ -796,15 +801,11 @@ Blocklist.prototype = {
     }
 
     LOG("Blocklist::loadBlocklistAsync: no XML File found");
-    // Neither file is present, so we just add empty lists, to avoid JS errors fetching
-    // blocklist information otherwise.
-    this._addonEntries = [];
-    this._gfxEntries = [];
-    this._pluginEntries = [];
   },
 
   async _preloadBlocklistFile(path) {
-    if (this.isLoaded) {
+    if (this._addonEntries) {
+      // The file has been already loaded.
       return;
     }
 
@@ -1231,7 +1232,7 @@ Blocklist.prototype = {
     Services.ppmm.broadcastAsyncMessage("Blocklist:blocklistInvalidated", {});
   },
 
-  async _blocklistUpdated(oldAddonEntries, oldPluginEntries) {
+  _blocklistUpdated(oldAddonEntries, oldPluginEntries) {
     var addonList = [];
 
     // A helper function that reverts the prefs passed to default values.
@@ -1240,177 +1241,177 @@ Blocklist.prototype = {
         Services.prefs.clearUserPref(pref);
     }
     const types = ["extension", "theme", "locale", "dictionary", "service"];
-    let addons = await AddonManager.getAddonsByTypes(types);
-    for (let addon of addons) {
-      let oldState = addon.blocklistState;
-      if (addon.updateBlocklistState) {
-        await addon.updateBlocklistState(false);
-      } else if (oldAddonEntries) {
-        oldState = this._getAddonBlocklistState(addon, oldAddonEntries);
-      } else {
-        oldState = Ci.nsIBlocklistService.STATE_NOTBLOCKED;
-      }
-      let state = addon.blocklistState;
-
-      LOG("Blocklist state for " + addon.id + " changed from " +
-          oldState + " to " + state);
-
-      // We don't want to re-warn about add-ons
-      if (state == oldState)
-        continue;
-
-      if (state === Ci.nsIBlocklistService.STATE_BLOCKED) {
-        // It's a hard block. We must reset certain preferences.
-        let prefs = this._getAddonPrefs(addon);
-        resetPrefs(prefs);
-      }
-
-      // Ensure that softDisabled is false if the add-on is not soft blocked
-      if (state != Ci.nsIBlocklistService.STATE_SOFTBLOCKED)
-        addon.softDisabled = false;
-
-      // Don't warn about add-ons becoming unblocked.
-      if (state == Ci.nsIBlocklistService.STATE_NOT_BLOCKED)
-        continue;
-
-      // If an add-on has dropped from hard to soft blocked just mark it as
-      // soft disabled and don't warn about it.
-      if (state == Ci.nsIBlocklistService.STATE_SOFTBLOCKED &&
-          oldState == Ci.nsIBlocklistService.STATE_BLOCKED) {
-        addon.softDisabled = true;
-        continue;
-      }
-
-      // If the add-on is already disabled for some reason then don't warn
-      // about it
-      if (!addon.isActive) {
-        // But mark it as softblocked if necessary. Note that we avoid setting
-        // softDisabled at the same time as userDisabled to make it clear
-        // which was the original cause of the add-on becoming disabled in a
-        // way that the user can change.
-        if (state == Ci.nsIBlocklistService.STATE_SOFTBLOCKED && !addon.userDisabled)
-          addon.softDisabled = true;
-        continue;
-      }
-
-      let entry = this._getAddonBlocklistEntry(addon, this._addonEntries);
-      addonList.push({
-        name: addon.name,
-        version: addon.version,
-        icon: addon.iconURL,
-        disable: false,
-        blocked: state == Ci.nsIBlocklistService.STATE_BLOCKED,
-        item: addon,
-        url: entry && entry.url,
-      });
-    }
-
-    AddonManagerPrivate.updateAddonAppDisabledStates();
-
-    var phs = Cc["@mozilla.org/plugin/host;1"].
-              getService(Ci.nsIPluginHost);
-    var plugins = phs.getPluginTags();
-
-    for (let plugin of plugins) {
-      let oldState = -1;
-      if (oldPluginEntries)
-        oldState = this._getPluginBlocklistState(plugin, oldPluginEntries);
-      let state = this.getPluginBlocklistState(plugin);
-      LOG("Blocklist state for " + plugin.name + " changed from " +
-          oldState + " to " + state);
-      // We don't want to re-warn about items
-      if (state == oldState)
-        continue;
-
-      if (oldState == Ci.nsIBlocklistService.STATE_BLOCKED) {
-        if (state == Ci.nsIBlocklistService.STATE_SOFTBLOCKED)
-          plugin.enabledState = Ci.nsIPluginTag.STATE_DISABLED;
-      } else if (!plugin.disabled && state != Ci.nsIBlocklistService.STATE_NOT_BLOCKED) {
-        if (state != Ci.nsIBlocklistService.STATE_OUTDATED &&
-            state != Ci.nsIBlocklistService.STATE_VULNERABLE_UPDATE_AVAILABLE &&
-            state != Ci.nsIBlocklistService.STATE_VULNERABLE_NO_UPDATE) {
-          addonList.push({
-            name: plugin.name,
-            version: plugin.version,
-            icon: "chrome://mozapps/skin/plugins/pluginGeneric.svg",
-            disable: false,
-            blocked: state == Ci.nsIBlocklistService.STATE_BLOCKED,
-            item: plugin,
-            url: this.getPluginBlocklistURL(plugin),
-          });
+    AddonManager.getAddonsByTypes(types, addons => {
+      for (let addon of addons) {
+        let oldState = addon.blocklistState;
+        if (addon.updateBlocklistState) {
+          addon.updateBlocklistState(false);
+        } else if (oldAddonEntries) {
+          oldState = this._getAddonBlocklistState(addon, oldAddonEntries);
+        } else {
+          oldState = Ci.nsIBlocklistService.STATE_NOTBLOCKED;
         }
-      }
-    }
+        let state = addon.blocklistState;
 
-    if (addonList.length == 0) {
-      this._notifyObserversBlocklistUpdated();
-      return;
-    }
+        LOG("Blocklist state for " + addon.id + " changed from " +
+            oldState + " to " + state);
 
-    if ("@mozilla.org/addons/blocklist-prompt;1" in Cc) {
-      try {
-        let blockedPrompter = Cc["@mozilla.org/addons/blocklist-prompt;1"]
-                               .getService(Ci.nsIBlocklistPrompt);
-        blockedPrompter.prompt(addonList);
-      } catch (e) {
-        LOG(e);
-      }
-      this._notifyObserversBlocklistUpdated();
-      return;
-    }
-
-    var args = {
-      restart: false,
-      list: addonList
-    };
-    // This lets the dialog get the raw js object
-    args.wrappedJSObject = args;
-
-    /*
-      Some tests run without UI, so the async code listens to a message
-      that can be sent programatically
-    */
-    let applyBlocklistChanges = () => {
-      for (let addon of addonList) {
-        if (!addon.disable)
+        // We don't want to re-warn about add-ons
+        if (state == oldState)
           continue;
 
-        if (addon.item instanceof Ci.nsIPluginTag)
-          addon.item.enabledState = Ci.nsIPluginTag.STATE_DISABLED;
-        else {
-          // This add-on is softblocked.
-          addon.item.softDisabled = true;
-          // We must revert certain prefs.
-          let prefs = this._getAddonPrefs(addon.item);
+        if (state === Ci.nsIBlocklistService.STATE_BLOCKED) {
+          // It's a hard block. We must reset certain preferences.
+          let prefs = this._getAddonPrefs(addon);
           resetPrefs(prefs);
+        }
+
+        // Ensure that softDisabled is false if the add-on is not soft blocked
+        if (state != Ci.nsIBlocklistService.STATE_SOFTBLOCKED)
+          addon.softDisabled = false;
+
+        // Don't warn about add-ons becoming unblocked.
+        if (state == Ci.nsIBlocklistService.STATE_NOT_BLOCKED)
+          continue;
+
+        // If an add-on has dropped from hard to soft blocked just mark it as
+        // soft disabled and don't warn about it.
+        if (state == Ci.nsIBlocklistService.STATE_SOFTBLOCKED &&
+            oldState == Ci.nsIBlocklistService.STATE_BLOCKED) {
+          addon.softDisabled = true;
+          continue;
+        }
+
+        // If the add-on is already disabled for some reason then don't warn
+        // about it
+        if (!addon.isActive) {
+          // But mark it as softblocked if necessary. Note that we avoid setting
+          // softDisabled at the same time as userDisabled to make it clear
+          // which was the original cause of the add-on becoming disabled in a
+          // way that the user can change.
+          if (state == Ci.nsIBlocklistService.STATE_SOFTBLOCKED && !addon.userDisabled)
+            addon.softDisabled = true;
+          continue;
+        }
+
+        addonList.push({
+          name: addon.name,
+          version: addon.version,
+          icon: addon.iconURL,
+          disable: false,
+          blocked: state == Ci.nsIBlocklistService.STATE_BLOCKED,
+          item: addon,
+          url: this.getAddonBlocklistURL(addon),
+        });
+      }
+
+      AddonManagerPrivate.updateAddonAppDisabledStates();
+
+      var phs = Cc["@mozilla.org/plugin/host;1"].
+                getService(Ci.nsIPluginHost);
+      var plugins = phs.getPluginTags();
+
+      for (let plugin of plugins) {
+        let oldState = -1;
+        if (oldPluginEntries)
+          oldState = this._getPluginBlocklistState(plugin, oldPluginEntries);
+        let state = this.getPluginBlocklistState(plugin);
+        LOG("Blocklist state for " + plugin.name + " changed from " +
+            oldState + " to " + state);
+        // We don't want to re-warn about items
+        if (state == oldState)
+          continue;
+
+        if (oldState == Ci.nsIBlocklistService.STATE_BLOCKED) {
+          if (state == Ci.nsIBlocklistService.STATE_SOFTBLOCKED)
+            plugin.enabledState = Ci.nsIPluginTag.STATE_DISABLED;
+        } else if (!plugin.disabled && state != Ci.nsIBlocklistService.STATE_NOT_BLOCKED) {
+          if (state != Ci.nsIBlocklistService.STATE_OUTDATED &&
+              state != Ci.nsIBlocklistService.STATE_VULNERABLE_UPDATE_AVAILABLE &&
+              state != Ci.nsIBlocklistService.STATE_VULNERABLE_NO_UPDATE) {
+            addonList.push({
+              name: plugin.name,
+              version: plugin.version,
+              icon: "chrome://mozapps/skin/plugins/pluginGeneric.svg",
+              disable: false,
+              blocked: state == Ci.nsIBlocklistService.STATE_BLOCKED,
+              item: plugin,
+              url: this.getPluginBlocklistURL(plugin),
+            });
+          }
         }
       }
 
-      if (args.restart)
-        restartApp();
-
-      this._notifyObserversBlocklistUpdated();
-      Services.obs.removeObserver(applyBlocklistChanges, "addon-blocklist-closed");
-    };
-
-    Services.obs.addObserver(applyBlocklistChanges, "addon-blocklist-closed");
-
-    if (Services.prefs.getBoolPref(PREF_BLOCKLIST_SUPPRESSUI, false)) {
-      applyBlocklistChanges();
-      return;
-    }
-
-    function blocklistUnloadHandler(event) {
-      if (event.target.location == URI_BLOCKLIST_DIALOG) {
-        applyBlocklistChanges();
-        blocklistWindow.removeEventListener("unload", blocklistUnloadHandler);
+      if (addonList.length == 0) {
+        this._notifyObserversBlocklistUpdated();
+        return;
       }
-    }
 
-    let blocklistWindow = Services.ww.openWindow(null, URI_BLOCKLIST_DIALOG, "",
-                            "chrome,centerscreen,dialog,titlebar", args);
-    if (blocklistWindow)
-      blocklistWindow.addEventListener("unload", blocklistUnloadHandler);
+      if ("@mozilla.org/addons/blocklist-prompt;1" in Cc) {
+        try {
+          let blockedPrompter = Cc["@mozilla.org/addons/blocklist-prompt;1"]
+                                 .getService(Ci.nsIBlocklistPrompt);
+          blockedPrompter.prompt(addonList);
+        } catch (e) {
+          LOG(e);
+        }
+        this._notifyObserversBlocklistUpdated();
+        return;
+      }
+
+      var args = {
+        restart: false,
+        list: addonList
+      };
+      // This lets the dialog get the raw js object
+      args.wrappedJSObject = args;
+
+      /*
+        Some tests run without UI, so the async code listens to a message
+        that can be sent programatically
+      */
+      let applyBlocklistChanges = () => {
+        for (let addon of addonList) {
+          if (!addon.disable)
+            continue;
+
+          if (addon.item instanceof Ci.nsIPluginTag)
+            addon.item.enabledState = Ci.nsIPluginTag.STATE_DISABLED;
+          else {
+            // This add-on is softblocked.
+            addon.item.softDisabled = true;
+            // We must revert certain prefs.
+            let prefs = this._getAddonPrefs(addon.item);
+            resetPrefs(prefs);
+          }
+        }
+
+        if (args.restart)
+          restartApp();
+
+        this._notifyObserversBlocklistUpdated();
+        Services.obs.removeObserver(applyBlocklistChanges, "addon-blocklist-closed");
+      };
+
+      Services.obs.addObserver(applyBlocklistChanges, "addon-blocklist-closed");
+
+      if (Services.prefs.getBoolPref(PREF_BLOCKLIST_SUPPRESSUI, false)) {
+        applyBlocklistChanges();
+        return;
+      }
+
+      function blocklistUnloadHandler(event) {
+        if (event.target.location == URI_BLOCKLIST_DIALOG) {
+          applyBlocklistChanges();
+          blocklistWindow.removeEventListener("unload", blocklistUnloadHandler);
+        }
+      }
+
+      let blocklistWindow = Services.ww.openWindow(null, URI_BLOCKLIST_DIALOG, "",
+                              "chrome,centerscreen,dialog,titlebar", args);
+      if (blocklistWindow)
+        blocklistWindow.addEventListener("unload", blocklistUnloadHandler);
+    });
   },
 
   classID: Components.ID("{66354bc9-7ed1-4692-ae1d-8da97d6b205e}"),

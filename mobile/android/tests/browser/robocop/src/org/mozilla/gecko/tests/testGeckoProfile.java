@@ -24,7 +24,7 @@ import android.text.TextUtils;
  */
 
 public class testGeckoProfile extends PixelTest {
-    private static final String TEST_PROFILE_NAME = "testProfile";
+    private final String TEST_PROFILE_NAME = "testProfile";
     private File mozDir;
     public void testGeckoProfile() {
         blockForGeckoReady();

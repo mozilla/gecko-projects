@@ -262,6 +262,7 @@ var webrtcUI = {
         break;
       case "webrtc:UpdateBrowserIndicators":
         let id = aMessage.data.windowId;
+        aMessage.targetFrameLoader.QueryInterface(Ci.nsIFrameLoader);
         let processMM =
           aMessage.targetFrameLoader.messageManager.processMessageManager;
         let index;

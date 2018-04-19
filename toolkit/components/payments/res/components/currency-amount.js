@@ -8,9 +8,9 @@
  * <currency-amount value="7.5" currency="USD"></currency-amount>
  */
 
-import ObservedPropertiesMixin from "../mixins/ObservedPropertiesMixin.js";
+/* global ObservedPropertiesMixin */
 
-export default class CurrencyAmount extends ObservedPropertiesMixin(HTMLElement) {
+class CurrencyAmount extends ObservedPropertiesMixin(HTMLElement) {
   static get observedAttributes() {
     return ["currency", "value"];
   }

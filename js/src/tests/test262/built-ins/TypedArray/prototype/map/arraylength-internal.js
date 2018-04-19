@@ -22,7 +22,6 @@ testWithTypedArrayConstructors(function(TA) {
 
   sample1.map(function() {
     loop++;
-    return 0;
   });
   assert.sameValue(loop, 42, "data descriptor");
 
@@ -38,7 +37,6 @@ testWithTypedArrayConstructors(function(TA) {
 
   sample2.map(function() {
     loop++;
-    return 0;
   });
   assert.sameValue(loop, 4, "accessor descriptor");
 });

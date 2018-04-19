@@ -34,7 +34,7 @@ def test_array_in_object(session):
     response = execute_script(session, """
         let arr = [];
         arr.push(arr);
-        return {'arrayValue': arr};
+        return {arr};
         """)
     assert_error(response, "javascript error")
 

@@ -29,11 +29,8 @@
 #include "threading/LockGuard.h"
 #include "threading/Thread.h"
 #include "vm/MutexIDs.h"
-#include "vm/Runtime.h"
 
 namespace js {
-
-static mozilla::Atomic<bool> sProtectedRegionsInit(false);
 
 /*
  * A class to store the addresses of the regions recognized as protected
@@ -63,21 +60,11 @@ class ProtectedRegionTree
     SplayTree<Region, Region> tree;
 
   public:
-    ProtectedRegionTree()
-      : lock(mutexid::ProtectedRegionTree),
-        alloc(4096),
-        tree(&alloc)
-    {
-        sProtectedRegionsInit = true;
-    }
+    ProtectedRegionTree() : lock(mutexid::ProtectedRegionTree),
+                            alloc(4096),
+                            tree(&alloc) {}
 
-    ~ProtectedRegionTree() {
-        // See Bug 1445619: Currently many users of the JS engine are leaking
-        // the world, unfortunately LifoAlloc owned by JSRuntimes have
-        // registered memory regions.
-        sProtectedRegionsInit = false;
-        MOZ_ASSERT_IF(!JSRuntime::hasLiveRuntimes(), tree.empty());
-    }
+    ~ProtectedRegionTree() { MOZ_ASSERT(tree.empty()); }
 
     void insert(uintptr_t addr, size_t size) {
         MOZ_ASSERT(addr && size);
@@ -127,14 +114,14 @@ MemoryProtectionExceptionHandler::isDisabled()
 void
 MemoryProtectionExceptionHandler::addRegion(void* addr, size_t size)
 {
-    if (sExceptionHandlerInstalled && sProtectedRegionsInit)
+    if (sExceptionHandlerInstalled)
         sProtectedRegions.insert(uintptr_t(addr), size);
 }
 
 void
 MemoryProtectionExceptionHandler::removeRegion(void* addr)
 {
-    if (sExceptionHandlerInstalled && sProtectedRegionsInit)
+    if (sExceptionHandlerInstalled)
         sProtectedRegions.remove(uintptr_t(addr));
 }
 
@@ -193,7 +180,7 @@ VectoredExceptionHandler(EXCEPTION_POINTERS* ExceptionInfo)
 
             // If the faulting address is in one of our protected regions, we
             // want to annotate the crash to make it stand out from the crowd.
-            if (sProtectedRegionsInit && sProtectedRegions.isProtected(address)) {
+            if (sProtectedRegions.isProtected(address)) {
                 ReportCrashIfDebug("Hit MOZ_CRASH(Tried to access a protected region!)\n");
                 MOZ_CRASH_ANNOTATE("MOZ_CRASH(Tried to access a protected region!)");
             }
@@ -263,7 +250,7 @@ UnixExceptionHandler(int signum, siginfo_t* info, void* context)
 
             // If the faulting address is in one of our protected regions, we
             // want to annotate the crash to make it stand out from the crowd.
-            if (sProtectedRegionsInit && sProtectedRegions.isProtected(address)) {
+            if (sProtectedRegions.isProtected(address)) {
                 ReportCrashIfDebug("Hit MOZ_CRASH(Tried to access a protected region!)\n");
                 MOZ_CRASH_ANNOTATE("MOZ_CRASH(Tried to access a protected region!)");
             }
@@ -587,7 +574,7 @@ MachExceptionHandler()
 
     // If the faulting address is inside one of our protected regions, we
     // want to annotate the crash to make it stand out from the crowd.
-    if (sProtectedRegionsInit && sProtectedRegions.isProtected(address)) {
+    if (sProtectedRegions.isProtected(address)) {
         ReportCrashIfDebug("Hit MOZ_CRASH(Tried to access a protected region!)\n");
         MOZ_CRASH_ANNOTATE("MOZ_CRASH(Tried to access a protected region!)");
     }

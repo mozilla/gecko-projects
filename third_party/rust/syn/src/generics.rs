@@ -143,24 +143,9 @@ impl Generics {
     pub fn const_params_mut(&mut self) -> ConstParamsMut {
         ConstParamsMut(self.params.iter_mut())
     }
-
-    /// Initializes an empty `where`-clause if there is not one present already.
-    pub fn make_where_clause(&mut self) -> &mut WhereClause {
-        // This is Option::get_or_insert_with in Rust 1.20.
-        if self.where_clause.is_none() {
-            self.where_clause = Some(WhereClause {
-                where_token: Default::default(),
-                predicates: Punctuated::new(),
-            });
-        }
-        match self.where_clause {
-            Some(ref mut where_clause) => where_clause,
-            None => unreachable!(),
-        }
-    }
 }
 
-pub struct TypeParams<'a>(Iter<'a, GenericParam>);
+pub struct TypeParams<'a>(Iter<'a, GenericParam, Token![,]>);
 
 impl<'a> Iterator for TypeParams<'a> {
     type Item = &'a TypeParam;
@@ -179,7 +164,7 @@ impl<'a> Iterator for TypeParams<'a> {
     }
 }
 
-pub struct TypeParamsMut<'a>(IterMut<'a, GenericParam>);
+pub struct TypeParamsMut<'a>(IterMut<'a, GenericParam, Token![,]>);
 
 impl<'a> Iterator for TypeParamsMut<'a> {
     type Item = &'a mut TypeParam;
@@ -198,7 +183,7 @@ impl<'a> Iterator for TypeParamsMut<'a> {
     }
 }
 
-pub struct Lifetimes<'a>(Iter<'a, GenericParam>);
+pub struct Lifetimes<'a>(Iter<'a, GenericParam, Token![,]>);
 
 impl<'a> Iterator for Lifetimes<'a> {
     type Item = &'a LifetimeDef;
@@ -217,7 +202,7 @@ impl<'a> Iterator for Lifetimes<'a> {
     }
 }
 
-pub struct LifetimesMut<'a>(IterMut<'a, GenericParam>);
+pub struct LifetimesMut<'a>(IterMut<'a, GenericParam, Token![,]>);
 
 impl<'a> Iterator for LifetimesMut<'a> {
     type Item = &'a mut LifetimeDef;
@@ -236,7 +221,7 @@ impl<'a> Iterator for LifetimesMut<'a> {
     }
 }
 
-pub struct ConstParams<'a>(Iter<'a, GenericParam>);
+pub struct ConstParams<'a>(Iter<'a, GenericParam, Token![,]>);
 
 impl<'a> Iterator for ConstParams<'a> {
     type Item = &'a ConstParam;
@@ -255,7 +240,7 @@ impl<'a> Iterator for ConstParams<'a> {
     }
 }
 
-pub struct ConstParamsMut<'a>(IterMut<'a, GenericParam>);
+pub struct ConstParamsMut<'a>(IterMut<'a, GenericParam, Token![,]>);
 
 impl<'a> Iterator for ConstParamsMut<'a> {
     type Item = &'a mut ConstParam;
@@ -400,7 +385,6 @@ ast_struct! {
     /// *This type is available if Syn is built with the `"derive"` or `"full"`
     /// feature.*
     pub struct TraitBound {
-        pub paren_token: Option<token::Paren>,
         pub modifier: TraitBoundModifier,
         /// The `for<'a>` in `for<'a> Foo<&'a T>`
         pub lifetimes: Option<BoundLifetimes>,
@@ -615,10 +599,7 @@ pub mod parsing {
             |
             syn!(TraitBound) => { TypeParamBound::Trait }
             |
-            parens!(syn!(TraitBound)) => {|(parens, mut bound)| {
-                bound.paren_token = Some(parens);
-                TypeParamBound::Trait(bound)
-            }}
+            parens!(syn!(TraitBound)) => { |bound| TypeParamBound::Trait(bound.1) }
         ));
 
         fn description() -> Option<&'static str> {
@@ -641,7 +622,6 @@ pub mod parsing {
                     path.segments.last_mut().unwrap().value_mut().arguments = parenthesized;
                 }
                 TraitBound {
-                    paren_token: None,
                     modifier: modifier,
                     lifetimes: lifetimes,
                     path: path,
@@ -939,15 +919,9 @@ mod printing {
 
     impl ToTokens for TraitBound {
         fn to_tokens(&self, tokens: &mut Tokens) {
-            let to_tokens = |tokens: &mut Tokens| {
-                self.modifier.to_tokens(tokens);
-                self.lifetimes.to_tokens(tokens);
-                self.path.to_tokens(tokens);
-            };
-            match self.paren_token {
-                Some(ref paren) => paren.surround(tokens, to_tokens),
-                None => to_tokens(tokens),
-            }
+            self.modifier.to_tokens(tokens);
+            self.lifetimes.to_tokens(tokens);
+            self.path.to_tokens(tokens);
         }
     }
 
@@ -976,10 +950,8 @@ mod printing {
 
     impl ToTokens for WhereClause {
         fn to_tokens(&self, tokens: &mut Tokens) {
-            if !self.predicates.is_empty() {
-                self.where_token.to_tokens(tokens);
-                self.predicates.to_tokens(tokens);
-            }
+            self.where_token.to_tokens(tokens);
+            self.predicates.to_tokens(tokens);
         }
     }
 

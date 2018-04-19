@@ -32,4 +32,5 @@ assert.throws(TypeError, function() {
   a.flatMap();
 }, 'boolean value');
 
+
 reportCompare(0, 0);

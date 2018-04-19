@@ -7,6 +7,8 @@
 #ifndef MOZILLA_DOMRECT_H_
 #define MOZILLA_DOMRECT_H_
 
+#include "nsIDOMClientRect.h"
+#include "nsIDOMClientRectList.h"
 #include "nsTArray.h"
 #include "nsCOMPtr.h"
 #include "nsWrapperCache.h"
@@ -74,6 +76,7 @@ protected:
 };
 
 class DOMRect final : public DOMRectReadOnly
+                    , public nsIDOMClientRect
 {
 public:
   explicit DOMRect(nsISupports* aParent, double aX = 0, double aY = 0,
@@ -86,7 +89,8 @@ public:
   {
   }
 
-  NS_INLINE_DECL_REFCOUNTING_INHERITED(DOMRect, DOMRectReadOnly)
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_NSIDOMCLIENTRECT
 
   static already_AddRefed<DOMRect>
   Constructor(const GlobalObject& aGlobal, ErrorResult& aRV);
@@ -135,11 +139,6 @@ public:
     mHeight = aHeight;
   }
 
-  static DOMRect* FromSupports(nsISupports* aSupports)
-  {
-    return static_cast<DOMRect*>(aSupports);
-  }
-
 protected:
   double mX, mY, mWidth, mHeight;
 
@@ -147,7 +146,7 @@ private:
   ~DOMRect() {};
 };
 
-class DOMRectList final : public nsISupports,
+class DOMRectList final : public nsIDOMClientRectList,
                           public nsWrapperCache
 {
   ~DOMRectList() {}
@@ -160,6 +159,8 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(DOMRectList)
 
+  NS_DECL_NSIDOMCLIENTRECTLIST
+
   virtual JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto) override;
 
   nsISupports* GetParentObject()
@@ -168,6 +169,23 @@ public:
   }
 
   void Append(DOMRect* aElement) { mArray.AppendElement(aElement); }
+
+  static DOMRectList* FromSupports(nsISupports* aSupports)
+  {
+#ifdef DEBUG
+    {
+      nsCOMPtr<nsIDOMClientRectList> list_qi = do_QueryInterface(aSupports);
+
+      // If this assertion fires the QI implementation for the object in
+      // question doesn't use the nsIDOMClientRectList pointer as the nsISupports
+      // pointer. That must be fixed, or we'll crash...
+      NS_ASSERTION(list_qi == static_cast<nsIDOMClientRectList*>(aSupports),
+                   "Uh, fix QI!");
+    }
+#endif
+
+    return static_cast<DOMRectList*>(aSupports);
+  }
 
   uint32_t Length()
   {

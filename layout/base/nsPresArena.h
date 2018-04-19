@@ -98,9 +98,9 @@ public:
 
   /**
    * Clears all currently registered ArenaRefPtrs for the given ArenaObjectID.
-   * This is called when we reconstruct the rule tree so that ComputedStyles
+   * This is called when we reconstruct the rule tree so that style contexts
    * pointing into the old rule tree aren't released afterwards, triggering an
-   * assertion in ~ComputedStyle.
+   * assertion in ~nsStyleContext.
    */
   void ClearArenaRefPtrs(mozilla::ArenaObjectID aObjectID);
 
@@ -110,11 +110,9 @@ public:
    */
   void AddSizeOfExcludingThis(nsWindowSizes& aWindowSizes) const;
 
-#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
   void Check() {
     mPool.Check();
   }
-#endif
 
 private:
   void* Allocate(uint32_t aCode, size_t aSize);

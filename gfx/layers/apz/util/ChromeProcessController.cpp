@@ -12,7 +12,6 @@
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
 #include "mozilla/layers/APZEventState.h"
-#include "mozilla/layers/APZThreadUtils.h"
 #include "mozilla/layers/IAPZCTreeManager.h"
 #include "mozilla/layers/DoubleTapToZoom.h"
 #include "nsIDocument.h"
@@ -159,14 +158,8 @@ ChromeProcessController::HandleDoubleTap(const mozilla::CSSPoint& aPoint,
   FrameMetrics::ViewID viewId;
   if (APZCCallbackHelper::GetOrCreateScrollIdentifiers(
       document->GetDocumentElement(), &presShellId, &viewId)) {
-    APZThreadUtils::RunOnControllerThread(
-      NewRunnableMethod<ScrollableLayerGuid, CSSRect, uint32_t>(
-        "IAPZCTreeManager::ZoomToRect",
-        mAPZCTreeManager,
-        &IAPZCTreeManager::ZoomToRect,
-        ScrollableLayerGuid(aGuid.mLayersId, presShellId, viewId),
-        zoomToRect,
-        ZoomToRectBehavior::DEFAULT_BEHAVIOR));
+    mAPZCTreeManager->ZoomToRect(
+      ScrollableLayerGuid(aGuid.mLayersId, presShellId, viewId), zoomToRect);
   }
 }
 

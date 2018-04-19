@@ -539,7 +539,7 @@ struct PoolHeader {
 	// "Natural" guards are part of the normal instruction stream,
 	// while "non-natural" guards are inserted for the sole purpose
 	// of skipping around a pool.
-        uint32_t isNatural : 1;
+        bool isNatural : 1;
         uint32_t ONES : 16;
       };
       uint32_t data;
@@ -554,12 +554,12 @@ struct PoolHeader {
     Header(uint32_t data)
       : data(data)
     {
-      VIXL_STATIC_ASSERT(sizeof(Header) == sizeof(uint32_t));
+      JS_STATIC_ASSERT(sizeof(Header) == sizeof(uint32_t));
       VIXL_ASSERT(ONES == 0xffff);
     }
 
     uint32_t raw() const {
-      VIXL_STATIC_ASSERT(sizeof(Header) == sizeof(uint32_t));
+      JS_STATIC_ASSERT(sizeof(Header) == sizeof(uint32_t));
       return data;
     }
   };

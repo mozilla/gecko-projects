@@ -50,7 +50,6 @@ struct CompileArgs : ShareableBase<CompileArgs>
     bool debugEnabled;
     bool ionEnabled;
     bool sharedMemoryEnabled;
-    HasGcTypes gcTypesEnabled;
     bool testTiering;
 
     CompileArgs(Assumptions&& assumptions, ScriptedCaller&& scriptedCaller)
@@ -60,7 +59,6 @@ struct CompileArgs : ShareableBase<CompileArgs>
         debugEnabled(false),
         ionEnabled(false),
         sharedMemoryEnabled(false),
-        gcTypesEnabled(HasGcTypes::False),
         testTiering(false)
     {}
 
@@ -86,10 +84,7 @@ EstimateCompiledCodeSize(Tier tier, size_t bytecodeSize);
 //  - *error is null and the caller should report out-of-memory.
 
 SharedModule
-CompileBuffer(const CompileArgs& args,
-              const ShareableBytes& bytecode,
-              UniqueChars* error,
-              UniqueCharsVector* warnings);
+CompileBuffer(const CompileArgs& args, const ShareableBytes& bytecode, UniqueChars* error);
 
 // Attempt to compile the second tier of the given wasm::Module, returning whether
 // tier-2 compilation succeeded and Module::finishTier2 was called.
@@ -124,8 +119,7 @@ CompileStreaming(const CompileArgs& args,
                  const ExclusiveStreamEnd& codeStreamEnd,
                  const ExclusiveTailBytesPtr& tailBytesPtr,
                  const Atomic<bool>& cancelled,
-                 UniqueChars* error,
-                 UniqueCharsVector* warnings);
+                 UniqueChars* error);
 
 }  // namespace wasm
 }  // namespace js

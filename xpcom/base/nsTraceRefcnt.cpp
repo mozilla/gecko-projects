@@ -6,7 +6,6 @@
 
 #include "nsTraceRefcnt.h"
 #include "mozilla/IntegerPrintfMacros.h"
-#include "mozilla/Path.h"
 #include "mozilla/StaticPtr.h"
 #include "nsXPCOMPrivate.h"
 #include "nscore.h"
@@ -144,7 +143,7 @@ struct SerialNumberRecord
       return;
     }
 
-    JSContext* cx = nsContentUtils::GetCurrentJSContext();
+    JSContext* cx = nsContentUtils::GetCurrentJSContextForThread();
     if (!cx) {
       return;
     }
@@ -665,35 +664,30 @@ LogThisObj(intptr_t aSerialNumber)
   return (bool)PL_HashTableLookup(gObjectsToLog, (const void*)aSerialNumber);
 }
 
-using EnvCharType = mozilla::filesystem::Path::value_type;
-
-static bool
-InitLog(const EnvCharType* aEnvVar, const char* aMsg, FILE** aResult)
-{
 #ifdef XP_WIN
-  // This is gross, I know.
-  const wchar_t* envvar = reinterpret_cast<const wchar_t*>(aEnvVar);
-  const char16_t* value = reinterpret_cast<const char16_t*>(::_wgetenv(envvar));
-#define ENVVAR_PRINTF "%S"
+#define FOPEN_NO_INHERIT "N"
 #else
-  const char* envvar = aEnvVar;
-  const char* value = ::getenv(aEnvVar);
-#define ENVVAR_PRINTF "%s"
+#define FOPEN_NO_INHERIT
 #endif
 
+static bool
+InitLog(const char* aEnvVar, const char* aMsg, FILE** aResult)
+{
+  const char* value = getenv(aEnvVar);
   if (value) {
-    nsTDependentString<EnvCharType> fname(value);
-    if (fname.EqualsLiteral("1")) {
+    if (nsCRT::strcmp(value, "1") == 0) {
       *aResult = stdout;
-      fprintf(stdout, "### " ENVVAR_PRINTF " defined -- logging %s to stdout\n",
-              envvar, aMsg);
+      fprintf(stdout, "### %s defined -- logging %s to stdout\n",
+              aEnvVar, aMsg);
       return true;
-    } else if (fname.EqualsLiteral("2")) {
+    } else if (nsCRT::strcmp(value, "2") == 0) {
       *aResult = stderr;
-      fprintf(stdout, "### " ENVVAR_PRINTF " defined -- logging %s to stderr\n",
-              envvar, aMsg);
+      fprintf(stdout, "### %s defined -- logging %s to stderr\n",
+              aEnvVar, aMsg);
       return true;
     } else {
+      FILE* stream;
+      nsAutoCString fname(value);
       if (!XRE_IsParentProcess()) {
         bool hasLogExtension =
           fname.RFind(".log", true, -1, 4) == kNotFound ? false : true;
@@ -701,32 +695,24 @@ InitLog(const EnvCharType* aEnvVar, const char* aMsg, FILE** aResult)
           fname.Cut(fname.Length() - 4, 4);
         }
         fname.Append('_');
-        const char* processType = XRE_ChildProcessTypeToString(XRE_GetProcessType());
-        fname.AppendASCII(processType);
+        fname.Append((char*)XRE_ChildProcessTypeToString(XRE_GetProcessType()));
         fname.AppendLiteral("_pid");
         fname.AppendInt((uint32_t)getpid());
         if (hasLogExtension) {
           fname.AppendLiteral(".log");
         }
       }
-#ifdef XP_WIN
-      FILE* stream = ::_wfopen(fname.get(), L"wN");
-      const wchar_t* fp = (const wchar_t*)fname.get();
-#else
-      FILE* stream = ::fopen(fname.get(), "w");
-      const char* fp = fname.get();
-#endif
+      stream = ::fopen(fname.get(), "w" FOPEN_NO_INHERIT);
       if (stream) {
         MozillaRegisterDebugFD(fileno(stream));
         *aResult = stream;
-        fprintf(stderr, "### " ENVVAR_PRINTF " defined -- logging %s to " ENVVAR_PRINTF "\n",
-                envvar, aMsg, fp);
+        fprintf(stderr, "### %s defined -- logging %s to %s\n",
+                aEnvVar, aMsg, fname.get());
       } else {
-        fprintf(stderr, "### " ENVVAR_PRINTF " defined -- unable to log %s to " ENVVAR_PRINTF "\n",
-                envvar, aMsg, fp);
+        fprintf(stderr, "### %s defined -- unable to log %s to %s\n",
+                aEnvVar, aMsg, fname.get());
         MOZ_ASSERT(false, "Tried and failed to create an XPCOM log");
       }
-#undef ENVVAR_PRINTF
       return stream != nullptr;
     }
   }
@@ -750,20 +736,14 @@ maybeUnregisterAndCloseFile(FILE*& aFile)
 static void
 InitTraceLog()
 {
-#ifdef XP_WIN
-#define ENVVAR(x) u"" x
-#else
-#define ENVVAR(x) x
-#endif
-
   if (gInitialized) {
     return;
   }
   gInitialized = true;
 
-  bool defined = InitLog(ENVVAR("XPCOM_MEM_BLOAT_LOG"), "bloat/leaks", &gBloatLog);
+  bool defined = InitLog("XPCOM_MEM_BLOAT_LOG", "bloat/leaks", &gBloatLog);
   if (!defined) {
-    gLogLeaksOnly = InitLog(ENVVAR("XPCOM_MEM_LEAK_LOG"), "leaks", &gBloatLog);
+    gLogLeaksOnly = InitLog("XPCOM_MEM_LEAK_LOG", "leaks", &gBloatLog);
   }
   if (defined || gLogLeaksOnly) {
     RecreateBloatView();
@@ -774,15 +754,15 @@ InitTraceLog()
     }
   }
 
-  InitLog(ENVVAR("XPCOM_MEM_REFCNT_LOG"), "refcounts", &gRefcntsLog);
+  InitLog("XPCOM_MEM_REFCNT_LOG", "refcounts", &gRefcntsLog);
 
-  InitLog(ENVVAR("XPCOM_MEM_ALLOC_LOG"), "new/delete", &gAllocLog);
+  InitLog("XPCOM_MEM_ALLOC_LOG", "new/delete", &gAllocLog);
 
   const char* classes = getenv("XPCOM_MEM_LOG_CLASSES");
 
 #ifdef HAVE_CPP_DYNAMIC_CAST_TO_VOID_PTR
   if (classes) {
-    InitLog(ENVVAR("XPCOM_MEM_COMPTR_LOG"), "nsCOMPtr", &gCOMPtrLog);
+    InitLog("XPCOM_MEM_COMPTR_LOG", "nsCOMPtr", &gCOMPtrLog);
   } else {
     if (getenv("XPCOM_MEM_COMPTR_LOG")) {
       fprintf(stdout, "### XPCOM_MEM_COMPTR_LOG defined -- but XPCOM_MEM_LOG_CLASSES is not defined\n");
@@ -794,8 +774,6 @@ InitTraceLog()
     fprintf(stdout, "### XPCOM_MEM_COMPTR_LOG defined -- but it will not work without dynamic_cast\n");
   }
 #endif // HAVE_CPP_DYNAMIC_CAST_TO_VOID_PTR
-
-#undef ENVVAR
 
   if (classes) {
     // if XPCOM_MEM_LOG_CLASSES was set to some value, the value is interpreted

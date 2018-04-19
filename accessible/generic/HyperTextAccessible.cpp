@@ -219,7 +219,7 @@ HyperTextAccessible::DOMPointToOffset(nsINode* aNode, int32_t aNodeOffset,
   if (aNodeOffset == -1) {
     findNode = aNode;
 
-  } else if (aNode->IsText()) {
+  } else if (aNode->IsNodeOfType(nsINode::eTEXT)) {
     // For text nodes, aNodeOffset comes in as a character offset
     // Text offset will be added at the end, if we find the offset in this hypertext
     // We want the "skipped" offset into the text (rendered text without the extra whitespace)
@@ -1340,7 +1340,7 @@ HyperTextAccessible::SetSelectionRange(int32_t aStartPos, int32_t aEndPos)
 
   // Set up the selection.
   for (int32_t idx = domSel->RangeCount() - 1; idx > 0; idx--)
-    domSel->RemoveRange(*domSel->GetRangeAt(idx), IgnoreErrors());
+    domSel->RemoveRange(domSel->GetRangeAt(idx));
   SetSelectionBoundsAt(0, aStartPos, aEndPos);
 
   // Make sure it is visible
@@ -1393,7 +1393,7 @@ HyperTextAccessible::CaretOffset() const
     // Ignore offset if cached accessible isn't a text leaf.
     if (nsCoreUtils::IsAncestorOf(GetNode(), textNode))
       return TransformOffset(text,
-        textNode->IsText() ? caretOffset : 0, false);
+        textNode->IsNodeOfType(nsINode::eTEXT) ? caretOffset : 0, false);
   }
 
   // No caret if the focused node is not inside this DOM node and this DOM node
@@ -1661,16 +1661,11 @@ HyperTextAccessible::SetSelectionBoundsAt(int32_t aSelectionNum,
 
   // If new range was created then add it, otherwise notify selection listeners
   // that existing selection range was changed.
-  if (aSelectionNum == static_cast<int32_t>(rangeCount)) {
-    IgnoredErrorResult err;
-    domSel->AddRange(*range, err);
-    return !err.Failed();
-  }
+  if (aSelectionNum == static_cast<int32_t>(rangeCount))
+    return NS_SUCCEEDED(domSel->AddRange(range));
 
-  domSel->RemoveRange(*range, IgnoreErrors());
-  IgnoredErrorResult err;
-  domSel->AddRange(*range, err);
-  return !err.Failed();
+  domSel->RemoveRange(range);
+  return NS_SUCCEEDED(domSel->AddRange(range));
 }
 
 bool
@@ -1683,7 +1678,7 @@ HyperTextAccessible::RemoveFromSelection(int32_t aSelectionNum)
   if (aSelectionNum < 0 || aSelectionNum >= static_cast<int32_t>(domSel->RangeCount()))
     return false;
 
-  domSel->RemoveRange(*domSel->GetRangeAt(aSelectionNum), IgnoreErrors());
+  domSel->RemoveRange(domSel->GetRangeAt(aSelectionNum));
   return true;
 }
 

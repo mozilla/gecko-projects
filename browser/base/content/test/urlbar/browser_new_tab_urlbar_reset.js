@@ -11,6 +11,6 @@ add_task(async function() {
   let tab2 = await BrowserTestUtils.openNewForegroundTab(gBrowser, "about:blank", false);
   await promiseAutocompleteResultPopup("m");
   ok(gURLBar.popupOpen, "The popup is open");
-  BrowserTestUtils.removeTab(tab);
-  BrowserTestUtils.removeTab(tab2);
+  await BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab2);
 });

@@ -568,8 +568,9 @@ GlobalObject::initIntlObject(JSContext* cx, Handle<GlobalObject*> global)
 }
 
 JSObject*
-js::InitIntlClass(JSContext* cx, Handle<GlobalObject*> global)
+js::InitIntlClass(JSContext* cx, HandleObject obj)
 {
+    Handle<GlobalObject*> global = obj.as<GlobalObject>();
     if (!GlobalObject::initIntlObject(cx, global))
         return nullptr;
 

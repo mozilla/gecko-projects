@@ -124,10 +124,6 @@ ksf{
         }
         MRO{
             "MRO",
-            "mɔni mǝ á mwaritaní (1973–2017)",
-        }
-        MRU{
-            "MRU",
             "mɔni mǝ á mwaritaní",
         }
         MUR{
@@ -180,10 +176,6 @@ ksf{
         }
         STD{
             "STD",
-            "mɔni mǝ á saotomɛ́ ri priŋsib (1977–2017)",
-        }
-        STN{
-            "STN",
             "mɔni mǝ á saotomɛ́ ri priŋsib",
         }
         SZL{
@@ -231,5 +223,5 @@ ksf{
             "mɔni mǝ á zimbabwɛ́",
         }
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.37.1"}
 }

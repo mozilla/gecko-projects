@@ -9,6 +9,7 @@
 #include "nsIChannel.h"
 #include "mozilla/dom/Element.h"
 #include "nsIDOMElement.h"
+#include "nsIDOMText.h"
 #include "nsIDocument.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMDocumentFragment.h"
@@ -856,13 +857,17 @@ txMozillaXSLTProcessor::SetParameter(const nsAString& aNamespaceURI,
                 break;
             }
 
-            nsCOMPtr<nsINodeList> nodeList = do_QueryInterface(supports);
+            nsCOMPtr<nsIDOMNodeList> nodeList = do_QueryInterface(supports);
             if (nodeList) {
-                uint32_t length = nodeList->Length();
+                uint32_t length;
+                nodeList->GetLength(&length);
 
+                nsCOMPtr<nsIDOMNode> node;
                 uint32_t i;
                 for (i = 0; i < length; ++i) {
-                    if (!nsContentUtils::CanCallerAccess(nodeList->Item(i))) {
+                    nodeList->Item(i, getter_AddRefs(node));
+
+                    if (!nsContentUtils::CanCallerAccess(node)) {
                         return NS_ERROR_DOM_SECURITY_ERR;
                     }
                 }
@@ -1417,19 +1422,23 @@ txVariable::Convert(nsIVariant *aValue, txAExprResult** aResult)
                 return xpathResult->GetExprResult(aResult);
             }
 
-            nsCOMPtr<nsINodeList> nodeList = do_QueryInterface(supports);
+            nsCOMPtr<nsIDOMNodeList> nodeList = do_QueryInterface(supports);
             if (nodeList) {
                 RefPtr<txNodeSet> nodeSet = new txNodeSet(nullptr);
                 if (!nodeSet) {
                     return NS_ERROR_OUT_OF_MEMORY;
                 }
 
-                uint32_t length = nodeList->Length();
+                uint32_t length;
+                nodeList->GetLength(&length);
 
+                nsCOMPtr<nsIDOMNode> node;
                 uint32_t i;
                 for (i = 0; i < length; ++i) {
+                    nodeList->Item(i, getter_AddRefs(node));
+
                     nsAutoPtr<txXPathNode> xpathNode(
-                        txXPathNativeNode::createXPathNode(nodeList->Item(i)));
+                        txXPathNativeNode::createXPathNode(node));
                     if (!xpathNode) {
                         return NS_ERROR_FAILURE;
                     }

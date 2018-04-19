@@ -89,7 +89,6 @@ BlockMightReach(MBasicBlock* src, MBasicBlock* dest)
 static void
 IonSpewDependency(MInstruction* load, MInstruction* store, const char* verb, const char* reason)
 {
-#ifdef JS_JITSPEW
     if (!JitSpewEnabled(JitSpew_Alias))
         return;
 
@@ -99,13 +98,11 @@ IonSpewDependency(MInstruction* load, MInstruction* store, const char* verb, con
     out.printf(" %s on store ", verb);
     store->printName(out);
     out.printf(" (%s)\n", reason);
-#endif
 }
 
 static void
 IonSpewAliasInfo(const char* pre, MInstruction* ins, const char* post)
 {
-#ifdef JS_JITSPEW
     if (!JitSpewEnabled(JitSpew_Alias))
         return;
 
@@ -113,7 +110,6 @@ IonSpewAliasInfo(const char* pre, MInstruction* ins, const char* post)
     out.printf("%s ", pre);
     ins->printName(out);
     out.printf(" %s\n", post);
-#endif
 }
 
 // This pass annotates every load instruction with the last store instruction
@@ -185,14 +181,12 @@ AliasAnalysis::analyze()
                         return false;
                 }
 
-#ifdef JS_JITSPEW
                 if (JitSpewEnabled(JitSpew_Alias)) {
                     Fprinter& out = JitSpewPrinter();
                     out.printf("Processing store ");
                     def->printName(out);
                     out.printf(" (flags %x)\n", set.flags());
                 }
-#endif
             } else {
                 // Find the most recent store on which this instruction depends.
                 MInstruction* lastStore = firstIns;

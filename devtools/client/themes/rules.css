@@ -19,6 +19,14 @@
   --rule-shape-toggle-color: var(--grey-10);
 }
 
+:root.theme-firebug {
+  --rule-highlight-background-color: var(--theme-highlight-yellow);
+  --rule-property-name: darkgreen;
+  --rule-property-value: darkblue;
+  --rule-overridden-item-border-color: var(--theme-content-color2);
+  --rule-header-background-color: var(--theme-header-background);
+}
+
 /* Rule View Tabpanel */
 
 #sidebar-panel-ruleview {
@@ -209,6 +217,12 @@
   cursor: default;
 }
 
+.theme-firebug .ruleview-rule-source-label {
+  font-family: var(--proportional-font-family);
+  font-weight: bold;
+  color: #0000FF;
+}
+
 .ruleview-rule-source:not([unselectable]):hover {
   text-decoration: underline;
 }
@@ -224,6 +238,17 @@
   display: flex;
 
   -moz-user-select: none;
+}
+
+.theme-firebug .ruleview-header {
+  font-family: var(--proportional-font-family);
+  font-weight: bold;
+  color: inherit;
+  border: none;
+  margin: 4px 0;
+  padding: 3px 4px 2px 4px;
+  line-height: inherit;
+  min-height: 0;
 }
 
 .ruleview-expandable-header {
@@ -281,6 +306,46 @@
 .ruleview-rule[uneditable=true] .ruleview-propertyvaluecontainer >
 .ruleview-propertyvalue {
   border-bottom-color: transparent;
+}
+
+.theme-firebug .ruleview-namecontainer > .ruleview-propertyname,
+.theme-firebug .ruleview-propertyvaluecontainer > .ruleview-propertyvalue {
+  border-bottom: none;
+}
+
+.theme-firebug .ruleview-namecontainer > .ruleview-propertyname {
+  color: var(--rule-property-name);
+}
+
+.theme-firebug .ruleview-propertyvaluecontainer > .ruleview-propertyvalue {
+  color: var(--rule-property-value);
+}
+
+.theme-firebug .ruleview-overridden .ruleview-propertyname,
+.theme-firebug .ruleview-overridden .ruleview-propertyvalue {
+  text-decoration: line-through;
+}
+
+.theme-firebug .ruleview-enableproperty:not([checked]) ~ .ruleview-namecontainer,
+.theme-firebug .ruleview-enableproperty:not([checked]) ~ .ruleview-namecontainer *,
+.theme-firebug .ruleview-enableproperty:not([checked]) ~ .ruleview-propertyvaluecontainer,
+.theme-firebug .ruleview-enableproperty:not([checked]) ~ .ruleview-propertyvaluecontainer *,
+.theme-firebug .ruleview-overridden > * > .ruleview-computed:not(.ruleview-overridden),
+.theme-firebug .ruleview-overridden > * > .ruleview-computed:not(.ruleview-overridden) * {
+  color: #CCCCCC;
+}
+
+.theme-firebug .ruleview-rule + .ruleview-rule {
+  border-bottom: none;
+}
+
+.ruleview-warning {
+  background-image: url(images/alerticon-warning.png);
+  background-size: 13px 12px;
+  margin-inline-start: 5px;
+  display: inline-block;
+  width: 13px;
+  height: 12px;
 }
 
 @media (min-resolution: 1.1dppx) {
@@ -417,8 +482,7 @@
   border-radius: 0;
 }
 
-.ruleview-shape-point.active,
-.ruleview-shapeswatch.active + .ruleview-shape > .ruleview-shape-point:hover {
+.ruleview-shape-point.active {
   background-color: var(--rule-highlight-background-color);
 }
 
@@ -451,30 +515,6 @@
 .ruleview-angleswatch {
   background: url("chrome://devtools/skin/images/angle-swatch.svg");
   background-size: 1em;
-}
-
-.ruleview-rule:not(:hover) .ruleview-fontswatch:not(.active) {
-  visibility: hidden;
-}
-
-.ruleview-fontswatch {
-  position: absolute;
-  width: 1.45em;
-  height: 1em;
-  right: 1.5em;
-  bottom: 0.5em;
-  font-size: 1em;
-
-  background: url("chrome://devtools/skin/images/font-swatch.svg");
-  -moz-context-properties: fill;
-  fill: var(--grey-40);
-  background-size: contain;
-  cursor: pointer;
-  -moz-user-select: none;
-}
-
-.ruleview-fontswatch.active {
-  fill: var(--blue-50);
 }
 
 .ruleview-shapeswatch {
@@ -520,6 +560,11 @@
   border: 1px solid #CCC;
   padding: 0;
   margin: -1px -3px -1px -1px;
+}
+
+.theme-firebug .styleinspector-propertyeditor {
+  border: 1px solid var(--theme-splitter-color);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
 }
 
 .ruleview-property {
@@ -575,6 +620,12 @@
   color: var(--theme-highlight-orange);
 }
 
+.theme-firebug .ruleview-selector > .ruleview-selector-matched,
+.theme-firebug .ruleview-selector > .ruleview-selector-separator,
+.theme-firebug .ruleview-selector > .ruleview-selector-unmatched {
+  color: inherit;
+}
+
 .ruleview-selectorhighlighter {
   background: url("chrome://devtools/skin/images/vview-open-inspector.png") no-repeat 0 0;
   padding-left: 16px;
@@ -611,4 +662,30 @@
 }
 .ruleview-overridden-rule-filter:hover {
   opacity: 1;
+}
+
+.theme-firebug .ruleview-overridden {
+  text-decoration: none;
+}
+
+/* Firebug theme disable/enable CSS rule. Firebug theme uses its own
+  icons to indicate when CSS rules can be disabled or enabled. */
+
+.theme-firebug .ruleview-rule .theme-checkbox {
+  background-repeat: no-repeat;
+  background-size: 12px 12px;
+  background-image: url(chrome://devtools/skin/images/firebug/disable.svg);
+  background-position: 0 0;
+}
+
+.theme-firebug .ruleview-rule .theme-checkbox:not([checked]){
+  filter: grayscale(1);
+}
+
+.theme-firebug .ruleview-rule .theme-checkbox[checked] {
+  background-position: 0 0;
+}
+
+.theme-firebug .ruleview-property:not(:hover) .ruleview-enableproperty {
+  visibility: hidden;
 }

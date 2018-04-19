@@ -12,7 +12,7 @@ const expected = new DOMException(
     'UUID to \'optionalServices\' in requestDevice() options. ' +
     'https://goo.gl/HxfxSQ', 'SecurityError');
 
-bluetooth_test(() => getConnectedHIDDevice({
+bluetooth_test(() => getHIDDevice({
   filters: [{services: ['device_information']}],
   optionalServices: ['human_interface_device']
 })

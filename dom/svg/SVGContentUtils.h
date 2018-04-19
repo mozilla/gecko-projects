@@ -20,12 +20,11 @@
 class nsIContent;
 class nsIDocument;
 class nsIFrame;
-class nsPresContext;
+class nsStyleContext;
 class nsStyleCoord;
 class nsSVGElement;
 
 namespace mozilla {
-class ComputedStyle;
 class nsSVGAnimatedTransformList;
 class SVGAnimatedPreserveAspectRatio;
 class SVGContextPaint;
@@ -69,6 +68,20 @@ enum SVGTransformTypes {
    eChildToUserSpace
 };
 
+inline bool
+IsSVGWhitespace(char aChar)
+{
+  return aChar == '\x20' || aChar == '\x9' ||
+         aChar == '\xD'  || aChar == '\xA';
+}
+
+inline bool
+IsSVGWhitespace(char16_t aChar)
+{
+  return aChar == char16_t('\x20') || aChar == char16_t('\x9') ||
+         aChar == char16_t('\xD')  || aChar == char16_t('\xA');
+}
+
 /**
  * Functions generally used by SVG Content classes. Functions here
  * should not generally depend on layout methods/classes e.g. nsSVGUtils
@@ -76,7 +89,6 @@ enum SVGTransformTypes {
 class SVGContentUtils
 {
 public:
-  typedef mozilla::ComputedStyle ComputedStyle;
   typedef mozilla::gfx::Float Float;
   typedef mozilla::gfx::Matrix Matrix;
   typedef mozilla::gfx::Rect Rect;
@@ -157,13 +169,13 @@ public:
    */
   static void GetStrokeOptions(AutoStrokeOptions* aStrokeOptions,
                                nsSVGElement* aElement,
-                               ComputedStyle* aComputedStyle,
+                               nsStyleContext* aStyleContext,
                                mozilla::SVGContextPaint* aContextPaint,
                                StrokeOptionFlags aFlags = eAllStrokeOptions);
 
   /**
    * Returns the current computed value of the CSS property 'stroke-width' for
-   * the given element. aComputedStyle may be provided as an optimization.
+   * the given element. aStyleContext may be provided as an optimization.
    * aContextPaint is also optional.
    *
    * Note that this function does NOT take account of the value of the 'stroke'
@@ -171,7 +183,7 @@ public:
    * "0", respectively.
    */
   static Float GetStrokeWidth(nsSVGElement* aElement,
-                              ComputedStyle* aComputedStyle,
+                              nsStyleContext* aStyleContext,
                               mozilla::SVGContextPaint* aContextPaint);
 
   /*
@@ -181,9 +193,9 @@ public:
    * XXX document the conditions under which these may fail, and what they
    * return in those cases.
    */
-  static float GetFontSize(mozilla::dom::Element* aElement);
-  static float GetFontSize(nsIFrame* aFrame);
-  static float GetFontSize(ComputedStyle*, nsPresContext*);
+  static float GetFontSize(mozilla::dom::Element *aElement);
+  static float GetFontSize(nsIFrame *aFrame);
+  static float GetFontSize(nsStyleContext *aStyleContext);
   /*
    * Get the number of CSS px (user units) per ex (i.e. the x-height in user
    * units) for an nsIContent
@@ -191,9 +203,9 @@ public:
    * XXX document the conditions under which these may fail, and what they
    * return in those cases.
    */
-  static float GetFontXHeight(mozilla::dom::Element* aElement);
-  static float GetFontXHeight(nsIFrame* aFrame);
-  static float GetFontXHeight(ComputedStyle*, nsPresContext*);
+  static float GetFontXHeight(mozilla::dom::Element *aElement);
+  static float GetFontXHeight(nsIFrame *aFrame);
+  static float GetFontXHeight(nsStyleContext *aStyleContext);
 
   /*
    * Report a localized error message to the error console.
@@ -242,7 +254,7 @@ public:
   static float
   AngleBisect(float a1, float a2);
 
-  /* Generate a viewbox to viewport transformation matrix */
+  /* Generate a viewbox to viewport tranformation matrix */
 
   static Matrix
   GetViewBoxTransform(float aViewportWidth, float aViewportHeight,

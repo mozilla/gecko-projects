@@ -39,6 +39,7 @@ class IID2NativeInterfaceMap;
 class ClassInfo2NativeSetMap;
 class ClassInfo2WrappedNativeProtoMap;
 class NativeSetMap;
+class IID2ThisTranslatorMap;
 class XPCWrappedNativeProtoMap;
 class JSObject2JSObjectMap;
 

@@ -15,6 +15,7 @@
 #include "nsIForm.h"
 #include "nsIFormControl.h"
 #include "nsGenericHTMLElement.h"
+#include "nsIDOMHTMLFormElement.h"
 #include "nsIWebProgressListener.h"
 #include "nsIRadioGroupContainer.h"
 #include "nsIWeakReferenceUtils.h"
@@ -35,6 +36,7 @@ class HTMLFormControlsCollection;
 class HTMLImageElement;
 
 class HTMLFormElement final : public nsGenericHTMLElement,
+                              public nsIDOMHTMLFormElement,
                               public nsIWebProgressListener,
                               public nsIForm,
                               public nsIRadioGroupContainer
@@ -42,7 +44,7 @@ class HTMLFormElement final : public nsGenericHTMLElement,
   friend class HTMLFormControlsCollection;
 
 public:
-  NS_IMPL_FROMNODE_HTML_WITH_TAG(HTMLFormElement, form)
+  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLFormElement, form)
 
   explicit HTMLFormElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo);
 
@@ -52,6 +54,9 @@ public:
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
+
+  // nsIDOMHTMLFormElement
+  NS_DECL_NSIDOMHTMLFORMELEMENT
 
   // nsIWebProgressListener
   NS_DECL_NSIWEBPROGRESSLISTENER
@@ -93,8 +98,10 @@ public:
                                 const nsAString& aValue,
                                 nsIPrincipal* aMaybeScriptedPrincipal,
                                 nsAttrValue& aResult) override;
-  void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
-  void WillHandleEvent(EventChainPostVisitor& aVisitor) override;
+  virtual nsresult GetEventTargetParent(
+                     EventChainPreVisitor& aVisitor) override;
+  virtual nsresult WillHandleEvent(
+                     EventChainPostVisitor& aVisitor) override;
   virtual nsresult PostHandleEvent(
                      EventChainPostVisitor& aVisitor) override;
 

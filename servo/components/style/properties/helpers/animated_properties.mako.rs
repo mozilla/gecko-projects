@@ -36,7 +36,7 @@ use values::animated::color::RGBA as AnimatedRGBA;
 use values::animated::effects::Filter as AnimatedFilter;
 use values::animated::effects::FilterList as AnimatedFilterList;
 use values::computed::{Angle, CalcLengthOrPercentage};
-use values::computed::{ClipRect, Context};
+use values::computed::{ClipRect, Context, ComputedUrl};
 use values::computed::{Length, LengthOrPercentage, LengthOrPercentageOrAuto};
 use values::computed::{LengthOrPercentageOrNone, MaxLength};
 use values::computed::{NonNegativeNumber, Number, NumberOrPercentage, Percentage};
@@ -48,7 +48,6 @@ use values::computed::transform::Transform as ComputedTransform;
 use values::computed::transform::Rotate as ComputedRotate;
 use values::computed::transform::Translate as ComputedTranslate;
 use values::computed::transform::Scale as ComputedScale;
-use values::computed::url::ComputedUrl;
 use values::generics::transform::{self, Rotate, Translate, Scale, Transform, TransformOperation};
 use values::distance::{ComputeSquaredDistance, SquaredDistance};
 use values::generics::font::{FontSettings as GenericFontSettings, FontTag, VariationValue};
@@ -68,7 +67,7 @@ pub fn nscsspropertyid_is_animatable(property: nsCSSPropertyID) -> bool {
     match property {
         % for prop in data.longhands + data.shorthands_except_all():
             % if prop.animatable:
-                ${prop.nscsspropertyid()} => true,
+                ${helpers.to_nscsspropertyid(prop.ident)} => true,
             % endif
         % endfor
         _ => false
@@ -154,12 +153,12 @@ impl From<nsCSSPropertyID> for TransitionProperty {
     fn from(property: nsCSSPropertyID) -> TransitionProperty {
         match property {
             % for prop in data.longhands:
-            ${prop.nscsspropertyid()} => {
+            ${helpers.to_nscsspropertyid(prop.ident)} => {
                 TransitionProperty::Longhand(LonghandId::${prop.camel_case})
             }
             % endfor
             % for prop in data.shorthands_except_all():
-            ${prop.nscsspropertyid()} => {
+            ${helpers.to_nscsspropertyid(prop.ident)} => {
                 TransitionProperty::Shorthand(ShorthandId::${prop.camel_case})
             }
             % endfor
@@ -179,7 +178,7 @@ pub fn nscsspropertyid_is_transitionable(property: nsCSSPropertyID) -> bool {
     match property {
         % for prop in data.longhands + data.shorthands_except_all():
             % if prop.transitionable:
-                ${prop.nscsspropertyid()} => true,
+                ${helpers.to_nscsspropertyid(prop.ident)} => true,
             % endif
         % endfor
         _ => false
@@ -1204,8 +1203,7 @@ impl Animate for ComputedTransformOperation {
             ) => {
                 Ok(TransformOperation::Translate(
                     fx.animate(tx, procedure)?,
-                    Some(fy.unwrap_or(LengthOrPercentage::zero())
-                        .animate(&ty.unwrap_or(LengthOrPercentage::zero()), procedure)?)
+                    Some(fy.unwrap_or(*fx).animate(&ty.unwrap_or(*tx), procedure)?)
                 ))
             },
             (

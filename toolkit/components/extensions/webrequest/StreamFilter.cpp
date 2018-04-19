@@ -244,7 +244,8 @@ StreamFilter::FireEvent(const nsAString& aType)
   RefPtr<Event> event = Event::Constructor(this, aType, init);
   event->SetTrusted(true);
 
-  DispatchEvent(*event);
+  bool defaultPrevented;
+  DispatchEvent(event, &defaultPrevented);
 }
 
 void
@@ -270,7 +271,8 @@ StreamFilter::FireDataEvent(const nsTArray<uint8_t>& aData)
     StreamFilterDataEvent::Constructor(this, NS_LITERAL_STRING("data"), init);
   event->SetTrusted(true);
 
-  DispatchEvent(*event);
+  bool defaultPrevented;
+  DispatchEvent(event, &defaultPrevented);
 }
 
 void

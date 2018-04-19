@@ -30,11 +30,7 @@ class BenchmarkPlayback : public QueueObject
   void InitDecoder(TrackInfo&& aInfo);
 
   void Output(const MediaDataDecoder::DecodedData& aResults);
-  void Error(const MediaResult& aError);
   void InputExhausted();
-
-  // Shutdown trackdemuxer and demuxer if any and shutdown the task queues.
-  void FinalizeShutdown();
 
   Atomic<Benchmark*> mMainThreadState;
 
@@ -85,7 +81,7 @@ public:
     const TimeDuration mTimeout;
   };
 
-  typedef MozPromise<uint32_t, MediaResult, /* IsExclusive = */ true> BenchmarkPromise;
+  typedef MozPromise<uint32_t, bool, /* IsExclusive = */ true> BenchmarkPromise;
 
   explicit Benchmark(MediaDataDemuxer* aDemuxer,
                      const Parameters& aParameters = Parameters());
@@ -97,7 +93,6 @@ private:
   friend class BenchmarkPlayback;
   virtual ~Benchmark();
   void ReturnResult(uint32_t aDecodeFps);
-  void ReturnError(const MediaResult& aError);
   void Dispose();
   const Parameters mParameters;
   RefPtr<Benchmark> mKeepAliveUntilComplete;

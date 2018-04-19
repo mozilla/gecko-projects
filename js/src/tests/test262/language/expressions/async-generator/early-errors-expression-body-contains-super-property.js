@@ -4,7 +4,7 @@
 
 /*---
 author: Caitlin Potter <caitp@igalia.com>
-esid: sec-async-generator-function-definitions-static-semantics-early-errors
+esid: pending
 description: >
   It is a syntax error if AsyncGeneratorBody contains SuperProperty is true.
 negative:

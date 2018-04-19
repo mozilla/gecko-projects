@@ -611,6 +611,10 @@ class Marionette(object):
             self.startup_timeout = int(startup_timeout)
 
         if self.bin:
+            if not Marionette.is_port_available(self.port, host=self.host):
+                ex_msg = "{0}:{1} is unavailable.".format(self.host, self.port)
+                raise errors.MarionetteException(message=ex_msg)
+
             self.instance = GeckoInstance.create(
                 app, host=self.host, port=self.port, bin=self.bin, **instance_args)
             self.start_binary(self.startup_timeout)
@@ -623,9 +627,6 @@ class Marionette(object):
             return self.instance.profile.profile
 
     def start_binary(self, timeout):
-        if not self.is_port_available(self.port, host=self.host):
-            raise IOError("Port {0}:{1} is unavailable.".format(self.host, self.port))
-
         try:
             self.instance.start()
             self.raise_for_port(timeout=timeout)
@@ -1706,19 +1707,21 @@ class Marionette(object):
         args = self._to_json(script_args)
         stack = traceback.extract_stack()
         frame = stack[-2:-1][0]  # grab the second-to-last frame
-        filename = frame[0] if sys.platform == "win32" else os.path.relpath(frame[0])
-        body = {"script": script.strip(),
+        body = {"script": script,
                 "args": args,
                 "newSandbox": new_sandbox,
                 "sandbox": sandbox,
                 "scriptTimeout": script_timeout,
                 "line": int(frame[1]),
-                "filename": filename}
-        rv = self._send_message("WebDriver:ExecuteScript", body, key="value")
+                "filename": os.path.basename(frame[0])}
+
+        rv = self._send_message("WebDriver:ExecuteScript",
+                                body, key="value")
         return self._from_json(rv)
 
     def execute_async_script(self, script, script_args=(), new_sandbox=True,
-                             sandbox="default", script_timeout=None):
+                             sandbox="default", script_timeout=None,
+                             debug_script=False):
         """Executes an asynchronous JavaScript script, and returns the
         result (or None if the script does return a value).
 
@@ -1735,6 +1738,8 @@ class Marionette(object):
         :param new_sandbox: If False, preserve global variables from
             the last execute_*script call. This is True by default,
             in which case no globals are preserved.
+        :param debug_script: Capture javascript exceptions when in
+            `CONTEXT_CHROME` context.
 
         Usage example:
 
@@ -1752,16 +1757,17 @@ class Marionette(object):
         args = self._to_json(script_args)
         stack = traceback.extract_stack()
         frame = stack[-2:-1][0]  # grab the second-to-last frame
-        filename = frame[0] if sys.platform == "win32" else os.path.relpath(frame[0])
-        body = {"script": script.strip(),
+        body = {"script": script,
                 "args": args,
                 "newSandbox": new_sandbox,
                 "sandbox": sandbox,
                 "scriptTimeout": script_timeout,
                 "line": int(frame[1]),
-                "filename": filename}
+                "filename": os.path.basename(frame[0]),
+                "debug_script": debug_script}
 
-        rv = self._send_message("WebDriver:ExecuteAsyncScript", body, key="value")
+        rv = self._send_message("WebDriver:ExecuteAsyncScript",
+                                body, key="value")
         return self._from_json(rv)
 
     def find_element(self, method, target, id=None):

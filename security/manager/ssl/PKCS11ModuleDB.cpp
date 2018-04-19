@@ -53,13 +53,13 @@ GetModuleNameForTelemetry(/*in*/ const SECMODModule* module,
 {
   result.Truncate();
   if (module->dllName) {
-    result.AssignASCII(module->dllName);
+    CopyASCIItoUTF16(module->dllName, result);
     int32_t separatorIndex = result.RFind(FILE_PATH_SEPARATOR);
     if (separatorIndex != kNotFound) {
       result = Substring(result, separatorIndex + 1);
     }
   } else {
-    result.AssignASCII(module->commonName);
+    CopyASCIItoUTF16(module->commonName, result);
   }
   if (result.Length() >= 70) {
     result.Truncate(69);

@@ -174,6 +174,7 @@ function clickLink(aId, aCallback) {
     aCallback();
   };
 
+  // eslint-disable-next-line mozilla/no-cpows-in-tests
   var link = browser.contentDocument.getElementById(aId);
   EventUtils.sendMouseEvent({type: "click"}, link);
 
@@ -515,7 +516,7 @@ add_test(function() {
 // Test for Bug 703929 - Loading the discover view from a chrome XUL file fails when
 // the add-on manager is reopened.
 add_test(function() {
-  const url = "chrome://mochitests/content/" + RELATIVE_DIR + "addon_prefs.xul";
+  const url = "chrome://mochitests/content/" + RELATIVE_DIR + "addon_about.xul";
   Services.prefs.setCharPref(PREF_DISCOVERURL, url);
 
   open_manager("addons://discover/", function(aWindow) {

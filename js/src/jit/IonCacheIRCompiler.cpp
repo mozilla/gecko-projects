@@ -5,7 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/DebugOnly.h"
-#include "mozilla/Maybe.h"
 
 #include "jit/BaselineIC.h"
 #include "jit/CacheIRCompiler.h"
@@ -24,7 +23,6 @@ using namespace js;
 using namespace js::jit;
 
 using mozilla::DebugOnly;
-using mozilla::Maybe;
 
 namespace js {
 namespace jit {
@@ -542,19 +540,6 @@ IonCacheIRCompiler::init()
         allocator.initInputLocation(0, ic->lhs());
         allocator.initInputLocation(1, TypedOrValueRegister(MIRType::Object,
                                                             AnyRegister(ic->rhs())));
-        break;
-      }
-      case CacheKind::UnaryArith: {
-        IonUnaryArithIC *ic = ic_->asUnaryArithIC();
-        ValueOperand output = ic->output();
-
-        available.add(output);
-
-        liveRegs_.emplace(ic->liveRegs());
-        outputUnchecked_.emplace(TypedOrValueRegister(output));
-
-        MOZ_ASSERT(numInputs == 1);
-        allocator.initInputLocation(0, ic->input());
         break;
       }
       case CacheKind::Call:

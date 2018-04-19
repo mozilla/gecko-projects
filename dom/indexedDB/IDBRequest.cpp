@@ -404,13 +404,14 @@ NS_INTERFACE_MAP_END_INHERITING(IDBWrapperCache)
 NS_IMPL_ADDREF_INHERITED(IDBRequest, IDBWrapperCache)
 NS_IMPL_RELEASE_INHERITED(IDBRequest, IDBWrapperCache)
 
-void
+nsresult
 IDBRequest::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   AssertIsOnOwningThread();
 
   aVisitor.mCanHandle = true;
   aVisitor.SetParentTarget(mTransaction, false);
+  return NS_OK;
 }
 
 class IDBOpenDBRequest::WorkerHolder final
@@ -568,16 +569,15 @@ IDBOpenDBRequest::DispatchNonTransactionError(nsresult aErrorCode)
   SetError(aErrorCode);
 
   // Make an error event and fire it at the target.
-  RefPtr<Event> event =
+  nsCOMPtr<nsIDOMEvent> event =
     CreateGenericEvent(this,
                        nsDependentString(kErrorEventType),
                        eDoesBubble,
                        eCancelable);
   MOZ_ASSERT(event);
 
-  IgnoredErrorResult rv;
-  DispatchEvent(*event, rv);
-  if (rv.Failed()) {
+  bool ignored;
+  if (NS_FAILED(DispatchEvent(event, &ignored))) {
     NS_WARNING("Failed to dispatch event!");
   }
 }
