@@ -54,7 +54,7 @@ async function runReloadTestCase({urlParams, background, devtoolsPage, testCase}
 
   await target.destroy();
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 
   await extension.unload();
 }

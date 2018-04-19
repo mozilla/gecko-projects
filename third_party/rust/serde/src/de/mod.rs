@@ -98,8 +98,7 @@
 //!    - Path
 //!    - PathBuf
 //!    - Range\<T\>
-//!    - NonZero\<T\> (unstable, deprecated)
-//!    - num::NonZero* (unstable)
+//!    - NonZero\<T\> (unstable)
 //!  - **Net types**:
 //!    - IpAddr
 //!    - Ipv4Addr
@@ -514,7 +513,7 @@ pub trait Deserialize<'de>: Sized {
     /// have been overwritten. Although whatever state that is will be
     /// memory-safe.
     ///
-    /// This is generally useful when repeatedly deserializing values that
+    /// This is generally useful when repeateadly deserializing values that
     /// are processed one at a time, where the value of `self` doesn't matter
     /// when the next deserialization occurs.
     ///

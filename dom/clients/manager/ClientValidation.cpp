@@ -49,10 +49,12 @@ ClientIsValidPrincipalInfo(const PrincipalInfo& aPrincipalInfo)
       NS_ENSURE_SUCCESS(rv, false);
 
       nsAutoCString originOrigin;
-      originURL->Origin(originOrigin);
+      rv = originURL->GetOrigin(originOrigin);
+      NS_ENSURE_SUCCESS(rv, false);
 
       nsAutoCString specOrigin;
-      specURL->Origin(specOrigin);
+      rv = specURL->GetOrigin(specOrigin);
+      NS_ENSURE_SUCCESS(rv, false);
 
       // For now require Clients to have a principal where both its
       // originNoSuffix and spec have the same origin.  This will
@@ -99,10 +101,12 @@ ClientIsValidCreationURL(const PrincipalInfo& aPrincipalInfo,
       NS_ENSURE_SUCCESS(rv, false);
 
       nsAutoCString origin;
-      url->Origin(origin);
+      rv = url->GetOrigin(origin);
+      NS_ENSURE_SUCCESS(rv, false);
 
       nsAutoCString principalOrigin;
-      principalURL->Origin(principalOrigin);
+      rv = principalURL->GetOrigin(principalOrigin);
+      NS_ENSURE_SUCCESS(rv, false);
 
       // The vast majority of sites should simply result in the same principal
       // and URL origin.
@@ -110,7 +114,9 @@ ClientIsValidCreationURL(const PrincipalInfo& aPrincipalInfo,
         return true;
       }
 
-      nsDependentCSubstring scheme = url->Scheme();
+      nsAutoCString scheme;
+      rv = url->GetScheme(scheme);
+      NS_ENSURE_SUCCESS(rv, false);
 
       // Generally any origin can also open javascript: windows and workers.
       if (scheme.LowerCaseEqualsLiteral("javascript")) {
@@ -124,6 +130,10 @@ ClientIsValidCreationURL(const PrincipalInfo& aPrincipalInfo,
         return true;
       }
 
+      nsAutoCString principalScheme;
+      rv = principalURL->GetScheme(principalScheme);
+      NS_ENSURE_SUCCESS(rv, false);
+
       // Otherwise don't support this URL type in the clients sub-system for
       // now.  This will exclude a variety of internal browser clients, but
       // currently we don't need to support those.  This function can be
@@ -132,7 +142,9 @@ ClientIsValidCreationURL(const PrincipalInfo& aPrincipalInfo,
     }
     case PrincipalInfo::TSystemPrincipalInfo:
     {
-      nsDependentCSubstring scheme = url->Scheme();
+      nsAutoCString scheme;
+      rv = url->GetScheme(scheme);
+      NS_ENSURE_SUCCESS(rv, false);
 
       // While many types of documents can be created with a system principal,
       // there are only a few that can reasonably become windows.  We attempt

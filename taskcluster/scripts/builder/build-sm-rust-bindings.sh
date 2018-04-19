@@ -11,7 +11,6 @@ sed -e "s|@top_srcdir@|$SRCDIR|" -e 's|@[^@]*@||g' < config.in > config
 
 cd "$SRCDIR/js/rust"
 
-export LD_LIBRARY_PATH="$TOOLTOOL_CHECKOUT/gcc/lib64"
 # Enable backtraces if we panic.
 export RUST_BACKTRACE=1
 

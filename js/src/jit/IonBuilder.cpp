@@ -3537,6 +3537,11 @@ IonBuilder::arithTrySharedStub(bool* emitted, JSOp op,
     if (actualOp == JSOP_POS)
         return Ok();
 
+    // FIXME: The JSOP_BITNOT path doesn't track optimizations yet.
+    if (actualOp != JSOP_BITNOT) {
+        trackOptimizationAttempt(TrackedStrategy::BinaryArith_SharedCache);
+        trackOptimizationSuccess();
+    }
 
     MInstruction* stub = nullptr;
     switch (actualOp) {
@@ -3545,7 +3550,8 @@ IonBuilder::arithTrySharedStub(bool* emitted, JSOp op,
         MOZ_ASSERT_IF(op == JSOP_MUL,
                       left->maybeConstantValue() && left->maybeConstantValue()->toInt32() == -1);
         MOZ_ASSERT_IF(op != JSOP_MUL, !left);
-        stub = MUnaryCache::New(alloc(), right);
+
+        stub = MUnarySharedStub::New(alloc(), right);
         break;
       case JSOP_ADD:
       case JSOP_SUB:
@@ -6513,7 +6519,7 @@ IonBuilder::jsop_initprop(PropertyName* name)
             }
         }
     }
-    MInstructionReverseIterator last = current->rbegin();
+    MInstruction* last = *current->rbegin();
 
     if (useFastPath && !forceInlineCaches()) {
         // This is definitely initializing an 'own' property of the object, treat
@@ -6535,7 +6541,7 @@ IonBuilder::jsop_initprop(PropertyName* name)
     // and check the most recent resume point to see if it needs updating too.
     current->pop();
     current->push(obj);
-    for (MInstructionReverseIterator riter = current->rbegin(); riter != last; riter++) {
+    for (MInstructionReverseIterator riter = current->rbegin(); *riter != last; riter++) {
         if (MResumePoint* resumePoint = riter->resumePoint()) {
             MOZ_ASSERT(resumePoint->pc() == pc);
             if (resumePoint->mode() == MResumePoint::ResumeAfter) {
@@ -8647,7 +8653,7 @@ IonBuilder::addTypedArrayLengthAndData(MDefinition* obj,
         SharedMem<void*> data = tarr->as<TypedArrayObject>().viewDataEither();
         // Bug 979449 - Optimistically embed the elements and use TI to
         //              invalidate if we move them.
-        bool isTenured = !tarr->runtimeFromMainThread()->gc.nursery().isInside(data);
+        bool isTenured = !tarr->zone()->group()->nursery().isInside(data);
         if (isTenured && tarr->isSingleton()) {
             // The 'data' pointer of TypedArrayObject can change in rare circumstances
             // (ArrayBufferObject::changeContents).
@@ -9812,7 +9818,7 @@ IonBuilder::freezePropertiesForCommonPrototype(TemporaryTypeSet* types, Property
 
         while (true) {
             HeapTypeSetKey property = key->property(NameToId(name));
-            MOZ_ALWAYS_TRUE(!property.isOwnProperty(constraints(), allowEmptyTypesforGlobal));
+            JS_ALWAYS_TRUE(!property.isOwnProperty(constraints(), allowEmptyTypesforGlobal));
 
             // Don't mark the proto. It will be held down by the shape
             // guard. This allows us to use properties found on prototypes

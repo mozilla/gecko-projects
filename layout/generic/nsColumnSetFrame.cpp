@@ -40,6 +40,12 @@ public:
       CalculateColumnRuleBounds(ToReferenceFrame());
   }
 
+  virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
+                                   LayerManager* aManager,
+                                   const ContainerLayerParameters& aParameters) override;
+  virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
+                                             LayerManager* aManager,
+                                             const ContainerLayerParameters& aContainerParameters) override;
   virtual bool CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
                                        mozilla::wr::IpcResourceUpdateQueue& aResources,
                                        const StackingContextHelper& aSc,
@@ -64,6 +70,34 @@ nsDisplayColumnRule::Paint(nsDisplayListBuilder* aBuilder,
   for (auto iter = mBorderRenderers.begin(); iter != mBorderRenderers.end(); iter++) {
     iter->DrawBorders();
   }
+}
+LayerState
+nsDisplayColumnRule::GetLayerState(nsDisplayListBuilder* aBuilder,
+                                   LayerManager* aManager,
+                                   const ContainerLayerParameters& aParameters)
+{
+  if (!gfxPrefs::LayersAllowColumnRuleLayers()) {
+    return LAYER_NONE;
+  }
+  RefPtr<gfxContext> screenRefCtx = gfxContext::CreateOrNull(
+    gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget().get());
+
+  static_cast<nsColumnSetFrame*>(mFrame)->
+    CreateBorderRenderers(mBorderRenderers, screenRefCtx, mVisibleRect, ToReferenceFrame());
+
+  if (mBorderRenderers.IsEmpty()) {
+    return LAYER_NONE;
+  }
+
+  return LAYER_ACTIVE;
+}
+
+already_AddRefed<nsDisplayItem::Layer>
+nsDisplayColumnRule::BuildLayer(nsDisplayListBuilder* aBuilder,
+                                LayerManager* aManager,
+                                const ContainerLayerParameters& aContainerParameters)
+{
+  return BuildDisplayItemLayer(aBuilder, aManager, aContainerParameters);
 }
 
 bool
@@ -99,17 +133,17 @@ nsDisplayColumnRule::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aB
  * XXX should we support CSS columns applied to table elements?
  */
 nsContainerFrame*
-NS_NewColumnSetFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle, nsFrameState aStateFlags)
+NS_NewColumnSetFrame(nsIPresShell* aPresShell, nsStyleContext* aContext, nsFrameState aStateFlags)
 {
-  nsColumnSetFrame* it = new (aPresShell) nsColumnSetFrame(aStyle);
+  nsColumnSetFrame* it = new (aPresShell) nsColumnSetFrame(aContext);
   it->AddStateBits(aStateFlags | NS_BLOCK_MARGIN_ROOT);
   return it;
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsColumnSetFrame)
 
-nsColumnSetFrame::nsColumnSetFrame(ComputedStyle* aStyle)
-  : nsContainerFrame(aStyle, kClassID)
+nsColumnSetFrame::nsColumnSetFrame(nsStyleContext* aContext)
+  : nsContainerFrame(aContext, kClassID)
   , mLastBalanceBSize(NS_INTRINSICSIZE)
 {
 }
@@ -250,7 +284,7 @@ nsColumnSetFrame::CreateBorderRenderers(nsTArray<nsCSSBorderRenderer>& aBorderRe
                         nsCSSRendering::CreateBorderRendererWithStyleBorder(presContext, dt,
                                                                             this, aDirtyRect,
                                                                             aLineRect, border,
-                                                                            Style(),
+                                                                            StyleContext(),
                                                                             &borderIsEmpty,
                                                                             skipSides);
                       if (br.isSome()) {
@@ -289,14 +323,18 @@ nsColumnSetFrame::GetAvailableContentBSize(const ReflowInput& aReflowInput)
 
 static nscoord
 GetColumnGap(nsColumnSetFrame*    aFrame,
-             const nsStyleColumn* aColStyle,
-             nscoord              aPercentageBasis)
+             const nsStyleColumn* aColStyle)
 {
-  const auto& columnGap = aColStyle->mColumnGap;
-  if (columnGap.GetUnit() == eStyleUnit_Normal) {
+  if (eStyleUnit_Normal == aColStyle->mColumnGap.GetUnit())
     return aFrame->StyleFont()->mFont.size;
+  if (eStyleUnit_Coord == aColStyle->mColumnGap.GetUnit()) {
+    nscoord colGap = aColStyle->mColumnGap.GetCoordValue();
+    NS_ASSERTION(colGap >= 0, "negative column gap");
+    return colGap;
   }
-  return nsLayoutUtils::ResolveGapToLength(columnGap, aPercentageBasis);
+
+  NS_NOTREACHED("Unknown gap type");
+  return 0;
 }
 
 nsColumnSetFrame::ReflowConfig
@@ -330,7 +368,7 @@ nsColumnSetFrame::ChooseColumnStrategy(const ReflowInput& aReflowInput,
     colBSize = std::min(colBSize, aReflowInput.ComputedMaxBSize());
   }
 
-  nscoord colGap = GetColumnGap(this, colStyle, aReflowInput.ComputedISize());
+  nscoord colGap = GetColumnGap(this, colStyle);
   int32_t numColumns = colStyle->mColumnCount;
 
   // If column-fill is set to 'balance', then we want to balance the columns.
@@ -514,7 +552,7 @@ nsColumnSetFrame::GetMinISize(gfxContext *aRenderingContext)
     // include n-1 column gaps.
     colISize = iSize;
     iSize *= colStyle->mColumnCount;
-    nscoord colGap = GetColumnGap(this, colStyle, NS_UNCONSTRAINEDSIZE);
+    nscoord colGap = GetColumnGap(this, colStyle);
     iSize += colGap * (colStyle->mColumnCount - 1);
     // The multiplication above can make 'width' negative (integer overflow),
     // so use std::max to protect against that.
@@ -535,7 +573,7 @@ nsColumnSetFrame::GetPrefISize(gfxContext *aRenderingContext)
   nscoord result = 0;
   DISPLAY_PREF_WIDTH(this, result);
   const nsStyleColumn* colStyle = StyleColumn();
-  nscoord colGap = GetColumnGap(this, colStyle, NS_UNCONSTRAINEDSIZE);
+  nscoord colGap = GetColumnGap(this, colStyle);
 
   nscoord colISize;
   if (colStyle->mColumnWidth.GetUnit() == eStyleUnit_Coord) {
@@ -1262,7 +1300,7 @@ nsColumnSetFrame::AppendDirectlyOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult)
     return;
   }
 
-  MOZ_ASSERT(column->Style()->GetPseudo() ==
+  MOZ_ASSERT(column->StyleContext()->GetPseudo() ==
                nsCSSAnonBoxes::columnContent,
              "What sort of child is this?");
   aResult.AppendElement(OwnedAnonBox(column));

@@ -202,8 +202,7 @@ this.FxAccountsClient.prototype = {
   },
 
   /**
-   * Destroy the current session with the Firefox Account API server and its
-   * associated device.
+   * Destroy the current session with the Firefox Account API server
    *
    * @param sessionTokenHex
    *        The session token encoded in hex
@@ -483,6 +482,36 @@ this.FxAccountsClient.prototype = {
       body.pushPublicKey = options.pushPublicKey;
       body.pushAuthKey = options.pushAuthKey;
     }
+
+    return this._request(path, "POST", creds, body);
+  },
+
+  /**
+   * Delete a device and its associated session token, signing the user
+   * out of the server.
+   *
+   * @method signOutAndDestroyDevice
+   * @param  sessionTokenHex
+   *         Session token obtained from signIn
+   * @param  id
+   *         Device identifier
+   * @param  [options]
+   *         Options object
+   * @param  [options.service]
+   *         `service` query parameter
+   * @return Promise
+   *         Resolves to an empty object:
+   *         {}
+   */
+  signOutAndDestroyDevice(sessionTokenHex, id, options = {}) {
+    let path = "/account/device/destroy";
+
+    if (options.service) {
+      path += "?service=" + encodeURIComponent(options.service);
+    }
+
+    let creds = deriveHawkCredentials(sessionTokenHex, "sessionToken");
+    let body = { id };
 
     return this._request(path, "POST", creds, body);
   },

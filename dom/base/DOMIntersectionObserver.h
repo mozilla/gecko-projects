@@ -8,7 +8,7 @@
 #define DOMIntersectionObserver_h
 
 #include "mozilla/dom/IntersectionObserverBinding.h"
-#include "nsStyleCoord.h"
+#include "nsCSSValue.h"
 #include "nsTArray.h"
 
 using mozilla::dom::DOMRect;
@@ -177,7 +177,7 @@ protected:
   RefPtr<nsIDocument>                             mDocument;
   RefPtr<mozilla::dom::IntersectionCallback>      mCallback;
   RefPtr<Element>                                 mRoot;
-  nsStyleSides                                    mRootMargin;
+  nsCSSRect                                       mRootMargin;
   nsTArray<double>                                mThresholds;
 
   // Holds raw pointers which are explicitly cleared by UnlinkTarget().

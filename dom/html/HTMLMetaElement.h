@@ -54,9 +54,10 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::httpEquiv, aHttpEquiv, aRv);
   }
-  void GetContent(nsAString& aValue)
+  nsresult GetContent(nsAString& aValue)
   {
     GetHTMLAttr(nsGkAtoms::content, aValue);
+    return NS_OK;
   }
   void SetContent(const nsAString& aContent, ErrorResult& aRv)
   {
@@ -77,7 +78,7 @@ protected:
   virtual ~HTMLMetaElement();
 
 private:
-  void SetMetaReferrer(nsIDocument* aDocument);
+  nsresult SetMetaReferrer(nsIDocument* aDocument);
 };
 
 } // namespace dom

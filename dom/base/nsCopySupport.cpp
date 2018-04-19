@@ -26,6 +26,8 @@
 
 #include "nsIDocShell.h"
 #include "nsIContentViewerEdit.h"
+#include "nsIClipboardDragDropHooks.h"
+#include "nsIClipboardDragDropHookList.h"
 #include "nsIClipboardHelper.h"
 #include "nsISelectionController.h"
 
@@ -66,6 +68,8 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
+
+nsresult NS_NewDomSelection(nsISelection **aDomSelection);
 
 static NS_DEFINE_CID(kCClipboardCID,           NS_CLIPBOARD_CID);
 static NS_DEFINE_CID(kCTransferableCID,        NS_TRANSFERABLE_CID);
@@ -277,8 +281,12 @@ SelectionCopyHelper(nsISelection *aSel, nsIDocument *aDoc,
       }
 
       if (doPutOnClipboard && clipboard) {
+        bool actuallyPutOnClipboard = true;
+        nsCopySupport::DoHooks(aDoc, trans, &actuallyPutOnClipboard);
+
         // put the transferable on the clipboard
-        clipboard->SetData(trans, nullptr, aClipboardID);
+        if (actuallyPutOnClipboard)
+          clipboard->SetData(trans, nullptr, aClipboardID);
       }
 
       // Return the transferable to the caller if requested.
@@ -325,24 +333,68 @@ nsCopySupport::GetTransferableForNode(nsINode* aNode,
                                       nsIDocument* aDoc,
                                       nsITransferable** aTransferable)
 {
+  nsCOMPtr<nsISelection> selection;
   // Make a temporary selection with aNode in a single range.
   // XXX We should try to get rid of the Selection object here.
   // XXX bug 1245883
-  nsCOMPtr<nsISelection> selection = new Selection();
+  nsresult rv = NS_NewDomSelection(getter_AddRefs(selection));
+  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aNode);
+  NS_ENSURE_TRUE(node, NS_ERROR_FAILURE);
   RefPtr<nsRange> range = new nsRange(aNode);
+  rv = range->SelectNode(node);
+  NS_ENSURE_SUCCESS(rv, rv);
   ErrorResult result;
-  range->SelectNode(*aNode, result);
-  if (NS_WARN_IF(result.Failed())) {
-    return result.StealNSResult();
-  }
   selection->AsSelection()->AddRangeInternal(*range, aDoc, result);
-  if (NS_WARN_IF(result.Failed())) {
-    return result.StealNSResult();
-  }
+  rv = result.StealNSResult();
+  NS_ENSURE_SUCCESS(rv, rv);
   // It's not the primary selection - so don't skip invisible content.
   uint32_t flags = 0;
   return SelectionCopyHelper(selection, aDoc, false, 0, flags,
                              aTransferable);
+}
+
+nsresult nsCopySupport::DoHooks(nsIDocument *aDoc, nsITransferable *aTrans,
+                                bool *aDoPutOnClipboard)
+{
+  NS_ENSURE_ARG(aDoc);
+
+  *aDoPutOnClipboard = true;
+
+  nsCOMPtr<nsISupports> container = aDoc->GetContainer();
+  nsCOMPtr<nsIClipboardDragDropHookList> hookObj = do_GetInterface(container);
+  if (!hookObj) return NS_ERROR_FAILURE;
+
+  nsCOMPtr<nsISimpleEnumerator> enumerator;
+  hookObj->GetHookEnumerator(getter_AddRefs(enumerator));
+  if (!enumerator) return NS_ERROR_FAILURE;
+
+  // the logic here should follow the behavior specified in
+  // nsIClipboardDragDropHooks.h
+
+  nsCOMPtr<nsIClipboardDragDropHooks> override;
+  nsCOMPtr<nsISupports> isupp;
+  bool hasMoreHooks = false;
+  nsresult rv = NS_OK;
+  while (NS_SUCCEEDED(enumerator->HasMoreElements(&hasMoreHooks))
+         && hasMoreHooks)
+  {
+    rv = enumerator->GetNext(getter_AddRefs(isupp));
+    if (NS_FAILED(rv)) break;
+    override = do_QueryInterface(isupp);
+    if (override)
+    {
+#ifdef DEBUG
+      nsresult hookResult =
+#endif
+      override->OnCopyOrDrag(nullptr, aTrans, aDoPutOnClipboard);
+      NS_ASSERTION(NS_SUCCEEDED(hookResult), "OnCopyOrDrag hook failed");
+      if (!*aDoPutOnClipboard)
+        break;
+    }
+  }
+
+  return rv;
 }
 
 nsresult
@@ -636,7 +688,7 @@ static nsresult AppendImagePromise(nsITransferable* aTransferable,
 #endif // XP_WIN
 
 nsIContent*
-nsCopySupport::GetSelectionForCopy(nsIDocument* aDocument, Selection** aSelection)
+nsCopySupport::GetSelectionForCopy(nsIDocument* aDocument, nsISelection** aSelection)
 {
   *aSelection = nullptr;
 
@@ -652,9 +704,8 @@ nsCopySupport::GetSelectionForCopy(nsIDocument* aDocument, Selection** aSelectio
     return nullptr;
   }
 
-  RefPtr<Selection> sel =
-    selectionController->GetDOMSelection(nsISelectionController::SELECTION_NORMAL);
-  sel.forget(aSelection);
+  selectionController->GetSelection(nsISelectionController::SELECTION_NORMAL,
+                                    aSelection);
   return focusedContent;
 }
 
@@ -664,11 +715,13 @@ nsCopySupport::CanCopy(nsIDocument* aDocument)
   if (!aDocument)
     return false;
 
-  RefPtr<Selection> sel;
+  nsCOMPtr<nsISelection> sel;
   GetSelectionForCopy(aDocument, getter_AddRefs(sel));
   NS_ENSURE_TRUE(sel, false);
 
-  return !sel->IsCollapsed();
+  bool isCollapsed;
+  sel->GetIsCollapsed(&isCollapsed);
+  return !isCollapsed;
 }
 
 static bool
@@ -683,12 +736,20 @@ IsInsideRuby(nsINode* aNode)
 }
 
 static bool
-IsSelectionInsideRuby(Selection* aSelection)
+IsSelectionInsideRuby(nsISelection* aSelection)
 {
-  uint32_t rangeCount = aSelection->RangeCount();;
+  int32_t rangeCount;
+  nsresult rv = aSelection->GetRangeCount(&rangeCount);
+  if (NS_FAILED(rv)) {
+    return false;
+  }
   for (auto i : IntegerRange(rangeCount)) {
-    nsRange* range = aSelection->GetRangeAt(i);
-    if (!IsInsideRuby(range->GetCommonAncestor())) {
+    nsCOMPtr<nsIDOMRange> range;
+    aSelection->GetRangeAt(i, getter_AddRefs(range));
+    nsCOMPtr<nsIDOMNode> node;
+    range->GetCommonAncestorContainer(getter_AddRefs(node));
+    nsCOMPtr<nsINode> n = do_QueryInterface(node);
+    if (!IsInsideRuby(n)) {
       return false;
     }
   }
@@ -699,7 +760,7 @@ bool
 nsCopySupport::FireClipboardEvent(EventMessage aEventMessage,
                                   int32_t aClipboardType,
                                   nsIPresShell* aPresShell,
-                                  Selection* aSelection,
+                                  nsISelection* aSelection,
                                   bool* aActionTaken)
 {
   if (aActionTaken) {
@@ -729,19 +790,20 @@ nsCopySupport::FireClipboardEvent(EventMessage aEventMessage,
 
   // if a selection was not supplied, try to find it
   nsCOMPtr<nsIContent> content;
-  RefPtr<Selection> sel = aSelection;
-  if (!sel) {
+  nsCOMPtr<nsISelection> sel = aSelection;
+  if (!sel)
     content = GetSelectionForCopy(doc, getter_AddRefs(sel));
-  }
 
   // retrieve the event target node from the start of the selection
+  nsresult rv;
   if (sel) {
-    RefPtr<nsRange> range = sel->GetRangeAt(0);
-    if (range) {
-      nsINode* startContainer = range->GetStartContainer();
-      if (startContainer) {
+    nsCOMPtr<nsIDOMRange> range;
+    rv = sel->GetRangeAt(0, getter_AddRefs(range));
+    if (NS_SUCCEEDED(rv) && range) {
+      nsCOMPtr<nsIDOMNode> startContainer;
+      range->GetStartContainer(getter_AddRefs(startContainer));
+      if (startContainer)
         content = do_QueryInterface(startContainer);
-      }
     }
   }
 
@@ -849,7 +911,7 @@ nsCopySupport::FireClipboardEvent(EventMessage aEventMessage,
       // expose the full functionality in browser. See bug 1130891.
       bool withRubyAnnotation = IsSelectionInsideRuby(sel);
       // call the copy code
-      nsresult rv = HTMLCopy(sel, doc, aClipboardType, withRubyAnnotation);
+      rv = HTMLCopy(sel, doc, aClipboardType, withRubyAnnotation);
       if (NS_FAILED(rv)) {
         return false;
       }
@@ -858,7 +920,7 @@ nsCopySupport::FireClipboardEvent(EventMessage aEventMessage,
     }
   } else if (clipboardData) {
     // check to see if any data was put on the data transfer.
-    count = clipboardData->MozItemCount();
+    clipboardData->GetMozItemCount(&count);
     if (count) {
       nsCOMPtr<nsIClipboard> clipboard(do_GetService("@mozilla.org/widget/clipboard;1"));
       NS_ENSURE_TRUE(clipboard, false);
@@ -869,7 +931,7 @@ nsCopySupport::FireClipboardEvent(EventMessage aEventMessage,
       NS_ENSURE_TRUE(transferable, false);
 
       // put the transferable on the clipboard
-      nsresult rv = clipboard->SetData(transferable, nullptr, aClipboardType);
+      rv = clipboard->SetData(transferable, nullptr, aClipboardType);
       if (NS_FAILED(rv)) {
         return false;
       }

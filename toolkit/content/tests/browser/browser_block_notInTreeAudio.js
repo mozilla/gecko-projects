@@ -84,5 +84,5 @@ add_task(async function block_not_in_tree_media() {
   await waitForTabPlayingEvent(tab, true);
 
   info("- remove tab -");
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

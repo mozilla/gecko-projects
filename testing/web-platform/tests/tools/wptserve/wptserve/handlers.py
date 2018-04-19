@@ -366,7 +366,7 @@ class StringHandler(object):
 
         self.resp_headers = [("Content-Type", content_type)]
         for k, v in headers.iteritems():
-            self.resp_headers.append((k.replace("_", "-"), v))
+            resp_headers.append((k.replace("_", "-"), v))
 
         self.handler = handler(self.handle_request)
 

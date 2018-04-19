@@ -7,24 +7,32 @@
 #ifndef nsDOMSerializer_h_
 #define nsDOMSerializer_h_
 
-#include "mozilla/dom/NonRefcountedDOMObject.h"
+#include "nsIDOMSerializer.h"
+#include "nsWrapperCache.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/XMLSerializerBinding.h"
 
 class nsINode;
-class nsIOutputStream;
 
-class nsDOMSerializer final : public mozilla::dom::NonRefcountedDOMObject
+class nsDOMSerializer final : public nsIDOMSerializer,
+                              public nsWrapperCache
 {
 public:
   nsDOMSerializer();
 
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsDOMSerializer)
+
+  // nsIDOMSerializer
+  NS_DECL_NSIDOMSERIALIZER
+
   // WebIDL API
-  static nsDOMSerializer*
+  static already_AddRefed<nsDOMSerializer>
   Constructor(const mozilla::dom::GlobalObject& aOwner,
               mozilla::ErrorResult& rv)
   {
-    return new nsDOMSerializer();
+    RefPtr<nsDOMSerializer> domSerializer = new nsDOMSerializer(aOwner.GetAsSupports());
+    return domSerializer.forget();
   }
 
   void
@@ -33,15 +41,27 @@ public:
 
   void
   SerializeToStream(nsINode& aRoot, nsIOutputStream* aStream,
-                    const nsAString& aCharset,
-                    mozilla::ErrorResult& aRv);
+                    const nsAString& aCharset, mozilla::ErrorResult& rv);
 
-  bool WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto,
-                  JS::MutableHandle<JSObject*> aReflector)
+  nsISupports* GetParentObject() const
   {
-    return mozilla::dom::XMLSerializerBinding::Wrap(aCx, this, aGivenProto,
-                                                    aReflector);
+    return mOwner;
   }
+
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
+  {
+    return mozilla::dom::XMLSerializerBinding::Wrap(aCx, this, aGivenProto);
+  }
+
+private:
+  virtual ~nsDOMSerializer();
+
+  explicit nsDOMSerializer(nsISupports* aOwner) : mOwner(aOwner)
+  {
+    MOZ_ASSERT(aOwner);
+  }
+
+  nsCOMPtr<nsISupports> mOwner;
 };
 
 

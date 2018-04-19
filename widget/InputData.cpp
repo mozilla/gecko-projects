@@ -5,9 +5,7 @@
 
 #include "InputData.h"
 
-#include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/dom/Touch.h"
-#include "mozilla/dom/WheelEventBinding.h"
 #include "mozilla/TextEvents.h"
 #include "nsContentUtils.h"
 #include "nsDebug.h"
@@ -273,7 +271,7 @@ MultiTouchInput::ToWidgetMouseEvent(nsIWidget* aWidget) const
 
   event.mTime = mTime;
   event.button = WidgetMouseEvent::eLeftButton;
-  event.inputSource = MouseEventBinding::MOZ_SOURCE_TOUCH;
+  event.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_TOUCH;
   event.mModifiers = modifiers;
   event.mFlags.mHandledByAPZ = mHandledByAPZ;
   event.mFocusSequenceNumber = mFocusSequenceNumber;
@@ -546,7 +544,7 @@ PanGestureInput::ToWidgetWheelEvent(nsIWidget* aWidget) const
     RoundedToInt(ViewAs<LayoutDevicePixel>(mPanStartPoint,
       PixelCastJustification::LayoutDeviceIsScreenForUntransformedEvent));
   wheelEvent.buttons = 0;
-  wheelEvent.mDeltaMode = WheelEventBinding::DOM_DELTA_PIXEL;
+  wheelEvent.mDeltaMode = nsIDOMWheelEvent::DOM_DELTA_PIXEL;
   wheelEvent.mMayHaveMomentum = true; // pan inputs may have momentum
   wheelEvent.mIsMomentum = IsMomentum();
   wheelEvent.mLineOrPageDeltaX = mLineOrPageDeltaX;
@@ -673,9 +671,7 @@ ScrollWheelInput::ScrollWheelInput(uint32_t aTime, TimeStamp aTimeStamp,
                                    ScrollDeltaType aDeltaType,
                                    const ScreenPoint& aOrigin, double aDeltaX,
                                    double aDeltaY,
-                                   bool aAllowToOverrideSystemScrollSpeed,
-                                   WheelDeltaAdjustmentStrategy
-                                     aWheelDeltaAdjustmentStrategy)
+                                   bool aAllowToOverrideSystemScrollSpeed)
   : InputData(SCROLLWHEEL_INPUT, aTime, aTimeStamp, aModifiers)
   , mDeltaType(aDeltaType)
   , mScrollMode(aScrollMode)
@@ -691,7 +687,6 @@ ScrollWheelInput::ScrollWheelInput(uint32_t aTime, TimeStamp aTimeStamp,
   , mMayHaveMomentum(false)
   , mIsMomentum(false)
   , mAllowToOverrideSystemScrollSpeed(aAllowToOverrideSystemScrollSpeed)
-  , mWheelDeltaAdjustmentStrategy(aWheelDeltaAdjustmentStrategy)
 {
 }
 
@@ -712,7 +707,6 @@ ScrollWheelInput::ScrollWheelInput(const WidgetWheelEvent& aWheelEvent)
   , mIsMomentum(aWheelEvent.mIsMomentum)
   , mAllowToOverrideSystemScrollSpeed(
       aWheelEvent.mAllowToOverrideSystemScrollSpeed)
-  , mWheelDeltaAdjustmentStrategy(WheelDeltaAdjustmentStrategy::eNone)
 {
   mOrigin =
     ScreenPoint(ViewAs<ScreenPixel>(aWheelEvent.mRefPoint,
@@ -723,11 +717,11 @@ ScrollWheelInput::ScrollDeltaType
 ScrollWheelInput::DeltaTypeForDeltaMode(uint32_t aDeltaMode)
 {
   switch (aDeltaMode) {
-  case WheelEventBinding::DOM_DELTA_LINE:
+  case nsIDOMWheelEvent::DOM_DELTA_LINE:
     return SCROLLDELTA_LINE;
-  case WheelEventBinding::DOM_DELTA_PAGE:
+  case nsIDOMWheelEvent::DOM_DELTA_PAGE:
     return SCROLLDELTA_PAGE;
-  case WheelEventBinding::DOM_DELTA_PIXEL:
+  case nsIDOMWheelEvent::DOM_DELTA_PIXEL:
     return SCROLLDELTA_PIXEL;
   default:
     MOZ_CRASH();
@@ -740,12 +734,12 @@ ScrollWheelInput::DeltaModeForDeltaType(ScrollDeltaType aDeltaType)
 {
   switch (aDeltaType) {
   case ScrollWheelInput::SCROLLDELTA_LINE:
-    return WheelEventBinding::DOM_DELTA_LINE;
+    return nsIDOMWheelEvent::DOM_DELTA_LINE;
   case ScrollWheelInput::SCROLLDELTA_PAGE:
-    return WheelEventBinding::DOM_DELTA_PAGE;
+    return nsIDOMWheelEvent::DOM_DELTA_PAGE;
   case ScrollWheelInput::SCROLLDELTA_PIXEL:
   default:
-    return WheelEventBinding::DOM_DELTA_PIXEL;
+    return nsIDOMWheelEvent::DOM_DELTA_PIXEL;
   }
 }
 

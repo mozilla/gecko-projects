@@ -17,7 +17,7 @@ class ServoDeclarationBlock final : public DeclarationBlock
 public:
   explicit ServoDeclarationBlock(
     already_AddRefed<RawServoDeclarationBlock> aRaw)
-    : DeclarationBlock(), mRaw(aRaw) {}
+    : DeclarationBlock(StyleBackendType::Servo), mRaw(aRaw) {}
 
   ServoDeclarationBlock()
     : ServoDeclarationBlock(Servo_DeclarationBlock_CreateEmpty().Consume()) {}

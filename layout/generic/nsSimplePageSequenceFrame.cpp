@@ -37,15 +37,15 @@ mozilla::LazyLogModule gLayoutPrintingLog("printing-layout");
 #define PR_PL(_p1)  MOZ_LOG(gLayoutPrintingLog, mozilla::LogLevel::Debug, _p1)
 
 nsSimplePageSequenceFrame*
-NS_NewSimplePageSequenceFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
+NS_NewSimplePageSequenceFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
-  return new (aPresShell) nsSimplePageSequenceFrame(aStyle);
+  return new (aPresShell) nsSimplePageSequenceFrame(aContext);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSimplePageSequenceFrame)
 
-nsSimplePageSequenceFrame::nsSimplePageSequenceFrame(ComputedStyle* aStyle)
-  : nsContainerFrame(aStyle, kClassID)
+nsSimplePageSequenceFrame::nsSimplePageSequenceFrame(nsStyleContext* aContext)
+  : nsContainerFrame(aContext, kClassID)
   , mTotalPages(-1)
   , mCalledBeginPage(false)
   , mCurrentCanvasListSetup(false)
@@ -57,7 +57,7 @@ nsSimplePageSequenceFrame::nsSimplePageSequenceFrame(ComputedStyle* aStyle)
   mPageData = new nsSharedPageData();
   mPageData->mHeadFootFont =
     *PresContext()->GetDefaultFont(kGenericFont_serif,
-                                   aStyle->StyleFont()->mLanguage);
+                                   aContext->StyleFont()->mLanguage);
   mPageData->mHeadFootFont.size = nsPresContext::CSSPointsToAppUnits(10);
 
   // Doing this here so we only have to go get these formats once
@@ -196,7 +196,7 @@ nsSimplePageSequenceFrame::Reflow(nsPresContext*     aPresContext,
 
     nsIntMargin marginTwips;
     mPageData->mPrintSettings->GetMarginInTwips(marginTwips);
-    mMargin = nsPresContext::CSSTwipsToAppUnits(marginTwips + unwriteableTwips);
+    mMargin = aPresContext->CSSTwipsToAppUnits(marginTwips + unwriteableTwips);
 
     int16_t printType;
     mPageData->mPrintSettings->GetPrintRange(&printType);
@@ -213,7 +213,7 @@ nsSimplePageSequenceFrame::Reflow(nsPresContext*     aPresContext,
     edgeTwips.right  = clamped(edgeTwips.right,  0, inchInTwips);
 
     mPageData->mEdgePaperMargin =
-      nsPresContext::CSSTwipsToAppUnits(edgeTwips + unwriteableTwips);
+      aPresContext->CSSTwipsToAppUnits(edgeTwips + unwriteableTwips);
   }
 
   // *** Special Override ***
@@ -460,7 +460,7 @@ GetPrintCanvasElementsInFrame(nsIFrame* aFrame,
       // If there is a canvasFrame, try to get actual canvas element.
       if (canvasFrame) {
         HTMLCanvasElement* canvas =
-          HTMLCanvasElement::FromNodeOrNull(canvasFrame->GetContent());
+          HTMLCanvasElement::FromContentOrNull(canvasFrame->GetContent());
         if (canvas && canvas->GetMozPrintCallback()) {
           aArr->AppendElement(canvas);
           continue;

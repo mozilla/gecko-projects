@@ -13,7 +13,7 @@ import org.junit.Assume;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mozilla.gecko.AppConstants;
-import org.robolectric.RobolectricTestRunner;
+import org.mozilla.gecko.background.testhelpers.TestRunner;
 
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
@@ -25,7 +25,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 
-@RunWith(RobolectricTestRunner.class)
+@RunWith(TestRunner.class)
 public class TestDownloadContentCatalog {
     /**
      * Scenario: Create a new, fresh catalog.

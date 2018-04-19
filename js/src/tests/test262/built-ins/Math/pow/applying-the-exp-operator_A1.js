@@ -20,7 +20,8 @@ base[7] = +Infinity;
 base[8] = NaN;
 var basenum = 9;
 
-for (var i = 0; i < basenum; i++) {
+for (var i = 0; i < basenum; i++)
+{
   assert.sameValue(
     Math.pow(base[i], exponent),
     NaN,

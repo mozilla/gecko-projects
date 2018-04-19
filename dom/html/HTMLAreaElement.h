@@ -35,11 +35,12 @@ public:
 
   NS_DECL_ADDSIZEOFEXCLUDINGTHIS
 
-  NS_IMPL_FROMNODE_HTML_WITH_TAG(HTMLAreaElement, area)
+  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLAreaElement, area)
 
   virtual int32_t TabIndexDefault() override;
 
-  void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
+  virtual nsresult GetEventTargetParent(
+                     EventChainPreVisitor& aVisitor) override;
   virtual nsresult PostHandleEvent(EventChainPostVisitor& aVisitor) override;
   virtual bool IsLink(nsIURI** aURI) const override;
   virtual void GetLinkTarget(nsAString& aTarget) override;

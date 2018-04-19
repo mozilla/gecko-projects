@@ -25,7 +25,6 @@
 
 #include "CaretAssociationHint.h"
 #include "FrameProperties.h"
-#include "LayoutConstants.h"
 #include "mozilla/layout/FrameChildList.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/SmallPointerArray.h"
@@ -33,16 +32,17 @@
 #include "nsDirection.h"
 #include "nsFrameList.h"
 #include "nsFrameState.h"
+#include "mozilla/layers/WebRenderUserData.h"
 #include "mozilla/ReflowOutput.h"
 #include "nsITheme.h"
 #include "nsLayoutUtils.h"
 #include "nsQueryFrame.h"
 #include "nsString.h"
-#include "mozilla/ComputedStyle.h"
+#include "nsStyleContext.h"
 #include "nsStyleStruct.h"
 #include "Visibility.h"
 #include "nsChangeHint.h"
-#include "mozilla/ComputedStyleInlines.h"
+#include "nsStyleContextInlines.h"
 #include "mozilla/gfx/CompositorHitTestInfo.h"
 #include "mozilla/gfx/MatrixFwd.h"
 #include "nsDisplayItemTypes.h"
@@ -141,11 +141,29 @@ typedef uint32_t nsSplittableType;
 #define NS_FRAME_IS_NOT_SPLITTABLE(type)\
   (0 == ((type) & NS_FRAME_SPLITTABLE))
 
+#define NS_INTRINSIC_WIDTH_UNKNOWN nscoord_MIN
+
 //----------------------------------------------------------------------
 
 #define NS_SUBTREE_DIRTY(_frame)  \
   (((_frame)->GetStateBits() &      \
     (NS_FRAME_IS_DIRTY | NS_FRAME_HAS_DIRTY_CHILDREN)) != 0)
+
+/**
+ * Constant used to indicate an unconstrained size.
+ *
+ * @see #Reflow()
+ */
+#define NS_UNCONSTRAINEDSIZE NS_MAXSIZE
+
+#define NS_INTRINSICSIZE    NS_UNCONSTRAINEDSIZE
+#define NS_AUTOHEIGHT       NS_UNCONSTRAINEDSIZE
+// +1 is to avoid clamped huge margin values being processed as auto margins
+#define NS_AUTOMARGIN       (NS_UNCONSTRAINEDSIZE + 1)
+#define NS_AUTOOFFSET       NS_UNCONSTRAINEDSIZE
+// NOTE: there are assumptions all over that these have the same value, namely NS_UNCONSTRAINEDSIZE
+//       if any are changed to be a value other than NS_UNCONSTRAINEDSIZE
+//       at least update AdjustComputedHeight/Width and test ad nauseum
 
 // 1 million CSS pixels less than our max app unit measure.
 // For reflowing with an "infinite" available inline space per [css-sizing].
@@ -568,7 +586,6 @@ public:
   using ReflowOutput = mozilla::ReflowOutput;
   using Visibility = mozilla::Visibility;
 
-  typedef mozilla::ComputedStyle ComputedStyle;
   typedef mozilla::FrameProperties FrameProperties;
   typedef mozilla::layers::Layer Layer;
   typedef mozilla::layers::LayerManager LayerManager;
@@ -591,7 +608,7 @@ public:
   explicit nsIFrame(ClassID aID)
     : mRect()
     , mContent(nullptr)
-    , mComputedStyle(nullptr)
+    , mStyleContext(nullptr)
     , mParent(nullptr)
     , mNextSibling(nullptr)
     , mPrevSibling(nullptr)
@@ -618,7 +635,7 @@ public:
   }
 
   nsPresContext* PresContext() const {
-    return Style()->PresContextForFrame();
+    return StyleContext()->PresContext();
   }
 
   nsIPresShell* PresShell() const {
@@ -771,36 +788,48 @@ public:
   virtual void AdjustOffsetsForBidi(int32_t aStart, int32_t aEnd) {}
 
   /**
-   * Get the style associated with this frame.
+   * Get the style context associated with this frame.
    */
-  ComputedStyle* Style() const { return mComputedStyle; }
-  void SetComputedStyle(ComputedStyle* aStyle)
+  nsStyleContext* StyleContext() const { return mStyleContext; }
+  void SetStyleContext(nsStyleContext* aContext)
   {
-    if (aStyle != mComputedStyle) {
-      RefPtr<ComputedStyle> oldComputedStyle = mComputedStyle.forget();
-      mComputedStyle = aStyle;
-      DidSetComputedStyle(oldComputedStyle);
+    if (aContext != mStyleContext) {
+      RefPtr<nsStyleContext> oldStyleContext = mStyleContext.forget();
+      mStyleContext = aContext;
+#ifdef DEBUG
+      aContext->FrameAddRef();
+#endif
+      DidSetStyleContext(oldStyleContext);
+#ifdef DEBUG
+      oldStyleContext->FrameRelease();
+#endif
     }
   }
 
   /**
-   * SetComputedStyleWithoutNotification is for changes to the style
+   * SetStyleContextWithoutNotification is for changes to the style
    * context that should suppress style change processing, in other
    * words, those that aren't really changes.  This generally means only
    * changes that happen during frame construction.
    */
-  void SetComputedStyleWithoutNotification(ComputedStyle* aStyle)
+  void SetStyleContextWithoutNotification(nsStyleContext* aContext)
   {
-    if (aStyle != mComputedStyle) {
-      mComputedStyle = aStyle;
+    if (aContext != mStyleContext) {
+#ifdef DEBUG
+      mStyleContext->FrameRelease();
+#endif
+      mStyleContext = aContext;
+#ifdef DEBUG
+      mStyleContext->FrameAddRef();
+#endif
     }
   }
 
   // Style post processing hook
-  // Attention: the old style is the one we're forgetting,
+  // Attention: the old style context is the one we're forgetting,
   // and hence possibly completely bogus for GetStyle* purposes.
   // Use PeekStyleData instead.
-  virtual void DidSetComputedStyle(ComputedStyle* aOldComputedStyle) = 0;
+  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) = 0;
 
   /**
    * Define typesafe getter functions for each style struct by
@@ -815,47 +844,42 @@ public:
    * Callers can use Style*WithOptionalParam if they're in a function that
    * accepts an *optional* pointer the style struct.
    */
-  #define STYLE_STRUCT(name_)                                         \
-    const nsStyle##name_ * Style##name_ () const MOZ_NONNULL_RETURN { \
-      NS_ASSERTION(mComputedStyle, "No style found!");                \
-      return mComputedStyle->Style##name_ ();                         \
-    }                                                                 \
-    const nsStyle##name_ * Style##name_##WithOptionalParam(           \
-      const nsStyle##name_ * aStyleStruct) const MOZ_NONNULL_RETURN { \
-      if (aStyleStruct) {                                             \
-        MOZ_ASSERT(aStyleStruct == Style##name_());                   \
-        return aStyleStruct;                                          \
-      }                                                               \
-      return Style##name_();                                          \
+  #define STYLE_STRUCT(name_, checkdata_cb_)                                  \
+    const nsStyle##name_ * Style##name_ () const MOZ_NONNULL_RETURN {         \
+      NS_ASSERTION(mStyleContext, "No style context found!");                 \
+      return mStyleContext->Style##name_ ();                                  \
+    }                                                                         \
+    const nsStyle##name_ * Style##name_##WithOptionalParam(                   \
+                             const nsStyle##name_ * aStyleStruct) const       \
+                             MOZ_NONNULL_RETURN {                             \
+      if (aStyleStruct) {                                                     \
+        MOZ_ASSERT(aStyleStruct == Style##name_());                           \
+        return aStyleStruct;                                                  \
+      }                                                                       \
+      return Style##name_();                                                  \
     }
   #include "nsStyleStructList.h"
   #undef STYLE_STRUCT
 
-  /** Also forward GetVisitedDependentColor to the style */
+  /** Also forward GetVisitedDependentColor to the style context */
   template<typename T, typename S>
   nscolor GetVisitedDependentColor(T S::* aField)
-    { return mComputedStyle->GetVisitedDependentColor(aField); }
+    { return mStyleContext->GetVisitedDependentColor(aField); }
 
   /**
-   * These methods are to access any additional ComputedStyles that
-   * the frame may be holding.
-   *
-   * These are styles that are children of the frame's primary style and are NOT
-   * used as styles for any child frames.
-   *
-   * These contexts also MUST NOT have any child styles whatsoever. If you need
-   * to insert styles into the style tree, then you should create pseudo element
-   * frames to own them.
-   *
-   * The indicies must be consecutive and implementations MUST return null if
-   * asked for an index that is out of range.
+   * These methods are to access any additional style contexts that
+   * the frame may be holding. These are contexts that are children
+   * of the frame's primary context and are NOT used as style contexts
+   * for any child frames. These contexts also MUST NOT have any child
+   * contexts whatsoever. If you need to insert style contexts into the
+   * style tree, then you should create pseudo element frames to own them
+   * The indicies must be consecutive and implementations MUST return an
+   * NS_ERROR_INVALID_ARG if asked for an index that is out of range.
    */
-  virtual ComputedStyle* GetAdditionalComputedStyle(int32_t aIndex) const = 0;
+  virtual nsStyleContext* GetAdditionalStyleContext(int32_t aIndex) const = 0;
 
-  virtual void SetAdditionalComputedStyle(int32_t aIndex,
-                                          ComputedStyle* aComputedStyle) = 0;
-
-  already_AddRefed<ComputedStyle> ComputeSelectionStyle() const;
+  virtual void SetAdditionalStyleContext(int32_t aIndex,
+                                         nsStyleContext* aStyleContext) = 0;
 
   /**
    * Accessor functions for geometric parent.
@@ -1007,13 +1031,8 @@ public:
    * reset the overflow rect if it was previously stored as deltas.
    * (If it is currently a "large" overflow and could be re-packed as deltas,
    * we don't bother as the cost of the allocation has already been paid.)
-   * @param aRebuildDisplayItems If true, then adds this frame to the
-   * list of modified frames for display list building if the rect has changed.
-   * Only pass false if you're sure that the relevant display items will be rebuilt
-   * already (possibly by an ancestor being in the modified list), or if this is
-   * a temporary change.
    */
-  void SetRect(const nsRect& aRect, bool aRebuildDisplayItems = true) {
+  void SetRect(const nsRect& aRect) {
     if (aRect == mRect) {
       return;
     }
@@ -1025,9 +1044,7 @@ public:
     } else {
       mRect = aRect;
     }
-    if (aRebuildDisplayItems) {
-      MarkNeedsDisplayItemRebuild();
-    }
+    MarkNeedsDisplayItemRebuild();
   }
   /**
    * Set this frame's rect from a logical rect in its own writing direction
@@ -1075,14 +1092,9 @@ public:
   /**
    * Set this frame's physical size. This leaves the frame's physical position
    * (topLeft) unchanged.
-   * @param aRebuildDisplayItems If true, then adds this frame to the
-   * list of modified frames for display list building if the size has changed.
-   * Only pass false if you're sure that the relevant display items will be rebuilt
-   * already (possibly by an ancestor being in the modified list), or if this is
-   * a temporary change.
    */
-  void SetSize(const nsSize& aSize, bool aRebuildDisplayItems = true) {
-    SetRect(nsRect(mRect.TopLeft(), aSize), aRebuildDisplayItems);
+  void SetSize(const nsSize& aSize) {
+    SetRect(nsRect(mRect.TopLeft(), aSize));
   }
 
   void SetPosition(const nsPoint& aPt) {
@@ -1159,6 +1171,9 @@ public:
   nsPoint GetPositionIgnoringScrolling();
 
   typedef AutoTArray<nsDisplayItem*, 4> DisplayItemArray;
+
+  typedef mozilla::layers::WebRenderUserData WebRenderUserData;
+  typedef nsRefPtrHashtable<nsUint32HashKey, WebRenderUserData> WebRenderUserDataTable;
 
 #define NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(prop, type, dtor)             \
   static const mozilla::FramePropertyDescriptor<type>* prop() {           \
@@ -1256,6 +1271,9 @@ public:
   NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(BidiDataProperty, mozilla::FrameBidiData)
 
   NS_DECLARE_FRAME_PROPERTY_WITHOUT_DTOR(PlaceholderFrameProperty, nsPlaceholderFrame)
+  NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(WebRenderUserDataProperty, WebRenderUserDataTable, DestroyWebRenderUserDataTable)
+
+  static void DestroyWebRenderUserDataTable(WebRenderUserDataTable* aTable);
 
   mozilla::FrameBidiData GetBidiData() const
   {
@@ -1950,8 +1968,7 @@ public:
    * Ensure that aImage gets notifed when the underlying image request loads
    * or animates.
    */
-  void AssociateImage(const nsStyleImage& aImage, nsPresContext* aPresContext,
-                      uint32_t aImageLoaderFlags);
+  void AssociateImage(const nsStyleImage& aImage, nsPresContext* aPresContext);
 
   /**
    * This structure holds information about a cursor. mContainer represents a
@@ -2338,27 +2355,23 @@ public:
   /**
    * Return the horizontal components of padding, border, and margin
    * that contribute to the intrinsic width that applies to the parent.
-   * @param aPercentageBasis the percentage basis to use for padding/margin -
-   *   i.e. the Containing Block's inline-size
    */
   struct IntrinsicISizeOffsetData {
     nscoord hPadding, hBorder, hMargin;
+    float hPctPadding, hPctMargin;
 
     IntrinsicISizeOffsetData()
       : hPadding(0), hBorder(0), hMargin(0)
+      , hPctPadding(0.0f), hPctMargin(0.0f)
     {}
   };
-  virtual IntrinsicISizeOffsetData
-  IntrinsicISizeOffsets(nscoord aPercentageBasis = NS_UNCONSTRAINEDSIZE) = 0;
+  virtual IntrinsicISizeOffsetData IntrinsicISizeOffsets() = 0;
 
   /**
    * Return the bsize components of padding, border, and margin
    * that contribute to the intrinsic width that applies to the parent.
-   * @param aPercentageBasis the percentage basis to use for padding/margin -
-   *   i.e. the Containing Block's inline-size
    */
-  IntrinsicISizeOffsetData
-  IntrinsicBSizeOffsets(nscoord aPercentageBasis = NS_UNCONSTRAINEDSIZE);
+  IntrinsicISizeOffsetData IntrinsicBSizeOffsets();
 
   virtual mozilla::IntrinsicSize GetIntrinsicSize() = 0;
 
@@ -2943,12 +2956,8 @@ public:
    * @param aDisplayItemKey If specified, only issues an invalidate
    * if this frame painted a display item of that type during the
    * previous paint. SVG rendering observers are always notified.
-   * @param aRebuildDisplayItems If true, then adds this frame to the
-   * list of modified frames for display list building. Only pass false
-   * if you're sure that the relevant display items will be rebuilt
-   * already (possibly by an ancestor being in the modified list).
    */
-  virtual void InvalidateFrame(uint32_t aDisplayItemKey = 0, bool aRebuildDisplayItems = true);
+  virtual void InvalidateFrame(uint32_t aDisplayItemKey = 0);
 
   /**
    * Same as InvalidateFrame(), but only mark a fixed rect as needing
@@ -2959,12 +2968,8 @@ public:
    * @param aDisplayItemKey If specified, only issues an invalidate
    * if this frame painted a display item of that type during the
    * previous paint. SVG rendering observers are always notified.
-   * @param aRebuildDisplayItems If true, then adds this frame to the
-   * list of modified frames for display list building. Only pass false
-   * if you're sure that the relevant display items will be rebuilt
-   * already (possibly by an ancestor being in the modified list).
    */
-  virtual void InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey = 0, bool aRebuildDisplayItems = true);
+  virtual void InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey = 0);
 
   /**
    * Calls InvalidateFrame() on all frames descendant frames (including
@@ -2973,12 +2978,11 @@ public:
    * This function doesn't walk through placeholder frames to invalidate
    * the out-of-flow frames.
    *
-   * @param aRebuildDisplayItems If true, then adds this frame to the
-   * list of modified frames for display list building. Only pass false
-   * if you're sure that the relevant display items will be rebuilt
-   * already (possibly by an ancestor being in the modified list).
+   * @param aDisplayItemKey If specified, only issues an invalidate
+   * if this frame painted a display item of that type during the
+   * previous paint. SVG rendering observers are always notified.
    */
-  void InvalidateFrameSubtree(bool aRebuildDisplayItems = true);
+  void InvalidateFrameSubtree(uint32_t aDisplayItemKey = 0);
 
   /**
    * Called when a frame is about to be removed and needs to be invalidated.
@@ -3343,34 +3347,33 @@ public:
 #endif
 
   /**
-   * Get the frame whose style should be the parent of this frame's style (i.e.,
-   * provide the parent style).
-   *
+   * Get the frame whose style context should be the parent of this
+   * frame's style context (i.e., provide the parent style context).
    * This frame must either be an ancestor of this frame or a child.  If
    * this returns a child frame, then the child frame must be sure to
    * return a grandparent or higher!  Furthermore, if a child frame is
    * returned it must have the same GetContent() as this frame.
    *
    * @param aProviderFrame (out) the frame associated with the returned value
-   *     or nullptr if the style is for display:contents content.
-   * @return The style that should be the parent of this frame's style. Null is
-   *         permitted, and means that this frame's style should be the root of
-   *         the style tree.
+   *     or nullptr if the style context is for display:contents content.
+   * @return The style context that should be the parent of this frame's
+   *         style context.  Null is permitted, and means that this frame's
+   *         style context should be the root of the style context tree.
    */
-  virtual ComputedStyle* GetParentComputedStyle(nsIFrame** aProviderFrame) const = 0;
+  virtual nsStyleContext* GetParentStyleContext(nsIFrame** aProviderFrame) const = 0;
 
   /**
-   * Called by RestyleManager to update the style of anonymous boxes
-   * directly associated with this frame.
+   * Called by ServoRestyleManager to update the style contexts of anonymous
+   * boxes directly associtated with this frame.
    *
-   * The passed-in ServoRestyleState can be used to create new ComputedStyles as
-   * needed, as well as posting changes to the change list.
+   * The passed-in ServoRestyleState can be used to create new style contexts
+   * as needed, as well as posting changes to the change list.
    *
    * It's guaranteed to already have a change in it for this frame and this
    * frame's content.
    *
-   * This function will be called after this frame's style has already been
-   * updated.  This function will only be called on frames which have the
+   * This function will be called after this frame's style context has already
+   * been updated.  This function will only be called on frames which have the
    * NS_FRAME_OWNS_ANON_BOXES bit set.
    */
   void UpdateStyleOfOwnedAnonBoxes(mozilla::ServoRestyleState& aRestyleState)
@@ -3396,22 +3399,22 @@ protected:
 
 public:
   // A helper both for UpdateStyleOfChildAnonBox, and to update frame-backed
-  // pseudo-elements in RestyleManager.
+  // pseudo-elements in ServoRestyleManager.
   //
-  // This gets a ComputedStyle that will be the new style for `aChildFrame`, and
-  // takes care of updating it, calling CalcStyleDifference, and adding to the
-  // change list as appropriate.
+  // This gets a style context that will be the new style context for
+  // `aChildFrame`, and takes care of updating it, calling CalcStyleDifference,
+  // and adding to the change list as appropriate.
   //
-  // If aContinuationComputedStyle is not Nothing, it should be used for
-  // continuations instead of aNewComputedStyle.  In either case, changehints
-  // are only computed based on aNewComputedStyle.
+  // If aContinuationStyleContext is not Nothing, it should be used for
+  // continuations instead of aNewStyleContext.  In either case, changehints are
+  // only computed based on aNewStyleContext.
   //
   // Returns the generated change hint for the frame.
   static nsChangeHint UpdateStyleOfOwnedChildFrame(
     nsIFrame* aChildFrame,
-    ComputedStyle* aNewComputedStyle,
+    nsStyleContext* aNewStyleContext,
     mozilla::ServoRestyleState& aRestyleState,
-    const Maybe<ComputedStyle*>& aContinuationComputedStyle = Nothing());
+    const Maybe<nsStyleContext*>& aContinuationStyleContext = Nothing());
 
   struct OwnedAnonBox
   {
@@ -4175,7 +4178,7 @@ protected:
   // Members
   nsRect                 mRect;
   nsCOMPtr<nsIContent>   mContent;
-  RefPtr<ComputedStyle> mComputedStyle;
+  RefPtr<nsStyleContext> mStyleContext;
 private:
   nsContainerFrame* mParent;
   nsIFrame*        mNextSibling;  // doubly-linked list of frames

@@ -14,7 +14,6 @@ info: |
     c. Let mappedValue be ? Call(callbackfn, T, « kValue, k, O »).
   ...
 includes: [detachArrayBuffer.js, testTypedArray.js]
-features: [TypedArray]
 ---*/
 
 testWithTypedArrayConstructors(function(TA) {
@@ -28,7 +27,6 @@ testWithTypedArrayConstructors(function(TA) {
       }
       $DETACHBUFFER(sample.buffer);
       loops++;
-      return 0;
     });
   });
 

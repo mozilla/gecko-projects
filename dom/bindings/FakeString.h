@@ -25,7 +25,7 @@ struct FakeString {
   }
 
   ~FakeString() {
-    if (mDataFlags & nsString::DataFlags::REFCOUNTED) {
+    if (mDataFlags & nsString::DataFlags::SHARED) {
       nsStringBuffer::FromData(mData)->Release();
     }
   }
@@ -129,7 +129,7 @@ private:
   }
   void AssignFromStringBuffer(already_AddRefed<nsStringBuffer> aBuffer) {
     SetData(static_cast<nsString::char_type*>(aBuffer.take()->Data()));
-    mDataFlags = nsString::DataFlags::REFCOUNTED | nsString::DataFlags::TERMINATED;
+    mDataFlags = nsString::DataFlags::SHARED | nsString::DataFlags::TERMINATED;
   }
 
   friend class NonNull<nsAString>;

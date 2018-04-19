@@ -4,20 +4,15 @@
 
 <%namespace name="helpers" file="/helpers.mako.rs" />
 
-<%helpers:shorthand
-    name="overflow"
-    sub_properties="overflow-x overflow-y"
-    spec="https://drafts.csswg.org/css-overflow/#propdef-overflow"
->
+<%helpers:shorthand name="overflow" sub_properties="overflow-x overflow-y"
+                    spec="https://drafts.csswg.org/css-overflow/#propdef-overflow">
     use properties::longhands::overflow_x::parse as parse_overflow;
     % if product == "gecko":
         use properties::longhands::overflow_x::SpecifiedValue;
     % endif
 
-    pub fn parse_value<'i, 't>(
-        context: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Longhands, ParseError<'i>> {
+    pub fn parse_value<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                               -> Result<Longhands, ParseError<'i>> {
         % if product == "gecko":
             let moz_kw_found = input.try(|input| {
                 try_match_ident_ignore_ascii_case! { input,
@@ -45,23 +40,20 @@
                 return moz_kw_found
             }
         % endif
-        let overflow_x = parse_overflow(context, input)?;
-        let overflow_y =
-            input.try(|i| parse_overflow(context, i)).unwrap_or(overflow_x);
+        let overflow = parse_overflow(context, input)?;
         Ok(expanded! {
-            overflow_x: overflow_x,
-            overflow_y: overflow_y,
+            overflow_x: overflow,
+            overflow_y: overflow,
         })
     }
 
     impl<'a> ToCss for LonghandsToSerialize<'a>  {
         fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result where W: fmt::Write {
-            self.overflow_x.to_css(dest)?;
-            if self.overflow_x != self.overflow_y {
-                dest.write_char(' ')?;
-                self.overflow_y.to_css(dest)?;
+            if self.overflow_x == self.overflow_y {
+                self.overflow_x.to_css(dest)
+            } else {
+                Ok(())
             }
-            Ok(())
         }
     }
 </%helpers:shorthand>
@@ -117,8 +109,7 @@ macro_rules! try_parse_one {
     };
 }
 
-<%helpers:shorthand name="transition"
-                    extra_prefixes="moz:layout.css.prefixes.transitions webkit"
+<%helpers:shorthand name="transition" extra_prefixes="moz webkit"
                     sub_properties="transition-property transition-duration
                                     transition-timing-function
                                     transition-delay"
@@ -127,10 +118,8 @@ macro_rules! try_parse_one {
     use properties::longhands::transition_${prop};
     % endfor
 
-    pub fn parse_value<'i, 't>(
-        context: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Longhands, ParseError<'i>> {
+    pub fn parse_value<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                               -> Result<Longhands, ParseError<'i>> {
         struct SingleTransition {
             % for prop in "duration timing_function delay".split():
             transition_${prop}: transition_${prop}::SingleSpecifiedValue,
@@ -140,10 +129,8 @@ macro_rules! try_parse_one {
             transition_property: Option<transition_property::SingleSpecifiedValue>,
         }
 
-        fn parse_one_transition<'i, 't>(
-            context: &ParserContext,
-            input: &mut Parser<'i, 't>,
-        ) -> Result<SingleTransition,ParseError<'i>> {
+        fn parse_one_transition<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                                        -> Result<SingleTransition,ParseError<'i>> {
             % for prop in "property duration timing_function delay".split():
             let mut ${prop} = None;
             % endfor
@@ -258,8 +245,7 @@ macro_rules! try_parse_one {
     }
 </%helpers:shorthand>
 
-<%helpers:shorthand name="animation"
-                    extra_prefixes="moz:layout.css.prefixes.animations webkit"
+<%helpers:shorthand name="animation" extra_prefixes="moz webkit"
                     sub_properties="animation-name animation-duration
                                     animation-timing-function animation-delay
                                     animation-iteration-count animation-direction
@@ -274,20 +260,16 @@ macro_rules! try_parse_one {
     use properties::longhands::animation_${prop};
     % endfor
 
-    pub fn parse_value<'i, 't>(
-        context: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Longhands, ParseError<'i>> {
+    pub fn parse_value<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                               -> Result<Longhands, ParseError<'i>> {
         struct SingleAnimation {
             % for prop in props:
             animation_${prop}: animation_${prop}::SingleSpecifiedValue,
             % endfor
         }
 
-        fn parse_one_animation<'i, 't>(
-            context: &ParserContext,
-            input: &mut Parser<'i, 't>,
-        ) -> Result<SingleAnimation, ParseError<'i>> {
+        fn parse_one_animation<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                                       -> Result<SingleAnimation,ParseError<'i>> {
             % for prop in props:
             let mut ${prop} = None;
             % endfor
@@ -382,10 +364,8 @@ macro_rules! try_parse_one {
                     spec="https://drafts.csswg.org/css-scroll-snap/#propdef-scroll-snap-type">
     use properties::longhands::scroll_snap_type_x;
 
-    pub fn parse_value<'i, 't>(
-        context: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Longhands, ParseError<'i>> {
+    pub fn parse_value<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                               -> Result<Longhands, ParseError<'i>> {
         let result = scroll_snap_type_x::parse(context, input)?;
         Ok(expanded! {
             scroll_snap_type_x: result,

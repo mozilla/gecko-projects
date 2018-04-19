@@ -23,6 +23,7 @@
 #include "mozStorageStatementRow.h"
 #include "mozStorageStatement.h"
 #include "GeckoProfiler.h"
+#include "nsDOMClassInfo.h"
 
 #include "mozilla/Logging.h"
 #include "mozilla/Printf.h"

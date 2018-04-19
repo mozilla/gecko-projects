@@ -1,74 +1,39 @@
 "use strict";
 
+ChromeUtils.import("resource://gre/modules/ExtensionCommon.jsm");
+
+const {ExtensionAPI, ExtensionAPIs} = ExtensionCommon;
+
 const {ExtensionManager} = ChromeUtils.import("resource://gre/modules/ExtensionChild.jsm", {});
 
 Cu.importGlobalProperties(["Blob", "URL"]);
 
-let experimentAPIs = {
-  userinputtest: {
-    schema: "schema.json",
-    parent: {
-      scopes: ["addon_parent"],
-      script: "parent.js",
-      paths: [["userinputtest"]],
-    },
-    child: {
-      scopes: ["addon_child"],
-      script: "child.js",
-      paths: [["userinputtest", "child"]],
-    },
+let schema = [
+  {
+    namespace: "userinputtest",
+    functions: [
+      {
+        name: "test",
+        type: "function",
+        async: true,
+        requireUserInput: true,
+        parameters: [],
+      },
+    ],
   },
-};
+];
 
-let experimentFiles = {
-  "schema.json": JSON.stringify([
-    {
-      namespace: "userinputtest",
-      functions: [
-        {
-          name: "test",
-          type: "function",
-          async: true,
-          requireUserInput: true,
-          parameters: [],
-        },
-        {
-          name: "child",
-          type: "function",
-          async: true,
-          requireUserInput: true,
-          parameters: [],
-        },
-      ],
-    },
-  ]),
-
-  /* globals ExtensionAPI */
-  "parent.js": () => {
-    this.userinputtest = class extends ExtensionAPI {
-      getAPI(context) {
-        return {
-          userinputtest: {
-            test() {},
-          },
-        };
-      }
+class API extends ExtensionAPI {
+  getAPI(context) {
+    return {
+      userinputtest: {
+        test() {},
+      },
     };
-  },
+  }
+}
 
-  /* globals ExtensionAPI */
-  "child.js": () => {
-    this.userinputtest = class extends ExtensionAPI {
-      getAPI(context) {
-        return {
-          userinputtest: {
-            child() {},
-          },
-        };
-      }
-    };
-  },
-};
+let schemaUrl = `data:,${JSON.stringify(schema)}`;
 
 // Set the "handlingUserInput" flag for the given extension's background page.
 // Returns an RAIIHelper that should be destruct()ed eventually.
@@ -90,6 +55,9 @@ function setHandlingUserInput(extension) {
 // Test that the schema requireUserInput flag works correctly for
 // proxied api implementations.
 add_task(async function test_proxy() {
+  let apiUrl = URL.createObjectURL(new Blob([API.toString()]));
+  ExtensionAPIs.register("userinputtest", schemaUrl, apiUrl);
+
   let extension = ExtensionTestUtils.loadExtension({
     background() {
       browser.test.onMessage.addListener(async () => {
@@ -103,9 +71,7 @@ add_task(async function test_proxy() {
     },
     manifest: {
       permissions: ["experiments.userinputtest"],
-      experiment_apis: experimentAPIs,
     },
-    files: experimentFiles,
   });
 
   await extension.startup();
@@ -113,7 +79,7 @@ add_task(async function test_proxy() {
   extension.sendMessage("test");
   let result = await extension.awaitMessage("result");
   ok(/test may only be called from a user input handler/.test(result),
-     `function failed when not called from a user input handler: ${result}`);
+     "function failed when not called from a user input handler");
 
   let handle = setHandlingUserInput(extension);
   extension.sendMessage("test");
@@ -122,34 +88,44 @@ add_task(async function test_proxy() {
   handle.destruct();
 
   await extension.unload();
+  ExtensionAPIs.unregister("userinputtest");
 });
 
 // Test that the schema requireUserInput flag works correctly for
 // non-proxied api implementations.
 add_task(async function test_local() {
+  let apiString = `this.userinputtest = ${API.toString()};`;
+  let apiUrl = URL.createObjectURL(new Blob([apiString]));
+  await Schemas.load(schemaUrl);
+  const {apiManager} = ChromeUtils.import("resource://gre/modules/ExtensionPageChild.jsm", {});
+  apiManager.registerModules({
+    userinputtest: {
+      url: apiUrl,
+      scopes: ["addon_child"],
+      paths: [["userinputtest"]],
+    },
+  });
+
   let extension = ExtensionTestUtils.loadExtension({
     background() {
       browser.test.onMessage.addListener(async () => {
         try {
-          await browser.userinputtest.child();
+          await browser.userinputtest.test();
           browser.test.sendMessage("result", null);
         } catch (err) {
           browser.test.sendMessage("result", err.message);
         }
       });
     },
-    manifest: {
-      experiment_apis: experimentAPIs,
-    },
-    files: experimentFiles,
+    manifest: {},
   });
 
   await extension.startup();
 
   extension.sendMessage("test");
   let result = await extension.awaitMessage("result");
-  ok(/child may only be called from a user input handler/.test(result),
-     `function failed when not called from a user input handler: ${result}`);
+  ok(/test may only be called from a user input handler/.test(result),
+     "function failed when not called from a user input handler");
 
   let handle = setHandlingUserInput(extension);
   extension.sendMessage("test");

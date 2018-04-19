@@ -11,7 +11,6 @@
 #include "mozilla/ErrorResult.h"
 #include "mozilla/OwningNonNull.h"
 #include "mozilla/RefPtr.h"
-#include "mozilla/Preferences.h"
 
 #include "mozilla/dom/AnalyserNode.h"
 #include "mozilla/dom/AnalyserNodeBinding.h"
@@ -121,7 +120,7 @@ NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
 static float GetSampleRateForAudioContext(bool aIsOffline, float aSampleRate)
 {
-  if (aIsOffline || aSampleRate != 0.0) {
+  if (aIsOffline) {
     return aSampleRate;
   } else {
     return static_cast<float>(CubebUtils::PreferredSampleRate());
@@ -198,7 +197,6 @@ AudioContext::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 
 /* static */ already_AddRefed<AudioContext>
 AudioContext::Constructor(const GlobalObject& aGlobal,
-                          const AudioContextOptions& aOptions,
                           ErrorResult& aRv)
 {
   nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(aGlobal.GetAsSupports());
@@ -207,22 +205,10 @@ AudioContext::Constructor(const GlobalObject& aGlobal,
     return nullptr;
   }
 
-  float sampleRate = MediaStreamGraph::REQUEST_DEFAULT_SAMPLE_RATE;
-  if (Preferences::GetBool("media.webaudio.audiocontextoptions-samplerate.enabled")) {
-    if (aOptions.mSampleRate > 0 &&
-        (aOptions.mSampleRate - WebAudioUtils::MinSampleRate < 0.0 ||
-        WebAudioUtils::MaxSampleRate - aOptions.mSampleRate < 0.0)) {
-      aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
-      return nullptr;
-    }
-    sampleRate = aOptions.mSampleRate;
-  }
-
   uint32_t maxChannelCount = std::min<uint32_t>(WebAudioUtils::MaxChannelCount,
       CubebUtils::MaxNumberOfChannels());
   RefPtr<AudioContext> object =
-    new AudioContext(window, false, maxChannelCount,
-                     0, sampleRate);
+    new AudioContext(window, false,maxChannelCount);
   aRv = object->Init();
   if (NS_WARN_IF(aRv.Failed())) {
      return nullptr;
@@ -667,12 +653,6 @@ double
 AudioContext::CurrentTime()
 {
   MediaStream* stream = Destination()->Stream();
-
-  if (!mIsStarted &&
-    stream->StreamTimeToSeconds(stream->GetCurrentTime()) == 0) {
-      return 0;
-  }
-
   // The value of a MediaStream's CurrentTime will always advance forward; it will never
   // reset (even if one rewinds a video.) Therefore we can use a single Random Seed
   // initialized at the same time as the object.
@@ -686,23 +666,6 @@ void AudioContext::DisconnectFromOwner()
   mIsDisconnecting = true;
   Shutdown();
   DOMEventTargetHelper::DisconnectFromOwner();
-}
-
-void
-AudioContext::BindToOwner(nsIGlobalObject* aNew)
-{
-  auto scopeExit = MakeScopeExit([&] {
-    DOMEventTargetHelper::BindToOwner(aNew);
-  });
-
-  if (GetOwner()) {
-    GetOwner()->RemoveAudioContext(this);
-  }
-
-  nsCOMPtr<nsPIDOMWindowInner> newWindow = do_QueryInterface(aNew);
-  if (newWindow) {
-    newWindow->AddAudioContext(this);
-  }
 }
 
 void

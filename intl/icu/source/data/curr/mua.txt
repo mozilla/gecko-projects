@@ -124,10 +124,6 @@ mua{
         }
         MRO{
             "MRO",
-            "Solai Mauritaniya (1973–2017)",
-        }
-        MRU{
-            "MRU",
             "Solai Mauritaniya",
         }
         MUR{
@@ -184,10 +180,6 @@ mua{
         }
         STD{
             "STD",
-            "Solai Sao Tome (1977–2017)",
-        }
-        STN{
-            "STN",
             "Solai Sao Tome",
         }
         SZL{
@@ -235,5 +227,5 @@ mua{
             "Solai Zimbabwe",
         }
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.37.1"}
 }

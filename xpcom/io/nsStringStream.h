@@ -59,8 +59,5 @@ NS_NewByteInputStream(nsIInputStream** aStreamResult,
 extern nsresult
 NS_NewCStringInputStream(nsIInputStream** aStreamResult,
                          const nsACString& aStringToRead);
-extern nsresult
-NS_NewCStringInputStream(nsIInputStream** aStreamResult,
-                         nsCString&& aStringToRead);
 
 #endif // nsStringStream_h__

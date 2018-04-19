@@ -10,9 +10,9 @@
 #include "mozilla/dom/TypedArray.h"
 #include "mozilla/dom/URLSearchParams.h"
 #include "mozilla/dom/XMLHttpRequest.h"
-#include "mozilla/UniquePtr.h"
 #include "nsContentUtils.h"
-#include "nsDOMSerializer.h"
+#include "nsIDOMDocument.h"
+#include "nsIDOMSerializer.h"
 #include "nsIGlobalObject.h"
 #include "nsIInputStream.h"
 #include "nsIOutputStream.h"
@@ -73,7 +73,8 @@ BodyExtractor<nsIDocument>::GetAsStream(nsIInputStream** aResult,
                                         nsACString& aContentTypeWithCharset,
                                         nsACString& aCharset) const
 {
-  NS_ENSURE_STATE(mBody);
+  nsCOMPtr<nsIDOMDocument> domdoc(do_QueryInterface(mBody));
+  NS_ENSURE_STATE(domdoc);
   aCharset.AssignLiteral("UTF-8");
 
   nsresult rv;
@@ -106,15 +107,13 @@ BodyExtractor<nsIDocument>::GetAsStream(nsIInputStream** aResult,
   } else {
     aContentTypeWithCharset.AssignLiteral("application/xml;charset=UTF-8");
 
-    auto serializer = MakeUnique<nsDOMSerializer>();
+    nsCOMPtr<nsIDOMSerializer> serializer =
+      do_CreateInstance(NS_XMLSERIALIZER_CONTRACTID, &rv);
+    NS_ENSURE_SUCCESS(rv, rv);
 
     // Make sure to use the encoding we'll send
-    ErrorResult res;
-    serializer->SerializeToStream(*mBody, output, NS_LITERAL_STRING("UTF-8"),
-                                  res);
-    if (NS_WARN_IF(res.Failed())) {
-      return res.StealNSResult();
-    }
+    rv = serializer->SerializeToStream(domdoc, output, aCharset);
+    NS_ENSURE_SUCCESS(rv, rv);
   }
 
   output->Close();
@@ -140,13 +139,12 @@ BodyExtractor<const nsAString>::GetAsStream(nsIInputStream** aResult,
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  uint32_t encodedLength = encoded.Length();
-  nsresult rv = NS_NewCStringInputStream(aResult, Move(encoded));
+  nsresult rv = NS_NewCStringInputStream(aResult, encoded);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
 
-  *aContentLength = encodedLength;
+  *aContentLength = encoded.Length();
   aContentTypeWithCharset.AssignLiteral("text/plain;charset=UTF-8");
   aCharset.AssignLiteral("UTF-8");
   return NS_OK;

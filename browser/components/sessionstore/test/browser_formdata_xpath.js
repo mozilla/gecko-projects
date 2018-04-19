@@ -62,8 +62,8 @@ add_task(async function test_form_data_restoration() {
   }
 
   // Remove all tabs.
-  await promiseRemoveTabAndSessionState(tab2);
-  await promiseRemoveTabAndSessionState(tab);
+  await promiseRemoveTab(tab2);
+  await promiseRemoveTab(tab);
 
   // Restore one of the tabs again.
   tab = ss.undoCloseTab(window, 0);
@@ -81,7 +81,7 @@ add_task(async function test_form_data_restoration() {
   }
 
   // Cleanup.
-  BrowserTestUtils.removeTab(tab);
+  await promiseRemoveTab(tab);
 });
 
 function createFilePath(leaf) {

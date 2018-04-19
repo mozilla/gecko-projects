@@ -5,11 +5,7 @@
  * http://creativecommons.org/licenses/publicdomain/
  *
  * Uses the WebCrypto API.
- *
- * Note that this test file uses the old, deprecated aesgcm128 encryption
- * scheme. PushCrypto.encrypt() exists and uses the later aes128gcm, but
- * there's no good reason to upgrade this at this time (and having mochitests
- * use PushCrypto directly is easier said than done.)
+ * Uses the fetch API.  Polyfill: https://github.com/github/fetch
  */
 
 (function (g) {

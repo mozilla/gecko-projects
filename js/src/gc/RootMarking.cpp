@@ -80,9 +80,9 @@ JS::RootingContext::traceStackRoots(JSTracer* trc)
 }
 
 static void
-TraceExactStackRoots(JSContext* cx, JSTracer* trc)
+TraceExactStackRoots(const CooperatingContext& target, JSTracer* trc)
 {
-    cx->traceStackRoots(trc);
+    target.context()->traceStackRoots(trc);
 }
 
 template <typename T, TraceFunction<T> TraceFn = TraceNullableRoot>
@@ -162,6 +162,11 @@ AutoGCRooter::trace(JSTracer* trc)
         return;
       }
 
+      case IONMASM: {
+        static_cast<js::jit::MacroAssembler::AutoRooter*>(this)->masm()->trace(trc);
+        return;
+      }
+
       case WRAPPER: {
         /*
          * We need to use TraceManuallyBarrieredEdge here because we trace
@@ -196,16 +201,16 @@ AutoGCRooter::trace(JSTracer* trc)
 }
 
 /* static */ void
-AutoGCRooter::traceAll(JSContext* cx, JSTracer* trc)
+AutoGCRooter::traceAll(const CooperatingContext& target, JSTracer* trc)
 {
-    for (AutoGCRooter* gcr = cx->autoGCRooters_; gcr; gcr = gcr->down)
+    for (AutoGCRooter* gcr = target.context()->autoGCRooters_; gcr; gcr = gcr->down)
         gcr->trace(trc);
 }
 
 /* static */ void
-AutoGCRooter::traceAllWrappers(JSContext* cx, JSTracer* trc)
+AutoGCRooter::traceAllWrappers(const CooperatingContext& target, JSTracer* trc)
 {
-    for (AutoGCRooter* gcr = cx->autoGCRooters_; gcr; gcr = gcr->down) {
+    for (AutoGCRooter* gcr = target.context()->autoGCRooters_; gcr; gcr = gcr->down) {
         if (gcr->tag_ == WRAPVECTOR || gcr->tag_ == WRAPPER)
             gcr->trace(trc);
     }
@@ -284,8 +289,8 @@ js::TraceRuntime(JSTracer* trc)
     MOZ_ASSERT(!trc->isMarkingTracer());
 
     JSRuntime* rt = trc->runtime();
-    rt->gc.evictNursery();
-    AutoPrepareForTracing prep(rt->mainContextFromOwnThread());
+    EvictAllNurseries(rt);
+    AutoPrepareForTracing prep(TlsContext.get());
     gcstats::AutoPhase ap(rt->gc.stats(), gcstats::PhaseKind::TRACE_HEAP);
     rt->gc.traceRuntime(trc, prep.session());
 }
@@ -319,17 +324,18 @@ js::gc::GCRuntime::traceRuntimeCommon(JSTracer* trc, TraceOrMarkRuntime traceOrM
     {
         gcstats::AutoPhase ap(stats(), gcstats::PhaseKind::MARK_STACK);
 
-        JSContext* cx = rt->mainContextFromOwnThread();
+        JSContext* cx = TlsContext.get();
+        for (const CooperatingContext& target : rt->cooperatingContexts()) {
+            // Trace active interpreter and JIT stack roots.
+            TraceInterpreterActivations(cx, target, trc);
+            jit::TraceJitActivations(cx, target, trc);
 
-        // Trace active interpreter and JIT stack roots.
-        TraceInterpreterActivations(cx, trc);
-        jit::TraceJitActivations(cx, trc);
+            // Trace legacy C stack roots.
+            AutoGCRooter::traceAll(target, trc);
 
-        // Trace legacy C stack roots.
-        AutoGCRooter::traceAll(cx, trc);
-
-        // Trace C stack roots.
-        TraceExactStackRoots(cx, trc);
+            // Trace C stack roots.
+            TraceExactStackRoots(target, trc);
+        }
 
         for (RootRange r = rootsHash.ref().all(); !r.empty(); r.popFront()) {
             const RootEntry& entry = r.front();
@@ -346,8 +352,9 @@ js::gc::GCRuntime::traceRuntimeCommon(JSTracer* trc, TraceOrMarkRuntime traceOrM
     // Trace the shared Intl data.
     rt->traceSharedIntlData(trc);
 
-    // Trace the JSContext.
-    rt->mainContextFromOwnThread()->trace(trc);
+    // Trace anything in any of the cooperating threads.
+    for (const CooperatingContext& target : rt->cooperatingContexts())
+        target.context()->trace(trc);
 
     // Trace all compartment roots, but not the compartment itself; it is
     // traced via the parent pointer if traceRoots actually traces anything.

@@ -156,7 +156,7 @@ TimeoutManager::DestroyFiringId(uint32_t aFiringId)
 {
   MOZ_DIAGNOSTIC_ASSERT(!mFiringIdStack.IsEmpty());
   MOZ_DIAGNOSTIC_ASSERT(mFiringIdStack.LastElement() == aFiringId);
-  mFiringIdStack.RemoveLastElement();
+  mFiringIdStack.RemoveElementAt(mFiringIdStack.Length() - 1);
 }
 
 bool
@@ -418,7 +418,7 @@ TimeoutManager::TimeoutManager(nsGlobalWindowInner& aWindow)
 
 TimeoutManager::~TimeoutManager()
 {
-  MOZ_DIAGNOSTIC_ASSERT(mWindow.IsDying());
+  MOZ_DIAGNOSTIC_ASSERT(mWindow.AsInner()->InnerObjectsFreed());
   MOZ_DIAGNOSTIC_ASSERT(!mThrottleTimeoutsTimer);
 
   mExecutor->Shutdown();
@@ -1297,7 +1297,7 @@ void
 TimeoutManager::MaybeStartThrottleTimeout()
 {
   if (gTimeoutThrottlingDelay <= 0 ||
-      mWindow.IsDying() || mWindow.IsSuspended()) {
+      mWindow.AsInner()->InnerObjectsFreed() || mWindow.IsSuspended()) {
     return;
   }
 

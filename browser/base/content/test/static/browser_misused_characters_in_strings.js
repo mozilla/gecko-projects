@@ -9,6 +9,10 @@
  * the end of the test, there is an assertion that all items have been
  * removed from the whitelist, thus ensuring there are no stale entries. */
 let gWhitelist = [{
+    file: "search.properties",
+    key: "searchForSomethingWith",
+    type: "single-quote"
+  }, {
     file: "netError.dtd",
     key: "certerror.introPara",
     type: "single-quote"
@@ -108,6 +112,14 @@ let gWhitelist = [{
     file: "dom.properties",
     key: "PatternAttributeCompileFailure",
     type: "single-quote"
+  }, {
+    file: "pipnss.properties",
+    key: "certErrorMismatchSingle2",
+    type: "double-quote"
+  }, {
+    file: "pipnss.properties",
+    key: "certErrorCodePrefix2",
+    type: "double-quote"
   }, {
     file: "aboutSupport.dtd",
     key: "aboutSupport.pageSubtitle",

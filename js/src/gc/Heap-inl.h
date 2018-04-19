@@ -13,10 +13,8 @@
 #include "gc/Zone.h"
 
 inline void
-js::gc::Arena::init(JS::Zone* zoneArg, AllocKind kind, const AutoLockGC& lock)
+js::gc::Arena::init(JS::Zone* zoneArg, AllocKind kind)
 {
-    MOZ_MAKE_MEM_UNDEFINED(this, ArenaSize);
-
     MOZ_ASSERT(firstFreeSpan.isEmpty());
     MOZ_ASSERT(!zone);
     MOZ_ASSERT(!allocated());
@@ -28,16 +26,16 @@ js::gc::Arena::init(JS::Zone* zoneArg, AllocKind kind, const AutoLockGC& lock)
     allocKind = size_t(kind);
     setAsFullyUnused();
     if (zone->isAtomsZone())
-        zone->runtimeFromAnyThread()->gc.atomMarking.registerArena(this, lock);
+        zone->runtimeFromAnyThread()->gc.atomMarking.registerArena(this);
     else
         bufferedCells() = &ArenaCellSet::Empty;
 }
 
 inline void
-js::gc::Arena::release(const AutoLockGC& lock)
+js::gc::Arena::release()
 {
     if (zone->isAtomsZone())
-        zone->runtimeFromAnyThread()->gc.atomMarking.unregisterArena(this, lock);
+        zone->runtimeFromAnyThread()->gc.atomMarking.unregisterArena(this);
     setAsNotAllocated();
 }
 

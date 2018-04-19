@@ -352,6 +352,7 @@ nsCSSScanner::nsCSSScanner(const nsAString& aBuffer, uint32_t aLineNumber)
   , mTokenOffset(0)
   , mRecordStartOffset(0)
   , mEOFCharacters(eEOFCharacters_None)
+  , mReporter(nullptr)
   , mRecording(false)
   , mSeenBadToken(false)
   , mSeenVariableReference(false)
@@ -591,6 +592,8 @@ nsCSSScanner::SkipComment()
   for (;;) {
     int32_t ch = Peek();
     if (ch < 0) {
+      if (mReporter)
+        mReporter->ReportUnexpectedEOF("PECommentEOF");
       SetEOFCharacters(eEOFCharacters_Asterisk | eEOFCharacters_Slash);
       return;
     }
@@ -601,6 +604,8 @@ nsCSSScanner::SkipComment()
       if (ch < 0) {
         // In this case, even if we saw a source map directive, leave
         // the "*" out of it.
+        if (mReporter)
+          mReporter->ReportUnexpectedEOF("PECommentEOF");
         SetEOFCharacters(eEOFCharacters_Slash);
         return;
       }
@@ -1041,6 +1046,8 @@ nsCSSScanner::ScanString(nsCSSToken& aToken)
 
     mSeenBadToken = true;
     aToken.mType = eCSSToken_Bad_String;
+    if (mReporter)
+      mReporter->ReportUnexpected("SEUnterminatedString", aToken);
     break;
   }
   return true;

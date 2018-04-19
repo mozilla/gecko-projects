@@ -142,6 +142,6 @@ add_task(async function interruptedDownloads() {
     function() {
       return content.wrappedJSObject.registration.unregister();
     });
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
   await clearDownloads();
 });

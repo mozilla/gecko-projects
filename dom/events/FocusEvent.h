@@ -9,14 +9,20 @@
 #include "mozilla/dom/FocusEventBinding.h"
 #include "mozilla/dom/UIEvent.h"
 #include "mozilla/EventForwards.h"
+#include "nsIDOMFocusEvent.h"
 
 namespace mozilla {
 namespace dom {
 
-class FocusEvent : public UIEvent
+class FocusEvent : public UIEvent,
+                   public nsIDOMFocusEvent
 {
 public:
-  NS_INLINE_DECL_REFCOUNTING_INHERITED(FocusEvent, UIEvent)
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_NSIDOMFOCUSEVENT
+
+  // Forward to base class
+  NS_FORWARD_TO_UIEVENT
 
   virtual JSObject* WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {

@@ -5,8 +5,8 @@
 
 // Test that whether close button in header of animation detail works.
 
-add_task(async function() {
-  await addTab(URL_ROOT + "doc_custom_playback_rate.html");
+add_task(async function () {
+  await addTab(URL_ROOT + "doc_multi_timings.html");
   const { animationInspector, panel } = await openAnimationInspector();
 
   info("Checking close button in header of animation detail");

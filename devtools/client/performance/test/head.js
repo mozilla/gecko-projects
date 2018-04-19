@@ -52,7 +52,10 @@ const key = (id, win = window) => {
 
 // Don't pollute global scope.
 (() => {
+  const flags = require("devtools/shared/flags");
   const PrefUtils = require("devtools/client/performance/test/helpers/prefs");
+
+  flags.testing = true;
 
   // Make sure all the prefs are reverted to their defaults once tests finish.
   let stopObservingPrefs = PrefUtils.whenUnknownPrefChanged("devtools.performance",
@@ -68,6 +71,7 @@ const key = (id, win = window) => {
 
   registerCleanupFunction(() => {
     info("finish() was called, cleaning up...");
+    flags.testing = false;
 
     PrefUtils.rollbackPrefsToDefault();
     stopObservingPrefs();

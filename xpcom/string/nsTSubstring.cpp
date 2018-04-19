@@ -121,8 +121,7 @@ nsTSubstring<T>::MutatePrep(size_type aCapacity, char_type** aOldData,
   //
   // several cases:
   //
-  //  (1) we have a refcounted shareable buffer (this->mDataFlags &
-  //      DataFlags::REFCOUNTED)
+  //  (1) we have a shared buffer (this->mDataFlags & DataFlags::SHARED)
   //  (2) we have an owned buffer (this->mDataFlags & DataFlags::OWNED)
   //  (3) we have an inline buffer (this->mDataFlags & DataFlags::INLINE)
   //  (4) we have a readonly buffer
@@ -134,7 +133,7 @@ nsTSubstring<T>::MutatePrep(size_type aCapacity, char_type** aOldData,
   size_type storageSize = (aCapacity + 1) * sizeof(char_type);
 
   // case #1
-  if (this->mDataFlags & DataFlags::REFCOUNTED) {
+  if (this->mDataFlags & DataFlags::SHARED) {
     nsStringBuffer* hdr = nsStringBuffer::FromData(this->mData);
     if (!hdr->IsReadonly()) {
       nsStringBuffer* newHdr = nsStringBuffer::Realloc(hdr, storageSize);
@@ -170,7 +169,7 @@ nsTSubstring<T>::MutatePrep(size_type aCapacity, char_type** aOldData,
     }
 
     newData = (char_type*)newHdr->Data();
-    newDataFlags = DataFlags::TERMINATED | DataFlags::REFCOUNTED;
+    newDataFlags = DataFlags::TERMINATED | DataFlags::SHARED;
   }
 
   // save old data and flags
@@ -277,7 +276,7 @@ nsTSubstring<T>::Capacity() const
   // return 0 to indicate an immutable or 0-sized buffer
 
   size_type capacity;
-  if (this->mDataFlags & DataFlags::REFCOUNTED) {
+  if (this->mDataFlags & DataFlags::SHARED) {
     // if the string is readonly, then we pretend that it has no capacity.
     nsStringBuffer* hdr = nsStringBuffer::FromData(this->mData);
     if (hdr->IsReadonly()) {
@@ -308,7 +307,7 @@ nsTSubstring<T>::EnsureMutable(size_type aNewLen)
     if (this->mDataFlags & (DataFlags::INLINE | DataFlags::OWNED)) {
       return true;
     }
-    if ((this->mDataFlags & DataFlags::REFCOUNTED) &&
+    if ((this->mDataFlags & DataFlags::SHARED) &&
         !nsStringBuffer::FromData(this->mData)->IsReadonly()) {
       return true;
     }
@@ -461,7 +460,7 @@ nsTSubstring<T>::Assign(const self_type& aStr, const fallible_t& aFallible)
     return true;
   }
 
-  if (aStr.mDataFlags & DataFlags::REFCOUNTED) {
+  if (aStr.mDataFlags & DataFlags::SHARED) {
     // nice! we can avoid a string copy :-)
 
     // |aStr| should be null-terminated
@@ -470,7 +469,7 @@ nsTSubstring<T>::Assign(const self_type& aStr, const fallible_t& aFallible)
     ::ReleaseData(this->mData, this->mDataFlags);
 
     SetData(aStr.mData, aStr.mLength,
-            DataFlags::TERMINATED | DataFlags::REFCOUNTED);
+            DataFlags::TERMINATED | DataFlags::SHARED);
 
     // get an owning reference to the this->mData
     nsStringBuffer::FromData(this->mData)->AddRef();
@@ -508,8 +507,8 @@ nsTSubstring<T>::Assign(self_type&& aStr, const fallible_t& aFallible)
     return true;
   }
 
-  if (aStr.mDataFlags & (DataFlags::REFCOUNTED | DataFlags::OWNED)) {
-    // If they have a REFCOUNTED or OWNED buffer, we can avoid a copy - so steal
+  if (aStr.mDataFlags & (DataFlags::SHARED | DataFlags::OWNED)) {
+    // If they have a SHARED or OWNED buffer, we can avoid a copy - so steal
     // their buffer and reset them to the empty string.
 
     // |aStr| should be null-terminated
@@ -1223,7 +1222,7 @@ size_t
 nsTSubstring<T>::SizeOfExcludingThisIfUnshared(
     mozilla::MallocSizeOf aMallocSizeOf) const
 {
-  if (this->mDataFlags & DataFlags::REFCOUNTED) {
+  if (this->mDataFlags & DataFlags::SHARED) {
     return nsStringBuffer::FromData(this->mData)->
       SizeOfIncludingThisIfUnshared(aMallocSizeOf);
   }
@@ -1235,7 +1234,7 @@ nsTSubstring<T>::SizeOfExcludingThisIfUnshared(
   // - DataFlags::VOIDED is set, and this->mData points to sEmptyBuffer;
   // - DataFlags::INLINE is set, and this->mData points to a buffer within a
   //   string object (e.g. nsAutoString);
-  // - None of DataFlags::REFCOUNTED, DataFlags::OWNED, DataFlags::INLINE is set,
+  // - None of DataFlags::SHARED, DataFlags::OWNED, DataFlags::INLINE is set,
   //   and this->mData points to a buffer owned by something else.
   //
   // In all three cases, we don't measure it.
@@ -1248,8 +1247,8 @@ nsTSubstring<T>::SizeOfExcludingThisEvenIfShared(
     mozilla::MallocSizeOf aMallocSizeOf) const
 {
   // This is identical to SizeOfExcludingThisIfUnshared except for the
-  // DataFlags::REFCOUNTED case.
-  if (this->mDataFlags & DataFlags::REFCOUNTED) {
+  // DataFlags::SHARED case.
+  if (this->mDataFlags & DataFlags::SHARED) {
     return nsStringBuffer::FromData(this->mData)->
       SizeOfIncludingThisEvenIfShared(aMallocSizeOf);
   }

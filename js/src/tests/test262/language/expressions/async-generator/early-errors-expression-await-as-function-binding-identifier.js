@@ -4,7 +4,7 @@
 
 /*---
 author: Caitlin Potter <caitp@igalia.com>
-esid: sec-identifiers-static-semantics-early-errors
+esid: pending
 description: >
   `await` is not a valid BindingIdentifier for AsyncGeneratorExpressions.
 negative:

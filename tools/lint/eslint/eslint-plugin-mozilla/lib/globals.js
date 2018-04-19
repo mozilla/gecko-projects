@@ -11,7 +11,7 @@
 const path = require("path");
 const fs = require("fs");
 const helpers = require("./helpers");
-const eslintScope = require("eslint-scope");
+const escope = require("escope");
 
 /**
  * Parses a list of "name:boolean_value" or/and "name" options divided by comma
@@ -179,7 +179,7 @@ module.exports = {
 
     // Discover global declarations
     // The second parameter works around https://github.com/babel/babel-eslint/issues/470
-    let scopeManager = eslintScope.analyze(ast, {});
+    let scopeManager = escope.analyze(ast, {});
     let globalScope = scopeManager.acquire(ast);
 
     let globals = Object.keys(globalScope.variables).map(v => ({

@@ -13,8 +13,6 @@
 
 namespace js {
 
-class GlobalObject;
-
 /*
  * Dispatch point for handlers that executes the appropriate C++ or scripted traps.
  *
@@ -103,9 +101,6 @@ ProxySetProperty(JSContext* cx, HandleObject proxy, HandleId id, HandleValue val
 bool
 ProxySetPropertyByValue(JSContext* cx, HandleObject proxy, HandleValue idVal, HandleValue val,
                         bool strict);
-
-extern JSObject*
-InitProxyClass(JSContext* cx, Handle<GlobalObject*> global);
 
 } /* namespace js */
 

@@ -596,6 +596,22 @@ MacroAssembler::branchPtrImpl(Condition cond, const T& lhs, const S& rhs, L labe
     j(cond, label);
 }
 
+template <typename T>
+CodeOffsetJump
+MacroAssembler::branchPtrWithPatch(Condition cond, Register lhs, T rhs, RepatchLabel* label)
+{
+    cmpPtr(lhs, rhs);
+    return jumpWithPatch(label, cond);
+}
+
+template <typename T>
+CodeOffsetJump
+MacroAssembler::branchPtrWithPatch(Condition cond, Address lhs, T rhs, RepatchLabel* label)
+{
+    cmpPtr(lhs, rhs);
+    return jumpWithPatch(label, cond);
+}
+
 void
 MacroAssembler::branchFloat(DoubleCondition cond, FloatRegister lhs, FloatRegister rhs,
                             Label* label)
@@ -643,9 +659,9 @@ MacroAssembler::branchDouble(DoubleCondition cond, FloatRegister lhs, FloatRegis
     j(ConditionFromDoubleCondition(cond), label);
 }
 
-template <typename T>
+template <typename T, typename L>
 void
-MacroAssembler::branchAdd32(Condition cond, T src, Register dest, Label* label)
+MacroAssembler::branchAdd32(Condition cond, T src, Register dest, L label)
 {
     addl(src, dest);
     j(cond, label);

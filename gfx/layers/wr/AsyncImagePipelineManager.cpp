@@ -30,7 +30,7 @@ AsyncImagePipelineManager::AsyncImagePipelineManager(already_AddRefed<wr::WebRen
  : mApi(aApi)
  , mIdNamespace(mApi->GetNamespace())
  , mResourceId(0)
- , mAsyncImageEpoch{0}
+ , mAsyncImageEpoch(0)
  , mWillGenerateFrame(false)
  , mDestroyed(false)
 {
@@ -129,13 +129,13 @@ AsyncImagePipelineManager::RemoveAsyncImagePipeline(const wr::PipelineId& aPipel
   uint64_t id = wr::AsUint64(aPipelineId);
   if (auto entry = mAsyncImagePipelines.Lookup(id)) {
     AsyncImagePipeline* holder = entry.Data();
-    wr::Epoch epoch = GetNextImageEpoch();
-    aTxn.ClearDisplayList(epoch, aPipelineId);
+    ++mAsyncImageEpoch; // Update webrender epoch
+    aTxn.ClearDisplayList(wr::NewEpoch(mAsyncImageEpoch), aPipelineId);
     for (wr::ImageKey key : holder->mKeys) {
       aTxn.DeleteImage(key);
     }
     entry.Remove();
-    RemovePipeline(aPipelineId, epoch);
+    RemovePipeline(aPipelineId, wr::NewEpoch(mAsyncImageEpoch));
   }
 }
 
@@ -271,7 +271,8 @@ AsyncImagePipelineManager::ApplyAsyncImages()
     return;
   }
 
-  wr::Epoch epoch = GetNextImageEpoch();
+  ++mAsyncImageEpoch; // Update webrender epoch
+  wr::Epoch epoch = wr::NewEpoch(mAsyncImageEpoch);
 
   // TODO: We can improve upon this by using two transactions: one for everything that
   // doesn't change the display list (in other words does not cause the scene to be
@@ -318,7 +319,6 @@ AsyncImagePipelineManager::ApplyAsyncImages()
 
     float opacity = 1.0f;
     builder.PushStackingContext(wr::ToLayoutRect(pipeline->mScBounds),
-                                nullptr,
                                 nullptr,
                                 &opacity,
                                 pipeline->mScTransform.IsIdentity() ? nullptr : &pipeline->mScTransform,
@@ -414,13 +414,6 @@ AsyncImagePipelineManager::PipelineRemoved(const wr::PipelineId& aPipelineId)
     // If mDestroyedEpoch contains nothing it means we reused the same pipeline id (probably because
     // we moved the tab to another window). In this case we need to keep the holder.
   }
-}
-
-wr::Epoch
-AsyncImagePipelineManager::GetNextImageEpoch()
-{
-  mAsyncImageEpoch.mHandle++;
-  return mAsyncImageEpoch;
 }
 
 } // namespace layers

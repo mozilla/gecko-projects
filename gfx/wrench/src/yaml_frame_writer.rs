@@ -178,22 +178,12 @@ fn maybe_radius_yaml(radius: &BorderRadius) -> Option<Yaml> {
     }
 }
 
-fn write_stacking_context(
-    parent: &mut Table,
-    sc: &StackingContext,
-    properties: &SceneProperties,
-    filter_iter: AuxIter<FilterOp>,
-    clip_id_mapper: &ClipIdMapper,
-) {
+fn write_sc(parent: &mut Table, sc: &StackingContext, properties: &SceneProperties, filter_iter: AuxIter<FilterOp>) {
     enum_node(parent, "scroll-policy", sc.scroll_policy);
 
     matrix4d_node(parent, "transform", &properties.resolve_layout_transform(&sc.transform));
 
     enum_node(parent, "transform-style", sc.transform_style);
-
-    if let Some(clip_node_id) = sc.clip_node_id {
-        yaml_node(parent, "clip-node", Yaml::Integer(clip_id_mapper.map_id(&clip_node_id) as i64));
-    }
 
     if let Some(perspective) = sc.perspective {
         matrix4d_node(parent, "perspective", &perspective);
@@ -281,30 +271,6 @@ fn native_font_handle_to_yaml(
     _: &mut Option<PathBuf>,
 ) {
     str_node(parent, "font", &handle.pathname);
-}
-
-fn radial_gradient_to_yaml(
-    table: &mut Table,
-    gradient: &webrender::api::RadialGradient,
-    stops_range: ItemRange<GradientStop>,
-    display_list: &BuiltDisplayList
-) {
-    point_node(table, "center", &gradient.center);
-    size_node(table, "radius", &gradient.radius);
-
-    let first_offset = gradient.start_offset;
-    let last_offset = gradient.end_offset;
-    let stops_delta = last_offset - first_offset;
-    assert!(first_offset <= last_offset);
-
-    let mut denormalized_stops = vec![];
-    for stop in display_list.get(stops_range) {
-        let denormalized_stop = (stop.offset * stops_delta) + first_offset;
-        denormalized_stops.push(Yaml::Real(denormalized_stop.to_string()));
-        denormalized_stops.push(Yaml::String(color_to_string(stop.color)));
-    }
-    yaml_node(table, "stops", Yaml::Array(denormalized_stops));
-    bool_node(table, "repeat", gradient.extend_mode == ExtendMode::Repeat);
 }
 
 enum CachedFont {
@@ -697,16 +663,11 @@ impl YamlFrameWriter {
             };
 
             let mut v = new_table();
-            let info = base.get_layer_primitive_info(&LayoutVector2D::zero());
-            rect_node(&mut v, "bounds", &info.rect);
-            rect_node(&mut v, "clip-rect", &info.clip_rect);
+            rect_node(&mut v, "bounds", &base.rect());
 
-            if let Some(tag) = info.tag {
-                yaml_node(
-                    &mut v,
-                    "hit-testing-tag",
-                     Yaml::Array(vec![Yaml::Integer(tag.0 as i64), Yaml::Integer(tag.1 as i64)])
-                );
+            rect_node(&mut v, "clip-rect", base.local_clip().clip_rect());
+            if let &LocalClip::RoundedRect(_, ref region) = base.local_clip() {
+                yaml_node(&mut v, "complex-clip", self.make_complex_clip_node(region));
             }
 
             let clip_and_scroll_yaml = match clip_id_mapper.map_info(&base.clip_and_scroll()) {
@@ -947,13 +908,23 @@ impl YamlFrameWriter {
                             ];
                             yaml_node(&mut v, "width", f32_vec_yaml(&widths, true));
                             str_node(&mut v, "border-type", "radial-gradient");
-                            yaml_node(&mut v, "outset", f32_vec_yaml(&outset, true));
-                            radial_gradient_to_yaml(
+                            point_node(&mut v, "start-center", &details.gradient.start_center);
+                            f32_node(&mut v, "start-radius", details.gradient.start_radius);
+                            point_node(&mut v, "end-center", &details.gradient.end_center);
+                            f32_node(&mut v, "end-radius", details.gradient.end_radius);
+                            f32_node(&mut v, "ratio-xy", details.gradient.ratio_xy);
+                            let mut stops = vec![];
+                            for stop in display_list.get(base.gradient_stops()) {
+                                stops.push(Yaml::Real(stop.offset.to_string()));
+                                stops.push(Yaml::String(color_to_string(stop.color)));
+                            }
+                            yaml_node(&mut v, "stops", Yaml::Array(stops));
+                            bool_node(
                                 &mut v,
-                                &details.gradient,
-                                base.gradient_stops(),
-                                display_list
+                                "repeat",
+                                details.gradient.extend_mode == ExtendMode::Repeat,
                             );
+                            yaml_node(&mut v, "outset", f32_vec_yaml(&outset, true));
                         }
                     }
                 }
@@ -993,13 +964,23 @@ impl YamlFrameWriter {
                 }
                 RadialGradient(item) => {
                     str_node(&mut v, "type", "radial-gradient");
+                    point_node(&mut v, "start-center", &item.gradient.start_center);
+                    f32_node(&mut v, "start-radius", item.gradient.start_radius);
+                    point_node(&mut v, "end-center", &item.gradient.end_center);
+                    f32_node(&mut v, "end-radius", item.gradient.end_radius);
+                    f32_node(&mut v, "ratio-xy", item.gradient.ratio_xy);
                     size_node(&mut v, "tile-size", &item.tile_size);
                     size_node(&mut v, "tile-spacing", &item.tile_spacing);
-                    radial_gradient_to_yaml(
+                    let mut stops = vec![];
+                    for stop in display_list.get(base.gradient_stops()) {
+                        stops.push(Yaml::Real(stop.offset.to_string()));
+                        stops.push(Yaml::String(color_to_string(stop.color)));
+                    }
+                    yaml_node(&mut v, "stops", Yaml::Array(stops));
+                    bool_node(
                         &mut v,
-                        &item.gradient,
-                        base.gradient_stops(),
-                        display_list
+                        "repeat",
+                        item.gradient.extend_mode == ExtendMode::Repeat,
                     );
                 }
                 Iframe(item) => {
@@ -1009,13 +990,7 @@ impl YamlFrameWriter {
                 PushStackingContext(item) => {
                     str_node(&mut v, "type", "stacking-context");
                     let filters = display_list.get(base.filters());
-                    write_stacking_context(
-                        &mut v,
-                        &item.stacking_context,
-                        &scene.properties,
-                        filters,
-                        clip_id_mapper,
-                    );
+                    write_sc(&mut v, &item.stacking_context, &scene.properties, filters);
 
                     let mut sub_iter = base.sub_iter();
                     self.write_display_list(&mut v, display_list, scene, &mut sub_iter, clip_id_mapper);
@@ -1024,6 +999,7 @@ impl YamlFrameWriter {
                 Clip(item) => {
                     str_node(&mut v, "type", "clip");
                     usize_node(&mut v, "id", clip_id_mapper.add_id(item.id));
+                    size_node(&mut v, "content-size", &base.rect().size);
 
                     let (complex_clips, complex_clip_count) = base.complex_clip();
                     if let Some(complex) = self.make_complex_clips_node(
@@ -1058,7 +1034,7 @@ impl YamlFrameWriter {
                     str_node(&mut v, "type", "scroll-frame");
                     usize_node(&mut v, "id", clip_id_mapper.add_id(item.scroll_frame_id));
                     size_node(&mut v, "content-size", &base.rect().size);
-                    rect_node(&mut v, "bounds", &base.clip_rect());
+                    rect_node(&mut v, "bounds", &base.local_clip().clip_rect());
 
                     let (complex_clips, complex_clip_count) = base.complex_clip();
                     if let Some(complex) = self.make_complex_clips_node(
@@ -1076,7 +1052,7 @@ impl YamlFrameWriter {
                 StickyFrame(item) => {
                     str_node(&mut v, "type", "sticky-frame");
                     usize_node(&mut v, "id", clip_id_mapper.add_id(item.id));
-                    rect_node(&mut v, "bounds", &base.clip_rect());
+                    rect_node(&mut v, "bounds", &base.local_clip().clip_rect());
 
                     if let Some(margin) = item.margins.top {
                         f32_node(&mut v, "margin-top", margin);

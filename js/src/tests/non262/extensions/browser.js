@@ -2,5 +2,5 @@
 // js/src/tests. That makes Worker script URLs resolve relative to the wrong
 // directory. workerDir is the workaround.
 workerDir = (document.location.href.replace(/\/[^/?]*(\?.*)?$/, '/') +
-             'non262/extensions/');
+             'js1_8_5/extensions/');
 

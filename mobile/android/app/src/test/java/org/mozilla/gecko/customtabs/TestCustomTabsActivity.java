@@ -3,10 +3,16 @@
 
 package org.mozilla.gecko.customtabs;
 
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Resources;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.support.annotation.AnimRes;
 import android.support.customtabs.CustomTabsIntent;
+import android.view.Menu;
+import android.view.MenuItem;
 
 import junit.framework.Assert;
 
@@ -14,8 +20,11 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.internal.util.reflection.Whitebox;
-import org.robolectric.RobolectricTestRunner;
+import org.mozilla.gecko.R;
+import org.mozilla.gecko.background.testhelpers.TestRunner;
+import org.mozilla.gecko.mozglue.SafeIntent;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.fakes.RoboMenu;
 
 import static org.mockito.Matchers.anyInt;
 import static org.mockito.Matchers.eq;
@@ -24,7 +33,7 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
-@RunWith(RobolectricTestRunner.class)
+@RunWith(TestRunner.class)
 public class TestCustomTabsActivity {
 
     private static final String THIRD_PARTY_PACKAGE_NAME = "mozilla.unit.test";

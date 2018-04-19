@@ -2,28 +2,23 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import ObservedPropertiesMixin from "../mixins/ObservedPropertiesMixin.js";
-import RichOption from "./rich-option.js";
-
 /**
  * <rich-select>
  *  <basic-card-option></basic-card-option>
  * </rich-select>
  */
 
-export default class BasicCardOption extends ObservedPropertiesMixin(RichOption) {
-  static get recordAttributes() {
-    return [
+/* global ObservedPropertiesMixin, RichOption */
+
+class BasicCardOption extends ObservedPropertiesMixin(RichOption) {
+  static get observedAttributes() {
+    return RichOption.observedAttributes.concat([
       "cc-exp",
       "cc-name",
       "cc-number",
       "guid",
       "type", // XXX Bug 1429181.
-    ];
-  }
-
-  static get observedAttributes() {
-    return RichOption.observedAttributes.concat(BasicCardOption.recordAttributes);
+    ]);
   }
 
   constructor() {

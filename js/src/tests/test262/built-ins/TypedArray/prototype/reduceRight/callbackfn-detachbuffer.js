@@ -23,7 +23,6 @@ info: |
       k, O »).
   ...
 includes: [detachArrayBuffer.js, testTypedArray.js]
-features: [TypedArray]
 ---*/
 
 testWithTypedArrayConstructors(function(TA) {

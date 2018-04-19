@@ -19,7 +19,6 @@
 
 #include "nsIMemoryReporter.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/FontPropertyTypes.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/RangedArray.h"
@@ -88,7 +87,6 @@ struct FontListSizes {
                             // including the font table cache and the cmaps
     uint32_t mFontTableCacheSize; // memory used for the gfxFontEntry table caches
     uint32_t mCharMapsSize; // memory used for cmap coverage info
-    uint32_t mLoaderSize;   // memory used for (platform-specific) loader
 };
 
 class gfxUserFontSet;
@@ -98,7 +96,6 @@ class gfxPlatformFontList : public gfxFontInfoLoader
     friend class InitOtherFamilyNamesRunnable;
 
 public:
-    typedef mozilla::FontWeight FontWeight;
     typedef mozilla::unicode::Script Script;
 
     static gfxPlatformFontList* PlatformFontList() {
@@ -188,15 +185,15 @@ public:
 
     // look up a font by name on the host platform
     virtual gfxFontEntry* LookupLocalFont(const nsAString& aFontName,
-                                          FontWeight aWeight,
-                                          uint16_t aStretch,
+                                          uint16_t aWeight,
+                                          int16_t aStretch,
                                           uint8_t aStyle) = 0;
 
     // create a new platform font from downloaded data (@font-face)
     // this method is responsible to ensure aFontData is free()'d
     virtual gfxFontEntry* MakePlatformFont(const nsAString& aFontName,
-                                           FontWeight aWeight,
-                                           uint16_t aStretch,
+                                           uint16_t aWeight,
+                                           int16_t aStretch,
                                            uint8_t aStyle,
                                            const uint8_t* aFontData,
                                            uint32_t aLength) = 0;

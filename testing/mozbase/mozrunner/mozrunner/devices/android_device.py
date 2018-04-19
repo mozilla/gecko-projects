@@ -19,7 +19,7 @@ import urlparse
 import urllib2
 from distutils.spawn import find_executable
 
-from mozdevice import ADBHost, ADBAndroid
+from mozdevice import DeviceManagerADB, DMError
 from mozprocess import ProcessHandler
 
 EMULATOR_HOME_DIR = os.path.join(os.path.expanduser('~'), '.mozbuild', 'android-device')
@@ -33,7 +33,6 @@ TRY_URL = 'https://hg.mozilla.org/try/raw-file/default'
 MANIFEST_PATH = 'testing/config/tooltool-manifests'
 
 verbose_logging = False
-devices = {}
 
 
 class AvdInfo(object):
@@ -105,19 +104,6 @@ AVD_DICT = {
                         '-qemu', '-enable-kvm'],
                        True)
 }
-
-
-def _get_device(substs, device_serial=None):
-    global devices
-    if device_serial in devices:
-        device = devices[device_serial]
-    else:
-        adb_path = _find_sdk_exe(substs, 'adb', False)
-        if not adb_path:
-            adb_path = 'adb'
-        device = ADBAndroid(adb=adb_path, verbose=verbose_logging, device=device_serial)
-        devices[device_serial] = device
-    return device
 
 
 def _install_host_utils(build_obj):
@@ -192,7 +178,7 @@ def _maybe_update_host_utils(build_obj):
 
 
 def verify_android_device(build_obj, install=False, xre=False, debugger=False,
-                          verbose=False, app=None, device_serial=None):
+                          verbose=False, app=None):
     """
        Determine if any Android device is connected via adb.
        If no device is found, prompt to start an emulator.
@@ -209,12 +195,8 @@ def verify_android_device(build_obj, install=False, xre=False, debugger=False,
     """
     device_verified = False
     emulator = AndroidEmulator('*', substs=build_obj.substs, verbose=verbose)
-    adb_path = _find_sdk_exe(build_obj.substs, 'adb', False)
-    if not adb_path:
-        adb_path = 'adb'
-    adbhost = ADBHost(adb=adb_path, verbose=verbose, timeout=10)
-    devices = adbhost.devices(timeout=10)
-    if 'device' in [d['state'] for d in devices]:
+    devices = emulator.dm.devices()
+    if (len(devices) > 0) and ('device' in [d[1] for d in devices]):
         device_verified = True
     elif emulator.is_available():
         response = raw_input(
@@ -242,10 +224,11 @@ def verify_android_device(build_obj, install=False, xre=False, debugger=False,
         # Installing every time is problematic because:
         #  - it prevents testing against other builds (downloaded apk)
         #  - installation may take a couple of minutes.
+        installed = emulator.dm.shellCheckOutput(['pm', 'list',
+                                                  'packages', 'org.mozilla.'])
         if not app:
             app = build_obj.substs["ANDROID_PACKAGE_NAME"]
-        device = _get_device(build_obj.substs, device_serial)
-        if not device.is_app_installed(app):
+        if app not in installed:
             if 'fennec' not in app and 'firefox' not in app:
                 raw_input(
                     "It looks like %s is not installed on this device,\n"
@@ -351,7 +334,10 @@ def run_firefox_for_android(build_obj, params):
        Launch Firefox for Android on the connected device.
        Optional 'params' allow parameters to be passed to Firefox.
     """
-    device = _get_device(build_obj.substs)
+    adb_path = _find_sdk_exe(build_obj.substs, 'adb', False)
+    if not adb_path:
+        adb_path = 'adb'
+    dm = DeviceManagerADB(autoconnect=False, adbPath=adb_path, retryLimit=1)
     try:
         #
         # Construct an adb command similar to:
@@ -361,37 +347,45 @@ def run_firefox_for_android(build_obj, params):
         #   -d <url param> \
         #   --es args "<params>"
         #
-        app = build_obj.substs['ANDROID_PACKAGE_NAME']
-        url = None
+        app = "%s/org.mozilla.gecko.BrowserApp" % build_obj.substs['ANDROID_PACKAGE_NAME']
+        cmd = ['am', 'start', '-a', 'android.activity.MAIN', '-n', app]
         if params:
             for p in params:
                 if urlparse.urlparse(p).scheme != "":
-                    url = p
+                    cmd.extend(['-d', p])
                     params.remove(p)
                     break
-        device.launch_fennec(app, extra_args=params, url=url)
-    except Exception:
+        if params:
+            cmd.extend(['--es', 'args', '"%s"' % ' '.join(params)])
+        _log_debug(cmd)
+        output = dm.shellCheckOutput(cmd, timeout=10)
+        _log_info(output)
+    except DMError:
         _log_warning("unable to launch Firefox for Android")
         return 1
     return 0
 
 
-def grant_runtime_permissions(build_obj, app, device_serial=None):
+def grant_runtime_permissions(build_obj, app):
     """
     Grant required runtime permissions to the specified app
     (typically org.mozilla.fennec_$USER).
     """
-    device = _get_device(build_obj.substs, device_serial)
+    adb_path = _find_sdk_exe(build_obj.substs, 'adb', False)
+    if not adb_path:
+        adb_path = 'adb'
+    dm = DeviceManagerADB(autoconnect=False, adbPath=adb_path, retryLimit=1)
+    dm.default_timeout = 10
     try:
-        sdk_level = device.version
-        if sdk_level and sdk_level >= 23:
+        sdk_level = dm.shellCheckOutput(['getprop', 'ro.build.version.sdk'])
+        if sdk_level and int(sdk_level) >= 23:
             _log_info("Granting important runtime permissions to %s" % app)
-            device.shell_output('pm grant %s android.permission.WRITE_EXTERNAL_STORAGE' % app)
-            device.shell_output('pm grant %s android.permission.READ_EXTERNAL_STORAGE' % app)
-            device.shell_output('pm grant %s android.permission.ACCESS_COARSE_LOCATION' % app)
-            device.shell_output('pm grant %s android.permission.ACCESS_FINE_LOCATION' % app)
-            device.shell_output('pm grant %s android.permission.CAMERA' % app)
-    except Exception:
+            dm.shellCheckOutput(['pm', 'grant', app, 'android.permission.WRITE_EXTERNAL_STORAGE'])
+            dm.shellCheckOutput(['pm', 'grant', app, 'android.permission.READ_EXTERNAL_STORAGE'])
+            dm.shellCheckOutput(['pm', 'grant', app, 'android.permission.ACCESS_COARSE_LOCATION'])
+            dm.shellCheckOutput(['pm', 'grant', app, 'android.permission.ACCESS_FINE_LOCATION'])
+            dm.shellCheckOutput(['pm', 'grant', app, 'android.permission.CAMERA'])
+    except DMError:
         _log_warning("Unable to grant runtime permissions to %s" % app)
 
 
@@ -422,7 +416,12 @@ class AndroidEmulator(object):
         self.avd_info = AVD_DICT[self.avd_type]
         self.gpu = True
         self.restarted = False
-        self.device_serial = device_serial
+        adb_path = _find_sdk_exe(substs, 'adb', False)
+        if not adb_path:
+            adb_path = 'adb'
+        self.dm = DeviceManagerADB(autoconnect=False, adbPath=adb_path, retryLimit=1,
+                                   deviceSerial=device_serial)
+        self.dm.default_timeout = 10
         _log_debug("Running on %s" % platform.platform())
         _log_debug("Emulator created with type %s" % self.avd_type)
 
@@ -544,28 +543,20 @@ class AndroidEmulator(object):
         if self.check_completed():
             return False
         _log_debug("Waiting for device status...")
-        adb_path = _find_sdk_exe(self.substs, 'adb', False)
-        if not adb_path:
-            adb_path = 'adb'
-        adbhost = ADBHost(adb=adb_path, verbose=verbose_logging, timeout=10)
-        devs = adbhost.devices(timeout=10)
-        devs = [(d['device_serial'], d['state']) for d in devs]
-        while ('emulator-5554', 'device') not in devs:
+        while(('emulator-5554', 'device') not in self.dm.devices()):
             time.sleep(10)
             if self.check_completed():
                 return False
-            devs = adbhost.devices(timeout=10)
-            devs = [(d['device_serial'], d['state']) for d in devs]
         _log_debug("Device status verified.")
 
         _log_debug("Checking that Android has booted...")
-        device = _get_device(self.substs, self.device_serial)
         complete = False
-        while not complete:
+        while(not complete):
             output = ''
             try:
-                output = device.get_prop('sys.boot_completed', timeout=5)
-            except Exception:
+                output = self.dm.shellCheckOutput(
+                    ['getprop', 'sys.boot_completed'], timeout=5)
+            except DMError:
                 # adb not yet responding...keep trying
                 pass
             if output.strip() == '1':
@@ -852,8 +843,19 @@ def _get_host_platform():
 
 def _get_device_platform(substs):
     # PIE executables are required when SDK level >= 21 - important for gdbserver
-    device = _get_device(substs)
-    sdk_level = device.version
+    adb_path = _find_sdk_exe(substs, 'adb', False)
+    if not adb_path:
+        adb_path = 'adb'
+    dm = DeviceManagerADB(autoconnect=False, adbPath=adb_path, retryLimit=1)
+    sdk_level = None
+    try:
+        cmd = ['getprop', 'ro.build.version.sdk']
+        _log_debug(cmd)
+        output = dm.shellCheckOutput(cmd, timeout=10)
+        if output:
+            sdk_level = int(output)
+    except Exception:
+        _log_warning("unable to determine Android sdk level")
     pie = ''
     if sdk_level and sdk_level >= 21:
         pie = '-pie'

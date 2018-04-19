@@ -130,8 +130,7 @@ CSP_LogMessage(const nsAString& aMessage,
                uint32_t aColumnNumber,
                uint32_t aFlags,
                const char *aCategory,
-               uint64_t aInnerWindowID,
-               bool aFromPrivateWindow)
+               uint64_t aInnerWindowID)
 {
   nsCOMPtr<nsIConsoleService> console(do_GetService(NS_CONSOLESERVICE_CONTRACTID));
 
@@ -171,7 +170,7 @@ CSP_LogMessage(const nsAString& aMessage,
     rv = error->Init(cspMsg, aSourceName,
                      aSourceLine, aLineNumber,
                      aColumnNumber, aFlags,
-                     aCategory, aFromPrivateWindow);
+                     aCategory);
   }
   if (NS_FAILED(rv)) {
     return;
@@ -192,14 +191,13 @@ CSP_LogLocalizedStr(const char* aName,
                     uint32_t aColumnNumber,
                     uint32_t aFlags,
                     const char* aCategory,
-                    uint64_t aInnerWindowID,
-                    bool aFromPrivateWindow)
+                    uint64_t aInnerWindowID)
 {
   nsAutoString logMsg;
   CSP_GetLocalizedStr(aName, aParams, aLength, logMsg);
   CSP_LogMessage(logMsg, aSourceName, aSourceLine,
                  aLineNumber, aColumnNumber, aFlags,
-                 aCategory, aInnerWindowID, aFromPrivateWindow);
+                 aCategory, aInnerWindowID);
 }
 
 /* ===== Helpers ============================ */
@@ -253,7 +251,6 @@ CSP_ContentTypeToDirective(nsContentPolicyType aType)
     case nsIContentPolicy::TYPE_XBL:
     case nsIContentPolicy::TYPE_DTD:
     case nsIContentPolicy::TYPE_OTHER:
-    case nsIContentPolicy::TYPE_SPECULATIVE:
       return nsIContentSecurityPolicy::DEFAULT_SRC_DIRECTIVE;
 
     // csp shold not block top level loads, e.g. in case

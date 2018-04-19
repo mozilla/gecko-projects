@@ -27,6 +27,7 @@
 #include "nsPIDOMWindow.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIBaseWindow.h"
+#include "nsIDOMMouseEvent.h"
 #include "nsCaret.h"
 #include "nsIDocument.h"
 #include "nsPIWindowRoot.h"
@@ -37,7 +38,6 @@
 #include "mozilla/dom/Event.h" // for nsIDOMEvent::InternalDOMEvent()
 #include "mozilla/dom/KeyboardEvent.h"
 #include "mozilla/dom/KeyboardEventBinding.h"
-#include "mozilla/dom/MouseEvent.h"
 #include "mozilla/dom/UIEvent.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventStateManager.h"
@@ -635,8 +635,9 @@ nsXULPopupManager::InitTriggerEvent(nsIDOMEvent* aEvent, nsIContent* aPopup,
 
   mCachedModifiers = 0;
 
-  UIEvent* uiEvent = aEvent ? aEvent->InternalDOMEvent()->AsUIEvent() : nullptr;
-  if (uiEvent) {
+  nsCOMPtr<nsIDOMUIEvent> domUiEvent = do_QueryInterface(aEvent);
+  if (domUiEvent) {
+    auto uiEvent = static_cast<UIEvent*>(domUiEvent.get());
     mRangeParent = uiEvent->GetRangeParent();
     mRangeOffset = uiEvent->RangeOffset();
 
@@ -665,8 +666,10 @@ nsXULPopupManager::InitTriggerEvent(nsIDOMEvent* aEvent, nsIContent* aPopup,
                event->mClass == eWheelEventClass) &&
                !event->AsGUIEvent()->mWidget) {
             // no widget, so just use the client point if available
-            MouseEvent* mouseEvent = aEvent->InternalDOMEvent()->AsMouseEvent();
-            nsIntPoint clientPt(mouseEvent->ClientX(), mouseEvent->ClientY());
+            nsCOMPtr<nsIDOMMouseEvent> mouseEvent = do_QueryInterface(aEvent);
+            nsIntPoint clientPt;
+            mouseEvent->GetClientX(&clientPt.x);
+            mouseEvent->GetClientY(&clientPt.y);
 
             // XXX this doesn't handle IFRAMEs in transforms
             nsPoint thisDocToRootDocOffset = presShell->
@@ -1925,6 +1928,7 @@ nsXULPopupManager::SetCaptureState(nsIContent* aOldPopup)
     mWidget = popup->GetWidget();
     if (mWidget) {
       mWidget->CaptureRollupEvents(nullptr, true);
+      popup->AttachedDismissalListener();
     }
   }
 
@@ -2729,7 +2733,7 @@ nsXULPopupManager::KeyDown(KeyboardEvent* aKeyEvent)
     }
   }
 
-  aKeyEvent->StopCrossProcessForwarding();
+  aKeyEvent->AsEvent()->StopCrossProcessForwarding();
   return NS_OK;
 }
 

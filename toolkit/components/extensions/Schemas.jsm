@@ -336,7 +336,7 @@ class Context {
   }
 
   get cloneScope() {
-    return this.params.cloneScope || undefined;
+    return this.params.cloneScope;
   }
 
   get url() {
@@ -1798,8 +1798,7 @@ class IntegerType extends Type {
   static parseSchema(root, schema, path, extraProperties = []) {
     this.checkSchemaProperties(schema, path, extraProperties);
 
-    let {minimum = -Infinity, maximum = Infinity} = schema;
-    return new this(schema, minimum, maximum);
+    return new this(schema, schema.minimum || -Infinity, schema.maximum || Infinity);
   }
 
   constructor(schema, minimum, maximum) {
@@ -2576,7 +2575,7 @@ class Namespace extends Map {
       type.type = "object";
     } else if (DEBUG) {
       if (!targetType) {
-        throw new Error(`Internal error: Attempt to extend a nonexistent type ${type.$extend}`);
+        throw new Error(`Internal error: Attempt to extend a nonexistant type ${type.$extend}`);
       } else if (!(targetType instanceof ChoiceType)) {
         throw new Error(`Internal error: Attempt to extend a non-extensible type ${type.$extend}`);
       }
@@ -3014,10 +3013,6 @@ this.Schemas = {
     if (!this.initialized) {
       this.init();
     }
-    if (!this._rootSchema) {
-      this._rootSchema = new SchemaRoot(null, this.schemaJSON);
-      this._rootSchema.parseSchemas();
-    }
     return this._rootSchema;
   },
 
@@ -3040,6 +3035,8 @@ this.Schemas = {
 
       Services.cpmm.addMessageListener("Schema:Add", this);
     }
+
+    this.flushSchemas();
   },
 
   receiveMessage(msg) {
@@ -3057,10 +3054,27 @@ this.Schemas = {
         for (let [url, schema] of data) {
           this.schemaJSON.set(url, schema);
         }
-        if (this._rootSchema) {
-          throw new Error("Schema loaded after root schema populated");
-        }
+        this.flushSchemas();
         break;
+
+      case "Schema:Delete":
+        this.schemaJSON.delete(data.url);
+        this.flushSchemas();
+        break;
+    }
+  },
+
+  _needFlush: true,
+  flushSchemas() {
+    if (this._needFlush) {
+      this._needFlush = false;
+      XPCOMUtils.defineLazyGetter(this, "_rootSchema", () => {
+        this._needFlush = true;
+
+        let rootSchema = new SchemaRoot(null, this.schemaJSON);
+        rootSchema.parseSchemas();
+        return rootSchema;
+      });
     }
   },
 
@@ -3089,9 +3103,7 @@ this.Schemas = {
       this.schemaHook([[url, schema]]);
     }
 
-    if (this._rootSchema) {
-      throw new Error("Schema loaded after root schema populated");
-    }
+    this.flushSchemas();
   },
 
   fetch(url) {
@@ -3115,6 +3127,17 @@ this.Schemas = {
     if (!this.schemaJSON.has(url)) {
       this.addSchema(url, blob, content);
     }
+  },
+
+  unload(url) {
+    this.schemaJSON.delete(url);
+
+    let data = Services.ppmm.initialProcessData;
+    data["Extension:Schemas"] = this.schemaJSON;
+
+    Services.ppmm.broadcastAsyncMessage("Schema:Delete", {url});
+
+    this.flushSchemas();
   },
 
   /**

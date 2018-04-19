@@ -9,10 +9,7 @@ description: >
     Infinity)
 ---*/
 
-var obj = {
-  0: 0,
-  length: Infinity
-};
+        var obj = { 0: 0, length: Infinity };
 
 assert.sameValue(Array.prototype.indexOf.call(obj, 0), 0, 'Array.prototype.indexOf.call(obj, 0)');
 

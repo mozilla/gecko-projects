@@ -6,8 +6,6 @@
 
 #include "FocusState.h"
 
-#include "mozilla/layers/APZThreadUtils.h"
-
 // #define FS_LOG(...) printf_stderr("FS: " __VA_ARGS__)
 #define FS_LOG(...)
 
@@ -15,28 +13,17 @@ namespace mozilla {
 namespace layers {
 
 FocusState::FocusState()
-  : mMutex("FocusStateMutex")
-  , mLastAPZProcessedEvent(1)
+  : mLastAPZProcessedEvent(1)
   , mLastContentProcessedEvent(0)
   , mFocusHasKeyEventListeners(false)
-  , mReceivedUpdate(false)
-  , mFocusLayersId{0}
+  , mFocusLayersId(0)
   , mFocusHorizontalTarget(FrameMetrics::NULL_SCROLL_ID)
   , mFocusVerticalTarget(FrameMetrics::NULL_SCROLL_ID)
 {
 }
 
-uint64_t
-FocusState::LastAPZProcessedEvent() const
-{
-  APZThreadUtils::AssertOnControllerThread();
-  MutexAutoLock lock(mMutex);
-
-  return mLastAPZProcessedEvent;
-}
-
 bool
-FocusState::IsCurrent(const MutexAutoLock& aProofOfLock) const
+FocusState::IsCurrent() const
 {
   FS_LOG("Checking IsCurrent() with cseq=%" PRIu64 ", aseq=%" PRIu64 "\n",
          mLastContentProcessedEvent,
@@ -49,38 +36,19 @@ FocusState::IsCurrent(const MutexAutoLock& aProofOfLock) const
 void
 FocusState::ReceiveFocusChangingEvent()
 {
-  APZThreadUtils::AssertOnControllerThread();
-  MutexAutoLock lock(mMutex);
-
-  if (!mReceivedUpdate) {
-    // In the initial state don't advance mLastAPZProcessedEvent because we
-    // might blow away the information that we're in a freshly-restarted GPU
-    // process. This information (i.e. that mLastAPZProcessedEvent == 1) needs
-    // to be preserved until the first call to Update() which will then advance
-    // mLastAPZProcessedEvent to match the content-side sequence number.
-    return;
-  }
   mLastAPZProcessedEvent += 1;
-  FS_LOG("Focus changing event incremented aseq to %" PRIu64 "\n",
-         mLastAPZProcessedEvent);
 }
 
 void
-FocusState::Update(LayersId aRootLayerTreeId,
-                   LayersId aOriginatingLayersId,
+FocusState::Update(uint64_t aRootLayerTreeId,
+                   uint64_t aOriginatingLayersId,
                    const FocusTarget& aState)
 {
-  // This runs on the updater thread, it's not worth passing around extra raw
-  // pointers just to assert it.
-
-  MutexAutoLock lock(mMutex);
-
   FS_LOG("Update with rlt=%" PRIu64 ", olt=%" PRIu64 ", ft=(%s, %" PRIu64 ")\n",
          aRootLayerTreeId,
          aOriginatingLayersId,
          aState.Type(),
          aState.mSequenceNumber);
-  mReceivedUpdate = true;
 
   // Update the focus tree with the latest target
   mFocusTree[aOriginatingLayersId] = aState;
@@ -117,24 +85,15 @@ FocusState::Update(LayersId aRootLayerTreeId,
       const uint64_t mSequenceNumber;
 
       bool match(const FocusTarget::NoFocusTarget& aNoFocusTarget) {
-        FS_LOG("Setting target to nil (reached a nil target) with seq=%" PRIu64 "\n",
-               mSequenceNumber);
+        FS_LOG("Setting target to nil (reached a nil target)\n");
 
         // Mark what sequence number this target has for debugging purposes so
         // we can always accurately report on whether we are stale or not
         mFocusState.mLastContentProcessedEvent = mSequenceNumber;
-
-        // If this focus state was just created and content has experienced more
-        // events then us, then assume we were recreated and sync focus sequence
-        // numbers.
-        if (mFocusState.mLastAPZProcessedEvent == 1 &&
-            mFocusState.mLastContentProcessedEvent > mFocusState.mLastAPZProcessedEvent) {
-          mFocusState.mLastAPZProcessedEvent = mFocusState.mLastContentProcessedEvent;
-        }
         return true;
       }
 
-      bool match(const LayersId& aRefLayerId) {
+      bool match(const FocusTarget::RefLayerId aRefLayerId) {
         // Guard against infinite loops
         MOZ_ASSERT(mFocusState.mFocusLayersId != aRefLayerId);
         if (mFocusState.mFocusLayersId == aRefLayerId) {
@@ -182,26 +141,19 @@ FocusState::Update(LayersId aRootLayerTreeId,
 }
 
 void
-FocusState::RemoveFocusTarget(LayersId aLayersId)
+FocusState::RemoveFocusTarget(uint64_t aLayersId)
 {
-  // This runs on the updater thread, it's not worth passing around extra raw
-  // pointers just to assert it.
-  MutexAutoLock lock(mMutex);
-
   mFocusTree.erase(aLayersId);
 }
 
 Maybe<ScrollableLayerGuid>
 FocusState::GetHorizontalTarget() const
 {
-  APZThreadUtils::AssertOnControllerThread();
-  MutexAutoLock lock(mMutex);
-
   // There is not a scrollable layer to async scroll if
   //   1. We aren't current
   //   2. There are event listeners that could change the focus
   //   3. The target has not been layerized
-  if (!IsCurrent(lock) ||
+  if (!IsCurrent() ||
       mFocusHasKeyEventListeners ||
       mFocusHorizontalTarget == FrameMetrics::NULL_SCROLL_ID) {
     return Nothing();
@@ -212,28 +164,16 @@ FocusState::GetHorizontalTarget() const
 Maybe<ScrollableLayerGuid>
 FocusState::GetVerticalTarget() const
 {
-  APZThreadUtils::AssertOnControllerThread();
-  MutexAutoLock lock(mMutex);
-
   // There is not a scrollable layer to async scroll if:
   //   1. We aren't current
   //   2. There are event listeners that could change the focus
   //   3. The target has not been layerized
-  if (!IsCurrent(lock) ||
+  if (!IsCurrent() ||
       mFocusHasKeyEventListeners ||
       mFocusVerticalTarget == FrameMetrics::NULL_SCROLL_ID) {
     return Nothing();
   }
   return Some(ScrollableLayerGuid(mFocusLayersId, 0, mFocusVerticalTarget));
-}
-
-bool
-FocusState::CanIgnoreKeyboardShortcutMisses() const
-{
-  APZThreadUtils::AssertOnControllerThread();
-  MutexAutoLock lock(mMutex);
-
-  return IsCurrent(lock) && !mFocusHasKeyEventListeners;
 }
 
 } // namespace layers

@@ -340,7 +340,8 @@ IsInterfaceEqualToOrInheritedFrom(REFIID aInterface, REFIID aFrom,
    * parent interfaces, searching for aFrom.
    */
   while (!typeInfos.IsEmpty()) {
-    RefPtr<ITypeInfo> curTypeInfo(typeInfos.PopLastElement());
+    RefPtr<ITypeInfo> curTypeInfo(Move(typeInfos.LastElement()));
+    typeInfos.RemoveElementAt(typeInfos.Length() - 1);
 
     TYPEATTR* typeAttr = nullptr;
     HRESULT hr = curTypeInfo->GetTypeAttr(&typeAttr);

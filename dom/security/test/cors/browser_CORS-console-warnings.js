@@ -27,11 +27,11 @@ function on_new_message(new_messages) {
   }
 }
 
-async function do_cleanup() {
+function* do_cleanup() {
   if (webconsole) {
     webconsole.ui.off("new-messages", on_new_message);
   }
-  await unsetCookiePref();
+  yield unsetCookiePref();
 }
 
 /**
@@ -59,19 +59,19 @@ function unsetCookiePref() {
 }
 
 //jscs:disable
-add_task(async function() {
+add_task(function*() {
   //jscs:enable
   // A longer timeout is necessary for this test than the plain mochitests
   // due to opening a new tab with the web console.
   requestLongerTimeout(4);
   registerCleanupFunction(do_cleanup);
-  await setCookiePref();
+  yield setCookiePref();
 
   let test_uri = "http://mochi.test:8888/browser/dom/security/test/cors/file_cors_logging_test.html";
 
-  let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, "about:blank");
+  let tab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, "about:blank");
 
-  let toolbox = await openToolboxForTab(tab, "webconsole");
+  let toolbox = yield openToolboxForTab(tab, "webconsole");
   ok(toolbox, "Got toolbox");
   let hud = toolbox.getCurrentPanel().hud;
   ok(hud, "Got hud");
@@ -84,10 +84,10 @@ add_task(async function() {
 
   BrowserTestUtils.loadURI(gBrowser, test_uri);
 
-  await BrowserTestUtils.waitForLocationChange(gBrowser, test_uri+"#finished");
+  yield BrowserTestUtils.waitForLocationChange(gBrowser, test_uri+"#finished");
 
   // Different OS combinations
   ok(messages_seen > 0, "Saw " + messages_seen + " messages.");
 
-  BrowserTestUtils.removeTab(tab);
+  yield BrowserTestUtils.removeTab(tab);
 });

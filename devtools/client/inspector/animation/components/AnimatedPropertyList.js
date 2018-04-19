@@ -4,13 +4,13 @@
 
 "use strict";
 
-const { Component, createFactory } = require("devtools/client/shared/vendor/react");
+const { createFactory, PureComponent } = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 
 const AnimatedPropertyItem = createFactory(require("./AnimatedPropertyItem"));
 
-class AnimatedPropertyList extends Component {
+class AnimatedPropertyList extends PureComponent {
   static get propTypes() {
     return {
       animation: PropTypes.object.isRequired,
@@ -25,27 +25,16 @@ class AnimatedPropertyList extends Component {
     super(props);
 
     this.state = {
-      // Array of object which has the property name, the keyframes, its aniamtion type
-      // and unchanged flag.
-      animatedProperties: null,
-      // To avoid rendering while the state is updating
-      // since we call an async function in updateState.
-      isStateUpdating: false,
+      animatedPropertyMap: null
     };
   }
 
   componentDidMount() {
-    // No need to set isStateUpdating state since paint sequence is finish here.
-    this.updateState(this.props.animation);
+    this.updateKeyframesList(this.props.animation);
   }
 
   componentWillReceiveProps(nextProps) {
-    this.setState({ isStateUpdating: true });
-    this.updateState(nextProps.animation);
-  }
-
-  shouldComponentUpdate(nextProps, nextState) {
-    return !nextState.isStateUpdating;
+    this.updateKeyframesList(nextProps.animation);
   }
 
   getPropertyState(property) {
@@ -60,49 +49,15 @@ class AnimatedPropertyList extends Component {
     return null;
   }
 
-  async updateState(animation) {
+  async updateKeyframesList(animation) {
     const {
       getAnimatedPropertyMap,
       emitEventForTest,
     } = this.props;
+    const animatedPropertyMap = await getAnimatedPropertyMap(animation);
+    const animationTypes = await animation.getAnimationTypes(animatedPropertyMap.keys());
 
-    let propertyMap = null;
-    let propertyNames = null;
-    let types = null;
-
-    try {
-      propertyMap = await getAnimatedPropertyMap(animation);
-      propertyNames = [...propertyMap.keys()];
-      types = await animation.getAnimationTypes(propertyNames);
-    } catch (e) {
-      // Expected if we've already been destroyed or other node have been selected
-      // in the meantime.
-      console.error(e);
-      return;
-    }
-
-    const animatedProperties = propertyNames.map(name => {
-      const keyframes = propertyMap.get(name);
-      const type = types[name];
-      const isUnchanged =
-        keyframes.every(keyframe => keyframe.value === keyframes[0].value);
-      return { isUnchanged, keyframes, name, type };
-    });
-
-    animatedProperties.sort((a, b) => {
-      if (a.isUnchanged === b.isUnchanged) {
-        return a.name > b.name ? 1 : -1;
-      }
-
-      return a.isUnchanged ? 1 : -1;
-    });
-
-    this.setState(
-      {
-        animatedProperties,
-        isStateUpdating: false
-      }
-    );
+    this.setState({ animatedPropertyMap, animationTypes });
 
     emitEventForTest("animation-keyframes-rendered");
   }
@@ -113,10 +68,11 @@ class AnimatedPropertyList extends Component {
       simulateAnimation,
     } = this.props;
     const {
-      animatedProperties,
+      animatedPropertyMap,
+      animationTypes,
     } = this.state;
 
-    if (!animatedProperties) {
+    if (!animatedPropertyMap) {
       return null;
     }
 
@@ -124,17 +80,17 @@ class AnimatedPropertyList extends Component {
       {
         className: "animated-property-list"
       },
-      animatedProperties.map(({ isUnchanged, keyframes, name, type }) => {
-        const state = this.getPropertyState(name);
+      [...animatedPropertyMap.entries()].map(([property, values]) => {
+        const state = this.getPropertyState(property);
+        const type = animationTypes[property];
         return AnimatedPropertyItem(
           {
             getComputedStyle,
-            isUnchanged,
-            keyframes,
-            name,
+            property,
             simulateAnimation,
             state,
             type,
+            values,
           }
         );
       })

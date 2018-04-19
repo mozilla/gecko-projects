@@ -621,7 +621,7 @@ Imm16::Imm16()
 { }
 
 void
-jit::PatchJump(CodeLocationJump& jump_, CodeLocationLabel label)
+jit::PatchJump(CodeLocationJump& jump_, CodeLocationLabel label, ReprotectCode reprotect)
 {
     // We need to determine if this jump can fit into the standard 24+2 bit
     // address or if we need a larger branch (or just need to use our pool
@@ -634,11 +634,18 @@ jit::PatchJump(CodeLocationJump& jump_, CodeLocationLabel label)
     int jumpOffset = label.raw() - jump_.raw();
     if (BOffImm::IsInRange(jumpOffset)) {
         // This instruction started off as a branch, and will remain one.
+        MaybeAutoWritableJitCode awjc(jump, sizeof(Instruction), reprotect);
         Assembler::RetargetNearBranch(jump, jumpOffset, c);
     } else {
         // This instruction started off as a branch, but now needs to be demoted
         // to an ldr.
         uint8_t** slot = reinterpret_cast<uint8_t**>(jump_.jumpTableEntry());
+
+        // Ensure both the branch and the slot are writable.
+        MOZ_ASSERT(uintptr_t(slot) > uintptr_t(jump));
+        size_t size = uintptr_t(slot) - uintptr_t(jump) + sizeof(void*);
+        MaybeAutoWritableJitCode awjc(jump, size, reprotect);
+
         Assembler::RetargetFarBranch(jump, slot, label.raw(), c);
     }
 }
@@ -708,7 +715,7 @@ class RelocationIterator
     uint32_t offset_;
 
   public:
-    explicit RelocationIterator(CompactBufferReader& reader)
+    RelocationIterator(CompactBufferReader& reader)
       : reader_(reader)
     { }
 
@@ -803,8 +810,9 @@ Assembler::GetPointer(uint8_t* instPtr)
     return ret;
 }
 
+template<class Iter>
 const uint32_t*
-Assembler::GetPtr32Target(InstructionIterator start, Register* dest, RelocStyle* style)
+Assembler::GetPtr32Target(Iter start, Register* dest, RelocStyle* style)
 {
     Instruction* load1 = start.cur();
     Instruction* load2 = start.next();
@@ -869,8 +877,9 @@ Assembler::TraceJumpRelocations(JSTracer* trc, JitCode* code, CompactBufferReade
     }
 }
 
+template <class Iter>
 static void
-TraceOneDataRelocation(JSTracer* trc, InstructionIterator iter)
+TraceOneDataRelocation(JSTracer* trc, Iter iter)
 {
     Register dest;
     Assembler::RelocStyle rs;
@@ -892,14 +901,30 @@ TraceOneDataRelocation(JSTracer* trc, InstructionIterator iter)
     }
 }
 
-/* static */ void
-Assembler::TraceDataRelocations(JSTracer* trc, JitCode* code, CompactBufferReader& reader)
+static void
+TraceDataRelocations(JSTracer* trc, uint8_t* buffer, CompactBufferReader& reader)
 {
     while (reader.more()) {
         size_t offset = reader.readUnsigned();
-        InstructionIterator iter((Instruction*)(code->raw() + offset));
+        InstructionIterator iter((Instruction*)(buffer + offset));
         TraceOneDataRelocation(trc, iter);
     }
+}
+
+static void
+TraceDataRelocations(JSTracer* trc, ARMBuffer* buffer, CompactBufferReader& reader)
+{
+    while (reader.more()) {
+        BufferOffset offset(reader.readUnsigned());
+        BufferInstructionIterator iter(offset, buffer);
+        TraceOneDataRelocation(trc, iter);
+    }
+}
+
+void
+Assembler::TraceDataRelocations(JSTracer* trc, JitCode* code, CompactBufferReader& reader)
+{
+    ::TraceDataRelocations(trc, code->raw(), reader);
 }
 
 void
@@ -914,6 +939,24 @@ Assembler::copyDataRelocationTable(uint8_t* dest)
 {
     if (dataRelocations_.length())
         memcpy(dest, dataRelocations_.buffer(), dataRelocations_.length());
+}
+
+void
+Assembler::trace(JSTracer* trc)
+{
+    for (size_t i = 0; i < jumps_.length(); i++) {
+        RelativePatch& rp = jumps_[i];
+        if (rp.kind() == Relocation::JITCODE) {
+            JitCode* code = JitCode::FromExecutable((uint8_t*)rp.target());
+            TraceManuallyBarrieredEdge(trc, &code, "masmrel32");
+            MOZ_ASSERT(code == JitCode::FromExecutable((uint8_t*)rp.target()));
+        }
+    }
+
+    if (dataRelocations_.length()) {
+        CompactBufferReader reader(dataRelocations_);
+        ::TraceDataRelocations(trc, &m_buffer, reader);
+    }
 }
 
 void
@@ -1740,7 +1783,7 @@ class PoolHintData
   private:
     uint32_t   index_    : 16;
     uint32_t   cond_     : 4;
-    uint32_t   loadType_ : 2;
+    LoadType   loadType_ : 2;
     uint32_t   destReg_  : 5;
     uint32_t   destType_ : 1;
     uint32_t   ONES     : 4;
@@ -1796,7 +1839,7 @@ class PoolHintData
         // want to lie about it so everyone knows it *used* to be a branch.
         if (ONES != ExpectedOnes)
             return PoolHintData::PoolBranch;
-        return static_cast<LoadType>(loadType_);
+        return loadType_;
     }
 
     bool isValidPoolHint() const {
@@ -2195,6 +2238,15 @@ Assembler::as_b(Label* l, Condition c)
         return BufferOffset();
 
     l->use(ret.getOffset());
+    return ret;
+}
+
+BufferOffset
+Assembler::as_b(wasm::OldTrapDesc target, Condition c)
+{
+    Label l;
+    BufferOffset ret = as_b(&l, c);
+    bindLater(&l, target);
     return ret;
 }
 
@@ -2631,6 +2683,18 @@ Assembler::bind(Label* label, BufferOffset boff)
 }
 
 void
+Assembler::bindLater(Label* label, wasm::OldTrapDesc target)
+{
+    if (label->used()) {
+        BufferOffset b(label);
+        do {
+            append(wasm::OldTrapSite(target, b.getOffset()));
+        } while (nextLink(b, &b));
+    }
+    label->reset();
+}
+
+void
 Assembler::bind(RepatchLabel* label)
 {
     // It does not seem to be useful to record this label for
@@ -2806,7 +2870,7 @@ struct PoolHeader : Instruction
         // The size should take into account the pool header.
         // The size is in units of Instruction (4 bytes), not byte.
         uint32_t size : 15;
-        uint32_t isNatural : 1;
+        bool isNatural : 1;
         uint32_t ONES : 16;
 
         Header(int size_, bool isNatural_)
@@ -2815,7 +2879,7 @@ struct PoolHeader : Instruction
             ONES(0xffff)
         { }
 
-        explicit Header(const Instruction* i) {
+        Header(const Instruction* i) {
             JS_STATIC_ASSERT(sizeof(Header) == sizeof(uint32_t));
             memcpy(this, i, sizeof(Header));
             MOZ_ASSERT(ONES == 0xffff);

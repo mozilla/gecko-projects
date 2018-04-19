@@ -22,17 +22,3 @@ async function promiseStatusPanelShown(win, value) {
   Assert.equal(win.StatusPanel._labelElement.value, value);
 }
 
-/**
- * Returns a Promise that resolves when a StatusPanel for a
- * window has finished being hidden.
- *
- * @param win (browser window)
- *        The window that the StatusPanel belongs to.
- */
-async function promiseStatusPanelHidden(win) {
-  let panel = win.StatusPanel.panel;
-  await BrowserTestUtils.waitForEvent(panel, "transitionend", (e) => {
-    return e.propertyName === "opacity" &&
-           win.getComputedStyle(e.target).opacity == "0";
-  });
-}

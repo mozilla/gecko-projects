@@ -70,6 +70,7 @@ var publicProperties = [
   "setSignedInUser",
   "signOut",
   "updateDeviceRegistration",
+  "deleteDeviceRegistration",
   "updateUserAccountData",
   "whenVerified",
 ];
@@ -118,30 +119,36 @@ AccountState.prototype = {
         new Error("Verification aborted; Another user signing in"));
       this.whenVerifiedDeferred = null;
     }
+
     if (this.whenKeysReadyDeferred) {
       this.whenKeysReadyDeferred.reject(
         new Error("Verification aborted; Another user signing in"));
       this.whenKeysReadyDeferred = null;
     }
-    return this.signOut();
-  },
 
-  // Clobber all cached data and write that empty data to storage.
-  async signOut() {
     this.cert = null;
     this.keyPair = null;
     this.oauthTokens = null;
-
     // Avoid finalizing the storageManager multiple times (ie, .signOut()
     // followed by .abort())
     if (!this.storageManager) {
-      return;
+      return Promise.resolve();
     }
-    const storageManager = this.storageManager;
+    let storageManager = this.storageManager;
     this.storageManager = null;
+    return storageManager.finalize();
+  },
 
-    await storageManager.deleteAccountData();
-    await storageManager.finalize();
+  // Clobber all cached data and write that empty data to storage.
+  signOut() {
+    this.cert = null;
+    this.keyPair = null;
+    this.oauthTokens = null;
+    let storageManager = this.storageManager;
+    this.storageManager = null;
+    return storageManager.deleteAccountData().then(() => {
+      return storageManager.finalize();
+    });
   },
 
   // Get user account data. Optionally specify explicit field names to fetch
@@ -565,7 +572,7 @@ FxAccountsInternal.prototype = {
     log.debug("setSignedInUser - aborting any existing flows");
     const signedInUser = await this.getSignedInUser();
     if (signedInUser) {
-      await this._signOutServer(signedInUser.sessionToken, signedInUser.oauthTokens);
+      await this.deleteDeviceRegistration(signedInUser.sessionToken, signedInUser.deviceId);
     }
     await this.abortExistingFlow();
     let currentAccountState = this.currentAccountState = this.newAccountState(
@@ -660,49 +667,30 @@ FxAccountsInternal.prototype = {
     return this.currentAccountState.updateUserAccountData({ cert: null });
   },
 
-  async getDeviceId() {
-    let data = await this.currentAccountState.getUserAccountData();
-    if (!data) {
-      // Without a signed-in user, there can be no device id.
-      return null;
-    }
-    // Try migrating first. Remove this in Firefox 65+.
-    if (data.deviceId) {
-      log.info("Migrating from deviceId to device.");
-      await this.currentAccountState.updateUserAccountData({
-        deviceId: null,
-        deviceRegistrationVersion: null,
-        device: {
-          id: data.deviceId,
-          registrationVersion: data.deviceRegistrationVersion
+  getDeviceId() {
+    return this.currentAccountState.getUserAccountData()
+      .then(data => {
+        if (data) {
+          if (!data.deviceId || !data.deviceRegistrationVersion ||
+              data.deviceRegistrationVersion < this.DEVICE_REGISTRATION_VERSION) {
+            // There is no device id or the device registration is outdated.
+            // Either way, we should register the device with FxA
+            // before returning the id to the caller.
+            return this._registerOrUpdateDevice(data);
+          }
+
+          // Return the device id that we already registered with the server.
+          return data.deviceId;
         }
+
+        // Without a signed-in user, there can be no device id.
+        return null;
       });
-      data = await this.currentAccountState.getUserAccountData();
-    }
-    const {device} = data;
-    if (!device || !device.registrationVersion ||
-        device.registrationVersion < this.DEVICE_REGISTRATION_VERSION) {
-      // There is no device registered or the device registration is outdated.
-      // Either way, we should register the device with FxA
-      // before returning the id to the caller.
-      return this._registerOrUpdateDevice(data);
-    }
-    // Return the device id that we already registered with the server.
-    return device.id;
   },
 
   async getDeviceList() {
-    const accountData = await this._getVerifiedAccountOrReject();
-    const devices = await this.fxAccountsClient.getDeviceList(accountData.sessionToken);
-
-    // Check if our push registration is still good.
-    const ourDevice = devices.find(device => device.isCurrentDevice);
-    if (ourDevice.pushEndpointExpired) {
-      await this.fxaPushService.unsubscribe();
-      await this._registerOrUpdateDevice(accountData);
-    }
-
-    return devices;
+    let accountData = await this._getVerifiedAccountOrReject();
+    return this.fxAccountsClient.getDeviceList(accountData.sessionToken);
   },
 
   /**
@@ -731,7 +719,7 @@ FxAccountsInternal.prototype = {
   /*
    * Reset state such that any previous flow is canceled.
    */
-  abortExistingFlow() {
+  abortExistingFlow: function abortExistingFlow() {
     if (this.currentTimer) {
       log.debug("Polling aborted; Another user signing in");
       clearTimeout(this.currentTimer);
@@ -781,74 +769,94 @@ FxAccountsInternal.prototype = {
   },
 
   _destroyAllOAuthTokens(tokenInfos) {
-    if (!tokenInfos) {
-      return Promise.resolve();
-    }
     // let's just destroy them all in parallel...
     let promises = [];
-    for (let tokenInfo of Object.values(tokenInfos)) {
+    for (let tokenInfo of Object.values(tokenInfos || {})) {
       promises.push(this._destroyOAuthToken(tokenInfo));
     }
     return Promise.all(promises);
   },
 
-  async signOut(localOnly) {
+  signOut: function signOut(localOnly) {
+    let currentState = this.currentAccountState;
     let sessionToken;
     let tokensToRevoke;
-    const data = await this.currentAccountState.getUserAccountData();
-    // Save the sessionToken, tokens before resetting them in _signOutLocal().
-    if (data) {
-      sessionToken = data.sessionToken;
-      tokensToRevoke = data.oauthTokens;
-    }
-    await this._signOutLocal();
-    if (!localOnly) {
-      // Do this in the background so *any* slow request won't
-      // block the local sign out.
-      Services.tm.dispatchToMainThread(async () => {
-        await this._signOutServer(sessionToken, tokensToRevoke);
-        FxAccountsConfig.resetConfigURLs();
-        this.notifyObservers("testhelper-fxa-signout-complete");
-      });
-    } else {
-      // We want to do this either way -- but if we're signing out remotely we
-      // need to wait until we destroy the oauth tokens if we want that to succeed.
-      FxAccountsConfig.resetConfigURLs();
-    }
-    return this.notifyObservers(ONLOGOUT_NOTIFICATION);
-  },
-
-  async _signOutLocal() {
-    await this.currentAccountState.signOut();
-    // this "aborts" this.currentAccountState but doesn't make a new one.
-    await this.abortExistingFlow();
-    this.currentAccountState = this.newAccountState();
-    return this.currentAccountState.promiseInitialized;
-  },
-
-  async _signOutServer(sessionToken, tokensToRevoke) {
-    log.debug("Unsubscribing from FxA push.");
-    try {
-      await this.fxaPushService.unsubscribe();
-    } catch (err) {
-      log.error("Could not unsubscribe from push.", err);
-    }
-    if (sessionToken) {
-      log.debug("Destroying session and device.");
-      try {
-        await this.fxAccountsClient.signOut(sessionToken, {service: "sync"});
-      } catch (err) {
-        log.error("Error during remote sign out of Firefox Accounts", err);
+    let deviceId;
+    return currentState.getUserAccountData().then(data => {
+      // Save the session token, tokens to revoke and the
+      // device id for use in the call to signOut below.
+      if (data) {
+        sessionToken = data.sessionToken;
+        tokensToRevoke = data.oauthTokens;
+        deviceId = data.deviceId;
       }
-    } else {
-      log.warn("Missing session token; skipping remote sign out");
+      return this._signOutLocal();
+    }).then(() => {
+      // FxAccountsManager calls here, then does its own call
+      // to FxAccountsClient.signOut().
+      if (!localOnly) {
+        // Wrap this in a promise so *any* errors in signOut won't
+        // block the local sign out. This is *not* returned.
+        Promise.resolve().then(() => {
+          // This can happen in the background and shouldn't block
+          // the user from signing out. The server must tolerate
+          // clients just disappearing, so this call should be best effort.
+          if (sessionToken) {
+            return this._signOutServer(sessionToken, deviceId);
+          }
+          log.warn("Missing session token; skipping remote sign out");
+          return null;
+        }).catch(err => {
+          log.error("Error during remote sign out of Firefox Accounts", err);
+        }).then(() => {
+          return this._destroyAllOAuthTokens(tokensToRevoke);
+        }).catch(err => {
+          log.error("Error during destruction of oauth tokens during signout", err);
+        }).then(() => {
+          FxAccountsConfig.resetConfigURLs();
+          // just for testing - notifications are cheap when no observers.
+          return this.notifyObservers("testhelper-fxa-signout-complete");
+        });
+      } else {
+        // We want to do this either way -- but if we're signing out remotely we
+        // need to wait until we destroy the oauth tokens if we want that to succeed.
+        FxAccountsConfig.resetConfigURLs();
+      }
+    }).then(() => {
+      return this.notifyObservers(ONLOGOUT_NOTIFICATION);
+    });
+  },
+
+  /**
+   * This function should be called in conjunction with a server-side
+   * signOut via FxAccountsClient.
+   */
+  _signOutLocal: function signOutLocal() {
+    let currentAccountState = this.currentAccountState;
+    return currentAccountState.signOut().then(() => {
+      // this "aborts" this.currentAccountState but doesn't make a new one.
+      return this.abortExistingFlow();
+    }).then(() => {
+      this.currentAccountState = this.newAccountState();
+      return this.currentAccountState.promiseInitialized;
+    });
+  },
+
+  _signOutServer(sessionToken, deviceId) {
+    // For now we assume the service being logged out from is Sync, so
+    // we must tell the server to either destroy the device or sign out
+    // (if no device exists). We might need to revisit this when this
+    // FxA code is used in a context that isn't Sync.
+
+    const options = { service: "sync" };
+
+    if (deviceId) {
+      log.debug("destroying device, session and unsubscribing from FxA push");
+      return this.deleteDeviceRegistration(sessionToken, deviceId);
     }
-    log.debug("Destroying all OAuth tokens.");
-    try {
-      await this._destroyAllOAuthTokens(tokensToRevoke);
-    } catch (err) {
-      log.error("Error during destruction of oauth tokens during signout", err);
-    }
+
+    log.debug("destroying session");
+    return this.fxAccountsClient.signOut(sessionToken, options);
   },
 
   /**
@@ -1365,6 +1373,8 @@ FxAccountsInternal.prototype = {
         currentState.whenVerifiedDeferred.resolve(accountData);
         delete currentState.whenVerifiedDeferred;
       }
+      // Tell FxAccountsManager to clear its cache
+      await this.notifyObservers(ON_FXA_UPDATE_NOTIFICATION, ONVERIFIED_NOTIFICATION);
     } catch (e) {
       log.error(e);
     }
@@ -1567,30 +1577,50 @@ FxAccountsInternal.prototype = {
   // Attempt to update the auth server with whatever device details are stored
   // in the account data. Returns a promise that always resolves, never rejects.
   // If the promise resolves to a value, that value is the device id.
-  async updateDeviceRegistration() {
-    try {
-      const signedInUser = await this.getSignedInUser();
+  updateDeviceRegistration() {
+    return this.getSignedInUser().then(signedInUser => {
       if (signedInUser) {
-        await this._registerOrUpdateDevice(signedInUser);
+        return this._registerOrUpdateDevice(signedInUser);
       }
-    } catch (error) {
-      await this._logErrorAndResetDeviceRegistrationVersion(error);
+      return null;
+    }).catch(error => this._logErrorAndResetDeviceRegistrationVersion(error));
+  },
+
+  // Delete the Push Subscription and the device registration on the auth server.
+  // Returns a promise that always resolves, never rejects.
+  async deleteDeviceRegistration(sessionToken, deviceId) {
+    try {
+      // Allow tests to skip device registration because it makes remote requests to the auth server.
+      if (Services.prefs.getBoolPref("identity.fxaccounts.skipDeviceRegistration")) {
+        return Promise.resolve();
+      }
+    } catch (ignore) {}
+
+    try {
+      await this.fxaPushService.unsubscribe();
+      if (sessionToken && deviceId) {
+        await this.fxAccountsClient.signOutAndDestroyDevice(sessionToken, deviceId);
+      }
+      await this.currentAccountState.updateUserAccountData({
+        deviceId: null,
+        deviceRegistrationVersion: null
+      });
+    } catch (err) {
+      log.error("Could not delete the device registration", err);
     }
+    return Promise.resolve();
   },
 
   async handleDeviceDisconnection(deviceId) {
     const accountData = await this.currentAccountState.getUserAccountData();
-    if (!accountData || !accountData.device) {
-      // Nothing we can do here.
-      return;
-    }
-    const localDeviceId = accountData.device.id;
+    const localDeviceId = accountData ? accountData.deviceId : null;
     const isLocalDevice = (deviceId == localDeviceId);
     if (isLocalDevice) {
       this.signOut(true);
     }
     const data = JSON.stringify({ isLocalDevice });
     await this.notifyObservers(ON_DEVICE_DISCONNECTED_NOTIFICATION, data);
+    return null;
   },
 
   handleEmailUpdated(newEmail) {
@@ -1652,14 +1682,23 @@ FxAccountsInternal.prototype = {
   // If you change what we send to the FxA servers during device registration,
   // you'll have to bump the DEVICE_REGISTRATION_VERSION number to force older
   // devices to re-register when Firefox updates
-  async _registerOrUpdateDevice(signedInUser) {
-    const {sessionToken, device: currentDevice} = signedInUser;
-    if (!sessionToken) {
-      throw new Error("_registerOrUpdateDevice called without a session token");
+  _registerOrUpdateDevice(signedInUser) {
+    try {
+      // Allow tests to skip device registration because:
+      //   1. It makes remote requests to the auth server.
+      //   2. _getDeviceName does not work from xpcshell.
+      //   3. The B2G tests fail when attempting to import services-sync/util.js.
+      if (Services.prefs.getBoolPref("identity.fxaccounts.skipDeviceRegistration")) {
+        return Promise.resolve();
+      }
+    } catch (ignore) {}
+
+    if (!signedInUser.sessionToken) {
+      return Promise.reject(new Error(
+        "_registerOrUpdateDevice called without a session token"));
     }
 
-    try {
-      const subscription = await this.fxaPushService.registerPushEndpoint();
+    return this.fxaPushService.registerPushEndpoint().then(subscription => {
       const deviceName = this._getDeviceName();
       let deviceOptions = {};
 
@@ -1674,27 +1713,21 @@ FxAccountsInternal.prototype = {
         }
       }
 
-      let device;
-      if (currentDevice && currentDevice.id) {
+      if (signedInUser.deviceId) {
         log.debug("updating existing device details");
-        device = await this.fxAccountsClient.updateDevice(
-          sessionToken, currentDevice.id, deviceName, deviceOptions);
-      } else {
-        log.debug("registering new device details");
-        device = await this.fxAccountsClient.registerDevice(
-          sessionToken, deviceName, this._getDeviceType(), deviceOptions);
+        return this.fxAccountsClient.updateDevice(
+          signedInUser.sessionToken, signedInUser.deviceId, deviceName, deviceOptions);
       }
 
-      await this.currentAccountState.updateUserAccountData({
-        device: {
-          id: device.id,
-          registrationVersion: this.DEVICE_REGISTRATION_VERSION
-        }
-      });
-      return device.id;
-    } catch (error) {
-      return this._handleDeviceError(error, sessionToken);
-    }
+      log.debug("registering new device details");
+      return this.fxAccountsClient.registerDevice(
+        signedInUser.sessionToken, deviceName, this._getDeviceType(), deviceOptions);
+    }).then(device =>
+      this.currentAccountState.updateUserAccountData({
+        deviceId: device.id,
+        deviceRegistrationVersion: this.DEVICE_REGISTRATION_VERSION
+      }).then(() => device.id)
+    ).catch(error => this._handleDeviceError(error, signedInUser.sessionToken));
   },
 
   _getDeviceName() {
@@ -1724,19 +1757,16 @@ FxAccountsInternal.prototype = {
     ).catch(() => {});
   },
 
-  async _recoverFromUnknownDevice() {
+  _recoverFromUnknownDevice() {
     // FxA did not recognise the device id. Handle it by clearing the device
     // id on the account data. At next sync or next sign-in, registration is
     // retried and should succeed.
     log.warn("unknown device id, clearing the local device data");
-    try {
-      await this.currentAccountState.updateUserAccountData({device: null});
-    } catch (error) {
-      await this._logErrorAndResetDeviceRegistrationVersion(error);
-    }
+    return this.currentAccountState.updateUserAccountData({ deviceId: null })
+      .catch(error => this._logErrorAndResetDeviceRegistrationVersion(error));
   },
 
-  async _recoverFromDeviceSessionConflict(error, sessionToken) {
+  _recoverFromDeviceSessionConflict(error, sessionToken) {
     // FxA has already associated this session with a different device id.
     // Perhaps we were beaten in a race to register. Handle the conflict:
     //   1. Fetch the list of devices for the current user from FxA.
@@ -1746,46 +1776,40 @@ FxAccountsInternal.prototype = {
     //      sync or next sign-in, registration is retried and should succeed.
     //   4. If we don't find a match, log the original error.
     log.warn("device session conflict, attempting to ascertain the correct device id");
-    try {
-      const devices = await this.fxAccountsClient.getDeviceList(sessionToken);
-      const matchingDevices = devices.filter(device => device.isCurrentDevice);
-      const length = matchingDevices.length;
-      if (length === 1) {
-        const deviceId = matchingDevices[0].id;
-        await this.currentAccountState.updateUserAccountData({
-          device: {
-            id: deviceId,
-            registrationVersion: null
-          }
-        });
-        return deviceId;
-      }
-      if (length > 1) {
-        log.error("insane server state, " + length + " devices for this session");
-      }
-      await this._logErrorAndResetDeviceRegistrationVersion(error);
-    } catch (secondError) {
-      log.error("failed to recover from device-session conflict", secondError);
-      await this._logErrorAndResetDeviceRegistrationVersion(error);
-    }
-    return null;
+    return this.fxAccountsClient.getDeviceList(sessionToken)
+      .then(devices => {
+        const matchingDevices = devices.filter(device => device.isCurrentDevice);
+        const length = matchingDevices.length;
+        if (length === 1) {
+          const deviceId = matchingDevices[0].id;
+          return this.currentAccountState.updateUserAccountData({
+            deviceId,
+            deviceRegistrationVersion: null
+          }).then(() => deviceId);
+        }
+        if (length > 1) {
+          log.error("insane server state, " + length + " devices for this session");
+        }
+        return this._logErrorAndResetDeviceRegistrationVersion(error);
+      }).catch(secondError => {
+        log.error("failed to recover from device-session conflict", secondError);
+        this._logErrorAndResetDeviceRegistrationVersion(error);
+      });
   },
 
-  async _logErrorAndResetDeviceRegistrationVersion(error) {
+  _logErrorAndResetDeviceRegistrationVersion(error) {
     // Device registration should never cause other operations to fail.
     // If we've reached this point, just log the error and reset the device
-    // on the account data. At next sync or next sign-in,
+    // registration version on the account data. At next sync or next sign-in,
     // registration will be retried.
     log.error("device registration failed", error);
-    try {
-      this.currentAccountState.updateUserAccountData({
-        device: null
-      });
-    } catch (secondError) {
+    return this.currentAccountState.updateUserAccountData({
+      deviceRegistrationVersion: null
+    }).catch(secondError => {
       log.error(
         "failed to reset the device registration version, device registration won't be retried",
         secondError);
-    }
+    }).then(() => {});
   },
 
   _handleTokenError(err) {

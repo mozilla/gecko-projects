@@ -51,8 +51,16 @@ public:
 
   void SetOndevicechange(mozilla::dom::EventHandlerNonNull* aCallback);
 
-  void EventListenerAdded(nsAtom* aType) override;
-  using DOMEventTargetHelper::EventListenerAdded;
+  NS_IMETHOD AddEventListener(const nsAString& aType,
+    nsIDOMEventListener* aListener,
+    bool aUseCapture, bool aWantsUntrusted,
+    uint8_t optional_argc) override;
+
+  virtual void AddEventListener(const nsAString& aType,
+                                dom::EventListener* aListener,
+                                const dom::AddEventListenerOptionsOrBoolean& aOptions,
+                                const dom::Nullable<bool>& aWantsUntrusted,
+                                ErrorResult& aRv) override;
 
 private:
   class GumResolver;

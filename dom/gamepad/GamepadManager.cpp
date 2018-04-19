@@ -300,7 +300,8 @@ GamepadManager::FireButtonEvent(EventTarget* aTarget,
 
   event->SetTrusted(true);
 
-  aTarget->DispatchEvent(*event);
+  bool defaultActionEnabled = true;
+  aTarget->DispatchEvent(event, &defaultActionEnabled);
 }
 
 void
@@ -322,7 +323,8 @@ GamepadManager::FireAxisMoveEvent(EventTarget* aTarget,
 
   event->SetTrusted(true);
 
-  aTarget->DispatchEvent(*event);
+  bool defaultActionEnabled = true;
+  aTarget->DispatchEvent(event, &defaultActionEnabled);
 }
 
 void
@@ -406,7 +408,8 @@ GamepadManager::FireConnectionEvent(EventTarget* aTarget,
 
   event->SetTrusted(true);
 
-  aTarget->DispatchEvent(*event);
+  bool defaultActionEnabled = true;
+  aTarget->DispatchEvent(event, &defaultActionEnabled);
 }
 
 void

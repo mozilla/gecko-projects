@@ -9,6 +9,8 @@ import org.mozilla.gecko.annotation.WrapForJNI;
 import org.mozilla.gecko.mozglue.JNIObject;
 import org.mozilla.gecko.util.ThreadUtils;
 
+import android.content.Context;
+import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.graphics.RectF;
@@ -77,7 +79,7 @@ public class LayerSession {
         @Override protected native void disposeNative();
 
         @WrapForJNI(calledFrom = "any", dispatchTo = "gecko")
-        public native void attachNPZC(PanZoomController npzc);
+        public native void attachNPZC(NativePanZoomController npzc);
 
         @WrapForJNI(calledFrom = "ui", dispatchTo = "gecko")
         public native void onBoundsChanged(int left, int top, int width, int height);
@@ -157,7 +159,7 @@ public class LayerSession {
 
     // All fields are accessed on UI thread only.
     private final GeckoDisplay mDisplay = new GeckoDisplay(this);
-    private PanZoomController mNPZC;
+    private NativePanZoomController mNPZC;
     private OverscrollEdgeEffect mOverscroll;
     private DynamicToolbarAnimator mToolbar;
     private CompositorController mController;
@@ -186,15 +188,15 @@ public class LayerSession {
     }
 
     /**
-     * Get the PanZoomController instance for this session.
+     * Get the NativePanZoomController instance for this session.
      *
-     * @return PanZoomController instance.
+     * @return NativePanZoomController instance.
      */
-    public PanZoomController getPanZoomController() {
+    public NativePanZoomController getPanZoomController() {
         ThreadUtils.assertOnUiThread();
 
         if (mNPZC == null) {
-            mNPZC = new PanZoomController(this);
+            mNPZC = new NativePanZoomController(this);
             if (mAttachedCompositor) {
                 mCompositor.attachNPZC(mNPZC);
             }

@@ -130,8 +130,10 @@ class MacroAssemblerMIPSShared : public Assembler
     void ma_addu(Register rd, Register rs, Imm32 imm);
     void ma_addu(Register rd, Register rs);
     void ma_addu(Register rd, Imm32 imm);
-    void ma_addTestCarry(Condition cond, Register rd, Register rs, Register rt, Label* overflow);
-    void ma_addTestCarry(Condition cond, Register rd, Register rs, Imm32 imm, Label* overflow);
+    template <typename L>
+    void ma_addTestCarry(Register rd, Register rs, Register rt, L overflow);
+    template <typename L>
+    void ma_addTestCarry(Register rd, Register rs, Imm32 imm, L overflow);
 
     // subtract
     void ma_subu(Register rd, Register rs, Imm32 imm);
@@ -162,8 +164,12 @@ class MacroAssemblerMIPSShared : public Assembler
         ma_li(ScratchRegister, imm);
         ma_b(lhs, ScratchRegister, l, c, jumpKind);
     }
+    template <typename T>
+    void ma_b(Register lhs, T rhs, wasm::OldTrapDesc target, Condition c,
+              JumpKind jumpKind = LongJump);
 
     void ma_b(Label* l, JumpKind jumpKind = LongJump);
+    void ma_b(wasm::OldTrapDesc target, JumpKind jumpKind = LongJump);
 
     // fp instructions
     void ma_lis(FloatRegister dest, float value);

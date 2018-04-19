@@ -900,10 +900,7 @@ SourcesView.prototype = extend(WidgetMethods, {
   _onNewTabCommand: function () {
     let win = Services.wm.getMostRecentWindow(gDevTools.chromeWindowType);
     let selected = this.selectedItem.attachment;
-    win.openWebLinkIn(selected.source.url, "tab", {
-      triggeringPrincipal: win.document.nodePrincipal,
-      relatedToCurrent: true,
-    });
+    win.openUILinkIn(selected.source.url, "tab", { relatedToCurrent: true });
   },
 
   /**
@@ -1101,7 +1098,7 @@ SourcesView.prototype = extend(WidgetMethods, {
    * The source editor's contextmenu handler.
    * - Toggles "Add Conditional Breakpoint" and "Edit Conditional Breakpoint" items
    */
-  _onEditorContextMenuOpen: function (ev, popup) {
+  _onEditorContextMenuOpen: function (message, ev, popup) {
     let actor = this.selectedValue;
     let line = this.DebuggerView.editor.getCursor().line + 1;
     let location = { actor, line };

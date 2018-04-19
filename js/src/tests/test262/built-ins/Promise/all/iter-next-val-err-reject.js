@@ -48,7 +48,7 @@ iterNextValThrows[Symbol.iterator] = function() {
 };
 
 Promise.all(iterNextValThrows).then(function() {
-  $DONE('The promise should be rejected.');
+  $ERROR('The promise should be rejected.');
 }, function(reason) {
   assert.sameValue(reason, error);
 }).then($DONE, $DONE);

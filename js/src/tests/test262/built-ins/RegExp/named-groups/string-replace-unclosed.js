@@ -3,8 +3,7 @@
 // This code is governed by the BSD license found in the LICENSE file.
 
 /*---
-description: >
-  A missing > following $< means that the $< is taken literally
+description: A missing > following $< means that the $< is taken literally
   in a replacement string in the context of named capture substitution.
 esid: sec-getsubstitution
 features: [regexp-named-groups]

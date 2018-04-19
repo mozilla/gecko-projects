@@ -11,6 +11,7 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/dom/StructuredCloneHolder.h"
+#include "mozilla/dom/WorkerHolder.h"
 #include "mozilla/dom/WorkerRunnable.h"
 #include "nsProxyRelease.h"
 
@@ -18,7 +19,6 @@ namespace mozilla {
 namespace dom {
 
 class Promise;
-class ThreadSafeWorkerRef;
 class WorkerPrivate;
 
 // A proxy to (eventually) mirror a resolved/rejected Promise's result from the
@@ -179,10 +179,13 @@ protected:
                                 JS::Handle<JS::Value> aValue) override;
 
 private:
-  explicit PromiseWorkerProxy(Promise* aWorkerPromise,
-                              const PromiseWorkerProxyStructuredCloneCallbacks* aCallbacks = nullptr);
+  PromiseWorkerProxy(WorkerPrivate* aWorkerPrivate,
+                     Promise* aWorkerPromise,
+                     const PromiseWorkerProxyStructuredCloneCallbacks* aCallbacks = nullptr);
 
   virtual ~PromiseWorkerProxy();
+
+  bool AddRefObject();
 
   // If not called from Create(), be sure to hold Lock().
   void CleanProperties();
@@ -196,7 +199,7 @@ private:
                    RunCallbackFunc aFunc);
 
   // Any thread with appropriate checks.
-  RefPtr<ThreadSafeWorkerRef> mWorkerRef;
+  WorkerPrivate* mWorkerPrivate;
 
   // Worker thread only.
   RefPtr<Promise> mWorkerPromise;
@@ -210,6 +213,8 @@ private:
 
   // Ensure the worker and the main thread won't race to access |mCleanedUp|.
   Mutex mCleanUpLock;
+
+  UniquePtr<WorkerHolder> mWorkerHolder;
 };
 } // namespace dom
 } // namespace mozilla

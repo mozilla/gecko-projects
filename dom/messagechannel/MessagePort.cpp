@@ -18,7 +18,7 @@
 #include "mozilla/dom/PMessagePort.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/StructuredCloneTags.h"
-#include "mozilla/dom/WorkerRef.h"
+#include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/dom/WorkerScope.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/PBackgroundChild.h"
@@ -33,6 +33,7 @@
 
 #include "nsIBFCacheEntry.h"
 #include "nsIDocument.h"
+#include "nsIDOMFileList.h"
 #include "nsIPresShell.h"
 #include "nsISupportsPrimitives.h"
 #include "nsServiceManagerUtils.h"
@@ -156,7 +157,8 @@ private:
                             EmptyString(), nullptr, ports);
     event->SetTrusted(true);
 
-    mPort->DispatchEvent(*event);
+    bool dummy;
+    mPort->DispatchEvent(static_cast<dom::Event*>(event.get()), &dummy);
 
     return NS_OK;
   }
@@ -198,12 +200,46 @@ NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 NS_IMPL_ADDREF_INHERITED(MessagePort, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(MessagePort, DOMEventTargetHelper)
 
+namespace {
+
+class MessagePortWorkerHolder final : public WorkerHolder
+{
+  MessagePort* mPort;
+
+public:
+  explicit MessagePortWorkerHolder(MessagePort* aPort)
+    : WorkerHolder("MessagePortWorkerHolder")
+    , mPort(aPort)
+  {
+    MOZ_ASSERT(aPort);
+    MOZ_COUNT_CTOR(MessagePortWorkerHolder);
+  }
+
+  virtual bool Notify(WorkerStatus aStatus) override
+  {
+    if (aStatus > Running) {
+      // We cannot process messages anymore because we cannot dispatch new
+      // runnables. Let's force a Close().
+      mPort->CloseForced();
+    }
+
+    return true;
+  }
+
+private:
+  ~MessagePortWorkerHolder()
+  {
+    MOZ_COUNT_DTOR(MessagePortWorkerHolder);
+  }
+};
+
+} // namespace
+
 MessagePort::MessagePort(nsIGlobalObject* aGlobal)
   : DOMEventTargetHelper(aGlobal)
   , mInnerID(0)
   , mMessageQueueEnabled(false)
   , mIsKeptAlive(false)
-  , mHasBeenTransferredOrClosed(false)
 {
   MOZ_ASSERT(aGlobal);
 
@@ -215,7 +251,7 @@ MessagePort::MessagePort(nsIGlobalObject* aGlobal)
 MessagePort::~MessagePort()
 {
   CloseForced();
-  MOZ_ASSERT(!mWorkerRef);
+  MOZ_ASSERT(!mWorkerHolder);
 }
 
 /* static */ already_AddRefed<MessagePort>
@@ -268,7 +304,7 @@ MessagePort::Initialize(const nsID& aUUID,
 
   if (mNeutered) {
     // If this port is neutered we don't want to keep it alive artificially nor
-    // we want to add listeners or WorkerRefs.
+    // we want to add listeners or workerWorkerHolders.
     mState = eStateDisentangled;
     return;
   }
@@ -286,24 +322,17 @@ MessagePort::Initialize(const nsID& aUUID,
   UpdateMustKeepAlive();
 
   if (!NS_IsMainThread()) {
-    RefPtr<MessagePort> self = this;
-
     WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
     MOZ_ASSERT(workerPrivate);
+    MOZ_ASSERT(!mWorkerHolder);
 
-    // When the callback is executed, we cannot process messages anymore because
-    // we cannot dispatch new runnables. Let's force a Close().
-    RefPtr<StrongWorkerRef> strongWorkerRef =
-      StrongWorkerRef::Create(workerPrivate, "MessagePort",
-                              [self]() { self->CloseForced(); });
-    if (NS_WARN_IF(!strongWorkerRef)) {
-      // The worker is shutting down. Let's return an already closed port.
-      mState = eStateDisentangledForClose;
+    nsAutoPtr<WorkerHolder> workerHolder(new MessagePortWorkerHolder(this));
+    if (NS_WARN_IF(!workerHolder->HoldWorker(workerPrivate, Closing))) {
+      aRv.Throw(NS_ERROR_FAILURE);
       return;
     }
 
-    MOZ_ASSERT(!mWorkerRef);
-    mWorkerRef = Move(strongWorkerRef);
+    mWorkerHolder = Move(workerHolder);
   } else if (GetOwner()) {
     MOZ_ASSERT(NS_IsMainThread());
     mInnerID = GetOwner()->WindowID();
@@ -501,7 +530,6 @@ MessagePort::Dispatch()
 void
 MessagePort::Close()
 {
-  mHasBeenTransferredOrClosed = true;
   CloseInternal(true /* aSoftly */);
 }
 
@@ -726,9 +754,6 @@ void
 MessagePort::CloneAndDisentangle(MessagePortIdentifier& aIdentifier)
 {
   MOZ_ASSERT(mIdentifier);
-  MOZ_ASSERT(!mHasBeenTransferredOrClosed);
-
-  mHasBeenTransferredOrClosed = true;
 
   // We can clone a port that has already been transfered. In this case, on the
   // otherside will have a neutered port. Here we set neutered to true so that
@@ -844,8 +869,8 @@ MessagePort::UpdateMustKeepAlive()
       mIsKeptAlive) {
     mIsKeptAlive = false;
 
-    // The DTOR of this WorkerRef will release the worker for us.
-    mWorkerRef = nullptr;
+    // The DTOR of this WorkerHolder will release the worker for us.
+    mWorkerHolder = nullptr;
 
     if (NS_IsMainThread()) {
       nsCOMPtr<nsIObserverService> obs =
@@ -953,7 +978,8 @@ MessagePort::DispatchError()
     MessageEvent::Constructor(this, NS_LITERAL_STRING("messageerror"), init);
   event->SetTrusted(true);
 
-  DispatchEvent(*event);
+  bool dummy;
+  DispatchEvent(event, &dummy);
 }
 
 } // namespace dom

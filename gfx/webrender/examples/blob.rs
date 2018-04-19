@@ -24,8 +24,8 @@ use webrender::api::{self, DisplayListBuilder, DocumentId, PipelineId, RenderApi
 // The deserialized command list internally used by this example is just a color.
 type ImageRenderingCommands = api::ColorU;
 
-// Serialize/deserialize the blob.
-// For real usecases you should probably use serde rather than doing it by hand.
+// Serialize/deserialze the blob.
+// Ror real usecases you should probably use serde rather than doing it by hand.
 
 fn serialize_blob(color: api::ColorU) -> Vec<u8> {
     vec![color.r, color.g, color.b, color.a]
@@ -73,7 +73,7 @@ fn render_blob(
             } else {
                 0
             };
-            // ..nested in the per-tile checkerboard pattern
+            // ..nested in the per-tile cherkerboard pattern
             let tc = if tile_checker { 0 } else { (1 - checker) * 40 };
 
             match descriptor.format {
@@ -88,7 +88,7 @@ fn render_blob(
                 }
                 _ => {
                     return Err(api::BlobImageError::Other(
-                        format!("Unsupported image format"),
+                        format!("Usupported image format"),
                     ));
                 }
             }
@@ -178,7 +178,7 @@ impl api::BlobImageRenderer for CheckerboardRenderer {
         // Add None in the map of rendered images. This makes it possible to differentiate
         // between commands that aren't finished yet (entry in the map is equal to None) and
         // keys that have never been requested (entry not in the map), which would cause deadlocks
-        // if we were to block upon receiving their result in resolve!
+        // if we were to block upon receing their result in resolve!
         self.rendered_images.insert(request, None);
     }
 
@@ -232,7 +232,7 @@ impl Example for App {
         let blob_img1 = api.generate_image_key();
         resources.add_image(
             blob_img1,
-            api::ImageDescriptor::new(500, 500, api::ImageFormat::BGRA8, true, false),
+            api::ImageDescriptor::new(500, 500, api::ImageFormat::BGRA8, true),
             api::ImageData::new_blob_image(serialize_blob(api::ColorU::new(50, 50, 150, 255))),
             Some(128),
         );
@@ -240,7 +240,7 @@ impl Example for App {
         let blob_img2 = api.generate_image_key();
         resources.add_image(
             blob_img2,
-            api::ImageDescriptor::new(200, 200, api::ImageFormat::BGRA8, true, false),
+            api::ImageDescriptor::new(200, 200, api::ImageFormat::BGRA8, true),
             api::ImageData::new_blob_image(serialize_blob(api::ColorU::new(50, 150, 50, 255))),
             None,
         );
@@ -249,7 +249,6 @@ impl Example for App {
         let info = api::LayoutPrimitiveInfo::new(bounds);
         builder.push_stacking_context(
             &info,
-            None,
             api::ScrollPolicy::Scrollable,
             None,
             api::TransformStyle::Flat,

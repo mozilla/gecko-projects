@@ -7,21 +7,20 @@
 #ifndef mozilla_dom_CSSKeyframesRule_h
 #define mozilla_dom_CSSKeyframesRule_h
 
-#include "mozilla/css/Rule.h"
+#include "mozilla/css/GroupRule.h"
 #include "mozilla/dom/CSSKeyframeRule.h"
 
 namespace mozilla {
 namespace dom {
 
-class CSSKeyframesRule : public css::Rule
+class CSSKeyframesRule : public css::GroupRule
 {
 protected:
-  using css::Rule::Rule;
+  using css::GroupRule::GroupRule;
   virtual ~CSSKeyframesRule() {}
 
 public:
-  // Let's not worry for now about sorting out whether we're a leaf or not.
-  bool IsCCLeaf() const override { return false; }
+  int32_t GetType() const final { return Rule::KEYFRAMES_RULE; }
 
   // WebIDL interface
   uint16_t Type() const final { return CSSRuleBinding::KEYFRAMES_RULE; }
@@ -32,6 +31,10 @@ public:
   virtual void DeleteRule(const nsAString& aKey) = 0;
   virtual CSSKeyframeRule* FindRule(const nsAString& aKey) = 0;
 
+#ifdef MOZ_OLD_STYLE
+  bool UseForPresentation(nsPresContext* aPresContext,
+                          nsMediaQueryResultCacheKey& aKey) final;
+#endif
 
   size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override = 0;
 

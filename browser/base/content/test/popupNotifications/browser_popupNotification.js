@@ -113,7 +113,7 @@ var tests = [
       await BrowserTestUtils.browserLoaded(tab.linkedBrowser);
       isnot(gBrowser.selectedTab, tab, "new tab isn't selected");
       wrongBrowserNotificationObject.browser = gBrowser.getBrowserForTab(tab);
-      let promiseTopic = TestUtils.topicObserved("PopupNotifications-backgroundShow");
+      let promiseTopic = promiseTopicObserved("PopupNotifications-backgroundShow");
       wrongBrowserNotification = showNotification(wrongBrowserNotificationObject);
       await promiseTopic;
       is(PopupNotifications.isPanelOpen, false, "panel isn't open");
@@ -147,7 +147,7 @@ var tests = [
   // test that the removed notification isn't shown on browser re-select
   { id: "Test#6",
     async run() {
-      let promiseTopic = TestUtils.topicObserved("PopupNotifications-updateNotShowing");
+      let promiseTopic = promiseTopicObserved("PopupNotifications-updateNotShowing");
       gBrowser.selectedTab = gBrowser.tabs[gBrowser.tabs.length - 1];
       await promiseTopic;
       is(PopupNotifications.isPanelOpen, false, "panel isn't open");

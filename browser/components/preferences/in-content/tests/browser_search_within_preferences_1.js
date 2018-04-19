@@ -3,16 +3,18 @@
  * This file contains tests for the Preferences search bar.
  */
 
+/* eslint-disable mozilla/no-cpows-in-tests */
+
 requestLongerTimeout(6);
 
 /**
  * Tests to see if search bar is being shown when pref is turned on
  */
-add_task(async function show_search_bar_when_pref_is_enabled() {
+add_task(async function() {
   await openPreferencesViaOpenPreferencesAPI("paneGeneral", { leaveOpen: true });
   let searchInput = gBrowser.contentDocument.getElementById("searchInput");
   is_element_visible(searchInput, "Search box should be shown");
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
 /**
@@ -20,7 +22,7 @@ add_task(async function show_search_bar_when_pref_is_enabled() {
  * After it runs a search, it tests if the "Search Results" panel is the only selected category.
  * The search is then cleared, it then tests if the "General" panel is the only selected category.
  */
-add_task(async function show_search_results_pane_only_then_revert_to_general() {
+add_task(async function() {
   await openPreferencesViaOpenPreferencesAPI("paneGeneral", { leaveOpen: true });
 
   // Performs search
@@ -60,13 +62,13 @@ add_task(async function show_search_results_pane_only_then_revert_to_general() {
     }
   }
 
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
 /**
  * Test for "password" case. When we search "password", it should show the "passwordGroup"
  */
-add_task(async function search_for_password_show_passwordGroup() {
+add_task(async function() {
   await openPreferencesViaOpenPreferencesAPI("paneGeneral", { leaveOpen: true });
 
   // Performs search
@@ -110,6 +112,7 @@ add_task(async function search_for_password_show_passwordGroup() {
     let child = mainPrefTag.children[i];
     if (child.id == "paneGeneral"
       || child.id == "startupGroup"
+      || child.id == "homepageGroup"
       || child.id == "languagesGroup"
       || child.id == "fontsGroup"
       || child.id == "downloadsGroup"
@@ -128,21 +131,20 @@ add_task(async function search_for_password_show_passwordGroup() {
       || child.id == "networkProxyCategory") {
       is_element_visible(child, "Should be in general tab");
     } else if (child.id) {
-      is_element_hidden(child, `Should not be in general tab: ${child.id}`);
+      is_element_hidden(child, "Should not be in general tab");
     }
   }
 
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
 /**
  * Test for if nothing is found
  */
-add_task(async function search_with_nothing_found() {
+add_task(async function() {
   await openPreferencesViaOpenPreferencesAPI("paneGeneral", { leaveOpen: true });
 
-  let noResultsEl = gBrowser.contentDocument.querySelector("#no-results-message");
-  let sorryMsgQueryEl = gBrowser.contentDocument.getElementById("sorry-message-query");
+  let noResultsEl = gBrowser.contentDocument.querySelector(".no-results-message");
 
   is_element_hidden(noResultsEl, "Should not be in search results yet");
 
@@ -159,7 +161,6 @@ add_task(async function search_with_nothing_found() {
   await searchCompletedPromise;
 
   is_element_visible(noResultsEl, "Should be in search results");
-  is(sorryMsgQueryEl.textContent, query, "sorry-message-query should contain the query");
 
   // Takes search off
   searchCompletedPromise = BrowserTestUtils.waitForEvent(
@@ -171,15 +172,14 @@ add_task(async function search_with_nothing_found() {
   await searchCompletedPromise;
 
   is_element_hidden(noResultsEl, "Should not be in search results");
-  is(sorryMsgQueryEl.textContent.length, 0, "sorry-message-query should be empty");
 
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
 /**
  * Test for if we go back to general tab after search case
  */
-add_task(async function exiting_search_reverts_to_general_pane() {
+add_task(async function() {
   await openPreferencesViaOpenPreferencesAPI("privacy", { leaveOpen: true });
   let generalPane = gBrowser.contentDocument.getElementById("generalCategory");
 
@@ -209,13 +209,56 @@ add_task(async function exiting_search_reverts_to_general_pane() {
   // Checks if back to normal
   is_element_visible(generalPane, "Should be in generalPane");
 
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
+});
+
+/**
+ * Test for "Site Data" case, verifying elements with data-hidden-from-search = true
+ * are hidden in search result.
+ */
+add_task(async function() {
+  await SpecialPowers.pushPrefEnv({ "set": [["browser.storageManager.enabled", false]] });
+  await openPreferencesViaOpenPreferencesAPI("privacy", { leaveOpen: true });
+  let generalPane = gBrowser.contentDocument.getElementById("generalCategory");
+
+  is_element_hidden(generalPane, "Should not be in general");
+
+  // Performs search
+  let searchInput = gBrowser.contentDocument.getElementById("searchInput");
+
+  is(searchInput, gBrowser.contentDocument.activeElement.closest("#searchInput"),
+    "Search input should be focused when visiting preferences");
+
+  let query = "site data";
+  let searchCompletedPromise = BrowserTestUtils.waitForEvent(
+    gBrowser.contentWindow, "PreferencesSearchCompleted", evt => evt.detail == query);
+  EventUtils.sendString(query);
+  await searchCompletedPromise;
+
+  let mainPrefTag = gBrowser.contentDocument.getElementById("mainPrefPane");
+
+  let child = mainPrefTag.querySelector("#siteDataGroup");
+  is_element_hidden(child, "Should be hidden in search results");
+
+  // Takes search off
+  searchCompletedPromise = BrowserTestUtils.waitForEvent(
+    gBrowser.contentWindow, "PreferencesSearchCompleted", evt => evt.detail == "");
+  let count = query.length;
+  while (count--) {
+    EventUtils.sendKey("BACK_SPACE");
+  }
+  await searchCompletedPromise;
+
+  // Checks if back to normal
+  is_element_visible(generalPane, "Should be in generalPane");
+
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
 /**
  * Test for if we go to another tab after searching
  */
-add_task(async function changing_tabs_after_searching() {
+add_task(async function() {
   await openPreferencesViaOpenPreferencesAPI("paneGeneral", { leaveOpen: true });
   let searchInput = gBrowser.contentDocument.getElementById("searchInput");
 
@@ -241,5 +284,5 @@ add_task(async function changing_tabs_after_searching() {
     }
   }
 
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });

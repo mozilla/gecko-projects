@@ -217,7 +217,6 @@ def test_option_disabled(session):
     session.url = inline("""
         <select>
           <option disabled>foo
-          <option>bar
         </select>""")
     option = session.find.css("option", all=False)
     assert not option.selected

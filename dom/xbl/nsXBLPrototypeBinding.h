@@ -133,6 +133,9 @@ public:
   bool HasStyleSheets() const;
   void AppendStyleSheetsTo(nsTArray<mozilla::StyleSheet*>& aResult) const;
 
+#ifdef MOZ_OLD_STYLE
+  nsIStyleRuleProcessor* GetRuleProcessor();
+#endif
 
   const RawServoAuthorStyles* GetServoStyles() const
   {
@@ -290,9 +293,8 @@ public:
                                         nsIContent* aCopyRoot,
                                         mozilla::dom::Element* aTemplChild);
 
-  bool ChromeOnlyContent() const { return mChromeOnlyContent; }
-  bool SimpleScopeChain() const { return mSimpleScopeChain; }
-  bool BindToUntrustedContent() const { return mBindToUntrustedContent; }
+  bool ChromeOnlyContent() { return mChromeOnlyContent; }
+  bool BindToUntrustedContent() { return mBindToUntrustedContent; }
 
   typedef nsClassHashtable<nsRefPtrHashKey<nsAtom>, nsXBLAttributeEntry> InnerAttributeTable;
 
@@ -329,9 +331,6 @@ protected:
   bool mKeyHandlersRegistered;
   bool mChromeOnlyContent;
   bool mBindToUntrustedContent;
-  // True if constructors, handlers, etc for this binding would skip the scope
-  // chain for parent elements and go directly to the document.
-  bool mSimpleScopeChain;
 
   nsAutoPtr<nsXBLPrototypeResources> mResources; // If we have any resources, this will be non-null.
 

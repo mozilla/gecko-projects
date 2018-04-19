@@ -34,5 +34,5 @@ add_task(async function test_check_set_desktop_background() {
   let promiseContextMenuHidden = BrowserTestUtils.waitForEvent(contextMenu, "popuphidden");
   contextMenu.hidePopup();
   await promiseContextMenuHidden;
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

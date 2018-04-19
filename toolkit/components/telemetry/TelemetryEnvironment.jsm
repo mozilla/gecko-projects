@@ -216,6 +216,8 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["dom.ipc.plugins.enabled", {what: RECORD_PREF_VALUE}],
   ["dom.ipc.processCount", {what: RECORD_PREF_VALUE}],
   ["dom.max_script_run_time", {what: RECORD_PREF_VALUE}],
+  ["experiments.manifest.uri", {what: RECORD_PREF_VALUE}],
+  ["extensions.allow-non-mpc-extensions", {what: RECORD_PREF_VALUE}],
   ["extensions.autoDisableScopes", {what: RECORD_PREF_VALUE}],
   ["extensions.enabledScopes", {what: RECORD_PREF_VALUE}],
   ["extensions.blocklist.enabled", {what: RECORD_PREF_VALUE}],
@@ -244,7 +246,7 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["layers.prefer-d3d9", {what: RECORD_PREF_VALUE}],
   ["layers.prefer-opengl", {what: RECORD_PREF_VALUE}],
   ["layout.css.devPixelsPerPx", {what: RECORD_PREF_VALUE}],
-  ["marionette.enabled", {what: RECORD_PREF_VALUE}],
+  ["layout.css.servo.enabled", {what: RECORD_PREF_VALUE}],
   ["network.proxy.autoconfig_url", {what: RECORD_PREF_STATE}],
   ["network.proxy.http", {what: RECORD_PREF_STATE}],
   ["network.proxy.ssl", {what: RECORD_PREF_STATE}],
@@ -275,6 +277,7 @@ const PREF_SEARCH_COHORT = "browser.search.cohort";
 const COMPOSITOR_CREATED_TOPIC = "compositor:created";
 const COMPOSITOR_PROCESS_ABORTED_TOPIC = "compositor:process-aborted";
 const DISTRIBUTION_CUSTOMIZATION_COMPLETE_TOPIC = "distribution-customization-complete";
+const EXPERIMENTS_CHANGED_TOPIC = "experiments-changed";
 const GFX_FEATURES_READY_TOPIC = "gfx-features-ready";
 const SEARCH_ENGINE_MODIFIED_TOPIC = "browser-search-engine-modified";
 const SEARCH_SERVICE_TOPIC = "browser-search-service";
@@ -547,6 +550,7 @@ EnvironmentAddonBuilder.prototype = {
   watchForChanges() {
     this._loaded = true;
     AddonManager.addAddonListener(this);
+    Services.obs.addObserver(this, EXPERIMENTS_CHANGED_TOPIC);
   },
 
   // AddonListener
@@ -571,7 +575,9 @@ EnvironmentAddonBuilder.prototype = {
   // nsIObserver
   observe(aSubject, aTopic, aData) {
     this._environment._log.trace("observe - Topic " + aTopic);
-    if (aTopic == BLOCKLIST_LOADED_TOPIC) {
+    if (aTopic == "experiment-changed") {
+      this._checkForChanges("experiment-changed");
+    } else if (aTopic == BLOCKLIST_LOADED_TOPIC) {
       Services.obs.removeObserver(this, BLOCKLIST_LOADED_TOPIC);
       this._blocklistObserverAdded = false;
       let plugins = this._getActivePlugins();
@@ -608,6 +614,7 @@ EnvironmentAddonBuilder.prototype = {
   _shutdownBlocker() {
     if (this._loaded) {
       AddonManager.removeAddonListener(this);
+      Services.obs.removeObserver(this, EXPERIMENTS_CHANGED_TOPIC);
       if (this._blocklistObserverAdded) {
         Services.obs.removeObserver(this, BLOCKLIST_LOADED_TOPIC);
       }
@@ -644,7 +651,7 @@ EnvironmentAddonBuilder.prototype = {
       theme: await this._getActiveTheme(),
       activePlugins: this._getActivePlugins(),
       activeGMPlugins: await this._getActiveGMPlugins(),
-      activeExperiment: {},
+      activeExperiment: this._getActiveExperiment(),
       persona: personaId,
     };
 
@@ -686,7 +693,7 @@ EnvironmentAddonBuilder.prototype = {
           updateDay: Utils.millisecondsToDays(updateDate.getTime()),
           isSystem: addon.isSystem,
           isWebExtension: addon.isWebExtension,
-          multiprocessCompatible: true,
+          multiprocessCompatible: Boolean(addon.multiprocessCompatible),
         };
 
         // getActiveAddons() gives limited data during startup and full
@@ -843,6 +850,28 @@ EnvironmentAddonBuilder.prototype = {
     }
 
     return activeGMPlugins;
+  },
+
+  /**
+   * Get the active experiment data in object form.
+   * @return Object containing the active experiment data.
+   */
+  _getActiveExperiment() {
+    let experimentInfo = {};
+    try {
+      let scope = {};
+      ChromeUtils.import("resource:///modules/experiments/Experiments.jsm", scope);
+      let experiments = scope.Experiments.instance();
+      let activeExperiment = experiments.getActiveExperimentID();
+      if (activeExperiment) {
+        experimentInfo.id = activeExperiment;
+        experimentInfo.branch = experiments.getActiveExperimentBranch();
+      }
+    } catch (e) {
+      // If this is not Firefox, the import will fail.
+    }
+
+    return experimentInfo;
   },
 };
 
@@ -1330,7 +1359,6 @@ EnvironmentCache.prototype = {
       buildId: Services.appinfo.appBuildID || null,
       version: Services.appinfo.version || null,
       vendor: Services.appinfo.vendor || null,
-      displayVersion: AppConstants.MOZ_APP_VERSION_DISPLAY || null,
       platformVersion: Services.appinfo.platformVersion || null,
       xpcomAbi: Services.appinfo.XPCOMABI,
       updaterAvailable: AppConstants.MOZ_UPDATER,

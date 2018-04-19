@@ -16,7 +16,6 @@
    xmlns:xbl="http://www.mozilla.org/xbl">
 
   <binding id="date-input"
-           simpleScopeChain="true"
            extends="chrome://global/content/bindings/datetimebox.xml#datetime-input-base">
     <resources>
       <stylesheet src="chrome://global/content/textbox.css"/>
@@ -253,7 +252,6 @@
               this.advanceToNextField();
             }
             targetField.setAttribute("typeBuffer", buffer);
-            this.setInputValueFromFields();
           }
         ]]>
         </body>
@@ -430,7 +428,6 @@
   </binding>
 
   <binding id="time-input"
-           simpleScopeChain="true"
            extends="chrome://global/content/bindings/datetimebox.xml#datetime-input-base">
     <resources>
       <stylesheet src="chrome://global/content/textbox.css"/>
@@ -1030,7 +1027,6 @@
             } else if (key == "p" || key == "P") {
               this.setDayPeriodValue(this.mPMIndicator);
             }
-            this.setInputValueFromFields();
             return;
           }
 
@@ -1048,7 +1044,6 @@
               this.advanceToNextField();
             }
             targetField.setAttribute("typeBuffer", buffer);
-            this.setInputValueFromFields();
           }
         ]]>
         </body>
@@ -1197,8 +1192,7 @@
     </implementation>
   </binding>
 
-  <binding id="datetime-input-base"
-           simpleScopeChain="true">
+  <binding id="datetime-input-base">
     <resources>
       <stylesheet src="chrome://global/content/textbox.css"/>
       <stylesheet src="chrome://global/skin/textbox.css"/>

@@ -46,7 +46,6 @@
 
 #include "mozilla/dom/WorkerCommon.h"
 #include "mozilla/dom/WorkerPrivate.h"
-#include "mozilla/dom/WorkerRef.h"
 #include "mozilla/dom/WorkerRunnable.h"
 #include "mozilla/dom/WorkerScope.h"
 
@@ -159,6 +158,22 @@ private:
   }
 };
 
+class WorkerFetchResolver;
+
+class WorkerNotifier final : public WorkerHolder
+{
+  RefPtr<WorkerFetchResolver> mResolver;
+
+public:
+  explicit WorkerNotifier(WorkerFetchResolver* aResolver)
+    : WorkerHolder("WorkerNotifier", AllowIdleShutdownStart)
+    , mResolver(aResolver)
+  {}
+
+  bool
+  Notify(WorkerStatus aStatus) override;
+};
+
 class WorkerFetchResolver final : public FetchDriverObserver
 {
   // Thread-safe:
@@ -167,7 +182,7 @@ class WorkerFetchResolver final : public FetchDriverObserver
 
   // Touched only on the worker thread.
   RefPtr<FetchObserver> mFetchObserver;
-  RefPtr<WeakWorkerRef> mWorkerRef;
+  UniquePtr<WorkerHolder> mWorkerHolder;
 
 public:
   // Returns null if worker is shutting down.
@@ -192,15 +207,9 @@ public:
     RefPtr<WorkerFetchResolver> r =
       new WorkerFetchResolver(proxy, signalProxy, aObserver);
 
-    RefPtr<WeakWorkerRef> workerRef =
-      WeakWorkerRef::Create(aWorkerPrivate, [r]() {
-        r->Shutdown(r->mWorkerRef->GetPrivate());
-      });
-    if (NS_WARN_IF(!workerRef)) {
+    if (NS_WARN_IF(!r->HoldWorker(aWorkerPrivate))) {
       return nullptr;
     }
-
-    r->mWorkerRef = Move(workerRef);
 
     return r.forget();
   }
@@ -280,7 +289,7 @@ public:
       mSignalProxy->Shutdown();
     }
 
-    mWorkerRef = nullptr;
+    mWorkerHolder = nullptr;
   }
 
 private:
@@ -300,6 +309,18 @@ private:
 
   virtual void
   FlushConsoleReport() override;
+
+  bool
+  HoldWorker(WorkerPrivate* aWorkerPrivate)
+  {
+    UniquePtr<WorkerNotifier> wn(new WorkerNotifier(this));
+    if (NS_WARN_IF(!wn->HoldWorker(aWorkerPrivate, Canceling))) {
+      return false;
+    }
+
+    mWorkerHolder = Move(wn);
+    return true;
+  }
 };
 
 class MainThreadFetchResolver final : public FetchDriverObserver
@@ -530,7 +551,7 @@ FetchRequest(nsIGlobalObject* aGlobal, const RequestOrUSVString& aInput,
     RefPtr<WorkerFetchResolver> resolver =
       WorkerFetchResolver::Create(worker, p, signal, observer);
     if (!resolver) {
-      NS_WARNING("Could not keep the worker alive.");
+      NS_WARNING("Could not add WorkerFetchResolver workerHolder to worker");
       aRv.Throw(NS_ERROR_DOM_ABORT_ERR);
       return nullptr;
     }
@@ -755,6 +776,18 @@ public:
   // Control runnable cancel already calls Run().
 };
 
+bool
+WorkerNotifier::Notify(WorkerStatus aStatus)
+{
+  if (mResolver) {
+    // This will nullify this object.
+    // No additional operation after this line!
+    mResolver->Shutdown(mWorkerPrivate);
+  }
+
+  return true;
+}
+
 void
 WorkerFetchResolver::OnResponseAvailableInternal(InternalResponse* aResponse)
 {
@@ -817,7 +850,7 @@ WorkerFetchResolver::OnResponseEnd(FetchDriverObserver::EndReason aReason)
       new WorkerFetchResponseEndControlRunnable(mPromiseProxy->GetWorkerPrivate(),
                                                 this);
     // This can fail if the worker thread is canceled or killed causing
-    // the PromiseWorkerProxy to give up its WorkerRef immediately,
+    // the PromiseWorkerProxy to give up its WorkerHolder immediately,
     // allowing the worker thread to become Dead.
     if (!cr->Dispatch()) {
       NS_WARNING("Failed to dispatch WorkerFetchResponseEndControlRunnable");

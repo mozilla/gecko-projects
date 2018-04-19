@@ -16,7 +16,6 @@
   #gapPercent { grid-gap: 15%; }
   #gapPercentTwo { grid-gap: 15% 10%; }
   #gapCalc { grid-gap: calc(10px + 4px); }
-  #gapCalcFixedPercent { grid-gap: calc(5px + 10%); }
   #gapCalcTwo { grid-gap: calc(10px + 4px) calc(20px - 8px); }
   .gapInitial { grid-gap: initial; }
   .gapInherit { grid-gap: inherit; }
@@ -45,7 +44,6 @@
   <div id="gapPercent"></div>
   <div id="gapPercentTwo"></div>
   <div id="gapCalc"></div>
-  <div id="gapCalcFixedPercent"></div>
   <div id="gapCalcTwo"></div>
   <div id="gapInitial" class="gapInitial"></div>
   <div class="gapPx">
@@ -72,37 +70,37 @@
         var target = document.getElementById("default");
         assert_equals(getComputedStyle(target).rowGap, "normal");
         assert_equals(getComputedStyle(target).columnGap, "normal");
-      }, "Default grid-gap is 'normal'");
+      }, "Default gap is 'normal'");
     test(
       function(){
         var target = document.getElementById("gapPx");
         assert_equals(getComputedStyle(target).rowGap, "12px");
         assert_equals(getComputedStyle(target).columnGap, "12px");
-      }, "grid-gap accepts pixels");
+      }, "gap accepts pixels");
     test(
       function(){
         var target = document.getElementById("gapPxTwo");
         assert_equals(getComputedStyle(target).rowGap, "12px");
         assert_equals(getComputedStyle(target).columnGap, "8px");
-      }, "grid-gap accepts pixels 2");
+      }, "gap accepts pixels 2");
     test(
       function(){
         var target = document.getElementById("gapPxPercent");
         assert_equals(getComputedStyle(target).rowGap, "12px");
         assert_equals(getComputedStyle(target).columnGap, "10%");
-      }, "grid-gap accepts pixels combined with percentage");
+      }, "gap accepts pixels combined with percentage");
     test(
       function(){
         var target = document.getElementById("gapEm");
         assert_equals(getComputedStyle(target).rowGap, "20px");
         assert_equals(getComputedStyle(target).columnGap, "20px");
-      }, "grid-gap accepts em");
+      }, "gap accepts em");
     test(
       function(){
         var target = document.getElementById("gapEmTwo");
         assert_equals(getComputedStyle(target).rowGap, "20px");
         assert_equals(getComputedStyle(target).columnGap, "40px");
-      }, "grid-gap accepts em 2");
+      }, "gap accepts em 2");
     test(
       function(){
         var target = document.getElementById("gapVw");
@@ -110,7 +108,7 @@
         // in any window size we just check it's not "normal".
         assert_not_equals(getComputedStyle(target).rowGap, "normal");
         assert_not_equals(getComputedStyle(target).columnGap, "normal");
-      }, "grid-gap accepts vw");
+      }, "gap accepts vw");
     test(
       function(){
         var target = document.getElementById("gapVwTwo");
@@ -118,116 +116,110 @@
         // in any window size we just check it's not "normal".
         assert_not_equals(getComputedStyle(target).rowGap, "normal");
         assert_not_equals(getComputedStyle(target).columnGap, "normal");
-      }, "grid-gap accepts vw and vh");
+      }, "gap accepts vw and vh");
     test(
       function(){
         var target = document.getElementById("gapPercent");
         assert_equals(getComputedStyle(target).rowGap, "15%");
         assert_equals(getComputedStyle(target).columnGap, "15%");
-      }, "grid-gap accepts percentage");
+      }, "gap accepts percentage");
     test(
       function(){
         var target = document.getElementById("gapPercentTwo");
         assert_equals(getComputedStyle(target).rowGap, "15%");
         assert_equals(getComputedStyle(target).columnGap, "10%");
-      }, "grid-gap accepts percentage 2");
+      }, "gap accepts percentage 2");
     test(
       function(){
         var target = document.getElementById("gapCalc");
         assert_equals(getComputedStyle(target).rowGap, "14px");
         assert_equals(getComputedStyle(target).columnGap, "14px");
-      }, "grid-gap accepts calc()");
-    test(
-      function(){
-        var target = document.getElementById("gapCalcFixedPercent");
-        assert_equals(getComputedStyle(target).rowGap, "calc(5px + 10%)");
-        assert_equals(getComputedStyle(target).columnGap, "calc(5px + 10%)");
-      }, "grid-gap accepts calc() mixing fixed and percentage values");
+      }, "gap accepts calc()");
     test(
       function(){
         var target = document.getElementById("gapCalcTwo");
         assert_equals(getComputedStyle(target).rowGap, "14px");
         assert_equals(getComputedStyle(target).columnGap, "12px");
-      }, "grid-gap accepts calc() 2");
+      }, "gap accepts calc() 2");
     test(
       function(){
         var target = document.getElementById("gapInitial");
         assert_equals(getComputedStyle(target).rowGap, "normal");
         assert_equals(getComputedStyle(target).columnGap, "normal");
-      }, "Initial grid-gap is 'normal'");
+      }, "Initial gap is 'normal'");
     test(
       function(){
         var target = document.getElementById("gapInitialPx");
         assert_equals(getComputedStyle(target).rowGap, "normal");
         assert_equals(getComputedStyle(target).columnGap, "normal");
-      }, "Initial grid-gap is 'normal' 2");
+      }, "Initial gap is 'normal' 2");
     test(
       function(){
         var target = document.getElementById("gapInherit");
         assert_equals(getComputedStyle(target).rowGap, "normal");
         assert_equals(getComputedStyle(target).columnGap, "normal");
-      }, "Initial inherited grid-gap is 'normal'");
+      }, "Initial inherited gap is 'normal'");
     test(
       function(){
         var target = document.getElementById("gapInheritPx");
         assert_equals(getComputedStyle(target).rowGap, "12px");
         assert_equals(getComputedStyle(target).columnGap, "12px");
-      }, "grid-gap is inheritable");
+      }, "gap is inheritable");
 
     test(
       function(){
         var target = document.getElementById("invalidGridGapNegative");
         assert_equals(getComputedStyle(target).rowGap, "normal");
         assert_equals(getComputedStyle(target).columnGap, "normal");
-      }, "Negative grid-gap is invalid");
+      }, "Negative gap is invalid");
     test(
       function(){
         var target = document.getElementById("invalidGridGapMaxContent");
         assert_equals(getComputedStyle(target).rowGap, "normal");
         assert_equals(getComputedStyle(target).columnGap, "normal");
-      }, "'max-content' grid-gap is invalid");
+      }, "'max-content' gap is invalid");
     test(
       function(){
         var target = document.getElementById("invalidGridGapNone");
         assert_equals(getComputedStyle(target).rowGap, "normal");
         assert_equals(getComputedStyle(target).columnGap, "normal");
-      }, "'none' grid-gap is invalid");
+      }, "'none' gap is invalid");
     test(
       function(){
         var target = document.getElementById("invalidGridGapAngle");
         assert_equals(getComputedStyle(target).rowGap, "normal");
         assert_equals(getComputedStyle(target).columnGap, "normal");
-      }, "Angle grid-gap is invalid");
+      }, "Angle gap is invalid");
     test(
       function(){
         var target = document.getElementById("invalidGridGapResolution");
         assert_equals(getComputedStyle(target).rowGap, "normal");
         assert_equals(getComputedStyle(target).columnGap, "normal");
-      }, "Resolution grid-gap is invalid");
+      }, "Resolution gap is invalid");
     test(
       function(){
         var target = document.getElementById("invalidGridGapTime");
         assert_equals(getComputedStyle(target).rowGap, "normal");
         assert_equals(getComputedStyle(target).columnGap, "normal");
-      }, "Time grid-gap is invalid");
+      }, "Time gap is invalid");
     test(
       function(){
         var target = document.getElementById("invalidGridGapThree");
         assert_equals(getComputedStyle(target).rowGap, "normal");
         assert_equals(getComputedStyle(target).columnGap, "normal");
-      }, "grid-gap with three values is invalid");
+      }, "gap with three values is invalid");
     test(
       function(){
         var target = document.getElementById("invalidGridGapSlash");
         assert_equals(getComputedStyle(target).rowGap, "normal");
         assert_equals(getComputedStyle(target).columnGap, "normal");
-      }, "grid-gap with slash is invalid");
+      }, "gap with slash is invalid");
     test(
       function(){
         var target = document.getElementById("invalidGridGapOneWrong");
         assert_equals(getComputedStyle(target).rowGap, "normal");
         assert_equals(getComputedStyle(target).columnGap, "normal");
-      }, "grid-gap with one wrong value is invalid");
+      }, "gap with one wrong value is invalid");
   </script>
 </body>
 

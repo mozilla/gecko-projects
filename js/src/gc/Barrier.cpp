@@ -21,9 +21,9 @@
 namespace js {
 
 bool
-RuntimeFromMainThreadIsHeapMajorCollecting(JS::shadow::Zone* shadowZone)
+RuntimeFromActiveCooperatingThreadIsHeapMajorCollecting(JS::shadow::Zone* shadowZone)
 {
-    MOZ_ASSERT(CurrentThreadCanAccessRuntime(shadowZone->runtimeFromMainThread()));
+    MOZ_ASSERT(CurrentThreadCanAccessRuntime(shadowZone->runtimeFromActiveCooperatingThread()));
     return JS::CurrentThreadIsHeapMajorCollecting();
 }
 

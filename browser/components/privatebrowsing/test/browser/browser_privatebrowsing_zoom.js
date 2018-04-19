@@ -30,8 +30,8 @@ add_task(async function test() {
 
   // cleanup
   win.FullZoom.reset();
-  BrowserTestUtils.removeTab(tabMozilla);
-  BrowserTestUtils.removeTab(tabAbout);
+  await Promise.all([ BrowserTestUtils.removeTab(tabMozilla),
+                      BrowserTestUtils.removeTab(tabAbout) ]);
 
   await BrowserTestUtils.closeWindow(win);
 });

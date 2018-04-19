@@ -29,7 +29,6 @@ async function createXULExtension(details) {
     "install.rdf": {
       id: details.id,
       name: details.name,
-      bootstrap: true,
       version: "0.1",
       targetApplications: [{
         id: "toolkit@mozilla.org",

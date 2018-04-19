@@ -14,9 +14,8 @@ use dom::bindings::trace::RootedTraceableBox;
 use dom::event::Event;
 use dom::window::Window;
 use dom_struct::dom_struct;
-use js::jsapi::{Heap, JSContext};
+use js::jsapi::{Heap, HandleValue, JSContext};
 use js::jsval::JSVal;
-use js::rust::HandleValue;
 use servo_atoms::Atom;
 
 // https://html.spec.whatwg.org/multipage/#the-popstateevent-interface

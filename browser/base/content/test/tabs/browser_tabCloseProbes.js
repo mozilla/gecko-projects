@@ -6,20 +6,6 @@ var gNoAnimHistogram = Services.telemetry
                                .getHistogramById("FX_TAB_CLOSE_TIME_NO_ANIM_MS");
 
 /**
- * Takes a Telemetry histogram snapshot and returns the sum of all counts.
- *
- * @param snapshot (Object)
- *        The Telemetry histogram snapshot to examine.
- * @return (int)
- *         The sum of all counts in the snapshot.
- */
-function snapshotCount(snapshot) {
-  // Use Array.prototype.reduce to sum up all of the
-  // snapshot.count entries
-  return snapshot.counts.reduce((a, b) => a + b);
-}
-
-/**
  * Takes a Telemetry histogram snapshot and makes sure
  * that the sum of all counts equals expectedCount.
  *
@@ -32,25 +18,10 @@ function snapshotCount(snapshot) {
  *        this would be 0.
  */
 function assertCount(snapshot, expectedCount) {
-  Assert.equal(snapshotCount(snapshot), expectedCount,
+  // Use Array.prototype.reduce to sum up all of the
+  // snapshot.count entries
+  Assert.equal(snapshot.counts.reduce((a, b) => a + b), expectedCount,
                `Should only be ${expectedCount} collected value.`);
-}
-
-/**
- * Takes a Telemetry histogram and waits for the sum of all counts becomes
- * equal to expectedCount.
- *
- * @param histogram (Object)
- *        The Telemetry histogram to examine.
- * @param expectedCount (int)
- *        What we expect the number of incremented counts to become.
- * @return (Promise)
- * @resolves When the histogram snapshot count becomes the expected count.
- */
-function waitForSnapshotCount(histogram, expectedCount) {
-  return BrowserTestUtils.waitForCondition(() => {
-    return snapshotCount(histogram.snapshot()) == expectedCount;
-  }, `Collected value should become ${expectedCount}.`);
 }
 
 add_task(async function setup() {
@@ -74,9 +45,9 @@ add_task(async function test_close_time_anim_probe() {
   gAnimHistogram.clear();
   gNoAnimHistogram.clear();
 
-  BrowserTestUtils.removeTab(tab, { animate: true });
+  await BrowserTestUtils.removeTab(tab, { animate: true });
 
-  await waitForSnapshotCount(gAnimHistogram, 1);
+  assertCount(gAnimHistogram.snapshot(), 1);
   assertCount(gNoAnimHistogram.snapshot(), 0);
 
   gAnimHistogram.clear();
@@ -94,10 +65,10 @@ add_task(async function test_close_time_no_anim_probe() {
   gAnimHistogram.clear();
   gNoAnimHistogram.clear();
 
-  BrowserTestUtils.removeTab(tab, { animate: false });
+  await BrowserTestUtils.removeTab(tab, { animate: false });
 
-  await waitForSnapshotCount(gNoAnimHistogram, 1);
   assertCount(gAnimHistogram.snapshot(), 0);
+  assertCount(gNoAnimHistogram.snapshot(), 1);
 
   gAnimHistogram.clear();
   gNoAnimHistogram.clear();

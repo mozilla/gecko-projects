@@ -16,4 +16,5 @@ verifyNotEnumerable(Object.is, "name");
 verifyNotWritable(Object.is, "name");
 verifyConfigurable(Object.is, "name");
 
+
 reportCompare(0, 0);

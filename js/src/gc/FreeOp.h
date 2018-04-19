@@ -40,7 +40,7 @@ class FreeOp : public JSFreeOp
     explicit FreeOp(JSRuntime* maybeRuntime);
     ~FreeOp();
 
-    bool onMainThread() const {
+    bool onActiveCooperatingThread() const {
         return runtime_ != nullptr;
     }
 

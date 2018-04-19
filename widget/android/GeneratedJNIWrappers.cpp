@@ -1017,51 +1017,6 @@ constexpr char ScreenManagerHelper::AddDisplay_t::signature[];
 constexpr char ScreenManagerHelper::RemoveDisplay_t::name[];
 constexpr char ScreenManagerHelper::RemoveDisplay_t::signature[];
 
-const char SpeechSynthesisService::name[] =
-        "org/mozilla/gecko/SpeechSynthesisService";
-
-constexpr char SpeechSynthesisService::DispatchBoundary_t::name[];
-constexpr char SpeechSynthesisService::DispatchBoundary_t::signature[];
-
-constexpr char SpeechSynthesisService::DispatchEnd_t::name[];
-constexpr char SpeechSynthesisService::DispatchEnd_t::signature[];
-
-constexpr char SpeechSynthesisService::DispatchError_t::name[];
-constexpr char SpeechSynthesisService::DispatchError_t::signature[];
-
-constexpr char SpeechSynthesisService::DispatchStart_t::name[];
-constexpr char SpeechSynthesisService::DispatchStart_t::signature[];
-
-constexpr char SpeechSynthesisService::DoneRegisteringVoices_t::name[];
-constexpr char SpeechSynthesisService::DoneRegisteringVoices_t::signature[];
-
-constexpr char SpeechSynthesisService::InitSynth_t::name[];
-constexpr char SpeechSynthesisService::InitSynth_t::signature[];
-
-auto SpeechSynthesisService::InitSynth() -> void
-{
-    return mozilla::jni::Method<InitSynth_t>::Call(SpeechSynthesisService::Context(), nullptr);
-}
-
-constexpr char SpeechSynthesisService::RegisterVoice_t::name[];
-constexpr char SpeechSynthesisService::RegisterVoice_t::signature[];
-
-constexpr char SpeechSynthesisService::Speak_t::name[];
-constexpr char SpeechSynthesisService::Speak_t::signature[];
-
-auto SpeechSynthesisService::Speak(mozilla::jni::String::Param a0, mozilla::jni::String::Param a1, float a2, float a3, float a4) -> mozilla::jni::String::LocalRef
-{
-    return mozilla::jni::Method<Speak_t>::Call(SpeechSynthesisService::Context(), nullptr, a0, a1, a2, a3, a4);
-}
-
-constexpr char SpeechSynthesisService::Stop_t::name[];
-constexpr char SpeechSynthesisService::Stop_t::signature[];
-
-auto SpeechSynthesisService::Stop() -> void
-{
-    return mozilla::jni::Method<Stop_t>::Call(SpeechSynthesisService::Context(), nullptr);
-}
-
 const char SurfaceTextureListener::name[] =
         "org/mozilla/gecko/SurfaceTextureListener";
 
@@ -1345,46 +1300,46 @@ auto LayerSession::Compositor::UpdateRootFrameMetrics(float a0, float a1, float 
     return mozilla::jni::Method<UpdateRootFrameMetrics_t>::Call(Compositor::mCtx, nullptr, a0, a1, a2);
 }
 
-const char PanZoomController::name[] =
-        "org/mozilla/gecko/gfx/PanZoomController";
+const char NativePanZoomController::name[] =
+        "org/mozilla/gecko/gfx/NativePanZoomController";
 
-constexpr char PanZoomController::DisposeNative_t::name[];
-constexpr char PanZoomController::DisposeNative_t::signature[];
+constexpr char NativePanZoomController::DisposeNative_t::name[];
+constexpr char NativePanZoomController::DisposeNative_t::signature[];
 
-constexpr char PanZoomController::HandleMotionEvent_t::name[];
-constexpr char PanZoomController::HandleMotionEvent_t::signature[];
+constexpr char NativePanZoomController::HandleMotionEvent_t::name[];
+constexpr char NativePanZoomController::HandleMotionEvent_t::signature[];
 
-constexpr char PanZoomController::HandleMouseEvent_t::name[];
-constexpr char PanZoomController::HandleMouseEvent_t::signature[];
+constexpr char NativePanZoomController::HandleMouseEvent_t::name[];
+constexpr char NativePanZoomController::HandleMouseEvent_t::signature[];
 
-constexpr char PanZoomController::HandleScrollEvent_t::name[];
-constexpr char PanZoomController::HandleScrollEvent_t::signature[];
+constexpr char NativePanZoomController::HandleScrollEvent_t::name[];
+constexpr char NativePanZoomController::HandleScrollEvent_t::signature[];
 
-constexpr char PanZoomController::SetIsLongpressEnabled_t::name[];
-constexpr char PanZoomController::SetIsLongpressEnabled_t::signature[];
+constexpr char NativePanZoomController::SetIsLongpressEnabled_t::name[];
+constexpr char NativePanZoomController::SetIsLongpressEnabled_t::signature[];
 
-constexpr char PanZoomController::SetAttached_t::name[];
-constexpr char PanZoomController::SetAttached_t::signature[];
+constexpr char NativePanZoomController::SetAttached_t::name[];
+constexpr char NativePanZoomController::SetAttached_t::signature[];
 
-auto PanZoomController::SetAttached(bool a0) const -> void
+auto NativePanZoomController::SetAttached(bool a0) const -> void
 {
-    return mozilla::jni::Method<SetAttached_t>::Call(PanZoomController::mCtx, nullptr, a0);
+    return mozilla::jni::Method<SetAttached_t>::Call(NativePanZoomController::mCtx, nullptr, a0);
 }
 
-constexpr char PanZoomController::SynthesizeNativeMouseEvent_t::name[];
-constexpr char PanZoomController::SynthesizeNativeMouseEvent_t::signature[];
+constexpr char NativePanZoomController::SynthesizeNativeMouseEvent_t::name[];
+constexpr char NativePanZoomController::SynthesizeNativeMouseEvent_t::signature[];
 
-auto PanZoomController::SynthesizeNativeMouseEvent(int32_t a0, int32_t a1, int32_t a2) const -> void
+auto NativePanZoomController::SynthesizeNativeMouseEvent(int32_t a0, int32_t a1, int32_t a2) const -> void
 {
-    return mozilla::jni::Method<SynthesizeNativeMouseEvent_t>::Call(PanZoomController::mCtx, nullptr, a0, a1, a2);
+    return mozilla::jni::Method<SynthesizeNativeMouseEvent_t>::Call(NativePanZoomController::mCtx, nullptr, a0, a1, a2);
 }
 
-constexpr char PanZoomController::SynthesizeNativeTouchPoint_t::name[];
-constexpr char PanZoomController::SynthesizeNativeTouchPoint_t::signature[];
+constexpr char NativePanZoomController::SynthesizeNativeTouchPoint_t::name[];
+constexpr char NativePanZoomController::SynthesizeNativeTouchPoint_t::signature[];
 
-auto PanZoomController::SynthesizeNativeTouchPoint(int32_t a0, int32_t a1, int32_t a2, int32_t a3, double a4, int32_t a5) const -> void
+auto NativePanZoomController::SynthesizeNativeTouchPoint(int32_t a0, int32_t a1, int32_t a2, int32_t a3, double a4, int32_t a5) const -> void
 {
-    return mozilla::jni::Method<SynthesizeNativeTouchPoint_t>::Call(PanZoomController::mCtx, nullptr, a0, a1, a2, a3, a4, a5);
+    return mozilla::jni::Method<SynthesizeNativeTouchPoint_t>::Call(NativePanZoomController::mCtx, nullptr, a0, a1, a2, a3, a4, a5);
 }
 
 const char StackScroller::name[] =
@@ -2400,9 +2355,9 @@ constexpr char GeckoProcessManager::GetEditableParent_t::signature[];
 constexpr char GeckoProcessManager::Start_t::name[];
 constexpr char GeckoProcessManager::Start_t::signature[];
 
-auto GeckoProcessManager::Start(mozilla::jni::String::Param a0, mozilla::jni::ObjectArray::Param a1, int32_t a2, int32_t a3, int32_t a4, int32_t a5) -> int32_t
+auto GeckoProcessManager::Start(mozilla::jni::String::Param a0, mozilla::jni::ObjectArray::Param a1, int32_t a2, int32_t a3, int32_t a4) -> int32_t
 {
-    return mozilla::jni::Method<Start_t>::Call(GeckoProcessManager::Context(), nullptr, a0, a1, a2, a3, a4, a5);
+    return mozilla::jni::Method<Start_t>::Call(GeckoProcessManager::Context(), nullptr, a0, a1, a2, a3, a4);
 }
 
 const char GeckoServiceChildProcess::name[] =
@@ -2582,14 +2537,14 @@ auto GeckoSession::Window::OnReady(mozilla::jni::Object::Param a0) const -> void
 constexpr char GeckoSession::Window::Open_t::name[];
 constexpr char GeckoSession::Window::Open_t::signature[];
 
-const char SessionTextInput::name[] =
-        "org/mozilla/geckoview/SessionTextInput";
+const char TextInputController::name[] =
+        "org/mozilla/geckoview/TextInputController";
 
-const char SessionTextInput::EditableClient::name[] =
-        "org/mozilla/geckoview/SessionTextInput$EditableClient";
+const char TextInputController::EditableClient::name[] =
+        "org/mozilla/geckoview/TextInputController$EditableClient";
 
-const char SessionTextInput::EditableListener::name[] =
-        "org/mozilla/geckoview/SessionTextInput$EditableListener";
+const char TextInputController::EditableListener::name[] =
+        "org/mozilla/geckoview/TextInputController$EditableListener";
 
 } /* java */
 } /* mozilla */

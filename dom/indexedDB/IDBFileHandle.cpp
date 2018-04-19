@@ -212,7 +212,7 @@ IDBFileHandle::FireCompleteOrAbortEvents(bool aAborted)
   mFiredCompleteOrAbort = true;
 #endif
 
-  RefPtr<Event> event;
+  nsCOMPtr<nsIDOMEvent> event;
   if (aAborted) {
     event = CreateGenericEvent(this, nsDependentString(kAbortEventType),
                                eDoesBubble, eNotCancelable);
@@ -224,9 +224,8 @@ IDBFileHandle::FireCompleteOrAbortEvents(bool aAborted)
     return;
   }
 
-  IgnoredErrorResult rv;
-  DispatchEvent(*event, rv);
-  if (rv.Failed()) {
+  bool dummy;
+  if (NS_FAILED(DispatchEvent(event, &dummy))) {
     NS_WARNING("DispatchEvent failed!");
   }
 }
@@ -781,13 +780,14 @@ IDBFileHandle::Run()
   return NS_OK;
 }
 
-void
+nsresult
 IDBFileHandle::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   AssertIsOnOwningThread();
 
   aVisitor.mCanHandle = true;
   aVisitor.SetParentTarget(mMutableFile, false);
+  return NS_OK;
 }
 
 // virtual

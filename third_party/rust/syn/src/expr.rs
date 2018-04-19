@@ -242,7 +242,7 @@ ast_enum_of_structs! {
             pub attrs: Vec<Attribute>,
             pub if_token: Token![if],
             pub let_token: Token![let],
-            pub pats: Punctuated<Pat, Token![|]>,
+            pub pat: Box<Pat>,
             pub eq_token: Token![=],
             pub expr: Box<Expr>,
             pub then_branch: Block,
@@ -268,7 +268,7 @@ ast_enum_of_structs! {
             pub label: Option<Label>,
             pub while_token: Token![while],
             pub let_token: Token![let],
-            pub pats: Punctuated<Pat, Token![|]>,
+            pub pat: Box<Pat>,
             pub eq_token: Token![=],
             pub expr: Box<Expr>,
             pub body: Block,
@@ -313,7 +313,6 @@ ast_enum_of_structs! {
         /// *This type is available if Syn is built with the `"full"` feature.*
         pub Closure(ExprClosure #full {
             pub attrs: Vec<Attribute>,
-            pub movability: Option<Token![static]>,
             pub capture: Option<Token![move]>,
             pub or1_token: Token![|],
             pub inputs: Punctuated<FnArg, Token![,]>,
@@ -407,7 +406,7 @@ ast_enum_of_structs! {
         /// A referencing operation: `&a` or `&mut a`.
         ///
         /// *This type is available if Syn is built with the `"full"` feature.*
-        pub Reference(ExprReference #full {
+        pub AddrOf(ExprAddrOf #full {
             pub attrs: Vec<Attribute>,
             pub and_token: Token![&],
             pub mutability: Option<Token![mut]>,
@@ -590,7 +589,7 @@ impl Expr {
             | Expr::Index(ExprIndex { ref mut attrs, .. })
             | Expr::Range(ExprRange { ref mut attrs, .. })
             | Expr::Path(ExprPath { ref mut attrs, .. })
-            | Expr::Reference(ExprReference { ref mut attrs, .. })
+            | Expr::AddrOf(ExprAddrOf { ref mut attrs, .. })
             | Expr::Break(ExprBreak { ref mut attrs, .. })
             | Expr::Continue(ExprContinue { ref mut attrs, .. })
             | Expr::Return(ExprReturn { ref mut attrs, .. })
@@ -640,7 +639,7 @@ impl From<usize> for Index {
         assert!(index < std::u32::MAX as usize);
         Index {
             index: index as u32,
-            span: Span::call_site(),
+            span: Span::def_site(),
         }
     }
 }
@@ -764,7 +763,7 @@ ast_struct! {
     pub struct Local {
         pub attrs: Vec<Attribute>,
         pub let_token: Token![let],
-        pub pats: Punctuated<Pat, Token![|]>,
+        pub pat: Box<Pat>,
         pub ty: Option<(Token![:], Box<Type>)>,
         pub init: Option<(Token![=], Box<Expr>)>,
         pub semi_token: Token![;],
@@ -954,10 +953,9 @@ ast_struct! {
     /// *This type is available if Syn is built with the `"full"` feature.*
     pub struct Arm {
         pub attrs: Vec<Attribute>,
-        pub leading_vert: Option<Token![|]>,
         pub pats: Punctuated<Pat, Token![|]>,
         pub guard: Option<(Token![if], Box<Expr>)>,
-        pub fat_arrow_token: Token![=>],
+        pub rocket_token: Token![=>],
         pub body: Box<Expr>,
         pub comma: Option<Token![,]>,
     }
@@ -1404,7 +1402,7 @@ pub mod parsing {
             and: punct!(&) >>
             mutability: option!(keyword!(mut)) >>
             expr: call!(unary_expr, allow_struct, true) >>
-            (ExprReference {
+            (ExprAddrOf {
                 attrs: Vec::new(),
                 and_token: and,
                 mutability: mutability,
@@ -1758,14 +1756,14 @@ pub mod parsing {
         named!(parse -> Self, do_parse!(
             if_: keyword!(if) >>
             let_: keyword!(let) >>
-            pats: call!(Punctuated::parse_separated_nonempty) >>
+            pat: syn!(Pat) >>
             eq: punct!(=) >>
             cond: expr_no_struct >>
             then_block: braces!(Block::parse_within) >>
             else_block: option!(else_block) >>
             (ExprIfLet {
                 attrs: Vec::new(),
-                pats: pats,
+                pat: Box::new(pat),
                 let_token: let_,
                 eq_token: eq,
                 expr: Box::new(cond),
@@ -1933,10 +1931,9 @@ pub mod parsing {
     impl Synom for Arm {
         named!(parse -> Self, do_parse!(
             attrs: many0!(Attribute::parse_outer) >>
-            leading_vert: option!(punct!(|)) >>
             pats: call!(Punctuated::parse_separated_nonempty) >>
             guard: option!(tuple!(keyword!(if), syn!(Expr))) >>
-            fat_arrow: punct!(=>) >>
+            rocket: punct!(=>) >>
             body: do_parse!(
                 expr: alt!(expr_nosemi | syn!(Expr)) >>
                 comma: switch!(value!(arm_expr_requires_comma(&expr)),
@@ -1951,9 +1948,8 @@ pub mod parsing {
                 (expr, comma)
             ) >>
             (Arm {
-                fat_arrow_token: fat_arrow,
+                rocket_token: rocket,
                 attrs: attrs,
-                leading_vert: leading_vert,
                 pats: pats,
                 guard: guard.map(|(if_, guard)| (if_, Box::new(guard))),
                 body: Box::new(body.0),
@@ -1968,7 +1964,6 @@ pub mod parsing {
 
     #[cfg(feature = "full")]
     named!(expr_closure(allow_struct: bool) -> Expr, do_parse!(
-        movability: option!(keyword!(static)) >>
         capture: option!(keyword!(move)) >>
         or1: punct!(|) >>
         inputs: call!(Punctuated::parse_terminated_with, fn_arg) >>
@@ -1989,7 +1984,6 @@ pub mod parsing {
         ) >>
         (ExprClosure {
             attrs: Vec::new(),
-            movability: movability,
             capture: capture,
             or1_token: or1,
             inputs: inputs,
@@ -2043,7 +2037,7 @@ pub mod parsing {
             label: option!(syn!(Label)) >>
             while_: keyword!(while) >>
             let_: keyword!(let) >>
-            pats: call!(Punctuated::parse_separated_nonempty) >>
+            pat: syn!(Pat) >>
             eq: punct!(=) >>
             value: expr_no_struct >>
             while_block: syn!(Block) >>
@@ -2052,7 +2046,7 @@ pub mod parsing {
                 eq_token: eq,
                 let_token: let_,
                 while_token: while_,
-                pats: pats,
+                pat: Box::new(pat),
                 expr: Box::new(value),
                 body: while_block,
                 label: label,
@@ -2384,14 +2378,14 @@ pub mod parsing {
     named!(stmt_local -> Stmt, do_parse!(
         attrs: many0!(Attribute::parse_outer) >>
         let_: keyword!(let) >>
-        pats: call!(Punctuated::parse_separated_nonempty) >>
+        pat: syn!(Pat) >>
         ty: option!(tuple!(punct!(:), syn!(Type))) >>
         init: option!(tuple!(punct!(=), syn!(Expr))) >>
         semi: punct!(;) >>
         (Stmt::Local(Local {
             attrs: attrs,
             let_token: let_,
-            pats: pats,
+            pat: Box::new(pat),
             ty: ty.map(|(colon, ty)| (colon, Box::new(ty))),
             init: init.map(|(eq, expr)| (eq, Box::new(expr))),
             semi_token: semi,
@@ -2623,7 +2617,7 @@ pub mod parsing {
             lit: syn!(LitInt) >>
             ({
                 if let IntSuffix::None = lit.suffix() {
-                    Index { index: lit.value() as u32, span: lit.span() }
+                    Index { index: lit.value() as u32, span: lit.span }
                 } else {
                     return parse_error();
                 }
@@ -2819,7 +2813,7 @@ mod printing {
     #[cfg(feature = "full")]
     use attr::FilterAttrs;
     use quote::{ToTokens, Tokens};
-    use proc_macro2::Literal;
+    use proc_macro2::{Literal, TokenNode, TokenTree};
 
     // If the given expression is a bare `ExprStruct`, wraps it in parenthesis
     // before appending it to `Tokens`.
@@ -3010,7 +3004,7 @@ mod printing {
             tokens.append_all(self.attrs.outer());
             self.if_token.to_tokens(tokens);
             self.let_token.to_tokens(tokens);
-            self.pats.to_tokens(tokens);
+            self.pat.to_tokens(tokens);
             self.eq_token.to_tokens(tokens);
             wrap_bare_struct(tokens, &self.expr);
             self.then_branch.to_tokens(tokens);
@@ -3036,7 +3030,7 @@ mod printing {
             self.label.to_tokens(tokens);
             self.while_token.to_tokens(tokens);
             self.let_token.to_tokens(tokens);
-            self.pats.to_tokens(tokens);
+            self.pat.to_tokens(tokens);
             self.eq_token.to_tokens(tokens);
             wrap_bare_struct(tokens, &self.expr);
             self.body.to_tokens(tokens);
@@ -3109,7 +3103,6 @@ mod printing {
     impl ToTokens for ExprClosure {
         fn to_tokens(&self, tokens: &mut Tokens) {
             tokens.append_all(self.attrs.outer());
-            self.movability.to_tokens(tokens);
             self.capture.to_tokens(tokens);
             self.or1_token.to_tokens(tokens);
             for input in self.inputs.pairs() {
@@ -3189,9 +3182,10 @@ mod printing {
 
     impl ToTokens for Index {
         fn to_tokens(&self, tokens: &mut Tokens) {
-            let mut lit = Literal::i64_unsuffixed(i64::from(self.index));
-            lit.set_span(self.span);
-            tokens.append(lit);
+            tokens.append(TokenTree {
+                span: self.span,
+                kind: TokenNode::Literal(Literal::integer(i64::from(self.index))),
+            });
         }
     }
 
@@ -3226,7 +3220,7 @@ mod printing {
     }
 
     #[cfg(feature = "full")]
-    impl ToTokens for ExprReference {
+    impl ToTokens for ExprAddrOf {
         fn to_tokens(&self, tokens: &mut Tokens) {
             tokens.append_all(self.attrs.outer());
             self.and_token.to_tokens(tokens);
@@ -3356,13 +3350,12 @@ mod printing {
     impl ToTokens for Arm {
         fn to_tokens(&self, tokens: &mut Tokens) {
             tokens.append_all(&self.attrs);
-            self.leading_vert.to_tokens(tokens);
             self.pats.to_tokens(tokens);
             if let Some((ref if_token, ref guard)) = self.guard {
                 if_token.to_tokens(tokens);
                 guard.to_tokens(tokens);
             }
-            self.fat_arrow_token.to_tokens(tokens);
+            self.rocket_token.to_tokens(tokens);
             self.body.to_tokens(tokens);
             self.comma.to_tokens(tokens);
         }
@@ -3565,7 +3558,7 @@ mod printing {
         fn to_tokens(&self, tokens: &mut Tokens) {
             tokens.append_all(self.attrs.outer());
             self.let_token.to_tokens(tokens);
-            self.pats.to_tokens(tokens);
+            self.pat.to_tokens(tokens);
             if let Some((ref colon_token, ref ty)) = self.ty {
                 colon_token.to_tokens(tokens);
                 ty.to_tokens(tokens);

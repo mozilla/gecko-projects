@@ -12,7 +12,7 @@ ChromeUtils.defineModuleGetter(this, "Preferences",
 // Checks that the play/pause button goes to the right state when the scrubber has reached
 // the end of the timeline but there are infinite animations playing.
 
-add_task(async function() {
+add_task(function* () {
   // TODO see if this is needed?
   // let timerPrecision = Preferences.get("privacy.reduceTimerPrecision");
   // Preferences.set("privacy.reduceTimerPrecision", false);
@@ -21,26 +21,26 @@ add_task(async function() {
   //   Preferences.set("privacy.reduceTimerPrecision", timerPrecision);
   // });
 
-  await addTab(URL_ROOT + "doc_simple_animation.html");
+  yield addTab(URL_ROOT + "doc_simple_animation.html");
 
-  let {panel, inspector} = await openAnimationInspector();
+  let {panel, inspector} = yield openAnimationInspector();
   let timeline = panel.animationsTimelineComponent;
   let btn = panel.playTimelineButtonEl;
 
   info("Select an infinite animation and wait for the scrubber to reach the end");
-  await selectNodeAndWaitForAnimations(".multi", inspector);
-  await waitForOutOfBoundScrubber(timeline);
+  yield selectNodeAndWaitForAnimations(".multi", inspector);
+  yield waitForOutOfBoundScrubber(timeline);
 
   ok(!btn.classList.contains("paused"),
      "The button is in its playing state still, animations are infinite.");
-  await assertScrubberMoving(panel, true);
+  yield assertScrubberMoving(panel, true);
 
   info("Click on the button after the scrubber has moved out of bounds");
-  await clickTimelinePlayPauseButton(panel);
+  yield clickTimelinePlayPauseButton(panel);
 
   ok(btn.classList.contains("paused"),
      "The button can be paused after the scrubber has moved out of bounds");
-  await assertScrubberMoving(panel, false);
+  yield assertScrubberMoving(panel, false);
 });
 
 function waitForOutOfBoundScrubber({win, scrubberEl}) {

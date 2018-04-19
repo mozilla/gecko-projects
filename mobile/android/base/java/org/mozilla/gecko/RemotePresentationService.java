@@ -7,7 +7,6 @@
 package org.mozilla.gecko;
 
 import org.mozilla.gecko.ScreenManagerHelper;
-import org.mozilla.geckoview.GeckoRuntime;
 import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoSessionSettings;
 import org.mozilla.geckoview.GeckoView;
@@ -125,14 +124,15 @@ class VirtualPresentation extends CastPresentation {
          * resources.
          */
 
+        // Create new GeckoView
+        view = new GeckoView(getContext());
+
         final GeckoSession session = new GeckoSession();
         session.getSettings().setString(GeckoSessionSettings.CHROME_URI,
                                         PRESENTATION_VIEW_URI + "#" + deviceId);
         session.getSettings().setInt(GeckoSessionSettings.SCREEN_ID, screenId);
 
-        // Create new GeckoView
-        view = new GeckoView(getContext());
-        view.setSession(session, GeckoRuntime.getDefault(getContext()));
+        view.setSession(session);
         view.setLayoutParams(new LayoutParams(LayoutParams.MATCH_PARENT,
                                               LayoutParams.MATCH_PARENT));
 

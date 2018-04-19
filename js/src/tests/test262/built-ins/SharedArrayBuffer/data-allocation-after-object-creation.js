@@ -1,4 +1,3 @@
-// |reftest| skip-if(!this.hasOwnProperty('SharedArrayBuffer')) -- SharedArrayBuffer is not enabled unconditionally
 // Copyright (C) 2015 André Bargull. All rights reserved.
 // Copyright (C) 2017 Mozilla Corporation. All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
@@ -19,12 +18,12 @@ info: |
     ...
     3. Let block be ? CreateByteDataBlock(byteLength).
     ...
-features: [SharedArrayBuffer, Reflect.construct]
+features: [Reflect.construct]
 ---*/
 
-function DummyError() {}
+function DummyError() { }
 
-var newTarget = function() {}.bind(null);
+var newTarget = function(){}.bind(null);
 Object.defineProperty(newTarget, "prototype", {
   get: function() {
     throw new DummyError();

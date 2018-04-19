@@ -14,7 +14,6 @@ from __future__ import absolute_import
 import contextlib
 import errno
 import functools
-import json
 import os
 import random
 import re
@@ -44,7 +43,7 @@ try:
 except ImportError:
     configitems = None
 
-testedwith = '3.7 3.8 3.9 4.0 4.1 4.2 4.3 4.4 4.5'
+testedwith = '3.7 3.8 3.9 4.0 4.1 4.2 4.3 4.4'
 minimumhgversion = '3.7'
 
 cmdtable = {}
@@ -223,7 +222,7 @@ def robustcheckout(ui, url, dest, upstream=None, revision=None, branch=None,
     # However, given that sparse has performance implications, we want to fail
     # fast if we can't satisfy the desired checkout request.
     if sparseprofile:
-        if util.versiontuple(n=2) not in ((4, 3), (4, 4), (4, 5)):
+        if util.versiontuple(n=2) not in ((4, 3), (4, 4)):
             raise error.Abort('sparse profile support only available for '
                               'Mercurial versions greater than 4.3 (using %s)' % util.version())
 
@@ -251,65 +250,21 @@ def robustcheckout(ui, url, dest, upstream=None, revision=None, branch=None,
 
     sharebase = os.path.realpath(sharebase)
 
-    optimes = []
-    start = time.time()
+    return _docheckout(ui, url, dest, upstream, revision, branch, purge,
+                       sharebase, networkattempts,
+                       sparse_profile=sparseprofile)
 
-    try:
-        return _docheckout(ui, url, dest, upstream, revision, branch, purge,
-                           sharebase, optimes, networkattempts,
-                           sparse_profile=sparseprofile)
-    finally:
-        overall = time.time() - start
-        optimes.append(('overall', overall))
-
-        if 'TASKCLUSTER_INSTANCE_TYPE' in os.environ:
-            perfherder = {
-                'framework': {
-                    'name': 'vcs',
-                },
-                'suites': [],
-            }
-            for op, duration in optimes:
-                perfherder['suites'].append({
-                    'name': op,
-                    'value': duration,
-                    'lowerIsBetter': True,
-                    'shouldAlert': False,
-                    'extraOptions': [os.environ['TASKCLUSTER_INSTANCE_TYPE']],
-                    'subtests': [],
-                })
-
-            ui.write('PERFHERDER_DATA: %s\n' % json.dumps(perfherder,
-                                                          sort_keys=True))
 
 def _docheckout(ui, url, dest, upstream, revision, branch, purge, sharebase,
-                optimes, networkattemptlimit, networkattempts=None,
-                sparse_profile=None):
+                networkattemptlimit, networkattempts=None, sparse_profile=None):
     if not networkattempts:
         networkattempts = [1]
 
     def callself():
         return _docheckout(ui, url, dest, upstream, revision, branch, purge,
-                           sharebase, optimes, networkattemptlimit,
+                           sharebase, networkattemptlimit,
                            networkattempts=networkattempts,
                            sparse_profile=sparse_profile)
-
-    @contextlib.contextmanager
-    def timeit(op):
-        errored = False
-        try:
-            start = time.time()
-            yield
-        except Exception:
-            errored = True
-            raise
-        finally:
-            elapsed = time.time() - start
-
-            if errored:
-                op += '_errored'
-
-            optimes.append((op, elapsed))
 
     ui.write('ensuring %s@%s is available at %s\n' % (url, revision or branch,
                                                       dest))
@@ -352,8 +307,7 @@ def _docheckout(ui, url, dest, upstream, revision, branch, purge, sharebase,
     # Require checkouts to be tied to shared storage because efficiency.
     if destvfs.exists('.hg') and not destvfs.exists('.hg/sharedpath'):
         ui.warn('(destination is not shared; deleting)\n')
-        with timeit('remove_unshared_dest'):
-            destvfs.rmtree(forcibly=True)
+        destvfs.rmtree(forcibly=True)
 
     # Verify the shared path exists and is using modern pooled storage.
     if destvfs.exists('.hg/sharedpath'):
@@ -363,20 +317,17 @@ def _docheckout(ui, url, dest, upstream, revision, branch, purge, sharebase,
 
         if not os.path.exists(storepath):
             ui.warn('(shared store does not exist; deleting destination)\n')
-            with timeit('removed_missing_shared_store'):
-                destvfs.rmtree(forcibly=True)
+            destvfs.rmtree(forcibly=True)
         elif not re.search('[a-f0-9]{40}/\.hg$', storepath.replace('\\', '/')):
             ui.warn('(shared store does not belong to pooled storage; '
                     'deleting destination to improve efficiency)\n')
-            with timeit('remove_unpooled_store'):
-                destvfs.rmtree(forcibly=True)
+            destvfs.rmtree(forcibly=True)
 
     if destvfs.isfileorlink('.hg/wlock'):
         ui.warn('(dest has an active working directory lock; assuming it is '
                 'left over from a previous process and that the destination '
                 'is corrupt; deleting it just to be sure)\n')
-        with timeit('remove_locked_wdir'):
-            destvfs.rmtree(forcibly=True)
+        destvfs.rmtree(forcibly=True)
 
     def handlerepoerror(e):
         if e.message == _('abandoned transaction found'):
@@ -385,8 +336,7 @@ def _docheckout(ui, url, dest, upstream, revision, branch, purge, sharebase,
             if not repo.recover():
                 ui.warn('(could not recover repo state; '
                         'deleting shared store)\n')
-                with timeit('remove_unrecovered_shared_store'):
-                    deletesharedstore()
+                deletesharedstore()
 
             ui.warn('(attempting checkout from beginning)\n')
             return callself()
@@ -447,12 +397,6 @@ def _docheckout(ui, url, dest, upstream, revision, branch, purge, sharebase,
                 ui.warn('socket error: %s\n' % e.reason)
                 handlenetworkfailure()
                 return True
-            else:
-                ui.warn('unhandled URLError; reason type: %s; value: %s' % (
-                    e.reason.__class__.__name__, e.reason))
-        else:
-            ui.warn('unhandled exception during network operation; type: %s; '
-                    'value: %s' % (e.__class__.__name__, e))
 
         return False
 
@@ -485,21 +429,15 @@ def _docheckout(ui, url, dest, upstream, revision, branch, purge, sharebase,
                 'corrupt; deleting store and destination just to be '
                 'sure)\n')
         if destvfs.exists():
-            with timeit('remove_dest_active_lock'):
-                destvfs.rmtree(forcibly=True)
-
-        with timeit('remove_shared_store_active_lock'):
-            storevfs.rmtree(forcibly=True)
+            destvfs.rmtree(forcibly=True)
+        storevfs.rmtree(forcibly=True)
 
     if storevfs.exists() and not storevfs.exists('.hg/requires'):
         ui.warn('(shared store missing requires file; this is a really '
                 'odd failure; deleting store and destination)\n')
         if destvfs.exists():
-            with timeit('remove_dest_no_requires'):
-                destvfs.rmtree(forcibly=True)
-
-        with timeit('remove_shared_store_no_requires'):
-            storevfs.rmtree(forcibly=True)
+            destvfs.rmtree(forcibly=True)
+        storevfs.rmtree(forcibly=True)
 
     if storevfs.exists('.hg/requires'):
         requires = set(storevfs.read('.hg/requires').splitlines())
@@ -513,11 +451,8 @@ def _docheckout(ui, url, dest, upstream, revision, branch, purge, sharebase,
                     'store and destination to ensure optimal behavior)\n' %
                     ', '.join(sorted(missing)))
             if destvfs.exists():
-                with timeit('remove_dest_missing_requires'):
-                    destvfs.rmtree(forcibly=True)
-
-            with timeit('remove_shared_store_missing_requires'):
-                storevfs.rmtree(forcibly=True)
+                destvfs.rmtree(forcibly=True)
+            storevfs.rmtree(forcibly=True)
 
     created = False
 
@@ -536,10 +471,8 @@ def _docheckout(ui, url, dest, upstream, revision, branch, purge, sharebase,
             ui.write('(cloning from upstream repo %s)\n' % upstream)
 
         try:
-            with timeit('clone'):
-                shareopts = {'pool': sharebase, 'mode': 'identity'}
-                res = hg.clone(ui, {}, clonepeer, dest=dest, update=False,
-                               shareopts=shareopts)
+            res = hg.clone(ui, {}, clonepeer, dest=dest, update=False,
+                           shareopts={'pool': sharebase, 'mode': 'identity'})
         except (error.Abort, ssl.SSLError, urllib2.URLError) as e:
             if handlepullerror(e):
                 return callself()
@@ -548,8 +481,7 @@ def _docheckout(ui, url, dest, upstream, revision, branch, purge, sharebase,
             return handlerepoerror(e)
         except error.RevlogError as e:
             ui.warn('(repo corruption: %s; deleting shared store)\n' % e.message)
-            with timeit('remove_shared_store_revlogerror'):
-                deletesharedstore()
+            deletesharedstore()
             return callself()
 
         # TODO retry here.
@@ -597,10 +529,9 @@ def _docheckout(ui, url, dest, upstream, revision, branch, purge, sharebase,
             if checkoutrevision in repo:
                 ui.warn('(revision already present locally; not pulling)\n')
             else:
-                with timeit('pull'):
-                    pullop = exchange.pull(repo, remote, heads=pullrevs)
-                    if not pullop.rheads:
-                        raise error.Abort('unable to pull requested revision')
+                pullop = exchange.pull(repo, remote, heads=pullrevs)
+                if not pullop.rheads:
+                    raise error.Abort('unable to pull requested revision')
         except (error.Abort, ssl.SSLError, urllib2.URLError) as e:
             if handlepullerror(e):
                 return callself()
@@ -630,18 +561,15 @@ def _docheckout(ui, url, dest, upstream, revision, branch, purge, sharebase,
         try:
             old_sparse_fn = getattr(repo.dirstate, '_sparsematchfn', None)
             if old_sparse_fn is not None:
-                assert util.versiontuple(n=2) in ((4, 3), (4, 4), (4, 5))
+                assert util.versiontuple(n=2) in ((4, 3), (4, 4))
                 repo.dirstate._sparsematchfn = lambda: matchmod.always(repo.root, '')
 
-            with timeit('purge'):
-                if purgeext.purge(ui, repo, all=True, abort_on_err=True,
-                                  # The function expects all arguments to be
-                                  # defined.
-                                  **{'print': None,
-                                     'print0': None,
-                                     'dirs': None,
-                                     'files': None}):
-                    raise error.Abort('error purging')
+            if purgeext.purge(ui, repo, all=True, abort_on_err=True,
+                              # The function expects all arguments to be
+                              # defined.
+                              **{'print': None, 'print0': None, 'dirs': None,
+                                 'files': None}):
+                raise error.Abort('error purging')
         finally:
             if old_sparse_fn is not None:
                 repo.dirstate._sparsematchfn = old_sparse_fn
@@ -678,7 +606,7 @@ def _docheckout(ui, url, dest, upstream, revision, branch, purge, sharebase,
             # one to change the sparse profile and another to update to the new
             # revision. This is not desired. But there's not a good API in
             # Mercurial to do this as one operation.
-            with repo.wlock(), timeit('sparse_update_config'):
+            with repo.wlock():
                 fcounts = map(len, sparsemod._updateconfigandrefreshwdir(
                     repo, [], [], [sparse_profile], force=True))
 
@@ -687,11 +615,8 @@ def _docheckout(ui, url, dest, upstream, revision, branch, purge, sharebase,
 
             ui.write('(sparse refresh complete)\n')
 
-    op = 'update_sparse' if sparse_profile else 'update'
-
-    with timeit(op):
-        if commands.update(ui, repo, rev=checkoutrevision, clean=True):
-            raise error.Abort('error updating')
+    if commands.update(ui, repo, rev=checkoutrevision, clean=True):
+        raise error.Abort('error updating')
 
     ui.write('updated to %s\n' % checkoutrevision)
     return None

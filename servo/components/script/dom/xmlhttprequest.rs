@@ -48,10 +48,9 @@ use hyper::mime::{self, Attr as MimeAttr, Mime, Value as MimeValue};
 use hyper_serde::Serde;
 use ipc_channel::ipc;
 use ipc_channel::router::ROUTER;
-use js::jsapi::{Heap, JSContext, JSObject};
+use js::jsapi::{Heap, JSContext, JSObject, JS_ParseJSON};
 use js::jsapi::JS_ClearPendingException;
 use js::jsval::{JSVal, NullValue, UndefinedValue};
-use js::rust::wrappers::JS_ParseJSON;
 use js::typedarray::{ArrayBuffer, CreateWith};
 use net_traits::{FetchChannels, FetchMetadata, FilteredMetadata};
 use net_traits::{FetchResponseListener, NetworkError, ReferrerPolicy};
@@ -520,8 +519,6 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
             Some(DocumentOrBodyInit::FormData(ref formdata)) => Some(formdata.extract()),
             Some(DocumentOrBodyInit::String(ref str)) => Some(str.extract()),
             Some(DocumentOrBodyInit::URLSearchParams(ref urlsp)) => Some(urlsp.extract()),
-            Some(DocumentOrBodyInit::ArrayBuffer(ref typedarray)) => Some((typedarray.to_vec(), None)),
-            Some(DocumentOrBodyInit::ArrayBufferView(ref typedarray)) => Some((typedarray.to_vec(), None)),
             None => None,
         };
 
@@ -1443,8 +1440,6 @@ impl Extractable for BodyInit {
             BodyInit::URLSearchParams(ref usp) => usp.extract(),
             BodyInit::Blob(ref b) => b.extract(),
             BodyInit::FormData(ref formdata) => formdata.extract(),
-            BodyInit::ArrayBuffer(ref typedarray) => ((typedarray.to_vec(), None)),
-            BodyInit::ArrayBufferView(ref typedarray) => ((typedarray.to_vec(), None)),
         }
     }
 }

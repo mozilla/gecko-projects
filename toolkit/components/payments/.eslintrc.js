@@ -1,20 +1,6 @@
 "use strict";
 
 module.exports = {
-  overrides: [
-    {
-      files: [
-        "res/components/*.js",
-        "res/containers/*.js",
-        "res/mixins/*.js",
-        "res/PaymentsStore.js",
-        "test/mochitest/test_*.html",
-      ],
-      parserOptions: {
-        sourceType: "module",
-      },
-    },
-  ],
   rules: {
     "mozilla/var-only-at-top-level": "error",
 

@@ -63,7 +63,7 @@ void VerifyPrivateStorePath(const char* aTableName,
   ASSERT_TRUE(privateStorePath == expectedPrivateStorePath);
 }
 
-TEST(UrlClassifierPerProviderDirectory, LookupCache)
+TEST(PerProviderDirectory, LookupCache)
 {
   RunTestInNewThread([] () -> void {
     nsCOMPtr<nsIFile> rootDir;
@@ -80,7 +80,7 @@ TEST(UrlClassifierPerProviderDirectory, LookupCache)
   });
 }
 
-TEST(UrlClassifierPerProviderDirectory, HashStore)
+TEST(PerProviderDirectory, HashStore)
 {
   RunTestInNewThread([] () -> void {
     nsCOMPtr<nsIFile> rootDir;

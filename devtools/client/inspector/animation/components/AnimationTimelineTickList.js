@@ -4,7 +4,8 @@
 
 "use strict";
 
-const { Component, createFactory } = require("devtools/client/shared/vendor/react");
+const { createFactory, PureComponent } =
+  require("devtools/client/shared/vendor/react");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const { connect } = require("devtools/client/shared/vendor/react-redux");
@@ -17,7 +18,7 @@ const { findOptimalTimeInterval } = require("../utils/utils");
 // The minimum spacing between 2 time graduation headers in the timeline (px).
 const TIME_GRADUATION_MIN_SPACING = 40;
 
-class AnimationTimelineTickList extends Component {
+class AnimationTimelineTickList extends PureComponent {
   static get propTypes() {
     return {
       sidebarWidth: PropTypes.number.isRequired,
@@ -34,11 +35,11 @@ class AnimationTimelineTickList extends Component {
   }
 
   componentDidMount() {
-    this.updateTickList(this.props);
+    this.updateTickList();
   }
 
   componentWillReceiveProps(nextProps) {
-    this.updateTickList(nextProps);
+    this.updateTickList();
   }
 
   shouldComponentUpdate(nextProps, nextState) {
@@ -50,7 +51,7 @@ class AnimationTimelineTickList extends Component {
       const currentTickItem = this.state.tickList[i];
       const nextTickItem = nextState.tickList[i];
 
-      if (currentTickItem.timeTickLabel !== nextTickItem.timeTickLabel) {
+      if (currentTickItem.text !== nextTickItem.text) {
         return true;
       }
     }
@@ -58,8 +59,8 @@ class AnimationTimelineTickList extends Component {
     return false;
   }
 
-  updateTickList(props) {
-    const { timeScale } = props;
+  updateTickList() {
+    const { timeScale } = this.props;
     const tickListEl = ReactDOM.findDOMNode(this);
     const width = tickListEl.offsetWidth;
     const animationDuration = timeScale.getDuration();
@@ -94,7 +95,7 @@ class AnimationTimelineTickList extends Component {
 
 const mapStateToProps = state => {
   return {
-    sidebarWidth: state.animations.sidebarSize ? state.animations.sidebarSize.width : 0
+    sidebarWidth: state.animations.sidebarSize.width
   };
 };
 

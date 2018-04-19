@@ -93,7 +93,8 @@ public:
 
   nsresult
   SendLifeCycleEvent(const nsAString& aEventType,
-                     LifeCycleEventCallback* aCallback);
+                     LifeCycleEventCallback* aCallback,
+                     nsIRunnable* aLoadFailure);
 
   nsresult
   SendPushEvent(const nsAString& aMessageId,
@@ -189,8 +190,11 @@ private:
   void
   ReleaseToken();
 
+  // |aLoadFailedRunnable| is a runnable dispatched to the main thread
+  // if the script loader failed for some reason, but can be null.
   nsresult
   SpawnWorkerIfNeeded(WakeUpReason aWhy,
+                      nsIRunnable* aLoadFailedRunnable,
                       bool* aNewWorkerCreated = nullptr,
                       nsILoadGroup* aLoadGroup = nullptr);
 

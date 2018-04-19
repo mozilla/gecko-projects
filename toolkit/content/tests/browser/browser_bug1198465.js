@@ -26,11 +26,6 @@ add_task(async function() {
   //    browser has dispatched its return message with the prefill value for
   //    the findbar, which essentially nulls these tests.
 
-  // The parent-side of the sidebar initialization is also async, so we do
-  // need to wait for that. We verify a bit further down that _startFindDeferred
-  // hasn't been resolved yet.
-  await gFindBarPromise;
-
   let findBar = gFindBar;
   is(findBar._findField.value, "", "findbar is empty");
 
@@ -76,5 +71,5 @@ add_task(async function() {
   // Clear the findField value to make the test  run successfully
   // for multiple runs in the same browser session.
   findBar._findField.value = "";
-  BrowserTestUtils.removeTab(aTab);
+  await BrowserTestUtils.removeTab(aTab);
 });

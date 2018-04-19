@@ -76,8 +76,6 @@ class IDBFactory final
   nsCOMPtr<nsIEventTarget> mEventTarget;
 
   uint64_t mInnerWindowID;
-  uint32_t mActiveTransactionCount;
-  uint32_t mActiveDatabaseCount;
 
   bool mBackgroundActorFailed;
   bool mPrivateBrowsingMode;
@@ -226,12 +224,6 @@ public:
                      const IDBOpenDBOptions& aOptions,
                      SystemCallerGuarantee,
                      ErrorResult& aRv);
-
-  void
-  RebindToNewWindow(nsPIDOMWindowInner* aNewWindow);
-
-  void
-  DisconnectFromWindow(nsPIDOMWindowInner* aOldWindow);
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(IDBFactory)

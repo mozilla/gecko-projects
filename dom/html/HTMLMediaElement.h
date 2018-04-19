@@ -82,7 +82,6 @@ namespace dom {
 
 class MediaError;
 class MediaSource;
-class PlayPromise;
 class Promise;
 class TextTrackList;
 class AudioTrackList;
@@ -140,12 +139,13 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(HTMLMediaElement,
                                            nsGenericHTMLElement)
-  NS_IMPL_FROMNODE_HELPER(HTMLMediaElement,
+  NS_IMPL_FROMCONTENT_HELPER(HTMLMediaElement,
                              IsAnyOfHTMLElements(nsGkAtoms::video,
                                                  nsGkAtoms::audio))
 
-  // EventTarget
-  void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
+  // nsIDOMEventTarget
+  virtual nsresult
+  GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
 
   virtual bool ParseAttribute(int32_t aNamespaceID,
                               nsAtom* aAttribute,
@@ -1327,7 +1327,7 @@ protected:
 
   // This method moves the mPendingPlayPromises into a temperate object. So the
   // mPendingPlayPromises is cleared after this method call.
-  nsTArray<RefPtr<PlayPromise>> TakePendingPlayPromises();
+  nsTArray<RefPtr<Promise>> TakePendingPlayPromises();
 
   // This method snapshots the mPendingPlayPromises by TakePendingPlayPromises()
   // and queues a task to resolve them.
@@ -1368,8 +1368,6 @@ protected:
   void SetCDMProxyFailure(const MediaResult& aResult);
   void ResetSetMediaKeysTempVariables();
 
-  void PauseIfShouldNotBePlaying();
-
   // The current decoder. Load() has been called on this decoder.
   // At most one of mDecoder and mSrcStream can be non-null.
   RefPtr<MediaDecoder> mDecoder;
@@ -1402,11 +1400,11 @@ protected:
   RefPtr<DOMMediaStream> mSrcStream;
 
   // True once mSrcStream's initial set of tracks are known.
-  bool mSrcStreamTracksAvailable = false;
+  bool mSrcStreamTracksAvailable;
 
   // If non-negative, the time we should return for currentTime while playing
   // mSrcStream.
-  double mSrcStreamPausedCurrentTime = -1;
+  double mSrcStreamPausedCurrentTime;
 
   // Holds a reference to the stream connecting this stream to the capture sink.
   RefPtr<MediaInputPort> mCaptureStreamPort;
@@ -1458,8 +1456,8 @@ protected:
 
   // Media loading flags. See:
   //   http://www.whatwg.org/specs/web-apps/current-work/#video)
-  nsMediaNetworkState mNetworkState = HTMLMediaElementBinding::NETWORK_EMPTY;
-  nsMediaReadyState mReadyState = HTMLMediaElementBinding::HAVE_NOTHING;
+  nsMediaNetworkState mNetworkState;
+  nsMediaReadyState mReadyState;
 
   enum LoadAlgorithmState {
     // No load algorithm instance is waiting for a source to be added to the
@@ -1475,18 +1473,18 @@ protected:
   // The current media load ID. This is incremented every time we start a
   // new load. Async events note the ID when they're first sent, and only fire
   // if the ID is unchanged when they come to fire.
-  uint32_t mCurrentLoadID = 0;
+  uint32_t mCurrentLoadID;
 
   // Denotes the waiting state of a load algorithm instance. When the load
   // algorithm is waiting for a source element child to be added, this is set
   // to WAITING_FOR_SOURCE, otherwise it's NOT_WAITING.
-  LoadAlgorithmState mLoadWaitStatus = NOT_WAITING;
+  LoadAlgorithmState mLoadWaitStatus;
 
   // Current audio volume
-  double mVolume = 1.0;
+  double mVolume;
 
   // True if the audio track is not silent.
-  bool mIsAudioTrackAudible = false;
+  bool mIsAudioTrackAudible;
 
   enum MutedReasons {
     MUTED_BY_CONTENT               = 0x01,
@@ -1495,7 +1493,7 @@ protected:
     MUTED_BY_AUDIO_TRACK           = 0x08
   };
 
-  uint32_t mMuted = 0;
+  uint32_t mMuted;
 
   UniquePtr<const MetadataTags> mTags;
 
@@ -1512,7 +1510,7 @@ protected:
   // Stores the current preload action for this element. Initially set to
   // PRELOAD_UNDEFINED, its value is changed by calling
   // UpdatePreloadAction().
-  PreloadAction mPreloadAction = PRELOAD_UNDEFINED;
+  PreloadAction mPreloadAction;
 
   // Time that the last timeupdate event was fired. Read/Write from the
   // main thread only.
@@ -1530,31 +1528,31 @@ protected:
 
   // Media 'currentTime' value when the last timeupdate event occurred.
   // Read/Write from the main thread only.
-  double mLastCurrentTime = 0.0;
+  double mLastCurrentTime;
 
   // Logical start time of the media resource in seconds as obtained
   // from any media fragments. A negative value indicates that no
   // fragment time has been set. Read/Write from the main thread only.
-  double mFragmentStart = -1.0;
+  double mFragmentStart;
 
   // Logical end time of the media resource in seconds as obtained
   // from any media fragments. A negative value indicates that no
   // fragment time has been set. Read/Write from the main thread only.
-  double mFragmentEnd = -1.0;
+  double mFragmentEnd;
 
   // The defaultPlaybackRate attribute gives the desired speed at which the
   // media resource is to play, as a multiple of its intrinsic speed.
-  double mDefaultPlaybackRate = 1.0;
+  double mDefaultPlaybackRate;
 
   // The playbackRate attribute gives the speed at which the media resource
   // plays, as a multiple of its intrinsic speed. If it is not equal to the
   // defaultPlaybackRate, then the implication is that the user is using a
   // feature such as fast forward or slow motion playback.
-  double mPlaybackRate = 1.0;
+  double mPlaybackRate;
 
   // True if pitch correction is applied when playbackRate is set to a
   // non-intrinsic value.
-  bool mPreservesPitch = true;
+  bool mPreservesPitch;
 
   // Reference to the source element last returned by GetNextSource().
   // This is the child source element which we're trying to load from.
@@ -1575,14 +1573,14 @@ protected:
   // The dom promise is used for HTMLMediaElement::SetMediaKeys.
   RefPtr<DetailedPromise> mSetMediaKeysDOMPromise;
   // Used to indicate if the MediaKeys attaching operation is on-going or not.
-  bool mAttachingMediaKey = false;
+  bool mAttachingMediaKey;
   MozPromiseRequestHolder<SetCDMPromise> mSetCDMRequest;
 
   // Stores the time at the start of the current 'played' range.
-  double mCurrentPlayRangeStart = 1.0;
+  double mCurrentPlayRangeStart;
 
   // True if loadeddata has been fired.
-  bool mLoadedDataFired = false;
+  bool mLoadedDataFired;
 
   // Indicates whether current playback is a result of user action
   // (ie. calling of the Play method), or automatic playback due to
@@ -1593,101 +1591,108 @@ protected:
   // is a mirror of the HTML attribute. These are different from this
   // 'mAutoplaying' flag, which indicates whether the current playback
   // is a result of the autoplay attribute.
-  bool mAutoplaying = true;
+  bool mAutoplaying;
 
   // Playback of the video is paused either due to calling the
   // 'Pause' method, or playback not yet having started.
   WakeLockBoolWrapper mPaused;
 
+  // True if the media statistics are currently being shown by the builtin
+  // video controls
+  bool mStatsShowing;
+
   // The following two fields are here for the private storage of the builtin
   // video controls, and control 'casting' of the video to external devices
   // (TVs, projectors etc.)
   // True if casting is currently allowed
-  bool mAllowCasting = false;
+  bool mAllowCasting;
   // True if currently casting this video
-  bool mIsCasting = false;
+  bool mIsCasting;
 
   // True if the sound is being captured.
-  bool mAudioCaptured = false;
+  bool mAudioCaptured;
 
   // If TRUE then the media element was actively playing before the currently
   // in progress seeking. If FALSE then the media element is either not seeking
   // or was not actively playing before the current seek. Used to decide whether
   // to raise the 'waiting' event as per 4.7.1.8 in HTML 5 specification.
-  bool mPlayingBeforeSeek = false;
+  bool mPlayingBeforeSeek;
 
   // True iff this element is paused because the document is inactive or has
   // been suspended by the audio channel service.
-  bool mPausedForInactiveDocumentOrChannel = false;
+  bool mPausedForInactiveDocumentOrChannel;
 
   // True iff event delivery is suspended (mPausedForInactiveDocumentOrChannel must also be true).
-  bool mEventDeliveryPaused = false;
+  bool mEventDeliveryPaused;
 
   // True if we're running the "load()" method.
-  bool mIsRunningLoadMethod = false;
+  bool mIsRunningLoadMethod;
 
   // True if we're running or waiting to run queued tasks due to an explicit
   // call to "load()".
-  bool mIsDoingExplicitLoad = false;
+  bool mIsDoingExplicitLoad;
 
   // True if we're loading the resource from the child source elements.
-  bool mIsLoadingFromSourceChildren = false;
+  bool mIsLoadingFromSourceChildren;
 
   // True if we're delaying the "load" event. They are delayed until either
   // an error occurs, or the first frame is loaded.
-  bool mDelayingLoadEvent = false;
+  bool mDelayingLoadEvent;
 
   // True when we've got a task queued to call SelectResource(),
   // or while we're running SelectResource().
-  bool mIsRunningSelectResource = false;
+  bool mIsRunningSelectResource;
 
   // True when we already have select resource call queued
-  bool mHaveQueuedSelectResource = false;
+  bool mHaveQueuedSelectResource;
 
   // True if we suspended the decoder because we were paused,
   // preloading metadata is enabled, autoplay was not enabled, and we loaded
   // the first frame.
-  bool mSuspendedAfterFirstFrame = false;
+  bool mSuspendedAfterFirstFrame;
 
   // True if we are allowed to suspend the decoder because we were paused,
   // preloading metdata was enabled, autoplay was not enabled, and we loaded
   // the first frame.
-  bool mAllowSuspendAfterFirstFrame = true;
+  bool mAllowSuspendAfterFirstFrame;
 
   // True if we've played or completed a seek. We use this to determine
   // when the poster frame should be shown.
-  bool mHasPlayedOrSeeked = false;
+  bool mHasPlayedOrSeeked;
 
   // True if we've added a reference to ourselves to keep the element
   // alive while no-one is referencing it but the element may still fire
   // events of its own accord.
-  bool mHasSelfReference = false;
+  bool mHasSelfReference;
 
   // True if we've received a notification that the engine is shutting
   // down.
-  bool mShuttingDown = false;
+  bool mShuttingDown;
 
   // True if we've suspended a load in the resource selection algorithm
   // due to loading a preload:none media. When true, the resource we'll
   // load when the user initiates either playback or an explicit load is
   // stored in mPreloadURI.
-  bool mSuspendedForPreloadNone = false;
+  bool mSuspendedForPreloadNone;
 
   // True if we've connected mSrcStream to the media element output.
-  bool mSrcStreamIsPlaying = false;
+  bool mSrcStreamIsPlaying;
+
+  // True if a same-origin check has been done for the media element and resource.
+  bool mMediaSecurityVerified;
 
   // True if we should set nsIClassOfService::UrgentStart to the channel to
   // get the response ASAP for better user responsiveness.
   bool mUseUrgentStartForChannel = false;
 
   // The CORS mode when loading the media element
-  CORSMode mCORSMode = CORS_NONE;
+  CORSMode mCORSMode;
 
   // Info about the played media.
   MediaInfo mMediaInfo;
 
   // True if the media has encryption information.
-  bool mIsEncrypted = false;
+  bool mIsEncrypted;
 
   enum WaitingForKeyState {
     NOT_WAITING_FOR_KEY = 0,
@@ -1698,7 +1703,7 @@ protected:
   // True when the CDM cannot decrypt the current block due to lacking a key.
   // Note: the "waitingforkey" event is not dispatched until all decoded data
   // has been rendered.
-  WaitingForKeyState mWaitingForKey = NOT_WAITING_FOR_KEY;
+  WaitingForKeyState mWaitingForKey;
 
   // Listens for waitingForKey events from the owned decoder.
   MediaEventListener mWaitingForKeyListener;
@@ -1712,7 +1717,7 @@ protected:
   // Disable the video playback by track selection. This flag might not be
   // enough if we ever expand the ability of supporting multi-tracks video
   // playback.
-  bool mDisableVideo = false;
+  bool mDisableVideo;
 
   RefPtr<TextTrackManager> mTextTrackManager;
 
@@ -1781,9 +1786,6 @@ public:
     uint32_t mCount;
   };
 private:
-
-  already_AddRefed<PlayPromise> CreatePlayPromise(ErrorResult& aRv) const;
-
   /**
    * This function is called by AfterSetAttr and OnAttrSetButNotChanged.
    * It will not be called if the value is being unset.
@@ -1808,33 +1810,26 @@ private:
   bool mIsBlessed = false;
 
   // True if the first frame has been successfully loaded.
-  bool mFirstFrameLoaded = false;
+  bool mFirstFrameLoaded;
 
   // Media elements also have a default playback start position, which must
   // initially be set to zero seconds. This time is used to allow the element to
   // be seeked even before the media is loaded.
-  double mDefaultPlaybackStartPosition = 0.0;
+  double mDefaultPlaybackStartPosition;
 
   // True if media element has been marked as 'tainted' and can't
   // participate in video decoder suspending.
-  bool mHasSuspendTaint = false;
+  bool mHasSuspendTaint;
 
   // True if media element has been forced into being considered 'hidden'.
   // For use by mochitests. Enabling pref "media.test.video-suspend"
-  bool mForcedHidden = false;
-
-  // True if we attempted to play before the media element had loaded
-  // metadata, and we need to attempt the play once we reach loaded metadata.
-  // If autoplay is disabled, we can't decide whether to allow a play()
-  // until we've loaded metadata, as we need to know whether the resource
-  // has an audio track.
-  bool mAttemptPlayUponLoadedMetadata = false;
+  bool mForcedHidden;
 
   // True if audio tracks and video tracks are constructed and added into the
   // track list, false if all tracks are removed from the track list.
-  bool mMediaTracksConstructed = false;
+  bool mMediaTracksConstructed;
 
-  Visibility mVisibilityState = Visibility::UNTRACKED;
+  Visibility mVisibilityState;
 
   UniquePtr<ErrorSink> mErrorSink;
 
@@ -1845,7 +1840,7 @@ private:
 
   // A list of pending play promises. The elements are pushed during the play()
   // method call and are resolved/rejected during further playback steps.
-  nsTArray<RefPtr<PlayPromise>> mPendingPlayPromises;
+  nsTArray<RefPtr<Promise>> mPendingPlayPromises;
 
   // A list of already-dispatched but not yet run
   // nsResolveOrRejectPendingPlayPromisesRunners.

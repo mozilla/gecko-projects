@@ -38,7 +38,6 @@ public:
   explicit WebRenderCommandBuilder(WebRenderLayerManager* aManager)
   : mManager(aManager)
   , mLastAsr(nullptr)
-  , mDoGrouping(false)
   {}
 
   void Destroy();
@@ -86,19 +85,10 @@ public:
                        nsDisplayListBuilder* aDisplayListBuilder);
 
   void CreateWebRenderCommandsFromDisplayList(nsDisplayList* aDisplayList,
-                                              nsDisplayItem* aOuterItem,
                                               nsDisplayListBuilder* aDisplayListBuilder,
                                               const StackingContextHelper& aSc,
                                               wr::DisplayListBuilder& aBuilder,
                                               wr::IpcResourceUpdateQueue& aResources);
-
-  // aWrappingItem has to be non-null.
-  void DoGroupingForDisplayList(nsDisplayList* aDisplayList,
-                                nsDisplayItem* aWrappingItem,
-                                nsDisplayListBuilder* aDisplayListBuilder,
-                                const StackingContextHelper& aSc,
-                                wr::DisplayListBuilder& aBuilder,
-                                wr::IpcResourceUpdateQueue& aResources);
 
   already_AddRefed<WebRenderFallbackData> GenerateFallbackData(nsDisplayItem* aItem,
                                                                wr::DisplayListBuilder& aBuilder,
@@ -124,16 +114,16 @@ public:
       *aOutIsRecycled = true;
     }
 
-    WebRenderUserDataTable* userDataTable =
-      frame->GetProperty(WebRenderUserDataProperty::Key());
+    nsIFrame::WebRenderUserDataTable* userDataTable =
+      frame->GetProperty(nsIFrame::WebRenderUserDataProperty());
 
     if (!userDataTable) {
-      userDataTable = new WebRenderUserDataTable();
-      frame->AddProperty(WebRenderUserDataProperty::Key(), userDataTable);
+      userDataTable = new nsIFrame::WebRenderUserDataTable();
+      frame->AddProperty(nsIFrame::WebRenderUserDataProperty(), userDataTable);
     }
 
-    RefPtr<WebRenderUserData>& data = userDataTable->GetOrInsert(WebRenderUserDataKey(aItem->GetPerFrameKey(), T::Type()));
-    if (!data || (data->GetType() != T::Type())) {
+    RefPtr<WebRenderUserData>& data = userDataTable->GetOrInsert(aItem->GetPerFrameKey());
+    if (!data || (data->GetType() != T::Type()) || !data->IsDataValid(mManager)) {
       // To recreate a new user data, we should remove the data from the table first.
       if (data) {
         data->RemoveFromTable();
@@ -158,8 +148,27 @@ public:
     return res.forget();
   }
 
-  WebRenderLayerManager* mManager;
+  template<class T> already_AddRefed<T>
+  GetWebRenderUserData(nsIFrame* aFrame, uint32_t aPerFrameKey)
+  {
+    MOZ_ASSERT(aFrame);
+    nsIFrame::WebRenderUserDataTable* userDataTable =
+      aFrame->GetProperty(nsIFrame::WebRenderUserDataProperty());
+    if (!userDataTable) {
+      return nullptr;
+    }
+
+    RefPtr<WebRenderUserData> data = userDataTable->Get(aPerFrameKey);
+    if (data && (data->GetType() == T::Type()) && data->IsDataValid(mManager)) {
+      RefPtr<T> result = static_cast<T*>(data.get());
+      return result.forget();
+    }
+
+    return nullptr;
+  }
+
 private:
+  WebRenderLayerManager* mManager;
   ScrollingLayersHelper mScrollingHelper;
 
   // These fields are used to save a copy of the display list for
@@ -180,10 +189,6 @@ private:
 
   // Store of WebRenderCanvasData objects for use in empty transactions
   CanvasDataSet mLastCanvasDatas;
-
-  // Whether consecutive inactive display items should be grouped into one
-  // blob image.
-  bool mDoGrouping;
 };
 
 } // namespace layers

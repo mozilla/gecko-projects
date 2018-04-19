@@ -10,7 +10,7 @@ const BROTLI_REQUESTS = 1;
  * Test brotli encoded response is handled correctly on HTTPS.
  */
 
-add_task(async function() {
+add_task(async function () {
   let { L10N } = require("devtools/client/netmonitor/src/utils/l10n");
 
   let { tab, monitor } = await initNetMonitor(BROTLI_URL);
@@ -25,11 +25,14 @@ add_task(async function() {
 
   store.dispatch(Actions.batchEnable(false));
 
-  // Execute requests.
-  await performRequests(monitor, tab, BROTLI_REQUESTS);
+  let wait = waitForNetworkEvents(monitor, BROTLI_REQUESTS);
+  await ContentTask.spawn(tab.linkedBrowser, {}, async function () {
+    content.wrappedJSObject.performRequests();
+  });
+  await wait;
 
   let requestItem = document.querySelector(".request-list-item");
-  let requestsListStatus = requestItem.querySelector(".status-code");
+  let requestsListStatus = requestItem.querySelector(".requests-list-status");
   EventUtils.sendMouseEvent({ type: "mouseover" }, requestsListStatus);
   await waitUntil(() => requestsListStatus.title);
 
@@ -48,8 +51,9 @@ add_task(async function() {
     });
 
   wait = waitForDOM(document, ".CodeMirror-code");
-  let onResponseContent = monitor.panelWin.api.once(EVENTS.RECEIVED_RESPONSE_CONTENT);
-  store.dispatch(Actions.toggleNetworkDetails());
+  let onResponseContent = monitor.panelWin.once(EVENTS.RECEIVED_RESPONSE_CONTENT);
+  EventUtils.sendMouseEvent({ type: "click" },
+    document.querySelector(".network-details-panel-toggle"));
   EventUtils.sendMouseEvent({ type: "click" },
     document.querySelector("#response-tab"));
   await wait;

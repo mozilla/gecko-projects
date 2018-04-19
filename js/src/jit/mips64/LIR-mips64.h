@@ -12,19 +12,10 @@ namespace jit {
 
 class LUnbox : public LInstructionHelper<1, 1, 0>
 {
-  protected:
-    LUnbox(LNode::Opcode opcode, const LAllocation& input)
-      : LInstructionHelper(opcode)
-    {
-        setOperand(0, input);
-    }
-
   public:
     LIR_HEADER(Unbox);
 
-    explicit LUnbox(const LAllocation& input)
-      : LInstructionHelper(classOpcode)
-    {
+    explicit LUnbox(const LAllocation& input) {
         setOperand(0, input);
     }
 
@@ -46,7 +37,7 @@ class LUnboxFloatingPoint : public LUnbox
     LIR_HEADER(UnboxFloatingPoint);
 
     LUnboxFloatingPoint(const LAllocation& input, MIRType type)
-      : LUnbox(classOpcode, input),
+      : LUnbox(input),
         type_(type)
     { }
 
@@ -60,9 +51,7 @@ class LDivOrModI64 : public LBinaryMath<1>
   public:
     LIR_HEADER(DivOrModI64)
 
-    LDivOrModI64(const LAllocation& lhs, const LAllocation& rhs, const LDefinition& temp)
-      : LBinaryMath(classOpcode)
-    {
+    LDivOrModI64(const LAllocation& lhs, const LAllocation& rhs, const LDefinition& temp) {
         setOperand(0, lhs);
         setOperand(1, rhs);
         setTemp(0, temp);
@@ -71,11 +60,11 @@ class LDivOrModI64 : public LBinaryMath<1>
     const LDefinition* remainder() {
         return getTemp(0);
     }
+
     MBinaryArithInstruction* mir() const {
         MOZ_ASSERT(mir_->isDiv() || mir_->isMod());
         return static_cast<MBinaryArithInstruction*>(mir_);
     }
-
     bool canBeDivideByZero() const {
         if (mir_->isMod())
             return mir_->toMod()->canBeDivideByZero();
@@ -99,9 +88,7 @@ class LUDivOrModI64 : public LBinaryMath<1>
   public:
     LIR_HEADER(UDivOrModI64);
 
-    LUDivOrModI64(const LAllocation& lhs, const LAllocation& rhs, const LDefinition& temp)
-      : LBinaryMath(classOpcode)
-    {
+    LUDivOrModI64(const LAllocation& lhs, const LAllocation& rhs, const LDefinition& temp) {
         setOperand(0, lhs);
         setOperand(1, rhs);
         setTemp(0, temp);
@@ -110,6 +97,7 @@ class LUDivOrModI64 : public LBinaryMath<1>
     const LDefinition* remainder() {
         return getTemp(0);
     }
+
     const char* extraName() const {
         return mir()->isTruncated() ? "Truncated" : nullptr;
     }
@@ -118,6 +106,7 @@ class LUDivOrModI64 : public LBinaryMath<1>
         MOZ_ASSERT(mir_->isDiv() || mir_->isMod());
         return static_cast<MBinaryArithInstruction*>(mir_);
     }
+
     bool canBeDivideByZero() const {
         if (mir_->isMod())
             return mir_->toMod()->canBeDivideByZero();
@@ -136,9 +125,7 @@ class LWasmTruncateToInt64 : public LInstructionHelper<1, 1, 0>
   public:
     LIR_HEADER(WasmTruncateToInt64);
 
-    explicit LWasmTruncateToInt64(const LAllocation& in)
-      : LInstructionHelper(classOpcode)
-    {
+    explicit LWasmTruncateToInt64(const LAllocation& in) {
         setOperand(0, in);
     }
 
@@ -152,9 +139,7 @@ class LInt64ToFloatingPoint : public LInstructionHelper<1, 1, 0>
   public:
     LIR_HEADER(Int64ToFloatingPoint);
 
-    explicit LInt64ToFloatingPoint(const LInt64Allocation& in)
-      : LInstructionHelper(classOpcode)
-    {
+    explicit LInt64ToFloatingPoint(const LInt64Allocation& in) {
         setInt64Operand(0, in);
     }
 

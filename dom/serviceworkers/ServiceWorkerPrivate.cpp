@@ -34,7 +34,6 @@
 #include "mozilla/dom/PushEventBinding.h"
 #include "mozilla/dom/RequestBinding.h"
 #include "mozilla/dom/WorkerDebugger.h"
-#include "mozilla/dom/WorkerRef.h"
 #include "mozilla/dom/WorkerRunnable.h"
 #include "mozilla/dom/WorkerScope.h"
 #include "mozilla/Unused.h"
@@ -198,7 +197,7 @@ private:
 nsresult
 ServiceWorkerPrivate::CheckScriptEvaluation(LifeCycleEventCallback* aScriptEvaluationCallback)
 {
-  nsresult rv = SpawnWorkerIfNeeded(LifeCycleEvent);
+  nsresult rv = SpawnWorkerIfNeeded(LifeCycleEvent, nullptr);
   NS_ENSURE_SUCCESS(rv, rv);
 
   RefPtr<KeepAliveToken> token = CreateEventKeepAliveToken();
@@ -477,7 +476,8 @@ public:
     aEvent->SetKeepAliveHandler(keepAliveHandler);
 
     ErrorResult result;
-    aWorkerScope->DispatchEvent(*aEvent, result);
+    bool dummy;
+    result = aWorkerScope->DispatchEvent(aEvent, &dummy);
     if (NS_WARN_IF(result.Failed())) {
       result.SuppressException();
       return NS_ERROR_FAILURE;
@@ -570,7 +570,7 @@ ServiceWorkerPrivate::SendMessageEvent(JSContext* aCx,
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  ErrorResult rv(SpawnWorkerIfNeeded(MessageEvent));
+  ErrorResult rv(SpawnWorkerIfNeeded(MessageEvent, nullptr));
   if (NS_WARN_IF(rv.Failed())) {
     return rv.StealNSResult();
   }
@@ -833,9 +833,10 @@ LifecycleEventWorkerRunnable::DispatchLifecycleEvent(JSContext* aCx,
 
 nsresult
 ServiceWorkerPrivate::SendLifeCycleEvent(const nsAString& aEventType,
-                                         LifeCycleEventCallback* aCallback)
+                                         LifeCycleEventCallback* aCallback,
+                                         nsIRunnable* aLoadFailure)
 {
-  nsresult rv = SpawnWorkerIfNeeded(LifeCycleEvent);
+  nsresult rv = SpawnWorkerIfNeeded(LifeCycleEvent, aLoadFailure);
   NS_ENSURE_SUCCESS(rv, rv);
 
   RefPtr<KeepAliveToken> token = CreateEventKeepAliveToken();
@@ -1021,7 +1022,7 @@ ServiceWorkerPrivate::SendPushEvent(const nsAString& aMessageId,
                                     const Maybe<nsTArray<uint8_t>>& aData,
                                     ServiceWorkerRegistrationInfo* aRegistration)
 {
-  nsresult rv = SpawnWorkerIfNeeded(PushEvent);
+  nsresult rv = SpawnWorkerIfNeeded(PushEvent, nullptr);
   NS_ENSURE_SUCCESS(rv, rv);
 
   RefPtr<KeepAliveToken> token = CreateEventKeepAliveToken();
@@ -1053,7 +1054,7 @@ ServiceWorkerPrivate::SendPushEvent(const nsAString& aMessageId,
 nsresult
 ServiceWorkerPrivate::SendPushSubscriptionChangeEvent()
 {
-  nsresult rv = SpawnWorkerIfNeeded(PushSubscriptionChangeEvent);
+  nsresult rv = SpawnWorkerIfNeeded(PushSubscriptionChangeEvent, nullptr);
   NS_ENSURE_SUCCESS(rv, rv);
 
   RefPtr<KeepAliveToken> token = CreateEventKeepAliveToken();
@@ -1071,15 +1072,15 @@ namespace {
 class AllowWindowInteractionHandler final : public ExtendableEventCallback
                                           , public nsITimerCallback
                                           , public nsINamed
+                                          , public WorkerHolder
 {
   nsCOMPtr<nsITimer> mTimer;
-  RefPtr<StrongWorkerRef> mWorkerRef;
 
   ~AllowWindowInteractionHandler()
   {
     // We must either fail to initialize or call ClearWindowAllowed.
     MOZ_DIAGNOSTIC_ASSERT(!mTimer);
-    MOZ_DIAGNOSTIC_ASSERT(!mWorkerRef);
+    MOZ_DIAGNOSTIC_ASSERT(!mWorkerPrivate);
   }
 
   void
@@ -1104,7 +1105,7 @@ class AllowWindowInteractionHandler final : public ExtendableEventCallback
     mTimer->Cancel();
     mTimer = nullptr;
 
-    mWorkerRef = nullptr;
+    ReleaseWorker();
   }
 
   void
@@ -1120,19 +1121,7 @@ class AllowWindowInteractionHandler final : public ExtendableEventCallback
       return;
     }
 
-    MOZ_ASSERT(!mWorkerRef);
-    RefPtr<AllowWindowInteractionHandler> self = this;
-    mWorkerRef =
-      StrongWorkerRef::Create(aWorkerPrivate,
-                              "AllowWindowInteractionHandler",
-                              [self]() {
-        // We could try to hold the worker alive until the timer fires, but
-        // other APIs are not likely to work in this partially shutdown state.
-        // We might as well let the worker thread exit.
-        self->ClearWindowAllowed(self->mWorkerRef->Private());
-      });
-
-    if (!mWorkerRef) {
+    if (!HoldWorker(aWorkerPrivate, Closing)) {
       return;
     }
 
@@ -1158,8 +1147,7 @@ class AllowWindowInteractionHandler final : public ExtendableEventCallback
   Notify(nsITimer* aTimer) override
   {
     MOZ_DIAGNOSTIC_ASSERT(mTimer == aTimer);
-    WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
-    ClearWindowAllowed(workerPrivate);
+    ClearWindowAllowed(mWorkerPrivate);
     return NS_OK;
   }
 
@@ -1171,10 +1159,22 @@ class AllowWindowInteractionHandler final : public ExtendableEventCallback
     return NS_OK;
   }
 
+  // WorkerHolder virtual methods
+  bool
+  Notify(WorkerStatus aStatus) override
+  {
+    // We could try to hold the worker alive until the timer fires, but other
+    // APIs are not likely to work in this partially shutdown state.  We might
+    // as well let the worker thread exit.
+    ClearWindowAllowed(mWorkerPrivate);
+    return true;
+  }
+
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
 
   explicit AllowWindowInteractionHandler(WorkerPrivate* aWorkerPrivate)
+    : WorkerHolder("AllowWindowInteractionHandler")
   {
     StartClearWindowTimer(aWorkerPrivate);
   }
@@ -1312,7 +1312,7 @@ ServiceWorkerPrivate::SendNotificationEvent(const nsAString& aEventName,
     return NS_ERROR_FAILURE;
   }
 
-  nsresult rv = SpawnWorkerIfNeeded(why);
+  nsresult rv = SpawnWorkerIfNeeded(why, nullptr);
   NS_ENSURE_SUCCESS(rv, rv);
 
   RefPtr<KeepAliveToken> token = CreateEventKeepAliveToken();
@@ -1749,11 +1749,19 @@ ServiceWorkerPrivate::SendFetchEvent(nsIInterceptedChannel* aChannel,
     return NS_OK;
   }
 
+  // if the ServiceWorker script fails to load for some reason, just resume
+  // the original channel.
+  nsCOMPtr<nsIRunnable> failRunnable =
+    NewRunnableMethod("nsIInterceptedChannel::ResetInterception",
+                      aChannel,
+                      &nsIInterceptedChannel::ResetInterception);
+
   aChannel->SetLaunchServiceWorkerStart(TimeStamp::Now());
   aChannel->SetDispatchFetchEventStart(TimeStamp::Now());
 
   bool newWorkerCreated = false;
   nsresult rv = SpawnWorkerIfNeeded(FetchEvent,
+                                    failRunnable,
                                     &newWorkerCreated,
                                     aLoadGroup);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1798,6 +1806,7 @@ ServiceWorkerPrivate::SendFetchEvent(nsIInterceptedChannel* aChannel,
 
 nsresult
 ServiceWorkerPrivate::SpawnWorkerIfNeeded(WakeUpReason aWhy,
+                                          nsIRunnable* aLoadFailedRunnable,
                                           bool* aNewWorkerCreated,
                                           nsILoadGroup* aLoadGroup)
 {
@@ -1807,13 +1816,6 @@ ServiceWorkerPrivate::SpawnWorkerIfNeeded(WakeUpReason aWhy,
   // to true at the end of this function.
   if (aNewWorkerCreated) {
     *aNewWorkerCreated = false;
-  }
-
-  // If the worker started shutting down on itself we may have a stale
-  // reference here.  Invoke our termination code to clean it out.
-  if (mWorkerPrivate && mWorkerPrivate->ParentStatusProtected() > Running) {
-    TerminateWorker();
-    MOZ_DIAGNOSTIC_ASSERT(!mWorkerPrivate);
   }
 
   if (mWorkerPrivate) {
@@ -1868,6 +1870,7 @@ ServiceWorkerPrivate::SpawnWorkerIfNeeded(WakeUpReason aWhy,
   info.mServiceWorkerRegistrationDescriptor.emplace(reg->Descriptor());
 
   info.mLoadGroup = aLoadGroup;
+  info.mLoadFailedAsyncRunnable = aLoadFailedRunnable;
 
   // If we are loading a script for a ServiceWorker then we must not
   // try to intercept it.  If the interception matches the current
@@ -2090,7 +2093,7 @@ ServiceWorkerPrivate::AttachDebugger()
   // and cancel the idle timeout. The idle timeout should not be reset until
   // the last debugger detached from the worker.
   if (!mDebuggerCount) {
-    nsresult rv = SpawnWorkerIfNeeded(AttachEvent);
+    nsresult rv = SpawnWorkerIfNeeded(AttachEvent, nullptr);
     NS_ENSURE_SUCCESS(rv, rv);
 
     mIdleWorkerTimer->Cancel();

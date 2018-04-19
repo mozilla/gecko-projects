@@ -41,7 +41,7 @@ protected:
         CachedGlyphData()
             : glyphIndex(0xffffffffU) { }
 
-        explicit CachedGlyphData(uint32_t gid)
+        CachedGlyphData(uint32_t gid)
             : glyphIndex(gid) { }
 
         uint32_t glyphIndex;

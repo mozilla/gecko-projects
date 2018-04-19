@@ -90,8 +90,7 @@ private:
                              nsIAndroidEventCallback* aCallback);
 
     java::EventDispatcher::NativeCallbackDelegate::LocalRef
-    WrapCallback(nsIAndroidEventCallback* aCallback,
-                 nsIAndroidEventFinalizer* aFinalizer = nullptr);
+    WrapCallback(nsIAndroidEventCallback* aCallback);
 };
 
 } // namespace widget

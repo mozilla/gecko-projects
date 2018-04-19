@@ -101,6 +101,9 @@ SVGStyleElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
         aName == nsGkAtoms::media ||
         aName == nsGkAtoms::type) {
       UpdateStyleSheetInternal(nullptr, nullptr, true);
+    } else if (aName == nsGkAtoms::scoped &&
+               OwnerDoc()->IsScopedStyleEnabled()) {
+      UpdateStyleSheetScopedness(!!aValue);
     }
   }
 
@@ -180,37 +183,49 @@ SVGStyleElement::SetXmlspace(const nsAString & aXmlspace, ErrorResult& rv)
 void
 SVGStyleElement::GetMedia(nsAString & aMedia)
 {
-  GetAttr(nsGkAtoms::media, aMedia);
+  GetAttr(kNameSpaceID_None, nsGkAtoms::media, aMedia);
 }
 
 void
 SVGStyleElement::SetMedia(const nsAString& aMedia, ErrorResult& rv)
 {
-  SetAttr(nsGkAtoms::media, aMedia, rv);
+  rv = SetAttr(kNameSpaceID_None, nsGkAtoms::media, aMedia, true);
+}
+
+bool
+SVGStyleElement::Scoped() const
+{
+  return GetBoolAttr(nsGkAtoms::scoped);
+}
+
+void
+SVGStyleElement::SetScoped(bool aScoped, ErrorResult& rv)
+{
+  rv = SetBoolAttr(nsGkAtoms::scoped, aScoped);
 }
 
 void
 SVGStyleElement::GetType(nsAString & aType)
 {
-  GetAttr(nsGkAtoms::type, aType);
+  GetAttr(kNameSpaceID_None, nsGkAtoms::type, aType);
 }
 
 void
 SVGStyleElement::SetType(const nsAString& aType, ErrorResult& rv)
 {
-  SetAttr(nsGkAtoms::type, aType, rv);
+  rv = SetAttr(kNameSpaceID_None, nsGkAtoms::type, aType, true);
 }
 
 void
 SVGStyleElement::GetTitle(nsAString & aTitle)
 {
-  GetAttr(nsGkAtoms::title, aTitle);
+  GetAttr(kNameSpaceID_None, nsGkAtoms::title, aTitle);
 }
 
 void
 SVGStyleElement::SetTitle(const nsAString& aTitle, ErrorResult& rv)
 {
-  SetAttr(nsGkAtoms::title, aTitle, rv);
+  rv = SetAttr(kNameSpaceID_None, nsGkAtoms::title, aTitle, true);
 }
 
 //----------------------------------------------------------------------
@@ -228,6 +243,7 @@ void
 SVGStyleElement::GetStyleSheetInfo(nsAString& aTitle,
                                    nsAString& aType,
                                    nsAString& aMedia,
+                                   bool* aIsScoped,
                                    bool* aIsAlternate)
 {
   *aIsAlternate = false;
@@ -246,6 +262,9 @@ SVGStyleElement::GetStyleSheetInfo(nsAString& aTitle,
   if (aType.IsEmpty()) {
     aType.AssignLiteral("text/css");
   }
+
+  *aIsScoped = HasAttr(kNameSpaceID_None, nsGkAtoms::scoped) &&
+               OwnerDoc()->IsScopedStyleEnabled();
 }
 
 CORSMode

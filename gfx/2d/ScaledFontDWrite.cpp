@@ -93,7 +93,7 @@ DoGrayscale(IDWriteFontFace *aDWFace, Float ppem)
 }
 
 static inline DWRITE_FONT_STRETCH
-DWriteFontStretchFromStretch(uint16_t aStretch)
+DWriteFontStretchFromStretch(int16_t aStretch)
 {
     switch (aStretch) {
         case NS_FONT_STRETCH_ULTRA_CONDENSED:
@@ -137,7 +137,7 @@ ScaledFontDWrite::ScaledFontDWrite(IDWriteFontFace *aFontFace,
     , mContrast(aContrast)
 {
   if (aStyle) {
-    mStyle = SkFontStyle(aStyle->weight.ToIntRounded(),
+    mStyle = SkFontStyle(aStyle->weight,
                          DWriteFontStretchFromStretch(aStyle->stretch),
                          aStyle->style == NS_FONT_STYLE_NORMAL ?
                          SkFontStyle::kUpright_Slant : SkFontStyle::kItalic_Slant);

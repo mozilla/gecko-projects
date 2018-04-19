@@ -7,12 +7,10 @@
 #include "vm/Xdr.h"
 
 #include "mozilla/PodOperations.h"
-#include "mozilla/ScopeExit.h"
 
 #include <string.h>
 
 #include "jsapi.h"
-#include "jsutil.h"
 
 #include "vm/Debugger.h"
 #include "vm/EnvironmentObject.h"
@@ -29,20 +27,22 @@ XDRState<mode>::lifoAlloc() const {
     return buf.cx()->tempLifoAlloc();
 }
 
-#ifdef DEBUG
-bool
-XDRCoderBase::validateResultCode(JSContext* cx, JS::TranscodeResult code) const
+template<XDRMode mode>
+void
+XDRState<mode>::postProcessContextErrors(JSContext* cx)
 {
-    // NOTE: This function is called to verify that we do not have a pending
-    // exception on the JSContext at the same time as a TranscodeResult failure.
-    if (cx->helperThread())
-        return true;
-    return cx->isExceptionPending() == bool(code == JS::TranscodeResult_Throw);
+    // NOTE: This should only be called on transcode failure. Not all failure
+    // paths call XDRState::fail(...), so we should update resultCode_ if it
+    // doesn't hold a specific transcode error.
+
+    if (resultCode_ & JS::TranscodeResult_Failure)
+        MOZ_ASSERT_IF(!cx->helperThread(), !cx->isExceptionPending());
+    else
+        resultCode_ = JS::TranscodeResult_Throw;
 }
-#endif
 
 template<XDRMode mode>
-XDRResult
+bool
 XDRState<mode>::codeChars(const Latin1Char* chars, size_t nchars)
 {
     static_assert(sizeof(Latin1Char) == sizeof(uint8_t), "Latin1Char must fit in 1 byte");
@@ -50,21 +50,21 @@ XDRState<mode>::codeChars(const Latin1Char* chars, size_t nchars)
     MOZ_ASSERT(mode == XDR_ENCODE);
 
     if (nchars == 0)
-        return Ok();
+        return true;
     uint8_t* ptr = buf.write(nchars);
     if (!ptr)
         return fail(JS::TranscodeResult_Throw);
 
     mozilla::PodCopy(ptr, chars, nchars);
-    return Ok();
+    return true;
 }
 
 template<XDRMode mode>
-XDRResult
+bool
 XDRState<mode>::codeChars(char16_t* chars, size_t nchars)
 {
     if (nchars == 0)
-        return Ok();
+        return true;
     size_t nbytes = nchars * sizeof(char16_t);
     if (mode == XDR_ENCODE) {
         uint8_t* ptr = buf.write(nbytes);
@@ -77,11 +77,11 @@ XDRState<mode>::codeChars(char16_t* chars, size_t nchars)
             return fail(JS::TranscodeResult_Failure_BadDecode);
         mozilla::NativeEndian::copyAndSwapFromLittleEndian(chars, ptr, nchars);
     }
-    return Ok();
+    return true;
 }
 
 template<XDRMode mode>
-static XDRResult
+static bool
 VersionCheck(XDRState<mode>* xdr)
 {
     JS::BuildIdCharVector buildId;
@@ -96,13 +96,15 @@ VersionCheck(XDRState<mode>* xdr)
     if (mode == XDR_ENCODE)
         buildIdLength = buildId.length();
 
-    MOZ_TRY(xdr->codeUint32(&buildIdLength));
+    if (!xdr->codeUint32(&buildIdLength))
+        return false;
 
     if (mode == XDR_DECODE && buildIdLength != buildId.length())
         return xdr->fail(JS::TranscodeResult_Failure_BadBuildId);
 
     if (mode == XDR_ENCODE) {
-        MOZ_TRY(xdr->codeBytes(buildId.begin(), buildIdLength));
+        if (!xdr->codeBytes(buildId.begin(), buildIdLength))
+            return false;
     } else {
         JS::BuildIdCharVector decodedBuildId;
 
@@ -113,18 +115,19 @@ VersionCheck(XDRState<mode>* xdr)
             return xdr->fail(JS::TranscodeResult_Throw);
         }
 
-        MOZ_TRY(xdr->codeBytes(decodedBuildId.begin(), buildIdLength));
+        if (!xdr->codeBytes(decodedBuildId.begin(), buildIdLength))
+            return false;
 
         // We do not provide binary compatibility with older scripts.
         if (!PodEqual(decodedBuildId.begin(), buildId.begin(), buildIdLength))
             return xdr->fail(JS::TranscodeResult_Failure_BadBuildId);
     }
 
-    return Ok();
+    return true;
 }
 
 template<XDRMode mode>
-XDRResult
+bool
 XDRState<mode>::codeFunction(MutableHandleFunction funp, HandleScriptSource sourceObject)
 {
     TraceLoggerThread* logger = TraceLoggerForCurrentThread(cx());
@@ -132,12 +135,6 @@ XDRState<mode>::codeFunction(MutableHandleFunction funp, HandleScriptSource sour
         mode == XDR_DECODE ? TraceLogger_DecodeFunction : TraceLogger_EncodeFunction;
     AutoTraceLog tl(logger, event);
 
-#ifdef DEBUG
-    auto sanityCheck = mozilla::MakeScopeExit([&] {
-        MOZ_ASSERT(validateResultCode(cx(), resultCode()));
-    });
-#endif
-    auto guard = mozilla::MakeScopeExit([&] { funp.set(nullptr); });
     RootedScope scope(cx(), &cx()->global()->emptyGlobalScope());
     if (mode == XDR_DECODE) {
         MOZ_ASSERT(!sourceObject);
@@ -150,15 +147,22 @@ XDRState<mode>::codeFunction(MutableHandleFunction funp, HandleScriptSource sour
         MOZ_ASSERT(funp->nonLazyScript()->enclosingScope()->is<GlobalScope>());
     }
 
-    MOZ_TRY(VersionCheck(this));
-    MOZ_TRY(XDRInterpretedFunction(this, scope, sourceObject, funp));
+    if (!VersionCheck(this)) {
+        postProcessContextErrors(cx());
+        return false;
+    }
 
-    guard.release();
-    return Ok();
+    if (!XDRInterpretedFunction(this, scope, sourceObject, funp)) {
+        postProcessContextErrors(cx());
+        funp.set(nullptr);
+        return false;
+    }
+
+    return true;
 }
 
 template<XDRMode mode>
-XDRResult
+bool
 XDRState<mode>::codeScript(MutableHandleScript scriptp)
 {
     TraceLoggerThread* logger = TraceLoggerForCurrentThread(cx());
@@ -166,18 +170,6 @@ XDRState<mode>::codeScript(MutableHandleScript scriptp)
         mode == XDR_DECODE ? TraceLogger_DecodeScript : TraceLogger_EncodeScript;
     AutoTraceLog tl(logger, event);
 
-#ifdef DEBUG
-    auto sanityCheck = mozilla::MakeScopeExit([&] {
-        MOZ_ASSERT(validateResultCode(cx(), resultCode()));
-    });
-#endif
-    auto guard = mozilla::MakeScopeExit([&] { scriptp.set(nullptr); });
-
-    // This should be a no-op when encoding, but when decoding it would eat any
-    // miss-aligned bytes if when encoding the XDR buffer is appended at the end
-    // of an existing buffer, such as in XDRIncrementalEncoder::linearize
-    // function.
-    MOZ_TRY(codeAlign(sizeof(js::XDRAlignment)));
     AutoXDRTree scriptTree(this, getTopLevelTreeKey());
 
     if (mode == XDR_DECODE)
@@ -185,12 +177,25 @@ XDRState<mode>::codeScript(MutableHandleScript scriptp)
     else
         MOZ_ASSERT(!scriptp->enclosingScope());
 
-    MOZ_TRY(VersionCheck(this));
-    MOZ_TRY(XDRScript(this, nullptr, nullptr, nullptr, scriptp));
-    MOZ_TRY(codeAlign(sizeof(js::XDRAlignment)));
+    if (!VersionCheck(this)) {
+        postProcessContextErrors(cx());
+        return false;
+    }
 
-    guard.release();
-    return Ok();
+    if (!XDRScript(this, nullptr, nullptr, nullptr, scriptp)) {
+        postProcessContextErrors(cx());
+        scriptp.set(nullptr);
+        return false;
+    }
+
+    return true;
+}
+
+template<XDRMode mode>
+bool
+XDRState<mode>::codeConstValue(MutableHandleValue vp)
+{
+    return XDRScriptConst(this, vp);
 }
 
 template class js::XDRState<XDR_ENCODE>;
@@ -201,17 +206,12 @@ AutoXDRTree::AutoXDRTree(XDRCoderBase* xdr, AutoXDRTree::Key key)
     parent_(this),
     xdr_(xdr)
 {
-    // Expect sub-tree to start with the maximum alignment required.
-    MOZ_ASSERT(xdr->isAligned(sizeof(js::XDRAlignment)));
     if (key_ != AutoXDRTree::noKey)
         xdr->createOrReplaceSubTree(this);
 }
 
 AutoXDRTree::~AutoXDRTree()
 {
-    // Expect sub-tree to end with the maximum alignment required.
-    MOZ_ASSERT_IF(xdr_->resultCode() == JS::TranscodeResult_Ok,
-                  xdr_->isAligned(sizeof(js::XDRAlignment)));
     if (key_ != AutoXDRTree::noKey)
         xdr_->endSubTree();
 }
@@ -230,10 +230,10 @@ AutoXDRTree::Key
 XDRIncrementalEncoder::getTreeKey(JSFunction* fun) const
 {
     if (fun->isInterpretedLazy()) {
-        static_assert(sizeof(fun->lazyScript()->sourceStart()) == 4 ||
-                      sizeof(fun->lazyScript()->sourceEnd()) == 4,
+        static_assert(sizeof(fun->lazyScript()->begin()) == 4 ||
+                      sizeof(fun->lazyScript()->end()) == 4,
                       "AutoXDRTree key requires LazyScripts positions to be uint32");
-        return uint64_t(fun->lazyScript()->sourceStart()) << 32 | fun->lazyScript()->sourceEnd();
+        return uint64_t(fun->lazyScript()->begin()) << 32 | fun->lazyScript()->end();
     }
 
     if (fun->isInterpreted()) {
@@ -329,7 +329,7 @@ XDRIncrementalEncoder::endSubTree()
     }
 }
 
-XDRResult
+bool
 XDRIncrementalEncoder::linearize(JS::TranscodeBuffer& buffer)
 {
     if (oom_) {
@@ -339,18 +339,6 @@ XDRIncrementalEncoder::linearize(JS::TranscodeBuffer& buffer)
 
     // Do not linearize while we are currently adding bytes.
     MOZ_ASSERT(scope_ == nullptr);
-
-    // Ensure the content of the buffer is properly aligned within the buffer.
-    // This alignment difference should be consumed by the codeAlign function
-    // call of codeScript when decoded.
-    size_t alignLen = sizeof(js::XDRAlignment);
-    if (buffer.length() % alignLen) {
-        alignLen = ComputeByteAlignment(buffer.length(), alignLen);
-        if (!buffer.appendN(0, alignLen)) {
-            ReportOutOfMemory(cx());
-            return fail(JS::TranscodeResult_Throw);
-        }
-    }
 
     // Visit the tree parts in a depth first order, to linearize the bits.
     Vector<SlicesNode::ConstRange> depthFirst(cx());
@@ -376,8 +364,6 @@ XDRIncrementalEncoder::linearize(JS::TranscodeBuffer& buffer)
         // buffer which would be serialized.
         MOZ_ASSERT(slice.sliceBegin <= slices_.length());
         MOZ_ASSERT(slice.sliceBegin + slice.sliceLength <= slices_.length());
-        MOZ_ASSERT(buffer.length() % sizeof(XDRAlignment) == 0);
-        MOZ_ASSERT(slice.sliceLength % sizeof(XDRAlignment) == 0);
         if (!buffer.append(slices_.begin() + slice.sliceBegin, slice.sliceLength)) {
             ReportOutOfMemory(cx());
             return fail(JS::TranscodeResult_Throw);
@@ -398,5 +384,5 @@ XDRIncrementalEncoder::linearize(JS::TranscodeBuffer& buffer)
 
     tree_.finish();
     slices_.clearAndFree();
-    return Ok();
+    return true;
 }

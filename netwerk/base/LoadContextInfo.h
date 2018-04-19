@@ -13,7 +13,7 @@ class nsILoadContext;
 namespace mozilla {
 namespace net {
 
-class LoadContextInfo final : public nsILoadContextInfo
+class LoadContextInfo : public nsILoadContextInfo
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS

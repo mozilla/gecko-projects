@@ -106,6 +106,6 @@ add_task(async function checkNotificationsDismissed() {
   await prefResetPromise;
 
   info("Removing spare tabs");
-  BrowserTestUtils.removeTab(firstTab);
-  BrowserTestUtils.removeTab(secondTab);
+  await BrowserTestUtils.removeTab(firstTab);
+  await BrowserTestUtils.removeTab(secondTab);
 });

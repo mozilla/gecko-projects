@@ -3,6 +3,7 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
+/* import-globals-from shared-head.js */
 "use strict";
 
 // Test for dynamically registering and unregistering themes
@@ -12,13 +13,13 @@ const LIGHT_THEME_NAME = "light";
 
 var toolbox;
 
-add_task(async function themeRegistration() {
-  let tab = await addTab("data:text/html,test");
+add_task(function* themeRegistration() {
+  let tab = yield addTab("data:text/html,test");
   let target = TargetFactory.forTab(tab);
-  toolbox = await gDevTools.showToolbox(target, "options");
+  toolbox = yield gDevTools.showToolbox(target, "options");
 
-  let themeId = await new Promise(resolve => {
-    gDevTools.once("theme-registered", registeredThemeId => {
+  let themeId = yield new Promise(resolve => {
+    gDevTools.once("theme-registered", (e, registeredThemeId) => {
       resolve(registeredThemeId);
     });
 
@@ -35,7 +36,7 @@ add_task(async function themeRegistration() {
   ok(gDevTools.getThemeDefinitionMap().has(themeId), "theme added to map");
 });
 
-add_task(async function themeInOptionsPanel() {
+add_task(function* themeInOptionsPanel() {
   let panelWin = toolbox.getCurrentPanel().panelWin;
   let doc = panelWin.frameElement.contentDocument;
   let themeBox = doc.getElementById("devtools-theme-box");
@@ -43,7 +44,7 @@ add_task(async function themeInOptionsPanel() {
     `input[type=radio][value=${TEST_THEME_NAME}]`);
   let eventsRecorded = [];
 
-  function onThemeChanged(theme) {
+  function onThemeChanged(event, theme) {
     eventsRecorded.push(theme);
   }
   gDevTools.on("theme-changed", onThemeChanged);
@@ -62,7 +63,7 @@ add_task(async function themeInOptionsPanel() {
   testThemeOption.click();
 
   info("Waiting for theme to finish loading");
-  await onThemeSwithComplete;
+  yield onThemeSwithComplete;
 
   is(gDevTools.getTheme(), TEST_THEME_NAME, "getTheme returns the expected theme");
   is(eventsRecorded.pop(), TEST_THEME_NAME, "theme-changed fired with the expected theme");
@@ -76,7 +77,7 @@ add_task(async function themeInOptionsPanel() {
   lightThemeOption.click();
 
   info("Waiting for theme to finish loading");
-  await onThemeSwithComplete;
+  yield onThemeSwithComplete;
 
   is(gDevTools.getTheme(), LIGHT_THEME_NAME, "getTheme returns the expected theme");
   is(eventsRecorded.pop(), LIGHT_THEME_NAME, "theme-changed fired with the expected theme");
@@ -87,27 +88,27 @@ add_task(async function themeInOptionsPanel() {
   onThemeSwithComplete = once(panelWin, "theme-switch-complete");
   // Select test theme again.
   testThemeOption.click();
-  await onThemeSwithComplete;
+  yield onThemeSwithComplete;
   is(gDevTools.getTheme(), TEST_THEME_NAME, "getTheme returns the expected theme");
   is(eventsRecorded.pop(), TEST_THEME_NAME, "theme-changed fired with the expected theme");
 
   gDevTools.off("theme-changed", onThemeChanged);
 });
 
-add_task(async function themeUnregistration() {
+add_task(function* themeUnregistration() {
   let panelWin = toolbox.getCurrentPanel().panelWin;
   let onUnRegisteredTheme = once(gDevTools, "theme-unregistered");
   let onThemeSwitchComplete = once(panelWin, "theme-switch-complete");
   let eventsRecorded = [];
 
-  function onThemeChanged(theme) {
+  function onThemeChanged(event, theme) {
     eventsRecorded.push(theme);
   }
   gDevTools.on("theme-changed", onThemeChanged);
 
   gDevTools.unregisterTheme(TEST_THEME_NAME);
-  await onUnRegisteredTheme;
-  await onThemeSwitchComplete;
+  yield onUnRegisteredTheme;
+  yield onThemeSwitchComplete;
 
   is(gDevTools.getTheme(), LIGHT_THEME_NAME, "getTheme returns the expected theme");
   is(eventsRecorded.pop(), LIGHT_THEME_NAME, "theme-changed fired with the expected theme");
@@ -124,7 +125,7 @@ add_task(async function themeUnregistration() {
   gDevTools.off("theme-changed", onThemeChanged);
 });
 
-add_task(async function cleanup() {
-  await toolbox.destroy();
+add_task(function* cleanup() {
+  yield toolbox.destroy();
   toolbox = null;
 });

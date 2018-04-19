@@ -143,8 +143,7 @@ public:
                           aLineNumber,
                           aColumnNumber,
                           aSeverityFlag,
-                          category.get(),
-                          /* IDB doesn't run on Private browsing mode */ false));
+                          category.get()));
     }
 
     MOZ_ALWAYS_SUCCEEDS(consoleService->LogMessage(scriptError));

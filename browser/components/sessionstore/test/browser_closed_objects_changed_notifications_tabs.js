@@ -12,7 +12,7 @@ let notificationsCount = 0;
 async function openWindow(url) {
   let win = await promiseNewWindowLoaded();
   let flags = Ci.nsIWebNavigation.LOAD_FLAGS_REPLACE_HISTORY;
-  win.gBrowser.selectedBrowser.loadURI(url, { flags });
+  win.gBrowser.selectedBrowser.loadURIWithFlags(url, flags);
   await promiseBrowserLoaded(win.gBrowser.selectedBrowser, true, url);
   return win;
 }
@@ -34,7 +34,7 @@ async function openTab(window, url) {
 
 async function openAndCloseTab(window, url) {
   let tab = await openTab(window, url);
-  await promiseRemoveTabAndSessionState(tab);
+  await promiseRemoveTab(tab);
 }
 
 function countingObserver() {
@@ -86,7 +86,7 @@ add_task(async function test_closedObjectsChangedNotifications() {
   assertNotificationCount(4);
 
   info("Closing tab again.");
-  await promiseRemoveTabAndSessionState(tab);
+  await promiseRemoveTab(tab);
   assertNotificationCount(5);
 
   info("Purging session history.");

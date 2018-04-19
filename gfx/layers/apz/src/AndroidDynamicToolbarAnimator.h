@@ -53,7 +53,7 @@ class AndroidDynamicToolbarAnimator {
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(AndroidDynamicToolbarAnimator);
   explicit AndroidDynamicToolbarAnimator(APZCTreeManager* aApz);
-  void Initialize(LayersId aRootLayerTreeId);
+  void Initialize(uint64_t aRootLayerTreeId);
   void ClearTreeManager();
   // Used to intercept events to determine if the event affects the toolbar.
   // May apply translation to touch events if the toolbar is visible.
@@ -168,7 +168,7 @@ protected:
   void QueueMessage(int32_t aMessage);
 
   // Read only Compositor and Controller threads after Initialize()
-  LayersId mRootLayerTreeId;
+  uint64_t mRootLayerTreeId;
   MOZ_NON_OWNING_REF APZCTreeManager* mApz;
 
   // Read/Write Compositor Thread, Read only Controller thread

@@ -4,7 +4,7 @@
 
 // Test cancelling add-on update checks while in progress (bug 925389)
 
-ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Promise.jsm");
 
 // The test extension uses an insecure update url.
 Services.prefs.setBoolPref(PREF_EM_CHECK_UPDATE_SECURITY, false);
@@ -29,7 +29,7 @@ profileDir.append("extensions");
 // Create an addon update listener containing a promise
 // that resolves when the update is cancelled
 function makeCancelListener() {
-  let updated = PromiseUtils.defer();
+  let updated = Promise.defer();
   return {
     onUpdateAvailable(addon, install) {
       updated.reject("Should not have seen onUpdateAvailable notification");
@@ -44,14 +44,14 @@ function makeCancelListener() {
 }
 
 // Set up the HTTP server so that we can control when it responds
-var httpReceived = PromiseUtils.defer();
+var httpReceived = Promise.defer();
 function dataHandler(aRequest, aResponse) {
   aResponse.processAsync();
   httpReceived.resolve([aRequest, aResponse]);
 }
 var testserver = new HttpServer();
 testserver.registerDirectory("/addons/", do_get_file("addons"));
-testserver.registerPathHandler("/data/test_update.json", dataHandler);
+testserver.registerPathHandler("/data/test_update.rdf", dataHandler);
 testserver.start(-1);
 gPort = testserver.identity.primaryPort;
 
@@ -59,8 +59,7 @@ gPort = testserver.identity.primaryPort;
 writeInstallRDFForExtension({
   id: "addon1@tests.mozilla.org",
   version: "1.0",
-  bootstrap: true,
-  updateURL: "http://localhost:" + gPort + "/data/test_update.json",
+  updateURL: "http://localhost:" + gPort + "/data/test_update.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -90,8 +89,8 @@ add_task(async function cancel_during_check() {
   // Now complete the HTTP request
   let file = do_get_cwd();
   file.append("data");
-  file.append("test_update.json");
-  let data = new TextDecoder().decode(await OS.File.read(file.path));
+  file.append("test_update.rdf");
+  let data = loadFile(file);
   response.write(data);
   response.finish();
 
@@ -105,7 +104,7 @@ add_task(async function cancel_during_check() {
 // the update check is in progress
 add_task(async function shutdown_during_check() {
   // Reset our HTTP listener
-  httpReceived = PromiseUtils.defer();
+  httpReceived = Promise.defer();
 
   let a1 = await promiseAddonByID("addon1@tests.mozilla.org");
   Assert.notEqual(a1, null);
@@ -124,10 +123,10 @@ add_task(async function shutdown_during_check() {
   // Now complete the HTTP request
   let file = do_get_cwd();
   file.append("data");
-  file.append("test_update.json");
-  let data = await loadFile(file.path);
+  file.append("test_update.rdf");
+  let data = loadFile(file);
   response.write(data);
   response.finish();
 
-  await testserver.stop();
+  await testserver.stop(Promise.defer().resolve);
 });

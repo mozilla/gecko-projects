@@ -127,7 +127,7 @@ public:
    * 0,0 area.
    */
   friend nsIFrame* NS_NewEmptyFrame(nsIPresShell* aShell,
-                                    ComputedStyle* aStyle);
+                                    nsStyleContext* aContext);
 
 private:
   // Left undefined; nsFrame objects are never allocated from the heap.
@@ -161,9 +161,9 @@ public:
             nsContainerFrame* aParent,
             nsIFrame*         aPrevInFlow) override;
   void DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData) override;
-  ComputedStyle* GetAdditionalComputedStyle(int32_t aIndex) const override;
-  void SetAdditionalComputedStyle(int32_t aIndex,
-                                  ComputedStyle* aComputedStyle) override;
+  nsStyleContext* GetAdditionalStyleContext(int32_t aIndex) const override;
+  void SetAdditionalStyleContext(int32_t aIndex,
+                                 nsStyleContext* aStyleContext) override;
   nscoord GetLogicalBaseline(mozilla::WritingMode aWritingMode) const override;
   const nsFrameList& GetChildList(ChildListID aListID) const override;
   void GetChildLists(nsTArray<ChildList>* aLists) const override;
@@ -245,24 +245,24 @@ public:
   mozilla::a11y::AccType AccessibleType() override;
 #endif
 
-  ComputedStyle* GetParentComputedStyle(nsIFrame** aProviderFrame) const override {
-    return DoGetParentComputedStyle(aProviderFrame);
+  nsStyleContext* GetParentStyleContext(nsIFrame** aProviderFrame) const override {
+    return DoGetParentStyleContext(aProviderFrame);
   }
 
   /**
-   * Do the work for getting the parent ComputedStyle frame so that
-   * other frame's |GetParentComputedStyle| methods can call this
+   * Do the work for getting the parent style context frame so that
+   * other frame's |GetParentStyleContext| methods can call this
    * method on *another* frame.  (This function handles out-of-flow
    * frames by using the frame manager's placeholder map and it also
    * handles block-within-inline and generated content wrappers.)
    *
    * @param aProviderFrame (out) the frame associated with the returned value
-   *   or null if the ComputedStyle is for display:contents content.
-   * @return The ComputedStyle that should be the parent of this frame's
-   *   ComputedStyle.  Null is permitted, and means that this frame's
-   *   ComputedStyle should be the root of the ComputedStyle tree.
+   *     or null if the style context is for display:contents content.
+   * @return The style context that should be the parent of this frame's
+   *         style context.  Null is permitted, and means that this frame's
+   *         style context should be the root of the style context tree.
    */
-  ComputedStyle* DoGetParentComputedStyle(nsIFrame** aProviderFrame) const;
+  nsStyleContext* DoGetParentStyleContext(nsIFrame** aProviderFrame) const;
 
   bool IsEmpty() override;
   bool IsSelfEmpty() override;
@@ -274,8 +274,7 @@ public:
                          InlineMinISizeData *aData) override;
   void AddInlinePrefISize(gfxContext *aRenderingContext,
                           InlinePrefISizeData *aData) override;
-  IntrinsicISizeOffsetData
-  IntrinsicISizeOffsets(nscoord aPercentageBasis = NS_UNCONSTRAINEDSIZE) override;
+  IntrinsicISizeOffsetData IntrinsicISizeOffsets() override;
   mozilla::IntrinsicSize GetIntrinsicSize() override;
   nsSize GetIntrinsicRatio() override;
 
@@ -557,7 +556,7 @@ public:
                       const nsDisplayListSet& aLists);
 
   /**
-   * Adjust the given parent frame to the right ComputedStyle parent frame for
+   * Adjust the given parent frame to the right style context parent frame for
    * the child, given the pseudo-type of the prospective child.  This handles
    * things like walking out of table pseudos and so forth.
    *
@@ -570,9 +569,9 @@ public:
 
 protected:
   // Protected constructor and destructor
-  nsFrame(ComputedStyle* aStyle, ClassID aID);
-  explicit nsFrame(ComputedStyle* aStyle)
-    : nsFrame(aStyle, ClassID::nsFrame_id) {}
+  nsFrame(nsStyleContext* aContext, ClassID aID);
+  explicit nsFrame(nsStyleContext* aContext)
+    : nsFrame(aContext, ClassID::nsFrame_id) {}
   virtual ~nsFrame();
 
   /**
@@ -587,7 +586,7 @@ protected:
   int16_t DisplaySelection(nsPresContext* aPresContext, bool isOkToTurnOn = false);
 
   // Style post processing hook
-  void DidSetComputedStyle(ComputedStyle* aOldComputedStyle) override;
+  void DidSetStyleContext(nsStyleContext* aOldStyleContext) override;
 
 public:
   /**
@@ -707,9 +706,8 @@ private:
   // Returns true if this frame has any kind of CSS transitions.
   bool HasCSSTransitions();
 
-public:
-
 #ifdef DEBUG_FRAME_DUMP
+public:
   /**
    * Get a printable from of the name of the frame type.
    * XXX This should be eliminated and we use GetType() instead...
@@ -722,6 +720,20 @@ public:
 #endif
 
 #ifdef DEBUG
+public:
+  /**
+   * See if style tree verification is enabled. To enable style tree
+   * verification add "styleverifytree:1" to your MOZ_LOG
+   * environment variable (any non-zero debug level will work). Or,
+   * call SetVerifyStyleTreeEnable with true.
+   */
+  static bool GetVerifyStyleTreeEnable();
+
+  /**
+   * Set the verify-style-tree enable flag.
+   */
+  static void SetVerifyStyleTreeEnable(bool aEnabled);
+
   static mozilla::LazyLogModule sFrameLogModule;
 
   // Show frame borders when rendering
@@ -731,7 +743,10 @@ public:
   // Show frame border of event target
   static void ShowEventTargetFrameBorder(bool aEnable);
   static bool GetShowEventTargetFrameBorder();
+
 #endif
+
+public:
 
   static void PrintDisplayList(nsDisplayListBuilder* aBuilder,
                                const nsDisplayList& aList,

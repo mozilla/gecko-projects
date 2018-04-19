@@ -7,9 +7,9 @@ package org.mozilla.gecko.distribution;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.RobolectricTestRunner;
+import org.mozilla.gecko.background.testhelpers.TestRunner;
 
-@RunWith(RobolectricTestRunner.class)
+@RunWith(TestRunner.class)
 public class TestReferrerDescriptor {
     @Test
     public void testReferrerDescriptor() {

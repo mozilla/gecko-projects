@@ -14,8 +14,10 @@ namespace js {
 namespace jit {
 
 JitCode*
-Linker::newCode(JSContext* cx, CodeKind kind)
+Linker::newCode(JSContext* cx, CodeKind kind, bool hasPatchableBackedges /* = false */)
 {
+    MOZ_ASSERT_IF(hasPatchableBackedges, kind == CodeKind::Ion);
+
     JS::AutoAssertNoGC nogc(cx);
     if (masm.oom())
         return fail(cx);
@@ -36,9 +38,12 @@ Linker::newCode(JSContext* cx, CodeKind kind)
     // ExecutableAllocator requires bytesNeeded to be aligned.
     bytesNeeded = AlignBytes(bytesNeeded, ExecutableAllocatorAlignment);
 
+    ExecutableAllocator& execAlloc = hasPatchableBackedges
+                                     ? cx->runtime()->jitRuntime()->backedgeExecAlloc()
+                                     : cx->runtime()->jitRuntime()->execAlloc();
+
     ExecutablePool* pool;
-    uint8_t* result =
-        (uint8_t*)cx->runtime()->jitRuntime()->execAlloc().alloc(cx, bytesNeeded, &pool, kind);
+    uint8_t* result = (uint8_t*)execAlloc.alloc(cx, bytesNeeded, &pool, kind);
     if (!result)
         return fail(cx);
 
@@ -59,7 +64,7 @@ Linker::newCode(JSContext* cx, CodeKind kind)
     code->copyFrom(masm);
     masm.link(code);
     if (masm.embedsNurseryPointers())
-        cx->runtime()->gc.storeBuffer().putWholeCell(code);
+        cx->zone()->group()->storeBuffer().putWholeCell(code);
     return code;
 }
 

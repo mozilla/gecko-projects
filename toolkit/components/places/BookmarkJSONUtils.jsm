@@ -41,61 +41,49 @@ var BookmarkJSONUtils = Object.freeze({
    *
    * @param aSpec
    *        url of the bookmark data.
-   * @param [options.replace]
-   *        Whether we should erase existing bookmarks before importing.
-   * @param [options.source]
-   *        The bookmark change source, used to determine the sync status for
-   *        imported bookmarks. Defaults to `RESTORE` if `replace = true`, or
-   *        `IMPORT` otherwise.
+   * @param aReplace
+   *        Boolean if true, replace existing bookmarks, else merge.
    *
    * @return {Promise}
    * @resolves When the new bookmarks have been created.
    * @rejects JavaScript exception.
    */
-  async importFromURL(aSpec, {
-    replace: aReplace = false,
-    source: aSource = aReplace ? PlacesUtils.bookmarks.SOURCES.RESTORE :
-                                 PlacesUtils.bookmarks.SOURCES.IMPORT,
-  } = {}) {
-    notifyObservers(PlacesUtils.TOPIC_BOOKMARKS_RESTORE_BEGIN, aReplace);
-    try {
-      let importer = new BookmarkImporter(aReplace, aSource);
-      await importer.importFromURL(aSpec);
+  importFromURL: function BJU_importFromURL(aSpec, aReplace) {
+    return (async function() {
+      notifyObservers(PlacesUtils.TOPIC_BOOKMARKS_RESTORE_BEGIN, aReplace);
+      try {
+        let importer = new BookmarkImporter(aReplace);
+        await importer.importFromURL(aSpec);
 
-      notifyObservers(PlacesUtils.TOPIC_BOOKMARKS_RESTORE_SUCCESS, aReplace);
-    } catch (ex) {
-      Cu.reportError("Failed to restore bookmarks from " + aSpec + ": " + ex);
-      notifyObservers(PlacesUtils.TOPIC_BOOKMARKS_RESTORE_FAILED, aReplace);
-    }
+        notifyObservers(PlacesUtils.TOPIC_BOOKMARKS_RESTORE_SUCCESS, aReplace);
+      } catch (ex) {
+        Cu.reportError("Failed to restore bookmarks from " + aSpec + ": " + ex);
+        notifyObservers(PlacesUtils.TOPIC_BOOKMARKS_RESTORE_FAILED, aReplace);
+      }
+    })();
   },
 
   /**
    * Restores bookmarks and tags from a JSON file.
+   * @note any item annotated with "places/excludeFromBackup" won't be removed
+   *       before executing the restore.
    *
    * @param aFilePath
    *        OS.File path string of bookmarks in JSON or JSONlz4 format to be restored.
-   * @param [options.replace]
-   *        Whether we should erase existing bookmarks before importing.
-   * @param [options.source]
-   *        The bookmark change source, used to determine the sync status for
-   *        imported bookmarks. Defaults to `RESTORE` if `replace = true`, or
-   *        `IMPORT` otherwise.
+   * @param aReplace
+   *        Boolean if true, replace existing bookmarks, else merge.
    *
    * @return {Promise}
    * @resolves When the new bookmarks have been created.
    * @rejects JavaScript exception.
    */
-  async importFromFile(aFilePath, {
-    replace: aReplace = false,
-    source: aSource = aReplace ? PlacesUtils.bookmarks.SOURCES.RESTORE :
-                                 PlacesUtils.bookmarks.SOURCES.IMPORT,
-  } = {}) {
+  async importFromFile(aFilePath, aReplace) {
     notifyObservers(PlacesUtils.TOPIC_BOOKMARKS_RESTORE_BEGIN, aReplace);
     try {
       if (!(await OS.File.exists(aFilePath)))
         throw new Error("Cannot restore from nonexisting json file");
 
-      let importer = new BookmarkImporter(aReplace, aSource);
+      let importer = new BookmarkImporter(aReplace);
       if (aFilePath.endsWith("jsonlz4")) {
         await importer.importFromCompressedFile(aFilePath);
       } else {
@@ -159,9 +147,12 @@ var BookmarkJSONUtils = Object.freeze({
   }
 });
 
-function BookmarkImporter(aReplace, aSource) {
+function BookmarkImporter(aReplace) {
   this._replace = aReplace;
-  this._source = aSource;
+  // The bookmark change source, used to determine the sync status and change
+  // counter.
+  this._source = aReplace ? PlacesUtils.bookmarks.SOURCE_IMPORT_REPLACE :
+                            PlacesUtils.bookmarks.SOURCE_IMPORT;
 }
 BookmarkImporter.prototype = {
   /**
@@ -246,7 +237,7 @@ BookmarkImporter.prototype = {
 
     // If we're replacing, then erase existing bookmarks first.
     if (this._replace) {
-      await PlacesUtils.bookmarks.eraseEverything({ source: this._source });
+      await PlacesBackups.eraseEverythingIncludingUserRoots({ source: this._source });
     }
 
     let folderIdToGuidMap = {};
@@ -276,10 +267,12 @@ BookmarkImporter.prototype = {
         continue;
       }
 
-      // Drop any roots whose guid we don't recognise - we don't support anything
-      // apart from the built-in roots.
+      // Places is moving away from supporting user-defined folders at the top
+      // of the tree, however, until we have a migration strategy we need to
+      // ensure any non-built-in folders are created (xref bug 1310299).
       if (!PlacesUtils.bookmarks.userContentRoots.includes(node.guid)) {
-        continue;
+        node.parentGuid = PlacesUtils.bookmarks.rootGuid;
+        await PlacesUtils.bookmarks.insert(node);
       }
 
       await PlacesUtils.bookmarks.insertTree(node, { fixupOrSkipInvalidEntries: true });

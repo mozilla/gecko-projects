@@ -16,7 +16,8 @@ class GentooBootstrapper(StyloInstall, BaseBootstrapper):
         self.dist_id = dist_id
 
     def install_system_packages(self):
-        self.run_as_root(['emerge', '--noreplace', '--quiet', 'nodejs'])
+        self.run_as_root(['emerge', '--noreplace', '--quiet', 'dev-vcs/git',
+                          'mercurial', 'nodejs'])
 
     def install_browser_packages(self):
         self.ensure_browser_packages()
@@ -61,7 +62,7 @@ class GentooBootstrapper(StyloInstall, BaseBootstrapper):
         # configuration files and doing so without user supervision is dangerous
         self.run_as_root(['emerge', '--noreplace', '--quiet',
                           '--autounmask-continue', '--ask',
-                          '=dev-java/oracle-jdk-bin-1.8.0.162-r1'])
+                          '=dev-java/oracle-jdk-bin-1.8.0.162'])
 
         from mozboot import android
         android.ensure_android('linux', artifact_mode=artifact_mode,

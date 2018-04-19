@@ -2,7 +2,6 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/CanonicalJSON.jsm");
 
 // Import common head.
 {
@@ -45,40 +44,6 @@ function run_test() {
   run_next_test();
 }
 
-// Returns a `CryptoWrapper`-like object that wraps the Sync record cleartext.
-// This exists to avoid importing `record.js` from Sync.
-function makeRecord(cleartext) {
-  return new Proxy({ cleartext }, {
-    get(target, property, receiver) {
-      if (property == "cleartext") {
-        return target.cleartext;
-      }
-      if (property == "cleartextToString") {
-        return () => JSON.stringify(target.cleartext);
-      }
-      return target.cleartext[property];
-    },
-    set(target, property, value, receiver) {
-      if (property == "cleartext") {
-        target.cleartext = value;
-      } else if (property != "cleartextToString") {
-        target.cleartext[property] = value;
-      }
-    },
-    has(target, property) {
-      return property == "cleartext" || (property in target.cleartext);
-    },
-    deleteProperty(target, property) {},
-    ownKeys(target) {
-      return ["cleartext", ...Reflect.ownKeys(target)];
-    },
-  });
-}
-
-async function storeRecords(buf, records, options) {
-  await buf.store(records.map(makeRecord), options);
-}
-
 function inspectChangeRecords(changeRecords) {
   let results = { updated: [], deleted: [] };
   for (let [id, record] of Object.entries(changeRecords)) {
@@ -89,7 +54,7 @@ function inspectChangeRecords(changeRecords) {
   return results;
 }
 
-async function fetchLocalTree(rootGuid) {
+async function assertLocalTree(rootGuid, expected, message) {
   function bookmarkNodeToInfo(node) {
     let { guid, index, title, typeCode: type } = node;
     let itemInfo = { guid, index, title, type };
@@ -117,14 +82,10 @@ async function fetchLocalTree(rootGuid) {
     return itemInfo;
   }
   let root = await PlacesUtils.promiseBookmarksTree(rootGuid);
-  return bookmarkNodeToInfo(root);
-}
-
-async function assertLocalTree(rootGuid, expected, message) {
-  let actual = await fetchLocalTree(rootGuid);
+  let actual = bookmarkNodeToInfo(root);
   if (!ObjectUtils.deepEqual(actual, expected)) {
-    info(`Expected structure for ${rootGuid}: ${CanonicalJSON.stringify(expected)}`);
-    info(`Actual structure for ${rootGuid}:   ${CanonicalJSON.stringify(actual)}`);
+    info(`Expected structure for ${rootGuid}: ${JSON.stringify(expected)}`);
+    info(`Actual structure for ${rootGuid}: ${JSON.stringify(actual)}`);
     throw new Assert.constructor.AssertionError({ actual, expected, message });
   }
 }
@@ -163,15 +124,11 @@ async function fetchAllKeywords(info) {
   return entries;
 }
 
-async function openMirror(name, options = {}) {
+async function openMirror(name) {
   let path = OS.Path.join(OS.Constants.Path.profileDir, `${name}_buf.sqlite`);
   let buf = await SyncedBookmarksMirror.open({
     path,
-    recordTelemetryEvent(...args) {
-      if (options.recordTelemetryEvent) {
-        options.recordTelemetryEvent.call(this, ...args);
-      }
-    },
+    recordTelemetryEvent() {},
   });
   return buf;
 }

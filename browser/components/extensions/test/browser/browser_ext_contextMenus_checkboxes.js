@@ -121,5 +121,5 @@ add_task(async function() {
   confirmOnClickData(result, 3, true, false);
 
   await extension.unload();
-  BrowserTestUtils.removeTab(tab1);
+  await BrowserTestUtils.removeTab(tab1);
 });

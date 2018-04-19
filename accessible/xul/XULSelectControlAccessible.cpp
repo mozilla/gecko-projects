@@ -13,6 +13,7 @@
 #include "nsIDOMXULSelectCntrlItemEl.h"
 #include "nsIDOMXULMultSelectCntrlEl.h"
 #include "nsIDOMElement.h"
+#include "nsIDOMXULElement.h"
 #include "nsIMutableArray.h"
 #include "nsIServiceManager.h"
 

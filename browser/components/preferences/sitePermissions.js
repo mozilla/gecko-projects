@@ -51,9 +51,9 @@ var gSitePermissionsManager = {
     this._checkbox = document.getElementById("permissionsDisableCheckbox");
 
     let permissionsText = document.getElementById("permissionsText");
-    permissionsText.textContent = params.introText;
-
-
+    while (permissionsText.hasChildNodes())
+      permissionsText.firstChild.remove();
+    permissionsText.appendChild(document.createTextNode(params.introText));
 
     this._checkbox.setAttribute("label", params.disablePermissionsLabel);
     let permissionsDisableDescription = document.getElementById("permissionsDisableDescription");

@@ -11,10 +11,10 @@ requestLongerTimeout(2);
 // changes when animations are playing, gets back to 0 when animations are
 // rewound, and stops when animations are paused.
 
-add_task(async function() {
-  await addTab(URL_ROOT + "doc_simple_animation.html");
+add_task(function* () {
+  yield addTab(URL_ROOT + "doc_simple_animation.html");
 
-  let {panel} = await openAnimationInspector();
+  let {panel} = yield openAnimationInspector();
   let label = panel.timelineCurrentTimeEl;
   ok(label, "The current time label exists");
 
@@ -22,23 +22,23 @@ add_task(async function() {
   // don't want to test the exact value of the time displayed, just that it
   // actually changes.
   info("Make sure the time displayed actually changes");
-  await isCurrentTimeLabelChanging(panel, true);
+  yield isCurrentTimeLabelChanging(panel, true);
 
   info("Pause the animations and check that the time stops changing");
-  await clickTimelinePlayPauseButton(panel);
-  await isCurrentTimeLabelChanging(panel, false);
+  yield clickTimelinePlayPauseButton(panel);
+  yield isCurrentTimeLabelChanging(panel, false);
 
   info("Rewind the animations and check that the time stops changing");
-  await clickTimelineRewindButton(panel);
-  await isCurrentTimeLabelChanging(panel, false);
+  yield clickTimelineRewindButton(panel);
+  yield isCurrentTimeLabelChanging(panel, false);
   is(label.textContent, "00:00.000");
 });
 
-async function isCurrentTimeLabelChanging(panel, isChanging) {
+function* isCurrentTimeLabelChanging(panel, isChanging) {
   let label = panel.timelineCurrentTimeEl;
 
   let time1 = label.textContent;
-  await new Promise(r => setTimeout(r, 200));
+  yield new Promise(r => setTimeout(r, 200));
   let time2 = label.textContent;
 
   if (isChanging) {

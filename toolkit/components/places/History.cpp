@@ -3248,7 +3248,7 @@ History::UpdatePlaces(JS::Handle<JS::Value> aPlaceInfos,
       // database.
       if (transitionType == nsINavHistoryService::TRANSITION_EMBED) {
         StoreAndNotifyEmbedVisit(data, aCallback);
-        visitData.RemoveLastElement();
+        visitData.RemoveElementAt(visitData.Length() - 1);
         initialUpdatedCount++;
         continue;
       }

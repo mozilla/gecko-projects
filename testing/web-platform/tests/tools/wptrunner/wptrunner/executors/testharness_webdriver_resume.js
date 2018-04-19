@@ -26,8 +26,6 @@ function process_event(event) {
     });
     payload = data;
     break;
-  default:
-    return;
   }
 
   callback(["%(url)s", data.type, payload]);

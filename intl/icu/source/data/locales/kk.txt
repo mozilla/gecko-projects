@@ -219,7 +219,7 @@ kk{
         minimumGroupingDigits{"1"}
         native{"latn"}
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.37.5"}
     calendar{
         generic{
             DateTimePatterns{
@@ -599,10 +599,6 @@ kk{
                 abbreviated{
                     "б.з.д.",
                     "б.з.",
-                }
-                abbreviated%variant{
-                    "BCE",
-                    "CE",
                 }
                 wide{
                     "Біздің заманымызға дейін",

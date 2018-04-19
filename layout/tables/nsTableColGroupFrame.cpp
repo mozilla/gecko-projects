@@ -5,7 +5,7 @@
 #include "nsTableColGroupFrame.h"
 #include "nsTableColFrame.h"
 #include "nsTableFrame.h"
-#include "mozilla/ComputedStyle.h"
+#include "nsStyleContext.h"
 #include "nsStyleConsts.h"
 #include "nsPresContext.h"
 #include "nsHTMLParts.h"
@@ -13,6 +13,9 @@
 #include "nsCOMPtr.h"
 #include "nsCSSRendering.h"
 #include "nsIPresShell.h"
+#ifdef MOZ_OLD_STYLE
+#include "mozilla/GeckoStyleContext.h"
+#endif
 
 using namespace mozilla;
 
@@ -136,16 +139,16 @@ nsTableColGroupFrame::SetInitialChildList(ChildListID     aListID,
 }
 
 /* virtual */ void
-nsTableColGroupFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
+nsTableColGroupFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
 {
-  nsContainerFrame::DidSetComputedStyle(aOldComputedStyle);
+  nsContainerFrame::DidSetStyleContext(aOldStyleContext);
 
-  if (!aOldComputedStyle) //avoid this on init
+  if (!aOldStyleContext) //avoid this on init
     return;
 
   nsTableFrame* tableFrame = GetTableFrame();
   if (tableFrame->IsBorderCollapse() &&
-      tableFrame->BCRecalcNeeded(aOldComputedStyle, Style())) {
+      tableFrame->BCRecalcNeeded(aOldStyleContext, StyleContext())) {
     int32_t colCount = GetColCount();
     if (!colCount)
       return; // this is a degenerated colgroup
@@ -293,6 +296,22 @@ nsTableColGroupFrame::RemoveFrame(ChildListID     aListID,
       nsTableColFrame* nextCol;
       while (col && col->GetColType() == eColAnonymousCol) {
 #ifdef DEBUG
+#ifdef MOZ_OLD_STYLE
+        nsIFrame* providerFrame;
+        nsStyleContext* psc = colFrame->GetParentStyleContext(&providerFrame);
+        if (psc->IsGecko()) {
+          // This check code is useful only in Gecko-backed style system.
+          if (colFrame->StyleContext()->AsGecko()->GetParent() == psc->AsGecko()) {
+            NS_ASSERTION(col->StyleContext() == colFrame->StyleContext() &&
+                         col->GetContent() == colFrame->GetContent(),
+                         "How did that happen??");
+          }
+          // else colFrame is being removed because of a frame
+          // reconstruct on it, and its style context is still the old
+          // one, so we can't assert anything about how it compares to
+          // col's style context.
+        }
+#endif
 #endif
         nextCol = col->GetNextCol();
         RemoveFrame(kPrincipalList, col);
@@ -441,32 +460,31 @@ void nsTableColGroupFrame::GetContinuousBCBorderWidth(WritingMode aWM,
 /* ----- global methods ----- */
 
 nsTableColGroupFrame*
-NS_NewTableColGroupFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
+NS_NewTableColGroupFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
-  return new (aPresShell) nsTableColGroupFrame(aStyle);
+  return new (aPresShell) nsTableColGroupFrame(aContext);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsTableColGroupFrame)
 
 void
-nsTableColGroupFrame::InvalidateFrame(uint32_t aDisplayItemKey, bool aRebuildDisplayItems)
+nsTableColGroupFrame::InvalidateFrame(uint32_t aDisplayItemKey)
 {
-  nsIFrame::InvalidateFrame(aDisplayItemKey, aRebuildDisplayItems);
+  nsIFrame::InvalidateFrame(aDisplayItemKey);
   if (GetTableFrame()->IsBorderCollapse() && StyleBorder()->HasBorder()) {
-    GetParent()->InvalidateFrameWithRect(GetVisualOverflowRect() + GetPosition(), aDisplayItemKey, false);
+    GetParent()->InvalidateFrameWithRect(GetVisualOverflowRect() + GetPosition(), aDisplayItemKey);
   }
 }
 
 void
 nsTableColGroupFrame::InvalidateFrameWithRect(const nsRect& aRect,
-                                              uint32_t aDisplayItemKey,
-                                              bool aRebuildDisplayItems)
+                                              uint32_t aDisplayItemKey)
 {
-  nsIFrame::InvalidateFrameWithRect(aRect, aDisplayItemKey, aRebuildDisplayItems);
+  nsIFrame::InvalidateFrameWithRect(aRect, aDisplayItemKey);
   // If we have filters applied that would affects our bounds, then
   // we get an inactive layer created and this is computed
   // within FrameLayerBuilder
-  GetParent()->InvalidateFrameWithRect(aRect + GetPosition(), aDisplayItemKey, false);
+  GetParent()->InvalidateFrameWithRect(aRect + GetPosition(), aDisplayItemKey);
 }
 
 #ifdef DEBUG_FRAME_DUMP

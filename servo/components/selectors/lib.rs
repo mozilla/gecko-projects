@@ -5,15 +5,11 @@
 // Make |cargo bench| work.
 #![cfg_attr(feature = "bench", feature(test))]
 
-#[macro_use]
-extern crate bitflags;
-#[macro_use]
-extern crate cssparser;
+#[macro_use] extern crate bitflags;
+#[macro_use] extern crate cssparser;
+#[macro_use] extern crate log;
+#[macro_use] extern crate matches;
 extern crate fnv;
-#[macro_use]
-extern crate log;
-#[macro_use]
-extern crate matches;
 extern crate phf;
 extern crate precomputed_hash;
 extern crate servo_arc;
@@ -31,5 +27,5 @@ mod tree;
 pub mod visitor;
 
 pub use nth_index_cache::NthIndexCache;
-pub use parser::{Parser, SelectorImpl, SelectorList};
+pub use parser::{SelectorImpl, Parser, SelectorList};
 pub use tree::{Element, OpaqueElement};

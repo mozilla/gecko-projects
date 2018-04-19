@@ -12,13 +12,7 @@
     title: "Renegotiation: remove then add video track"
   });
 
-  runNetworkTest(async function (options) {
-    // Use fake video here since the native fake device on linux doesn't
-    // change color as needed by checkVideoPlaying() below.
-    await pushPrefs(
-      ['media.video_loopback_dev', ''],
-      ['media.navigator.streams.fake', true]);
-
+  runNetworkTest(function (options) {
     const test = new PeerConnectionTest(options);
     const helper = new VideoStreamHelper();
     var originalTrack;
@@ -39,7 +33,9 @@
           return test.pcLocal.removeSender(0);
         },
         function PC_LOCAL_ADD_VIDEO_TRACK(test) {
-          return test.pcLocal.getAllUserMediaAndAddStreams([{video: true}]);
+          // Use fake:true here since the native fake device on linux doesn't
+          // change color as needed by checkVideoPlaying() below.
+          return test.pcLocal.getAllUserMediaAndAddStreams([{video: true, fake: true}]);
         },
       ],
       [

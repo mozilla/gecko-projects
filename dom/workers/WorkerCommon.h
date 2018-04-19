@@ -27,9 +27,6 @@ WorkerPrivate*
 GetCurrentThreadWorkerPrivate();
 
 bool
-IsCurrentThreadRunningWorker();
-
-bool
 IsCurrentThreadRunningChromeWorker();
 
 JSContext*

@@ -8,8 +8,6 @@ XPCOMUtils.defineLazyGetter(this, "Management", () => {
   return Management;
 });
 
-ChromeUtils.import("resource://testing-common/CustomizableUITestUtils.jsm", this);
-let gCUITestUtils = new CustomizableUITestUtils(window);
 
 /**
  * Wait for the given PopupNotification to display
@@ -354,7 +352,7 @@ async function testInstallMethod(installFn, telemetryBase) {
       addon.uninstall();
     }
 
-    BrowserTestUtils.removeTab(tab);
+    await BrowserTestUtils.removeTab(tab);
   }
 
   // A few different tests for each installation method:
@@ -472,7 +470,7 @@ async function interactiveUpdateTest(autoUpdate, checkFn) {
 
   await checkPromise;
 
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
   addon.uninstall();
   await SpecialPowers.popPrefEnv();
 }

@@ -7,14 +7,12 @@
 #ifndef mozilla_layers_APZCTreeManagerChild_h
 #define mozilla_layers_APZCTreeManagerChild_h
 
-#include "mozilla/layers/APZInputBridge.h"
 #include "mozilla/layers/IAPZCTreeManager.h"
 #include "mozilla/layers/PAPZCTreeManagerChild.h"
 
 namespace mozilla {
 namespace layers {
 
-class APZInputBridgeChild;
 class RemoteCompositorSession;
 
 class APZCTreeManagerChild
@@ -25,8 +23,12 @@ public:
   APZCTreeManagerChild();
 
   void SetCompositorSession(RemoteCompositorSession* aSession);
-  void SetInputBridge(APZInputBridgeChild* aInputBridge);
-  void Destroy();
+
+  nsEventStatus
+  ReceiveInputEvent(
+          InputData& aEvent,
+          ScrollableLayerGuid* aOutTargetGuid,
+          uint64_t* aOutInputBlockId) override;
 
   void
   SetKeyboardMap(const KeyboardMap& aKeyboardMap) override;
@@ -76,8 +78,19 @@ public:
   void
   SetLongTapEnabled(bool aTapGestureEnabled) override;
 
-  APZInputBridge*
-  InputBridge() override;
+  void
+  ProcessTouchVelocity(uint32_t aTimestampMs, float aSpeedY) override;
+
+  void
+  ProcessUnhandledEvent(
+          LayoutDeviceIntPoint* aRefPoint,
+          ScrollableLayerGuid*  aOutTargetGuid,
+          uint64_t*             aOutFocusSequenceNumber) override;
+
+  void
+  UpdateWheelTransaction(
+          LayoutDeviceIntPoint aRefPoint,
+          EventMessage aEventMessage) override;
 
 protected:
   mozilla::ipc::IPCResult RecvHandleTap(const TapType& aType,
@@ -93,11 +106,11 @@ protected:
 
   mozilla::ipc::IPCResult RecvCancelAutoscroll(const FrameMetrics::ViewID& aScrollId) override;
 
-  virtual ~APZCTreeManagerChild();
+  virtual
+  ~APZCTreeManagerChild() { }
 
 private:
   MOZ_NON_OWNING_REF RemoteCompositorSession* mCompositorSession;
-  RefPtr<APZInputBridgeChild> mInputBridge;
 };
 
 } // namespace layers

@@ -50,8 +50,6 @@ var ActionBarHandler = {
    * (mozcaretstatechanged) events.
    */
   handleEvent: function(e) {
-    e.stopImmediatePropagation();
-
     // Close an open ActionBar, if carets no longer logically visible.
     if (this._selectionID && !e.caretVisible) {
       this._uninit(false);

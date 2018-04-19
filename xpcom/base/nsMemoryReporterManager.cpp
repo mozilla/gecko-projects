@@ -332,11 +332,10 @@ VsizeMaxContiguousDistinguishedAmount(int64_t* aN)
 #include <unistd.h>
 
 static void
-XMappingIter(int64_t& aVsize, int64_t& aResident, int64_t& aShared)
+XMappingIter(int64_t& aVsize, int64_t& aResident)
 {
   aVsize = -1;
   aResident = -1;
-  aShared = -1;
   int mapfd = open("/proc/self/xmap", O_RDONLY);
   struct stat st;
   prxmap_t* prmapp = nullptr;
@@ -360,13 +359,9 @@ XMappingIter(int64_t& aVsize, int64_t& aResident, int64_t& aShared)
         if (nmap >= n / sizeof(prxmap_t)) {
           aVsize = 0;
           aResident = 0;
-          aShared = 0;
           for (int i = 0; i < n / sizeof(prxmap_t); i++) {
             aVsize += prmapp[i].pr_size;
             aResident += prmapp[i].pr_rss * prmapp[i].pr_pagesize;
-            if (prmapp[i].pr_mflags & MA_SHARED) {
-              aShared += prmapp[i].pr_rss * prmapp[i].pr_pagesize;
-            }
           }
           break;
         }
@@ -382,8 +377,8 @@ XMappingIter(int64_t& aVsize, int64_t& aResident, int64_t& aShared)
 static MOZ_MUST_USE nsresult
 VsizeDistinguishedAmount(int64_t* aN)
 {
-  int64_t vsize, resident, shared;
-  XMappingIter(vsize, resident, shared);
+  int64_t vsize, resident;
+  XMappingIter(vsize, resident);
   if (vsize == -1) {
     return NS_ERROR_FAILURE;
   }
@@ -394,8 +389,8 @@ VsizeDistinguishedAmount(int64_t* aN)
 static MOZ_MUST_USE nsresult
 ResidentDistinguishedAmount(int64_t* aN)
 {
-  int64_t vsize, resident, shared;
-  XMappingIter(vsize, resident, shared);
+  int64_t vsize, resident;
+  XMappingIter(vsize, resident);
   if (resident == -1) {
     return NS_ERROR_FAILURE;
   }
@@ -407,19 +402,6 @@ static MOZ_MUST_USE nsresult
 ResidentFastDistinguishedAmount(int64_t* aN)
 {
   return ResidentDistinguishedAmount(aN);
-}
-
-#define HAVE_RESIDENT_UNIQUE_REPORTER 1
-static MOZ_MUST_USE nsresult
-ResidentUniqueDistinguishedAmount(int64_t* aN)
-{
-  int64_t vsize, resident, shared;
-  XMappingIter(vsize, resident, shared);
-  if (resident == -1) {
-    return NS_ERROR_FAILURE;
-  }
-  *aN = resident - shared;
-  return NS_OK;
 }
 
 #elif defined(XP_MACOSX)
@@ -1419,6 +1401,11 @@ public:
     MOZ_COLLECT_REPORT(
       "explicit/atoms/table", KIND_HEAP, UNITS_BYTES, sizes.mTable,
       "Memory used by the atom table.");
+
+    MOZ_COLLECT_REPORT(
+      "explicit/atoms/static/atom-objects", KIND_HEAP, UNITS_BYTES,
+      sizes.mStaticAtomObjects,
+      "Memory used by static atom objects.");
 
     MOZ_COLLECT_REPORT(
       "explicit/atoms/dynamic/atom-objects", KIND_HEAP, UNITS_BYTES,

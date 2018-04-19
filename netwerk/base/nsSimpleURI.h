@@ -36,11 +36,10 @@ class nsSimpleURI
     , public nsIIPCSerializableURI
 {
 protected:
-    nsSimpleURI();
     virtual ~nsSimpleURI();
 
 public:
-    NS_DECL_THREADSAFE_ISUPPORTS
+    NS_DECL_ISUPPORTS
     NS_DECL_NSIURI
     NS_DECL_NSISERIALIZABLE
     NS_DECL_NSICLASSINFO
@@ -50,6 +49,8 @@ public:
     static already_AddRefed<nsSimpleURI> From(nsIURI* aURI);
 
     // nsSimpleURI methods:
+
+    nsSimpleURI();
 
     bool Equals(nsSimpleURI* aOther)
     {
@@ -77,7 +78,7 @@ protected:
     virtual nsresult SetSpecInternal(const nsACString &input);
     virtual nsresult SetScheme(const nsACString &input);
     virtual nsresult SetUserPass(const nsACString &input);
-    nsresult SetUsername(const nsACString &input);
+    virtual nsresult SetUsername(const nsACString &input);
     virtual nsresult SetPassword(const nsACString &input);
     virtual nsresult SetHostPort(const nsACString &aValue);
     virtual nsresult SetHost(const nsACString &input);
@@ -87,7 +88,6 @@ protected:
     virtual nsresult SetFilePath(const nsACString &input);
     virtual nsresult SetQuery(const nsACString &input);
     virtual nsresult SetQueryWithEncoding(const nsACString &input, const Encoding* encoding);
-    nsresult ReadPrivate(nsIObjectInputStream *stream);
 
     // Helper to share code between Equals methods.
     virtual nsresult EqualsInternal(nsIURI* other,
@@ -132,23 +132,10 @@ public:
     class Mutator final
         : public nsIURIMutator
         , public BaseURIMutator<nsSimpleURI>
-        , public nsISerializable
     {
         NS_DECL_ISUPPORTS
         NS_FORWARD_SAFE_NSIURISETTERS_RET(mURI)
         NS_DEFINE_NSIMUTATOR_COMMON
-
-        NS_IMETHOD
-        Write(nsIObjectOutputStream *aOutputStream) override
-        {
-            return NS_ERROR_NOT_IMPLEMENTED;
-        }
-
-        MOZ_MUST_USE NS_IMETHOD
-        Read(nsIObjectInputStream* aStream) override
-        {
-            return InitFromInputStream(aStream);
-        }
 
         explicit Mutator() { }
     private:

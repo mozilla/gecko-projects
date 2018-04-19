@@ -9,14 +9,12 @@
 
 #include "mozilla/MemoryReporting.h"
 
+#include <cmath>
 #include <stdint.h>
 
 #include "NamespaceImports.h"
 
 namespace js {
-
-struct Class;
-class GlobalObject;
 
 typedef double (*UnaryFunType)(double);
 
@@ -86,10 +84,8 @@ class MathCache
  * JS math functions.
  */
 
-extern const Class MathClass;
-
 extern JSObject*
-InitMathClass(JSContext* cx, Handle<GlobalObject*> global);
+InitMathClass(JSContext* cx, HandleObject obj);
 
 extern uint64_t
 GenerateRandomSeed();

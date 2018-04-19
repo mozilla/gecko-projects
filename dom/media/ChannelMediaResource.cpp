@@ -285,11 +285,6 @@ ChannelMediaResource::OnStartRequest(nsIRequest* aRequest,
   // This is important, we want to make sure all principals are updated before
   // any consumer can see the new data.
   UpdatePrincipal();
-  if (owner->HasError()) {
-    // Updating the principal resulted in an error. Abort the load.
-    CloseChannel();
-    return NS_OK;
-  }
 
   mCacheStream.NotifyDataStarted(mLoadID, startOffset, seekable, length);
   mIsTransportSeekable = seekable;
@@ -322,7 +317,7 @@ nsresult
 ChannelMediaResource::ParseContentRangeHeader(nsIHttpChannel * aHttpChan,
                                               int64_t& aRangeStart,
                                               int64_t& aRangeEnd,
-                                              int64_t& aRangeTotal) const
+                                              int64_t& aRangeTotal)
 {
   NS_ENSURE_ARG(aHttpChan);
 
@@ -451,55 +446,6 @@ ChannelMediaResource::OnDataAvailable(uint32_t aLoadID,
   return NS_OK;
 }
 
-int64_t
-ChannelMediaResource::CalculateStreamLength() const
-{
-  if (!mChannel) {
-    return -1;
-  }
-
-  nsCOMPtr<nsIHttpChannel> hc = do_QueryInterface(mChannel);
-  if (!hc) {
-    return -1;
-  }
-
-  bool succeeded = false;
-  Unused << hc->GetRequestSucceeded(&succeeded);
-  if (!succeeded) {
-    return -1;
-  }
-
-  // We can't determine the length of uncompressed payload.
-  const bool isCompressed = IsPayloadCompressed(hc);
-  if (isCompressed) {
-    return -1;
-  }
-
-  int64_t contentLength = -1;
-  if (NS_FAILED(hc->GetContentLength(&contentLength))) {
-    return -1;
-  }
-
-  uint32_t responseStatus = 0;
-  Unused << hc->GetResponseStatus(&responseStatus);
-  if (responseStatus != HTTP_PARTIAL_RESPONSE_CODE) {
-    return contentLength;
-  }
-
-  // We have an HTTP Byte Range response. The Content-Length is the length
-  // of the response, not the resource. We need to parse the Content-Range
-  // header and extract the range total in order to get the stream length.
-  int64_t rangeStart = 0;
-  int64_t rangeEnd = 0;
-  int64_t rangeTotal = 0;
-  bool gotRangeHeader = NS_SUCCEEDED(
-    ParseContentRangeHeader(hc, rangeStart, rangeEnd, rangeTotal));
-  if (gotRangeHeader && rangeTotal != -1) {
-    contentLength = std::max(contentLength, rangeTotal);
-  }
-  return contentLength;
-}
-
 nsresult
 ChannelMediaResource::Open(nsIStreamListener** aStreamListener)
 {
@@ -507,8 +453,15 @@ ChannelMediaResource::Open(nsIStreamListener** aStreamListener)
   MOZ_ASSERT(aStreamListener);
   MOZ_ASSERT(mChannel);
 
-  int64_t streamLength = CalculateStreamLength();
-  nsresult rv = mCacheStream.Init(streamLength);
+  int64_t cl = -1;
+  nsCOMPtr<nsIHttpChannel> hc = do_QueryInterface(mChannel);
+  if (hc && !IsPayloadCompressed(hc)) {
+    if (NS_FAILED(hc->GetContentLength(&cl))) {
+      cl = -1;
+    }
+  }
+
+  nsresult rv = mCacheStream.Init(cl);
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -516,7 +469,7 @@ ChannelMediaResource::Open(nsIStreamListener** aStreamListener)
   mSharedInfo = new SharedInfo;
   mSharedInfo->mResources.AppendElement(this);
 
-  mIsLiveStream = streamLength < 0;
+  mIsLiveStream = cl < 0;
   mListener = new Listener(this, 0, ++mLoadID);
   *aStreamListener = mListener;
   NS_ADDREF(*aStreamListener);

@@ -21,7 +21,6 @@
 #include "nsClassHashtable.h"
 #include "nsNodeUtils.h"
 #include "nsWrapperCache.h"
-#include "mozilla/dom/Nullable.h"
 #include "mozilla/dom/MutationEventBinding.h"
 #include "mozilla/dom/MutationObserverBinding.h"
 #include "nsIDocument.h"
@@ -531,9 +530,8 @@ public:
 
   void HandleMutation();
 
-  void GetObservingInfo(
-    nsTArray<mozilla::dom::Nullable<MutationObservingInfo>>& aResult,
-    mozilla::ErrorResult& aRv);
+  void GetObservingInfo(nsTArray<Nullable<MutationObservingInfo>>& aResult,
+                        mozilla::ErrorResult& aRv);
 
   mozilla::dom::MutationCallback* MutationCallback() { return mCallback; }
 

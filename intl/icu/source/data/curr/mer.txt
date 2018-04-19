@@ -124,10 +124,6 @@ mer{
         }
         MRO{
             "MRO",
-            "Ugwiya ya Mauritania (1973–2017)",
-        }
-        MRU{
-            "MRU",
             "Ugwiya ya Mauritania",
         }
         MUR{
@@ -180,10 +176,6 @@ mer{
         }
         STD{
             "STD",
-            "Dobra ya Sao Tome na Principe (1977–2017)",
-        }
-        STN{
-            "STN",
             "Dobra ya Sao Tome na Principe",
         }
         SZL{
@@ -231,5 +223,5 @@ mer{
             "Dola ya Zimbabwe",
         }
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.31.33"}
 }

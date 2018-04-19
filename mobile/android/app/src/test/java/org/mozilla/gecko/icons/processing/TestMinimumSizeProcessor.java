@@ -7,14 +7,15 @@ import android.graphics.Bitmap;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.Mock;
+import org.mozilla.gecko.background.testhelpers.TestRunner;
 import org.mozilla.gecko.icons.IconRequest;
 import org.mozilla.gecko.icons.IconResponse;
-import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 import static org.mockito.Mockito.*;
 
-@RunWith(RobolectricTestRunner.class)
+@RunWith(TestRunner.class)
 public class TestMinimumSizeProcessor {
 
     private MinimumSizeProcessor processor;

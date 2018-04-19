@@ -143,7 +143,7 @@ public:
       }
     }
 
-    // We only set these once we know we're returning true.
+    // We only set these once we know we're returing true.
     *mFrameInUse = true;
     (*mChainCounter)--;
 

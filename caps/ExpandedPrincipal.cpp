@@ -180,17 +180,6 @@ ExpandedPrincipal::AddonHasPermission(const nsAtom* aPerm)
   return false;
 }
 
-bool
-ExpandedPrincipal::AddonAllowsLoad(nsIURI* aURI, bool aExplicit /* = false */)
-{
-  for (const auto& principal : mPrincipals) {
-    if (Cast(principal)->AddonAllowsLoad(aURI, aExplicit)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 nsIPrincipal*
 ExpandedPrincipal::PrincipalToInherit(nsIURI* aRequestedURI)
 {

@@ -37,8 +37,6 @@
 #include "nsITreeColumns.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLLabelElement.h"
-#include "mozilla/dom/MouseEventBinding.h"
-#include "mozilla/dom/Selection.h"
 
 using namespace mozilla;
 
@@ -49,7 +47,7 @@ using namespace mozilla;
 bool
 nsCoreUtils::IsLabelWithControl(nsIContent* aContent)
 {
-  dom::HTMLLabelElement* label = dom::HTMLLabelElement::FromNode(aContent);
+  dom::HTMLLabelElement* label = dom::HTMLLabelElement::FromContent(aContent);
   if (label && label->GetControl())
     return true;
 
@@ -101,7 +99,7 @@ nsCoreUtils::DispatchClickEvent(nsITreeBoxObject *aTreeBoxObj,
 
   nsCOMPtr<nsIContent> tcXULElm(do_QueryInterface(tcElm));
   nsCOMPtr<nsIBoxObject> tcBoxObj =
-    nsXULElement::FromNode(tcXULElm)->GetBoxObject(IgnoreErrors());
+    nsXULElement::FromContent(tcXULElm)->GetBoxObject(IgnoreErrors());
 
   int32_t tcX = 0;
   tcBoxObj->GetX(&tcX);
@@ -145,7 +143,7 @@ nsCoreUtils::DispatchMouseEvent(EventMessage aMessage, int32_t aX, int32_t aY,
   event.mClickCount = 1;
   event.button = WidgetMouseEvent::eLeftButton;
   event.mTime = PR_IntervalNow();
-  event.inputSource = dom::MouseEventBinding::MOZ_SOURCE_UNKNOWN;
+  event.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
 
   nsEventStatus status = nsEventStatus_eIgnore;
   aPresShell->HandleEventWithTarget(&event, aFrame, aContent, &status);
@@ -204,7 +202,7 @@ nsCoreUtils::GetDOMElementFor(nsIContent *aContent)
   if (aContent->IsElement())
     return aContent;
 
-  if (aContent->IsText())
+  if (aContent->IsNodeOfType(nsINode::eTEXT))
     return aContent->GetFlattenedTreeParent();
 
   return nullptr;
@@ -259,9 +257,8 @@ nsCoreUtils::ScrollSubstringTo(nsIFrame* aFrame, nsRange* aRange,
                                nsIPresShell::ScrollAxis aVertical,
                                nsIPresShell::ScrollAxis aHorizontal)
 {
-  if (!aFrame || !aRange) {
+  if (!aFrame)
     return NS_ERROR_FAILURE;
-  }
 
   nsPresContext *presContext = aFrame->PresContext();
 
@@ -269,12 +266,13 @@ nsCoreUtils::ScrollSubstringTo(nsIFrame* aFrame, nsRange* aRange,
   aFrame->GetSelectionController(presContext, getter_AddRefs(selCon));
   NS_ENSURE_TRUE(selCon, NS_ERROR_FAILURE);
 
-  RefPtr<dom::Selection> selection =
-    selCon->GetDOMSelection(nsISelectionController::SELECTION_ACCESSIBILITY);
+  nsCOMPtr<nsISelection> selection;
+  selCon->GetSelection(nsISelectionController::SELECTION_ACCESSIBILITY,
+                       getter_AddRefs(selection));
 
-  nsCOMPtr<nsISelectionPrivate> privSel(do_QueryObject(selection));
-  selection->RemoveAllRanges(IgnoreErrors());
-  selection->AddRange(*aRange, IgnoreErrors());
+  nsCOMPtr<nsISelectionPrivate> privSel(do_QueryInterface(selection));
+  selection->RemoveAllRanges();
+  selection->AddRange(aRange);
 
   privSel->ScrollIntoViewInternal(
     nsISelectionController::SELECTION_ANCHOR_REGION,
@@ -494,7 +492,7 @@ nsCoreUtils::GetTreeBodyBoxObject(nsITreeBoxObject *aTreeBoxObj)
   nsCOMPtr<nsIDOMElement> tcElm;
   aTreeBoxObj->GetTreeBody(getter_AddRefs(tcElm));
   nsCOMPtr<nsIContent> tcContent(do_QueryInterface(tcElm));
-  RefPtr<nsXULElement> tcXULElm = nsXULElement::FromNodeOrNull(tcContent);
+  RefPtr<nsXULElement> tcXULElm = nsXULElement::FromContentOrNull(tcContent);
   if (!tcXULElm)
     return nullptr;
 
@@ -511,7 +509,7 @@ nsCoreUtils::GetTreeBoxObject(nsIContent *aContent)
                                            kNameSpaceID_XUL)) {
       // We will get the nsITreeBoxObject from the tree node
       RefPtr<nsXULElement> xulElement =
-        nsXULElement::FromNode(currentContent);
+        nsXULElement::FromContent(currentContent);
       nsCOMPtr<nsIBoxObject> box = xulElement->GetBoxObject(IgnoreErrors());
       nsCOMPtr<nsITreeBoxObject> treeBox(do_QueryInterface(box));
       if (treeBox)

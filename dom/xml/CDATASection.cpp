@@ -15,7 +15,8 @@ CDATASection::~CDATASection()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED(CDATASection, CharacterData, nsIDOMNode)
+NS_IMPL_ISUPPORTS_INHERITED(CDATASection, nsGenericDOMDataNode, nsIDOMNode,
+                            nsIDOMCharacterData, nsIDOMText)
 
 JSObject*
 CDATASection::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
@@ -26,19 +27,19 @@ CDATASection::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 bool
 CDATASection::IsNodeOfType(uint32_t aFlags) const
 {
-  return !(aFlags & ~eDATA_NODE);
+  return !(aFlags & ~(eTEXT | eDATA_NODE));
 }
 
-already_AddRefed<CharacterData>
+nsGenericDOMDataNode*
 CDATASection::CloneDataNode(mozilla::dom::NodeInfo *aNodeInfo, bool aCloneText) const
 {
   RefPtr<mozilla::dom::NodeInfo> ni = aNodeInfo;
-  RefPtr<CDATASection> it = new CDATASection(ni.forget());
-  if (aCloneText) {
+  CDATASection *it = new CDATASection(ni.forget());
+  if (it && aCloneText) {
     it->mText = mText;
   }
 
-  return it.forget();
+  return it;
 }
 
 #ifdef DEBUG

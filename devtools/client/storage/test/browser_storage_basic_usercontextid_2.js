@@ -74,14 +74,14 @@ function testTree(tests) {
   let doc = gPanelWindow.document;
   for (let [item] of tests) {
     ok(doc.querySelector("[data-id='" + JSON.stringify(item) + "']"),
-      `Tree item ${item.toSource()} should be present in the storage tree`);
+       "Tree item " + item[0] + " should be present in the storage tree");
   }
 }
 
 /**
  * Test that correct table entries are shown for each of the tree item
  */
-async function testTables(tests) {
+function* testTables(tests) {
   let doc = gPanelWindow.document;
   // Expand all nodes so that the synthesized click event actually works
   gUI.tree.expandAll();
@@ -94,7 +94,7 @@ async function testTables(tests) {
 
   // Click rest of the tree items and wait for the table to be updated
   for (let [treeItem, items] of tests.slice(1)) {
-    await selectTreeItem(treeItem);
+    yield selectTreeItem(treeItem);
 
     // Check whether correct number of items are present in the table
     is(doc.querySelectorAll(
@@ -109,12 +109,12 @@ async function testTables(tests) {
   }
 }
 
-add_task(async function() {
-  await openTabAndSetupStorage(MAIN_DOMAIN + "storage-listings-usercontextid.html",
+add_task(function* () {
+  yield openTabAndSetupStorage(MAIN_DOMAIN + "storage-listings-usercontextid.html",
                                {userContextId: 1});
 
   testTree(testCasesUserContextId);
-  await testTables(testCasesUserContextId);
+  yield testTables(testCasesUserContextId);
 
-  await finishTests();
+  yield finishTests();
 });

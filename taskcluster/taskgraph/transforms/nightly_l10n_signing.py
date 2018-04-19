@@ -38,7 +38,8 @@ def define_upstream_artifacts(config, jobs):
         dep_job = job['dependent-task']
 
         locale_specifications = generate_specifications_of_artifacts_to_sign(
-            dep_job,
+            dep_job.attributes.get('build_platform'),
+            is_nightly=True,
             keep_locale_template=True
         )
 

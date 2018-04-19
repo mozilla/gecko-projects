@@ -6,23 +6,11 @@
 #ifndef _mozilla_dom_ServiceWorkerUtils_h
 #define _mozilla_dom_ServiceWorkerUtils_h
 
-#include "mozilla/MozPromise.h"
-#include "mozilla/dom/ServiceWorkerRegistrationDescriptor.h"
-
 namespace mozilla {
 namespace dom {
 
-class ServiceWorkerRegistrationData;
-class ServiceWorkerRegistrationDescriptor;
-
-typedef MozPromise<ServiceWorkerRegistrationDescriptor, nsresult, false>
-        ServiceWorkerRegistrationPromise;
-
 bool
 ServiceWorkerParentInterceptEnabled();
-
-bool
-ServiceWorkerRegistrationDataIsValid(const ServiceWorkerRegistrationData& aData);
 
 } // namespace dom
 } // namespace mozilla

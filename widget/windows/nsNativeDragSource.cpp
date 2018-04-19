@@ -11,17 +11,16 @@
 #include "nsToolkit.h"
 #include "nsWidgetsCID.h"
 #include "nsIDragService.h"
-#include "mozilla/dom/DataTransfer.h"
 
 /*
  * class nsNativeDragSource
  */
-nsNativeDragSource::nsNativeDragSource(mozilla::dom::DataTransfer* aDataTransfer) :
+nsNativeDragSource::nsNativeDragSource(nsIDOMDataTransfer* aDataTransfer) :
   m_cRef(0),
   m_hCursor(nullptr),
   mUserCancelled(false)
 {
-  mDataTransfer = aDataTransfer;
+  mDataTransfer = do_QueryInterface(aDataTransfer);
 }
 
 nsNativeDragSource::~nsNativeDragSource()

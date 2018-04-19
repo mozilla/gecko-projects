@@ -23,6 +23,13 @@ GDBTestInitInterpreterRegs(InterpreterRegs& regs,
 }
 
 void
+GDBTestInitAbstractFramePtr(AbstractFramePtr& frame, void* ptr)
+{
+    MOZ_ASSERT((uintptr_t(ptr) &  AbstractFramePtr::TagMask) == 0);
+    frame.ptr_ = uintptr_t(ptr) | AbstractFramePtr::Tag_ScriptFrameIterData;
+}
+
+void
 GDBTestInitAbstractFramePtr(AbstractFramePtr& frame, InterpreterFrame* ptr)
 {
     MOZ_ASSERT((uintptr_t(ptr) & AbstractFramePtr::TagMask) == 0);
@@ -70,6 +77,10 @@ FRAGMENT(Interpreter, Regs) {
 }
 
 FRAGMENT(Interpreter, AbstractFramePtr) {
+
+    js::AbstractFramePtr sfidptr;
+    GDBTestInitAbstractFramePtr(sfidptr, (js::ScriptFrameIter::Data*) uintptr_t(0xdeeb0));
+
     js::AbstractFramePtr ifptr;
     GDBTestInitAbstractFramePtr(ifptr, (js::InterpreterFrame*) uintptr_t(0x8badf00));
 
@@ -84,8 +95,8 @@ FRAGMENT(Interpreter, AbstractFramePtr) {
 
     breakpoint();
 
+    use(sfidptr);
     use(ifptr);
     use(bfptr);
     use(rfptr);
-    use(sfptr);
 }

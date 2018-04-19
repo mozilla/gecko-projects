@@ -30,8 +30,10 @@ public:
   NS_DECL_NSIIPCSERIALIZABLEURI
   NS_DECL_NSINESTEDURI
 
-protected:
+  // nsMozIconURI
   nsMozIconURI();
+
+protected:
   virtual ~nsMozIconURI();
   nsCOMPtr<nsIURL> mIconURL; // a URL that we want the icon for
   uint32_t mSize; // the # of pixels in a row that we want for this image.
@@ -73,6 +75,11 @@ public:
     NS_IMETHOD Deserialize(const mozilla::ipc::URIParams& aParams) override
     {
       return InitFromIPCParams(aParams);
+    }
+
+    NS_IMETHOD Read(nsIObjectInputStream* aStream) override
+    {
+      return NS_ERROR_NOT_IMPLEMENTED;
     }
 
     NS_IMETHOD Finalize(nsIURI** aURI) override

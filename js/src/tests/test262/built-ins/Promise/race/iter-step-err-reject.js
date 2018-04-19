@@ -46,7 +46,7 @@ iterStepThrows[Symbol.iterator] = function() {
 };
 
 Promise.race(iterStepThrows).then(function() {
-  $DONE('The promise should be rejected.');
+  $ERROR('The promise should be rejected.');
 }, function(reason) {
   assert.sameValue(reason, error);
 }).then($DONE, $DONE);

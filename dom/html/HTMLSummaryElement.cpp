@@ -143,7 +143,7 @@ HTMLSummaryElement::IsMainSummary() const
 HTMLDetailsElement*
 HTMLSummaryElement::GetDetails() const
 {
-  return HTMLDetailsElement::FromNodeOrNull(GetParent());
+  return HTMLDetailsElement::FromContentOrNull(GetParent());
 }
 
 JSObject*

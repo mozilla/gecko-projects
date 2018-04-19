@@ -3,12 +3,12 @@ import platform
 import signal
 import subprocess
 import sys
-import tempfile
 
 import mozinfo
 import mozleak
 from mozprocess import ProcessHandler
 from mozprofile import FirefoxProfile, Preferences
+from mozprofile.permissions import ServerLocations
 from mozrunner import FirefoxRunner
 from mozrunner.utils import get_stack_fixer_function
 from mozcrash import mozcrash
@@ -23,6 +23,7 @@ from ..executors import executor_kwargs as base_executor_kwargs
 from ..executors.executormarionette import (MarionetteTestharnessExecutor,
                                             MarionetteRefTestExecutor,
                                             MarionetteWdspecExecutor)
+from ..environment import hostnames
 
 
 here = os.path.join(os.path.split(__file__)[0])
@@ -79,8 +80,7 @@ def browser_kwargs(test_type, run_info_data, **kwargs):
                                                          **kwargs),
             "leak_check": kwargs["leak_check"],
             "stylo_threads": kwargs["stylo_threads"],
-            "chaos_mode_flags": kwargs["chaos_mode_flags"],
-            "config": kwargs["config"]}
+            "chaos_mode_flags": kwargs["chaos_mode_flags"]}
 
 
 def executor_kwargs(test_type, server_config, cache_manager, run_info_data,
@@ -102,7 +102,7 @@ def executor_kwargs(test_type, server_config, cache_manager, run_info_data,
         if kwargs["binary_args"]:
             options["args"] = kwargs["binary_args"]
         options["prefs"] = {
-            "network.dns.localDomains": ",".join(server_config['domains'].values())
+            "network.dns.localDomains": ",".join(hostnames)
         }
         capabilities["moz:firefoxOptions"] = options
     if kwargs["certutil_binary"] is None:
@@ -117,13 +117,10 @@ def env_extras(**kwargs):
 
 
 def env_options():
-    # The server host is set to 127.0.0.1 as Firefox is configured (through the
-    # network.dns.localDomains preference set below) to resolve the test
-    # domains to localhost without relying on the network stack.
-    #
-    # https://github.com/w3c/web-platform-tests/pull/9480
-    return {"server_host": "127.0.0.1",
-            "bind_address": False,
+    return {"host": "127.0.0.1",
+            "external_host": "web-platform.test",
+            "bind_hostname": "false",
+            "certificate_domain": "web-platform.test",
             "supports_debugger": True}
 
 
@@ -133,8 +130,8 @@ def run_info_extras(**kwargs):
 
 
 def update_properties():
-    return (["debug", "webrender", "e10s", "os", "version", "processor", "bits"],
-            {"debug", "e10s", "webrender"})
+    return (["debug", "stylo", "e10s", "os", "version", "processor", "bits"],
+            {"debug", "e10s", "stylo"})
 
 
 class FirefoxBrowser(Browser):
@@ -146,7 +143,7 @@ class FirefoxBrowser(Browser):
                  symbols_path=None, stackwalk_binary=None, certutil_binary=None,
                  ca_certificate_path=None, e10s=False, stackfix_dir=None,
                  binary_args=None, timeout_multiplier=None, leak_check=False, stylo_threads=1,
-                 chaos_mode_flags=None, config=None):
+                 chaos_mode_flags=None):
         Browser.__init__(self, logger)
         self.binary = binary
         self.prefs_root = prefs_root
@@ -162,7 +159,6 @@ class FirefoxBrowser(Browser):
         self.certutil_binary = certutil_binary
         self.e10s = e10s
         self.binary_args = binary_args
-        self.config = config
         if stackfix_dir:
             self.stack_fixer = get_stack_fixer_function(stackfix_dir,
                                                         self.symbols_path)
@@ -193,12 +189,15 @@ class FirefoxBrowser(Browser):
         if self.chaos_mode_flags is not None:
             env["MOZ_CHAOSMODE"] = str(self.chaos_mode_flags)
 
+        locations = ServerLocations(filename=os.path.join(here, "server-locations.txt"))
+
         preferences = self.load_prefs()
 
-        self.profile = FirefoxProfile(preferences=preferences)
+        self.profile = FirefoxProfile(locations=locations,
+                                      preferences=preferences)
         self.profile.set_preferences({"marionette.port": self.marionette_port,
                                       "dom.disable_open_during_load": False,
-                                      "network.dns.localDomains": ",".join(self.config['domains'].values()),
+                                      "network.dns.localDomains": ",".join(hostnames),
                                       "network.proxy.type": 0,
                                       "places.history.enabled": False,
                                       "dom.send_after_paint_to_content": True,
@@ -302,15 +301,12 @@ class FirefoxBrowser(Browser):
 
     def on_output(self, line):
         """Write a line of output from the firefox process to the log"""
-        if "GLib-GObject-CRITICAL" in line:
-            return
-        if line:
-            data = line.decode("utf8", "replace")
-            if self.stack_fixer:
-                data = self.stack_fixer(data)
-            self.logger.process_output(self.pid(),
-                                      data,
-                                      command=" ".join(self.runner.command))
+        data = line.decode("utf8", "replace")
+        if self.stack_fixer:
+            data = self.stack_fixer(data)
+        self.logger.process_output(self.pid(),
+                                   data,
+                                   command=" ".join(self.runner.command))
 
     def is_alive(self):
         if self.runner:

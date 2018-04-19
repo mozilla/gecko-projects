@@ -379,7 +379,6 @@ private:
   SandboxBrokerClient* mBroker;
   ContentProcessSandboxParams mParams;
   bool mAllowSysV;
-  bool mUsingRenderDoc;
 
   bool BelowLevel(int aLevel) const {
     return mParams.mLevel < aLevel;
@@ -745,7 +744,6 @@ public:
     : mBroker(aBroker)
     , mParams(Move(aParams))
     , mAllowSysV(PR_GetEnv("MOZ_SANDBOX_ALLOW_SYSV") != nullptr)
-    , mUsingRenderDoc(PR_GetEnv("RENDERDOC_CAPTUREOPTS") != nullptr)
     { }
 
   ~ContentSandboxPolicy() override = default;
@@ -792,12 +790,6 @@ public:
       const auto trapFn = aHasArgs ? ConnectTrap : ConnectTrapLegacy;
       return Some(AllowBelowLevel(4, Trap(trapFn, mBroker)));
     }
-    case SYS_ACCEPT:
-    case SYS_ACCEPT4:
-      if (mUsingRenderDoc) {
-        return Some(Allow());
-      }
-      return SandboxPolicyCommon::EvaluateSocketCall(aCall, aHasArgs);
     case SYS_RECV:
     case SYS_SEND:
     case SYS_GETSOCKOPT:

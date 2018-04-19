@@ -79,15 +79,14 @@ function test_system_dep_desc() {
       system: "fixed",
       base: "symbols: x",
       base_tests: {
-        system: "fixed",
+        system: "fixed 1",
         symbols: "x"
       },
       tests: {
         system: [
           [null, "", "symbolic"],
           ["fixed 0"],
-          ["fixed", "FixeD"],
-          ["fixed 1", "FixeD 1"],
+          ["fixed 1", "fixed", "FixeD"],
           ["fixed -1"],
           [null, "fixed a", "fixed \"0\"", "fixed 0 1"],
         ],

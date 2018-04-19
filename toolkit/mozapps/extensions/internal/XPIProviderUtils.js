@@ -8,7 +8,7 @@
 /* globals ADDON_SIGNING, SIGNED_TYPES, BOOTSTRAP_REASONS, DB_SCHEMA,
           AddonInternal, XPIProvider, XPIStates, syncLoadManifestFromFile,
           isUsableAddon, recordAddonTelemetry,
-          flushChromeCaches, descriptorToPath, DEFAULT_SKIN */
+          flushChromeCaches, descriptorToPath */
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -52,7 +52,7 @@ const KEY_APP_TEMPORARY               = "app-temporary";
 
 // Properties to save in JSON file
 const PROP_JSON_FIELDS = ["id", "syncGUID", "location", "version", "type",
-                          "internalName", "updateURL", "optionsURL",
+                          "internalName", "updateURL", "updateKey", "optionsURL",
                           "optionsType", "optionsBrowserStyle", "aboutURL",
                           "defaultLocale", "visible", "active", "userDisabled",
                           "appDisabled", "pendingUninstall", "installDate",
@@ -60,8 +60,8 @@ const PROP_JSON_FIELDS = ["id", "syncGUID", "location", "version", "type",
                           "skinnable", "size", "sourceURI", "releaseNotesURI",
                           "softDisabled", "foreignInstall",
                           "strictCompatibility", "locales", "targetApplications",
-                          "targetPlatforms", "signedState",
-                          "seen", "dependencies", "hasEmbeddedWebExtension",
+                          "targetPlatforms", "multiprocessCompatible", "signedState",
+                          "seen", "dependencies", "hasEmbeddedWebExtension", "mpcOptedOut",
                           "userPermissions", "icons", "iconURL", "icon64URL",
                           "blocklistState", "blocklistURL", "startupData"];
 
@@ -183,6 +183,19 @@ function DBAddonInternal(aLoaded) {
   }
 
   this._sourceBundle = aLoaded._sourceBundle;
+
+  XPCOMUtils.defineLazyGetter(this, "pendingUpgrade", function() {
+      for (let install of XPIProvider.installs) {
+        if (install.state == AddonManager.STATE_INSTALLED &&
+            !(install.addon.inDatabase) &&
+            install.addon.id == this.id &&
+            install.installLocation == this._installLocation) {
+          delete this.pendingUpgrade;
+          return this.pendingUpgrade = install.addon;
+        }
+      }
+      return null;
+    });
 }
 
 DBAddonInternal.prototype = Object.create(AddonInternal.prototype);
@@ -200,13 +213,27 @@ Object.assign(DBAddonInternal.prototype, {
         }
       });
     });
+    if (aUpdate.multiprocessCompatible !== undefined &&
+        aUpdate.multiprocessCompatible != this.multiprocessCompatible) {
+      this.multiprocessCompatible = aUpdate.multiprocessCompatible;
+      XPIDatabase.saveChanges();
+    }
 
     if (wasCompatible != this.isCompatible)
       XPIProvider.updateAddonDisabledState(this);
   },
 
   toJSON() {
-    return copyProperties(this, PROP_JSON_FIELDS);
+    let jsonData = copyProperties(this, PROP_JSON_FIELDS);
+
+    // Experiments are serialized as disabled so they aren't run on the next
+    // startup.
+    if (this.type == "experiment") {
+      jsonData.userDisabled = true;
+      jsonData.active = false;
+    }
+
+    return jsonData;
   },
 
   get inDatabase() {
@@ -341,9 +368,9 @@ this.XPIDatabase = {
    * 1) Perfectly good, up to date database
    * 2) Out of date JSON database needs to be upgraded => upgrade
    * 3) JSON database exists but is mangled somehow => build new JSON
-   * 4) no JSON DB, but a usable SQLITE db we can upgrade from => upgrade
+   * 4) no JSON DB, but a useable SQLITE db we can upgrade from => upgrade
    * 5) useless SQLITE DB => build new JSON
-   * 6) usable RDF DB => upgrade
+   * 6) useable RDF DB => upgrade
    * 7) useless RDF DB => build new JSON
    * 8) Nothing at all => build new JSON
    * @param  aRebuildOnError
@@ -809,7 +836,10 @@ this.XPIDatabase = {
   getVisibleAddonsWithPendingOperations(aTypes, aCallback) {
     this.getAddonList(
         aAddon => (aAddon.visible &&
-                   aAddon.pendingUninstall &&
+                   (aAddon.pendingUninstall ||
+                    // Logic here is tricky. If we're active but disabled,
+                    // we're pending disable; !active && !disabled, we're pending enable
+                    (aAddon.active == aAddon.disabled)) &&
                    (!aTypes || (aTypes.length == 0) || (aTypes.indexOf(aAddon.type) > -1))),
         aCallback);
   },
@@ -1145,7 +1175,7 @@ this.XPIDatabaseReconcile = {
       logger.warn("addMetadata: Add-on " + aId + " is invalid", e);
 
       // Remove the invalid add-on from the install location if the install
-      // location isn't locked
+      // location isn't locked, no restart will be necessary
       if (aInstallLocation.isLinkedAddon(aId))
         logger.warn("Not uninstalling invalid item because it is a proxy file");
       else if (aInstallLocation.locked)
@@ -1169,7 +1199,7 @@ this.XPIDatabaseReconcile = {
     aNewAddon.appDisabled = !isUsableAddon(aNewAddon);
 
     // The default theme is never a foreign install
-    if (aNewAddon.type == "theme" && aNewAddon.internalName == DEFAULT_SKIN)
+    if (aNewAddon.type == "theme" && aNewAddon.internalName == XPIProvider.defaultSkin)
       aNewAddon.foreignInstall = false;
 
     if (isDetectedInstall && aNewAddon.foreignInstall) {
@@ -1203,8 +1233,9 @@ this.XPIDatabaseReconcile = {
   },
 
   /**
-   * Updates an add-on's metadata and determines. This is called when either the
-   * add-on's install directory path or last modified time has changed.
+   * Updates an add-on's metadata and determines if a restart of the
+   * application is necessary. This is called when either the add-on's
+   * install directory path or last modified time has changed.
    *
    * @param  aInstallLocation
    *         The install location containing the add-on
@@ -1225,7 +1256,15 @@ this.XPIDatabaseReconcile = {
       // If there isn't an updated install manifest for this add-on then load it.
       if (!aNewAddon) {
         let file = new nsIFile(aAddonState.path);
-        aNewAddon = syncLoadManifestFromFile(file, aInstallLocation, aOldAddon);
+        aNewAddon = syncLoadManifestFromFile(file, aInstallLocation);
+
+        // Carry over any pendingUninstall state to add-ons modified directly
+        // in the profile. This is important when the attempt to remove the
+        // add-on in processPendingFileChanges failed and caused an mtime
+        // change to the add-ons files.
+        aNewAddon.pendingUninstall = aOldAddon.pendingUninstall;
+
+        aNewAddon.updateBlocklistState({oldAddon: aOldAddon});
       }
 
       // The ID in the manifest that was loaded must match the ID of the old
@@ -1284,12 +1323,19 @@ this.XPIDatabaseReconcile = {
    *         ran
    * @param  aAddonState
    *         The new state of the add-on
+   * @param  aOldAppVersion
+   *         The version of the application last run with this profile or null
+   *         if it is a new profile or the version is unknown
+   * @param  aOldPlatformVersion
+   *         The version of the platform last run with this profile or null
+   *         if it is a new profile or the version is unknown
    * @param  aReloadMetadata
    *         A boolean which indicates whether metadata should be reloaded from
    *         the addon manifests. Default to false.
    * @return the new addon.
    */
-  updateCompatibility(aInstallLocation, aOldAddon, aAddonState, aReloadMetadata) {
+  updateCompatibility(aInstallLocation, aOldAddon, aAddonState, aOldAppVersion,
+                      aOldPlatformVersion, aReloadMetadata) {
     logger.debug("Updating compatibility for add-on " + aOldAddon.id + " in " + aInstallLocation.name);
 
     let checkSigning = aOldAddon.signedState === undefined && ADDON_SIGNING &&
@@ -1302,7 +1348,6 @@ this.XPIDatabaseReconcile = {
         manifest = syncLoadManifestFromFile(file, aInstallLocation);
       } catch (err) {
         // If we can no longer read the manifest, it is no longer compatible.
-        aOldAddon.brokenManifest = true;
         aOldAddon.appDisabled = true;
         return aOldAddon;
       }
@@ -1328,6 +1373,7 @@ this.XPIDatabaseReconcile = {
       copyProperties(manifest, props, aOldAddon);
     }
 
+    aOldAddon.updateBlocklistState({updateDatabase: false});
     aOldAddon.appDisabled = !isUsableAddon(aOldAddon);
 
     return aOldAddon;
@@ -1390,10 +1436,6 @@ this.XPIDatabaseReconcile = {
       locationAddonMap.set(a.id, a);
     }
 
-    // Keep track of add-ons whose blocklist status may have changed. We'll check this
-    // after everything else.
-    let addonsToCheckAgainstBlocklist = [];
-
     // Build the list of current add-ons into similar maps. When add-ons are still
     // present we re-use the add-on objects from the database and update their
     // details directly
@@ -1448,10 +1490,8 @@ this.XPIDatabaseReconcile = {
               // version has changed. A schema change also reloads metadata from
               // the manifests.
               newAddon = this.updateCompatibility(installLocation, oldAddon, xpiState,
+                                                  aOldAppVersion, aOldPlatformVersion,
                                                   aSchemaChange);
-              // We need to do a blocklist check later, but the add-on may have changed by then.
-              // Avoid storing the current copy and just get one when we need one instead.
-              addonsToCheckAgainstBlocklist.push(newAddon.id);
             } else {
               // No change
               newAddon = oldAddon;
@@ -1512,8 +1552,9 @@ this.XPIDatabaseReconcile = {
 
     let previousVisible = this.getVisibleAddons(previousAddons);
     let currentVisible = this.flattenByID(currentAddons, hideLocation);
+    let sawActiveTheme = false;
 
-    // Pass over the new set of visible add-ons, record any changes that occurred
+    // Pass over the new set of visible add-ons, record any changes that occured
     // during startup and call bootstrap install/uninstall scripts as necessary
     for (let [id, currentAddon] of currentVisible) {
       let previousAddon = previousVisible.get(id);
@@ -1535,12 +1576,9 @@ this.XPIDatabaseReconcile = {
         if (!wasStaged && XPIDatabase.activeBundles) {
           // For themes we know which is active by the current skin setting
           if (currentAddon.type == "theme")
-            isActive = currentAddon.internalName == DEFAULT_SKIN;
+            isActive = currentAddon.internalName == XPIProvider.currentSkin;
           else
             isActive = XPIDatabase.activeBundles.includes(currentAddon.path);
-
-          if (currentAddon.type == "webextension-theme")
-            currentAddon.userDisabled = !isActive;
 
           // If the add-on wasn't active and it isn't already disabled in some way
           // then it was probably either softDisabled or userDisabled
@@ -1610,6 +1648,9 @@ this.XPIDatabaseReconcile = {
 
       XPIDatabase.makeAddonVisible(currentAddon);
       currentAddon.active = isActive;
+
+      if (currentAddon.active && currentAddon.internalName == XPIProvider.selectedSkin)
+        sawActiveTheme = true;
     }
 
     // Pass over the set of previously visible add-ons that have now gone away
@@ -1643,6 +1684,13 @@ this.XPIDatabaseReconcile = {
       }
     }
 
+    // If a custom theme is selected and it wasn't seen in the new list of
+    // active add-ons then enable the default theme
+    if (XPIProvider.selectedSkin != XPIProvider.defaultSkin && !sawActiveTheme) {
+      logger.info("Didn't see selected skin " + XPIProvider.selectedSkin);
+      XPIProvider.enableDefaultTheme();
+    }
+
     // Finally update XPIStates to match everything
     for (let [locationName, locationAddonMap] of currentAddons) {
       for (let [id, addon] of locationAddonMap) {
@@ -1655,26 +1703,6 @@ this.XPIDatabaseReconcile = {
     // Clear out any cached migration data.
     XPIDatabase.migrateData = null;
     XPIDatabase.saveChanges();
-
-    // Do some blocklist checks. These will happen after we've just saved everything,
-    // because they're async and depend on the blocklist loading. When we're done, save
-    // the data if any of the add-ons' blocklist state has changed.
-    AddonManager.shutdown.addBlocker(
-      "Update add-on blocklist state into add-on DB",
-      (async () => {
-        // Avoid querying the AddonManager immediately to give startup a chance
-        // to complete.
-        await Promise.resolve();
-        let addons = await AddonManager.getAddonsByIDs(addonsToCheckAgainstBlocklist);
-        await Promise.all(addons.map(addon => {
-          if (addon) {
-            return addon.updateBlocklistState({updateDatabase: false});
-          }
-          return null;
-        }));
-        XPIDatabase.saveChanges();
-      })().catch(Cu.reportError)
-    );
 
     return true;
   },

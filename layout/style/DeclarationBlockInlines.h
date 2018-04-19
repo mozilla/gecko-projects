@@ -7,6 +7,9 @@
 #ifndef mozilla_DeclarationBlockInlines_h
 #define mozilla_DeclarationBlockInlines_h
 
+#ifdef MOZ_OLD_STYLE
+#include "mozilla/css/Declaration.h"
+#endif
 #include "mozilla/ServoDeclarationBlock.h"
 
 namespace mozilla {
@@ -28,13 +31,30 @@ DeclarationBlock::Release()
 already_AddRefed<DeclarationBlock>
 DeclarationBlock::Clone() const
 {
-  return do_AddRef(new ServoDeclarationBlock(*AsServo()));
+  RefPtr<DeclarationBlock> result;
+  if (IsGecko()) {
+#ifdef MOZ_OLD_STYLE
+    result = new css::Declaration(*AsGecko());
+#else
+    MOZ_CRASH("old style system disabled");
+#endif
+  } else {
+    result = new ServoDeclarationBlock(*AsServo());
+  }
+  return result.forget();
 }
 
 already_AddRefed<DeclarationBlock>
 DeclarationBlock::EnsureMutable()
 {
-  if (!IsDirty()) {
+#ifdef DEBUG
+#ifdef MOZ_OLD_STYLE
+  if (IsGecko()) {
+    AsGecko()->AssertNotExpanded();
+  }
+#endif
+#endif
+  if (IsServo() && !IsDirty()) {
     // In stylo, the old DeclarationBlock is stored in element's rule node tree
     // directly, to avoid new values replacing the DeclarationBlock in the tree
     // directly, we need to copy the old one here if we haven't yet copied.

@@ -27,6 +27,6 @@ add_task(async function test() {
   });
 
   // clean up
-  BrowserTestUtils.removeTab(tab2);
-  BrowserTestUtils.removeTab(tab);
+  await Promise.all([ BrowserTestUtils.removeTab(tab2),
+                      BrowserTestUtils.removeTab(tab) ]);
 });

@@ -119,8 +119,6 @@ var Harness = {
 
       Services.wm.addListener(this);
 
-      window.addEventListener("popupshown", this);
-
       var self = this;
       registerCleanupFunction(function() {
         Services.prefs.clearUserPref(PREF_LOGGING_ENABLED);
@@ -136,8 +134,6 @@ var Harness = {
         AddonManager.removeInstallListener(self);
 
         Services.wm.removeListener(self);
-
-        window.removeEventListener("popupshown", self);
 
         AddonManager.getAllInstalls(function(aInstalls) {
           is(aInstalls.length, 0, "Should be no active installs at the end of the test");
@@ -239,40 +235,6 @@ var Harness = {
           default:
                 ok(false, "prompt type " + promptType + " not handled in test.");
                 break;
-      }
-    }
-  },
-
-  popupReady(panel) {
-    if (this.installBlockedCallback)
-      ok(false, "Should have been blocked by the whitelist");
-    this.pendingCount++;
-
-    // If there is a confirm callback then its return status determines whether
-    // to install the items or not. If not the test is over.
-    let result = true;
-    if (this.installConfirmCallback) {
-      result = this.installConfirmCallback(panel);
-      if (result === this.leaveOpen)
-        return;
-    }
-
-    if (!result) {
-      panel.secondaryButton.click();
-    } else {
-      panel.button.click();
-    }
-  },
-
-  handleEvent(event) {
-    if (event.type === "popupshown") {
-      if (event.target.firstChild) {
-        let popupId = event.target.getAttribute("popupid");
-        if (popupId === "addon-webext-permissions") {
-          this.popupReady(event.target.firstChild);
-        } else if (popupId === "addon-installed" || popupId === "addon-install-failed") {
-          event.target.firstChild.button.click();
-        }
       }
     }
   },
@@ -393,9 +355,9 @@ var Harness = {
   },
 
   onInstallEnded(install, addon) {
-    this.installCount++;
     if (this.installEndedCallback)
       this.installEndedCallback(install, addon);
+    this.installCount++;
     this.checkTestEnded();
   },
 

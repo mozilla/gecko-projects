@@ -7,8 +7,7 @@
 #include "mozilla/ipc/IOThreadChild.h"
 
 #include "ContentProcess.h"
-#include "base/shared_memory.h"
-#include "mozilla/Preferences.h"
+#include "ContentPrefs.h"
 #include "mozilla/Scheduler.h"
 
 #if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
@@ -16,6 +15,7 @@
 #endif
 
 #if (defined(XP_WIN) || defined(XP_MACOSX)) && defined(MOZ_CONTENT_SANDBOX)
+#include "mozilla/Preferences.h"
 #include "mozilla/SandboxSettings.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsDirectoryService.h"
@@ -81,145 +81,155 @@ SetUpSandboxEnvironment()
 }
 #endif
 
-#ifdef ANDROID
-static int gPrefsFd = -1;
-
-void
-SetPrefsFd(int aFd)
-{
-  gPrefsFd = aFd;
-}
-#endif
-
 bool
 ContentProcess::Init(int aArgc, char* aArgv[])
 {
-  Maybe<uint64_t> childID;
-  Maybe<bool> isForBrowser;
-  Maybe<base::SharedMemoryHandle> prefsHandle;
-  Maybe<size_t> prefsLen;
-  Maybe<const char*> schedulerPrefs;
+  // If passed in grab the application path for xpcom init
+  bool foundAppdir = false;
+  bool foundChildID = false;
+  bool foundIsForBrowser = false;
+  bool foundIntPrefs = false;
+  bool foundBoolPrefs = false;
+  bool foundStringPrefs = false;
+  bool foundSchedulerPrefs = false;
+
+  uint64_t childID;
+  bool isForBrowser;
+
 #if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+  // If passed in grab the profile path for sandboxing
+  bool foundProfile = false;
   nsCOMPtr<nsIFile> profileDir;
 #endif
 
-  for (int i = 1; i < aArgc; i++) {
-    if (!aArgv[i]) {
+  char* schedulerPrefs = nullptr;
+  InfallibleTArray<Pref> prefsArray;
+  for (int idx = aArgc; idx > 0; idx--) {
+    if (!aArgv[idx]) {
       continue;
     }
 
-    if (strcmp(aArgv[i], "-appdir") == 0) {
-      if (++i == aArgc) {
-        return false;
+    if (!strcmp(aArgv[idx], "-appdir")) {
+      MOZ_ASSERT(!foundAppdir);
+      if (foundAppdir) {
+        continue;
       }
-      nsDependentCString appDir(aArgv[i]);
+      nsCString appDir;
+      appDir.Assign(nsDependentCString(aArgv[idx+1]));
       mXREEmbed.SetAppDir(appDir);
-
-    } else if (strcmp(aArgv[i], "-childID") == 0) {
-      if (++i == aArgc) {
-        return false;
+      foundAppdir = true;
+    } else if (!strcmp(aArgv[idx], "-childID")) {
+      MOZ_ASSERT(!foundChildID);
+      if (foundChildID) {
+        continue;
       }
-      char* str = aArgv[i];
-      childID = Some(strtoull(str, &str, 10));
-      if (str[0] != '\0') {
-        return false;
+      if (idx + 1 < aArgc) {
+        childID = strtoull(aArgv[idx + 1], nullptr, 10);
+        foundChildID = true;
       }
-
-    } else if (strcmp(aArgv[i], "-isForBrowser") == 0) {
-      isForBrowser = Some(true);
-
-    } else if (strcmp(aArgv[i], "-notForBrowser") == 0) {
-      isForBrowser = Some(false);
-
-#ifdef XP_WIN
-    } else if (strcmp(aArgv[i], "-prefsHandle") == 0) {
-      if (++i == aArgc) {
-        return false;
+    } else if (!strcmp(aArgv[idx], "-isForBrowser") || !strcmp(aArgv[idx], "-notForBrowser")) {
+      MOZ_ASSERT(!foundIsForBrowser);
+      if (foundIsForBrowser) {
+        continue;
       }
-      // ContentParent uses %zu to print a word-sized unsigned integer. So
-      // even though strtoull() returns a long long int, it will fit in a
-      // uintptr_t.
-      char* str = aArgv[i];
-      prefsHandle = Some(reinterpret_cast<HANDLE>(strtoull(str, &str, 10)));
-      if (str[0] != '\0') {
-        return false;
+      isForBrowser = strcmp(aArgv[idx], "-notForBrowser");
+      foundIsForBrowser = true;
+    } else if (!strcmp(aArgv[idx], "-intPrefs")) {
+      char* str = aArgv[idx + 1];
+      while (*str) {
+        int32_t index = strtol(str, &str, 10);
+        MOZ_ASSERT(str[0] == ':');
+        str++;
+        MaybePrefValue value(PrefValue(static_cast<int32_t>(strtol(str, &str, 10))));
+        MOZ_ASSERT(str[0] == '|');
+        str++;
+        // XXX: we assume these values as default values, which may not be
+        // true. We also assume they are unlocked. Fortunately, these prefs
+        // get reset properly by the first IPC message.
+        Pref pref(nsCString(ContentPrefs::GetEarlyPref(index)),
+                  /* isLocked */ false, value, MaybePrefValue());
+        prefsArray.AppendElement(pref);
       }
-#endif
-
-    } else if (strcmp(aArgv[i], "-prefsLen") == 0) {
-      if (++i == aArgc) {
-        return false;
+      foundIntPrefs = true;
+    } else if (!strcmp(aArgv[idx], "-boolPrefs")) {
+      char* str = aArgv[idx + 1];
+      while (*str) {
+        int32_t index = strtol(str, &str, 10);
+        MOZ_ASSERT(str[0] == ':');
+        str++;
+        MaybePrefValue value(PrefValue(!!strtol(str, &str, 10)));
+        MOZ_ASSERT(str[0] == '|');
+        str++;
+        Pref pref(nsCString(ContentPrefs::GetEarlyPref(index)),
+                  /* isLocked */ false, value, MaybePrefValue());
+        prefsArray.AppendElement(pref);
       }
-      // ContentParent uses %zu to print a word-sized unsigned integer. So
-      // even though strtoull() returns a long long int, it will fit in a
-      // uintptr_t.
-      char* str = aArgv[i];
-      prefsLen = Some(strtoull(str, &str, 10));
-      if (str[0] != '\0') {
-        return false;
+      foundBoolPrefs = true;
+    } else if (!strcmp(aArgv[idx], "-stringPrefs")) {
+      char* str = aArgv[idx + 1];
+      while (*str) {
+        int32_t index = strtol(str, &str, 10);
+        MOZ_ASSERT(str[0] == ':');
+        str++;
+        int32_t length = strtol(str, &str, 10);
+        MOZ_ASSERT(str[0] == ';');
+        str++;
+        MaybePrefValue value(PrefValue(nsCString(str, length)));
+        Pref pref(nsCString(ContentPrefs::GetEarlyPref(index)),
+                  /* isLocked */ false, value, MaybePrefValue());
+        prefsArray.AppendElement(pref);
+        str += length + 1;
+        MOZ_ASSERT(*(str - 1) == '|');
       }
-
-    } else if (strcmp(aArgv[i], "-schedulerPrefs") == 0) {
-      if (++i == aArgc) {
-        return false;
-      }
-      schedulerPrefs = Some(aArgv[i]);
-
-    } else if (strcmp(aArgv[i], "-safeMode") == 0) {
+      foundStringPrefs = true;
+    } else if (!strcmp(aArgv[idx], "-schedulerPrefs")) {
+      schedulerPrefs = aArgv[idx + 1];
+      foundSchedulerPrefs = true;
+    } else if (!strcmp(aArgv[idx], "-safeMode")) {
       gSafeMode = true;
+    }
 
 #if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
-    } else if (strcmp(aArgv[i], "-profile") == 0) {
-      if (++i == aArgc) {
-        return false;
+    else if (!strcmp(aArgv[idx], "-profile")) {
+      MOZ_ASSERT(!foundProfile);
+      if (foundProfile) {
+        continue;
       }
       bool flag;
-      nsresult rv = XRE_GetFileFromPath(aArgv[i], getter_AddRefs(profileDir));
-      if (NS_FAILED(rv) || NS_FAILED(profileDir->Exists(&flag)) || !flag) {
+      nsresult rv = XRE_GetFileFromPath(aArgv[idx+1], getter_AddRefs(profileDir));
+      if (NS_FAILED(rv) ||
+          NS_FAILED(profileDir->Exists(&flag)) || !flag) {
         NS_WARNING("Invalid profile directory passed to content process.");
         profileDir = nullptr;
       }
+      foundProfile = true;
+    }
 #endif /* XP_MACOSX && MOZ_CONTENT_SANDBOX */
+
+    bool allFound = foundAppdir
+                 && foundChildID
+                 && foundIsForBrowser
+                 && foundIntPrefs
+                 && foundBoolPrefs
+                 && foundStringPrefs
+                 && foundSchedulerPrefs;
+
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+    allFound &= foundProfile;
+#endif
+
+    if (allFound) {
+      break;
     }
   }
 
-#ifdef ANDROID
-  // Android is different; get the FD via gPrefsFd instead of a fixed fd.
-  MOZ_RELEASE_ASSERT(gPrefsFd != -1);
-  prefsHandle = Some(base::FileDescriptor(gPrefsFd, /* auto_close */ true));
-#elif XP_UNIX
-  prefsHandle = Some(base::FileDescriptor(kPrefsFileDescriptor,
-                                          /* auto_close */ true));
-#endif
-
-  // Did we find all the mandatory flags?
-  if (childID.isNothing() ||
-      isForBrowser.isNothing() ||
-      prefsHandle.isNothing() ||
-      prefsLen.isNothing() ||
-      schedulerPrefs.isNothing()) {
-    return false;
-  }
-
-  // Set up early prefs from the shared memory.
-  base::SharedMemory shm;
-  if (!shm.SetHandle(*prefsHandle, /* read_only */ true)) {
-    NS_ERROR("failed to open shared memory in the child");
-    return false;
-  }
-  if (!shm.Map(*prefsLen)) {
-    NS_ERROR("failed to map shared memory in the child");
-    return false;
-  }
-  Preferences::DeserializePreferences(static_cast<char*>(shm.memory()),
-                                      *prefsLen);
-
-  Scheduler::SetPrefs(*schedulerPrefs);
+  Preferences::SetEarlyPreferences(&prefsArray);
+  Scheduler::SetPrefs(schedulerPrefs);
   mContent.Init(IOThreadChild::message_loop(),
                 ParentPid(),
                 IOThreadChild::channel(),
-                *childID,
-                *isForBrowser);
+                childID,
+                isForBrowser);
   mXREEmbed.Start();
 #if (defined(XP_MACOSX)) && defined(MOZ_CONTENT_SANDBOX)
   mContent.SetProfileDir(profileDir);

@@ -64,7 +64,7 @@ public:
 
 protected:
   void DeleteTexture();
-  bool BindIOSurfaceToTexture(gl::GLContext* aGL);
+  void BindIOSurfaceToTexture(gl::GLContext* aGL);
 
   RefPtr<MacIOSurface> mIOSurface;
   gl::GLContext* mGLContext;

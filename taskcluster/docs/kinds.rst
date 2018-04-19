@@ -162,9 +162,15 @@ Template <yaml-templates>`.
 balrog
 ------
 
-Balrog tasks are responsible for submitting metadata to our update server (Balrog).
-They are typically downstream of a beetmover job that moves signed MARs somewhere
-(eg: beetmover and beetmover-l10n for releases, beetmover-repackage for nightlies).
+Balrog is the Mozilla Update Server. Jobs of this kind are submitting information
+which assists in telling Firefox that an update is available for the related job.
+
+balrog-l10n
+-----------
+
+Balrog is the Mozilla Update Server. Jobs of this kind are submitting information
+which assists in telling Firefox that an update is available for the localized
+job involved.
 
 beetmover
 ---------
@@ -223,27 +229,20 @@ all the signed multi-locales (aka "multi") APKs for a given release and upload t
 all at once.
 
 release-balrog-submit-toplevel
-------------------------------
-Toplevel tasks are responsible for submitting metadata to Balrog that is not specific to any
-particular platform+locale. For example: fileUrl templates, versions, and platform aliases.
-
-Toplevel tasks are also responsible for updating test channel rules to point at the Release
-being generated.
+----------------------
+Push a top-level release blob to Balrog.
 
 release-secondary-balrog-submit-toplevel
-----------------------------------------
-Performs the same function as `release-balrog-submit-toplevel`, but against the beta channel
-during RC builds.
+----------------------
+Push a top-level RC release blob to Balrog.
 
 release-balrog-scheduling
--------------------------
-Schedules a Release for shipping in Balrog. If a `release_eta` was provided when starting the Release,
-it will be scheduled to go live at that day and time.
+----------------------
+Schedule a release to go live in Balrog.
 
 release-secondary-balrog-scheduling
------------------------------------
-Performs the same function as `release-balrog-scheduling`, except for the beta channel as part of RC
-Releases.
+----------------------
+Schedule an RC release to go live in Balrog.
 
 release-binary-transparency
 ---------------------------
@@ -310,13 +309,9 @@ release-secondary-final-verify
 ------------------------------
 Verifies the contents and package of release update MARs for RC releases.
 
-release-sign-and-push-langpacks
--------------------------------
-Sign a langpack XPI and publishes it onto addons.mozilla.org.
-
-release-beetmover-signed-langpacks
-----------------------------------
-Publishes signed langpacks to archive.mozilla.org
+release-secondary-balrog-publishing
+---------------------
+Schedule an RC release to go live in Balrog. Usually this will happen on the beta channel, to a smaller audience, before the RC goes live on the release channel.
 
 release-sign-and-push-langpacks
 -------------------------------
@@ -362,46 +357,6 @@ release-partner-repack
 ----------------------
 Generates customized versions of releases for partners.
 
-release-partner-repack-chunking-dummy
-----------------------
-Chunks the partner repacks by locale.
-
-release-partner-repack-signing
-------------------------------
-Internal signing of partner repacks.
-
-release-partner-repack-repackage
-------------------------------
-Repackaging of partner repacks.
-
-release-partner-repack-repackage-signing
-------------------------------
-External signing of partner repacks.
-
-release-partner-repack-beetmover
-------------------------------
-Moves the partner repacks to S3 buckets.
-
-release-eme-free-repack
-----------------------
-Generates customized versions of releases for eme-free repacks.
-
-release-eme-free-repack-signing
-------------------------------
-Internal signing of eme-free repacks
-
-release-eme-free-repack-repackage
-------------------------------
-Repackaging of eme-free repacks.
-
-release-eme-free-repack-repackage-signing
-------------------------------
-External signing of eme-free repacks.
-
-release-eme-free-repack-beetmover
-------------------------------
-Moves the eme-free repacks to S3 buckets.
-
 repackage
 ---------
 Repackage tasks take a signed output and package them up into something suitable
@@ -422,6 +377,12 @@ repo-update
 -----------
 Repo-Update tasks are tasks that perform some action on the project repo itself,
 in order to update its state in some way.
+
+repo-update-bb
+--------------
+Repo-Update tasks are tasks that perform some action on the project repo itself,
+in order to update its state in some way. This kind is the older, buildbot version.
+It will be removed after the migration to taskcluster.
 
 partials
 --------

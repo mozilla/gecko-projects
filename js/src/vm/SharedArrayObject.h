@@ -16,6 +16,8 @@
 #include "vm/ArrayBufferObject.h"
 #include "vm/JSObject.h"
 
+typedef struct JSProperty JSProperty;
+
 namespace js {
 
 class FutexWaiter;

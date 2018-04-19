@@ -191,12 +191,12 @@ function saveDocument(aDocument, aSkipPrompt) {
     throw "Must have a document when calling saveDocument";
 
   let contentDisposition = null;
-  let cacheKey = 0;
+  let cacheKeyInt = null;
 
   if (aDocument instanceof Ci.nsIWebBrowserPersistDocument) {
     // nsIWebBrowserPersistDocument exposes these directly.
     contentDisposition = aDocument.contentDisposition;
-    cacheKey = aDocument.cacheKey;
+    cacheKeyInt = aDocument.cacheKey;
   } else if (aDocument instanceof Ci.nsIDOMDocument) {
     // Otherwise it's an actual nsDocument (and possibly a CPOW).
     // We want to use cached data because the document is currently visible.
@@ -219,10 +219,23 @@ function saveDocument(aDocument, aSkipPrompt) {
              .currentDescriptor
              .QueryInterface(Ci.nsISHEntry);
 
-      cacheKey = shEntry.cacheKey;
+      let cacheKey = shEntry.cacheKey
+                            .QueryInterface(Ci.nsISupportsPRUint32)
+                            .data;
+      // cacheKey might be a CPOW, which can't be passed to native
+      // code, but the data attribute is just a number.
+      cacheKeyInt = cacheKey.data;
     } catch (ex) {
       // We might not find it in the cache.  Oh, well.
     }
+  }
+
+  // Convert the cacheKey back into an XPCOM object.
+  let cacheKey = null;
+  if (cacheKeyInt) {
+    cacheKey = Cc["@mozilla.org/supports-PRUint32;1"]
+      .createInstance(Ci.nsISupportsPRUint32);
+    cacheKey.data = cacheKeyInt;
   }
 
   internalSave(aDocument.documentURI, aDocument, null, contentDisposition,
@@ -351,7 +364,7 @@ function internalSave(aURL, aDocument, aDefaultFileName, aContentDisposition,
     aSkipPrompt = false;
 
   if (aCacheKey == undefined)
-    aCacheKey = 0;
+    aCacheKey = null;
 
   // Note: aDocument == null when this code is used by save-link-as...
   var saveMode = GetSaveModeForContentType(aContentType, aDocument);
@@ -441,7 +454,7 @@ function internalSave(aURL, aDocument, aDefaultFileName, aContentDisposition,
  * @param persistArgs.sourceURI
  *        The nsIURI of the document being saved
  * @param persistArgs.sourceCacheKey [optional]
- *        If set will be passed to savePrivacyAwareURI
+ *        If set will be passed to saveURI
  * @param persistArgs.sourceDocument [optional]
  *        The document to be saved, or null if not saving a complete document
  * @param persistArgs.sourceReferrer
@@ -1167,9 +1180,7 @@ function openURL(aURL) {
   } else {
     var recentWindow = Services.wm.getMostRecentWindow("navigator:browser");
     if (recentWindow) {
-      recentWindow.openWebLinkIn(uri.spec, "tab", {
-        triggeringPrincipal: recentWindow.document.contentPrincipal
-      });
+      recentWindow.openUILinkIn(uri.spec, "tab");
       return;
     }
 

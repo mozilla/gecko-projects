@@ -17,6 +17,7 @@ interface CustomEvent : Event
   readonly attribute any detail;
 
   // initCustomEvent is a Gecko specific deprecated method.
+  [Throws]
   void initCustomEvent(DOMString type,
                        optional boolean canBubble = false,
                        optional boolean cancelable = false,

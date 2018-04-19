@@ -196,7 +196,7 @@ protected:
 private:
   // this section is for main-thread-only object
   // all the references need to be proxy released on main thread.
-  uint32_t mCacheKey;
+  nsCOMPtr<nsISupports> mCacheKey;
   nsCOMPtr<nsIChildChannel> mRedirectChannelChild;
   RefPtr<InterceptStreamListener> mInterceptListener;
   // Needed to call AsyncOpen in FinishInterceptedRedirect

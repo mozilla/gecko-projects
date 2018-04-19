@@ -141,7 +141,7 @@ gTests.push({
     // The colon included in the terms selects only about: URIs. If not included
     // we also may get pages like about.html included in the query result.
     query.searchTerms = "about:";
-    var queryString = hs.queryToQueryString(query, options);
+    var queryString = hs.queriesToQueryString([query], 1, options);
     this._query = await PlacesUtils.bookmarks.insert({
       index: 0, // it must be the first
       parentGuid: PlacesUtils.bookmarks.unfiledGuid,
@@ -184,9 +184,7 @@ async function runTest(test) {
 
   Assert.ok(true, "Expected tabs were loaded");
 
-  for (let tab of tabs) {
-    BrowserTestUtils.removeTab(tab);
-  }
+  await Promise.all(tabs.map(tab => BrowserTestUtils.removeTab(tab)));
 
   await test.cleanup();
 }

@@ -3,14 +3,13 @@
 
 /*---
 author: Brian Terlson <brian.terlson@microsoft.com>
-esid: sec-function.prototype.tostring
+esid: pending
 description: Function.prototype.toString on an async function declaration
 features: [async-functions]
-includes: [nativeFunctionMatcher.js]
 ---*/
 
 /* before */async function /* a */ f /* b */ ( /* c */ x /* d */ , /* e */ y /* f */ ) /* g */ { /* h */ ; /* i */ ; /* j */ }/* after */
 
-assertToStringOrNativeFunction(f, "async function /* a */ f /* b */ ( /* c */ x /* d */ , /* e */ y /* f */ ) /* g */ { /* h */ ; /* i */ ; /* j */ }");
+assert.sameValue(f.toString(), "async function /* a */ f /* b */ ( /* c */ x /* d */ , /* e */ y /* f */ ) /* g */ { /* h */ ; /* i */ ; /* j */ }");
 
 reportCompare(0, 0);

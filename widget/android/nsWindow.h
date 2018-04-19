@@ -120,7 +120,7 @@ public:
             nsWindow* const mWindow;
 
         public:
-            explicit Locked(WindowPtr<Impl>& aPtr)
+            Locked(WindowPtr<Impl>& aPtr)
                 : mozilla::MutexAutoLock(aPtr.mWindowLock)
                 , mWindow(aPtr.mWindow)
             {}
@@ -344,7 +344,7 @@ private:
     void CreateLayerManager(int aCompositorWidth, int aCompositorHeight);
     void RedrawAll();
 
-    mozilla::layers::LayersId GetRootLayerId() const;
+    int64_t GetRootLayerId() const;
     RefPtr<mozilla::layers::UiCompositorControllerChild> GetUiCompositorControllerChild();
 };
 

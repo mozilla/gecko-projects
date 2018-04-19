@@ -17,7 +17,7 @@ add_task(async function setup() {
     await PlacesUtils.keywords.remove("get");
     await PlacesUtils.keywords.remove("post");
     while (gBrowser.tabs.length > 1) {
-      BrowserTestUtils.removeTab(gBrowser.selectedTab);
+      await BrowserTestUtils.removeTab(gBrowser.selectedTab);
     }
   });
 });

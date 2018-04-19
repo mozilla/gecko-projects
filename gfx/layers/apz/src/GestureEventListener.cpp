@@ -22,6 +22,13 @@ namespace mozilla {
 namespace layers {
 
 /**
+ * Maximum time for a touch on the screen and corresponding lift of the finger
+ * to be considered a tap. This also applies to double taps, except that it is
+ * used twice.
+ */
+static const uint32_t MAX_TAP_TIME = 300;
+
+/**
  * Amount of span or focus change needed to take us from the GESTURE_WAITING_PINCH
  * state to the GESTURE_PINCH state. This is measured as either a change in distance
  * between the fingers used to compute the span ratio, or the a change in
@@ -81,7 +88,9 @@ GestureEventListener::GestureEventListener(AsyncPanZoomController* aAsyncPanZoom
 {
 }
 
-GestureEventListener::~GestureEventListener() = default;
+GestureEventListener::~GestureEventListener()
+{
+}
 
 nsEventStatus GestureEventListener::HandleInputEvent(const MultiTouchInput& aEvent)
 {
@@ -254,7 +263,7 @@ bool GestureEventListener::MoveDistanceExceeds(ScreenCoord aThreshold) const
 
 bool GestureEventListener::MoveDistanceIsLarge() const
 {
-  return MoveDistanceExceeds(mAsyncPanZoomController->GetTouchStartTolerance());
+  return MoveDistanceExceeds(AsyncPanZoomController::GetTouchStartTolerance());
 }
 
 bool GestureEventListener::SecondTapIsFar() const
@@ -262,7 +271,7 @@ bool GestureEventListener::SecondTapIsFar() const
   // Allow a little more room here, because the is actually lifting their finger
   // off the screen before replacing it, and that tends to have more error than
   // wiggling the finger while on the screen.
-  return MoveDistanceExceeds(mAsyncPanZoomController->GetSecondTapTolerance());
+  return MoveDistanceExceeds(AsyncPanZoomController::GetSecondTapTolerance());
 }
 
 nsEventStatus GestureEventListener::HandleInputTouchMove()
@@ -296,7 +305,7 @@ nsEventStatus GestureEventListener::HandleInputTouchMove()
 
   // The user has performed a double tap, but not lifted her finger.
   case GESTURE_SECOND_SINGLE_TOUCH_DOWN: {
-    // If touch has moved noticeably (within gfxPrefs::APZMaxTapTime()), change state.
+    // If touch has moved noticeably (within MAX_TAP_TIME), change state.
     if (MoveDistanceIsLarge()) {
       CancelLongTapTimeoutTask();
       CancelMaxTapTimeoutTask();
@@ -541,7 +550,7 @@ void GestureEventListener::HandleInputTimeoutLongTap()
 
   switch (mState) {
   case GESTURE_FIRST_SINGLE_TOUCH_DOWN:
-    // just in case MaxTapTime > ContextMenuDelay cancel MaxTap timer
+    // just in case MAX_TAP_TIME > ContextMenuDelay cancel MAX_TAP timer
     // and fall through
     CancelMaxTapTimeoutTask();
     MOZ_FALLTHROUGH;
@@ -654,7 +663,7 @@ void GestureEventListener::CreateMaxTapTimeoutTask()
   mMaxTapTimeoutTask = task;
   mAsyncPanZoomController->PostDelayedTask(
     task.forget(),
-    gfxPrefs::APZMaxTapTime());
+    MAX_TAP_TIME);
 }
 
 } // namespace layers

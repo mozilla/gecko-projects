@@ -25,7 +25,7 @@ bogo_init()
   BORING=${BORING:=boringssl}
   if [ ! -d "$BORING" ]; then
     git clone -q https://boringssl.googlesource.com/boringssl "$BORING"
-    git -C "$BORING" checkout -q ec55dc15d3a39e5f1a58bfd79148729f38f6acb4
+    git -C "$BORING" checkout -q a513e86c1ebb1383930c9e504bdabcc302a85f30
   fi
 
   SCRIPTNAME="bogo.sh"
@@ -39,12 +39,11 @@ bogo_cleanup()
   . common/cleanup.sh
 }
 
-cd ../
-cwd=$(cd $(dirname $0); pwd -P)
-SOURCE_DIR="$cwd"/..
+cd "$(dirname "$0")"
+SOURCE_DIR="$PWD"/../..
 bogo_init
 (cd "$BORING"/ssl/test/runner;
- GOPATH="$cwd" go test -pipe -shim-path "${BINDIR}"/nss_bogo_shim \
+ GOPATH="$PWD" go test -pipe -shim-path "${BINDIR}"/nss_bogo_shim \
 	 -loose-errors -allow-unimplemented \
 	 -shim-config "${SOURCE_DIR}/gtests/nss_bogo_shim/config.json") \
 	 2>bogo.errors | tee bogo.log

@@ -213,15 +213,14 @@ VRDisplayOSVR::VRDisplayOSVR(OSVR_ClientContext* context,
 
   MOZ_COUNT_CTOR_INHERITED(VRDisplayOSVR, VRDisplayHost);
 
-  VRDisplayState& state = mDisplayInfo.mDisplayState;
-  state.mIsConnected = true;
-  strncpy(state.mDisplayName, "OSVR HMD", kVRDisplayNameMaxLen);
-  state.mCapabilityFlags = VRDisplayCapabilityFlags::Cap_None;
-  state.mCapabilityFlags =
+  mDisplayInfo.mIsConnected = true;
+  mDisplayInfo.mDisplayName.AssignLiteral("OSVR HMD");
+  mDisplayInfo.mCapabilityFlags = VRDisplayCapabilityFlags::Cap_None;
+  mDisplayInfo.mCapabilityFlags =
     VRDisplayCapabilityFlags::Cap_Orientation | VRDisplayCapabilityFlags::Cap_Position;
 
-  state.mCapabilityFlags |= VRDisplayCapabilityFlags::Cap_External;
-  state.mCapabilityFlags |= VRDisplayCapabilityFlags::Cap_Present;
+  mDisplayInfo.mCapabilityFlags |= VRDisplayCapabilityFlags::Cap_External;
+  mDisplayInfo.mCapabilityFlags |= VRDisplayCapabilityFlags::Cap_Present;
 
   // XXX OSVR display topology allows for more than one viewer
   // will assume only one viewer for now (most likely stay that way)
@@ -234,7 +233,7 @@ VRDisplayOSVR::VRDisplayOSVR(OSVR_ClientContext* context,
     // XXX for now there is only one surface per eye
     osvr_ClientGetViewerEyeSurfaceProjectionClippingPlanes(
       *m_display, 0, eye, 0, &left, &right, &bottom, &top);
-    state.mEyeFOV[eye] =
+    mDisplayInfo.mEyeFOV[eye] =
       SetFromTanRadians(-left, right, -bottom, top);
   }
 
@@ -249,8 +248,8 @@ VRDisplayOSVR::VRDisplayOSVR(OSVR_ClientContext* context,
     OSVR_ViewportDimension l, b, w, h;
     osvr_ClientGetRelativeViewportForViewerEyeSurface(*m_display, 0, eye, 0, &l,
                                                       &b, &w, &h);
-    state.mEyeResolution.width = w;
-    state.mEyeResolution.height = h;
+    mDisplayInfo.mEyeResolution.width = w;
+    mDisplayInfo.mEyeResolution.height = h;
     OSVR_Pose3 eyePose;
     // Viewer eye pose may not be immediately available, update client context until we get it
     OSVR_ReturnCode ret =
@@ -259,9 +258,9 @@ VRDisplayOSVR::VRDisplayOSVR(OSVR_ClientContext* context,
       osvr_ClientUpdate(*m_ctx);
       ret = osvr_ClientGetViewerEyePose(*m_display, 0, eye, &eyePose);
     }
-    state.mEyeTranslation[eye].x = eyePose.translation.data[0];
-    state.mEyeTranslation[eye].y = eyePose.translation.data[1];
-    state.mEyeTranslation[eye].z = eyePose.translation.data[2];
+    mDisplayInfo.mEyeTranslation[eye].x = eyePose.translation.data[0];
+    mDisplayInfo.mEyeTranslation[eye].y = eyePose.translation.data[1];
+    mDisplayInfo.mEyeTranslation[eye].z = eyePose.translation.data[2];
 
     Matrix4x4 pose;
     pose.SetRotationFromQuaternion(gfx::Quaternion(osvrQuatGetX(&eyePose.rotation),

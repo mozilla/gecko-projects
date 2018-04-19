@@ -54,9 +54,6 @@ const ENV_PRESERVE_PREFS = "MOZ_MARIONETTE_PREF_STATE_ACROSS_RESTARTS";
 // are checked before Marionette initialises.
 const RECOMMENDED_PREFS = new Map([
 
-  // Make sure Shield doesn't hit the network.
-  ["app.normandy.api_url", ""],
-
   // Disable automatic downloading of new releases.
   //
   // This should also be set in the profile prior to starting Firefox,
@@ -199,6 +196,9 @@ const RECOMMENDED_PREFS = new Map([
   // Disable installing any distribution extensions or add-ons.
   // Should be set in profile.
   ["extensions.installDistroAddons", false],
+
+  // Make sure Shield doesn't hit the network.
+  ["extensions.shield-recipe-client.api_url", ""],
 
   ["extensions.showMismatchUI", false],
 

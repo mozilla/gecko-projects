@@ -80,8 +80,8 @@ impl <T: RefCounted + 'static> RefPtr<T> {
 
     /// Write this RefPtr's value into an outparameter.
     #[inline]
-    pub fn forget(self, into: &mut *const T) {
-        *into = &*self;
+    pub unsafe fn forget(self, into: &mut *const T) {
+        *into = &*self as *const T;
         mem::forget(self);
     }
 }

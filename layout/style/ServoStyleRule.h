@@ -81,7 +81,7 @@ public:
   NotNull<DeclarationBlock*> GetDeclarationBlock() const override;
 
   // WebIDL interface
-  uint16_t Type() const final { return dom::CSSRuleBinding::STYLE_RULE; }
+  uint16_t Type() const final;
   void GetCssText(nsAString& aCssText) const final;
   void GetSelectorText(nsAString& aSelectorText) final;
   void SetSelectorText(const nsAString& aSelectorText) final;
@@ -90,6 +90,8 @@ public:
   RawServoStyleRule* Raw() const { return mRawRule; }
 
   // Methods of mozilla::css::Rule
+  int32_t GetType() const final { return css::Rule::STYLE_RULE; }
+  already_AddRefed<Rule> Clone() const final;
   size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const final;
 #ifdef DEBUG
   void List(FILE* out = stdout, int32_t aIndent = 0) const final;

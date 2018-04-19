@@ -32,7 +32,7 @@ AddonTestUtils.init(this);
 // Allow for unsigned addons.
 AddonTestUtils.overrideCertDB();
 
-createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "42", "42");
+createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "42");
 
 add_task(async function test_url_overrides_newtab_update() {
   const EXTENSION_ID = "test_url_overrides_update@tests.mozilla.org";
@@ -97,7 +97,7 @@ add_task(async function test_url_overrides_newtab_update() {
 
   equal(extension.version, "1.0", "The installed addon has the expected version.");
   ok(aboutNewTabService.newTabURL.endsWith(NEWTAB_URI),
-     "Newtab url is overridden by the extension.");
+     "Newtab url is overriden by the extension.");
 
   let update = await promiseFindAddonUpdates(extension.addon);
   let install = update.updateAvailable;

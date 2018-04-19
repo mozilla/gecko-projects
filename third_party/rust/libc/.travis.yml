@@ -53,8 +53,7 @@ matrix:
     - env: TARGET=arm-unknown-linux-musleabihf
     - env: TARGET=aarch64-unknown-linux-gnu
     - env: TARGET=aarch64-unknown-linux-musl
-      # FIXME(#856)
-      rust: 1.22.1
+      rust: beta
     - os: osx
       osx_image: xcode8.2
       env: TARGET=i386-apple-ios

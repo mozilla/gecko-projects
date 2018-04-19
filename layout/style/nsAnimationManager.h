@@ -17,12 +17,11 @@
 #include "nsISupportsImpl.h"
 
 class nsIGlobalObject;
+class nsStyleContext;
 class ServoComputedData;
 struct nsStyleDisplay;
-class ServoCSSAnimationBuilder;
 
 namespace mozilla {
-class ComputedStyle;
 namespace css {
 class Declaration;
 } /* namespace css */
@@ -31,6 +30,8 @@ class KeyframeEffectReadOnly;
 class Promise;
 } /* namespace dom */
 
+class GeckoStyleContext;
+class ServoStyleContext;
 enum class CSSPseudoElementType : uint8_t;
 struct NonOwningAnimationTarget;
 
@@ -282,12 +283,25 @@ public:
   {
   }
 
+  NS_INLINE_DECL_REFCOUNTING(nsAnimationManager)
+
   typedef mozilla::AnimationCollection<mozilla::dom::CSSAnimation>
     CSSAnimationCollection;
   typedef nsTArray<RefPtr<mozilla::dom::CSSAnimation>>
     OwningCSSAnimationPtrArray;
 
-  ~nsAnimationManager() override = default;
+#ifdef MOZ_OLD_STYLE
+  /**
+   * Update the set of animations on |aElement| based on |aStyleContext|.
+   * If necessary, this will notify the corresponding EffectCompositor so
+   * that it can update its animation rule.
+   *
+   * aStyleContext may be a style context for aElement or for its
+   * :before or :after pseudo-element.
+   */
+  void UpdateAnimations(mozilla::GeckoStyleContext* aStyleContext,
+                        mozilla::dom::Element* aElement);
+#endif
 
   /**
    * This function does the same thing as the above UpdateAnimations()
@@ -296,8 +310,7 @@ public:
   void UpdateAnimations(
     mozilla::dom::Element* aElement,
     mozilla::CSSPseudoElementType aPseudoType,
-    const mozilla::ComputedStyle* aComputedValues);
-
+    const mozilla::ServoStyleContext* aComputedValues);
 
   // Utility function to walk through |aIter| to find the Keyframe with
   // matching offset and timing function but stopping as soon as the offset
@@ -337,6 +350,9 @@ public:
     return mMaybeReferencedAnimations.Contains(aName);
   }
 
+protected:
+  ~nsAnimationManager() override = default;
+
 private:
   // This includes all animation names referenced regardless of whether a
   // corresponding `@keyframes` rule is available.
@@ -346,10 +362,11 @@ private:
   // style invalidation.
   nsTHashtable<nsRefPtrHashKey<nsAtom>> mMaybeReferencedAnimations;
 
+  template<class BuilderType>
   void DoUpdateAnimations(
     const mozilla::NonOwningAnimationTarget& aTarget,
     const nsStyleDisplay& aStyleDisplay,
-    ServoCSSAnimationBuilder& aBuilder);
+    BuilderType& aBuilder);
 };
 
 #endif /* !defined(nsAnimationManager_h_) */

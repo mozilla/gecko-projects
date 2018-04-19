@@ -185,8 +185,6 @@ public:
     ENUM_MAX
   };
 
-  // Make sure that any additions done to ErrorType enum are also mirrored in
-  // XHR_ERROR_TYPE enum of TelemetrySend.jsm.
   enum class ErrorType : uint16_t {
     eOK,
     eRequest,
@@ -250,6 +248,8 @@ public:
   // nsISizeOfEventTarget
   virtual size_t
     SizeOfEventTargetIncludingThis(MallocSizeOf aMallocSizeOf) const override;
+
+  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(XMLHttpRequestEventTarget)
 
   // states
   virtual uint16_t ReadyState() const override;
@@ -466,6 +466,12 @@ public:
   void DispatchProgressEvent(DOMEventTargetHelper* aTarget,
                              const ProgressEventType aType,
                              int64_t aLoaded, int64_t aTotal);
+
+  // This is called by nsXULTemplateQueryProcessorXML.
+  nsresult Init(nsIPrincipal* aPrincipal,
+                nsIGlobalObject* aGlobalObject,
+                nsIURI* aBaseURI,
+                nsILoadGroup* aLoadGroup);
 
   void SetRequestObserver(nsIRequestObserver* aObserver);
 

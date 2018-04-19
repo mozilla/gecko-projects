@@ -9,12 +9,12 @@ rayon = "1"
 thread_profiler = "0.1.1"
 euclid = { version = "0.17", features = ["serde"] }
 app_units = "0.6"
-gleam = "0.4.32"
+gleam = "0.4.20"
 log = "0.4"
 
 [dependencies.webrender]
 path = "../webrender"
-version = "0.57.2"
+version = "0.57.0"
 default-features = false
 features = ["capture"]
 

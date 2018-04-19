@@ -8,7 +8,6 @@
 
 #include "mozilla/MathAlgorithms.h"
 
-#include "jit/CodeGenerator.h"
 #include "jit/MIR.h"
 
 #include "jit/MacroAssembler-inl.h"
@@ -66,14 +65,14 @@ FrameSizeClass::frameSize() const
 }
 
 void
-CodeGenerator::visitValue(LValue* value)
+CodeGeneratorX64::visitValue(LValue* value)
 {
     ValueOperand result = ToOutValue(value);
     masm.moveValue(value->value(), result);
 }
 
 void
-CodeGenerator::visitBox(LBox* box)
+CodeGeneratorX64::visitBox(LBox* box)
 {
     const LAllocation* in = box->getOperand(0);
     ValueOperand result = ToOutValue(box);
@@ -82,7 +81,7 @@ CodeGenerator::visitBox(LBox* box)
 }
 
 void
-CodeGenerator::visitUnbox(LUnbox* unbox)
+CodeGeneratorX64::visitUnbox(LUnbox* unbox)
 {
     MUnbox* mir = unbox->mir();
 
@@ -145,7 +144,7 @@ CodeGenerator::visitUnbox(LUnbox* unbox)
 }
 
 void
-CodeGenerator::visitCompareB(LCompareB* lir)
+CodeGeneratorX64::visitCompareB(LCompareB* lir)
 {
     MCompare* mir = lir->mir();
 
@@ -168,7 +167,7 @@ CodeGenerator::visitCompareB(LCompareB* lir)
 }
 
 void
-CodeGenerator::visitCompareBAndBranch(LCompareBAndBranch* lir)
+CodeGeneratorX64::visitCompareBAndBranch(LCompareBAndBranch* lir)
 {
     MCompare* mir = lir->cmpMir();
 
@@ -190,7 +189,7 @@ CodeGenerator::visitCompareBAndBranch(LCompareBAndBranch* lir)
 }
 
 void
-CodeGenerator::visitCompareBitwise(LCompareBitwise* lir)
+CodeGeneratorX64::visitCompareBitwise(LCompareBitwise* lir)
 {
     MCompare* mir = lir->mir();
     const ValueOperand lhs = ToValue(lir, LCompareBitwise::LhsInput);
@@ -204,7 +203,7 @@ CodeGenerator::visitCompareBitwise(LCompareBitwise* lir)
 }
 
 void
-CodeGenerator::visitCompareBitwiseAndBranch(LCompareBitwiseAndBranch* lir)
+CodeGeneratorX64::visitCompareBitwiseAndBranch(LCompareBitwiseAndBranch* lir)
 {
     MCompare* mir = lir->cmpMir();
 
@@ -219,7 +218,7 @@ CodeGenerator::visitCompareBitwiseAndBranch(LCompareBitwiseAndBranch* lir)
 }
 
 void
-CodeGenerator::visitCompareI64(LCompareI64* lir)
+CodeGeneratorX64::visitCompareI64(LCompareI64* lir)
 {
     MCompare* mir = lir->mir();
     MOZ_ASSERT(mir->compareType() == MCompare::Compare_Int64 ||
@@ -240,7 +239,7 @@ CodeGenerator::visitCompareI64(LCompareI64* lir)
 }
 
 void
-CodeGenerator::visitCompareI64AndBranch(LCompareI64AndBranch* lir)
+CodeGeneratorX64::visitCompareI64AndBranch(LCompareI64AndBranch* lir)
 {
     MCompare* mir = lir->cmpMir();
     MOZ_ASSERT(mir->compareType() == MCompare::Compare_Int64 ||
@@ -260,7 +259,7 @@ CodeGenerator::visitCompareI64AndBranch(LCompareI64AndBranch* lir)
 }
 
 void
-CodeGenerator::visitDivOrModI64(LDivOrModI64* lir)
+CodeGeneratorX64::visitDivOrModI64(LDivOrModI64* lir)
 {
     Register lhs = ToRegister(lir->lhs());
     Register rhs = ToRegister(lir->rhs());
@@ -306,7 +305,7 @@ CodeGenerator::visitDivOrModI64(LDivOrModI64* lir)
 }
 
 void
-CodeGenerator::visitUDivOrModI64(LUDivOrModI64* lir)
+CodeGeneratorX64::visitUDivOrModI64(LUDivOrModI64* lir)
 {
     Register lhs = ToRegister(lir->lhs());
     Register rhs = ToRegister(lir->rhs());
@@ -339,7 +338,7 @@ CodeGenerator::visitUDivOrModI64(LUDivOrModI64* lir)
 }
 
 void
-CodeGenerator::visitWasmSelectI64(LWasmSelectI64* lir)
+CodeGeneratorX64::visitWasmSelectI64(LWasmSelectI64* lir)
 {
     MOZ_ASSERT(lir->mir()->type() == MIRType::Int64);
 
@@ -355,7 +354,7 @@ CodeGenerator::visitWasmSelectI64(LWasmSelectI64* lir)
 }
 
 void
-CodeGenerator::visitWasmReinterpretFromI64(LWasmReinterpretFromI64* lir)
+CodeGeneratorX64::visitWasmReinterpretFromI64(LWasmReinterpretFromI64* lir)
 {
     MOZ_ASSERT(lir->mir()->type() == MIRType::Double);
     MOZ_ASSERT(lir->mir()->input()->type() == MIRType::Int64);
@@ -363,7 +362,7 @@ CodeGenerator::visitWasmReinterpretFromI64(LWasmReinterpretFromI64* lir)
 }
 
 void
-CodeGenerator::visitWasmReinterpretToI64(LWasmReinterpretToI64* lir)
+CodeGeneratorX64::visitWasmReinterpretToI64(LWasmReinterpretToI64* lir)
 {
     MOZ_ASSERT(lir->mir()->type() == MIRType::Int64);
     MOZ_ASSERT(lir->mir()->input()->type() == MIRType::Double);
@@ -371,13 +370,13 @@ CodeGenerator::visitWasmReinterpretToI64(LWasmReinterpretToI64* lir)
 }
 
 void
-CodeGenerator::visitWasmUint32ToDouble(LWasmUint32ToDouble* lir)
+CodeGeneratorX64::visitWasmUint32ToDouble(LWasmUint32ToDouble* lir)
 {
     masm.convertUInt32ToDouble(ToRegister(lir->input()), ToFloatRegister(lir->output()));
 }
 
 void
-CodeGenerator::visitWasmUint32ToFloat32(LWasmUint32ToFloat32* lir)
+CodeGeneratorX64::visitWasmUint32ToFloat32(LWasmUint32ToFloat32* lir)
 {
     masm.convertUInt32ToFloat32(ToRegister(lir->input()), ToFloatRegister(lir->output()));
 }
@@ -394,7 +393,7 @@ CodeGeneratorX64::wasmStore(const wasm::MemoryAccessDesc& access, const LAllocat
         const MConstant* mir = value->toConstant();
         Imm32 cst = Imm32(mir->type() == MIRType::Int32 ? mir->toInt32() : mir->toInt64());
 
-        masm.append(access, masm.size());
+        size_t storeOffset = masm.size();
         switch (access.type()) {
           case Scalar::Int8:
           case Scalar::Uint8:
@@ -419,6 +418,7 @@ CodeGeneratorX64::wasmStore(const wasm::MemoryAccessDesc& access, const LAllocat
           case Scalar::MaxTypedArrayViewType:
             MOZ_CRASH("unexpected array type");
         }
+        masm.append(access, storeOffset, masm.framePushed());
 
         masm.memoryBarrierAfter(access.sync());
     } else {
@@ -447,13 +447,13 @@ CodeGeneratorX64::emitWasmLoad(T* ins)
 }
 
 void
-CodeGenerator::visitWasmLoad(LWasmLoad* ins)
+CodeGeneratorX64::visitWasmLoad(LWasmLoad* ins)
 {
     emitWasmLoad(ins);
 }
 
 void
-CodeGenerator::visitWasmLoadI64(LWasmLoadI64* ins)
+CodeGeneratorX64::visitWasmLoadI64(LWasmLoadI64* ins)
 {
     emitWasmLoad(ins);
 }
@@ -478,19 +478,19 @@ CodeGeneratorX64::emitWasmStore(T* ins)
 }
 
 void
-CodeGenerator::visitWasmStore(LWasmStore* ins)
+CodeGeneratorX64::visitWasmStore(LWasmStore* ins)
 {
     emitWasmStore(ins);
 }
 
 void
-CodeGenerator::visitWasmStoreI64(LWasmStoreI64* ins)
+CodeGeneratorX64::visitWasmStoreI64(LWasmStoreI64* ins)
 {
     emitWasmStore(ins);
 }
 
 void
-CodeGenerator::visitAsmJSLoadHeap(LAsmJSLoadHeap* ins)
+CodeGeneratorX64::visitAsmJSLoadHeap(LAsmJSLoadHeap* ins)
 {
     const MAsmJSLoadHeap* mir = ins->mir();
     MOZ_ASSERT(mir->offset() < wasm::OffsetGuardLimit);
@@ -512,7 +512,7 @@ CodeGenerator::visitAsmJSLoadHeap(LAsmJSLoadHeap* ins)
 }
 
 void
-CodeGenerator::visitAsmJSStoreHeap(LAsmJSStoreHeap* ins)
+CodeGeneratorX64::visitAsmJSStoreHeap(LAsmJSStoreHeap* ins)
 {
     const MAsmJSStoreHeap* mir = ins->mir();
     MOZ_ASSERT(mir->offset() < wasm::OffsetGuardLimit);
@@ -536,7 +536,7 @@ CodeGenerator::visitAsmJSStoreHeap(LAsmJSStoreHeap* ins)
 }
 
 void
-CodeGenerator::visitWasmCompareExchangeHeap(LWasmCompareExchangeHeap* ins)
+CodeGeneratorX64::visitWasmCompareExchangeHeap(LWasmCompareExchangeHeap* ins)
 {
     MWasmCompareExchangeHeap* mir = ins->mir();
 
@@ -549,6 +549,7 @@ CodeGenerator::visitWasmCompareExchangeHeap(LWasmCompareExchangeHeap* ins)
     BaseIndex srcAddr(HeapReg, ptr, TimesOne, mir->access().offset());
 
     if (accessType == Scalar::Int64) {
+        MOZ_ASSERT(!mir->access().isPlainAsmJS());
         masm.compareExchange64(Synchronization::Full(), srcAddr, Register64(oldval),
                                Register64(newval), ToOutRegister64(ins));
     } else {
@@ -558,7 +559,7 @@ CodeGenerator::visitWasmCompareExchangeHeap(LWasmCompareExchangeHeap* ins)
 }
 
 void
-CodeGenerator::visitWasmAtomicExchangeHeap(LWasmAtomicExchangeHeap* ins)
+CodeGeneratorX64::visitWasmAtomicExchangeHeap(LWasmAtomicExchangeHeap* ins)
 {
     MWasmAtomicExchangeHeap* mir = ins->mir();
 
@@ -571,6 +572,7 @@ CodeGenerator::visitWasmAtomicExchangeHeap(LWasmAtomicExchangeHeap* ins)
     BaseIndex srcAddr(HeapReg, ptr, TimesOne, mir->access().offset());
 
     if (accessType == Scalar::Int64) {
+        MOZ_ASSERT(!mir->access().isPlainAsmJS());
         masm.atomicExchange64(Synchronization::Full(), srcAddr, Register64(value),
                               ToOutRegister64(ins));
     } else {
@@ -580,7 +582,7 @@ CodeGenerator::visitWasmAtomicExchangeHeap(LWasmAtomicExchangeHeap* ins)
 }
 
 void
-CodeGenerator::visitWasmAtomicBinopHeap(LWasmAtomicBinopHeap* ins)
+CodeGeneratorX64::visitWasmAtomicBinopHeap(LWasmAtomicBinopHeap* ins)
 {
     MWasmAtomicBinopHeap* mir = ins->mir();
     MOZ_ASSERT(mir->hasUses());
@@ -613,7 +615,7 @@ CodeGenerator::visitWasmAtomicBinopHeap(LWasmAtomicBinopHeap* ins)
 }
 
 void
-CodeGenerator::visitWasmAtomicBinopHeapForEffect(LWasmAtomicBinopHeapForEffect* ins)
+CodeGeneratorX64::visitWasmAtomicBinopHeapForEffect(LWasmAtomicBinopHeapForEffect* ins)
 {
     MWasmAtomicBinopHeap* mir = ins->mir();
     MOZ_ASSERT(!mir->hasUses());
@@ -644,7 +646,7 @@ CodeGenerator::visitWasmAtomicBinopHeapForEffect(LWasmAtomicBinopHeapForEffect* 
 }
 
 void
-CodeGenerator::visitTruncateDToInt32(LTruncateDToInt32* ins)
+CodeGeneratorX64::visitTruncateDToInt32(LTruncateDToInt32* ins)
 {
     FloatRegister input = ToFloatRegister(ins->input());
     Register output = ToRegister(ins->output());
@@ -656,7 +658,7 @@ CodeGenerator::visitTruncateDToInt32(LTruncateDToInt32* ins)
 }
 
 void
-CodeGenerator::visitTruncateFToInt32(LTruncateFToInt32* ins)
+CodeGeneratorX64::visitTruncateFToInt32(LTruncateFToInt32* ins)
 {
     FloatRegister input = ToFloatRegister(ins->input());
     Register output = ToRegister(ins->output());
@@ -668,7 +670,7 @@ CodeGenerator::visitTruncateFToInt32(LTruncateFToInt32* ins)
 }
 
 void
-CodeGenerator::visitWrapInt64ToInt32(LWrapInt64ToInt32* lir)
+CodeGeneratorX64::visitWrapInt64ToInt32(LWrapInt64ToInt32* lir)
 {
     const LAllocation* input = lir->getOperand(0);
     Register output = ToRegister(lir->output());
@@ -680,7 +682,7 @@ CodeGenerator::visitWrapInt64ToInt32(LWrapInt64ToInt32* lir)
 }
 
 void
-CodeGenerator::visitExtendInt32ToInt64(LExtendInt32ToInt64* lir)
+CodeGeneratorX64::visitExtendInt32ToInt64(LExtendInt32ToInt64* lir)
 {
     const LAllocation* input = lir->getOperand(0);
     Register output = ToRegister(lir->output());
@@ -692,7 +694,7 @@ CodeGenerator::visitExtendInt32ToInt64(LExtendInt32ToInt64* lir)
 }
 
 void
-CodeGenerator::visitSignExtendInt64(LSignExtendInt64* ins)
+CodeGeneratorX64::visitSignExtendInt64(LSignExtendInt64* ins)
 {
     Register64 input = ToRegister64(ins->getInt64Operand(0));
     Register64 output = ToOutRegister64(ins);
@@ -710,7 +712,7 @@ CodeGenerator::visitSignExtendInt64(LSignExtendInt64* ins)
 }
 
 void
-CodeGenerator::visitWasmTruncateToInt64(LWasmTruncateToInt64* lir)
+CodeGeneratorX64::visitWasmTruncateToInt64(LWasmTruncateToInt64* lir)
 {
     FloatRegister input = ToFloatRegister(lir->input());
     Register64 output = ToOutRegister64(lir);
@@ -746,7 +748,7 @@ CodeGenerator::visitWasmTruncateToInt64(LWasmTruncateToInt64* lir)
 }
 
 void
-CodeGenerator::visitInt64ToFloatingPoint(LInt64ToFloatingPoint* lir)
+CodeGeneratorX64::visitInt64ToFloatingPoint(LInt64ToFloatingPoint* lir)
 {
     Register64 input = ToRegister64(lir->getInt64Operand(0));
     FloatRegister output = ToFloatRegister(lir->output());
@@ -772,14 +774,14 @@ CodeGenerator::visitInt64ToFloatingPoint(LInt64ToFloatingPoint* lir)
 }
 
 void
-CodeGenerator::visitNotI64(LNotI64* lir)
+CodeGeneratorX64::visitNotI64(LNotI64* lir)
 {
     masm.cmpq(Imm32(0), ToRegister(lir->input()));
     masm.emitSet(Assembler::Equal, ToRegister(lir->output()));
 }
 
 void
-CodeGenerator::visitClzI64(LClzI64* lir)
+CodeGeneratorX64::visitClzI64(LClzI64* lir)
 {
     Register64 input = ToRegister64(lir->getInt64Operand(0));
     Register64 output = ToOutRegister64(lir);
@@ -787,7 +789,7 @@ CodeGenerator::visitClzI64(LClzI64* lir)
 }
 
 void
-CodeGenerator::visitCtzI64(LCtzI64* lir)
+CodeGeneratorX64::visitCtzI64(LCtzI64* lir)
 {
     Register64 input = ToRegister64(lir->getInt64Operand(0));
     Register64 output = ToOutRegister64(lir);
@@ -795,7 +797,7 @@ CodeGenerator::visitCtzI64(LCtzI64* lir)
 }
 
 void
-CodeGenerator::visitTestI64AndBranch(LTestI64AndBranch* lir)
+CodeGeneratorX64::visitTestI64AndBranch(LTestI64AndBranch* lir)
 {
     Register input = ToRegister(lir->input());
     masm.testq(input, input);

@@ -11,6 +11,7 @@ config = {
     'debug_build': True,
     #### 32 bit build specific #####
     'env': {
+        'BINSCOPE': 'C:/Program Files (x86)/Microsoft/SDL BinScope/BinScope.exe',
         'HG_SHARE_BASE_DIR': 'C:/builds/hg-shared',
         'MOZBUILD_STATE_PATH': os.path.join(os.getcwd(), '.mozbuild'),
         'MOZ_CRASHREPORTER_NO_REPORT': '1',

@@ -184,20 +184,17 @@ public:
                  nsIPrincipal* aPrincipal,
                  nsIArray* aPaymentMethods,
                  nsIPaymentDetails* aPaymentDetails,
-                 nsIPaymentOptions* aPaymentOptions,
-		 const nsAString& aShippingOption);
+                 nsIPaymentOptions* aPaymentOptions);
 
 private:
   ~PaymentRequest() = default;
 
   uint64_t mTabId;
   nsString mRequestId;
-  nsString mCompleteStatus;
   nsCOMPtr<nsIPrincipal> mTopLevelPrincipal;
   nsCOMPtr<nsIArray> mPaymentMethods;
   nsCOMPtr<nsIPaymentDetails> mPaymentDetails;
   nsCOMPtr<nsIPaymentOptions> mPaymentOptions;
-  nsString mShippingOption;
 };
 
 class PaymentAddress final : public nsIPaymentAddress

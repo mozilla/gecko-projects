@@ -32,6 +32,14 @@ config = {
     "mozilla-central": {
         "repo_path": 'mozilla-central',
         "update_channel": "nightly",
+        'platform_overrides': {
+            'android-api-16-old-id': {
+                "update_channel": "nightly-old-id",
+            },
+            'android-x86-old-id': {
+                "update_channel": "nightly-old-id",
+            },
+        }
     },
     'mozilla-release': {
         'enable_release_promotion': True,
@@ -219,6 +227,14 @@ config = {
     'ux': {},
     'date': {
         'update_channel': 'nightly-date',
+        'platform_overrides': {
+            'android-api-16-old-id': {
+                "update_channel": "nightly-old-id",
+            },
+            'android-x86-old-id': {
+                "update_channel": "nightly-old-id",
+            },
+        }
     },
     'cypress': {
         # bug 1164935
@@ -304,32 +320,8 @@ config = {
             },
         },
     },
-    'larch': {
-        'stage_server': 'upload.ffxbld.productdelivery.prod.mozaws.net',
-    },
-    'maple': {
-        'platform_overrides': {
-            'linux-devedition': {
-                "update_channel": "aurora",
-            },
-            'linux64-devedition': {
-                "update_channel": "aurora",
-            },
-            'macosx64-devedition': {
-                "update_channel": "aurora",
-            },
-            'win32-devedition': {
-                "update_channel": "aurora",
-            },
-            'win64-devedition': {
-                "update_channel": "aurora",
-            },
-        },
-    },
-    'oak': {
-        'stage_server': 'upload.ffxbld.productdelivery.prod.mozaws.net',
-    },
-    'pine': {
-        'stage_server': 'upload.ffxbld.productdelivery.prod.mozaws.net',
-    },
+    'larch': {},
+    # 'maple': {},
+    'oak': {},
+    'pine': {},
 }

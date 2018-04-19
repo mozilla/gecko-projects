@@ -8,11 +8,9 @@ description: >
     that converts to a string
 ---*/
 
-var obj = {
-  "Hello": 1
-};
+        var obj = { "Hello": 1 };
 
-var desc = Object.getOwnPropertyDescriptor(obj, new String("Hello"));
+        var desc = Object.getOwnPropertyDescriptor(obj, new String("Hello"));
 
 assert.sameValue(desc.value, 1, 'desc.value');
 

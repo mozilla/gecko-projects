@@ -1,7 +1,7 @@
 /* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 
-const ADDON_INSTALL_ID = "addon-webext-permissions";
+const ADDON_INSTALL_ID = "addon-install-confirmation";
 
 let fileurl1 = get_addon_file_url("browser_dragdrop1.xpi");
 let fileurl2 = get_addon_file_url("browser_dragdrop2.xpi");
@@ -21,7 +21,7 @@ function promiseInstallNotification(aBrowser) {
 
       PopupNotifications.panel.removeEventListener("popupshown", popupshown);
       ok(true, `Got ${ADDON_INSTALL_ID} popup for browser`);
-      event.target.firstChild.secondaryButton.click();
+      notification.remove();
       resolve();
     }
 
@@ -85,7 +85,7 @@ async function testOpenedAndDraggedXPI(aBrowser) {
     await BrowserTestUtils.switchTab(gBrowser, newTab);
   }
   await newTabInstallNotification;
-  BrowserTestUtils.removeTab(newTab);
+  await BrowserTestUtils.removeTab(newTab);
   await CheckBrowserInPid(aBrowser, browserPid,
                           "Check that browser has not switched process.");
 }

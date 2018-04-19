@@ -21,36 +21,34 @@ class ToolboxController extends Component {
     // state, and for the definitions of the props that are expected to be passed in.
     this.state = {
       focusedButton: ELEMENT_PICKER_ID,
-      toolboxButtons: [],
       currentToolId: null,
+      canRender: false,
       highlightedTools: new Set(),
+      areDockButtonsEnabled: true,
       panelDefinitions: [],
       hostTypes: [],
-      areDockOptionsEnabled: true,
       canCloseToolbox: true,
-      isSplitConsoleActive: false,
-      disableAutohide: undefined,
-      canRender: false,
+      toolboxButtons: [],
       buttonIds: [],
       checkedButtonsUpdated: () => {
         this.forceUpdate();
       }
     };
 
-    this.setFocusedButton = this.setFocusedButton.bind(this);
-    this.setToolboxButtons = this.setToolboxButtons.bind(this);
-    this.setCurrentToolId = this.setCurrentToolId.bind(this);
-    this.highlightTool = this.highlightTool.bind(this);
-    this.unhighlightTool = this.unhighlightTool.bind(this);
-    this.setHostTypes = this.setHostTypes.bind(this);
-    this.setDockOptionsEnabled = this.setDockOptionsEnabled.bind(this);
-    this.setCanCloseToolbox = this.setCanCloseToolbox.bind(this);
-    this.setIsSplitConsoleActive = this.setIsSplitConsoleActive.bind(this);
-    this.setDisableAutohide = this.setDisableAutohide.bind(this);
-    this.setCanRender = this.setCanRender.bind(this);
-    this.setPanelDefinitions = this.setPanelDefinitions.bind(this);
     this.updateButtonIds = this.updateButtonIds.bind(this);
     this.updateFocusedButton = this.updateFocusedButton.bind(this);
+    this.setFocusedButton = this.setFocusedButton.bind(this);
+    this.setCurrentToolId = this.setCurrentToolId.bind(this);
+    this.setCanRender = this.setCanRender.bind(this);
+    this.setOptionsPanel = this.setOptionsPanel.bind(this);
+    this.highlightTool = this.highlightTool.bind(this);
+    this.unhighlightTool = this.unhighlightTool.bind(this);
+    this.setDockButtonsEnabled = this.setDockButtonsEnabled.bind(this);
+    this.setHostTypes = this.setHostTypes.bind(this);
+    this.setCanCloseToolbox = this.setCanCloseToolbox.bind(this);
+    this.setPanelDefinitions = this.setPanelDefinitions.bind(this);
+    this.setToolboxButtons = this.setToolboxButtons.bind(this);
+    this.setCanMinimize = this.setCanMinimize.bind(this);
   }
 
   shouldComponentUpdate() {
@@ -68,11 +66,8 @@ class ToolboxController extends Component {
    * using the arrow keys.
    */
   updateButtonIds() {
-    const {
-      toolboxButtons,
-      panelDefinitions,
-      canCloseToolbox,
-    } = this.state;
+    const {panelDefinitions, toolboxButtons, optionsPanel, hostTypes,
+           canCloseToolbox} = this.state;
 
     // This is a little gnarly, but go through all of the state and extract the IDs.
     this.setState({
@@ -80,6 +75,8 @@ class ToolboxController extends Component {
         ...toolboxButtons.filter(btn => btn.isInStartContainer).map(({id}) => id),
         ...panelDefinitions.map(({id}) => id),
         ...toolboxButtons.filter(btn => !btn.isInStartContainer).map(({id}) => id),
+        optionsPanel ? optionsPanel.id : null,
+        ...hostTypes.map(({position}) => "toolbox-dock-" + position),
         canCloseToolbox ? "toolbox-close" : null
       ].filter(id => id)
     });
@@ -115,6 +112,10 @@ class ToolboxController extends Component {
     this.setState({ canRender: true }, this.updateButtonIds);
   }
 
+  setOptionsPanel(optionsPanel) {
+    this.setState({ optionsPanel }, this.updateButtonIds);
+  }
+
   highlightTool(highlightedTool) {
     let { highlightedTools } = this.state;
     highlightedTools.add(highlightedTool);
@@ -129,24 +130,16 @@ class ToolboxController extends Component {
     }
   }
 
-  setDockOptionsEnabled(areDockOptionsEnabled) {
-    this.setState({ areDockOptionsEnabled });
+  setDockButtonsEnabled(areDockButtonsEnabled) {
+    this.setState({ areDockButtonsEnabled }, this.updateButtonIds);
   }
 
   setHostTypes(hostTypes) {
-    this.setState({ hostTypes });
+    this.setState({ hostTypes }, this.updateButtonIds);
   }
 
   setCanCloseToolbox(canCloseToolbox) {
     this.setState({ canCloseToolbox }, this.updateButtonIds);
-  }
-
-  setIsSplitConsoleActive(isSplitConsoleActive) {
-    this.setState({ isSplitConsoleActive });
-  }
-
-  setDisableAutohide(disableAutohide) {
-    this.setState({ disableAutohide });
   }
 
   setPanelDefinitions(panelDefinitions) {
@@ -167,6 +160,13 @@ class ToolboxController extends Component {
     });
 
     this.setState({ toolboxButtons }, this.updateButtonIds);
+  }
+
+  setCanMinimize(canMinimize) {
+    /* Bug 1177463 - The minimize button is currently hidden until we agree on
+       the UI for it, and until bug 1173849 is fixed too. */
+
+    // this.setState({ canMinimize });
   }
 
   render() {

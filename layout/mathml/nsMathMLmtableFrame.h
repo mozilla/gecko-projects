@@ -8,7 +8,6 @@
 #define nsMathMLmtableFrame_h___
 
 #include "mozilla/Attributes.h"
-#include "mozilla/UniquePtr.h"
 #include "nsMathMLContainerFrame.h"
 #include "nsBlockFrame.h"
 #include "nsTableWrapperFrame.h"
@@ -26,7 +25,7 @@ class nsMathMLmtableWrapperFrame final
 public:
   friend nsContainerFrame*
   NS_NewMathMLmtableOuterFrame(nsIPresShell*   aPresShell,
-                               ComputedStyle* aStyle);
+                               nsStyleContext* aContext);
 
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS(nsMathMLmtableWrapperFrame)
@@ -50,8 +49,8 @@ public:
   }
 
 protected:
-  explicit nsMathMLmtableWrapperFrame(ComputedStyle* aStyle)
-    : nsTableWrapperFrame(aStyle, kClassID)
+  explicit nsMathMLmtableWrapperFrame(nsStyleContext* aContext)
+    : nsTableWrapperFrame(aContext, kClassID)
   {}
 
   virtual ~nsMathMLmtableWrapperFrame();
@@ -73,7 +72,7 @@ public:
 
   friend nsContainerFrame*
   NS_NewMathMLmtableFrame(nsIPresShell*   aPresShell,
-                          ComputedStyle* aStyle);
+                          nsStyleContext* aContext);
 
   // Overloaded nsTableFrame methods
 
@@ -158,8 +157,8 @@ public:
   bool GetUseCSSSpacing() { return mUseCSSSpacing; }
 
 protected:
-  explicit nsMathMLmtableFrame(ComputedStyle* aStyle)
-    : nsTableFrame(aStyle, kClassID)
+  explicit nsMathMLmtableFrame(nsStyleContext* aContext)
+    : nsTableFrame(aContext, kClassID)
     , mFrameSpacingX(0)
     , mFrameSpacingY(0)
     , mUseCSSSpacing(false)
@@ -184,7 +183,7 @@ public:
 
   friend nsContainerFrame*
   NS_NewMathMLmtrFrame(nsIPresShell*   aPresShell,
-                       ComputedStyle* aStyle);
+                       nsStyleContext* aContext);
 
   // overloaded nsTableRowFrame methods
 
@@ -233,8 +232,8 @@ public:
   }
 
 protected:
-  explicit nsMathMLmtrFrame(ComputedStyle* aStyle)
-    : nsTableRowFrame(aStyle, kClassID)
+  explicit nsMathMLmtrFrame(nsStyleContext* aContext)
+    : nsTableRowFrame(aContext, kClassID)
   {}
 
   virtual ~nsMathMLmtrFrame();
@@ -249,7 +248,7 @@ public:
 
   friend nsContainerFrame*
   NS_NewMathMLmtdFrame(nsIPresShell*   aPresShell,
-                       ComputedStyle* aStyle,
+                       nsStyleContext* aContext,
                        nsTableFrame*   aTableFrame);
 
   // overloaded nsTableCellFrame methods
@@ -278,8 +277,8 @@ public:
   virtual nsMargin GetBorderOverflow() override;
 
 protected:
-  nsMathMLmtdFrame(ComputedStyle* aStyle, nsTableFrame* aTableFrame)
-    : nsTableCellFrame(aStyle, aTableFrame, kClassID)
+  nsMathMLmtdFrame(nsStyleContext* aContext, nsTableFrame* aTableFrame)
+    : nsTableCellFrame(aContext, aTableFrame, kClassID)
   {
   }
 
@@ -295,7 +294,7 @@ class nsMathMLmtdInnerFrame final
 public:
   friend nsContainerFrame*
   NS_NewMathMLmtdInnerFrame(nsIPresShell*   aPresShell,
-                            ComputedStyle* aStyle);
+                            nsStyleContext* aContext);
 
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS(nsMathMLmtdInnerFrame)
@@ -326,7 +325,7 @@ public:
   }
 
   virtual const nsStyleText* StyleTextForLineLayout() override;
-  virtual void DidSetComputedStyle(ComputedStyle* aOldComputedStyle) override;
+  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) override;
 
   bool
   IsMrowLike() override
@@ -337,10 +336,10 @@ public:
   }
 
 protected:
-  explicit nsMathMLmtdInnerFrame(ComputedStyle* aStyle);
-  virtual ~nsMathMLmtdInnerFrame() {}
+  explicit nsMathMLmtdInnerFrame(nsStyleContext* aContext);
+  virtual ~nsMathMLmtdInnerFrame();
 
-  mozilla::UniquePtr<nsStyleText> mUniqueStyleText;
+  nsStyleText* mUniqueStyleText;
 
 };  // class nsMathMLmtdInnerFrame
 

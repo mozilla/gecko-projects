@@ -11,17 +11,13 @@ use dom::bindings::reflector::DomObject;
 use dom::bindings::root::DomRoot;
 use dom::blob::{Blob, BlobImpl};
 use dom::globalscope::GlobalScope;
-use js::jsapi::{JSAutoCompartment, JSContext};
+use js::jsapi::{Handle, HandleObject, HandleValue, MutableHandleValue, JSAutoCompartment, JSContext};
 use js::jsapi::{JSStructuredCloneCallbacks, JSStructuredCloneReader, JSStructuredCloneWriter};
-use js::jsapi::{JS_ClearPendingException, JSObject};
+use js::jsapi::{JS_ClearPendingException, JSObject, JS_ReadStructuredClone};
 use js::jsapi::{JS_ReadBytes, JS_WriteBytes};
 use js::jsapi::{JS_ReadUint32Pair, JS_WriteUint32Pair};
-use js::jsapi::HandleObject as RawHandleObject;
-use js::jsapi::JS_STRUCTURED_CLONE_VERSION;
-use js::jsapi::MutableHandleObject as RawMutableHandleObject;
-use js::jsapi::TransferableOwnership;
-use js::rust::{Handle, HandleValue, MutableHandleValue};
-use js::rust::wrappers::{JS_WriteStructuredClone, JS_ReadStructuredClone};
+use js::jsapi::{JS_STRUCTURED_CLONE_VERSION, JS_WriteStructuredClone};
+use js::jsapi::{MutableHandleObject, TransferableOwnership};
 use libc::size_t;
 use std::os::raw;
 use std::ptr;
@@ -141,10 +137,10 @@ unsafe extern "C" fn read_callback(cx: *mut JSContext,
 
 unsafe extern "C" fn write_callback(_cx: *mut JSContext,
                                     w: *mut JSStructuredCloneWriter,
-                                    obj: RawHandleObject,
+                                    obj: HandleObject,
                                     _closure: *mut raw::c_void)
                                     -> bool {
-    if let Ok(blob) = root_from_handleobject::<Blob>(Handle::from_raw(obj)) {
+    if let Ok(blob) = root_from_handleobject::<Blob>(obj) {
         return write_blob(blob, w).is_ok()
     }
     return false
@@ -156,13 +152,13 @@ unsafe extern "C" fn read_transfer_callback(_cx: *mut JSContext,
                                             _content: *mut raw::c_void,
                                             _extra_data: u64,
                                             _closure: *mut raw::c_void,
-                                            _return_object: RawMutableHandleObject)
+                                            _return_object: MutableHandleObject)
                                             -> bool {
     false
 }
 
 unsafe extern "C" fn write_transfer_callback(_cx: *mut JSContext,
-                                             _obj: RawHandleObject,
+                                             _obj: Handle<*mut JSObject>,
                                              _closure: *mut raw::c_void,
                                              _tag: *mut u32,
                                              _ownership: *mut TransferableOwnership,

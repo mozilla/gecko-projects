@@ -53,8 +53,6 @@ EXPORTS += [
     'nsDeque.h',
     'nsEnumeratorUtils.h',
     'nsExpirationTracker.h',
-    'nsGkAtomList.h',
-    'nsGkAtoms.h',
     'nsHashKeys.h',
     'nsHashPropertyBag.h',
     'nsInterfaceHashtable.h',
@@ -117,16 +115,6 @@ UNIFIED_SOURCES += [
     'PLDHashTable.cpp',
     'Tokenizer.cpp',
 ]
-
-SOURCES += [
-    'nsGkAtoms.cpp',
-]
-if CONFIG['CC_TYPE'] == 'msvc':
-    # Needed for gGkAtoms.
-    SOURCES['nsGkAtoms.cpp'].flags += [
-        '-constexpr:steps300000',
-        '-Zc:externConstexpr',
-    ]
 
 EXTRA_COMPONENTS += [
     'nsINIProcessor.js',

@@ -124,10 +124,6 @@ nyn{
         }
         MRO{
             "MRO",
-            "Ougwiya ya Mouriteeniya (1973–2017)",
-        }
-        MRU{
-            "MRU",
             "Ougwiya ya Mouriteeniya",
         }
         MUR{
@@ -184,10 +180,6 @@ nyn{
         }
         STD{
             "STD",
-            "Dobra ya Sao Tome na Purinsipo (1977–2017)",
-        }
-        STN{
-            "STN",
             "Dobra ya Sao Tome na Purinsipo",
         }
         SZL{
@@ -235,5 +227,5 @@ nyn{
             "Doora ya Zimbabwe",
         }
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.31.33"}
 }

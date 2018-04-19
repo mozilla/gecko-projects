@@ -13,4 +13,3 @@
 ## Reference: https://www.mozilla.org/styleguide/communications/translation/
 
 -brand-short-name = Nightly
--vendor-short-name = Mozilla

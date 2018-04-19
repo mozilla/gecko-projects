@@ -10,25 +10,25 @@ requestLongerTimeout(2);
 // be clicked. Check that when it is, the button changes state and the scrubber stops and
 // resumes.
 
-add_task(async function() {
-  await addTab(URL_ROOT + "doc_simple_animation.html");
+add_task(function* () {
+  yield addTab(URL_ROOT + "doc_simple_animation.html");
 
-  let {panel} = await openAnimationInspector();
+  let {panel} = yield openAnimationInspector();
   let btn = panel.playTimelineButtonEl;
 
   ok(btn, "The play/pause button exists");
   ok(!btn.classList.contains("paused"), "The play/pause button is in its playing state");
 
   info("Click on the button to pause all timeline animations");
-  await clickTimelinePlayPauseButton(panel);
+  yield clickTimelinePlayPauseButton(panel);
 
   ok(btn.classList.contains("paused"), "The play/pause button is in its paused state");
-  await assertScrubberMoving(panel, false);
+  yield assertScrubberMoving(panel, false);
 
   info("Click again on the button to play all timeline animations");
-  await clickTimelinePlayPauseButton(panel);
+  yield clickTimelinePlayPauseButton(panel);
 
   ok(!btn.classList.contains("paused"),
      "The play/pause button is in its playing state again");
-  await assertScrubberMoving(panel, true);
+  yield assertScrubberMoving(panel, true);
 });

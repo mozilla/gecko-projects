@@ -9,14 +9,7 @@
 // access the dictionary resources.
 
 #include "hnjalloc.h"
-
-#undef FILE // Undo #defines from hnjalloc.h before #including other headers
-#undef fopen
-#undef fclose
-#undef fgets
-#undef feof
-#undef fgetc
-
+#undef FILE // Undo the damage done in hnjalloc.h
 #include "nsNetUtil.h"
 #include "nsIInputStream.h"
 #include "nsIURI.h"

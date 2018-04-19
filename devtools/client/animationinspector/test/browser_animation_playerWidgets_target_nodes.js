@@ -8,12 +8,12 @@ requestLongerTimeout(2);
 
 // Test that player widgets display information about target nodes
 
-add_task(async function() {
-  await addTab(URL_ROOT + "doc_simple_animation.html");
-  let {inspector, panel} = await openAnimationInspector();
+add_task(function* () {
+  yield addTab(URL_ROOT + "doc_simple_animation.html");
+  let {inspector, panel} = yield openAnimationInspector();
 
   info("Select the simple animated node");
-  await selectNodeAndWaitForAnimations(".animated", inspector);
+  yield selectNodeAndWaitForAnimations(".animated", inspector);
 
   let targetNodeComponent = getAnimationTargetNodes(panel)[0];
   let {previewer} = targetNodeComponent;
@@ -21,7 +21,7 @@ add_task(async function() {
   // Make sure to wait for the target-retrieved event if the nodeFront hasn't
   // yet been retrieved by the TargetNodeComponent.
   if (!previewer.nodeFront) {
-    await targetNodeComponent.once("target-retrieved");
+    yield targetNodeComponent.once("target-retrieved");
   }
 
   is(previewer.el.textContent, "div#.ball.animated",

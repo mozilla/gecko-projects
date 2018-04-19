@@ -49,7 +49,6 @@ private:
   nsCOMPtr<nsIArray> mMethodData;
   nsCOMPtr<nsIPaymentDetails> mDetails;
   nsCOMPtr<nsIPaymentOptions> mOptions;
-  nsString mShippingOption;
 };
 
 class PaymentCompleteActionRequest final : public nsIPaymentCompleteActionRequest
@@ -81,7 +80,6 @@ private:
   ~PaymentUpdateActionRequest() = default;
 
   nsCOMPtr<nsIPaymentDetails> mDetails;
-  nsString mShippingOption;
 };
 
 } // end of namespace dom

@@ -9,9 +9,6 @@ var gSearchResultsPane = {
   listSearchTooltips: new Set(),
   listSearchMenuitemIndicators: new Set(),
   searchInput: null,
-  // A map of DOM Elements to a string of keywords used in search
-  // XXX: We should invalidate this cache on `intl:app-locales-changed`
-  searchKeywords: new WeakMap(),
   inited: false,
 
   init() {
@@ -30,9 +27,10 @@ var gSearchResultsPane = {
       // Initialize other panes in an idle callback.
       window.requestIdleCallback(() => this.initializeCategories());
     }
-    let helpUrl = Services.urlFormatter.formatURLPref("app.support.baseURL") + "preferences";
-    let helpContainer = document.getElementById("need-help");
-    helpContainer.querySelector("a").href = helpUrl;
+    let strings = this.strings;
+    this.searchInput.placeholder = AppConstants.platform == "win" ?
+      strings.getString("searchInput.labelWin") :
+      strings.getString("searchInput.labelUnix");
   },
 
   handleEvent(event) {
@@ -199,6 +197,11 @@ var gSearchResultsPane = {
     return selection;
   },
 
+  get strings() {
+    delete this.strings;
+    return this.strings = document.getElementById("searchResultBundle");
+  },
+
   /**
    * Shows or hides content according to search input
    *
@@ -224,8 +227,7 @@ var gSearchResultsPane = {
     }
 
     let srHeader = document.getElementById("header-searchResults");
-    let noResultsEl = document.getElementById("no-results-message");
-    srHeader.hidden = !this.query;
+
     if (this.query) {
       // Showing the Search Results Tag
       gotoPref("paneSearchResults");
@@ -233,66 +235,85 @@ var gSearchResultsPane = {
       let resultsFound = false;
 
       // Building the range for highlighted areas
-      let rootPreferencesChildren = [...document
-        .querySelectorAll("#mainPrefPane > *:not([data-hidden-from-search])")];
+      let rootPreferencesChildren = document
+        .querySelectorAll("#mainPrefPane > *:not([data-hidden-from-search])");
+
+      // Show all second level headers in search result
+      for (let element of document.querySelectorAll("caption.search-header")) {
+        element.hidden = false;
+      }
 
       if (subQuery) {
         // Since the previous query is a subset of the current query,
         // there is no need to check elements that is hidden already.
-        rootPreferencesChildren = rootPreferencesChildren.filter(el => !el.hidden);
+        rootPreferencesChildren =
+          Array.prototype.filter.call(rootPreferencesChildren, el => !el.hidden);
       }
 
-      // Attach the bindings for all children if they were not already visible.
-      for (let child of rootPreferencesChildren) {
-        if (child.hidden) {
-          child.classList.add("visually-hidden");
-          child.hidden = false;
-        }
+      // Mark all the children to check be visible to bind JS, Access Keys, etc,
+      // but don't really show them by setting their visibility to hidden in CSS.
+      for (let i = 0; i < rootPreferencesChildren.length; i++) {
+        rootPreferencesChildren[i].hidden = false;
+        rootPreferencesChildren[i].classList.add("visually-hidden");
       }
 
       let ts = performance.now();
       let FRAME_THRESHOLD = 1000 / 60;
 
       // Showing or Hiding specific section depending on if words in query are found
-      for (let child of rootPreferencesChildren) {
+      for (let i = 0; i < rootPreferencesChildren.length; i++) {
         if (performance.now() - ts > FRAME_THRESHOLD) {
           // Creating tooltips for all the instances found
           for (let anchorNode of this.listSearchTooltips) {
             this.createSearchTooltip(anchorNode, this.query);
           }
+          // It hides Search Results header so turning it on
+          srHeader.hidden = false;
+          srHeader.classList.remove("visually-hidden");
           ts = await new Promise(resolve => window.requestAnimationFrame(resolve));
           if (query !== this.query) {
             return;
           }
         }
 
-        if (!child.classList.contains("header") &&
-            !child.classList.contains("subcategory") &&
-            await this.searchWithinNode(child, this.query)) {
-          child.classList.remove("visually-hidden");
-
-          // Show the preceding search-header if one exists.
-          let groupbox = child.closest("groupbox");
-          let groupHeader = groupbox && groupbox.querySelector(".search-header");
-          if (groupHeader) {
-            groupHeader.hidden = false;
-          }
-
+        rootPreferencesChildren[i].classList.remove("visually-hidden");
+        if (!rootPreferencesChildren[i].classList.contains("header") &&
+            !rootPreferencesChildren[i].classList.contains("subcategory") &&
+            !rootPreferencesChildren[i].classList.contains("no-results-message") &&
+            this.searchWithinNode(rootPreferencesChildren[i], this.query)) {
+          rootPreferencesChildren[i].hidden = false;
           resultsFound = true;
         } else {
-          child.classList.add("visually-hidden");
+          rootPreferencesChildren[i].hidden = true;
         }
       }
+      // It hides Search Results header so turning it on
+      srHeader.hidden = false;
+      srHeader.classList.remove("visually-hidden");
 
-      noResultsEl.hidden = !!resultsFound;
-      noResultsEl.setAttribute("query", this.query);
-      // XXX: This is potentially racy in case where Fluent retranslates the
-      // message and ereases the query within.
-      // The feature is not yet supported, but we should fix for it before
-      // we enable it. See bug 1446389 for details.
-      let msgQueryElem = document.getElementById("sorry-message-query");
-      msgQueryElem.textContent = this.query;
-      if (resultsFound) {
+      if (!resultsFound) {
+        let noResultsEl = document.querySelector(".no-results-message");
+        noResultsEl.setAttribute("query", this.query);
+        noResultsEl.hidden = false;
+
+        let strings = this.strings;
+
+        document.getElementById("sorry-message").textContent = AppConstants.platform == "win" ?
+          strings.getFormattedString("searchResults.sorryMessageWin", [this.query]) :
+          strings.getFormattedString("searchResults.sorryMessageUnix", [this.query]);
+        let helpUrl = Services.urlFormatter.formatURLPref("app.support.baseURL") + "preferences";
+        let brandName = document.getElementById("bundleBrand").getString("brandShortName");
+        let helpString = strings.getString("searchResults.needHelp3");
+        let helpContainer = document.getElementById("need-help");
+        let link = document.createElement("label");
+        link.className = "text-link";
+        link.setAttribute("href", helpUrl);
+        link.textContent = strings.getFormattedString("searchResults.needHelpSupportLink", [brandName]);
+
+        helpContainer.innerHTML = "";
+        let fragment = BrowserUtils.getLocalizedFragment(document, helpString, link);
+        helpContainer.appendChild(fragment);
+      } else {
         // Creating tooltips for all the instances found
         for (let anchorNode of this.listSearchTooltips) {
           this.createSearchTooltip(anchorNode, this.query);
@@ -306,8 +327,7 @@ var gSearchResultsPane = {
         }
       }
     } else {
-      noResultsEl.hidden = true;
-      document.getElementById("sorry-message-query").textContent = "";
+      document.getElementById("sorry-message").textContent = "";
       // Going back to General when cleared
       gotoPref("paneGeneral");
 
@@ -330,7 +350,7 @@ var gSearchResultsPane = {
    * @returns boolean
    *    Returns true when found in at least one childNode, false otherwise
    */
-  async searchWithinNode(nodeObject, searchPhrase) {
+  searchWithinNode(nodeObject, searchPhrase) {
     let matchesFound = false;
     if (nodeObject.childElementCount == 0 ||
         nodeObject.tagName == "label" ||
@@ -369,20 +389,8 @@ var gSearchResultsPane = {
       let valueResult = nodeObject.tagName !== "menuitem" ?
         this.queryMatchesContent(nodeObject.getAttribute("value"), searchPhrase) : false;
 
-      // Searching some elements, such as xul:button, buttons to open subdialogs
-      // using l10n ids.
-      let keywordsResult =
-        nodeObject.hasAttribute("search-l10n-ids") &&
-        await this.matchesSearchL10nIDs(nodeObject, searchPhrase);
-
-      if (!keywordsResult) {
-        // Searching some elements, such as xul:button, buttons to open subdialogs
-        // using searchkeywords attribute.
-        keywordsResult =
-          !keywordsResult &&
-          nodeObject.hasAttribute("searchkeywords") &&
-          this.queryMatchesContent(nodeObject.getAttribute("searchkeywords"), searchPhrase);
-      }
+      // Searching some elements, such as xul:button, buttons to open subdialogs.
+      let keywordsResult = this.queryMatchesContent(nodeObject.getAttribute("searchkeywords"), searchPhrase);
 
       // Creating tooltips for buttons
       if (keywordsResult && (nodeObject.tagName === "button" || nodeObject.tagName == "menulist")) {
@@ -413,12 +421,12 @@ var gSearchResultsPane = {
     if (nodeObject.tagName == "deck" && nodeObject.id != "historyPane") {
       let index = nodeObject.selectedIndex;
       if (index != -1) {
-        let result = await this.searchChildNodeIfVisible(nodeObject, index, searchPhrase);
+        let result = this.searchChildNodeIfVisible(nodeObject, index, searchPhrase);
         matchesFound = matchesFound || result;
       }
     } else {
       for (let i = 0; i < nodeObject.childNodes.length; i++) {
-        let result = await this.searchChildNodeIfVisible(nodeObject, i, searchPhrase);
+        let result = this.searchChildNodeIfVisible(nodeObject, i, searchPhrase);
         matchesFound = matchesFound || result;
       }
     }
@@ -436,74 +444,16 @@ var gSearchResultsPane = {
    * @returns boolean
    *    Returns true when found the specific childNode, false otherwise
    */
-  async searchChildNodeIfVisible(nodeObject, index, searchPhrase) {
+  searchChildNodeIfVisible(nodeObject, index, searchPhrase) {
     let result = false;
     if (!nodeObject.childNodes[index].hidden && nodeObject.getAttribute("data-hidden-from-search") !== "true") {
-      result = await this.searchWithinNode(nodeObject.childNodes[index], searchPhrase);
+      result = this.searchWithinNode(nodeObject.childNodes[index], searchPhrase);
       // Creating tooltips for menulist element
       if (result && nodeObject.tagName === "menulist") {
         this.listSearchTooltips.add(nodeObject);
       }
     }
     return result;
-  },
-
-  /**
-   * Search for a phrase in l10n messages associated with the element.
-   *
-   * @param Node nodeObject
-   *    The parent DOM Element
-   * @param String searchPhrase
-   * @returns boolean
-   *    true when the text content contains the query string else false
-   */
-  async matchesSearchL10nIDs(nodeObject, searchPhrase) {
-    if (!this.searchKeywords.has(nodeObject)) {
-      // The `search-l10n-ids` attribute is a comma-separated list of
-      // l10n ids. It may also uses a dot notation to specify an attribute
-      // of the message to be used.
-      //
-      // Example: "containers-add-button.label, user-context-personal"
-      //
-      // The result is an array of arrays of l10n ids and optionally attribute names.
-      //
-      // Example: [["containers-add-button", "label"], ["user-context-personal"]]
-      const refs = nodeObject.getAttribute("search-l10n-ids")
-        .split(",")
-        .map(s => s.trim().split(".")).filter(s => s[0].length > 0);
-
-      const messages = await document.l10n.formatMessages(refs.map(ref => [ref[0]]));
-
-      // Map the localized messages taking value or a selected attribute and
-      // building a string of concatenated translated strings out of it.
-      let keywords = messages.map((msg, i) => {
-        let [refId, refAttr] = refs[i];
-        if (!msg) {
-          console.error(`Missing search l10n id "${refId}"`);
-          return null;
-        }
-        if (refAttr) {
-          let attr = msg.attributes && msg.attributes.find(a => a.name === refAttr);
-          if (!attr) {
-            console.error(`Missing search l10n id "${refId}.${refAttr}"`);
-            return null;
-          }
-          if (attr.value === "") {
-            console.error(`Empty value added to search-l10n-ids "${refId}.${refAttr}"`);
-          }
-          return attr.value;
-        }
-        if (msg.value === "") {
-          console.error(`Empty value added to search-l10n-ids "${refId}"`);
-        }
-        return msg.value;
-      }).filter(keyword => keyword !== null).join(" ");
-
-      this.searchKeywords.set(nodeObject, keywords);
-      return this.queryMatchesContent(keywords, searchPhrase);
-    }
-
-    return this.queryMatchesContent(this.searchKeywords.get(nodeObject), searchPhrase);
   },
 
   /**
@@ -521,7 +471,7 @@ var gSearchResultsPane = {
     }
     let searchTooltip = anchorNode.ownerDocument.createElement("span");
     let searchTooltipText = anchorNode.ownerDocument.createElement("span");
-    searchTooltip.className = "search-tooltip";
+    searchTooltip.setAttribute("class", "search-tooltip");
     searchTooltipText.textContent = query;
     searchTooltip.appendChild(searchTooltipText);
 
@@ -543,11 +493,15 @@ var gSearchResultsPane = {
   },
 
   /**
-   * Remove all search tooltips.
+   * Remove all search tooltips that were created.
    */
   removeAllSearchTooltips() {
+    let searchTooltips = Array.from(document.querySelectorAll(".search-tooltip"));
+    for (let searchTooltip of searchTooltips) {
+      searchTooltip.parentElement.classList.remove("search-tooltip-parent");
+      searchTooltip.remove();
+    }
     for (let anchorNode of this.listSearchTooltips) {
-      anchorNode.parentElement.classList.remove("search-tooltip-parent");
       anchorNode.tooltipNode.remove();
       anchorNode.tooltipNode = null;
     }

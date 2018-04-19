@@ -73,11 +73,7 @@ public:
   // Low-level wrapper around platform shmem primitives.
   typedef mozilla::ipc::SharedMemory SharedMemory;
   typedef SharedMemory::SharedMemoryType SharedMemoryType;
-  // Shmem objects should only be constructed directly from SharedMemory
-  // objects by the Shmem implementation itself, or by a select few functions
-  // in ProtocolUtils.{h,cpp}.  You should not need to add new instances of
-  // this token.
-  struct PrivateIPDLCaller {};
+  struct IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead {};
 
   Shmem() :
     mSegment(nullptr),
@@ -96,7 +92,7 @@ public:
   }
 
 #if !defined(DEBUG)
-  Shmem(PrivateIPDLCaller,
+  Shmem(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
         SharedMemory* aSegment, id_t aId) :
     mSegment(aSegment),
     mData(aSegment->memory()),
@@ -106,7 +102,7 @@ public:
     mSize = static_cast<size_t>(*PtrToSize(mSegment));
   }
 #else
-  Shmem(PrivateIPDLCaller,
+  Shmem(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
         SharedMemory* aSegment, id_t aId);
 #endif
 
@@ -114,7 +110,7 @@ public:
   {
     // Shmem only holds a "weak ref" to the actual segment, which is
     // owned by IPDL. So there's nothing interesting to be done here
-    forget(PrivateIPDLCaller());
+    forget(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead());
   }
 
   Shmem& operator=(const Shmem& aRhs)
@@ -173,23 +169,23 @@ public:
   }
 
   // These shouldn't be used directly, use the IPDL interface instead.
-  id_t Id(PrivateIPDLCaller) const {
+  id_t Id(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead) const {
     return mId;
   }
 
-  SharedMemory* Segment(PrivateIPDLCaller) const {
+  SharedMemory* Segment(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead) const {
     return mSegment;
   }
 
 #ifndef DEBUG
-  void RevokeRights(PrivateIPDLCaller)
+  void RevokeRights(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead)
   {
   }
 #else
-  void RevokeRights(PrivateIPDLCaller);
+  void RevokeRights(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead);
 #endif
 
-  void forget(PrivateIPDLCaller)
+  void forget(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead)
   {
     mSegment = nullptr;
     mData = nullptr;
@@ -198,7 +194,7 @@ public:
   }
 
   static already_AddRefed<Shmem::SharedMemory>
-  Alloc(PrivateIPDLCaller,
+  Alloc(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
         size_t aNBytes,
         SharedMemoryType aType,
         bool aUnsafe,
@@ -209,7 +205,7 @@ public:
   // this segment in OpenExisting() below.  Return a new message if
   // successful (owned by the caller), nullptr if not.
   IPC::Message*
-  ShareTo(PrivateIPDLCaller,
+  ShareTo(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
           base::ProcessId aTargetPid,
           int32_t routingId);
 
@@ -218,7 +214,8 @@ public:
   // segment.  Return a new message if successful (owned by the
   // caller), nullptr if not.
   IPC::Message*
-  UnshareFrom(PrivateIPDLCaller,
+  UnshareFrom(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
+              base::ProcessId aTargetPid,
               int32_t routingId);
 
   // Return a SharedMemory instance in this process using the
@@ -226,13 +223,13 @@ public:
   // underlying OS shmem resource.  The contents of the descriptor
   // depend on the type of SharedMemory that was passed to us.
   static already_AddRefed<SharedMemory>
-  OpenExisting(PrivateIPDLCaller,
+  OpenExisting(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
                const IPC::Message& aDescriptor,
                id_t* aId,
                bool aProtect=false);
 
   static void
-  Dealloc(PrivateIPDLCaller,
+  Dealloc(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
           SharedMemory* aSegment);
 
 private:

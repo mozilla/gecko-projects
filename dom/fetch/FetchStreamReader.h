@@ -15,7 +15,7 @@
 namespace mozilla {
 namespace dom {
 
-class WeakWorkerRef;
+class WorkerHolder;
 
 class FetchStreamReader final : public nsIOutputStreamCallback
                               , public PromiseNativeHandler
@@ -66,7 +66,7 @@ private:
 
   nsCOMPtr<nsIAsyncOutputStream> mPipeOut;
 
-  RefPtr<WeakWorkerRef> mWorkerRef;
+  UniquePtr<WorkerHolder> mWorkerHolder;
 
   JS::Heap<JSObject*> mReader;
 

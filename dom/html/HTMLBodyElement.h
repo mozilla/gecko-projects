@@ -8,6 +8,9 @@
 
 #include "mozilla/Attributes.h"
 #include "nsGenericHTMLElement.h"
+#ifdef MOZ_OLD_STYLE
+#include "nsIStyleRule.h"
+#endif
 
 namespace mozilla {
 
@@ -21,6 +24,7 @@ class HTMLBodyElement final : public nsGenericHTMLElement
 {
 public:
   using Element::GetText;
+  using Element::SetText;
 
   explicit HTMLBodyElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
     : nsGenericHTMLElement(aNodeInfo)
@@ -30,7 +34,7 @@ public:
   // nsISupports
   NS_INLINE_DECL_REFCOUNTING_INHERITED(HTMLBodyElement, nsGenericHTMLElement)
 
-  NS_IMPL_FROMNODE_HTML_WITH_TAG(HTMLBodyElement, body);
+  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLBodyElement, body);
 
   // Event listener stuff; we need to declare only the ones we need to
   // forward to window that don't come from nsIDOMHTMLBodyElement.

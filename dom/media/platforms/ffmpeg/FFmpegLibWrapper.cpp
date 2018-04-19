@@ -4,10 +4,8 @@
 
 #include "FFmpegLibWrapper.h"
 #include "FFmpegLog.h"
+#include "MediaPrefs.h"
 #include "mozilla/PodOperations.h"
-#ifdef MOZ_FFMPEG
-#include "mozilla/StaticPrefs.h"
-#endif
 #include "mozilla/Types.h"
 #include "PlatformDecoderModule.h"
 #include "prlink.h"
@@ -47,7 +45,7 @@ FFmpegLibWrapper::Link()
     }
 #ifdef MOZ_FFMPEG
     if (version < (54u << 16 | 35u << 8 | 1u) &&
-        !StaticPrefs::MediaLibavcodecAllowObsolete()) {
+        !MediaPrefs::LibavcodecAllowObsolete()) {
       // Refuse any libavcodec version prior to 54.35.1.
       // (Unless media.libavcodec.allow-obsolete==true)
       Unlink();

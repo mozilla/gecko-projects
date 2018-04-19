@@ -207,7 +207,6 @@ nsHttpHandler::nsHttpHandler()
     , mMaxRequestAttempts(6)
     , mMaxRequestDelay(10)
     , mIdleSynTimeout(250)
-    , mFallbackSynTimeout(5)
     , mH2MandatorySuiteEnabled(false)
     , mMaxUrgentExcessiveConns(3)
     , mMaxConnections(24)
@@ -468,6 +467,8 @@ nsHttpHandler::Init()
         prefBranch->AddObserver(TCP_FAST_OPEN_STALLS_TIMEOUT, this, true);
         PrefsChanged(prefBranch, nullptr);
     }
+
+    nsHttpChannelAuthProvider::InitializePrefs();
 
     mMisc.AssignLiteral("rv:" MOZILLA_UAVERSION);
 
@@ -1374,12 +1375,6 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         rv = prefs->GetBoolPref(HTTP_PREF("fast-fallback-to-IPv4"), &cVar);
         if (NS_SUCCEEDED(rv))
             mFastFallbackToIPv4 = cVar;
-    }
-
-    if (PREF_CHANGED(HTTP_PREF("fallback-connection-timeout"))) {
-        rv = prefs->GetIntPref(HTTP_PREF("fallback-connection-timeout"), &val);
-        if (NS_SUCCEEDED(rv))
-            mFallbackSynTimeout = (uint16_t) clamped(val, 0, 10 * 60);
     }
 
     if (PREF_CHANGED(HTTP_PREF("version"))) {

@@ -5,7 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsSVGDataParser.h"
-#include "nsContentUtils.h"
 #include "SVGContentUtils.h"
 
 nsSVGDataParser::nsSVGDataParser(const nsAString& aValue)
@@ -32,7 +31,7 @@ bool
 nsSVGDataParser::SkipWsp()
 {
   while (mIter != mEnd) {
-    if (!nsContentUtils::IsHTMLWhitespace(*mIter)) {
+    if (!IsSVGWhitespace(*mIter)) {
       return true;
     }
     ++mIter;

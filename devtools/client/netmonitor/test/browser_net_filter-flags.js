@@ -136,7 +136,7 @@ const EXPECTED_REQUESTS = [
   },
 ];
 
-add_task(async function() {
+add_task(async function () {
   let { monitor } = await initNetMonitor(FILTERING_URL);
   let { document, store, windowRequire } = monitor.panelWin;
   let Actions = windowRequire("devtools/client/netmonitor/src/actions/index");
@@ -392,7 +392,7 @@ add_task(async function() {
     let requestItems = document.querySelectorAll(".request-list-item");
     for (let requestItem of requestItems) {
       requestItem.scrollIntoView();
-      let requestsListStatus = requestItem.querySelector(".status-code");
+      let requestsListStatus = requestItem.querySelector(".requests-list-status");
       EventUtils.sendMouseEvent({ type: "mouseover" }, requestsListStatus);
       await waitUntil(() => requestsListStatus.title);
     }

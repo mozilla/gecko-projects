@@ -37,8 +37,10 @@ impl GamepadButtonList {
     }
 
     pub fn sync_from_vr(&self, vr_buttons: &[WebVRGamepadButton]) {
-        for (gp_btn, btn) in self.list.iter().zip(vr_buttons.iter()) {
-            gp_btn.update(btn.pressed, btn.touched);
+        let mut index = 0;
+        for btn in vr_buttons {
+            self.list.get(index).as_ref().unwrap().update(btn.pressed, btn.touched);
+            index += 1;
         }
     }
 }

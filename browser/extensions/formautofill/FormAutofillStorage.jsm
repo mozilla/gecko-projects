@@ -57,9 +57,6 @@
  *       version,              // schema version in integer
  *
  *       // credit card fields
- *       billingAddressGUID,   // An optional GUID of an autofill address record
- *                                which may or may not exist locally.
- *
  *       cc-name,
  *       cc-number,            // will be stored in masked format (************1234)
  *                             // (see details below)
@@ -145,6 +142,16 @@ XPCOMUtils.defineLazyServiceGetter(this, "gUUIDGenerator",
                                    "@mozilla.org/uuid-generator;1",
                                    "nsIUUIDGenerator");
 
+XPCOMUtils.defineLazyGetter(this, "REGION_NAMES", function() {
+  let regionNames = {};
+  let countries = Services.strings.createBundle("chrome://global/locale/regionNames.properties").getSimpleEnumeration();
+  while (countries.hasMoreElements()) {
+    let country = countries.getNext().QueryInterface(Ci.nsIPropertyElement);
+    regionNames[country.key.toUpperCase()] = country.value;
+  }
+  return regionNames;
+});
+
 const CryptoHash = Components.Constructor("@mozilla.org/security/hash;1",
                                           "nsICryptoHash", "initWithString");
 
@@ -189,7 +196,6 @@ const VALID_ADDRESS_COMPUTED_FIELDS = [
 ].concat(STREET_ADDRESS_COMPONENTS, TEL_COMPONENTS);
 
 const VALID_CREDIT_CARD_FIELDS = [
-  "billingAddressGUID",
   "cc-name",
   "cc-number",
   "cc-exp-month",
@@ -1266,12 +1272,8 @@ class Addresses extends AutofillRecords {
 
     // Compute country name
     if (!("country-name" in address)) {
-      if (address.country) {
-        try {
-          address["country-name"] = Services.intl.getRegionDisplayNames(undefined, [address.country]);
-        } catch (e) {
-          address["country-name"] = "";
-        }
+      if (address.country && REGION_NAMES[address.country]) {
+        address["country-name"] = REGION_NAMES[address.country];
       } else {
         address["country-name"] = "";
       }
@@ -1368,13 +1370,7 @@ class Addresses extends AutofillRecords {
     }
 
     // Only values included in the region list will be saved.
-    let hasLocalizedName = false;
-    try {
-      let localizedName = Services.intl.getRegionDisplayNames(undefined, [country]);
-      hasLocalizedName = localizedName != country;
-    } catch (e) {}
-
-    if (country && hasLocalizedName) {
+    if (country && REGION_NAMES[country]) {
       address.country = country;
     } else {
       delete address.country;
@@ -1655,7 +1651,7 @@ class CreditCards extends AutofillRecords {
   }
 
   /**
-   * Normalize the given record and return the first matched guid if storage has the same record.
+   * Normailze the given record and retrun the first matched guid if storage has the same record.
    * @param {Object} targetCreditCard
    *        The credit card for duplication checking.
    * @returns {string|null}
@@ -1717,7 +1713,7 @@ class CreditCards extends AutofillRecords {
         return false;
       }
 
-      if (!creditCardToMerge[field] && typeof(existingField) != "undefined") {
+      if (!creditCardToMerge[field]) {
         creditCardToMerge[field] = existingField;
       }
 

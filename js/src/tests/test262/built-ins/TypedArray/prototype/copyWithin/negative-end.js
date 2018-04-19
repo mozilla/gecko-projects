@@ -2,6 +2,7 @@
 // This code is governed by the BSD license found in the LICENSE file.
 /*---
 esid: sec-%typedarray%.prototype.copywithin
+es6id: 22.2.3.5
 description: >
   Set values with negative end argument.
 info: |
@@ -25,7 +26,6 @@ info: |
   final be min(relativeEnd, len).
   ...
 includes: [compareArray.js, testTypedArray.js]
-features: [TypedArray]
 ---*/
 
 testWithTypedArrayConstructors(function(TA) {

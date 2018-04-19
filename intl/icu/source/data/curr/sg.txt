@@ -124,10 +124,6 @@ sg{
         }
         MRO{
             "MRO",
-            "ugîya tî Moritanïi (1973–2017)",
-        }
-        MRU{
-            "MRU",
             "ugîya tî Moritanïi",
         }
         MUR{
@@ -180,10 +176,6 @@ sg{
         }
         STD{
             "STD",
-            "dôbra tî Sâô Tomë na Prinsîpe (1977–2017)",
-        }
-        STN{
-            "STN",
             "dôbra tî Sâô Tomë na Prinsîpe",
         }
         SZL{
@@ -231,5 +223,5 @@ sg{
             "dolära tî Zimbäbwe",
         }
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.37.1"}
 }

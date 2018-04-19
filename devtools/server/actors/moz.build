@@ -5,14 +5,11 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 DIRS += [
-    'canvas',
     'emulation',
     'highlighters',
     'inspector',
-    'object',
     'utils',
     'webconsole',
-    'worker',
 ]
 
 DevToolsModules(
@@ -22,7 +19,6 @@ DevToolsModules(
     'addon.js',
     'addons.js',
     'animation.js',
-    'array-buffer.js',
     'breakpoint.js',
     'call-watcher.js',
     'canvas.js',
@@ -36,6 +32,7 @@ DevToolsModules(
     'emulation.js',
     'environment.js',
     'errordocs.js',
+    'eventlooplag.js',
     'frame.js',
     'framerate.js',
     'gcli.js',

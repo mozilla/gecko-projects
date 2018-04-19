@@ -161,8 +161,9 @@ def test_element(session):
     session.url = inline("<input type=checkbox>")
     element = session.find.css("input", all=False)
     element.click()
-    assert session.execute_script("return arguments[0].hasAttribute('checked')", args=(element,)) is False
-    result = session.transport.send("GET", "session/{session_id}/element/{element_id}/property/checked"
+    assert None == session.execute_script("return arguments[0].hasAttribute('checked')",
+                                          args=[element])
+    result = session.transport.send("GET", "session/{session_id}/element/{element_id}/property/id"
                                     .format(session_id=session.session_id,
                                             element_id=element.id))
     assert_success(result, True)

@@ -163,7 +163,7 @@ HTMLAreaAccessible::Description(nsString& aDescription)
 
   // Still to do - follow IE's standard here
   RefPtr<dom::HTMLAreaElement> area =
-    dom::HTMLAreaElement::FromNodeOrNull(mContent);
+    dom::HTMLAreaElement::FromContentOrNull(mContent);
   if (area)
     area->GetShape(aDescription);
 }

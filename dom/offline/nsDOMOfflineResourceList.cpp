@@ -524,8 +524,9 @@ void
 nsDOMOfflineResourceList::FirePendingEvents()
 {
   for (int32_t i = 0; i < mPendingEvents.Count(); ++i) {
-    RefPtr<Event> event = mPendingEvents[i];
-    DispatchEvent(*event);
+    bool dummy;
+    nsCOMPtr<nsIDOMEvent> event = mPendingEvents[i];
+    DispatchEvent(event, &dummy);
   }
   mPendingEvents.Clear();
 }
@@ -555,7 +556,8 @@ nsDOMOfflineResourceList::SendEvent(const nsAString &aEventName)
     return NS_OK;
   }
 
-  DispatchEvent(*event);
+  bool dummy;
+  DispatchEvent(event, &dummy);
 
   return NS_OK;
 }

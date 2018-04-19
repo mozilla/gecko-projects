@@ -48,6 +48,7 @@ var observer = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
                                           Ci.nsIFormSubmitObserver,
                                           Ci.nsIWebProgressListener,
+                                          Ci.nsIDOMEventListener,
                                           Ci.nsISupportsWeakReference]),
 
   // nsIFormSubmitObserver
@@ -383,7 +384,7 @@ var LoginManagerContent = {
       return;
     }
 
-    let pwField = event.originalTarget;
+    let pwField = event.target;
     if (pwField.form) {
       // Fill is handled by onDOMFormHasPassword which is already throttled.
       return;
@@ -891,7 +892,7 @@ var LoginManagerContent = {
         continue;
       }
 
-      if (ChromeUtils.getClassName(formRoot) === "HTMLFormElement") {
+      if (formRoot instanceof Ci.nsIDOMHTMLFormElement) {
         // For now only perform capture upon navigation for FormLike's without
         // a <form> to avoid capture from both an earlyformsubmit and
         // navigation for the same "form".
@@ -1016,7 +1017,7 @@ var LoginManagerContent = {
     clobberPassword = false,
     userTriggered = false,
   } = {}) {
-    if (ChromeUtils.getClassName(form) === "HTMLFormElement") {
+    if (form instanceof Ci.nsIDOMHTMLFormElement) {
       throw new Error("_fillForm should only be called with FormLike objects");
     }
 

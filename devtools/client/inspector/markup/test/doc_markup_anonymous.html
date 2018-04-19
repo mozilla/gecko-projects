@@ -25,8 +25,10 @@
   <script>
   "use strict";
   var host = document.querySelector("#shadow");
-  var root = host.attachShadow({ mode: "open" });
-  root.innerHTML = "<h3>Shadow DOM</h3><select multiple></select>";
+  if (host.createShadowRoot) {
+    var root = host.createShadowRoot();
+    root.innerHTML = "<h3>Shadow DOM</h3><select multiple></select>";
+  }
   </script>
 </body>
 </html>

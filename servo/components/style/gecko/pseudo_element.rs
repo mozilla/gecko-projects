@@ -17,10 +17,7 @@ use std::fmt;
 use string_cache::Atom;
 use values::serialize_atom_identifier;
 
-include!(concat!(
-    env!("OUT_DIR"),
-    "/gecko/pseudo_element_definition.rs"
-));
+include!(concat!(env!("OUT_DIR"), "/gecko/pseudo_element_definition.rs"));
 
 impl ::selectors::parser::PseudoElement for PseudoElement {
     type Impl = SelectorImpl;
@@ -45,11 +42,11 @@ impl PseudoElement {
     pub fn cascade_type(&self) -> PseudoElementCascadeType {
         if self.is_eager() {
             debug_assert!(!self.is_anon_box());
-            return PseudoElementCascadeType::Eager;
+            return PseudoElementCascadeType::Eager
         }
 
         if self.is_precomputed() {
-            return PseudoElementCascadeType::Precomputed;
+            return PseudoElementCascadeType::Precomputed
         }
 
         PseudoElementCascadeType::Lazy
@@ -76,9 +73,7 @@ impl PseudoElement {
     /// Gets the canonical index of this eagerly-cascaded pseudo-element.
     #[inline]
     pub fn eager_index(&self) -> usize {
-        EAGER_PSEUDOS
-            .iter()
-            .position(|p| p == self)
+        EAGER_PSEUDOS.iter().position(|p| p == self)
             .expect("Not an eager pseudo")
     }
 

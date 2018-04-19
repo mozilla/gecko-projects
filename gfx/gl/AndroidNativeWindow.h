@@ -22,12 +22,12 @@ public:
   AndroidNativeWindow() : mNativeWindow(nullptr) {
   }
 
-  explicit AndroidNativeWindow(java::sdk::Surface::Param aSurface) {
+  AndroidNativeWindow(java::sdk::Surface::Param aSurface) {
     mNativeWindow = ANativeWindow_fromSurface(jni::GetEnvForThread(),
                                               aSurface.Get());
   }
 
-  explicit AndroidNativeWindow(java::GeckoSurface::Param aSurface) {
+  AndroidNativeWindow(java::GeckoSurface::Param aSurface) {
     auto surf = java::sdk::Surface::LocalRef(java::sdk::Surface::Ref::From(aSurface));
     mNativeWindow = ANativeWindow_fromSurface(jni::GetEnvForThread(),
                                               surf.Get());

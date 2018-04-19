@@ -67,7 +67,7 @@ add_task(async function() {
        "by another window");
   let tab = BrowserTestUtils.addTab(browserTest);
   await BrowserTestUtils.switchTab(browserTest, tab);
-  BrowserTestUtils.removeTab(browserTest.selectedTab);
+  await BrowserTestUtils.removeTab(browserTest.selectedTab);
   await testContentVisibilityState(true /* isHidden */, browserTest);
 
   info("test window should report 'visible' if it is not fully covered by " +

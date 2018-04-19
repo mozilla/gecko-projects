@@ -32,6 +32,7 @@
 
 #include "nsIDOMElement.h"
 #include "nsIDOMXULButtonElement.h"
+#include "nsIDOMXULElement.h"
 #include "nsIDOMXULLabelElement.h"
 #include "nsIDOMXULSelectCntrlEl.h"
 #include "nsIDOMXULSelectCntrlItemEl.h"
@@ -66,6 +67,10 @@
 #include "nsIServiceManager.h"
 #include "nsWhitespaceTokenizer.h"
 #include "nsAttrName.h"
+
+#ifdef DEBUG
+#include "nsIDOMCharacterData.h"
+#endif
 
 #include "mozilla/Assertions.h"
 #include "mozilla/BasicEvents.h"
@@ -184,7 +189,7 @@ Accessible::Description(nsString& aDescription)
   // 3. it doesn't have an accName; or
   // 4. its title attribute already equals to its accName nsAutoString name;
 
-  if (!HasOwnContent() || mContent->IsText())
+  if (!HasOwnContent() || mContent->IsNodeOfType(nsINode::eTEXT))
     return;
 
   nsTextEquivUtils::
@@ -644,7 +649,7 @@ Accessible::RelativeBounds(nsIFrame** aBoundingFrame) const
       if (canvasFrame) {
         *aBoundingFrame = canvasFrame;
         dom::HTMLCanvasElement *canvas =
-          dom::HTMLCanvasElement::FromNode(canvasFrame->GetContent());
+          dom::HTMLCanvasElement::FromContent(canvasFrame->GetContent());
 
         // get the bounding rect of the hit region
         nsRect bounds;
@@ -1066,7 +1071,7 @@ Accessible::NativeAttributes()
   nsAccUtils::SetAccAttr(attributes, nsGkAtoms::tag, tagName);
 
   // Expose draggable object attribute.
-  if (auto htmlElement = nsGenericHTMLElement::FromNode(mContent)) {
+  if (auto htmlElement = nsGenericHTMLElement::FromContent(mContent)) {
     if (htmlElement->Draggable()) {
       nsAccUtils::SetAccAttr(attributes, nsGkAtoms::draggable,
                              NS_LITERAL_STRING("true"));

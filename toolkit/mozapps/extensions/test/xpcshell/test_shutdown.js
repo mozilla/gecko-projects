@@ -10,7 +10,7 @@ const IGNORE = ["getPreferredIconURL", "escapeAddonURI",
                 "addAddonListener", "removeAddonListener",
                 "addInstallListener", "removeInstallListener",
                 "addManagerListener", "removeManagerListener",
-                "shutdown", "init",
+                "mapURIToAddonID", "shutdown", "init",
                 "stateToString", "errorToString", "getUpgradeListener",
                 "addUpgradeListener", "removeUpgradeListener"];
 

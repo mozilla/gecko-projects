@@ -4,13 +4,25 @@
 
 "use strict";
 
+const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 
 const NegativePath = require("./NegativePath");
 
 class NegativeEndDelayPath extends NegativePath {
-  getClassName() {
-    return "animation-negative-end-delay-path";
+  static get propTypes() {
+    return {
+      animation: PropTypes.object.isRequired,
+      durationPerPixel: PropTypes.number.isRequired,
+      keyframes: PropTypes.object.isRequired,
+      simulateAnimation: PropTypes.func.isRequired,
+      totalDuration: PropTypes.number.isRequired,
+    };
+  }
+
+  constructor(props) {
+    props.className = "animation-negative-end-delay-path";
+    super(props);
   }
 
   renderGraph(state, helper) {

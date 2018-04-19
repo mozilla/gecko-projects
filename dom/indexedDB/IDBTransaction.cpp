@@ -823,7 +823,7 @@ IDBTransaction::FireCompleteOrAbortEvents(nsresult aResult)
   // Make sure we drop the WorkerHolder when this function completes.
   nsAutoPtr<WorkerHolder> workerHolder = Move(mWorkerHolder);
 
-  RefPtr<Event> event;
+  nsCOMPtr<nsIDOMEvent> event;
   if (NS_SUCCEEDED(aResult)) {
     event = CreateGenericEvent(this,
                                nsDependentString(kCompleteEventType),
@@ -861,9 +861,8 @@ IDBTransaction::FireCompleteOrAbortEvents(nsresult aResult)
                  mAbortCode);
   }
 
-  IgnoredErrorResult rv;
-  DispatchEvent(*event, rv);
-  if (rv.Failed()) {
+  bool dummy;
+  if (NS_FAILED(DispatchEvent(event, &dummy))) {
     NS_WARNING("DispatchEvent failed!");
   }
 
@@ -1043,13 +1042,14 @@ IDBTransaction::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
   return IDBTransactionBinding::Wrap(aCx, this, aGivenProto);
 }
 
-void
+nsresult
 IDBTransaction::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   AssertIsOnOwningThread();
 
   aVisitor.mCanHandle = true;
   aVisitor.SetParentTarget(mDatabase, false);
+  return NS_OK;
 }
 
 NS_IMETHODIMP

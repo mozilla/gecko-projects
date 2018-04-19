@@ -31,9 +31,7 @@ async function check_homepage({expectedURL, expectedPageVal = 1, locked = false}
     is(startupPageRadioGroup.value, expectedPageVal,
        "Value of start page radio group should match expected");
 
-    content.document.getElementById("category-home").click();
-
-    let homepageTextbox = content.document.getElementById("homePageUrl");
+    let homepageTextbox = content.document.getElementById("browserHomePage");
     // Unfortunately this test does not work because the new UI does not fill
     // default values into the URL box at the moment.
     // is(homepageTextbox.value, expectedURL,
@@ -41,13 +39,11 @@ async function check_homepage({expectedURL, expectedPageVal = 1, locked = false}
 
     is(homepageTextbox.disabled, locked,
        "Homepage URL text box disabled status should match expected");
-    is(content.document.getElementById("homeMode").disabled, locked,
-       "Home mode drop down disabled status should match expected");
-    is(content.document.getElementById("useCurrentBtn").disabled, locked,
+    is(content.document.getElementById("useCurrent").disabled, locked,
        "\"Use current page\" button disabled status should match expected");
-    is(content.document.getElementById("useBookmarkBtn").disabled, locked,
+    is(content.document.getElementById("useBookmark").disabled, locked,
       "\"Use bookmark\" button disabled status should match expected");
-    is(content.document.getElementById("restoreDefaultHomePageBtn").disabled,
+    is(content.document.getElementById("restoreDefaultHomePage").disabled,
        locked, "\"Restore defaults\" button disabled status should match expected");
   });
   await BrowserTestUtils.removeTab(tab);

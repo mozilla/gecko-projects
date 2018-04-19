@@ -29,6 +29,7 @@
 
 class nsGlobalWindowInner;
 class nsIPrincipal;
+class nsScriptNameSpaceManager;
 class nsIHandleReportCallback;
 
 namespace mozilla {
@@ -107,6 +108,13 @@ GetXBLScopeOrGlobal(JSContext* cx, JSObject* obj)
     return GetXBLScope(cx, obj);
 }
 
+// This function is similar to GetXBLScopeOrGlobal. However, if |obj| is a
+// chrome scope, then it will return an add-on scope if addonId is non-null.
+// Like GetXBLScopeOrGlobal, it returns the scope of |obj| if it's already a
+// content XBL scope. But it asserts that |obj| is not an add-on scope.
+JSObject*
+GetScopeForXBLExecution(JSContext* cx, JS::HandleObject obj, JSAddonId* addonId);
+
 // Returns whether XBL scopes have been explicitly disabled for code running
 // in this compartment. See the comment around mAllowContentXBLScope.
 bool
@@ -123,6 +131,15 @@ UseContentXBLScope(JS::Realm* realm);
 // force creation of a new one if one is needed again.
 void
 ClearContentXBLScope(JSObject* global);
+
+bool
+IsAddonCompartment(JSCompartment* c);
+
+bool
+IsInAddonScope(JSObject* obj);
+
+JSObject*
+GetAddonScope(JSContext* cx, JS::HandleObject contentScope, JSAddonId* addonId);
 
 bool
 IsSandboxPrototypeProxy(JSObject* obj);
@@ -224,6 +241,11 @@ xpc_FastGetCachedWrapper(JSContext* cx, nsWrapperCache* cache, JS::MutableHandle
 
     return nullptr;
 }
+
+// If aVariant is an XPCVariant, this marks the object to be in aGeneration.
+// This also unmarks the gray JSObject.
+extern void
+xpc_MarkInCCGeneration(nsISupports* aVariant, uint32_t aGeneration);
 
 // If aWrappedJS is a JS wrapper, unmark its JSObject.
 extern void
@@ -501,6 +523,14 @@ nsGlobalWindowInner*
 WindowGlobalOrNull(JSObject* aObj);
 
 /**
+ * If |aObj| is in an addon scope and that addon scope is associated with a
+ * live DOM Window, returns the associated nsGlobalWindow. Otherwise, returns
+ * null.
+ */
+nsGlobalWindowInner*
+AddonWindowOrNull(JSObject* aObj);
+
+/**
  * If |cx| is in a compartment whose global is a window, returns the associated
  * nsGlobalWindow. Otherwise, returns null.
  */
@@ -517,6 +547,12 @@ ShouldDiscardSystemSource();
 
 bool
 SharedMemoryEnabled();
+
+bool
+SetAddonInterposition(const nsACString& addonId, nsIAddonInterposition* interposition);
+
+bool
+AllowCPOWsInAddon(const nsACString& addonId, bool allow);
 
 bool
 ExtraWarningsForSystemJS();

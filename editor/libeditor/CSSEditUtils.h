@@ -16,6 +16,7 @@ class nsComputedDOMStyle;
 class nsAtom;
 class nsIContent;
 class nsICSSDeclaration;
+class nsIDOMNode;
 class nsINode;
 
 namespace mozilla {

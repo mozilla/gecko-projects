@@ -6,12 +6,12 @@ import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mozilla.gecko.AboutPages;
+import org.mozilla.gecko.background.testhelpers.TestRunner;
 import org.mozilla.gecko.icons.IconRequest;
 import org.mozilla.gecko.icons.Icons;
-import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
-@RunWith(RobolectricTestRunner.class)
+@RunWith(TestRunner.class)
 public class TestAboutPagesPreparer {
     private static final String[] ABOUT_PAGES = {
             AboutPages.ACCOUNTS,

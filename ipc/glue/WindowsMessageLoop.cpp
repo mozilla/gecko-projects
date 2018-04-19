@@ -677,17 +677,6 @@ namespace mozilla {
 namespace ipc {
 namespace windows {
 
-static bool
-ProcessTypeRequiresWinEventHook()
-{
-  switch (XRE_GetProcessType()) {
-    case GeckoProcessType_GMPlugin:
-      return false;
-    default:
-      return true;
-  }
-}
-
 void
 InitUIThread()
 {
@@ -701,16 +690,16 @@ InitUIThread()
   MOZ_ASSERT(gUIThreadId == GetCurrentThreadId(),
              "Called InitUIThread multiple times on different threads!");
 
-  if (!gWinEventHook && ProcessTypeRequiresWinEventHook()) {
+  if (!gWinEventHook) {
     gWinEventHook = SetWinEventHook(EVENT_OBJECT_CREATE, EVENT_OBJECT_DESTROY,
                                     NULL, &WinEventHook, GetCurrentProcessId(),
                                     gUIThreadId, WINEVENT_OUTOFCONTEXT);
-    MOZ_ASSERT(gWinEventHook);
 
     // We need to execute this after setting the hook in case the OLE window
     // already existed.
     gCOMWindow = FindCOMWindow();
   }
+  MOZ_ASSERT(gWinEventHook);
 }
 
 } // namespace windows
@@ -855,6 +844,13 @@ MessageChannel::SpinInternalEventLoop()
       return;
     }
   } while (true);
+}
+
+static inline bool
+IsTimeoutExpired(PRIntervalTime aStart, PRIntervalTime aTimeout)
+{
+  return (aTimeout != PR_INTERVAL_NO_TIMEOUT) &&
+    (aTimeout <= (PR_IntervalNow() - aStart));
 }
 
 static HHOOK gWindowHook;
@@ -1034,21 +1030,27 @@ MessageChannel::WaitForSyncNotify(bool aHandleWindowsMessages)
   // Use a blocking wait if this channel does not require
   // Windows message deferral behavior.
   if (!(mFlags & REQUIRE_DEFERRED_MESSAGE_PROTECTION) || !aHandleWindowsMessages) {
-    TimeDuration timeout = (kNoTimeout == mTimeoutMs) ?
-                           TimeDuration::Forever() :
-                           TimeDuration::FromMilliseconds(mTimeoutMs);
+    PRIntervalTime timeout = (kNoTimeout == mTimeoutMs) ?
+                             PR_INTERVAL_NO_TIMEOUT :
+                             PR_MillisecondsToInterval(mTimeoutMs);
+    PRIntervalTime waitStart = 0;
+
+    if (timeout != PR_INTERVAL_NO_TIMEOUT) {
+      waitStart = PR_IntervalNow();
+    }
 
     MOZ_ASSERT(!mIsSyncWaitingOnNonMainThread);
     mIsSyncWaitingOnNonMainThread = true;
 
-    CVStatus status = mMonitor->Wait(timeout);
+    mMonitor->Wait(timeout);
 
     MOZ_ASSERT(mIsSyncWaitingOnNonMainThread);
     mIsSyncWaitingOnNonMainThread = false;
 
     // If the timeout didn't expire, we know we received an event. The
     // converse is not true.
-    return WaitResponse(status == CVStatus::Timeout);
+    return WaitResponse(timeout == PR_INTERVAL_NO_TIMEOUT ?
+                        false : IsTimeoutExpired(waitStart, timeout));
   }
 
   NS_ASSERTION(mFlags & REQUIRE_DEFERRED_MESSAGE_PROTECTION,

@@ -162,8 +162,7 @@ AddonsEngine.prototype = {
       changes[id] = modified;
     }
 
-    let lastSync = await this.getLastSync();
-    let lastSyncDate = new Date(lastSync * 1000);
+    let lastSyncDate = new Date(this.lastSync * 1000);
 
     // The reconciler should have been refreshed at the beginning of a sync and
     // we assume this function is only called from within a sync.
@@ -222,8 +221,7 @@ AddonsEngine.prototype = {
    * highly unlikely to occur. Still, we exercise defense just in case.
    */
   async _syncCleanup() {
-    let lastSync = await this.getLastSync();
-    let ms = 1000 * lastSync - PRUNE_ADDON_CHANGES_THRESHOLD;
+    let ms = 1000 * this.lastSync - PRUNE_ADDON_CHANGES_THRESHOLD;
     this._reconciler.pruneChangesBeforeDate(new Date(ms));
     return SyncEngine.prototype._syncCleanup.call(this);
   },

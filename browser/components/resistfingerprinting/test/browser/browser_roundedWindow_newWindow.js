@@ -44,6 +44,6 @@ add_task(async function test_new_window() {
     }
   );
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
   await BrowserTestUtils.closeWindow(win);
 });

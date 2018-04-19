@@ -18,6 +18,14 @@ serve = None
 sslutils = None
 
 
+hostnames = ["web-platform.test",
+             "www.web-platform.test",
+             "www1.web-platform.test",
+             "www2.web-platform.test",
+             "xn--n8j6ds53lwwkrqhv28a.web-platform.test",
+             "xn--lve-6lad.web-platform.test"]
+
+
 def do_delayed_imports(logger, test_paths):
     global serve, sslutils
 
@@ -84,31 +92,19 @@ class TestEnvironment(object):
         self.cache_manager = multiprocessing.Manager()
         self.stash = serve.stash.StashServer()
         self.env_extras = env_extras
-        self.env_extras_cms = None
 
 
     def __enter__(self):
         self.stash.__enter__()
         self.ssl_env.__enter__()
         self.cache_manager.__enter__()
-
-        self.config = self.load_config()
+        for cm in self.env_extras:
+            cm.__enter__(self.options)
         self.setup_server_logging()
+        self.config = self.load_config()
         ports = serve.get_ports(self.config, self.ssl_env)
         self.config = serve.normalise_config(self.config, ports)
-
-        assert self.env_extras_cms is None, (
-            "A TestEnvironment object cannot be nested")
-
-        self.env_extras_cms = []
-
-        for env in self.env_extras:
-            cm = env(self.options, self.config)
-            cm.__enter__()
-            self.env_extras_cms.append(cm)
-
-        self.servers = serve.start(self.config,
-                                   self.ssl_env,
+        self.servers = serve.start(self.config, self.ssl_env,
                                    self.get_routes())
         if self.options.get("supports_debugger") and self.debug_info and self.debug_info.interactive:
             self.ignore_interrupts()
@@ -120,11 +116,8 @@ class TestEnvironment(object):
         for scheme, servers in self.servers.iteritems():
             for port, server in servers:
                 server.kill()
-        for cm in self.env_extras_cms:
+        for cm in self.env_extras:
             cm.__exit__(exc_type, exc_val, exc_tb)
-
-        self.env_extras_cms = None
-
         self.cache_manager.__exit__(exc_type, exc_val, exc_tb)
         self.ssl_env.__exit__(exc_type, exc_val, exc_tb)
         self.stash.__exit__()
@@ -137,26 +130,18 @@ class TestEnvironment(object):
 
     def load_config(self):
         default_config_path = os.path.join(serve_path(self.test_paths), "config.default.json")
-        local_config = {
-            "ports": {
-                "http": [8000, 8001],
-                "https": [8443],
-                "ws": [8888]
-            },
-            "check_subdomains": False,
-            "ssl": {}
-        }
-
-        if "browser_host" in self.options:
-            local_config["browser_host"] = self.options["browser_host"]
-
-        if "bind_address" in self.options:
-            local_config["bind_address"] = self.options["bind_address"]
+        local_config_path = os.path.join(here, "config.json")
 
         with open(default_config_path) as f:
             default_config = json.load(f)
 
-        local_config["server_host"] = self.options.get("server_host", None)
+        with open(local_config_path) as f:
+            data = f.read()
+            local_config = json.loads(data % self.options)
+
+        #TODO: allow non-default configuration for ssl
+
+        local_config["external_host"] = self.options.get("external_host", None)
         local_config["ssl"]["encrypt_after_connect"] = self.options.get("encrypt_after_connect", False)
 
         config = serve.merge_json(default_config, local_config)
@@ -165,7 +150,7 @@ class TestEnvironment(object):
         if not self.ssl_env.ssl_enabled:
             config["ports"]["https"] = [None]
 
-        host = config["browser_host"]
+        host = self.options.get("certificate_domain", config["host"])
         hosts = [host]
         hosts.extend("%s.%s" % (item[0], host) for item in serve.get_subdomains(host).values())
         key_file, certificate = self.ssl_env.host_cert_path(hosts)
@@ -201,14 +186,10 @@ class TestEnvironment(object):
         for path, format_args, content_type, route in [
                 ("testharness_runner.html", {}, "text/html", "/testharness_runner.html"),
                 (self.options.get("testharnessreport", "testharnessreport.js"),
-                 {"output": self.pause_after_test}, "text/javascript;charset=utf8",
+                 {"output": self.pause_after_test}, "text/javascript",
                  "/resources/testharnessreport.js")]:
             path = os.path.normpath(os.path.join(here, path))
-            # Note that .headers. files don't apply to static routes, so we need to
-            # readd any static headers here.
-            headers = {"Cache-Control": "max-age=3600"}
-            route_builder.add_static(path, format_args, content_type, route,
-                                     headers=headers)
+            route_builder.add_static(path, format_args, content_type, route)
 
         data = b""
         with open(os.path.join(repo_root, "resources", "testdriver.js"), "rb") as fp:
@@ -235,23 +216,20 @@ class TestEnvironment(object):
             if not failed:
                 return
             time.sleep(0.5)
-        raise EnvironmentError("Servers failed to start: %s" %
-                               ", ".join("%s:%s" % item for item in failed))
+        raise EnvironmentError("Servers failed to start (scheme:port): %s" % ("%s:%s" for item in failed))
 
     def test_servers(self):
         failed = []
-        host = self.config["server_host"]
         for scheme, servers in self.servers.iteritems():
             for port, server in servers:
                 if self.test_server_port:
                     s = socket.socket()
                     try:
-                        s.connect((host, port))
+                        s.connect((self.config["host"], port))
                     except socket.error:
-                        failed.append((host, port))
+                        failed.append((scheme, port))
                     finally:
                         s.close()
 
                 if not server.is_alive():
                     failed.append((scheme, port))
-        return failed

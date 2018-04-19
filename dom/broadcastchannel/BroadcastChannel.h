@@ -10,6 +10,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/DOMEventTargetHelper.h"
 #include "nsAutoPtr.h"
+#include "nsIObserver.h"
 #include "nsTArray.h"
 #include "mozilla/RefPtr.h"
 
@@ -25,12 +26,15 @@ namespace dom {
 
 class BroadcastChannelChild;
 class BroadcastChannelMessage;
-class WorkerRef;
+class WorkerHolder;
 
 class BroadcastChannel final
   : public DOMEventTargetHelper
+  , public nsIObserver
 {
   friend class BroadcastChannelChild;
+
+  NS_DECL_NSIOBSERVER
 
   typedef mozilla::ipc::PrincipalInfo PrincipalInfo;
 
@@ -64,6 +68,8 @@ public:
 
 private:
   BroadcastChannel(nsPIDOMWindowInner* aWindow,
+                   const PrincipalInfo& aPrincipalInfo,
+                   const nsACString& aOrigin,
                    const nsAString& aChannel);
 
   ~BroadcastChannel();
@@ -75,13 +81,13 @@ private:
 
   void RemoveDocFromBFCache();
 
-  void DisconnectFromOwner() override;
-
   RefPtr<BroadcastChannelChild> mActor;
 
-  RefPtr<WorkerRef> mWorkerRef;
+  nsAutoPtr<WorkerHolder> mWorkerHolder;
 
   nsString mChannel;
+
+  uint64_t mInnerID;
 
   enum {
     StateActive,

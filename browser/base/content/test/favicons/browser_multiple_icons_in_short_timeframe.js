@@ -36,5 +36,5 @@ add_task(async function() {
   Assert.equal(gBrowser.getIcon(), ROOT + "two.png",
                "The expected icon has been set");
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

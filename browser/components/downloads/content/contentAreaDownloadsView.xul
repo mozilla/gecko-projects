@@ -7,8 +7,8 @@
 <?xml-stylesheet href="chrome://global/skin/"?>
 <?xml-stylesheet href="chrome://browser/content/downloads/contentAreaDownloadsView.css"?>
 <?xml-stylesheet href="chrome://browser/skin/downloads/contentAreaDownloadsView.css"?>
-<?xml-stylesheet href="chrome://browser/content/downloads/downloads.css"?>
-<?xml-stylesheet href="chrome://browser/skin/downloads/allDownloadsView.css"?>
+
+<?xul-overlay href="chrome://browser/content/downloads/allDownloadsViewOverlay.xul"?>
 
 <!DOCTYPE window [
 <!ENTITY % downloadsDTD SYSTEM "chrome://browser/locale/downloads/downloads.dtd">
@@ -26,10 +26,6 @@
           src="chrome://global/content/globalOverlay.js"/>
   <script type="application/javascript"
           src="chrome://browser/content/downloads/contentAreaDownloadsView.js"/>
-  <script type="application/javascript"
-          src="chrome://browser/content/downloads/allDownloadsView.js"/>
-  <script type="application/javascript"
-          src="chrome://global/content/contentAreaUtils.js"/>
 
 #include ../../../../toolkit/content/editMenuCommands.inc.xul
 
@@ -41,11 +37,11 @@
 #endif
 
   <stack flex="1">
-#include downloadsRichListBox.inc.xul
+    <richlistbox id="downloadsRichListBox"/>
     <description id="downloadsListEmptyDescription"
                  value="&downloadsListEmpty.label;"
                  mousethrough="always"/>
   </stack>
-#include downloadsCommands.inc.xul
-#include downloadsContextMenu.inc.xul
+  <commandset id="downloadCommands"/>
+  <menupopup id="downloadsContextMenu"/>
 </window>

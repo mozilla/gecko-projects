@@ -160,6 +160,8 @@ var TabCrashHandler = {
         break;
       }
       case "oop-frameloader-crashed": {
+        aSubject.QueryInterface(Ci.nsIFrameLoader);
+
         let browser = aSubject.ownerElement;
         if (!browser) {
           return;
@@ -874,7 +876,7 @@ var UnsubmittedCrashHandler = {
     {
       label: gNavigatorBundle.GetStringFromName("pendingCrashReports.viewAll"),
       callback() {
-        chromeWin.openTrustedLinkIn("about:crashes", "tab");
+        chromeWin.openUILinkIn("about:crashes", "tab");
         return true;
       },
     }];
@@ -993,10 +995,12 @@ var PluginCrashReporter = {
         // Only the parent process gets the gmp-plugin-crash observer
         // notification, so we need to inform any content processes that
         // the GMP has crashed.
-        if (Services.ppmm) {
+        if (Cc["@mozilla.org/parentprocessmessagemanager;1"]) {
           let pluginName = propertyBag.getPropertyAsAString("pluginName");
-          Services.ppmm.broadcastAsyncMessage("gmp-plugin-crash",
-                                              { pluginName, pluginID });
+          let mm = Cc["@mozilla.org/parentprocessmessagemanager;1"]
+            .getService(Ci.nsIMessageListenerManager);
+          mm.broadcastAsyncMessage("gmp-plugin-crash",
+                                   { pluginName, pluginID });
         }
         break;
       }

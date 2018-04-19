@@ -45,7 +45,7 @@ SVGLengthList::SetValueFromString(const nsAString& aValue)
 {
   SVGLengthList temp;
 
-  nsCharSeparatedTokenizerTemplate<nsContentUtils::IsHTMLWhitespace>
+  nsCharSeparatedTokenizerTemplate<IsSVGWhitespace>
     tokenizer(aValue, ',', nsCharSeparatedTokenizer::SEPARATOR_OPTIONAL);
 
   while (tokenizer.hasMoreTokens()) {

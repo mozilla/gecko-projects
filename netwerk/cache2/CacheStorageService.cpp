@@ -2160,7 +2160,6 @@ CacheStorageService::SizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) con
   if (sGlobalEntryTables) {
     n += sGlobalEntryTables->ShallowSizeOfIncludingThis(mallocSizeOf);
   }
-  n += mPurgeTimeStamps.SizeOfExcludingThis(mallocSizeOf);
 
   return n;
 }

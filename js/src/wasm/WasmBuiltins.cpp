@@ -69,6 +69,28 @@ CallingActivation()
     return act->asJit();
 }
 
+static void*
+WasmHandleExecutionInterrupt()
+{
+    JitActivation* activation = CallingActivation();
+    MOZ_ASSERT(activation->isWasmInterrupted());
+
+    if (!CheckForInterrupt(activation->cx())) {
+        // If CheckForInterrupt failed, it is time to interrupt execution.
+        // Returning nullptr to the caller will jump to the throw stub which
+        // will call HandleThrow. The JitActivation must stay in the
+        // interrupted state until then so that stack unwinding works in
+        // HandleThrow.
+        return nullptr;
+    }
+
+    // If CheckForInterrupt succeeded, then execution can proceed and the
+    // interrupt is over.
+    void* resumePC = activation->wasmInterruptResumePC();
+    activation->finishWasmInterrupt();
+    return resumePC;
+}
+
 static bool
 WasmHandleDebugTrap()
 {
@@ -93,15 +115,16 @@ WasmHandleDebugTrap()
             return true;
         debugFrame->setIsDebuggee();
         debugFrame->observe(cx);
-        ResumeMode mode = Debugger::onEnterFrame(cx, debugFrame);
-        if (mode == ResumeMode::Return) {
-            // Ignoring forced return (ResumeMode::Return) -- changing code execution
+        // TODO call onEnterFrame
+        JSTrapStatus status = Debugger::onEnterFrame(cx, debugFrame);
+        if (status == JSTRAP_RETURN) {
+            // Ignoring forced return (JSTRAP_RETURN) -- changing code execution
             // order is not yet implemented in the wasm baseline.
-            // TODO properly handle ResumeMode::Return and resume wasm execution.
+            // TODO properly handle JSTRAP_RETURN and resume wasm execution.
             JS_ReportErrorASCII(cx, "Unexpected resumption value from onEnterFrame");
             return false;
         }
-        return mode == ResumeMode::Continue;
+        return status == JSTRAP_CONTINUE;
     }
     if (site->kind() == CallSite::LeaveFrame) {
         debugFrame->updateReturnJSValue();
@@ -114,24 +137,24 @@ WasmHandleDebugTrap()
     MOZ_ASSERT(debug.hasBreakpointTrapAtOffset(site->lineOrBytecode()));
     if (debug.stepModeEnabled(debugFrame->funcIndex())) {
         RootedValue result(cx, UndefinedValue());
-        ResumeMode mode = Debugger::onSingleStep(cx, &result);
-        if (mode == ResumeMode::Return) {
-            // TODO properly handle ResumeMode::Return.
+        JSTrapStatus status = Debugger::onSingleStep(cx, &result);
+        if (status == JSTRAP_RETURN) {
+            // TODO properly handle JSTRAP_RETURN.
             JS_ReportErrorASCII(cx, "Unexpected resumption value from onSingleStep");
             return false;
         }
-        if (mode != ResumeMode::Continue)
+        if (status != JSTRAP_CONTINUE)
             return false;
     }
     if (debug.hasBreakpointSite(site->lineOrBytecode())) {
         RootedValue result(cx, UndefinedValue());
-        ResumeMode mode = Debugger::onTrap(cx, &result);
-        if (mode == ResumeMode::Return) {
-            // TODO properly handle ResumeMode::Return.
+        JSTrapStatus status = Debugger::onTrap(cx, &result);
+        if (status == JSTRAP_RETURN) {
+            // TODO properly handle JSTRAP_RETURN.
             JS_ReportErrorASCII(cx, "Unexpected resumption value from breakpoint handler");
             return false;
         }
-        if (mode != ResumeMode::Continue)
+        if (status != JSTRAP_CONTINUE)
             return false;
     }
     return true;
@@ -146,7 +169,7 @@ void*
 wasm::HandleThrow(JSContext* cx, WasmFrameIter& iter)
 {
     // WasmFrameIter iterates down wasm frames in the activation starting at
-    // JitActivation::wasmExitFP(). Calling WasmFrameIter::startUnwinding pops
+    // JitActivation::wasmExitFP(). Pass Unwind::True to pop
     // JitActivation::wasmExitFP() once each time WasmFrameIter is incremented,
     // ultimately leaving exit FP null when the WasmFrameIter is done().  This
     // is necessary to prevent a DebugFrame from being observed again after we
@@ -174,14 +197,14 @@ wasm::HandleThrow(JSContext* cx, WasmFrameIter& iter)
         DebugFrame* frame = iter.debugFrame();
         frame->clearReturnJSValue();
 
-        // Assume ResumeMode::Terminate if no exception is pending --
+        // Assume JSTRAP_ERROR status if no exception is pending --
         // no onExceptionUnwind handlers must be fired.
         if (cx->isExceptionPending()) {
-            ResumeMode mode = Debugger::onExceptionUnwind(cx, frame);
-            if (mode == ResumeMode::Return) {
+            JSTrapStatus status = Debugger::onExceptionUnwind(cx, frame);
+            if (status == JSTRAP_RETURN) {
                 // Unexpected trap return -- raising error since throw recovery
                 // is not yet implemented in the wasm baseline.
-                // TODO properly handle ResumeMode::Return and resume wasm execution.
+                // TODO properly handle JSTRAP_RETURN and resume wasm execution.
                 JS_ReportErrorASCII(cx, "Unexpected resumption value from onExceptionUnwind");
             }
         }
@@ -196,6 +219,7 @@ wasm::HandleThrow(JSContext* cx, WasmFrameIter& iter)
         frame->leave(cx);
     }
 
+    MOZ_ASSERT(!cx->activation()->asJit()->isWasmInterrupted(), "unwinding clears the interrupt");
     MOZ_ASSERT(!cx->activation()->asJit()->isWasmTrapping(), "unwinding clears the trapping state");
 
     return iter.unwoundAddressOfReturnAddress();
@@ -210,80 +234,61 @@ WasmHandleThrow()
     return HandleThrow(cx, iter);
 }
 
-// Unconditionally returns nullptr per calling convention of HandleTrap().
-static void*
-ReportError(JSContext* cx, unsigned errorNumber)
+static void
+WasmOldReportTrap(int32_t trapIndex)
 {
-    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr, errorNumber);
-    return nullptr;
-};
+    JSContext* cx = TlsContext.get();
 
-// Has the same return-value convention as HandleTrap().
-static void*
-CheckInterrupt(JSContext* cx, JitActivation* activation)
-{
-    ResetInterruptState(cx);
+    MOZ_ASSERT(trapIndex < int32_t(Trap::Limit) && trapIndex >= 0);
+    Trap trap = Trap(trapIndex);
 
-    if (!CheckForInterrupt(cx))
-        return nullptr;
-
-    void* resumePC = activation->wasmTrapData().resumePC;
-    activation->finishWasmTrap();
-    return resumePC;
-}
-
-// The calling convention between this function and its caller in the stub
-// generated by GenerateTrapExit() is:
-//   - return nullptr if the stub should jump to the throw stub to unwind
-//     the activation;
-//   - return the (non-null) resumePC that should be jumped if execution should
-//     resume after the trap.
-static void*
-WasmHandleTrap()
-{
-    JitActivation* activation = CallingActivation();
-    JSContext* cx = activation->cx();
-
-    switch (activation->wasmTrapData().trap) {
+    unsigned errorNumber;
+    switch (trap) {
       case Trap::Unreachable:
-        return ReportError(cx, JSMSG_WASM_UNREACHABLE);
+        errorNumber = JSMSG_WASM_UNREACHABLE;
+        break;
       case Trap::IntegerOverflow:
-        return ReportError(cx, JSMSG_WASM_INTEGER_OVERFLOW);
+        errorNumber = JSMSG_WASM_INTEGER_OVERFLOW;
+        break;
       case Trap::InvalidConversionToInteger:
-        return ReportError(cx, JSMSG_WASM_INVALID_CONVERSION);
+        errorNumber = JSMSG_WASM_INVALID_CONVERSION;
+        break;
       case Trap::IntegerDivideByZero:
-        return ReportError(cx, JSMSG_WASM_INT_DIVIDE_BY_ZERO);
+        errorNumber = JSMSG_WASM_INT_DIVIDE_BY_ZERO;
+        break;
       case Trap::IndirectCallToNull:
-        return ReportError(cx, JSMSG_WASM_IND_CALL_TO_NULL);
+        errorNumber = JSMSG_WASM_IND_CALL_TO_NULL;
+        break;
       case Trap::IndirectCallBadSig:
-        return ReportError(cx, JSMSG_WASM_IND_CALL_BAD_SIG);
+        errorNumber = JSMSG_WASM_IND_CALL_BAD_SIG;
+        break;
       case Trap::ImpreciseSimdConversion:
-        return ReportError(cx, JSMSG_SIMD_FAILED_CONVERSION);
+        errorNumber = JSMSG_SIMD_FAILED_CONVERSION;
+        break;
       case Trap::OutOfBounds:
-        return ReportError(cx, JSMSG_WASM_OUT_OF_BOUNDS);
+        errorNumber = JSMSG_WASM_OUT_OF_BOUNDS;
+        break;
       case Trap::UnalignedAccess:
-        return ReportError(cx, JSMSG_WASM_UNALIGNED_ACCESS);
-      case Trap::CheckInterrupt:
-        return CheckInterrupt(cx, activation);
+        errorNumber = JSMSG_WASM_UNALIGNED_ACCESS;
+        break;
       case Trap::StackOverflow:
-        // TlsData::setInterrupt() causes a fake stack overflow. Since
-        // TlsData::setInterrupt() is called racily, it's possible for a real
-        // stack overflow to trap, followed by a racy call to setInterrupt().
-        // Thus, we must check for a real stack overflow first before we
-        // CheckInterrupt() and possibly resume execution.
-        if (!CheckRecursionLimit(cx))
-            return nullptr;
-        if (activation->wasmExitFP()->tls->isInterrupted())
-            return CheckInterrupt(cx, activation);
-        return ReportError(cx, JSMSG_OVER_RECURSED);
+        errorNumber = JSMSG_OVER_RECURSED;
+        break;
       case Trap::ThrowReported:
         // Error was already reported under another name.
-        return nullptr;
-      case Trap::Limit:
-        break;
+        return;
+      default:
+        MOZ_CRASH("unexpected trap");
     }
 
-    MOZ_CRASH("unexpected trap");
+    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr, errorNumber);
+}
+
+static void
+WasmReportTrap()
+{
+    Trap trap = TlsContext.get()->runtime()->wasmTrapData().trap;
+    WasmOldReportTrap(int32_t(trap));
 }
 
 static void
@@ -506,15 +511,21 @@ static void*
 AddressOf(SymbolicAddress imm, ABIFunctionType* abiType)
 {
     switch (imm) {
+      case SymbolicAddress::HandleExecutionInterrupt:
+        *abiType = Args_General0;
+        return FuncCast(WasmHandleExecutionInterrupt, *abiType);
       case SymbolicAddress::HandleDebugTrap:
         *abiType = Args_General0;
         return FuncCast(WasmHandleDebugTrap, *abiType);
       case SymbolicAddress::HandleThrow:
         *abiType = Args_General0;
         return FuncCast(WasmHandleThrow, *abiType);
-      case SymbolicAddress::HandleTrap:
+      case SymbolicAddress::ReportTrap:
         *abiType = Args_General0;
-        return FuncCast(WasmHandleTrap, *abiType);
+        return FuncCast(WasmReportTrap, *abiType);
+      case SymbolicAddress::OldReportTrap:
+        *abiType = Args_General1;
+        return FuncCast(WasmOldReportTrap, *abiType);
       case SymbolicAddress::ReportOutOfBounds:
         *abiType = Args_General0;
         return FuncCast(WasmReportOutOfBounds, *abiType);
@@ -536,9 +547,6 @@ AddressOf(SymbolicAddress imm, ABIFunctionType* abiType)
       case SymbolicAddress::CallImport_F64:
         *abiType = Args_General4;
         return FuncCast(Instance::callImport_f64, *abiType);
-      case SymbolicAddress::CallImport_Ref:
-        *abiType = Args_General4;
-        return FuncCast(Instance::callImport_ref, *abiType);
       case SymbolicAddress::CoerceInPlace_ToInt32:
         *abiType = Args_General1;
         return FuncCast(CoerceInPlace_ToInt32, *abiType);
@@ -684,16 +692,17 @@ wasm::NeedsBuiltinThunk(SymbolicAddress sym)
     // Some functions don't want to a thunk, because they already have one or
     // they don't have frame info.
     switch (sym) {
+      case SymbolicAddress::HandleExecutionInterrupt: // GenerateInterruptExit
       case SymbolicAddress::HandleDebugTrap:          // GenerateDebugTrapStub
       case SymbolicAddress::HandleThrow:              // GenerateThrowStub
-      case SymbolicAddress::HandleTrap:               // GenerateTrapExit
+      case SymbolicAddress::ReportTrap:               // GenerateTrapExit
+      case SymbolicAddress::OldReportTrap:            // GenerateOldTrapExit
       case SymbolicAddress::ReportOutOfBounds:        // GenerateOutOfBoundsExit
       case SymbolicAddress::ReportUnalignedAccess:    // GenerateUnalignedExit
       case SymbolicAddress::CallImport_Void:          // GenerateImportInterpExit
       case SymbolicAddress::CallImport_I32:
       case SymbolicAddress::CallImport_I64:
       case SymbolicAddress::CallImport_F64:
-      case SymbolicAddress::CallImport_Ref:
       case SymbolicAddress::CoerceInPlace_ToInt32:    // GenerateImportJitExit
       case SymbolicAddress::CoerceInPlace_ToNumber:
 #if defined(JS_CODEGEN_MIPS32)
@@ -865,8 +874,8 @@ PopulateTypedNatives(TypedNativeToFuncPtrMap* typedNatives)
 // things:
 //  - bridging the few differences between the internal wasm ABI and the external
 //    native ABI (viz. float returns on x86 and soft-fp ARM)
-//  - executing an exit prologue/epilogue which in turn allows any profiling
-//    iterator to see the full stack up to the wasm operation that called out
+//  - executing an exit prologue/epilogue which in turn allows any asynchronous
+//    interrupt to see the full stack up to the wasm operation that called out
 //
 // Thunks are created for two kinds of C++ callees, enumerated above:
 //  - SymbolicAddress: for statically compiled calls in the wasm module
@@ -922,7 +931,7 @@ wasm::EnsureBuiltinThunksInitialized()
 
     LifoAlloc lifo(BUILTIN_THUNK_LIFO_SIZE);
     TempAllocator tempAlloc(&lifo);
-    WasmMacroAssembler masm(tempAlloc);
+    MacroAssembler masm(MacroAssembler::WasmToken(), tempAlloc);
 
     for (auto sym : MakeEnumeratedRange(SymbolicAddress::Limit)) {
         if (!NeedsBuiltinThunk(sym)) {
@@ -978,8 +987,7 @@ wasm::EnsureBuiltinThunksInitialized()
     size_t allocSize = AlignBytes(masm.bytesNeeded(), ExecutableCodePageSize);
 
     thunks->codeSize = allocSize;
-    thunks->codeBase = (uint8_t*)AllocateExecutableMemory(allocSize, ProtectionSetting::Writable,
-                                                          MemCheckKind::MakeUndefined);
+    thunks->codeBase = (uint8_t*)AllocateExecutableMemory(allocSize, ProtectionSetting::Writable);
     if (!thunks->codeBase)
         return false;
 
@@ -992,7 +1000,10 @@ wasm::EnsureBuiltinThunksInitialized()
     MOZ_ASSERT(masm.callSiteTargets().empty());
     MOZ_ASSERT(masm.callFarJumps().empty());
     MOZ_ASSERT(masm.trapSites().empty());
+    MOZ_ASSERT(masm.oldTrapSites().empty());
+    MOZ_ASSERT(masm.oldTrapFarJumps().empty());
     MOZ_ASSERT(masm.callFarJumps().empty());
+    MOZ_ASSERT(masm.memoryAccesses().empty());
     MOZ_ASSERT(masm.symbolicAccesses().empty());
 
     ExecutableAllocator::cacheFlush(thunks->codeBase, thunks->codeSize);

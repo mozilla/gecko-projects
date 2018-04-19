@@ -189,7 +189,7 @@ impl Runtime {
             });
 
             if use_internal_job_queue {
-                assert!(js::UseInternalJobQueues(js_context));
+                assert!(js::UseInternalJobQueues(js_context, false));
             }
 
             JS::InitSelfHostedCode(js_context);
@@ -541,8 +541,8 @@ impl JS::HandleObject {
 
 impl Default for jsid {
     fn default() -> jsid {
-        jsid {
-            asBits: JSID_TYPE_VOID as usize,
+        unsafe {
+            JSID_VOID
         }
     }
 }
@@ -567,7 +567,7 @@ pub trait GCMethods {
 }
 
 impl GCMethods for jsid {
-    unsafe fn initial() -> jsid { Default::default() }
+    unsafe fn initial() -> jsid { JSID_VOID }
     unsafe fn post_barrier(_: *mut jsid, _: jsid, _: jsid) {}
 }
 

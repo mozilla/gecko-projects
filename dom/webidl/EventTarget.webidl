@@ -19,7 +19,7 @@ dictionary EventListenerOptions {
 };
 
 dictionary AddEventListenerOptions : EventListenerOptions {
-  boolean passive;
+  boolean passive = false;
   boolean once = false;
 };
 

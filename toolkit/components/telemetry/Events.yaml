@@ -1,40 +1,22 @@
 activity_stream:
   event:
     objects: [
-      "ARCHIVE_FROM_POCKET",
-      "BLOCK",
-      "BOOKMARK_ADD",
-      "BOOKMARK_DELETE",
       "CLICK",
-      "CLOSE_NEWTAB_PREFS",
+      "SEARCH",
+      "BLOCK",
       "DELETE",
-      "DELETE_FROM_POCKET",
       "DELETE_CONFIRM",
       "DIALOG_CANCEL",
       "DIALOG_OPEN",
-      "DRAG",
-      "DROP",
-      "MIGRATION_CANCEL",
-      "MIGRATION_START",
-      "OPEN_NEWTAB_PREFS",
       "OPEN_NEW_WINDOW",
       "OPEN_PRIVATE_WINDOW",
+      "OPEN_NEWTAB_PREFS",
+      "CLOSE_NEWTAB_PREFS",
+      "BOOKMARK_DELETE",
+      "BOOKMARK_ADD",
       "PIN",
-      "PREVIEW_REQUEST",
-      "SAVE_TO_POCKET",
-      "SEARCH",
-      "DISCLAIMER_ACKED",
-      "MENU_ADD_TOPSITE",
-      "MENU_COLLAPSE",
-      "MENU_EXPAND",
-      "MENU_MANAGE",
-      "MENU_MOVE_DOWN",
-      "MENU_MOVE_UP",
-      "MENU_PRIVACY_NOTICE",
-      "MENU_REMOVE",
-      "TOP_SITES_EDIT",
-      "TOP_SITES_EDIT_CLOSE",
-      "UNPIN"]
+      "UNPIN",
+      "SAVE_TO_POCKET"]
     release_channel_collection: opt-out
     record_in_processes: ["main"]
     description: >
@@ -161,30 +143,3 @@ telemetry.test.second:
     expiry_version: never
     extra_keys:
       key1: This is just a test description.
-
-devtools.main:
-  open:
-    objects: ["tools"]
-    bug_numbers: [1416024]
-    notification_emails: ["dev-developer-tools@lists.mozilla.org", "hkirschner@mozilla.com"]
-    record_in_processes: ["main"]
-    description: User opens devtools toolbox.
-    release_channel_collection: opt-out
-    expiry_version: never
-    extra_keys:
-      entrypoint: How was the toolbox opened? CommandLine, ContextMenu, DeveloperToolbar, HamburgerMenu, KeyShortcut, SessionRestore or SystemMenu
-      first_panel: The name of the first panel opened.
-      host: "Toolbox host (positioning): bottom, side, window or other."
-      splitconsole: Indicates whether the split console was open.
-      width: Toolbox width rounded up to the nearest 50px.
-  close:
-    objects: ["tools"]
-    bug_numbers: [1453312]
-    notification_emails: ["dev-developer-tools@lists.mozilla.org", "hkirschner@mozilla.com"]
-    record_in_processes: ["main"]
-    description: User closes devtools toolbox.
-    release_channel_collection: opt-out
-    expiry_version: never
-    extra_keys:
-      host: "Toolbox host (positioning): bottom, side, window or other."
-      width: Toolbox width rounded up to the nearest 50px.

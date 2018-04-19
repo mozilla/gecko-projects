@@ -9,6 +9,7 @@
 #include "Role.h"
 
 #include "mozilla/FloatingPoint.h"
+#include "nsIDOMXULElement.h"
 #include "nsIDOMXULControlElement.h"
 
 using namespace mozilla::a11y;

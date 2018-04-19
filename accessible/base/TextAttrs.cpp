@@ -592,7 +592,7 @@ TextAttrsMgr::FontStyleTextAttr::
 
 TextAttrsMgr::FontWeightTextAttr::
   FontWeightTextAttr(nsIFrame* aRootFrame, nsIFrame* aFrame) :
-  TTextAttr<FontWeight>(!aFrame)
+  TTextAttr<int32_t>(!aFrame)
 {
   mRootNativeValue = GetFontWeight(aRootFrame);
   mIsRootDefined = true;
@@ -605,7 +605,7 @@ TextAttrsMgr::FontWeightTextAttr::
 
 bool
 TextAttrsMgr::FontWeightTextAttr::
-  GetValueFor(Accessible* aAccessible, FontWeight* aValue)
+  GetValueFor(Accessible* aAccessible, int32_t* aValue)
 {
   nsIContent* elm = nsCoreUtils::GetDOMElementFor(aAccessible->GetContent());
   if (elm) {
@@ -620,16 +620,15 @@ TextAttrsMgr::FontWeightTextAttr::
 
 void
 TextAttrsMgr::FontWeightTextAttr::
-  ExposeValue(nsIPersistentProperties* aAttributes,
-              const FontWeight& aValue)
+  ExposeValue(nsIPersistentProperties* aAttributes, const int32_t& aValue)
 {
   nsAutoString formattedValue;
-  formattedValue.AppendFloat(aValue.ToFloat());
+  formattedValue.AppendInt(aValue);
 
   nsAccUtils::SetAccAttr(aAttributes, nsGkAtoms::fontWeight, formattedValue);
 }
 
-FontWeight
+int32_t
 TextAttrsMgr::FontWeightTextAttr::
   GetFontWeight(nsIFrame* aFrame)
 {
@@ -646,9 +645,8 @@ TextAttrsMgr::FontWeightTextAttr::
   // bold font, i.e. synthetic bolding is used. IsSyntheticBold method is only
   // needed on Mac, but it is "safe" to use on all platforms.  (For non-Mac
   // platforms it always return false.)
-  if (font->IsSyntheticBold()) {
-    return FontWeight::Bold();
-  }
+  if (font->IsSyntheticBold())
+    return 700;
 
   // On Windows, font->GetStyle()->weight will give the same weight as
   // fontEntry->Weight(), the weight of the first font in the font group,

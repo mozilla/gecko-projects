@@ -114,6 +114,7 @@ NS_CP_ContentTypeName(uint32_t contentType)
     CASE_RETURN( TYPE_FETCH                       );
     CASE_RETURN( TYPE_IMAGESET                    );
     CASE_RETURN( TYPE_WEB_MANIFEST                );
+    CASE_RETURN( TYPE_SAVEAS_DOWNLOAD             );
     CASE_RETURN( TYPE_INTERNAL_SCRIPT             );
     CASE_RETURN( TYPE_INTERNAL_WORKER             );
     CASE_RETURN( TYPE_INTERNAL_SHARED_WORKER      );
@@ -134,8 +135,6 @@ NS_CP_ContentTypeName(uint32_t contentType)
     CASE_RETURN( TYPE_INTERNAL_STYLESHEET         );
     CASE_RETURN( TYPE_INTERNAL_STYLESHEET_PRELOAD );
     CASE_RETURN( TYPE_INTERNAL_WORKER_IMPORT_SCRIPTS );
-    CASE_RETURN( TYPE_SAVEAS_DOWNLOAD             );
-    CASE_RETURN( TYPE_SPECULATIVE                 );
    default:
     return "<Unknown Type>";
   }
@@ -151,13 +150,17 @@ NS_CP_ContentTypeName(uint32_t contentType)
     if (!policy)                                                              \
         return NS_ERROR_FAILURE;                                              \
                                                                               \
-    return policy-> action (contentLocation, loadInfo, mimeType, decision);   \
+    return policy-> action (contentType, contentLocation, requestOrigin,      \
+                            context, mimeType, extra, triggeringPrincipal,    \
+                            decision);                                        \
   PR_END_MACRO
 
 /* Passes on parameters from its "caller"'s context. */
 #define CHECK_CONTENT_POLICY_WITH_SERVICE(action, _policy)                    \
   PR_BEGIN_MACRO                                                              \
-    return _policy-> action (contentLocation, loadInfo, mimeType, decision);  \
+    return _policy-> action (contentType, contentLocation, requestOrigin,     \
+                             context, mimeType, extra, triggeringPrincipal,   \
+                             decision);                                       \
   PR_END_MACRO
 
 /**
@@ -190,8 +193,12 @@ NS_CP_ContentTypeName(uint32_t contentType)
                       do_GetService(                                          \
                               "@mozilla.org/data-document-content-policy;1"); \
                   if (dataPolicy) {                                           \
-                      dataPolicy-> action (contentLocation, loadInfo,         \
-                                           mimeType, decision);               \
+                      nsContentPolicyType externalType =                      \
+                          nsContentUtils::InternalContentPolicyTypeToExternal(contentType); \
+                      dataPolicy-> action (externalType, contentLocation,     \
+                                           requestOrigin, context,            \
+                                           mimeType, extra,                   \
+                                           triggeringPrincipal, decision);    \
                   }                                                           \
               }                                                               \
           }                                                                   \
@@ -213,15 +220,16 @@ NS_CP_ContentTypeName(uint32_t contentType)
  * origin URI will be passed).
  */
 inline nsresult
-NS_CheckContentLoadPolicy(nsIURI           *contentLocation,
-                          nsILoadInfo      *loadInfo,
+NS_CheckContentLoadPolicy(uint32_t          contentType,
+                          nsIURI           *contentLocation,
+                          nsIPrincipal     *loadingPrincipal,
+                          nsIPrincipal     *triggeringPrincipal,
+                          nsISupports      *context,
                           const nsACString &mimeType,
+                          nsISupports      *extra,
                           int16_t          *decision,
                           nsIContentPolicy *policyService = nullptr)
 {
-    nsIPrincipal* loadingPrincipal = loadInfo->LoadingPrincipal();
-    nsCOMPtr<nsISupports> context = loadInfo->GetLoadingContext();
-    nsContentPolicyType contentType = loadInfo->InternalContentPolicyType();
     CHECK_PRINCIPAL_AND_DATA(ShouldLoad);
     if (policyService) {
         CHECK_CONTENT_POLICY_WITH_SERVICE(ShouldLoad, policyService);
@@ -230,18 +238,26 @@ NS_CheckContentLoadPolicy(nsIURI           *contentLocation,
 }
 
 /**
- * Alias for calling ShouldProcess on the content policy service.
+ * Alias for calling ShouldProcess on the content policy service.  Parameters
+ * are the same as nsIContentPolicy::shouldLoad, except for the and
+ * triggeringPrincipal parameters (which should be non-null if possible, and
+ * have the same semantics as in nsLoadInfo), and the last parameter, which
+ * can be used to pass in a pointer to a useful service if the caller already
+ * has it.  The origin URI to pass to shouldLoad will be the URI of
+ * loadingPrincipal, unless loadingPrincipal is null (in which case a null
+ * origin URI will be passed).
  */
 inline nsresult
-NS_CheckContentProcessPolicy(nsIURI           *contentLocation,
-                             nsILoadInfo      *loadInfo,
+NS_CheckContentProcessPolicy(uint32_t          contentType,
+                             nsIURI           *contentLocation,
+                             nsIPrincipal     *loadingPrincipal,
+                             nsIPrincipal     *triggeringPrincipal,
+                             nsISupports      *context,
                              const nsACString &mimeType,
+                             nsISupports      *extra,
                              int16_t          *decision,
                              nsIContentPolicy *policyService = nullptr)
 {
-    nsIPrincipal* loadingPrincipal = loadInfo->LoadingPrincipal();
-    nsCOMPtr<nsISupports> context = loadInfo->GetLoadingContext();
-    nsContentPolicyType contentType = loadInfo->InternalContentPolicyType();
     CHECK_PRINCIPAL_AND_DATA(ShouldProcess);
     if (policyService) {
         CHECK_CONTENT_POLICY_WITH_SERVICE(ShouldProcess, policyService);

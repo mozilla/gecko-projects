@@ -235,9 +235,7 @@ public:
 private:
   const AudioConfig mIn;
   const AudioConfig mOut;
-  // mChannelOrderMap will be empty if we do not know how to proceed with this
-  // channel layout.
-  AutoTArray<uint8_t, AudioConfig::ChannelLayout::MAX_CHANNELS> mChannelOrderMap;
+  uint8_t mChannelOrderMap[MAX_AUDIO_CHANNELS];
   /**
    * ProcessInternal
    * Parameters:

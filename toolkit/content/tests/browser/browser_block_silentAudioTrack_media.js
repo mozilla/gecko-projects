@@ -59,7 +59,7 @@ add_task(async function unblock_icon_should_disapear_after_resume_tab() {
   await waitForTabPlayingEvent(tab, false);
 
   info("- remove tab -");
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });
 
 add_task(async function should_not_show_sound_indicator_after_resume_tab() {
@@ -89,5 +89,5 @@ add_task(async function should_not_show_sound_indicator_after_resume_tab() {
   await waitForTabPlayingEvent(tab, false);
 
   info("- remove tab -");
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

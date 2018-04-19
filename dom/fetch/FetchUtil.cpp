@@ -11,7 +11,6 @@
 #include "nsIDocument.h"
 
 #include "mozilla/dom/InternalRequest.h"
-#include "mozilla/dom/WorkerRef.h"
 
 namespace mozilla {
 namespace dom {
@@ -267,43 +266,36 @@ public:
 
 NS_IMPL_ISUPPORTS(WindowStreamOwner, nsIObserver, nsISupportsWeakReference)
 
-class WorkerStreamOwner final
+class WorkerStreamOwner final : public WorkerHolder
 {
-public:
-  NS_INLINE_DECL_REFCOUNTING(WorkerStreamOwner)
+  // Read from any thread but only set/cleared on the worker thread. The
+  // lifecycle of WorkerStreamOwner prevents concurrent read/clear.
+  nsCOMPtr<nsIAsyncInputStream> mStream;
 
+public:
   explicit WorkerStreamOwner(nsIAsyncInputStream* aStream)
-    : mStream(aStream)
+    : WorkerHolder("WorkerStreamOwner",
+                   WorkerHolder::Behavior::AllowIdleShutdownStart)
+    , mStream(aStream)
   {}
 
-  static already_AddRefed<WorkerStreamOwner>
+  static UniquePtr<WorkerStreamOwner>
   Create(nsIAsyncInputStream* aStream, WorkerPrivate* aWorker)
   {
-    RefPtr<WorkerStreamOwner> self = new WorkerStreamOwner(aStream);
+    auto self = MakeUnique<WorkerStreamOwner>(aStream);
 
-    self->mWorkerRef = WeakWorkerRef::Create(aWorker, [self]() {
-      if (self->mStream) {
-        // If this Close() calls JSStreamConsumer::OnInputStreamReady and drops
-        // the last reference to the JSStreamConsumer, 'this' will not be
-        // destroyed since ~JSStreamConsumer() only enqueues a Destroyer.
-        self->mStream->Close();
-        self->mStream = nullptr;
-        self->mWorkerRef = nullptr;
-      }
-    });
-
-    if (!self->mWorkerRef) {
+    if (!self->HoldWorker(aWorker, Closing)) {
       return nullptr;
     }
 
-    return self.forget();
+    return self;
   }
 
   struct Destroyer final : CancelableRunnable
   {
-    RefPtr<WorkerStreamOwner> mDoomed;
+    UniquePtr<WorkerStreamOwner> mDoomed;
 
-    explicit Destroyer(already_AddRefed<WorkerStreamOwner>&& aDoomed)
+    explicit Destroyer(UniquePtr<WorkerStreamOwner>&& aDoomed)
       : CancelableRunnable("WorkerStreamOwner::Destroyer")
       , mDoomed(Move(aDoomed))
     {}
@@ -322,21 +314,29 @@ public:
     }
   };
 
-private:
-  ~WorkerStreamOwner() = default;
+  // WorkerHolder:
 
-  // Read from any thread but only set/cleared on the worker thread. The
-  // lifecycle of WorkerStreamOwner prevents concurrent read/clear.
-  nsCOMPtr<nsIAsyncInputStream> mStream;
-  RefPtr<WeakWorkerRef> mWorkerRef;
+  bool Notify(WorkerStatus aStatus) override
+  {
+    if (!mStream) {
+      return true;
+    }
 
+    // If this Close() calls JSStreamConsumer::OnInputStreamReady and drops the
+    // last reference to the JSStreamConsumer, 'this' will not be destroyed
+    // since ~JSStreamConsumer() only enqueues a Destroyer.
+    mStream->Close();
+    mStream = nullptr;
+    ReleaseWorker();
+    return true;
+  }
 };
 
 class JSStreamConsumer final : public nsIInputStreamCallback
 {
   nsCOMPtr<nsIEventTarget> mOwningEventTarget;
   RefPtr<WindowStreamOwner> mWindowStreamOwner;
-  RefPtr<WorkerStreamOwner> mWorkerStreamOwner;
+  UniquePtr<WorkerStreamOwner> mWorkerStreamOwner;
   JS::StreamConsumer* mConsumer;
   bool mConsumerAborted;
 
@@ -352,7 +352,7 @@ class JSStreamConsumer final : public nsIInputStreamCallback
     MOZ_DIAGNOSTIC_ASSERT(mConsumer);
   }
 
-  JSStreamConsumer(RefPtr<WorkerStreamOwner> aWorkerStreamOwner,
+  JSStreamConsumer(UniquePtr<WorkerStreamOwner> aWorkerStreamOwner,
                    nsIGlobalObject* aGlobal,
                    JS::StreamConsumer* aConsumer)
    : mOwningEventTarget(aGlobal->EventTargetFor(TaskCategory::Other))
@@ -375,7 +375,7 @@ class JSStreamConsumer final : public nsIInputStreamCallback
       destroyer = new WindowStreamOwner::Destroyer(mWindowStreamOwner.forget());
     } else {
       MOZ_DIAGNOSTIC_ASSERT(mWorkerStreamOwner);
-      destroyer = new WorkerStreamOwner::Destroyer(mWorkerStreamOwner.forget());
+      destroyer = new WorkerStreamOwner::Destroyer(Move(mWorkerStreamOwner));
     }
 
     MOZ_ALWAYS_SUCCEEDS(mOwningEventTarget->Dispatch(destroyer.forget()));
@@ -440,7 +440,7 @@ public:
 
     RefPtr<JSStreamConsumer> consumer;
     if (aMaybeWorker) {
-      RefPtr<WorkerStreamOwner> owner =
+      UniquePtr<WorkerStreamOwner> owner =
         WorkerStreamOwner::Create(asyncStream, aMaybeWorker);
       if (!owner) {
         return false;

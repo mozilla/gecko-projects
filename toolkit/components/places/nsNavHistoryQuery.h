@@ -51,6 +51,7 @@ public:
   {
     if (!mTags.ReplaceElementsAt(0, mTags.Length(), aTags))
       return NS_ERROR_OUT_OF_MEMORY;
+
     return NS_OK;
   }
   bool TagsAreNot() { return mTagsAreNot; }
@@ -58,20 +59,18 @@ public:
   const nsTArray<uint32_t>& Transitions() const { return mTransitions; }
   nsresult SetTransitions(const nsTArray<uint32_t>& aTransitions)
   {
-    if (!mTransitions.ReplaceElementsAt(0, mTransitions.Length(), aTransitions))
+    if (!mTransitions.ReplaceElementsAt(0, mTransitions.Length(),
+                                        aTransitions))
       return NS_ERROR_OUT_OF_MEMORY;
+
     return NS_OK;
   }
-
-  nsresult Clone(nsNavHistoryQuery **_clone);
 
 private:
   ~nsNavHistoryQuery() {}
 
 protected:
 
-  // IF YOU ADD MORE ITEMS:
-  //  * Add to the copy constructor
   int32_t mMinVisits;
   int32_t mMaxVisits;
   PRTime mBeginTime;
@@ -101,8 +100,18 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsNavHistoryQuery, NS_NAVHISTORYQUERY_IID)
 class nsNavHistoryQueryOptions final : public nsINavHistoryQueryOptions
 {
 public:
-  nsNavHistoryQueryOptions();
-  nsNavHistoryQueryOptions(const nsNavHistoryQueryOptions& other);
+  nsNavHistoryQueryOptions()
+  : mSort(0)
+  , mResultType(0)
+  , mExcludeItems(false)
+  , mExcludeQueries(false)
+  , mExcludeReadOnlyFolders(false)
+  , mExpandQueries(true)
+  , mIncludeHidden(false)
+  , mMaxResults(0)
+  , mQueryType(nsINavHistoryQueryOptions::QUERY_TYPE_HISTORY)
+  , mAsyncEnabled(false)
+  { }
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_NAVHISTORYQUERYOPTIONS_IID)
 
@@ -120,19 +129,21 @@ public:
   uint16_t QueryType() const { return mQueryType; }
   bool AsyncEnabled() const { return mAsyncEnabled; }
 
-  nsresult Clone(nsNavHistoryQueryOptions **_clone);
+  nsresult Clone(nsNavHistoryQueryOptions **aResult);
 
 private:
   ~nsNavHistoryQueryOptions() {}
+  nsNavHistoryQueryOptions(const nsNavHistoryQueryOptions& other) {} // no copy
 
   // IF YOU ADD MORE ITEMS:
-  //  * Add to the copy constructor
   //  * Add a new getter for C++ above if it makes sense
   //  * Add to the serialization code (see nsNavHistory::QueriesToQueryString())
   //  * Add to the deserialization code (see nsNavHistory::QueryStringToQueries)
+  //  * Add to the nsNavHistoryQueryOptions::Clone() function
   //  * Add to the nsNavHistory.cpp::GetSimpleBookmarksQueryFolder function if applicable
   uint16_t mSort;
   nsCString mSortingAnnotation;
+  nsCString mParentAnnotationToExclude;
   uint16_t mResultType;
   bool mExcludeItems;
   bool mExcludeQueries;

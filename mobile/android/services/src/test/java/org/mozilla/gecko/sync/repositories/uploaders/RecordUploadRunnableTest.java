@@ -7,13 +7,13 @@ import android.net.Uri;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.RobolectricTestRunner;
+import org.mozilla.gecko.background.testhelpers.TestRunner;
 
 import java.net.URI;
 
 import static org.junit.Assert.*;
 
-@RunWith(RobolectricTestRunner.class)
+@RunWith(TestRunner.class)
 public class RecordUploadRunnableTest {
     @Test
     public void testBuildPostURI() throws Exception {

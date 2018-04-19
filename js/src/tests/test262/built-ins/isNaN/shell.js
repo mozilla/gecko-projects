@@ -8,15 +8,6 @@ description: |
     weak basis for assertions regarding the consistent canonicalization of NaN
     values in Array buffers.
 ---*/
-
-var NaNs = [
-  NaN,
-  Number.NaN,
-  NaN * 0,
-  0/0,
-  Infinity/Infinity,
-  -(0/0),
-  Math.pow(-1, 0.5),
-  -Math.pow(-1, 0.5),
-  Number("Not-a-Number"),
+var distinctNaNs = [
+  0/0, Infinity/Infinity, -(0/0), Math.pow(-1, 0.5), -Math.pow(-1, 0.5)
 ];

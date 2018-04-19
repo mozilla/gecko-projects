@@ -11,8 +11,9 @@
 #include "mozilla/dom/BindingDeclarations.h"
 
 class nsAtom;
+class nsGenericDOMDataNode;
 class nsIDocument;
-class ComputedStyle;
+class nsStyleContext;
 
 namespace mozilla {
 class StyleSheet;
@@ -20,7 +21,6 @@ namespace css {
 class Rule;
 } // namespace css
 namespace dom {
-class CharacterData;
 class Element;
 class InspectorFontFace;
 } // namespace dom
@@ -37,7 +37,6 @@ class InspectorUtils
 public:
   static void GetAllStyleSheets(GlobalObject& aGlobal,
                                 nsIDocument& aDocument,
-                                bool aDocumentOnly,
                                 nsTArray<RefPtr<StyleSheet>>& aResult);
   static void GetCSSStyleRules(GlobalObject& aGlobal,
                                Element& aElement,
@@ -165,11 +164,11 @@ public:
                                       ErrorResult& aRv);
 
   static bool IsIgnorableWhitespace(GlobalObject& aGlobalObject,
-                                    CharacterData& aDataNode)
+                                    nsGenericDOMDataNode& aDataNode)
   {
     return IsIgnorableWhitespace(aDataNode);
   }
-  static bool IsIgnorableWhitespace(CharacterData& aDataNode);
+  static bool IsIgnorableWhitespace(nsGenericDOMDataNode& aDataNode);
 
   // Returns the "parent" of a node.  The parent of a document node is the
   // frame/iframe containing that document.  aShowingAnonymousContent says
@@ -271,8 +270,8 @@ public:
   static void ScrollElementIntoView(GlobalObject& aGlobal, Element& aElement);
 
 private:
-  static already_AddRefed<ComputedStyle>
-    GetCleanComputedStyleForElement(Element* aElement, nsAtom* aPseudo);
+  static already_AddRefed<nsStyleContext>
+    GetCleanStyleContextForElement(Element* aElement, nsAtom* aPseudo);
 };
 
 } // namespace dom

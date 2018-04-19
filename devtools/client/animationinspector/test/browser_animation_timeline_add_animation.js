@@ -7,13 +7,13 @@
 // Test re-used animation element since we re-use existent animation element
 // for the render performance.
 
-add_task(async function() {
-  await addTab(URL_ROOT + "doc_add_animation.html");
-  let {panel, controller} = await openAnimationInspector();
+add_task(function* () {
+  yield addTab(URL_ROOT + "doc_add_animation.html");
+  let {panel, controller} = yield openAnimationInspector();
   const timelineComponent = panel.animationsTimelineComponent;
 
   // Add new animation which has delay and endDelay.
-  await startNewAnimation(controller, panel, "#target2");
+  yield startNewAnimation(controller, panel, "#target2");
   const previousAnimationEl =
     timelineComponent.animationsEl.querySelector(".animation:nth-child(2)");
   const previousSummaryGraphEl = previousAnimationEl.querySelector(".summary");
@@ -24,7 +24,7 @@ add_task(async function() {
   const previousEndDelayBounds = previousEndDelayEl.getBoundingClientRect();
 
   // Add another animation.
-  await startNewAnimation(controller, panel, "#target3");
+  yield startNewAnimation(controller, panel, "#target3");
   const currentAnimationEl =
     timelineComponent.animationsEl.querySelector(".animation:nth-child(2)");
   const currentSummaryGraphEl = currentAnimationEl.querySelector(".summary");
@@ -51,18 +51,18 @@ add_task(async function() {
      "Reused .end-delay element should be shorter");
 });
 
-async function startNewAnimation(controller, panel, selector) {
+function* startNewAnimation(controller, panel, selector) {
   info("Add a new animation to the page and check the time again");
   let onPlayerAdded = controller.once(controller.PLAYERS_UPDATED_EVENT);
   let onRendered = waitForAnimationTimelineRendering(panel);
 
-  await executeInContent("devtools:test:setAttribute", {
+  yield executeInContent("devtools:test:setAttribute", {
     selector: selector,
     attributeName: "class",
     attributeValue: "animation"
   });
 
-  await onPlayerAdded;
-  await onRendered;
-  await waitForAllAnimationTargets(panel);
+  yield onPlayerAdded;
+  yield onRendered;
+  yield waitForAllAnimationTargets(panel);
 }

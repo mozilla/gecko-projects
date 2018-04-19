@@ -7,7 +7,6 @@
 include protocol PCompositorBridge;
 
 using mozilla::gfx::IntSize from "mozilla/gfx/Point.h";
-using nsTransparencyMode from "mozilla/widget/WidgetMessageUtils.h";
 
 namespace mozilla {
 namespace widget {
@@ -19,7 +18,7 @@ sync protocol PCompositorWidget
 parent:
   sync EnterPresentLock();
   sync LeavePresentLock();
-  async UpdateTransparency(nsTransparencyMode aMode);
+  async UpdateTransparency(int32_t aMode);
   sync ClearTransparentWindow();
   async __delete__();
 

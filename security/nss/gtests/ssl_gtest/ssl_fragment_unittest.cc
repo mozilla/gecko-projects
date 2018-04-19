@@ -20,16 +20,14 @@ namespace nss_test {
 // This class cuts every unencrypted handshake record into two parts.
 class RecordFragmenter : public PacketFilter {
  public:
-  RecordFragmenter(bool is_dtls13)
-      : is_dtls13_(is_dtls13), sequence_number_(0), splitting_(true) {}
+  RecordFragmenter() : sequence_number_(0), splitting_(true) {}
 
  private:
   class HandshakeSplitter {
    public:
-    HandshakeSplitter(bool is_dtls13, const DataBuffer& input,
-                      DataBuffer* output, uint64_t* sequence_number)
-        : is_dtls13_(is_dtls13),
-          input_(input),
+    HandshakeSplitter(const DataBuffer& input, DataBuffer* output,
+                      uint64_t* sequence_number)
+        : input_(input),
           output_(output),
           cursor_(0),
           sequence_number_(sequence_number) {}
@@ -37,9 +35,9 @@ class RecordFragmenter : public PacketFilter {
    private:
     void WriteRecord(TlsRecordHeader& record_header,
                      DataBuffer& record_fragment) {
-      TlsRecordHeader fragment_header(
-          record_header.variant(), record_header.version(),
-          record_header.content_type(), *sequence_number_);
+      TlsRecordHeader fragment_header(record_header.version(),
+                                      record_header.content_type(),
+                                      *sequence_number_);
       ++*sequence_number_;
       if (::g_ssl_gtest_verbose) {
         std::cerr << "Fragment: " << fragment_header << ' ' << record_fragment
@@ -90,7 +88,7 @@ class RecordFragmenter : public PacketFilter {
       while (parser.remaining()) {
         TlsRecordHeader header;
         DataBuffer record;
-        if (!header.Parse(is_dtls13_, 0, &parser, &record)) {
+        if (!header.Parse(0, &parser, &record)) {
           ADD_FAILURE() << "bad record header";
           return false;
         }
@@ -120,7 +118,6 @@ class RecordFragmenter : public PacketFilter {
     }
 
    private:
-    bool is_dtls13_;
     const DataBuffer& input_;
     DataBuffer* output_;
     size_t cursor_;
@@ -135,7 +132,7 @@ class RecordFragmenter : public PacketFilter {
     }
 
     output->Allocate(input.len());
-    HandshakeSplitter splitter(is_dtls13_, input, output, &sequence_number_);
+    HandshakeSplitter splitter(input, output, &sequence_number_);
     if (!splitter.Split()) {
       // If splitting fails, we obviously reached encrypted packets.
       // Stop splitting from that point onward.
@@ -147,21 +144,18 @@ class RecordFragmenter : public PacketFilter {
   }
 
  private:
-  bool is_dtls13_;
   uint64_t sequence_number_;
   bool splitting_;
 };
 
 TEST_P(TlsConnectDatagram, FragmentClientPackets) {
-  bool is_dtls13 = version_ >= SSL_LIBRARY_VERSION_TLS_1_3;
-  client_->SetFilter(std::make_shared<RecordFragmenter>(is_dtls13));
+  client_->SetFilter(std::make_shared<RecordFragmenter>());
   Connect();
   SendReceive();
 }
 
 TEST_P(TlsConnectDatagram, FragmentServerPackets) {
-  bool is_dtls13 = version_ >= SSL_LIBRARY_VERSION_TLS_1_3;
-  server_->SetFilter(std::make_shared<RecordFragmenter>(is_dtls13));
+  server_->SetFilter(std::make_shared<RecordFragmenter>());
   Connect();
   SendReceive();
 }

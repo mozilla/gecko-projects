@@ -559,8 +559,7 @@ DOMMediaStream::Constructor(const GlobalObject& aGlobal,
   if (!newStream->GetPlaybackStream()) {
     MOZ_ASSERT(aTracks.IsEmpty());
     MediaStreamGraph* graph =
-      MediaStreamGraph::GetInstance(MediaStreamGraph::SYSTEM_THREAD_DRIVER, ownerWindow,
-                                    MediaStreamGraph::REQUEST_DEFAULT_SAMPLE_RATE);
+      MediaStreamGraph::GetInstance(MediaStreamGraph::SYSTEM_THREAD_DRIVER, ownerWindow);
     newStream->InitPlaybackStreamCommon(graph);
   }
 
@@ -601,8 +600,7 @@ DOMMediaStream::CountUnderlyingStreams(const GlobalObject& aGlobal, ErrorResult&
     return nullptr;
   }
 
-  MediaStreamGraph* graph = MediaStreamGraph::GetInstanceIfExists(window,
-                                                MediaStreamGraph::REQUEST_DEFAULT_SAMPLE_RATE);
+  MediaStreamGraph* graph = MediaStreamGraph::GetInstanceIfExists(window);
   if (!graph) {
     p->MaybeResolve(0);
     return p.forget();

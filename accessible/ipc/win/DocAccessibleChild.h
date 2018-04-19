@@ -57,7 +57,7 @@ public:
                            const bool aDoSyncCheck = true);
   bool SendSelectionEvent(const uint64_t& aID, const uint64_t& aWidgetID,
                           const uint32_t& aType);
-  bool SendRoleChangedEvent(const a11y::role& aRole);
+  bool SendRoleChangedEvent(const uint32_t& aRole);
 
   bool ConstructChildDocInParentProcess(DocAccessibleChild* aNewChildDoc,
                                         uint64_t aUniqueID, uint32_t aMsaaID);
@@ -256,7 +256,7 @@ private:
 
   struct SerializedRoleChanged final : public DeferredEvent
   {
-    explicit SerializedRoleChanged(DocAccessibleChild* aTarget, a11y::role aRole)
+    explicit SerializedRoleChanged(DocAccessibleChild* aTarget, uint32_t aRole)
       : DeferredEvent(aTarget)
       , mRole(aRole)
     {}
@@ -266,7 +266,7 @@ private:
       Unused << aIPCDoc->SendRoleChangedEvent(mRole);
     }
 
-    a11y::role mRole;
+    uint32_t mRole;
   };
 
   struct SerializedEvent final : public DeferredEvent

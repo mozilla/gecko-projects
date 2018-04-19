@@ -215,7 +215,6 @@ WebGLContext::DestroyResourcesAndContext()
     mBoundCopyWriteBuffer = nullptr;
     mBoundPixelPackBuffer = nullptr;
     mBoundPixelUnpackBuffer = nullptr;
-    mBoundTransformFeedbackBuffer = nullptr;
     mBoundUniformBuffer = nullptr;
     mCurrentProgram = nullptr;
     mActiveProgramLinkInfo = nullptr;
@@ -821,7 +820,8 @@ WebGLContext::ThrowEvent_WebGLContextCreationError(const nsACString& text)
                                                                            eventInit);
     event->SetTrusted(true);
 
-    target->DispatchEvent(*event);
+    bool didPreventDefault;
+    target->DispatchEvent(event, &didPreventDefault);
 
     //////
 
@@ -1796,9 +1796,7 @@ WebGLContext::UpdateContextLossStatus()
             RefPtr<Event> event = new Event(mOffscreenCanvas, nullptr, nullptr);
             event->InitEvent(kEventName, kCanBubble, kIsCancelable);
             event->SetTrusted(true);
-            useDefaultHandler =
-                mOffscreenCanvas->DispatchEvent(*event, CallerType::System,
-                                                IgnoreErrors());
+            mOffscreenCanvas->DispatchEvent(event, &useDefaultHandler);
         }
 
         // We sent the callback, so we're just 'regular lost' now.
@@ -1864,7 +1862,8 @@ WebGLContext::UpdateContextLossStatus()
             RefPtr<Event> event = new Event(mOffscreenCanvas, nullptr, nullptr);
             event->InitEvent(NS_LITERAL_STRING("webglcontextrestored"), true, true);
             event->SetTrusted(true);
-            mOffscreenCanvas->DispatchEvent(*event);
+            bool unused;
+            mOffscreenCanvas->DispatchEvent(event, &unused);
         }
 
         mEmitContextLostErrorOnce = true;
@@ -2543,7 +2542,6 @@ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(WebGLContext,
   mBoundPixelPackBuffer,
   mBoundPixelUnpackBuffer,
   mBoundTransformFeedback,
-  mBoundTransformFeedbackBuffer,
   mBoundUniformBuffer,
   mCurrentProgram,
   mBoundDrawFramebuffer,

@@ -32,8 +32,6 @@ add_task(async function() {
   ], "Correct titles are returned");
 
   registerCleanupFunction(async function() {
-    for (let tab of tabs) {
-      BrowserTestUtils.removeTab(tab);
-    }
+    await Promise.all(tabs.map(BrowserTestUtils.removeTab));
   });
 });

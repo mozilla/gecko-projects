@@ -104,7 +104,6 @@ Phase("phase1", [
 ]);
 
 Phase("phase2", [
-  [Sync],
   [History.add, history1],
   [Sync, SYNC_WIPE_REMOTE]
 ]);

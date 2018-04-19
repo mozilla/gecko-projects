@@ -4,6 +4,7 @@
 
 /* eslint-env mozilla/frame-script */
 
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "Logger",
   "resource://gre/modules/accessibility/Utils.jsm");
 ChromeUtils.defineModuleGetter(this, "Presentation",

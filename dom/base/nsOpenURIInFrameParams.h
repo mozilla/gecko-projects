@@ -7,7 +7,7 @@
 #include "mozilla/BasePrincipal.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsIBrowserDOMWindow.h"
-#include "nsIFrameLoaderOwner.h"
+#include "nsIFrameLoader.h"
 #include "nsString.h"
 
 namespace mozilla {

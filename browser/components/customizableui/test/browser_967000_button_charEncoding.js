@@ -56,7 +56,7 @@ add_task(async function() {
   await panelHidePromise;
   info("Panel hidden");
 
-  BrowserTestUtils.removeTab(newTab);
+  await BrowserTestUtils.removeTab(newTab);
 });
 
 add_task(async function asyncCleanup() {

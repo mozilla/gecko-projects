@@ -32,38 +32,62 @@
 namespace js {
 
 /////////////////////////////////////////////////////////////////////
-// RecompileInfo
+// CompilerOutput & RecompileInfo
 /////////////////////////////////////////////////////////////////////
 
-jit::IonScript*
-RecompileInfo::maybeIonScriptToInvalidate(const TypeZone& zone) const
+inline jit::IonScript*
+CompilerOutput::ion() const
 {
-    MOZ_ASSERT(script_->zone() == zone.zone());
+    // Note: If type constraints are generated before compilation has finished
+    // (i.e. after IonBuilder but before CodeGenerator::link) then a valid
+    // CompilerOutput may not yet have an associated IonScript.
+    MOZ_ASSERT(isValid());
+    jit::IonScript* ion = script()->maybeIonScript();
+    MOZ_ASSERT(ion != ION_COMPILING_SCRIPT);
+    return ion;
+}
 
-    // Make sure this is not called under CodeGenerator::link (before the
-    // IonScript is created).
-    MOZ_ASSERT_IF(zone.currentCompilationId(), zone.currentCompilationId().ref() != id_);
+inline CompilerOutput*
+RecompileInfo::compilerOutput(TypeZone& types) const
+{
+    if (generation != types.generation) {
+        if (!types.sweepCompilerOutputs || outputIndex >= types.sweepCompilerOutputs->length())
+            return nullptr;
+        CompilerOutput* output = &(*types.sweepCompilerOutputs)[outputIndex];
+        if (!output->isValid())
+            return nullptr;
+        output = &(*types.compilerOutputs)[output->sweepIndex()];
+        return output->isValid() ? output : nullptr;
+    }
 
-    if (!script_->hasIonScript() || script_->ionScript()->compilationId() != id_)
+    if (!types.compilerOutputs || outputIndex >= types.compilerOutputs->length())
         return nullptr;
+    CompilerOutput* output = &(*types.compilerOutputs)[outputIndex];
+    return output->isValid() ? output : nullptr;
+}
 
-    return script_->ionScript();
+inline CompilerOutput*
+RecompileInfo::compilerOutput(JSContext* cx) const
+{
+    return compilerOutput(cx->zone()->types);
 }
 
 inline bool
-RecompileInfo::shouldSweep(const TypeZone& zone)
+RecompileInfo::shouldSweep(TypeZone& types)
 {
-    if (IsAboutToBeFinalizedUnbarriered(&script_))
+    CompilerOutput* output = compilerOutput(types);
+    if (!output || !output->isValid())
         return true;
 
-    MOZ_ASSERT(script_->zone() == zone.zone());
+    // If this info is for a compilation that occurred after sweeping started,
+    // the index is already correct.
+    MOZ_ASSERT_IF(generation == types.generation,
+                  outputIndex == output - types.compilerOutputs->begin());
 
-    // Don't sweep if we're called under CodeGenerator::link, before the
-    // IonScript is created.
-    if (zone.currentCompilationId() && zone.currentCompilationId().ref() == id_)
-        return false;
-
-    return maybeIonScriptToInvalidate(zone) == nullptr;
+    // Update this info for the output's index in the zone's compiler outputs.
+    outputIndex = output - types.compilerOutputs->begin();
+    generation = types.generation;
+    return false;
 }
 
 /////////////////////////////////////////////////////////////////////
@@ -122,9 +146,9 @@ inline JSCompartment*
 TypeSet::ObjectKey::maybeCompartment()
 {
     if (isSingleton())
-        return singletonNoBarrier()->compartment();
+        return singleton()->compartment();
 
-    return groupNoBarrier()->compartment();
+    return group()->compartment();
 }
 
 /* static */ inline TypeSet::Type
@@ -955,15 +979,14 @@ HeapTypeSet::newPropertyState(JSContext* cx)
     checkMagic();
 
     /* Propagate the change to all constraints. */
-    AutoAssertNoTISweeping nosweeping(cx->zone()->types);
     if (!cx->helperThread()) {
-        TypeConstraint* constraint = constraintList(nosweeping);
+        TypeConstraint* constraint = constraintList();
         while (constraint) {
             constraint->newPropertyState(cx, this);
             constraint = constraint->next();
         }
     } else {
-        MOZ_ASSERT(!constraintList(nosweeping));
+        MOZ_ASSERT(!constraintList());
     }
 }
 
@@ -1109,7 +1132,6 @@ ObjectGroup::getProperty(JSContext* cx, JSObject* obj, jsid id)
     MOZ_ASSERT(!unknownProperties());
     MOZ_ASSERT_IF(obj, obj->group() == this);
     MOZ_ASSERT_IF(singleton(), obj);
-    MOZ_ASSERT(cx->compartment() == compartment());
 
     if (HeapTypeSet* types = maybeGetProperty(id))
         return types;

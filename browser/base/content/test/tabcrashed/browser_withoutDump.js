@@ -17,7 +17,7 @@ add_task(async function test_without_dump() {
     let tab = gBrowser.getTabForBrowser(browser);
     await BrowserTestUtils.crashBrowser(browser);
 
-    let tabClosingPromise = BrowserTestUtils.waitForTabClosing(tab);
+    let tabRemovedPromise = BrowserTestUtils.tabRemoved(tab);
 
     await ContentTask.spawn(browser, null, async function() {
       let doc = content.document;
@@ -31,6 +31,6 @@ add_task(async function test_without_dump() {
       doc.getElementById("closeTab").click();
     });
 
-    await tabClosingPromise;
+    await tabRemovedPromise;
   });
 });

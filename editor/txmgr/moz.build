@@ -18,16 +18,11 @@ EXPORTS += [
     'nsTransactionManagerCID.h',
 ]
 
-EXPORTS.mozilla += [
-    'TransactionManager.h',
-    'TransactionStack.h',
-]
-
 UNIFIED_SOURCES += [
-    'TransactionItem.cpp',
-    'TransactionManager.cpp',
-    'TransactionManagerFactory.cpp',
-    'TransactionStack.cpp',
+    'nsTransactionItem.cpp',
+    'nsTransactionManager.cpp',
+    'nsTransactionManagerFactory.cpp',
+    'nsTransactionStack.cpp',
 ]
 
 FINAL_LIBRARY = 'xul'

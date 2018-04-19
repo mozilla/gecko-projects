@@ -15,21 +15,21 @@ const TEST_URI = `
   <span id="matches" class="matches">Some styled text</span>
 `;
 
-add_task(async function() {
-  await addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
-  let {inspector, view} = await openComputedView();
-  await selectNode("#matches", inspector);
+add_task(function* () {
+  yield addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
+  let {inspector, view} = yield openComputedView();
+  yield selectNode("#matches", inspector);
 
   info("Checking the property itself");
   let container = getComputedViewPropertyView(view, "color").valueNode;
-  await checkColorCycling(container, view);
+  checkColorCycling(container, view);
 
   info("Checking matched selectors");
-  container = await getComputedViewMatchedRules(view, "color");
-  await checkColorCycling(container, view);
+  container = yield getComputedViewMatchedRules(view, "color");
+  yield checkColorCycling(container, view);
 });
 
-async function checkColorCycling(container, view) {
+function* checkColorCycling(container, view) {
   let valueNode = container.querySelector(".computed-color");
   let win = view.styleWindow;
 
@@ -52,11 +52,11 @@ async function checkColorCycling(container, view) {
   }];
 
   for (let test of tests) {
-    await checkSwatchShiftClick(container, win, test.value, test.comment);
+    yield checkSwatchShiftClick(container, win, test.value, test.comment);
   }
 }
 
-async function checkSwatchShiftClick(container, win, expectedValue, comment) {
+function* checkSwatchShiftClick(container, win, expectedValue, comment) {
   let swatch = container.querySelector(".computed-colorswatch");
   let valueNode = container.querySelector(".computed-color");
   swatch.scrollIntoView();
@@ -66,10 +66,6 @@ async function checkSwatchShiftClick(container, win, expectedValue, comment) {
     type: "mousedown",
     shiftKey: true
   }, win);
-  // we need to have the mouse up event in order to make sure that the platform
-  // lets go of the last container, and is not waiting for something to happen.
-  // Bug: https://bugzilla.mozilla.org/show_bug.cgi?id=1442153
-  EventUtils.synthesizeMouseAtCenter(swatch, {type: "mouseup"}, win);
-  await onUnitChange;
+  yield onUnitChange;
   is(valueNode.textContent, expectedValue, comment);
 }

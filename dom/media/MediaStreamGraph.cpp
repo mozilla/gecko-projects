@@ -243,7 +243,7 @@ MediaStreamGraphImpl::ProcessChunkMetadataForInterval(MediaStream* aStream,
     if (chunk->IsNull() || offset < aStart) {
       continue;
     }
-    const PrincipalHandle& principalHandle = chunk->GetPrincipalHandle();
+    PrincipalHandle principalHandle = chunk->GetPrincipalHandle();
     if (principalHandle != aSegment.GetLastPrincipalHandle()) {
       aSegment.SetLastPrincipalHandle(principalHandle);
       LOG(LogLevel::Debug,
@@ -332,31 +332,30 @@ namespace {
 } // namespace
 
 bool
-MediaStreamGraphImpl::AudioTrackPresent()
+MediaStreamGraphImpl::AudioTrackPresent(bool& aNeedsAEC)
 {
   MOZ_ASSERT(OnGraphThreadOrNotRunning());
 
   bool audioTrackPresent = false;
-  for (MediaStream* stream : mStreams) {
+  for (uint32_t i = 0; i < mStreams.Length() && audioTrackPresent == false; ++i) {
+    MediaStream* stream = mStreams[i];
+    SourceMediaStream* source = stream->AsSourceStream();
+#ifdef MOZ_WEBRTC
+    if (source && source->NeedsMixing()) {
+      aNeedsAEC = true;
+    }
+#endif
+    // If this is a AudioNodeStream, force a AudioCallbackDriver.
     if (stream->AsAudioNodeStream()) {
       audioTrackPresent = true;
-      break;
+    } else {
+      for (StreamTracks::TrackIter tracks(stream->GetStreamTracks(), MediaSegment::AUDIO);
+           !tracks.IsEnded(); tracks.Next()) {
+        audioTrackPresent = true;
+      }
     }
-
-    if (!StreamTracks::TrackIter(
-            stream->GetStreamTracks(),
-            MediaSegment::AUDIO
-          ).IsEnded()) {
-      audioTrackPresent = true;
-      break;
-    }
-
-    if (SourceMediaStream* source = stream->AsSourceStream()) {
+    if (source) {
       audioTrackPresent = source->HasPendingAudioTrack();
-    }
-
-    if (audioTrackPresent) {
-      break;
     }
   }
 
@@ -366,6 +365,9 @@ MediaStreamGraphImpl::AudioTrackPresent()
   if (!audioTrackPresent && mInputDeviceUsers.Count() != 0) {
     NS_WARNING("No audio tracks, but full-duplex audio is enabled!!!!!");
     audioTrackPresent = true;
+#ifdef MOZ_WEBRTC
+    aNeedsAEC = true;
+#endif
   }
 
   return audioTrackPresent;
@@ -375,7 +377,8 @@ void
 MediaStreamGraphImpl::UpdateStreamOrder()
 {
   MOZ_ASSERT(OnGraphThreadOrNotRunning());
-  bool audioTrackPresent = AudioTrackPresent();
+  bool shouldAEC = false;
+  bool audioTrackPresent = AudioTrackPresent(shouldAEC);
 
   // Note that this looks for any audio streams, input or output, and switches to a
   // SystemClockDriver if there are none.  However, if another is already pending, let that
@@ -892,7 +895,8 @@ MediaStreamGraphImpl::CloseAudioInputImpl(AudioDataListener *aListener)
   mAudioInputs.RemoveElement(aListener);
 
   // Switch Drivers since we're adding or removing an input (to nothing/system or output only)
-  bool audioTrackPresent = AudioTrackPresent();
+  bool shouldAEC = false;
+  bool audioTrackPresent = AudioTrackPresent(shouldAEC);
 
   MonitorAutoLock mon(mMonitor);
   if (LifecycleStateRef() == LIFECYCLE_RUNNING) {
@@ -3641,25 +3645,21 @@ MediaStreamGraphImpl::Destroy()
 }
 
 static
-uint32_t WindowToHash(nsPIDOMWindowInner* aWindow,
-                      TrackRate aSampleRate)
+uint32_t WindowToHash(nsPIDOMWindowInner* aWindow)
 {
   uint32_t hashkey = 0;
 
   hashkey = AddToHash(hashkey, aWindow);
-  hashkey = AddToHash(hashkey, aSampleRate);
 
   return hashkey;
 }
 
 MediaStreamGraph*
-MediaStreamGraph::GetInstanceIfExists(nsPIDOMWindowInner* aWindow,
-                                      TrackRate aSampleRate)
+MediaStreamGraph::GetInstanceIfExists(nsPIDOMWindowInner* aWindow)
 {
   MOZ_ASSERT(NS_IsMainThread(), "Main thread only");
 
-  TrackRate sampleRate = aSampleRate ? aSampleRate : CubebUtils::PreferredSampleRate();
-  uint32_t hashkey = WindowToHash(aWindow, sampleRate);
+  uint32_t hashkey = WindowToHash(aWindow);
 
   MediaStreamGraphImpl* graph = nullptr;
   gGraphs.Get(hashkey, &graph);
@@ -3668,14 +3668,12 @@ MediaStreamGraph::GetInstanceIfExists(nsPIDOMWindowInner* aWindow,
 
 MediaStreamGraph*
 MediaStreamGraph::GetInstance(MediaStreamGraph::GraphDriverType aGraphDriverRequested,
-                              nsPIDOMWindowInner* aWindow,
-                              TrackRate aSampleRate)
+                              nsPIDOMWindowInner* aWindow)
 {
   MOZ_ASSERT(NS_IsMainThread(), "Main thread only");
 
-  TrackRate sampleRate = aSampleRate ? aSampleRate : CubebUtils::PreferredSampleRate();
   MediaStreamGraphImpl* graph =
-    static_cast<MediaStreamGraphImpl*>(GetInstanceIfExists(aWindow, sampleRate));
+    static_cast<MediaStreamGraphImpl*>(GetInstanceIfExists(aWindow));
 
   if (!graph) {
     if (!gMediaStreamGraphShutdownBlocker) {
@@ -3721,14 +3719,14 @@ MediaStreamGraph::GetInstance(MediaStreamGraph::GraphDriverType aGraphDriverRequ
       mainThread = AbstractThread::MainThread();
     }
     graph = new MediaStreamGraphImpl(aGraphDriverRequested,
-                                     sampleRate,
+                                     CubebUtils::PreferredSampleRate(),
                                      mainThread);
 
-    uint32_t hashkey = WindowToHash(aWindow, sampleRate);
+    uint32_t hashkey = WindowToHash(aWindow);
     gGraphs.Put(hashkey, graph);
 
     LOG(LogLevel::Debug,
-        ("Starting up MediaStreamGraph %p for window %p for sample rate %d", graph, aWindow, sampleRate));
+        ("Starting up MediaStreamGraph %p for window %p", graph, aWindow));
   }
 
   return graph;
@@ -4150,7 +4148,8 @@ MediaStreamGraphImpl::ApplyAudioContextOperationImpl(
   // This is the same logic as in UpdateStreamOrder, but it's simpler to have it
   // here as well so we don't have to store the Promise(s) on the Graph.
   if (aOperation != AudioContextOperation::Resume) {
-    bool audioTrackPresent = AudioTrackPresent();
+    bool shouldAEC = false;
+    bool audioTrackPresent = AudioTrackPresent(shouldAEC);
 
     if (!audioTrackPresent && CurrentDriver()->AsAudioCallbackDriver()) {
       CurrentDriver()->AsAudioCallbackDriver()->

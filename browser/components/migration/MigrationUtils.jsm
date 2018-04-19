@@ -375,10 +375,7 @@ var MigratorPrototype = {
 
         // Import the default bookmarks. We ignore whether or not we succeed.
         await BookmarkHTMLUtils.importFromURL(
-          "chrome://browser/locale/bookmarks.html", {
-            replace: true,
-            source: PlacesUtils.bookmarks.SOURCES.RESTORE_ON_STARTUP,
-          }).catch(Cu.reportError);
+          "chrome://browser/locale/bookmarks.html", true).catch(r => r);
 
         // We'll tell nsBrowserGlue we've imported bookmarks, but before that
         // we need to make sure we're going to know when it's finished
@@ -1042,12 +1039,12 @@ var MigrationUtils = Object.freeze({
     }, ex => Cu.reportError(ex));
   },
 
-  insertVisitsWrapper(pageInfos) {
-    this._importQuantities.history += pageInfos.length;
+  insertVisitsWrapper(places, options) {
+    this._importQuantities.history += places.length;
     if (gKeepUndoData) {
-      this._updateHistoryUndo(pageInfos);
+      this._updateHistoryUndo(places);
     }
-    return PlacesUtils.history.insertMany(pageInfos);
+    return PlacesUtils.asyncHistory.updatePlaces(places, options, true);
   },
 
   async insertLoginsWrapper(logins) {
@@ -1101,26 +1098,20 @@ var MigrationUtils = Object.freeze({
     return this._postProcessUndoData(undoData);
   },
 
-  _updateHistoryUndo(pageInfos) {
+  _updateHistoryUndo(places) {
     let visits = gUndoData.get("visits");
     let visitMap = new Map(visits.map(v => [v.url, v]));
-    for (let pageInfo of pageInfos) {
-      let visitCount = pageInfo.visits.length;
+    for (let place of places) {
+      let visitCount = place.visits.length;
       let first, last;
       if (visitCount > 1) {
-        let dates = pageInfo.visits.map(v => v.date);
-        first = Math.min.apply(Math, dates);
-        last = Math.max.apply(Math, dates);
+        let visitDates = place.visits.map(v => v.visitDate);
+        first = Math.min.apply(Math, visitDates);
+        last = Math.max.apply(Math, visitDates);
       } else {
-        first = last = pageInfo.visits[0].date;
+        first = last = place.visits[0].visitDate;
       }
-      let url = pageInfo.url;
-      if (url instanceof Ci.nsIURI) {
-        url = pageInfo.url.spec;
-      } else if (typeof url != "string") {
-        pageInfo.url.href;
-      }
-
+      let url = place.uri.spec;
       try {
         new URL(url);
       } catch (ex) {

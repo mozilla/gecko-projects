@@ -7,7 +7,7 @@
  * Test if sorting columns in the network table works correctly with new requests.
  */
 
-add_task(async function() {
+add_task(async function () {
   let { L10N } = require("devtools/client/netmonitor/src/utils/l10n");
 
   let { monitor } = await initNetMonitor(SORTING_URL);
@@ -51,7 +51,8 @@ add_task(async function() {
   await performRequestsInContent(requests);
   await wait;
 
-  store.dispatch(Actions.toggleNetworkDetails());
+  EventUtils.sendMouseEvent({ type: "click" },
+    document.querySelector(".network-details-panel-toggle"));
 
   isnot(getSelectedRequest(store.getState()), undefined,
     "There should be a selected item in the requests menu.");
@@ -158,7 +159,7 @@ add_task(async function() {
     let requestItems = document.querySelectorAll(".request-list-item");
     for (let requestItem of requestItems) {
       requestItem.scrollIntoView();
-      let requestsListStatus = requestItem.querySelector(".status-code");
+      let requestsListStatus = requestItem.querySelector(".requests-list-status");
       EventUtils.sendMouseEvent({ type: "mouseover" }, requestsListStatus);
       await waitUntil(() => requestsListStatus.title);
     }

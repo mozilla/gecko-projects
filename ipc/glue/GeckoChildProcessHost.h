@@ -74,8 +74,6 @@ public:
 
   virtual bool PerformAsyncLaunch(StringVector aExtraOpts=StringVector());
 
-  virtual void OnProcessHandleReady(ProcessHandle aProcessHandle);
-  virtual void OnProcessLaunchError();
   virtual void OnChannelConnected(int32_t peer_pid) override;
   virtual void OnMessageReceived(IPC::Message&& aMsg) override;
   virtual void OnChannelError() override;
@@ -102,16 +100,6 @@ public:
 #ifdef XP_MACOSX
   task_t GetChildTask() {
     return mChildTask;
-  }
-#endif
-
-#ifdef XP_WIN
-  void AddHandleToShare(HANDLE aHandle) {
-    mLaunchOptions->handles_to_inherit.push_back(aHandle);
-  }
-#else
-  void AddFdToRemap(int aSrcFd, int aDstFd) {
-    mLaunchOptions->fds_to_remap.push_back(std::make_pair(aSrcFd, aDstFd));
   }
 #endif
 

@@ -28,6 +28,17 @@ class PropertyName;
 
 }  /* namespace js */
 
+extern bool
+AtomIsPinned(JSContext* cx, JSAtom* atom);
+
+#ifdef DEBUG
+
+// This may be called either with or without the atoms lock held.
+extern bool
+AtomIsPinnedInRuntime(JSRuntime* rt, JSAtom* atom);
+
+#endif // DEBUG
+
 /* Well-known predefined C strings. */
 #define DECLARE_PROTO_STR(name,init,clasp) extern const char js_##name##_str[];
 JS_FOR_EACH_PROTOTYPE(DECLARE_PROTO_STR)
@@ -36,6 +47,11 @@ JS_FOR_EACH_PROTOTYPE(DECLARE_PROTO_STR)
 #define DECLARE_CONST_CHAR_STR(idpart, id, text)  extern const char js_##idpart##_str[];
 FOR_EACH_COMMON_PROPERTYNAME(DECLARE_CONST_CHAR_STR)
 #undef DECLARE_CONST_CHAR_STR
+
+/* Constant strings that are not atomized. */
+extern const char js_getter_str[];
+extern const char js_send_str[];
+extern const char js_setter_str[];
 
 namespace js {
 
@@ -80,11 +96,17 @@ template <AllowGC allowGC>
 extern JSAtom*
 ToAtom(JSContext* cx, typename MaybeRooted<JS::Value, allowGC>::HandleType v);
 
-// These functions are declared in vm/Xdr.h
-//
-// template<XDRMode mode>
-// XDRResult
-// XDRAtom(XDRState<mode>* xdr, js::MutableHandleAtom atomp);
+enum XDRMode {
+    XDR_ENCODE,
+    XDR_DECODE
+};
+
+template <XDRMode mode>
+class XDRState;
+
+template<XDRMode mode>
+bool
+XDRAtom(XDRState<mode>* xdr, js::MutableHandleAtom atomp);
 
 extern JS::Handle<PropertyName*>
 ClassName(JSProtoKey key, JSContext* cx);

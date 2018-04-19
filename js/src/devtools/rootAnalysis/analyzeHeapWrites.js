@@ -34,7 +34,10 @@ function checkExternalFunction(entry)
         "Servo_IsWorkerThread",
         /nsIFrame::AppendOwnedAnonBoxes/,
         // Assume that atomic accesses are threadsafe.
-        /^__atomic_/,
+        /^__atomic_fetch_/,
+        /^__atomic_load_/,
+        /^__atomic_store_/,
+        /^__atomic_thread_fence/,
     ];
     if (entry.matches(whitelist))
         return;
@@ -297,10 +300,6 @@ function checkFieldWrite(entry, location, fields)
 
         if (/\bThreadLocal<\b/.test(field))
             return;
-
-        // Debugging check for string corruption.
-        if (field == "nsStringBuffer.mCanary")
-            return;
     }
 
     var str = "";
@@ -476,7 +475,7 @@ function ignoreContents(entry)
 
         // The analysis thinks we'll write to mBits in the DoGetStyleFoo<false>
         // call.  Maybe the template parameter confuses it?
-        /ComputedStyle::PeekStyle/,
+        /nsStyleContext::PeekStyle/,
 
         // The analysis can't cope with the indirection used for the objects
         // being initialized here, from nsCSSValue::Array::Create to the return
@@ -925,7 +924,6 @@ function processAssign(body, entry, location, lhs, edge)
                 return;
         } else if (lhs.Exp[0].Kind == "Fld") {
             const {
-                Name: [ fieldName ],
                 Type: {Kind, Type: fieldType},
                 FieldCSU: {Type: {Kind: containerTypeKind,
                                   Name: containerTypeName}}
@@ -935,10 +933,11 @@ function processAssign(body, entry, location, lhs, edge)
             if (containerTypeKind == 'CSU' &&
                 Kind == 'Pointer' &&
                 isEdgeSafeArgument(entry, containerExpr) &&
-                isSafeMemberPointer(containerTypeName, fieldName, fieldType))
+                isSafeMemberPointer(containerTypeName, fieldType))
             {
                 return;
             }
+
         }
         if (fields.length)
             checkFieldWrite(entry, location, fields);
@@ -1199,16 +1198,6 @@ function expressionValueEdge(exp) {
     return edge;
 }
 
-// Examples:
-//
-//   void foo(type* aSafe) {
-//     type* safeBecauseNew = new type(...);
-//     type* unsafeBecauseMultipleAssignments = new type(...);
-//     if (rand())
-//       unsafeBecauseMultipleAssignments = bar();
-//     type* safeBecauseSingleAssignmentOfSafe = aSafe;
-//   }
-//
 function isSafeVariable(entry, variable)
 {
     var index = safeArgumentIndex(variable);
@@ -1255,8 +1244,7 @@ function isSafeLocalVariable(entry, name)
             // itself is threadsafe.
             if ((isDirectCall(edge, /operator\[\]/) ||
                  isDirectCall(edge, /nsTArray.*?::InsertElementAt\b/) ||
-                 isDirectCall(edge, /nsStyleContent::ContentAt/) ||
-                 isDirectCall(edge, /nsTArray_base.*?::GetAutoArrayBuffer\b/)) &&
+                 isDirectCall(edge, /nsStyleContent::ContentAt/)) &&
                 isEdgeSafeArgument(entry, edge.PEdgeCallInstance.Exp))
             {
                 return true;
@@ -1355,12 +1343,8 @@ function isSafeLocalVariable(entry, name)
     return true;
 }
 
-function isSafeMemberPointer(containerType, memberName, memberType)
+function isSafeMemberPointer(containerType, memberType)
 {
-    // nsTArray owns its header.
-    if (containerType.includes("nsTArray_base") && memberName == "mHdr")
-        return true;
-
     if (memberType.Kind != 'Pointer')
         return false;
 

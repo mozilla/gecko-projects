@@ -16,10 +16,6 @@
 #include "mozilla/webrender/RenderTextureHost.h"
 #include "mozilla/widget/CompositorWidget.h"
 
-#ifdef XP_WIN
-#include "mozilla/widget/WinCompositorWindowThread.h"
-#endif
-
 namespace mozilla {
 namespace wr {
 
@@ -64,9 +60,6 @@ RenderThread::Start()
   }
 
   sRenderThread = new RenderThread(thread);
-#ifdef XP_WIN
-  widget::WinCompositorWindowThread::Start();
-#endif
 }
 
 // static
@@ -90,9 +83,6 @@ RenderThread::ShutDown()
   task.Wait();
 
   sRenderThread = nullptr;
-#ifdef XP_WIN
-  widget::WinCompositorWindowThread::ShutDown();
-#endif
 }
 
 void
@@ -232,19 +222,17 @@ RenderThread::RunEvent(wr::WindowId aWindowId, UniquePtr<RendererEvent> aEvent)
 
 static void
 NotifyDidRender(layers::CompositorBridgeParentBase* aBridge,
-                wr::WrPipelineInfo aInfo,
+                wr::WrPipelineInfo* aInfo,
                 TimeStamp aStart,
                 TimeStamp aEnd)
 {
-  for (uintptr_t i = 0; i < aInfo.epochs.length; i++) {
-    aBridge->NotifyDidCompositeToPipeline(
-        aInfo.epochs.data[i].pipeline_id,
-        aInfo.epochs.data[i].epoch,
-        aStart,
-        aEnd);
+  wr::WrPipelineId pipeline;
+  wr::WrEpoch epoch;
+  while (wr_pipeline_info_next_epoch(aInfo, &pipeline, &epoch)) {
+    aBridge->NotifyDidCompositeToPipeline(pipeline, epoch, aStart, aEnd);
   }
-  for (uintptr_t i = 0; i < aInfo.removed_pipelines.length; i++) {
-    aBridge->NotifyPipelineRemoved(aInfo.removed_pipelines.data[i]);
+  while (wr_pipeline_info_next_removed_pipeline(aInfo, &pipeline)) {
+    aBridge->NotifyPipelineRemoved(pipeline);
   }
 
   wr_pipeline_info_delete(aInfo);

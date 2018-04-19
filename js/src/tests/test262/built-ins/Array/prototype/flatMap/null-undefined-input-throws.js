@@ -19,4 +19,5 @@ assert.throws(TypeError, function() {
   [].flatMap.call(void 0);
 }, 'undefined');
 
+
 reportCompare(0, 0);

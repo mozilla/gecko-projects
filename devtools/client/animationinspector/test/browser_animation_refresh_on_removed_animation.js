@@ -8,16 +8,16 @@ requestLongerTimeout(2);
 
 // Test that the panel content refreshes when animations are removed.
 
-add_task(async function() {
-  await addTab(URL_ROOT + "doc_simple_animation.html");
+add_task(function* () {
+  yield addTab(URL_ROOT + "doc_simple_animation.html");
 
-  let {inspector, panel} = await openAnimationInspector();
-  await testRefreshOnRemove(inspector, panel);
+  let {inspector, panel} = yield openAnimationInspector();
+  yield testRefreshOnRemove(inspector, panel);
 });
 
-async function testRefreshOnRemove(inspector, panel) {
+function* testRefreshOnRemove(inspector, panel) {
   info("Select a animated node");
-  await selectNodeAndWaitForAnimations(".animated", inspector);
+  yield selectNodeAndWaitForAnimations(".animated", inspector);
 
   assertAnimationsDisplayed(panel, 1);
 
@@ -25,25 +25,25 @@ async function testRefreshOnRemove(inspector, panel) {
   let onPanelUpdated = panel.once(panel.UI_UPDATED_EVENT);
 
   info("Remove the animation on the node by removing the class");
-  await executeInContent("devtools:test:setAttribute", {
+  yield executeInContent("devtools:test:setAttribute", {
     selector: ".animated",
     attributeName: "class",
     attributeValue: "ball still test-node"
   });
 
-  await onPanelUpdated;
+  yield onPanelUpdated;
   ok(true, "The panel update event was fired");
 
   assertAnimationsDisplayed(panel, 0);
 
   info("Add an finite animation on the node again, and wait for it to appear");
   onPanelUpdated = panel.once(panel.UI_UPDATED_EVENT);
-  await executeInContent("devtools:test:setAttribute", {
+  yield executeInContent("devtools:test:setAttribute", {
     selector: ".test-node",
     attributeName: "class",
     attributeValue: "ball short test-node"
   });
-  await onPanelUpdated;
-  await waitForAnimationSelecting(panel);
+  yield onPanelUpdated;
+  yield waitForAnimationSelecting(panel);
   assertAnimationsDisplayed(panel, 1);
 }

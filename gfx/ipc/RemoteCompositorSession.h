@@ -20,7 +20,7 @@ public:
                           CompositorBridgeChild* aChild,
                           CompositorWidgetDelegate* aWidgetDelegate,
                           APZCTreeManagerChild* aAPZ,
-                          const LayersId& aRootLayerTreeId);
+                          const uint64_t& aRootLayerTreeId);
   ~RemoteCompositorSession() override;
 
   CompositorBridgeParent* GetInProcessBridge() const override;

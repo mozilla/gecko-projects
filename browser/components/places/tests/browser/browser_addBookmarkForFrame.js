@@ -26,7 +26,7 @@ async function withAddBookmarkForFrame(taskFn) {
     bookmarkFrame.click();
   }, taskFn);
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 }
 
 add_task(async function test_open_add_bookmark_for_frame() {

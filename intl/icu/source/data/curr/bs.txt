@@ -648,10 +648,6 @@ bs{
         }
         MRO{
             "MRO",
-            "Mauritanijska ugvija (1973–2017)",
-        }
-        MRU{
-            "MRU",
             "Mauritanijska ugvija",
         }
         MTL{
@@ -880,10 +876,6 @@ bs{
         }
         STD{
             "STD",
-            "Dobra Sao Toma i Principa (1977–2017)",
-        }
-        STN{
-            "STN",
             "Dobra Sao Toma i Principa",
         }
         SUR{
@@ -1235,7 +1227,7 @@ bs{
         SHP{"£"}
         SRD{"$"}
         SSP{"£"}
-        STN{"Db"}
+        STD{"Db"}
         SYP{"£"}
         THB{"฿"}
         TOP{"T$"}
@@ -2061,11 +2053,6 @@ bs{
             other{"makaonskih pataka"}
         }
         MRO{
-            few{"mauritanijske ugvije (1973–2017)"}
-            one{"mauritanijska ugvija (1973–2017)"}
-            other{"mauritanijskih ugvija (1973–2017)"}
-        }
-        MRU{
             few{"mauritanijske ugvije"}
             one{"mauritanijska ugvija"}
             other{"mauritanijskih ugvija"}
@@ -2351,11 +2338,6 @@ bs{
             other{"južnosudanskih funti"}
         }
         STD{
-            few{"dobre Sao Toma i Principa (1977–2017)"}
-            one{"dobra Sao Toma i Principa (1977–2017)"}
-            other{"dobri Sao Toma i Principa (1977–2017)"}
-        }
-        STN{
             few{"dobre Sao Toma i Principa"}
             one{"dobra Sao Toma i Principa"}
             other{"dobri Sao Toma i Principa"}
@@ -2701,5 +2683,5 @@ bs{
         one{"{0} {1}"}
         other{"{0} {1}"}
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.37.5"}
 }

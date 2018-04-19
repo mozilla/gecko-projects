@@ -995,13 +995,13 @@ async function scheduleTools() {
   }));
 
   queue.scheduleTask(merge(base, {
-    symbol: "scan-build",
-    name: "scan-build",
-    image: FUZZ_IMAGE,
+    symbol: "scan-build-5.0",
+    name: "scan-build-5.0",
+    image: LINUX_IMAGE,
     env: {
       USE_64: "1",
-      CC: "clang",
-      CCC: "clang++",
+      CC: "clang-5.0",
+      CCC: "clang++-5.0",
     },
     artifacts: {
       public: {
@@ -1089,18 +1089,6 @@ async function scheduleTools() {
       "/bin/bash",
       "-c",
       "bin/checkout.sh && nss/automation/taskcluster/scripts/run_saw.sh poly1305"
-    ]
-  }));
-
-  queue.scheduleTask(merge(base, {
-    symbol: "Coverage",
-    name: "Coverage",
-    image: FUZZ_IMAGE,
-    features: ["allowPtrace"],
-    command: [
-      "/bin/bash",
-      "-c",
-      "bin/checkout.sh && nss/automation/taskcluster/scripts/gen_coverage_report.sh"
     ]
   }));
 

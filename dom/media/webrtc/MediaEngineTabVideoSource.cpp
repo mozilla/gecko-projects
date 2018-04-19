@@ -11,6 +11,7 @@
 #include "mozilla/UniquePtrExtensions.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "nsGlobalWindow.h"
+#include "nsIDOMClientRect.h"
 #include "nsIDocShell.h"
 #include "nsIPresShell.h"
 #include "nsPresContext.h"

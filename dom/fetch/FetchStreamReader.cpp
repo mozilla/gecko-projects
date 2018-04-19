@@ -16,6 +16,38 @@
 namespace mozilla {
 namespace dom {
 
+namespace {
+
+class FetchStreamReaderWorkerHolder final : public WorkerHolder
+{
+public:
+  explicit FetchStreamReaderWorkerHolder(FetchStreamReader* aReader)
+    : WorkerHolder("FetchStreamReaderWorkerHolder",
+                   WorkerHolder::Behavior::AllowIdleShutdownStart)
+    , mReader(aReader)
+    , mWasNotified(false)
+  {}
+
+  bool Notify(WorkerStatus aStatus) override
+  {
+    if (!mWasNotified) {
+      mWasNotified = true;
+      // The WorkerPrivate does have a context available, and we could pass it
+      // here to trigger cancellation of the reader, but the author of this
+      // comment chickened out.
+      mReader->CloseAndRelease(nullptr, NS_ERROR_DOM_INVALID_STATE_ERR);
+    }
+
+    return true;
+  }
+
+private:
+  RefPtr<FetchStreamReader> mReader;
+  bool mWasNotified;
+};
+
+} // anonymous
+
 NS_IMPL_CYCLE_COLLECTING_ADDREF(FetchStreamReader)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(FetchStreamReader)
 
@@ -63,22 +95,17 @@ FetchStreamReader::Create(JSContext* aCx, nsIGlobalObject* aGlobal,
     WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
     MOZ_ASSERT(workerPrivate);
 
-    RefPtr<WeakWorkerRef> workerRef =
-      WeakWorkerRef::Create(workerPrivate, [streamReader]() {
-        // The WorkerPrivate does have a context available, and we could pass
-        // it here to trigger cancellation of the reader, but the author of
-        // this comment chickened out.
-        streamReader->CloseAndRelease(nullptr, NS_ERROR_DOM_INVALID_STATE_ERR);
-      });
-
-    if (NS_WARN_IF(!workerRef)) {
+    // We need to know when the worker goes away.
+    UniquePtr<FetchStreamReaderWorkerHolder> holder(
+      new FetchStreamReaderWorkerHolder(streamReader));
+    if (NS_WARN_IF(!holder->HoldWorker(workerPrivate, Closing))) {
       streamReader->mPipeOut->CloseWithStatus(NS_ERROR_DOM_INVALID_STATE_ERR);
       return NS_ERROR_DOM_INVALID_STATE_ERR;
     }
 
     // These 2 objects create a ref-cycle here that is broken when the stream is
     // closed or the worker shutsdown.
-    streamReader->mWorkerRef = workerRef.forget();
+    streamReader->mWorkerHolder = Move(holder);
   }
 
   pipeIn.forget(aInputStream);
@@ -103,9 +130,9 @@ FetchStreamReader::~FetchStreamReader()
 
 // If a context is provided, an attempt will be made to cancel the reader.  The
 // only situation where we don't expect to have a context is when closure is
-// being triggered from the destructor or the WorkerRef is notifying.  If
+// being triggered from the destructor or the WorkerHolder is notifying.  If
 // we're at the destructor, it's far too late to cancel anything.  And if the
-// WorkerRef is being notified, the global is going away, so there's also
+// WorkerHolder is being notified, the global is going away, so there's also
 // no need to do further JS work.
 void
 FetchStreamReader::CloseAndRelease(JSContext* aCx, nsresult aStatus)
@@ -142,7 +169,7 @@ FetchStreamReader::CloseAndRelease(JSContext* aCx, nsresult aStatus)
   mPipeOut->CloseWithStatus(aStatus);
   mPipeOut = nullptr;
 
-  mWorkerRef = nullptr;
+  mWorkerHolder = nullptr;
 
   mReader = nullptr;
   mBuffer = nullptr;
@@ -194,7 +221,7 @@ FetchStreamReader::OnOutputStreamReady(nsIAsyncOutputStream* aStream)
 
   // TODO: We need to verify this is the correct global per the spec.
   //       See bug 1385890.
-  AutoEntryScript aes(mGlobal, "ReadableStreamReader.read", !mWorkerRef);
+  AutoEntryScript aes(mGlobal, "ReadableStreamReader.read", !mWorkerHolder);
 
   JS::Rooted<JSObject*> reader(aes.cx(), mReader);
   JS::Rooted<JSObject*> promise(aes.cx(),

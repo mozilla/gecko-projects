@@ -27,6 +27,7 @@
 #include "nsAtom.h"
 #include "nsIContent.h"
 #include "nsIContentIterator.h"
+#include "nsIDOMElement.h"
 #include "nsNameSpaceManager.h"
 #include "nsINode.h"
 #include "nsISupportsImpl.h"

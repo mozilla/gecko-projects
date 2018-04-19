@@ -16,7 +16,6 @@
 namespace mozilla {
 namespace layers {
 
-class APZSampler;
 class CompositableHost;
 class CompositingRenderTarget;
 struct PreparedData;
@@ -55,9 +54,7 @@ class ContainerLayerComposite : public ContainerLayer,
                         const RenderTargetIntRect& aClipRect);
 
   template<class ContainerT>
-  void RenderMinimap(ContainerT* aContainer,
-                     const RefPtr<APZSampler>& aSampler,
-                     LayerManagerComposite* aManager,
+  void RenderMinimap(ContainerT* aContainer, LayerManagerComposite* aManager,
                      const RenderTargetIntRect& aClipRect, Layer* aLayer);
 public:
   explicit ContainerLayerComposite(LayerManagerComposite *aManager);
@@ -108,15 +105,15 @@ public:
   // post-scales.
   virtual float GetPostXScale() const override {
     if (mScaleToResolution) {
-      return mSimpleAttrs.GetPostXScale() * mPresShellResolution;
+      return mSimpleAttrs.PostXScale() * mPresShellResolution;
     }
-    return mSimpleAttrs.GetPostXScale();
+    return mSimpleAttrs.PostXScale();
   }
   virtual float GetPostYScale() const override {
     if (mScaleToResolution) {
-      return mSimpleAttrs.GetPostYScale() * mPresShellResolution;
+      return mSimpleAttrs.PostYScale() * mPresShellResolution;
     }
-    return mSimpleAttrs.GetPostYScale();
+    return mSimpleAttrs.PostYScale();
   }
 
   virtual const char* Name() const override { return "ContainerLayerComposite"; }

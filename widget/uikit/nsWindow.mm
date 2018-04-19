@@ -34,7 +34,6 @@
 #include "mozilla/BasicEvents.h"
 #include "mozilla/TouchEvents.h"
 #include "mozilla/Unused.h"
-#include "mozilla/dom/MouseEventBinding.h"
 
 #include "GeckoProfiler.h"
 
@@ -148,7 +147,7 @@ private:
     event.mClickCount = 1;
     event.button = WidgetMouseEvent::eLeftButton;
     event.mTime = PR_IntervalNow();
-    event.inputSource = MouseEventBinding::MOZ_SOURCE_UNKNOWN;
+    event.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
 
     nsEventStatus status;
     aWindow->DispatchEvent(&event, status);

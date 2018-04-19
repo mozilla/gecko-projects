@@ -78,7 +78,6 @@ class nsWindow final : public nsBaseWidget
 public:
     typedef mozilla::gfx::DrawTarget DrawTarget;
     typedef mozilla::WidgetEventTime WidgetEventTime;
-    typedef mozilla::WidgetKeyboardEvent WidgetKeyboardEvent;
     typedef mozilla::widget::PlatformCompositorWidgetDelegate PlatformCompositorWidgetDelegate;
 
     nsWindow();
@@ -229,8 +228,6 @@ public:
     virtual void       EndRemoteDrawingInRegion(mozilla::gfx::DrawTarget* aDrawTarget,
                                                 LayoutDeviceIntRegion& aInvalidRegion) override;
 
-    void               SetProgress(unsigned long progressPercent);
-
 private:
     void               UpdateAlpha(mozilla::gfx::SourceSurface* aSourceSurface, nsIntRect aBoundsRect);
 
@@ -281,32 +278,10 @@ public:
                                          guint aTime);
     static void        UpdateDragStatus (GdkDragContext *aDragContext,
                                          nsIDragService *aDragService);
-    /**
-     * DispatchKeyDownOrKeyUpEvent() dispatches eKeyDown or eKeyUp event.
-     *
-     * @param aEvent            A native GDK_KEY_PRESS or GDK_KEY_RELEASE
-     *                          event.
-     * @param aProcessedByIME   true if the event is handled by IME.
-     * @param aIsCancelled      [Out] true if the default is prevented.
-     * @return                  true if eKeyDown event is actually dispatched.
-     *                          Otherwise, false.
-     */
-    bool DispatchKeyDownOrKeyUpEvent(GdkEventKey* aEvent,
-                                     bool aProcessedByIME,
-                                     bool* aIsCancelled);
-
-    /**
-     * DispatchKeyDownOrKeyUpEvent() dispatches eKeyDown or eKeyUp event.
-     *
-     * @param aEvent            An eKeyDown or eKeyUp event.  This will be
-     *                          dispatched as is.
-     * @param aIsCancelled      [Out] true if the default is prevented.
-     * @return                  true if eKeyDown event is actually dispatched.
-     *                          Otherwise, false.
-     */
-    bool DispatchKeyDownOrKeyUpEvent(WidgetKeyboardEvent& aEvent,
-                                     bool* aIsCancelled);
-
+    // If this dispatched the keydown event actually, this returns TRUE,
+    // otherwise, FALSE.
+    bool               DispatchKeyDownEvent(GdkEventKey *aEvent,
+                                            bool *aIsCancelled);
     WidgetEventTime    GetWidgetEventTime(guint32 aEventTime);
     mozilla::TimeStamp GetEventTimeStamp(guint32 aEventTime);
     mozilla::CurrentX11TimeGetter* GetCurrentTimeGetter();
@@ -400,6 +375,8 @@ public:
 
     virtual bool WidgetTypeSupportsAcceleration() override;
 
+    bool DoDrawTitlebar() const;
+
     typedef enum { CSD_SUPPORT_SYSTEM,    // CSD including shadows
                    CSD_SUPPORT_CLIENT,    // CSD without shadows
                    CSD_SUPPORT_NONE,      // WM does not support CSD at all
@@ -409,7 +386,7 @@ public:
      * Get the support of Client Side Decoration by checking
      * the XDG_CURRENT_DESKTOP environment variable.
      */
-    static CSDSupportLevel GetSystemCSDSupportLevel();
+    static CSDSupportLevel GetCSDSupportLevel();
 
 protected:
     virtual ~nsWindow();
@@ -515,11 +492,9 @@ private:
     // window. See bug 1225044.
     unsigned int mPendingConfigures;
 
-    // Window titlebar rendering mode, CSD_SUPPORT_NONE if it's disabled
-    // for this window.
-    CSDSupportLevel    mCSDSupportLevel;
+    bool               mIsCSDAvailable;
     // If true, draw our own window titlebar.
-    bool               mDrawInTitlebar;
+    bool               mIsCSDEnabled;
     // Draggable titlebar region maintained by UpdateWindowDraggingRegion
     LayoutDeviceIntRegion mDraggableRegion;
 

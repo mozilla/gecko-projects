@@ -222,7 +222,7 @@ class ArenaLists
      * GC we only move the head of the of the list of spans back to the arena
      * only for the arena that was not fully allocated.
      */
-    ZoneData<AllAllocKindArray<FreeSpan*>> freeLists_;
+    ZoneGroupData<AllAllocKindArray<FreeSpan*>> freeLists_;
     AllAllocKindArray<FreeSpan*>& freeLists() { return freeLists_.ref(); }
     const AllAllocKindArray<FreeSpan*>& freeLists() const { return freeLists_.ref(); }
 
@@ -236,7 +236,7 @@ class ArenaLists
     // Arena) so the JITs can fall back gracefully.
     static FreeSpan placeholder;
 
-    ZoneOrGCTaskData<AllAllocKindArray<ArenaList>> arenaLists_;
+    ZoneGroupOrGCTaskData<AllAllocKindArray<ArenaList>> arenaLists_;
     ArenaList& arenaLists(AllocKind i) { return arenaLists_.ref()[i]; }
     const ArenaList& arenaLists(AllocKind i) const { return arenaLists_.ref()[i]; }
 
@@ -251,27 +251,27 @@ class ArenaLists
     const BackgroundFinalizeState& backgroundFinalizeState(AllocKind i) const { return backgroundFinalizeState_.ref()[i]; }
 
     /* For each arena kind, a list of arenas remaining to be swept. */
-    MainThreadOrGCTaskData<AllAllocKindArray<Arena*>> arenaListsToSweep_;
+    ActiveThreadOrGCTaskData<AllAllocKindArray<Arena*>> arenaListsToSweep_;
     Arena*& arenaListsToSweep(AllocKind i) { return arenaListsToSweep_.ref()[i]; }
     Arena* arenaListsToSweep(AllocKind i) const { return arenaListsToSweep_.ref()[i]; }
 
     /* During incremental sweeping, a list of the arenas already swept. */
-    ZoneOrGCTaskData<AllocKind> incrementalSweptArenaKind;
-    ZoneOrGCTaskData<ArenaList> incrementalSweptArenas;
+    ZoneGroupOrGCTaskData<AllocKind> incrementalSweptArenaKind;
+    ZoneGroupOrGCTaskData<ArenaList> incrementalSweptArenas;
 
     // Arena lists which have yet to be swept, but need additional foreground
     // processing before they are swept.
-    ZoneData<Arena*> gcShapeArenasToUpdate;
-    ZoneData<Arena*> gcAccessorShapeArenasToUpdate;
-    ZoneData<Arena*> gcScriptArenasToUpdate;
-    ZoneData<Arena*> gcObjectGroupArenasToUpdate;
+    ZoneGroupData<Arena*> gcShapeArenasToUpdate;
+    ZoneGroupData<Arena*> gcAccessorShapeArenasToUpdate;
+    ZoneGroupData<Arena*> gcScriptArenasToUpdate;
+    ZoneGroupData<Arena*> gcObjectGroupArenasToUpdate;
 
     // The list of empty arenas which are collected during sweep phase and released at the end of
     // sweeping every sweep group.
-    ZoneData<Arena*> savedEmptyArenas;
+    ZoneGroupData<Arena*> savedEmptyArenas;
 
   public:
-    explicit ArenaLists(JSRuntime* rt, JS::Zone* zone);
+    explicit ArenaLists(JSRuntime* rt, ZoneGroup* group);
     ~ArenaLists();
 
     const void* addressOfFreeList(AllocKind thingKind) const {

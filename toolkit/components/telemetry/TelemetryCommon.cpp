@@ -116,8 +116,7 @@ LogToBrowserConsole(uint32_t aLogLevel, const nsAString& aMsg)
   }
 
   nsCOMPtr<nsIScriptError> error(do_CreateInstance(NS_SCRIPTERROR_CONTRACTID));
-  error->Init(aMsg, EmptyString(), EmptyString(), 0, 0, aLogLevel,
-              "chrome javascript", false /* from private window */);
+  error->Init(aMsg, EmptyString(), EmptyString(), 0, 0, aLogLevel, "chrome javascript");
   console->LogMessage(error);
 }
 
@@ -169,13 +168,6 @@ IsValidIdentifierString(const nsACString& aStr, const size_t aMaxLength,
   }
 
   return true;
-}
-
-JSString*
-ToJSString(JSContext* cx, const nsACString& aStr)
-{
-  const NS_ConvertUTF8toUTF16 wide(aStr);
-  return JS_NewUCStringCopyN(cx, wide.Data(), wide.Length());
 }
 
 JSString*

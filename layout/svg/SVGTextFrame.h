@@ -34,7 +34,7 @@ class TextRenderedRunIterator;
 
 namespace dom {
 class SVGIRect;
-class SVGGeometryElement;
+class SVGPathElement;
 } // namespace dom
 
 /**
@@ -180,7 +180,7 @@ private:
 class SVGTextFrame final : public nsSVGDisplayContainerFrame
 {
   friend nsIFrame*
-  NS_NewSVGTextFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle);
+  NS_NewSVGTextFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
   friend class mozilla::CharIterator;
   friend class mozilla::GlyphMetricsUpdater;
@@ -197,8 +197,8 @@ class SVGTextFrame final : public nsSVGDisplayContainerFrame
   typedef mozilla::gfx::Point Point;
 
 protected:
-  explicit SVGTextFrame(ComputedStyle* aStyle)
-    : nsSVGDisplayContainerFrame(aStyle, kClassID)
+  explicit SVGTextFrame(nsStyleContext* aContext)
+    : nsSVGDisplayContainerFrame(aContext, kClassID)
     , mTrailingUndisplayedCharacters(0)
     , mFontSizeScaleFactor(1.0f)
     , mLastContextScale(1.0f)
@@ -238,7 +238,7 @@ public:
   }
 #endif
 
-  virtual void DidSetComputedStyle(ComputedStyle* aOldComputedStyle) override;
+  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) override;
 
   /**
    * Finds the nsTextFrame for the closest rendered run to the specified point.
@@ -538,8 +538,8 @@ private:
   bool ShouldRenderAsPath(nsTextFrame* aFrame, bool& aShouldPaintSVGGlyphs);
 
   // Methods to get information for a <textPath> frame.
-  mozilla::dom::SVGGeometryElement*
-  GetTextPathGeometryElement(nsIFrame* aTextPathFrame);
+  mozilla::dom::SVGPathElement*
+  GetTextPathPathElement(nsIFrame* aTextPathFrame);
   already_AddRefed<Path> GetTextPath(nsIFrame* aTextPathFrame);
   gfxFloat GetOffsetScale(nsIFrame* aTextPathFrame);
   gfxFloat GetStartOffset(nsIFrame* aTextPathFrame);

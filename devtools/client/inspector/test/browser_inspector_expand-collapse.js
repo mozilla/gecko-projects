@@ -9,17 +9,17 @@
 const TEST_URL = "data:text/html;charset=utf-8," +
                  "<div id='parent-node'><div id='child-node'></div></div>";
 
-add_task(async function() {
+add_task(function* () {
   // Test is often exceeding time-out threshold, similar to Bug 1137765
   requestLongerTimeout(2);
 
-  let {inspector} = await openInspectorForURL(TEST_URL);
+  let {inspector} = yield openInspectorForURL(TEST_URL);
 
   info("Selecting the parent node");
 
-  let front = await getNodeFrontForSelector("#parent-node", inspector);
+  let front = yield getNodeFrontForSelector("#parent-node", inspector);
 
-  await selectNode(front, inspector);
+  yield selectNode(front, inspector);
 
   info("Simulating context menu click on the selected node container.");
   let allMenuItems = openContextMenuAndGetAllItems(inspector, {
@@ -37,12 +37,12 @@ add_task(async function() {
   nodeMenuExpandElement.click();
 
   info("Waiting for expansion to occur");
-  await waitForMultipleChildrenUpdates(inspector);
+  yield waitForMultipleChildrenUpdates(inspector);
   let markUpContainer = getContainerForNodeFront(front, inspector);
   ok(markUpContainer.expanded, "node has been successfully expanded");
 
   // reselecting node after expansion
-  await selectNode(front, inspector);
+  yield selectNode(front, inspector);
 
   info("Testing whether collapse works properly");
   info("Simulating context menu click on the selected node container.");
@@ -59,6 +59,6 @@ add_task(async function() {
   nodeMenuCollapseElement.click();
 
   info("Waiting for collapse to occur");
-  await waitForMultipleChildrenUpdates(inspector);
+  yield waitForMultipleChildrenUpdates(inspector);
   ok(!markUpContainer.expanded, "node has been successfully collapsed");
 });

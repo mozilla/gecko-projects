@@ -9,8 +9,6 @@
 #include <string.h>
 #include <sys/mman.h>
 
-#include "mozilla/Sprintf.h"
-
 extern "C" {
 
 JNIEXPORT
@@ -58,7 +56,7 @@ Java_org_mozilla_gecko_mozglue_SharedMemory_map(JNIEnv *env, jobject jobj, jint 
   void* address = mmap(NULL, length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
   if (address == MAP_FAILED) {
     char msg[128];
-    SprintfLiteral(msg, "mmap failed. errno=%d", errno);
+    snprintf(msg, sizeof(msg), "mmap failed. errno=%d", errno);
     env->ThrowNew(env->FindClass("java/lang/NullPointerException"), msg);
     return 0;
   }

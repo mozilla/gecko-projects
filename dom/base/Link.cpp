@@ -184,7 +184,7 @@ Link::TryDNSPrefetchOrPreconnectOrPrefetchOrPreloadOrPrerender()
     nsCOMPtr<nsIURI> uri(GetURI());
     if (uri && mElement->OwnerDoc()) {
       mElement->OwnerDoc()->MaybePreconnect(uri,
-        Element::AttrValueToCORSMode(mElement->GetParsedAttr(nsGkAtoms::crossorigin)));
+        mElement->AttrValueToCORSMode(mElement->GetParsedAttr(nsGkAtoms::crossorigin)));
       return;
     }
   }
@@ -737,8 +737,7 @@ Link::GetSearch(nsAString &_search)
   nsAutoCString search;
   nsresult rv = url->GetQuery(search);
   if (NS_SUCCEEDED(rv) && !search.IsEmpty()) {
-    _search.Assign(u'?');
-    AppendUTF8toUTF16(search, _search);
+    CopyUTF8toUTF16(NS_LITERAL_CSTRING("?") + search, _search);
   }
 }
 
@@ -941,11 +940,9 @@ Link::AsValueToContentPolicy(const nsAttrValue& aValue)
   case DESTINATION_INVALID:
     return nsIContentPolicy::TYPE_INVALID;
   case DESTINATION_AUDIO:
-    return nsIContentPolicy::TYPE_INTERNAL_AUDIO;
   case DESTINATION_TRACK:
-    return nsIContentPolicy::TYPE_INTERNAL_TRACK;
   case DESTINATION_VIDEO:
-    return nsIContentPolicy::TYPE_INTERNAL_VIDEO;
+    return nsIContentPolicy::TYPE_MEDIA;
   case DESTINATION_FONT:
     return nsIContentPolicy::TYPE_FONT;
   case DESTINATION_IMAGE:

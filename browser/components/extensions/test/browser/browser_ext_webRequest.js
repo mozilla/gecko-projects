@@ -105,7 +105,7 @@ add_task(async function test_newTab() {
   let tab = await BrowserTestUtils.openNewForegroundTab(window.gBrowser, `${dummy}?newTab=${Math.random()}`);
 
   await extension.awaitMessage("done");
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });
 
 add_task(async function test_subframe() {

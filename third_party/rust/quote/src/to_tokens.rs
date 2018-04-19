@@ -2,7 +2,14 @@ use super::Tokens;
 
 use std::borrow::Cow;
 
-use proc_macro2::{Literal, Span, Term, TokenStream, TokenTree};
+use proc_macro2::{Literal, Span, Term, TokenNode, TokenTree, TokenStream};
+
+fn tt(kind: TokenNode) -> TokenTree {
+    TokenTree {
+        span: Span::def_site(),
+        kind: kind,
+    }
+}
 
 /// Types that can be interpolated inside a [`quote!`] invocation.
 ///
@@ -18,7 +25,7 @@ pub trait ToTokens {
     /// use quote::{Tokens, ToTokens};
     ///
     /// extern crate proc_macro2;
-    /// use proc_macro2::{TokenTree, Spacing, Span, Op};
+    /// use proc_macro2::{TokenTree, TokenNode, Spacing, Span};
     ///
     /// pub struct Path {
     ///     pub global: bool,
@@ -30,8 +37,14 @@ pub trait ToTokens {
     ///         for (i, segment) in self.segments.iter().enumerate() {
     ///             if i > 0 || self.global {
     ///                 // Double colon `::`
-    ///                 tokens.append(Op::new(':', Spacing::Joint));
-    ///                 tokens.append(Op::new(':', Spacing::Alone));
+    ///                 tokens.append(TokenTree {
+    ///                     span: Span::def_site(),
+    ///                     kind: TokenNode::Op(':', Spacing::Joint),
+    ///                 });
+    ///                 tokens.append(TokenTree {
+    ///                     span: Span::def_site(),
+    ///                     kind: TokenNode::Op(':', Spacing::Alone),
+    ///                 });
     ///             }
     ///             segment.to_tokens(tokens);
     ///         }
@@ -92,7 +105,7 @@ impl<T: ToTokens> ToTokens for Option<T> {
 
 impl ToTokens for str {
     fn to_tokens(&self, tokens: &mut Tokens) {
-        tokens.append(Literal::string(self));
+        tokens.append(tt(TokenNode::Literal(Literal::string(self))));
     }
 }
 
@@ -103,54 +116,49 @@ impl ToTokens for String {
 }
 
 macro_rules! primitive {
-    ($($t:ident => $name:ident)*) => ($(
+    ($($t:ident)*) => ($(
         impl ToTokens for $t {
             fn to_tokens(&self, tokens: &mut Tokens) {
-                tokens.append(Literal::$name(*self));
+                tokens.append(tt(TokenNode::Literal(Literal::$t(*self))));
             }
         }
     )*)
 }
 
 primitive! {
-    i8 => i8_suffixed
-    i16 => i16_suffixed
-    i32 => i32_suffixed
-    i64 => i64_suffixed
-    isize => isize_suffixed
-
-    u8 => u8_suffixed
-    u16 => u16_suffixed
-    u32 => u32_suffixed
-    u64 => u64_suffixed
-    usize => usize_suffixed
-
-    f32 => f32_suffixed
-    f64 => f64_suffixed
+    i8 i16 i32 i64 isize
+    u8 u16 u32 u64 usize
+    f32 f64
 }
 
 impl ToTokens for char {
     fn to_tokens(&self, tokens: &mut Tokens) {
-        tokens.append(Literal::character(*self));
+        tokens.append(tt(TokenNode::Literal(Literal::character(*self))));
     }
 }
 
 impl ToTokens for bool {
     fn to_tokens(&self, tokens: &mut Tokens) {
         let word = if *self { "true" } else { "false" };
-        tokens.append(Term::new(word, Span::call_site()));
+        tokens.append(tt(TokenNode::Term(Term::intern(word))));
     }
 }
 
 impl ToTokens for Term {
     fn to_tokens(&self, tokens: &mut Tokens) {
-        tokens.append(self.clone());
+        tokens.append(tt(TokenNode::Term(*self)));
     }
 }
 
 impl ToTokens for Literal {
     fn to_tokens(&self, tokens: &mut Tokens) {
-        tokens.append(self.clone());
+        tokens.append(tt(TokenNode::Literal(self.clone())));
+    }
+}
+
+impl ToTokens for TokenNode {
+    fn to_tokens(&self, tokens: &mut Tokens) {
+        tokens.append(tt(self.clone()));
     }
 }
 

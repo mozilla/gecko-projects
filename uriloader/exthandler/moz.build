@@ -106,8 +106,10 @@ if CONFIG['MOZ_ENABLE_DBUS']:
     ]
 
 EXTRA_COMPONENTS += [
-    'HandlerService.js',
-    'HandlerService.manifest',
+    'nsHandlerService-json.js',
+    'nsHandlerService-json.manifest',
+    'nsHandlerService.js',
+    'nsHandlerService.manifest',
     'nsWebHandlerApp.js',
     'nsWebHandlerApp.manifest',
 ]

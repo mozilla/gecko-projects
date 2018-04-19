@@ -59,7 +59,7 @@ CreateIframe(Element* aOpenerFrameElement, const nsAString& aName, bool aRemote)
                              aName, /* aNotify = */ false);
 
   // Indicate whether the iframe is should be remote.
-  popupFrameElement->SetAttr(kNameSpaceID_None, nsGkAtoms::remote,
+  popupFrameElement->SetAttr(kNameSpaceID_None, nsGkAtoms::Remote,
                              aRemote ? NS_LITERAL_STRING("true") :
                                        NS_LITERAL_STRING("false"),
                              /* aNotify = */ false);
@@ -87,12 +87,16 @@ DispatchCustomDOMEvent(Element* aFrameElement, const nsAString& aEventName,
   RefPtr<CustomEvent> event =
     NS_NewDOMCustomEvent(aFrameElement, presContext, nullptr);
 
+  ErrorResult res;
   event->InitCustomEvent(cx,
                          aEventName,
                          /* aCanBubble = */ true,
                          /* aCancelable = */ true,
-                         aDetailValue);
-
+                         aDetailValue,
+                         res);
+  if (res.Failed()) {
+    return false;
+  }
   event->SetTrusted(true);
   // Dispatch the event.
   // We don't initialize aStatus here, as our callers have already done so.
@@ -182,7 +186,7 @@ BrowserElementParent::OpenWindowOOP(TabParent* aOpenerTabParent,
                                     const nsAString& aName,
                                     const nsAString& aFeatures,
                                     TextureFactoryIdentifier* aTextureFactoryIdentifier,
-                                    layers::LayersId* aLayersId)
+                                    uint64_t* aLayersId)
 {
   // Create an iframe owned by the same document which owns openerFrameElement.
   nsCOMPtr<Element> openerFrameElement = aOpenerTabParent->GetOwnerElement();
@@ -280,7 +284,8 @@ BrowserElementParent::OpenWindowInProcess(nsPIDOMWindowOuter* aOpenerWindow,
   RefPtr<nsFrameLoader> frameLoader = popupFrameElement->GetFrameLoader();
   NS_ENSURE_TRUE(frameLoader, BrowserElementParent::OPEN_WINDOW_IGNORED);
 
-  nsCOMPtr<nsIDocShell> docshell = frameLoader->GetDocShell(IgnoreErrors());
+  nsCOMPtr<nsIDocShell> docshell;
+  frameLoader->GetDocShell(getter_AddRefs(docshell));
   NS_ENSURE_TRUE(docshell, BrowserElementParent::OPEN_WINDOW_IGNORED);
 
   nsCOMPtr<nsPIDOMWindowOuter> window = docshell->GetWindow();

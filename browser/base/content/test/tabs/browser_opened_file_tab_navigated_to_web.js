@@ -18,7 +18,7 @@ add_task(async function() {
   // Open first file:// page.
   let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, uriString);
   registerCleanupFunction(async function() {
-    BrowserTestUtils.removeTab(tab);
+    await BrowserTestUtils.removeTab(tab);
   });
 
   // Open new file:// tab from JavaScript in first file:// page.
@@ -29,7 +29,7 @@ add_task(async function() {
 
   let openedTab = await promiseTabOpened;
   registerCleanupFunction(async function() {
-    BrowserTestUtils.removeTab(openedTab);
+    await BrowserTestUtils.removeTab(openedTab);
   });
 
   let openedBrowser = openedTab.linkedBrowser;

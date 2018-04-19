@@ -136,7 +136,8 @@ TCPServerSocket::FireEvent(const nsAString& aType, TCPSocket* aSocket)
   RefPtr<TCPServerSocketEvent> event =
       TCPServerSocketEvent::Constructor(this, aType, init);
   event->SetTrusted(true);
-  DispatchEvent(*event);
+  bool dummy;
+  DispatchEvent(event, &dummy);
 
   if (mServerBridgeParent) {
     mServerBridgeParent->OnConnect(event);
@@ -159,7 +160,8 @@ TCPServerSocket::OnStopListening(nsIServerSocket* aServer, nsresult aStatus)
     RefPtr<Event> event = new Event(GetOwner());
     event->InitEvent(NS_LITERAL_STRING("error"), false, false);
     event->SetTrusted(true);
-    DispatchEvent(*event);
+    bool dummy;
+    DispatchEvent(event, &dummy);
 
     NS_WARNING("Server socket was closed by unexpected reason.");
     return NS_ERROR_FAILURE;

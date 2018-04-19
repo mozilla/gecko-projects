@@ -25,7 +25,7 @@ function test() {
   gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 }
 
-function confirm_install(panel) {
+function confirm_install(window) {
   ok(false, "Should not see the install dialog");
   return false;
 }

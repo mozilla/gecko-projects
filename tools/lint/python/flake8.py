@@ -131,7 +131,6 @@ def run_process(config, cmd):
         proc.wait()
     except KeyboardInterrupt:
         proc.kill()
-        return 1
 
 
 def setup(root):
@@ -141,10 +140,6 @@ def setup(root):
 
 
 def lint(paths, config, **lintargs):
-    # TODO don't store results in a global
-    global results
-    results = []
-
     cmdargs = [
         os.path.join(bindir, 'flake8'),
         '--format', '{"path":"%(path)s","lineno":%(row)s,'
@@ -168,7 +163,6 @@ def lint(paths, config, **lintargs):
             cmd.extend(['--append-config={}'.format(c) for c in configs])
 
         cmd.extend(paths)
-        if run_process(config, cmd):
-            break
+        run_process(config, cmd)
 
     return results

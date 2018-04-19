@@ -5,23 +5,30 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "AudioWorkletGlobalScope.h"
-#include "WorkletPrincipal.h"
 #include "mozilla/dom/AudioWorkletGlobalScopeBinding.h"
 #include "mozilla/dom/FunctionBinding.h"
 
 namespace mozilla {
 namespace dom {
 
-AudioWorkletGlobalScope::AudioWorkletGlobalScope() = default;
+AudioWorkletGlobalScope::AudioWorkletGlobalScope(nsPIDOMWindowInner* aWindow)
+  : WorkletGlobalScope(aWindow)
+{
+}
+
+AudioWorkletGlobalScope::~AudioWorkletGlobalScope()
+{
+}
 
 bool
 AudioWorkletGlobalScope::WrapGlobalObject(JSContext* aCx,
+                                          nsIPrincipal* aPrincipal,
                                           JS::MutableHandle<JSObject*> aReflector)
 {
   JS::CompartmentOptions options;
   return AudioWorkletGlobalScopeBinding::Wrap(aCx, this, this,
                                               options,
-                                              WorkletPrincipal::GetWorkletPrincipal(),
+                                              nsJSPrincipals::get(aPrincipal),
                                               true, aReflector);
 }
 

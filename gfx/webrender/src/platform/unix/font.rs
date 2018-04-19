@@ -17,13 +17,8 @@ use freetype::freetype::{FT_LOAD_COLOR, FT_LOAD_DEFAULT, FT_LOAD_FORCE_AUTOHINT}
 use freetype::freetype::{FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH, FT_LOAD_NO_AUTOHINT};
 use freetype::freetype::{FT_LOAD_NO_BITMAP, FT_LOAD_NO_HINTING, FT_LOAD_VERTICAL_LAYOUT};
 use freetype::freetype::{FT_FACE_FLAG_SCALABLE, FT_FACE_FLAG_FIXED_SIZES};
-use freetype::succeeded;
-use glyph_rasterizer::{FontInstance, GlyphFormat, GlyphRasterResult, RasterizedGlyph};
-#[cfg(feature = "pathfinder")]
-use glyph_rasterizer::NativeFontHandleWrapper;
+use glyph_rasterizer::{FontInstance, GlyphFormat, RasterizedGlyph};
 use internal_types::{FastHashMap, ResourceCacheError};
-#[cfg(feature = "pathfinder")]
-use pathfinder_font_renderer::freetype as pf_freetype;
 use std::{cmp, mem, ptr, slice};
 use std::cmp::max;
 use std::ffi::CString;
@@ -157,7 +152,7 @@ impl FontContext {
             FT_Init_FreeType(&mut lib)
         };
 
-        if succeeded(result) {
+        if result.succeeded() {
             Ok(FontContext {
                 lib,
                 faces: FastHashMap::default(),
@@ -166,7 +161,7 @@ impl FontContext {
         } else {
             // TODO(gw): Provide detailed error values.
             Err(ResourceCacheError::new(
-                format!("Failed to initialize FreeType - {}", result)
+                format!("Failed to initialize FreeType - {}", result.0)
             ))
         }
     }
@@ -187,7 +182,7 @@ impl FontContext {
                     &mut face,
                 )
             };
-            if succeeded(result) && !face.is_null() {
+            if result.succeeded() && !face.is_null() {
                 self.faces.insert(
                     *font_key,
                     Face {
@@ -196,7 +191,7 @@ impl FontContext {
                     },
                 );
             } else {
-                warn!("WARN: webrender failed to load font");
+                println!("WARN: webrender failed to load font");
                 debug!("font={:?}", font_key);
             }
         }
@@ -214,7 +209,7 @@ impl FontContext {
                     &mut face,
                 )
             };
-            if succeeded(result) && !face.is_null() {
+            if result.succeeded() && !face.is_null() {
                 self.faces.insert(
                     *font_key,
                     Face {
@@ -223,7 +218,7 @@ impl FontContext {
                     },
                 );
             } else {
-                warn!("WARN: webrender failed to load font");
+                println!("WARN: webrender failed to load font");
                 debug!("font={:?}, path={:?}", font_key, pathname);
             }
         }
@@ -232,7 +227,7 @@ impl FontContext {
     pub fn delete_font(&mut self, font_key: &FontKey) {
         if let Some(face) = self.faces.remove(font_key) {
             let result = unsafe { FT_Done_Face(face.face) };
-            assert!(succeeded(result));
+            assert!(result.succeeded());
         }
     }
 
@@ -321,11 +316,11 @@ impl FontContext {
             }
         };
 
-        if succeeded(result) {
+        if result.succeeded() {
             result = unsafe { FT_Load_Glyph(face.face, glyph.index as FT_UInt, load_flags as FT_Int32) };
         };
 
-        if succeeded(result) {
+        if result.succeeded() {
             let slot = unsafe { (*face.face).glyph };
             assert!(slot != ptr::null_mut());
 
@@ -572,7 +567,7 @@ impl FontContext {
             (FontRenderMode::Subpixel, _) => FT_Render_Mode::FT_RENDER_MODE_LCD,
         };
         let result = unsafe { FT_Render_Glyph(slot, render_mode) };
-        if !succeeded(result) {
+        if !result.succeeded() {
             error!("Unable to rasterize");
             debug!(
                 "{:?} with {:?}, {:?}",
@@ -586,23 +581,26 @@ impl FontContext {
         }
     }
 
-    #[cfg(not(feature = "pathfinder"))]
-    pub fn rasterize_glyph(&mut self, font: &FontInstance, key: &GlyphKey) -> GlyphRasterResult {
+    pub fn rasterize_glyph(
+        &mut self,
+        font: &FontInstance,
+        key: &GlyphKey,
+    ) -> Option<RasterizedGlyph> {
         let slot = match self.load_glyph(font, key) {
             Some(slot) => slot,
-            None => return GlyphRasterResult::LoadFailed,
+            None => return None,
         };
 
         // Get dimensions of the glyph, to see if we need to rasterize it.
         let dimensions = match self.get_glyph_dimensions_impl(slot, font, key, false) {
             Some(val) => val,
-            None => return GlyphRasterResult::LoadFailed,
+            None => return None,
         };
         let GlyphDimensions { mut left, mut top, width, height, .. } = dimensions;
 
         // For spaces and other non-printable characters, early out.
         if width == 0 || height == 0 {
-            return GlyphRasterResult::LoadFailed;
+            return None;
         }
 
         let format = unsafe { (*slot).format };
@@ -614,13 +612,13 @@ impl FontContext {
             }
             FT_Glyph_Format::FT_GLYPH_FORMAT_OUTLINE => {
                 if !self.rasterize_glyph_outline(slot, font, key) {
-                    return GlyphRasterResult::LoadFailed;
+                    return None;
                 }
             }
             _ => {
                 error!("Unsupported format");
                 debug!("format={:?}", format);
-                return GlyphRasterResult::LoadFailed;
+                return None;
             }
         };
 
@@ -773,7 +771,7 @@ impl FontContext {
             _ => font.get_alpha_glyph_format(),
         };
 
-        GlyphRasterResult::Bitmap(RasterizedGlyph {
+        Some(RasterizedGlyph {
             left: left as f32,
             top: top as f32,
             width: actual_width as u32,
@@ -790,13 +788,5 @@ impl Drop for FontContext {
         unsafe {
             FT_Done_FreeType(self.lib);
         }
-    }
-}
-
-#[cfg(feature = "pathfinder")]
-impl<'a> Into<pf_freetype::FontDescriptor> for NativeFontHandleWrapper<'a> {
-    fn into(self) -> pf_freetype::FontDescriptor {
-        let NativeFontHandleWrapper(font_handle) = self;
-        pf_freetype::FontDescriptor::new(font_handle.pathname.clone().into(), font_handle.index)
     }
 }

@@ -2,9 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import AddressOption from "../components/address-option.js";
-import PaymentStateSubscriberMixin from "../mixins/PaymentStateSubscriberMixin.js";
-import RichSelect from "../components/rich-select.js";
+/* global PaymentStateSubscriberMixin */
+
+"use strict";
 
 /**
  * <address-picker></address-picker>
@@ -12,14 +12,10 @@ import RichSelect from "../components/rich-select.js";
  * <address-option> listening to savedAddresses.
  */
 
-export default class AddressPicker extends PaymentStateSubscriberMixin(HTMLElement) {
-  static get observedAttributes() {
-    return ["address-fields"];
-  }
-
+class AddressPicker extends PaymentStateSubscriberMixin(HTMLElement) {
   constructor() {
     super();
-    this.dropdown = new RichSelect();
+    this.dropdown = document.createElement("rich-select");
     this.dropdown.addEventListener("change", this);
   }
 
@@ -28,80 +24,19 @@ export default class AddressPicker extends PaymentStateSubscriberMixin(HTMLEleme
     super.connectedCallback();
   }
 
-  attributeChangedCallback(name, oldValue, newValue) {
-    if (oldValue !== newValue) {
-      this.render(this.requestStore.getState());
-    }
-  }
-
-  /**
-   * De-dupe and filter addresses for the given set of fields that will be visible
-   *
-   * @param {object} addresses
-   * @param {array?} fieldNames - optional list of field names that be used when
-   *                              de-duping and excluding entries
-   * @returns {object} filtered copy of given addresses
-   */
-  filterAddresses(addresses, fieldNames = [
-    "address-level1",
-    "address-level2",
-    "country",
-    "name",
-    "postal-code",
-    "street-address",
-  ]) {
-    let uniques = new Set();
-    let result = {};
-    for (let [guid, address] of Object.entries(addresses)) {
-      let addressCopy = {};
-      let isMatch = false;
-      // exclude addresses that are missing all of the requested fields
-      for (let name of fieldNames) {
-        if (address[name]) {
-          isMatch = true;
-          addressCopy[name] = address[name];
-        }
-      }
-      if (isMatch) {
-        let key = JSON.stringify(addressCopy);
-        // exclude duplicated addresses
-        if (!uniques.has(key)) {
-          uniques.add(key);
-          result[guid] = address;
-        }
-      }
-    }
-    return result;
-  }
-
   render(state) {
     let {savedAddresses} = state;
     let desiredOptions = [];
-    let fieldNames;
-    if (this.hasAttribute("address-fields")) {
-      let names = this.getAttribute("address-fields").split(/\s+/);
-      if (names.length) {
-        fieldNames = names;
-      }
-    }
-    let filteredAddresses = this.filterAddresses(savedAddresses, fieldNames);
-
-    for (let [guid, address] of Object.entries(filteredAddresses)) {
+    for (let [guid, address] of Object.entries(savedAddresses)) {
       let optionEl = this.dropdown.getOptionByValue(guid);
       if (!optionEl) {
-        optionEl = new AddressOption();
+        optionEl = document.createElement("address-option");
         optionEl.value = guid;
       }
 
-      for (let key of AddressOption.recordAttributes) {
-        let val = address[key];
-        if (val) {
-          optionEl.setAttribute(key, val);
-        } else {
-          optionEl.removeAttribute(key);
-        }
+      for (let [key, val] of Object.entries(address)) {
+        optionEl.setAttribute(key, val);
       }
-
       desiredOptions.push(optionEl);
     }
 

@@ -6,7 +6,6 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/BasicEvents.h"
-#include "mozilla/CheckedInt.h"
 
 #include "DataTransfer.h"
 
@@ -67,7 +66,8 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(DataTransfer)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DataTransfer)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(mozilla::dom::DataTransfer)
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
+  NS_INTERFACE_MAP_ENTRY(nsIDOMDataTransfer)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMDataTransfer)
 NS_INTERFACE_MAP_END
 
 // the size of the array
@@ -223,7 +223,16 @@ DataTransfer::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
   return DataTransferBinding::Wrap(aCx, this, aGivenProto);
 }
 
-void
+NS_IMETHODIMP
+DataTransfer::GetDropEffect(nsAString& aDropEffect)
+{
+  nsString dropEffect;
+  GetDropEffect(dropEffect);
+  aDropEffect = dropEffect;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 DataTransfer::SetDropEffect(const nsAString& aDropEffect)
 {
   // the drop effect can only be 'none', 'copy', 'move' or 'link'.
@@ -237,14 +246,25 @@ DataTransfer::SetDropEffect(const nsAString& aDropEffect)
       break;
     }
   }
+
+  return NS_OK;
 }
 
-void
+NS_IMETHODIMP
+DataTransfer::GetEffectAllowed(nsAString& aEffectAllowed)
+{
+  nsString effectAllowed;
+  GetEffectAllowed(effectAllowed);
+  aEffectAllowed = effectAllowed;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 DataTransfer::SetEffectAllowed(const nsAString& aEffectAllowed)
 {
   if (aEffectAllowed.EqualsLiteral("uninitialized")) {
     mEffectAllowed = nsIDragService::DRAGDROP_ACTION_UNINITIALIZED;
-    return;
+    return NS_OK;
   }
 
   static_assert(nsIDragService::DRAGDROP_ACTION_NONE == 0,
@@ -262,6 +282,29 @@ DataTransfer::SetEffectAllowed(const nsAString& aEffectAllowed)
       break;
     }
   }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+DataTransfer::GetDropEffectInt(uint32_t* aDropEffect)
+{
+  *aDropEffect = mDropEffect;
+  return  NS_OK;
+}
+
+NS_IMETHODIMP
+DataTransfer::SetDropEffectInt(uint32_t aDropEffect)
+{
+  mDropEffect = aDropEffect;
+  return  NS_OK;
+}
+
+NS_IMETHODIMP
+DataTransfer::GetEffectAllowedInt(uint32_t* aEffectAllowed)
+{
+  *aEffectAllowed = mEffectAllowed;
+  return  NS_OK;
 }
 
 void
@@ -278,10 +321,44 @@ DataTransfer::GetMozTriggeringPrincipalURISpec(nsAString& aPrincipalURISpec)
   CopyUTF8toUTF16(principalURISpec, aPrincipalURISpec);
 }
 
+NS_IMETHODIMP
+DataTransfer::SetEffectAllowedInt(uint32_t aEffectAllowed)
+{
+  mEffectAllowed = aEffectAllowed;
+  return  NS_OK;
+}
+
+NS_IMETHODIMP
+DataTransfer::GetMozUserCancelled(bool* aUserCancelled)
+{
+  *aUserCancelled = MozUserCancelled();
+  return NS_OK;
+}
+
 already_AddRefed<FileList>
-DataTransfer::GetFiles(nsIPrincipal& aSubjectPrincipal)
+DataTransfer::GetFiles(nsIPrincipal& aSubjectPrincipal,
+                       ErrorResult& aRv)
 {
   return mItems->Files(&aSubjectPrincipal);
+}
+
+NS_IMETHODIMP
+DataTransfer::GetFiles(nsIDOMFileList** aFileList)
+{
+  if (!aFileList) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // The XPCOM interface is only avaliable to system code, and thus we can
+  // assume the system principal. This is consistent with the previous behavour
+  // of this function, which also assumed the system principal.
+  //
+  // This code is also called from C++ code, which expects it to have a System
+  // Principal, and thus the SubjectPrincipal cannot be used.
+  RefPtr<FileList> files = mItems->Files(nsContentUtils::GetSystemPrincipal());
+
+  files.forget(aFileList);
+  return NS_OK;
 }
 
 void
@@ -417,11 +494,29 @@ DataTransfer::ClearData(const Optional<nsAString>& aFormat,
   }
 }
 
-void
+NS_IMETHODIMP
+DataTransfer::GetMozItemCount(uint32_t* aCount)
+{
+  *aCount = MozItemCount();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+DataTransfer::GetMozCursor(nsAString& aCursorState)
+{
+  nsString cursor;
+  GetMozCursor(cursor);
+  aCursorState = cursor;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 DataTransfer::SetMozCursor(const nsAString& aCursorState)
 {
   // Lock the cursor to an arrow during the drag.
   mCursorState = aCursorState.EqualsLiteral("default");
+
+  return NS_OK;
 }
 
 already_AddRefed<nsINode>
@@ -441,6 +536,18 @@ DataTransfer::GetMozSourceNode()
   }
 
   return node.forget();
+}
+
+NS_IMETHODIMP
+DataTransfer::GetMozSourceNode(nsIDOMNode** aSourceNode)
+{
+  nsCOMPtr<nsINode> sourceNode = GetMozSourceNode();
+  if (!sourceNode) {
+    *aSourceNode = nullptr;
+    return NS_OK;
+  }
+
+  return CallQueryInterface(sourceNode, aSourceNode);
 }
 
 already_AddRefed<DOMStringList>
@@ -736,6 +843,16 @@ DataTransfer::SetDragImage(Element& aImage, int32_t aX, int32_t aY)
   }
 }
 
+NS_IMETHODIMP
+DataTransfer::SetDragImage(nsIDOMElement* aImage, int32_t aX, int32_t aY)
+{
+  nsCOMPtr<Element> image = do_QueryInterface(aImage);
+  if (image) {
+    SetDragImage(*image, aX, aY);
+  }
+  return NS_OK;
+}
+
 void
 DataTransfer::UpdateDragImage(Element& aImage, int32_t aX, int32_t aY)
 {
@@ -805,6 +922,19 @@ DataTransfer::AddElement(Element& aElement, ErrorResult& aRv)
   }
 
   mDragTarget = &aElement;
+}
+
+NS_IMETHODIMP
+DataTransfer::AddElement(nsIDOMElement* aElement)
+{
+  NS_ENSURE_TRUE(aElement, NS_ERROR_NULL_POINTER);
+
+  nsCOMPtr<Element> element = do_QueryInterface(aElement);
+  NS_ENSURE_TRUE(element, NS_ERROR_INVALID_ARG);
+
+  ErrorResult rv;
+  AddElement(*element, rv);
+  return rv.StealNSResult();
 }
 
 nsresult
@@ -1471,14 +1601,11 @@ DataTransfer::FillInExternalCustomTypes(nsIVariant* aData, uint32_t aIndex,
     return;
   }
 
-  CheckedInt<int32_t> checkedLen(len);
-  if (!checkedLen.isValid()) {
-    return;
-  }
+  nsAutoCString str;
+  str.Adopt(chrs, len);
 
   nsCOMPtr<nsIInputStream> stringStream;
-  NS_NewByteInputStream(getter_AddRefs(stringStream), chrs, checkedLen.value(),
-                        NS_ASSIGNMENT_ADOPT);
+  NS_NewCStringInputStream(getter_AddRefs(stringStream), str);
 
   nsCOMPtr<nsIObjectInputStream> stream =
     NS_NewObjectInputStream(stringStream);

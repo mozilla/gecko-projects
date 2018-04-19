@@ -485,7 +485,7 @@ FunctionBox::FunctionBox(JSContext* cx, ObjectBox* traceListHead,
     usesThis(false),
     usesReturn(false),
     hasRest_(false),
-    hasExprBody_(false),
+    isExprBody_(false),
     hasExtensibleScope_(false),
     argumentsHasLocalBinding_(false),
     definitelyNeedsArgsObj_(false),
@@ -542,12 +542,12 @@ FunctionBox::initWithEnclosingParseContext(ParseContext* enclosing, FunctionSynt
         allowNewTarget_ = true;
         allowSuperProperty_ = fun->allowSuperProperty();
 
-        if (IsConstructorKind(kind)) {
+        if (kind == ClassConstructor || kind == DerivedClassConstructor) {
             auto stmt = enclosing->findInnermostStatement<ParseContext::ClassStatement>();
             MOZ_ASSERT(stmt);
             stmt->constructorBox = this;
 
-            if (kind == FunctionSyntaxKind::DerivedClassConstructor) {
+            if (kind == DerivedClassConstructor) {
                 setDerivedClassConstructor();
                 allowSuperCall_ = true;
                 needsThisTDZChecks_ = true;
@@ -2501,6 +2501,8 @@ PerHandlerParser<SyntaxParseHandler>::finishFunction(bool isStandaloneFunction /
     lazy->setAsyncKind(funbox->asyncKind());
     if (funbox->hasRest())
         lazy->setHasRest();
+    if (funbox->isExprBody())
+        lazy->setIsExprBody();
     if (funbox->isLikelyConstructorWrapper())
         lazy->setLikelyConstructorWrapper();
     if (funbox->isDerivedClassConstructor())
@@ -2598,7 +2600,7 @@ Parser<FullParseHandler, CharT>::standaloneFunction(HandleFunction fun,
     YieldHandling yieldHandling = GetYieldHandling(generatorKind);
     AwaitHandling awaitHandling = GetAwaitHandling(asyncKind);
     AutoAwaitIsKeyword<FullParseHandler, CharT> awaitIsKeyword(this, awaitHandling);
-    if (!functionFormalParametersAndBody(InAllowed, yieldHandling, &fn, FunctionSyntaxKind::Statement,
+    if (!functionFormalParametersAndBody(InAllowed, yieldHandling, &fn, Statement,
                                          parameterListEnd, /* isStandaloneFunction = */ true))
     {
         return null();
@@ -2752,7 +2754,7 @@ GeneralParser<ParseHandler, CharT>::functionBody(InHandling inHandling,
     }
 
     MOZ_ASSERT_IF(!pc->isGenerator() && !pc->isAsync(), pc->lastYieldOffset == startYieldOffset);
-    MOZ_ASSERT_IF(pc->isGenerator(), kind != FunctionSyntaxKind::Arrow);
+    MOZ_ASSERT_IF(pc->isGenerator(), kind != Arrow);
     MOZ_ASSERT_IF(pc->isGenerator(), type == StatementListBody);
 
     if (pc->needsDotGeneratorName()) {
@@ -2769,7 +2771,7 @@ GeneralParser<ParseHandler, CharT>::functionBody(InHandling inHandling,
     // Declare the 'arguments' and 'this' bindings if necessary before
     // finishing up the scope so these special bindings get marked as closed
     // over if necessary. Arrow functions don't have these bindings.
-    if (kind != FunctionSyntaxKind::Arrow) {
+    if (kind != Arrow) {
         if (!declareFunctionArgumentsObject())
             return null();
         if (!declareFunctionThis())
@@ -2784,7 +2786,7 @@ ParserBase::newFunction(HandleAtom atom, FunctionSyntaxKind kind,
                         GeneratorKind generatorKind, FunctionAsyncKind asyncKind,
                         HandleObject proto)
 {
-    MOZ_ASSERT_IF(kind == FunctionSyntaxKind::Statement, atom != nullptr);
+    MOZ_ASSERT_IF(kind == Statement, atom != nullptr);
 
     RootedFunction fun(context);
 
@@ -2794,38 +2796,41 @@ ParserBase::newFunction(HandleAtom atom, FunctionSyntaxKind kind,
     bool isGlobalSelfHostedBuiltin = false;
 #endif
     switch (kind) {
-      case FunctionSyntaxKind::Expression:
+      case AssignmentExpression:
+      case PrimaryExpression:
         flags = (generatorKind == GeneratorKind::NotGenerator &&
                  asyncKind == FunctionAsyncKind::SyncFunction
                  ? JSFunction::INTERPRETED_LAMBDA
                  : JSFunction::INTERPRETED_LAMBDA_GENERATOR_OR_ASYNC);
         break;
-      case FunctionSyntaxKind::Arrow:
+      case Arrow:
         flags = JSFunction::INTERPRETED_LAMBDA_ARROW;
         allocKind = gc::AllocKind::FUNCTION_EXTENDED;
         break;
-      case FunctionSyntaxKind::Method:
+      case Method:
         flags = (generatorKind == GeneratorKind::NotGenerator &&
                  asyncKind == FunctionAsyncKind::SyncFunction
                  ? JSFunction::INTERPRETED_METHOD
                  : JSFunction::INTERPRETED_METHOD_GENERATOR_OR_ASYNC);
         allocKind = gc::AllocKind::FUNCTION_EXTENDED;
         break;
-      case FunctionSyntaxKind::ClassConstructor:
-      case FunctionSyntaxKind::DerivedClassConstructor:
+      case ClassConstructor:
+      case DerivedClassConstructor:
         flags = JSFunction::INTERPRETED_CLASS_CONSTRUCTOR;
         allocKind = gc::AllocKind::FUNCTION_EXTENDED;
         break;
-      case FunctionSyntaxKind::Getter:
+      case Getter:
+      case GetterNoExpressionClosure:
         flags = JSFunction::INTERPRETED_GETTER;
         allocKind = gc::AllocKind::FUNCTION_EXTENDED;
         break;
-      case FunctionSyntaxKind::Setter:
+      case Setter:
+      case SetterNoExpressionClosure:
         flags = JSFunction::INTERPRETED_SETTER;
         allocKind = gc::AllocKind::FUNCTION_EXTENDED;
         break;
       default:
-        MOZ_ASSERT(kind == FunctionSyntaxKind::Statement);
+        MOZ_ASSERT(kind == Statement);
 #ifdef DEBUG
         if (options().selfHostingMode && !pc->isFunctionBox()) {
             isGlobalSelfHostedBuiltin = true;
@@ -2932,10 +2937,10 @@ JSAtom*
 ParserBase::prefixAccessorName(PropertyType propType, HandleAtom propAtom)
 {
     RootedAtom prefix(context);
-    if (propType == PropertyType::Setter) {
+    if (propType == PropertyType::Setter || propType == PropertyType::SetterNoExpressionClosure) {
         prefix = context->names().setPrefix;
     } else {
-        MOZ_ASSERT(propType == PropertyType::Getter);
+        MOZ_ASSERT(propType == PropertyType::Getter || propType == PropertyType::GetterNoExpressionClosure);
         prefix = context->names().getPrefix;
     }
 
@@ -2979,7 +2984,7 @@ GeneralParser<ParseHandler, CharT>::functionArguments(YieldHandling yieldHandlin
     //   async a => 1
     //         ^
     Modifier argModifier = TokenStream::Operand;
-    if (kind == FunctionSyntaxKind::Arrow) {
+    if (kind == Arrow) {
         TokenKind tt;
         // In async function, the first token after `async` is already gotten
         // with TokenStream::None.
@@ -3000,9 +3005,7 @@ GeneralParser<ParseHandler, CharT>::functionArguments(YieldHandling yieldHandlin
         if (!tokenStream.getToken(&tt, firstTokenModifier))
             return false;
         if (tt != TokenKind::Lp) {
-            error(kind == FunctionSyntaxKind::Arrow
-                  ? JSMSG_BAD_ARROW_ARGS
-                  : JSMSG_PAREN_BEFORE_FORMAL);
+            error(kind == Arrow ? JSMSG_BAD_ARROW_ARGS : JSMSG_PAREN_BEFORE_FORMAL);
             return false;
         }
 
@@ -3037,12 +3040,10 @@ GeneralParser<ParseHandler, CharT>::functionArguments(YieldHandling yieldHandlin
         bool hasRest = false;
         bool hasDefault = false;
         bool duplicatedParam = false;
-        bool disallowDuplicateParams = kind == FunctionSyntaxKind::Arrow ||
-                                       kind == FunctionSyntaxKind::Method ||
-                                       kind == FunctionSyntaxKind::ClassConstructor;
+        bool disallowDuplicateParams = kind == Arrow || kind == Method || kind == ClassConstructor;
         AtomVector& positionalFormals = pc->positionalFormalParameterNames();
 
-        if (kind == FunctionSyntaxKind::Getter) {
+        if (IsGetterKind(kind)) {
             error(JSMSG_ACCESSOR_WRONG_ARGS, "getter", "no", "s");
             return false;
         }
@@ -3060,7 +3061,7 @@ GeneralParser<ParseHandler, CharT>::functionArguments(YieldHandling yieldHandlin
             MOZ_ASSERT_IF(parenFreeArrow, TokenKindIsPossibleIdentifier(tt));
 
             if (tt == TokenKind::TripleDot) {
-                if (kind == FunctionSyntaxKind::Setter) {
+                if (IsSetterKind(kind)) {
                     error(JSMSG_ACCESSOR_WRONG_ARGS, "setter", "one", "");
                     return false;
                 }
@@ -3187,7 +3188,7 @@ GeneralParser<ParseHandler, CharT>::functionArguments(YieldHandling yieldHandlin
             }
 
             // Setter syntax uniquely requires exactly one argument.
-            if (kind == FunctionSyntaxKind::Setter)
+            if (IsSetterKind(kind))
                 break;
 
             if (!tokenStream.matchToken(&matched, TokenKind::Comma, TokenStream::Operand))
@@ -3208,7 +3209,7 @@ GeneralParser<ParseHandler, CharT>::functionArguments(YieldHandling yieldHandlin
             if (!tokenStream.getToken(&tt, TokenStream::Operand))
                 return false;
             if (tt != TokenKind::Rp) {
-                if (kind == FunctionSyntaxKind::Setter) {
+                if (IsSetterKind(kind)) {
                     error(JSMSG_ACCESSOR_WRONG_ARGS, "setter", "one", "");
                     return false;
                 }
@@ -3225,7 +3226,7 @@ GeneralParser<ParseHandler, CharT>::functionArguments(YieldHandling yieldHandlin
             funbox->hasDirectEvalInParameterExpr = true;
 
         funbox->function()->setArgCount(positionalFormals.length());
-    } else if (kind == FunctionSyntaxKind::Setter) {
+    } else if (IsSetterKind(kind)) {
         error(JSMSG_ACCESSOR_WRONG_ARGS, "setter", "one", "");
         return false;
     }
@@ -3253,11 +3254,23 @@ Parser<FullParseHandler, CharT>::skipLazyInnerFunction(ParseNode* funcNode, uint
     LazyScript* lazy = fun->lazyScript();
     if (lazy->needsHomeObject())
         funbox->setNeedsHomeObject();
+    if (lazy->isExprBody())
+        funbox->setIsExprBody();
 
     PropagateTransitiveParseFlags(lazy, pc->sc());
 
-    if (!tokenStream.advance(fun->lazyScript()->sourceEnd()))
+    if (!tokenStream.advance(fun->lazyScript()->end()))
         return false;
+
+    if (allowExpressionClosures()) {
+        // Only expression closure can be Statement kind.
+        // If we remove expression closure, we can remove isExprBody flag from
+        // LazyScript and JSScript.
+        if (kind == Statement && funbox->isExprBody()) {
+            if (!matchOrInsertSemicolon())
+                return false;
+        }
+    }
 
     // Append possible Annex B function box only upon successfully parsing.
     if (tryAnnexB && !pc->innermostScope()->addPossibleAnnexBFunctionBox(pc, funbox))
@@ -3364,7 +3377,7 @@ GeneralParser<ParseHandler, CharT>::functionDefinition(Node funcNode, uint32_t t
                                                        FunctionAsyncKind asyncKind,
                                                        bool tryAnnexB /* = false */)
 {
-    MOZ_ASSERT_IF(kind == FunctionSyntaxKind::Statement, funName);
+    MOZ_ASSERT_IF(kind == Statement, funName);
 
     // When fully parsing a LazyScript, we do not fully reparse its inner
     // functions, which are also lazy. Instead, their free variables and
@@ -3395,7 +3408,8 @@ GeneralParser<ParseHandler, CharT>::functionDefinition(Node funcNode, uint32_t t
     Directives directives(pc);
     Directives newDirectives = directives;
 
-    Position start(keepAtoms, tokenStream);
+    Position start(keepAtoms);
+    tokenStream.tell(&start);
 
     // Parse the inner function. The following is a loop as we may attempt to
     // reparse a function due to failed syntax parsing and encountering new
@@ -3461,8 +3475,9 @@ Parser<FullParseHandler, CharT>::trySyntaxParseInnerFunction(ParseNode** funcNod
         UsedNameTracker::RewindToken token = usedNames.getRewindToken();
 
         // Move the syntax parser to the current position in the stream.
-        Position currentPosition(keepAtoms, tokenStream);
-        if (!syntaxParser->tokenStream.seek(currentPosition, anyChars))
+        Position position(keepAtoms);
+        tokenStream.tell(&position);
+        if (!syntaxParser->tokenStream.seek(position, anyChars))
             return false;
 
         // Make a FunctionBox before we enter the syntax parser, because |pn|
@@ -3493,8 +3508,8 @@ Parser<FullParseHandler, CharT>::trySyntaxParseInnerFunction(ParseNode** funcNod
         }
 
         // Advance this parser over tokens processed by the syntax parser.
-        Position currentSyntaxPosition(keepAtoms, syntaxParser->tokenStream);
-        if (!tokenStream.seek(currentSyntaxPosition, syntaxParser->anyChars))
+        syntaxParser->tokenStream.tell(&position);
+        if (!tokenStream.seek(position, syntaxParser->anyChars))
             return false;
 
         // Update the end position of the parse node.
@@ -3686,17 +3701,17 @@ Parser<FullParseHandler, CharT>::standaloneLazyFunction(HandleFunction fun, uint
         return null();
 
     YieldHandling yieldHandling = GetYieldHandling(generatorKind);
-    FunctionSyntaxKind syntaxKind = FunctionSyntaxKind::Statement;
+    FunctionSyntaxKind syntaxKind = Statement;
     if (fun->isClassConstructor())
-        syntaxKind = FunctionSyntaxKind::ClassConstructor;
+        syntaxKind = ClassConstructor;
     else if (fun->isMethod())
-        syntaxKind = FunctionSyntaxKind::Method;
+        syntaxKind = Method;
     else if (fun->isGetter())
-        syntaxKind = FunctionSyntaxKind::Getter;
+        syntaxKind = Getter;
     else if (fun->isSetter())
-        syntaxKind = FunctionSyntaxKind::Setter;
+        syntaxKind = Setter;
     else if (fun->isArrow())
-        syntaxKind = FunctionSyntaxKind::Arrow;
+        syntaxKind = Arrow;
 
     if (!functionFormalParametersAndBody(InAllowed, yieldHandling, &pn, syntaxKind)) {
         MOZ_ASSERT(directives == newDirectives);
@@ -3728,10 +3743,9 @@ GeneralParser<ParseHandler, CharT>::functionFormalParametersAndBody(InHandling i
     // See below for an explanation why arrow function parameters and arrow
     // function bodies are parsed with different yield/await settings.
     {
-        AwaitHandling awaitHandling =
-            (funbox->isAsync() || (kind == FunctionSyntaxKind::Arrow && awaitIsKeyword()))
-            ? AwaitIsKeyword
-            : AwaitIsName;
+        AwaitHandling awaitHandling = funbox->isAsync() || (kind == Arrow && awaitIsKeyword())
+                                      ? AwaitIsKeyword
+                                      : AwaitIsName;
         AutoAwaitIsKeyword<ParseHandler, CharT> awaitIsKeyword(this, awaitHandling);
         if (!functionArguments(yieldHandling, kind, *pn))
             return false;
@@ -3746,7 +3760,7 @@ GeneralParser<ParseHandler, CharT>::functionFormalParametersAndBody(InHandling i
         pc->functionScope().useAsVarScope(pc);
     }
 
-    if (kind == FunctionSyntaxKind::Arrow) {
+    if (kind == Arrow) {
         bool matched;
         if (!tokenStream.matchToken(&matched, TokenKind::Arrow))
             return false;
@@ -3770,14 +3784,29 @@ GeneralParser<ParseHandler, CharT>::functionFormalParametersAndBody(InHandling i
         return false;
     uint32_t openedPos = 0;
     if (tt != TokenKind::Lc) {
-        if (kind != FunctionSyntaxKind::Arrow) {
-            error(JSMSG_CURLY_BEFORE_BODY);
-            return false;
+        if (kind != Arrow) {
+            if (funbox->isGenerator() || funbox->isAsync() || kind == Method ||
+                kind == GetterNoExpressionClosure || kind == SetterNoExpressionClosure ||
+                IsConstructorKind(kind) || kind == PrimaryExpression)
+            {
+                error(JSMSG_CURLY_BEFORE_BODY);
+                return false;
+            }
+
+            if (allowExpressionClosures()) {
+                this->addTelemetry(DeprecatedLanguageExtension::ExpressionClosure);
+                if (!warnOnceAboutExprClosure())
+                    return false;
+                handler.noteExpressionClosure(pn);
+            } else {
+                error(JSMSG_CURLY_BEFORE_BODY);
+                return false;
+            }
         }
 
         anyChars.ungetToken();
         bodyType = ExpressionBody;
-        funbox->setHasExprBody();
+        funbox->setIsExprBody();
     } else {
         openedPos = pos().begin;
     }
@@ -3800,7 +3829,7 @@ GeneralParser<ParseHandler, CharT>::functionFormalParametersAndBody(InHandling i
     }
 
     // Revalidate the function name when we transitioned to strict mode.
-    if ((kind == FunctionSyntaxKind::Statement || kind == FunctionSyntaxKind::Expression) &&
+    if ((kind == Statement || IsFunctionExpression(kind)) &&
         fun->explicitName() &&
         !inheritedStrict &&
         pc->sc()->strict())
@@ -3810,7 +3839,7 @@ GeneralParser<ParseHandler, CharT>::functionFormalParametersAndBody(InHandling i
 
         PropertyName* propertyName = fun->explicitName()->asPropertyName();
         YieldHandling nameYieldHandling;
-        if (kind == FunctionSyntaxKind::Expression) {
+        if (IsFunctionExpression(kind)) {
             // Named lambda has binding inside it.
             nameYieldHandling = bodyYieldHandling;
         } else {
@@ -3834,12 +3863,12 @@ GeneralParser<ParseHandler, CharT>::functionFormalParametersAndBody(InHandling i
                                                               JSMSG_CURLY_OPENED, openedPos));
         funbox->setEnd(anyChars);
     } else {
-        MOZ_ASSERT(kind == FunctionSyntaxKind::Arrow);
+        MOZ_ASSERT_IF(!allowExpressionClosures(), kind == Arrow);
 
         if (anyChars.hadError())
             return false;
         funbox->setEnd(anyChars);
-        if (kind == FunctionSyntaxKind::Statement && !matchOrInsertSemicolon())
+        if (kind == Statement && !matchOrInsertSemicolon())
             return false;
     }
 
@@ -3943,13 +3972,14 @@ GeneralParser<ParseHandler, CharT>::functionStmt(uint32_t toStringStart,
     bool tryAnnexB = kind == DeclarationKind::SloppyLexicalFunction;
 
     YieldHandling newYieldHandling = GetYieldHandling(generatorKind);
-    return functionDefinition(pn, toStringStart, InAllowed, newYieldHandling, name,
-                              FunctionSyntaxKind::Statement, generatorKind, asyncKind, tryAnnexB);
+    return functionDefinition(pn, toStringStart, InAllowed, newYieldHandling, name, Statement,
+                              generatorKind, asyncKind, tryAnnexB);
 }
 
 template <class ParseHandler, typename CharT>
 typename ParseHandler::Node
 GeneralParser<ParseHandler, CharT>::functionExpr(uint32_t toStringStart,
+                                                 ExpressionClosure expressionClosureHandling,
                                                  InvokedPrediction invoked,
                                                  FunctionAsyncKind asyncKind)
 {
@@ -3985,8 +4015,12 @@ GeneralParser<ParseHandler, CharT>::functionExpr(uint32_t toStringStart,
     if (invoked)
         pn = handler.setLikelyIIFE(pn);
 
-    return functionDefinition(pn, toStringStart, InAllowed, yieldHandling, name,
-                              FunctionSyntaxKind::Expression, generatorKind, asyncKind);
+    FunctionSyntaxKind kind = expressionClosureHandling == ExpressionClosure::Allowed
+                              ? AssignmentExpression
+                              : PrimaryExpression;
+
+    return functionDefinition(pn, toStringStart, InAllowed, yieldHandling, name, kind,
+                              generatorKind, asyncKind);
 }
 
 /*
@@ -4017,7 +4051,7 @@ Parser<SyntaxParseHandler, CharT>::asmJS(Node list)
     // For simplicity, unconditionally abort the syntax parse when "use asm" is
     // encountered so that asm.js is always validated/compiled exactly once
     // during a full parse.
-    MOZ_ALWAYS_FALSE(abortIfSyntaxParser());
+    JS_ALWAYS_FALSE(abortIfSyntaxParser());
 
     // Record that the current script source constains some AsmJS, to disable
     // any incremental encoder, as AsmJS cannot be encoded with XDR at the
@@ -4431,6 +4465,8 @@ GeneralParser<ParseHandler, CharT>::bindingInitializer(Node lhs, DeclarationKind
     if (!rhs)
         return null();
 
+    handler.checkAndSetIsDirectRHSAnonFunction(rhs);
+
     Node assign = handler.newAssignment(ParseNodeKind::Assign, lhs, rhs);
     if (!assign)
         return null();
@@ -4814,6 +4850,8 @@ GeneralParser<ParseHandler, CharT>::declarationPattern(DeclarationKind declKind,
     if (!init)
         return null();
 
+    handler.checkAndSetIsDirectRHSAnonFunction(init);
+
     return handler.newAssignment(ParseNodeKind::Assign, pattern, init);
 }
 
@@ -4836,6 +4874,8 @@ GeneralParser<ParseHandler, CharT>::initializerInNameDeclaration(Node binding,
                                   yieldHandling, TripledotProhibited);
     if (!initializer)
         return false;
+
+    handler.checkAndSetIsDirectRHSAnonFunction(initializer);
 
     if (forHeadKind && initialDeclaration) {
         bool isForIn, isForOf;
@@ -5916,6 +5956,8 @@ GeneralParser<ParseHandler, CharT>::exportDefaultAssignExpr(uint32_t begin)
     Node kid = assignExpr(InAllowed, YieldIsName, TripledotProhibited);
     if (!kid)
         return null();
+
+    handler.checkAndSetIsDirectRHSAnonFunction(kid);
 
     if (!matchOrInsertSemicolon())
         return null();
@@ -7152,8 +7194,10 @@ ToAccessorType(PropertyType propType)
 {
     switch (propType) {
       case PropertyType::Getter:
+      case PropertyType::GetterNoExpressionClosure:
         return AccessorType::Getter;
       case PropertyType::Setter:
+      case PropertyType::SetterNoExpressionClosure:
         return AccessorType::Setter;
       case PropertyType::Normal:
       case PropertyType::Method:
@@ -7231,7 +7275,8 @@ GeneralParser<ParseHandler, CharT>::classDefinition(YieldHandling yieldHandling,
     if (hasHeritage) {
         if (!tokenStream.getToken(&tt))
             return null();
-        classHeritage = memberExpr(yieldHandling, TripledotProhibited, tt);
+        classHeritage = memberExpr(yieldHandling, TripledotProhibited,
+                                   ExpressionClosure::Forbidden, tt);
         if (!classHeritage)
             return null();
     }
@@ -7289,6 +7334,11 @@ GeneralParser<ParseHandler, CharT>::classDefinition(YieldHandling yieldHandling,
             return null();
         }
 
+        if (propType == PropertyType::Getter)
+            propType = PropertyType::GetterNoExpressionClosure;
+        if (propType == PropertyType::Setter)
+            propType = PropertyType::SetterNoExpressionClosure;
+
         bool isConstructor = !isStatic && propAtom == context->names().constructor;
         if (isConstructor) {
             if (propType != PropertyType::Method) {
@@ -7307,8 +7357,8 @@ GeneralParser<ParseHandler, CharT>::classDefinition(YieldHandling yieldHandling,
 
         RootedAtom funName(context);
         switch (propType) {
-          case PropertyType::Getter:
-          case PropertyType::Setter:
+          case PropertyType::GetterNoExpressionClosure:
+          case PropertyType::SetterNoExpressionClosure:
             if (!anyChars.isCurrentTokenType(TokenKind::Rb)) {
                 funName = prefixAccessorName(propType, propAtom);
                 if (!funName)
@@ -7331,6 +7381,8 @@ GeneralParser<ParseHandler, CharT>::classDefinition(YieldHandling yieldHandling,
                                    propType, funName);
         if (!fn)
             return null();
+
+        handler.checkAndSetIsDirectRHSAnonFunction(fn);
 
         AccessorType atype = ToAccessorType(propType);
         if (!handler.addClassMethodDefinition(classMethods, propName, fn, atype, isStatic))
@@ -7968,6 +8020,7 @@ template <class ParseHandler, typename CharT>
 MOZ_ALWAYS_INLINE typename ParseHandler::Node
 GeneralParser<ParseHandler, CharT>::orExpr(InHandling inHandling, YieldHandling yieldHandling,
                                            TripledotHandling tripledotHandling,
+                                           ExpressionClosure expressionClosureHandling,
                                            PossibleError* possibleError,
                                            InvokedPrediction invoked /* = PredictUninvoked */)
 {
@@ -7981,9 +8034,15 @@ GeneralParser<ParseHandler, CharT>::orExpr(InHandling inHandling, YieldHandling 
     int depth = 0;
     Node pn;
     for (;;) {
-        pn = unaryExpr(yieldHandling, tripledotHandling, possibleError, invoked);
+        pn = unaryExpr(yieldHandling, tripledotHandling, expressionClosureHandling, possibleError,
+                       invoked);
         if (!pn)
             return null();
+
+        if (handler.isExpressionClosure(pn))
+            return pn;
+
+        expressionClosureHandling = ExpressionClosure::Forbidden;
 
         // If a binary operator follows, consume it and compute the
         // corresponding operator.
@@ -8049,12 +8108,17 @@ template <class ParseHandler, typename CharT>
 MOZ_ALWAYS_INLINE typename ParseHandler::Node
 GeneralParser<ParseHandler, CharT>::condExpr(InHandling inHandling, YieldHandling yieldHandling,
                                              TripledotHandling tripledotHandling,
+                                             ExpressionClosure expressionClosureHandling,
                                              PossibleError* possibleError,
                                              InvokedPrediction invoked /* = PredictUninvoked */)
 {
-    Node condition = orExpr(inHandling, yieldHandling, tripledotHandling, possibleError, invoked);
+    Node condition = orExpr(inHandling, yieldHandling, tripledotHandling,
+                            expressionClosureHandling, possibleError, invoked);
     if (!condition)
         return null();
+
+    if (handler.isExpressionClosure(condition))
+        return condition;
 
     bool matched;
     if (!tokenStream.matchToken(&matched, TokenKind::Hook))
@@ -8150,7 +8214,8 @@ GeneralParser<ParseHandler, CharT>::assignExpr(InHandling inHandling, YieldHandl
 
     // Save the tokenizer state in case we find an arrow function and have to
     // rewind.
-    Position start(keepAtoms, tokenStream);
+    Position start(keepAtoms);
+    tokenStream.tell(&start);
 
     PossibleError possibleErrorInner(*this);
     Node lhs;
@@ -8179,7 +8244,8 @@ GeneralParser<ParseHandler, CharT>::assignExpr(InHandling inHandling, YieldHandl
 
         isArrow = true;
     } else {
-        lhs = condExpr(inHandling, yieldHandling, tripledotHandling, &possibleErrorInner, invoked);
+        lhs = condExpr(inHandling, yieldHandling, tripledotHandling, ExpressionClosure::Allowed,
+                       &possibleErrorInner, invoked);
         if (!lhs)
             return null();
 
@@ -8223,9 +8289,8 @@ GeneralParser<ParseHandler, CharT>::assignExpr(InHandling inHandling, YieldHandl
         if (!pn)
             return null();
 
-        return functionDefinition(pn, toStringStart, inHandling, yieldHandling, nullptr,
-                                  FunctionSyntaxKind::Arrow, GeneratorKind::NotGenerator,
-                                  asyncKind);
+        return functionDefinition(pn, toStringStart, inHandling, yieldHandling, nullptr, Arrow,
+                                  GeneratorKind::NotGenerator, asyncKind);
     }
 
     MOZ_ALWAYS_TRUE(tokenStream.getToken(&tokenAfterLHS, TokenStream::Operand));
@@ -8295,6 +8360,9 @@ GeneralParser<ParseHandler, CharT>::assignExpr(InHandling inHandling, YieldHandl
     Node rhs = assignExpr(inHandling, yieldHandling, TripledotProhibited);
     if (!rhs)
         return null();
+
+    if (kind == ParseNodeKind::Assign)
+        handler.checkAndSetIsDirectRHSAnonFunction(rhs);
 
     return handler.newAssignment(kind, lhs, rhs);
 }
@@ -8372,7 +8440,7 @@ typename ParseHandler::Node
 GeneralParser<ParseHandler, CharT>::unaryOpExpr(YieldHandling yieldHandling, ParseNodeKind kind,
                                                 uint32_t begin)
 {
-    Node kid = unaryExpr(yieldHandling, TripledotProhibited);
+    Node kid = unaryExpr(yieldHandling, TripledotProhibited, ExpressionClosure::Forbidden);
     if (!kid)
         return null();
     return handler.newUnary(kind, begin, kid);
@@ -8382,6 +8450,7 @@ template <class ParseHandler, typename CharT>
 typename ParseHandler::Node
 GeneralParser<ParseHandler, CharT>::unaryExpr(YieldHandling yieldHandling,
                                               TripledotHandling tripledotHandling,
+                                              ExpressionClosure expressionClosureHandling,
                                               PossibleError* possibleError /* = nullptr */,
                                               InvokedPrediction invoked /* = PredictUninvoked */)
 {
@@ -8416,7 +8485,7 @@ GeneralParser<ParseHandler, CharT>::unaryExpr(YieldHandling yieldHandling,
         //   // Evaluates expression, triggering a runtime ReferenceError for
         //   // the undefined name.
         //   typeof (1, nonExistentName);
-        Node kid = unaryExpr(yieldHandling, TripledotProhibited);
+        Node kid = unaryExpr(yieldHandling, TripledotProhibited, ExpressionClosure::Forbidden);
         if (!kid)
             return null();
 
@@ -8432,7 +8501,7 @@ GeneralParser<ParseHandler, CharT>::unaryExpr(YieldHandling yieldHandling,
 
         uint32_t operandOffset = pos().begin;
         Node operand =
-            memberExpr(yieldHandling, TripledotProhibited, tt2);
+            memberExpr(yieldHandling, TripledotProhibited, ExpressionClosure::Forbidden, tt2);
         if (!operand || !checkIncDecOperand(operand, operandOffset))
             return null();
         ParseNodeKind pnk = (tt == TokenKind::Inc)
@@ -8446,7 +8515,7 @@ GeneralParser<ParseHandler, CharT>::unaryExpr(YieldHandling yieldHandling,
         if (!tokenStream.peekOffset(&exprOffset, TokenStream::Operand))
             return null();
 
-        Node expr = unaryExpr(yieldHandling, TripledotProhibited);
+        Node expr = unaryExpr(yieldHandling, TripledotProhibited, ExpressionClosure::Forbidden);
         if (!expr)
             return null();
 
@@ -8464,7 +8533,8 @@ GeneralParser<ParseHandler, CharT>::unaryExpr(YieldHandling yieldHandling,
 
       case TokenKind::Await: {
         if (pc->isAsync()) {
-            Node kid = unaryExpr(yieldHandling, tripledotHandling, possibleError, invoked);
+            Node kid = unaryExpr(yieldHandling, tripledotHandling, ExpressionClosure::Forbidden,
+                                 possibleError, invoked);
             if (!kid)
                 return null();
             pc->lastAwaitOffset = begin;
@@ -8475,10 +8545,13 @@ GeneralParser<ParseHandler, CharT>::unaryExpr(YieldHandling yieldHandling,
         MOZ_FALLTHROUGH;
 
       default: {
-        Node expr = memberExpr(yieldHandling, tripledotHandling, tt,
+        Node expr = memberExpr(yieldHandling, tripledotHandling, expressionClosureHandling, tt,
                                /* allowCallSyntax = */ true, possibleError, invoked);
         if (!expr)
             return null();
+
+        if (handler.isExpressionClosure(expr))
+            return expr;
 
         /* Don't look across a newline boundary for a postfix incop. */
         if (!tokenStream.peekTokenSameLine(&tt))
@@ -8589,6 +8662,7 @@ template <class ParseHandler, typename CharT>
 typename ParseHandler::Node
 GeneralParser<ParseHandler, CharT>::memberExpr(YieldHandling yieldHandling,
                                                TripledotHandling tripledotHandling,
+                                               ExpressionClosure expressionClosureHandling,
                                                TokenKind tt, bool allowCallSyntax /* = true */,
                                                PossibleError* possibleError /* = nullptr */,
                                                InvokedPrediction invoked /* = PredictUninvoked */)
@@ -8612,7 +8686,8 @@ GeneralParser<ParseHandler, CharT>::memberExpr(YieldHandling yieldHandling,
         } else {
             // Gotten by tryNewTarget
             tt = anyChars.currentToken().type;
-            Node ctorExpr = memberExpr(yieldHandling, TripledotProhibited, tt,
+            Node ctorExpr = memberExpr(yieldHandling, TripledotProhibited,
+                                       ExpressionClosure::Forbidden, tt,
                                        /* allowCallSyntax = */ false,
                                        /* possibleError = */ nullptr, PredictInvoked);
             if (!ctorExpr)
@@ -8641,9 +8716,13 @@ GeneralParser<ParseHandler, CharT>::memberExpr(YieldHandling yieldHandling,
         if (!lhs)
             return null();
     } else {
-        lhs = primaryExpr(yieldHandling, tripledotHandling, tt, possibleError, invoked);
+        lhs = primaryExpr(yieldHandling, tripledotHandling, expressionClosureHandling, tt,
+                          possibleError, invoked);
         if (!lhs)
             return null();
+
+        if (handler.isExpressionClosure(lhs))
+            return lhs;
     }
 
     MOZ_ASSERT_IF(handler.isSuperBase(lhs), anyChars.isCurrentTokenType(TokenKind::Super));
@@ -9268,6 +9347,14 @@ GeneralParser<ParseHandler, CharT>::arrayInitializer(YieldHandling yieldHandling
     return literal;
 }
 
+static JSAtom*
+DoubleToAtom(JSContext* cx, double value)
+{
+    // This is safe because doubles can not be moved.
+    Value tmp = DoubleValue(value);
+    return ToAtom<CanGC>(cx, HandleValue::fromMarkedLocation(&tmp));
+}
+
 template <class ParseHandler, typename CharT>
 typename ParseHandler::Node
 GeneralParser<ParseHandler, CharT>::propertyName(YieldHandling yieldHandling,
@@ -9325,7 +9412,7 @@ GeneralParser<ParseHandler, CharT>::propertyName(YieldHandling yieldHandling,
     Node propName;
     switch (ltok) {
       case TokenKind::Number:
-        propAtom.set(NumberToAtom(context, anyChars.currentToken().number()));
+        propAtom.set(DoubleToAtom(context, anyChars.currentToken().number()));
         if (!propAtom.get())
             return null();
         propName = newNumber(anyChars.currentToken());
@@ -9389,7 +9476,7 @@ GeneralParser<ParseHandler, CharT>::propertyName(YieldHandling yieldHandling,
 
             uint32_t index;
             if (propAtom->isIndex(&index)) {
-                propAtom.set(NumberToAtom(context, index));
+                propAtom.set(DoubleToAtom(context, index));
                 if (!propAtom.get())
                     return null();
                 return handler.newNumber(index, NoDecimal, pos());
@@ -9399,7 +9486,7 @@ GeneralParser<ParseHandler, CharT>::propertyName(YieldHandling yieldHandling,
         if (tt == TokenKind::Number) {
             tokenStream.consumeKnownToken(TokenKind::Number);
 
-            propAtom.set(NumberToAtom(context, anyChars.currentToken().number()));
+            propAtom.set(DoubleToAtom(context, anyChars.currentToken().number()));
             if (!propAtom.get())
                 return null();
             return newNumber(anyChars.currentToken());
@@ -9556,11 +9643,16 @@ GeneralParser<ParseHandler, CharT>::objectLiteral(YieldHandling yieldHandling,
                 if (!propExpr)
                     return null();
 
+                handler.checkAndSetIsDirectRHSAnonFunction(propExpr);
+
                 if (!checkDestructuringAssignmentElement(propExpr, exprPos, &possibleErrorInner,
                                                          possibleError))
                 {
                     return null();
                 }
+
+                if (foldConstants && !FoldConstants(context, &propExpr, this))
+                    return null();
 
                 if (propAtom == context->names().proto) {
                     if (seenPrototypeMutation) {
@@ -9578,25 +9670,18 @@ GeneralParser<ParseHandler, CharT>::objectLiteral(YieldHandling yieldHandling,
                     }
                     seenPrototypeMutation = true;
 
-                    if (foldConstants && !FoldConstants(context, &propExpr, this))
-                        return null();
-
-                    // This occurs *only* if we observe PropertyType::Normal!
-                    // Only |__proto__: v| mutates [[Prototype]]. Getters,
-                    // setters, method/generator definitions, computed
-                    // property name versions of all of these, and shorthands
-                    // do not.
+                    // Note: this occurs *only* if we observe TokenKind::Colon!  Only
+                    // __proto__: v mutates [[Prototype]].  Getters, setters,
+                    // method/generator definitions, computed property name
+                    // versions of all of these, and shorthands do not.
                     if (!handler.addPrototypeMutation(literal, namePos.begin, propExpr))
                         return null();
                 } else {
-                    Node propDef = handler.newPropertyDefinition(propName, propExpr);
-                    if (!propDef)
-                        return null();
+                    if (!handler.isConstant(propExpr))
+                        handler.setListFlag(literal, PNX_NONCONST);
 
-                    if (foldConstants && !FoldConstants(context, &propDef, this))
+                    if (!handler.addPropertyDefinition(literal, propName, propExpr))
                         return null();
-
-                    handler.addPropertyDefinition(literal, propDef);
                 }
             } else if (propType == PropertyType::Shorthand) {
                 /*
@@ -9664,6 +9749,8 @@ GeneralParser<ParseHandler, CharT>::objectLiteral(YieldHandling yieldHandling,
                 if (!rhs)
                     return null();
 
+                handler.checkAndSetIsDirectRHSAnonFunction(rhs);
+
                 Node propExpr = handler.newAssignment(ParseNodeKind::Assign, lhs, rhs);
                 if (!propExpr)
                     return null();
@@ -9685,6 +9772,8 @@ GeneralParser<ParseHandler, CharT>::objectLiteral(YieldHandling yieldHandling,
                 Node fn = methodDefinition(namePos.begin, propType, funName);
                 if (!fn)
                     return null();
+
+                handler.checkAndSetIsDirectRHSAnonFunction(fn);
 
                 AccessorType atype = ToAccessorType(propType);
                 if (!handler.addObjectMethodDefinition(literal, propName, fn, atype))
@@ -9722,26 +9811,34 @@ GeneralParser<ParseHandler, CharT>::methodDefinition(uint32_t toStringStart, Pro
     FunctionSyntaxKind kind;
     switch (propType) {
       case PropertyType::Getter:
-        kind = FunctionSyntaxKind::Getter;
+        kind = Getter;
+        break;
+
+      case PropertyType::GetterNoExpressionClosure:
+        kind = GetterNoExpressionClosure;
         break;
 
       case PropertyType::Setter:
-        kind = FunctionSyntaxKind::Setter;
+        kind = Setter;
+        break;
+
+      case PropertyType::SetterNoExpressionClosure:
+        kind = SetterNoExpressionClosure;
         break;
 
       case PropertyType::Method:
       case PropertyType::GeneratorMethod:
       case PropertyType::AsyncMethod:
       case PropertyType::AsyncGeneratorMethod:
-        kind = FunctionSyntaxKind::Method;
+        kind = Method;
         break;
 
       case PropertyType::Constructor:
-        kind = FunctionSyntaxKind::ClassConstructor;
+        kind = ClassConstructor;
         break;
 
       case PropertyType::DerivedConstructor:
-        kind = FunctionSyntaxKind::DerivedClassConstructor;
+        kind = DerivedClassConstructor;
         break;
 
       default:
@@ -9816,6 +9913,7 @@ template <class ParseHandler, typename CharT>
 typename ParseHandler::Node
 GeneralParser<ParseHandler, CharT>::primaryExpr(YieldHandling yieldHandling,
                                                 TripledotHandling tripledotHandling,
+                                                ExpressionClosure expressionClosureHandling,
                                                 TokenKind tt, PossibleError* possibleError,
                                                 InvokedPrediction invoked /* = PredictUninvoked */)
 {
@@ -9825,7 +9923,8 @@ GeneralParser<ParseHandler, CharT>::primaryExpr(YieldHandling yieldHandling,
 
     switch (tt) {
       case TokenKind::Function:
-        return functionExpr(pos().begin, invoked, FunctionAsyncKind::SyncFunction);
+        return functionExpr(pos().begin, expressionClosureHandling, invoked,
+                            FunctionAsyncKind::SyncFunction);
 
       case TokenKind::Class:
         return classDefinition(yieldHandling, ClassExpression, NameRequired);
@@ -9890,7 +9989,8 @@ GeneralParser<ParseHandler, CharT>::primaryExpr(YieldHandling yieldHandling,
             if (nextSameLine == TokenKind::Function) {
                 uint32_t toStringStart = pos().begin;
                 tokenStream.consumeKnownToken(TokenKind::Function);
-                return functionExpr(toStringStart, PredictUninvoked, FunctionAsyncKind::AsyncFunction);
+                return functionExpr(toStringStart, expressionClosureHandling, PredictUninvoked,
+                                    FunctionAsyncKind::AsyncFunction);
             }
         }
 
@@ -9993,6 +10093,31 @@ GeneralParser<ParseHandler, CharT>::exprInParens(InHandling inHandling,
 {
     MOZ_ASSERT(anyChars.isCurrentTokenType(TokenKind::Lp));
     return expr(inHandling, yieldHandling, tripledotHandling, possibleError, PredictInvoked);
+}
+
+void
+ParserBase::addTelemetry(DeprecatedLanguageExtension e)
+{
+    if (context->helperThread())
+        return;
+    context->compartment()->addTelemetry(getFilename(), e);
+}
+
+template <class ParseHandler, typename CharT>
+bool
+GeneralParser<ParseHandler, CharT>::warnOnceAboutExprClosure()
+{
+#ifndef RELEASE_OR_BETA
+    if (context->helperThread())
+        return true;
+
+    if (!context->compartment()->warnedAboutExprClosure) {
+        if (!warning(JSMSG_DEPRECATED_EXPR_CLOSURE))
+            return false;
+        context->compartment()->warnedAboutExprClosure = true;
+    }
+#endif
+    return true;
 }
 
 template class PerHandlerParser<FullParseHandler>;

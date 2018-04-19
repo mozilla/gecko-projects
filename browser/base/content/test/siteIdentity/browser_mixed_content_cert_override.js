@@ -49,6 +49,6 @@ add_task(async function() {
                               .getService(Ci.nsICertOverrideService);
   certOverrideService.clearValidityOverride("self-signed.example.com", -1);
 
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 

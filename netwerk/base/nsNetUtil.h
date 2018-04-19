@@ -50,6 +50,8 @@ class nsIStreamLoader;
 class nsIStreamLoaderObserver;
 class nsIIncrementalStreamLoader;
 class nsIIncrementalStreamLoaderObserver;
+class nsIUnicharStreamLoader;
+class nsIUnicharStreamLoaderObserver;
 
 namespace mozilla {
 class Encoding;
@@ -423,6 +425,9 @@ NS_NewStreamLoader(nsIStreamLoader        **outStream,
                    nsIInterfaceRequestor   *aCallbacks = nullptr,
                    nsLoadFlags              aLoadFlags = nsIRequest::LOAD_NORMAL,
                    nsIURI                  *aReferrer = nullptr);
+
+nsresult NS_NewUnicharStreamLoader(nsIUnicharStreamLoader        **result,
+                                   nsIUnicharStreamLoaderObserver *observer);
 
 nsresult NS_NewSyncStreamListener(nsIStreamListener **result,
                                   nsIInputStream    **stream);

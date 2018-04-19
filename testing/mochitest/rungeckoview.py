@@ -12,8 +12,8 @@ import traceback
 from optparse import OptionParser
 
 import mozcrash
+import mozdevice
 import mozlog
-from mozdevice import ADBAndroid
 from mozprofile import Profile
 
 
@@ -33,13 +33,17 @@ class GeckoviewOptions(OptionParser):
                         action="store", type="string", dest="app",
                         default="org.mozilla.geckoview_example",
                         help="geckoview_example package name")
+        self.add_option("--deviceIP",
+                        action="store", type="string", dest="deviceIP",
+                        default=None,
+                        help="ip address of remote device to test")
         self.add_option("--deviceSerial",
                         action="store", type="string", dest="deviceSerial",
                         default=None,
                         help="serial ID of remote device to test")
         self.add_option("--adbpath",
                         action="store", type="string", dest="adbPath",
-                        default=None,
+                        default="adb",
                         help="Path to adb binary.")
         self.add_option("--remoteTestRoot",
                         action="store", type="string", dest="remoteTestRoot",
@@ -54,11 +58,9 @@ class GeckoviewTestRunner:
        app starts without crashing.
     """
 
-    def __init__(self, log, options):
+    def __init__(self, log, dm, options):
         self.log = log
-        self.device = ADBAndroid(adb=options.adbPath or 'adb',
-                                 device=options.deviceSerial,
-                                 test_root=options.remoteTestRoot)
+        self.dm = dm
         self.options = options
         self.appname = self.options.app.split('/')[-1]
         self.logcat = None
@@ -66,11 +68,11 @@ class GeckoviewTestRunner:
         self.log.debug("options=%s" % vars(options))
 
     def build_profile(self):
-        test_root = self.device.test_root
+        test_root = self.dm.deviceRoot
         self.remote_profile = posixpath.join(test_root, 'gv-profile')
-        self.device.mkdir(self.remote_profile, parents=True)
+        self.dm.mkDirs(posixpath.join(self.remote_profile, "x"))
         profile = Profile()
-        self.device.push(profile.profile, self.remote_profile)
+        self.dm.pushDir(profile.profile, self.remote_profile)
         self.log.debug("profile %s -> %s" %
                        (str(profile.profile), str(self.remote_profile)))
 
@@ -78,7 +80,8 @@ class GeckoviewTestRunner:
         """
         geckoview_example installed
         """
-        if not self.device.is_app_installed(self.appname):
+        installed = self.dm.shellCheckOutput(['pm', 'list', 'packages', self.appname])
+        if self.appname not in installed:
             return (False, "%s not installed" % self.appname)
         return (True, "%s installed" % self.appname)
 
@@ -87,25 +90,29 @@ class GeckoviewTestRunner:
         geckoview_example starts
         """
         try:
-            self.device.stop_application(self.appname)
-            self.device.clear_logcat()
-
-            args = ["-profile", self.remote_profile]
+            self.dm.stopApplication(self.appname)
+            self.dm.recordLogcat()
+            cmd = ['am', 'start', '-a', 'android.intent.action.MAIN', '-n',
+                   'org.mozilla.geckoview_example/org.mozilla.geckoview_example.GeckoViewActivity',
+                   '--es', 'args', '-profile %s' % self.remote_profile]
             env = {}
-            env["MOZ_CRASHREPORTER"] = "1"
-            env["MOZ_CRASHREPORTER_NO_REPORT"] = "1"
-            env["MOZ_CRASHREPORTER_SHUTDOWN"] = "1"
+            env["MOZ_CRASHREPORTER"] = 1
+            env["MOZ_CRASHREPORTER_NO_REPORT"] = 1
             env["XPCOM_DEBUG_BREAK"] = "stack"
-            env["DISABLE_UNSAFE_CPOW_WARNINGS"] = "1"
-            env["MOZ_DISABLE_NONLOCAL_CONNECTIONS"] = "1"
-            env["MOZ_IN_AUTOMATION"] = "1"
-            env["R_LOG_VERBOSE"] = "1"
-            env["R_LOG_LEVEL"] = "6"
+            env["DISABLE_UNSAFE_CPOW_WARNINGS"] = 1
+            env["MOZ_DISABLE_NONLOCAL_CONNECTIONS"] = 1
+            env["MOZ_IN_AUTOMATION"] = 1
+            env["R_LOG_VERBOSE"] = 1
+            env["R_LOG_LEVEL"] = 6
             env["R_LOG_DESTINATION"] = "stderr"
-            self.device.launch_activity("org.mozilla.geckoview_example",
-                                        "GeckoViewActivity",
-                                        extra_args=args, moz_env=env)
-        except Exception:
+            i = 0
+            for key, value in env.iteritems():
+                cmd.append("--es")
+                cmd.append("env%d" % i)
+                cmd.append("%s=%s" % (key, str(value)))
+                i = i + 1
+            self.dm.shellCheckOutput(cmd)
+        except mozdevice.DMError:
             return (False, "Exception during %s startup" % self.appname)
         return (True, "%s started" % self.appname)
 
@@ -120,7 +127,7 @@ class GeckoviewTestRunner:
         # wait up to 60 seconds for startup
         for wait_time in xrange(60):
             time.sleep(1)
-            self.logcat = self.device.get_logcat()
+            self.logcat = self.dm.getLogcat()
             for line in self.logcat:
                 for e in expected:
                     if e in line:
@@ -177,7 +184,7 @@ class GeckoviewTestRunner:
             # crashreporter initialization, in case all tests finished quickly
             for wait_time in xrange(60):
                 time.sleep(1)
-                if self.device.is_dir(remote_dir):
+                if self.dm.dirExists(remote_dir):
                     crash_dir_found = True
                     break
             if not crash_dir_found:
@@ -189,7 +196,7 @@ class GeckoviewTestRunner:
                     remote_dir
                 # Whilst no crash was found, the run should still display as a failure
                 return True
-            self.device.pull(remote_dir, dump_dir)
+            self.dm.getDirectory(remote_dir, dump_dir)
             crashed = mozcrash.log_crashes(self.log, dump_dir, symbols_path, test=self.test_name)
         finally:
             try:
@@ -203,13 +210,23 @@ class GeckoviewTestRunner:
            Cleanup at end of job run.
         """
         self.log.debug("Cleaning up...")
-        self.device.stop_application(self.appname)
-        self.device.rm(self.remote_profile, force=True, recursive=True)
+        self.dm.stopApplication(self.appname)
+        self.dm.removeDir(self.remote_profile)
         self.log.debug("Cleanup complete.")
 
 
 def run_test_harness(log, parser, options):
-    runner = GeckoviewTestRunner(log, options)
+    device_args = {'deviceRoot': options.remoteTestRoot}
+    device_args['adbPath'] = options.adbPath
+    if options.deviceIP:
+        device_args['host'] = options.deviceIP
+        device_args['port'] = options.devicePort
+    elif options.deviceSerial:
+        device_args['deviceSerial'] = options.deviceSerial
+    device_args['packageName'] = options.app
+    dm = mozdevice.DroidADB(**device_args)
+
+    runner = GeckoviewTestRunner(log, dm, options)
     result = -1
     try:
         result = runner.run_tests()
@@ -224,9 +241,9 @@ def run_test_harness(log, parser, options):
     finally:
         try:
             runner.cleanup()
-        except Exception:
+        except mozdevice.DMError:
             # ignore device error while cleaning up
-            traceback.print_exc()
+            pass
     return result
 
 

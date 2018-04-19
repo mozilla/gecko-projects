@@ -41,16 +41,15 @@ info: |
         each implementation distinguishable NaN value.
   ...
 includes: [nans.js, testTypedArray.js, compareArray.js]
-features: [TypedArray]
 ---*/
 
 function body(FloatArray) {
-  var sample = new FloatArray(NaNs);
+  var sample = new FloatArray(distinctNaNs);
   var sampleBytes, resultBytes;
   var i = 0;
 
   var result = sample.map(function() {
-    return NaNs[i++];
+    return distinctNaNs[i++];
   });
 
   sampleBytes = new Uint8Array(sample.buffer);

@@ -2,7 +2,7 @@
 // This code is governed by the BSD license found in the LICENSE file.
 
 /*---
-esid: sec-get-%typedarray%.prototype-@@tostringtag
+es6id: 22.2.3.31
 description: >
   get %TypedArray%.prototype [ @@toStringTag ].length is 0.
 info: |

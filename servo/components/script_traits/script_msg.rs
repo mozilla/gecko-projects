@@ -11,9 +11,9 @@ use LayoutControlMsg;
 use LoadData;
 use WorkerGlobalScopeInit;
 use WorkerScriptLoadOrigin;
-use canvas_traits::canvas::{CanvasMsg, CanvasId};
+use canvas_traits::canvas::CanvasMsg;
 use devtools_traits::{ScriptToDevtoolsControlMsg, WorkerId};
-use euclid::{Size2D, TypedSize2D};
+use euclid::{Point2D, Size2D, TypedSize2D};
 use gfx_traits::Epoch;
 use ipc_channel::ipc::{IpcReceiver, IpcSender};
 use msg::constellation_msg::{BrowsingContextId, PipelineId, TraversalDirection};
@@ -26,7 +26,6 @@ use servo_url::ServoUrl;
 use style_traits::CSSPixel;
 use style_traits::cursor::CursorKind;
 use style_traits::viewport::ViewportConstraints;
-use webrender_api::{DeviceIntPoint, DeviceUintSize};
 
 /// Messages from the layout to the constellation.
 #[derive(Deserialize, Serialize)]
@@ -79,7 +78,7 @@ pub enum ScriptMsg {
     ChangeRunningAnimationsState(AnimationState),
     /// Requests that a new 2D canvas thread be created. (This is done in the constellation because
     /// 2D canvases may use the GPU and we don't want to give untrusted content access to the GPU.)
-    CreateCanvasPaintThread(Size2D<i32>, IpcSender<(IpcSender<CanvasMsg>, CanvasId)>),
+    CreateCanvasPaintThread(Size2D<i32>, IpcSender<IpcSender<CanvasMsg>>),
     /// Notifies the constellation that this frame has received focus.
     Focus,
     /// Forward an event that was sent to the parent window.
@@ -136,10 +135,12 @@ pub enum ScriptMsg {
     SetTitle(Option<String>),
     /// Send a key event
     SendKeyEvent(Option<char>, Key, KeyState, KeyModifiers),
+    /// Get Window Informations size and position
+    GetClientWindow(IpcSender<(Size2D<u32>, Point2D<i32>)>),
     /// Move the window to a point
-    MoveTo(DeviceIntPoint),
+    MoveTo(Point2D<i32>),
     /// Resize the window to size
-    ResizeTo(DeviceUintSize),
+    ResizeTo(Size2D<u32>),
     /// Script has handled a touch event, and either prevented or allowed default actions.
     TouchEventProcessed(EventResult),
     /// A log entry, with the top-level browsing context id and thread name
@@ -153,12 +154,10 @@ pub enum ScriptMsg {
     RegisterServiceWorker(ScopeThings, ServoUrl),
     /// Enter or exit fullscreen
     SetFullscreenState(bool),
-    /// Get Window Informations size and position
-    GetClientWindow(IpcSender<(DeviceUintSize, DeviceIntPoint)>),
     /// Get the screen size (pixel)
-    GetScreenSize(IpcSender<(DeviceUintSize)>),
+    GetScreenSize(IpcSender<(Size2D<u32>)>),
     /// Get the available screen size (pixel)
-    GetScreenAvailSize(IpcSender<(DeviceUintSize)>),
+    GetScreenAvailSize(IpcSender<(Size2D<u32>)>),
     /// Requests that the compositor shut down.
     Exit,
 }

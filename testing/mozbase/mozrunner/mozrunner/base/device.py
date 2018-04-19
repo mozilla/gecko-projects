@@ -20,7 +20,7 @@ from ..devices import BaseEmulator
 class DeviceRunner(BaseRunner):
     """
     The base runner class used for running gecko on
-    remote devices (or emulators).
+    remote devices (or emulators), such as B2G.
     """
     env = {'MOZ_CRASHREPORTER': '1',
            'MOZ_CRASHREPORTER_NO_REPORT': '1',

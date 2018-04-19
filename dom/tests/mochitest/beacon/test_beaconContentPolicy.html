@@ -49,9 +49,8 @@ function setupPolicy() {
     },
 
     // nsIContentPolicy implementation
-    shouldLoad: function(contentLocation, loadInfo, mimeTypeGuess) {
+    shouldLoad: function(contentType, contentLocation, requestOrigin, context, mimeTypeGuess, extra) {
       // Remember last content type seen for the test url
-      let contentType = loadInfo.externalContentPolicyType;
 
       if (SpecialPowers.wrap(contentLocation).spec == beaconUrl) {
         is(contentType,  Ci.nsIContentPolicy.TYPE_BEACON, "Beacon content type should match expected.  is: " + contentType + " should be: " + Ci.nsIContentPolicy.TYPE_BEACON);
@@ -62,7 +61,7 @@ function setupPolicy() {
       return Ci.nsIContentPolicy.ACCEPT;
     },
 
-    shouldProcess: function(contentLocation, loadInfo, mimeTypeGuess) {
+    shouldProcess: function(contentType, contentLocation, requestOrigin, context, mimeTypeGuess, extra) {
       return Ci.nsIContentPolicy.ACCEPT;
     }
   }

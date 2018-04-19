@@ -8,7 +8,7 @@ use cssparser::Parser;
 use gecko_bindings::bindings;
 use gecko_bindings::structs::{ServoBundledURI, URLExtraData};
 use gecko_bindings::structs::mozilla::css::URLValueData;
-use gecko_bindings::structs::root::{RustString, nsStyleImageRequest};
+use gecko_bindings::structs::root::{nsStyleImageRequest, RustString};
 use gecko_bindings::structs::root::mozilla::css::{ImageValue, URLValue};
 use gecko_bindings::sugar::refptr::RefPtr;
 use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
@@ -37,10 +37,9 @@ impl CssUrl {
     /// URL.
     ///
     /// Returns `Err` in the case that extra_data is incomplete.
-    pub fn parse_from_string<'a>(
-        url: String,
-        context: &ParserContext,
-    ) -> Result<Self, ParseError<'a>> {
+    pub fn parse_from_string<'a>(url: String,
+                                 context: &ParserContext)
+                                 -> Result<Self, ParseError<'a>> {
         Ok(CssUrl {
             serialization: Arc::new(url),
             extra_data: context.url_data.clone(),
@@ -56,10 +55,15 @@ impl CssUrl {
 
     /// Convert from URLValueData to SpecifiedUrl.
     unsafe fn from_url_value_data(url: &URLValueData) -> Result<Self, ()> {
-        let arc_type =
-            &url.mString as *const _ as *const RawOffsetArc<String>;
         Ok(CssUrl {
-            serialization: Arc::from_raw_offset((*arc_type).clone()),
+            serialization: if url.mUsingRustString {
+                let arc_type = url.mStrings.mRustString.as_ref()
+                    as *const _ as
+                    *const RawOffsetArc<String>;
+                Arc::from_raw_offset((*arc_type).clone())
+            } else {
+                Arc::new(url.mStrings.mString.as_ref().to_string())
+            },
             extra_data: url.mExtraData.to_safe(),
         })
     }
@@ -80,10 +84,7 @@ impl CssUrl {
 
     /// Little helper for Gecko's ffi.
     pub fn as_slice_components(&self) -> (*const u8, usize) {
-        (
-            self.serialization.as_str().as_ptr(),
-            self.serialization.as_str().len(),
-        )
+        (self.serialization.as_str().as_ptr(), self.serialization.as_str().len())
     }
 
     /// Create a bundled URI suitable for sending to Gecko
@@ -91,17 +92,16 @@ impl CssUrl {
     pub fn for_ffi(&self) -> ServoBundledURI {
         let arc_offset = Arc::into_raw_offset(self.serialization.clone());
         ServoBundledURI {
-            mURLString: unsafe { mem::transmute::<_, RawOffsetArc<RustString>>(arc_offset) },
+            mURLString: unsafe {
+                mem::transmute::<_, RawOffsetArc<RustString>>(arc_offset)
+            },
             mExtraData: self.extra_data.get(),
         }
     }
 }
 
 impl Parse for CssUrl {
-    fn parse<'i, 't>(
-        context: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Self, ParseError<'i>> {
+    fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
         let url = input.expect_url()?;
         Self::parse_from_string(url.as_ref().to_owned(), context)
     }
@@ -157,10 +157,7 @@ impl PartialEq for SpecifiedUrl {
 impl Eq for SpecifiedUrl {}
 
 impl Parse for SpecifiedUrl {
-    fn parse<'i, 't>(
-        context: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Self, ParseError<'i>> {
+    fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
         CssUrl::parse(context, input).map(Self::from_css_url)
     }
 }
@@ -203,7 +200,7 @@ impl SpecifiedImageUrl {
     /// Parse a URL from a string value. See SpecifiedUrl::parse_from_string.
     pub fn parse_from_string<'a>(
         url: String,
-        context: &ParserContext,
+        context: &ParserContext
     ) -> Result<Self, ParseError<'a>> {
         CssUrl::parse_from_string(url, context).map(Self::from_css_url)
     }
@@ -226,10 +223,7 @@ impl SpecifiedImageUrl {
 }
 
 impl Parse for SpecifiedImageUrl {
-    fn parse<'i, 't>(
-        context: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Self, ParseError<'i>> {
+    fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
         CssUrl::parse(context, input).map(Self::from_css_url)
     }
 }

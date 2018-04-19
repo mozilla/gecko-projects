@@ -52,15 +52,15 @@ public:
   virtual void UnbindFromTree(bool aDeep, bool aNullParent) override;
   virtual EventStates IntrinsicState() const override;
 
-  void GetEventTargetParent(EventChainPreVisitor& aVisitor) override
+  virtual nsresult GetEventTargetParent(EventChainPreVisitor& aVisitor) override
   {
     MOZ_ASSERT(IsInNativeAnonymousSubtree());
     if (aVisitor.mEvent->mMessage == eLoad ||
         aVisitor.mEvent->mMessage == eLoadError) {
       // Don't propagate the events to the parent.
-      return;
+      return NS_OK;
     }
-    nsGenericHTMLElement::GetEventTargetParent(aVisitor);
+    return nsGenericHTMLElement::GetEventTargetParent(aVisitor);
   }
 
 protected:

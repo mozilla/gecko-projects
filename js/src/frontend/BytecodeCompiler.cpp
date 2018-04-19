@@ -65,10 +65,8 @@ class MOZ_STACK_CLASS BytecodeCompiler
     bool createScript();
     bool createScript(uint32_t toStringStart, uint32_t toStringEnd);
 
-    using TokenStreamPosition = frontend::TokenStreamPosition<char16_t>;
-
     bool emplaceEmitter(Maybe<BytecodeEmitter>& emitter, SharedContext* sharedContext);
-    bool handleParseFailure(const Directives& newDirectives, TokenStreamPosition& startPosition);
+    bool handleParseFailure(const Directives& newDirectives);
     bool deoptimizeArgumentsInEnclosingScripts(JSContext* cx, HandleObject environment);
 
     AutoKeepAtoms keepAtoms;
@@ -88,6 +86,7 @@ class MOZ_STACK_CLASS BytecodeCompiler
     Maybe<Parser<FullParseHandler, char16_t>> parser;
 
     Directives directives;
+    TokenStream::Position startPosition;
 
     RootedScript script;
 };
@@ -158,6 +157,7 @@ BytecodeCompiler::BytecodeCompiler(JSContext* cx,
     sourceObject(cx),
     scriptSource(nullptr),
     directives(options.strictOption),
+    startPosition(keepAtoms),
     script(cx)
 {
     MOZ_ASSERT(sourceBuffer.get());
@@ -229,7 +229,11 @@ BytecodeCompiler::createParser()
     parser.emplace(cx, alloc, options, sourceBuffer.get(), sourceBuffer.length(),
                    /* foldConstants = */ true, *usedNames, syntaxParser.ptrOr(nullptr), nullptr);
     parser->ss = scriptSource;
-    return parser->checkOptions();
+    if (!parser->checkOptions())
+        return false;
+
+    parser->tokenStream.tell(&startPosition);
+    return true;
 }
 
 bool
@@ -265,8 +269,7 @@ BytecodeCompiler::emplaceEmitter(Maybe<BytecodeEmitter>& emitter, SharedContext*
 }
 
 bool
-BytecodeCompiler::handleParseFailure(const Directives& newDirectives,
-                                     TokenStreamPosition& startPosition)
+BytecodeCompiler::handleParseFailure(const Directives& newDirectives)
 {
     if (parser->hadAbortedSyntaxParse()) {
         // Hit some unrecoverable ambiguity during an inner syntax parse.
@@ -313,8 +316,6 @@ BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
     if (!createSourceAndParser())
         return nullptr;
 
-    TokenStreamPosition startPosition(keepAtoms, parser->tokenStream);
-
     if (!createScript())
         return nullptr;
 
@@ -349,7 +350,7 @@ BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
         }
 
         // Maybe we aborted a syntax parse. See if we can try again.
-        if (!handleParseFailure(directives, startPosition))
+        if (!handleParseFailure(directives))
             return nullptr;
 
         // Reset UsedNameTracker state before trying again.
@@ -451,8 +452,6 @@ BytecodeCompiler::compileStandaloneFunction(MutableHandleFunction fun,
     if (!createSourceAndParser(parameterListEnd))
         return false;
 
-    TokenStreamPosition startPosition(keepAtoms, parser->tokenStream);
-
     // Speculatively parse using the default directives implied by the context.
     // If a directive is encountered (e.g., "use strict") that changes how the
     // function should have been parsed, we backup and reparse with the new set
@@ -463,7 +462,7 @@ BytecodeCompiler::compileStandaloneFunction(MutableHandleFunction fun,
         Directives newDirectives = directives;
         fn = parser->standaloneFunction(fun, enclosingScope, parameterListEnd, generatorKind,
                                         asyncKind, directives, &newDirectives);
-        if (!fn && !handleParseFailure(newDirectives, startPosition))
+        if (!fn && !handleParseFailure(newDirectives))
             return false;
     } while (!fn);
 
@@ -636,7 +635,7 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
     options.setMutedErrors(lazy->mutedErrors())
            .setFileAndLine(lazy->filename(), lazy->lineno())
            .setColumn(lazy->column())
-           .setScriptSourceOffset(lazy->sourceStart())
+           .setScriptSourceOffset(lazy->begin())
            .setNoScriptRval(false)
            .setSelfHostingMode(false);
 
@@ -678,7 +677,7 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
     MOZ_ASSERT(sourceObject);
 
     Rooted<JSScript*> script(cx, JSScript::Create(cx, options, sourceObject,
-                                                  lazy->sourceStart(), lazy->sourceEnd(),
+                                                  lazy->begin(), lazy->end(),
                                                   lazy->toStringStart(), lazy->toStringEnd()));
     if (!script)
         return false;

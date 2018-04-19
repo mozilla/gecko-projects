@@ -12,70 +12,26 @@ audio > xul|videocontrols {
   height: 100%;
   display: inline-block;
   overflow: hidden;
-
-  direction: ltr;
-  /* Prevent unwanted style inheritance. See bug 554717. */
-  text-align: left;
-  list-style-image: none !important;
-  font: normal normal normal 100%/normal sans-serif !important;
-  text-decoration: none !important;
 }
 
-.controlsContainer {
-  --clickToPlay-size: 48px;
-  --button-size: 30px;
-  --timer-size: 40px;
-  --timer-long-size: 60px;
-  --track-size: 5px;
-  --thumb-size: 13px;
-  --label-font-size: 13px;
-}
-.controlsContainer.touch {
-  --clickToPlay-size: 64px;
-  --button-size: 40px;
-  --timer-size: 52px;
-  --timer-long-size: 78px;
-  --track-size: 7px;
-  --thumb-size: 16px;
-  --label-font-size: 16px;
-}
-
-/* Some CSS custom properties defined here are referenced by videocontrols.xml in JavaScript */
 .controlBar {
-  /* Do not delete: these variables are accessed by JavaScript directly.
-     see videocontrols.xml and search for |-width|. */
-  --clickToPlay-width: var(--clickToPlay-size);
-  --playButton-width: var(--button-size);
+  --clickToPlay-width: 48px;
+  --clickToPlay-height: var(--clickToPlay-width);
+  --playButton-width: 30px;
+  --playButton-height: var(--playButton-width);
   --scrubberStack-width: 64px;
-  --muteButton-width: var(--button-size);
+  --muteButton-width: 30px;
   --volumeStack-width: 48px;
-  --castingButton-width: var(--button-size);
-  --closedCaptionButton-width: var(--button-size);
-  --fullscreenButton-width: var(--button-size);
-  --positionDurationBox-width: var(--timer-size);
-  --durationSpan-width: var(--timer-size);
-  --positionDurationBox-width-long: var(--timer-long-size);
-  --durationSpan-width-long: var(--timer-long-size);
+  --closedCaptionButton-width: 30px;
+  --fullscreenButton-width: 30px;
+
+  --positionDurationBox-width: 40px;
+  --durationSpan-width: 40px;
+  --positionDurationBox-width-long: 60px;
+  --durationSpan-width-long: 60px;
 }
 
-.touch .controlBar {
-  /* Do not delete: these variables are accessed by JavaScript directly.
-     see videocontrols.xml and search for |-width|. */
-  --scrubberStack-width: 84px;
-  --volumeStack-width: 64px;
-}
-
-/*
-  XXX this is needed because of bug 1354501.
-  Can be removed when the bug is fixed, or when we move away from
-  the finish event to the finished promise.
-  (currently behind dom.animations-api.core.enabled)
-*/
-.fadeout {
-  opacity: 0;
-}
-
-.controlsContainer [hidden],
+.controlsContainer [hidden="true"],
 .controlBar[hidden] {
   display: none;
 }
@@ -137,14 +93,13 @@ audio > xul|videocontrols {
   background-color: rgba(26,26,26,.8);
 }
 
-.touch .controlBar {
-  height: 52px;
-}
-
-.controlBar > .button {
+.playButton,
+.muteButton,
+.closedCaptionButton,
+.fullscreenButton {
   height: 100%;
-  min-width: var(--button-size);
-  min-height: var(--button-size);
+  min-width: var(--playButton-width);
+  min-height: var(--playButton-height);
   padding: 6px;
   border: 0;
   margin: 0;
@@ -157,15 +112,17 @@ audio > xul|videocontrols {
   fill: #ffffff;
 }
 
-.touch .controlBar > .button {
-  background-size: 24px 24px;
-}
-
-.controlBar > .button:hover {
+.playButton:hover,
+.muteButton:hover,
+.closedCaptionButton:hover,
+.fullscreenButton:hover {
   fill: #48a0f7;
 }
 
-.controlBar > .button:hover:active {
+.playButton:hover:active,
+.muteButton:hover:active,
+.closedCaptionButton:hover:active,
+.fullscreenButton:hover:active {
   fill: #2d89e6;
 }
 
@@ -192,14 +149,6 @@ audio > xul|videocontrols {
   display: none;
 }
 
-.castingButton {
-  background-image: url(chrome://global/skin/media/castingButton-ready.svg);
-}
-
-.castingButton[enabled] {
-  background-image: url(chrome://global/skin/media/castingButton-active.svg);
-}
-
 .closedCaptionButton {
   background-image: url(chrome://global/skin/media/closedCaptionButton-cc-off.svg);
 }
@@ -220,8 +169,8 @@ audio > xul|videocontrols {
 
 .volumeControl::-moz-range-thumb,
 .scrubber::-moz-range-thumb {
-  height: var(--thumb-size);
-  width: var(--thumb-size);
+  height: 13px;
+  width: 13px;
   border: none;
   border-radius: 50%;
   background-color: #ffffff;
@@ -243,7 +192,7 @@ audio > xul|videocontrols {
 .progressStack {
   position: relative;
   width: 100%;
-  height: var(--track-size);
+  height: 5px;
 }
 
 .scrubberStack {
@@ -276,7 +225,7 @@ audio > xul|videocontrols {
   height: 100%;
   padding: 0;
   border: 0;
-  border-radius: calc(var(--track-size) / 2);
+  border-radius: 2.5px;
   margin: 0;
   background: none;
   background-color: transparent;
@@ -294,7 +243,7 @@ audio > xul|videocontrols {
   padding: 0;
   margin: 0;
   border: 0;
-  border-radius: calc(var(--track-size) / 2);
+  border-radius: 2.5px;
   background: none;
 }
 
@@ -315,8 +264,8 @@ audio > xul|videocontrols {
 
 .volumeControl::-moz-range-progress,
 .volumeControl::-moz-range-track {
-  height: var(--track-size);
-  border-radius: calc(var(--track-size) / 2);
+  height: 5px;
+  border-radius: 2.5px;
 }
 
 .volumeControl::-moz-range-progress {
@@ -330,7 +279,7 @@ audio > xul|videocontrols {
 
 .bufferBar::-moz-progress-bar {
   background-color: rgba(255,255,255,0.3);
-  border-radius: calc(var(--track-size) / 2);
+  border-radius: 2.5px;
 }
 
 .progressBar::-moz-progress-bar {
@@ -346,19 +295,15 @@ audio > xul|videocontrols {
   border-radius: 2.5px;
   padding: 5px 0;
   vertical-align: middle;
+  font-size: 12px;
   background-color: #000000;
   opacity: 0.7;
-}
-
-.touch .textTrackList {
-  bottom: 58px;
 }
 
 .textTrackList > .textTrackItem {
   display: block;
   width: 100%;
-  height: var(--button-size);
-  font-size: var(--label-font-size);
+  height: 30px;
   padding: 2px 10px;
   border: none;
   margin: 0;
@@ -389,7 +334,7 @@ audio > xul|videocontrols {
   padding-inline-end: 9px;
   white-space: nowrap;
   font: message-box;
-  font-size: var(--label-font-size);
+  font-size: 13px;
   font-size-adjust: 0.55;
   color: #ffffff;
 }
@@ -413,12 +358,11 @@ audio > xul|videocontrols {
   margin-bottom: 20px;
 }
 
-/* Not showing the throbber on mobile because of conflict with m.youtube.com (see bug 1289412) */
-.controlsContainer:not(.mobile) .statusIcon[type="throbber"] {
+.statusIcon[type="throbber"] {
   background: url(chrome://global/skin/media/throbber.png) no-repeat center;
 }
 
-.controlsContainer:not(.mobile) .statusIcon[type="throbber"][stalled] {
+.statusIcon[type="throbber"][stalled] {
   background: url(chrome://global/skin/media/stalled.png) no-repeat center;
 }
 
@@ -431,8 +375,8 @@ audio > xul|videocontrols {
 
 /* Overlay Play button */
 .clickToPlay {
-  min-width: var(--clickToPlay-size);
-  min-height: var(--clickToPlay-size);
+  min-width: var(--clickToPlay-width);
+  min-height: var(--clickToPlay-height);
   border-radius: 50%;
   background-image: url(chrome://global/skin/media/playButton.svg);
   background-repeat: no-repeat;
@@ -459,6 +403,41 @@ audio > xul|videocontrols {
   display: none;
 }
 
+/* CSS Transitions */
+.clickToPlay {
+  transition-property: transform, opacity;
+  transition-duration: 400ms, 400ms;
+}
+
+.controlsSpacer[fadeout] {
+  opacity: 0;
+}
+
+.clickToPlay[fadeout] {
+  transform: scale(3);
+  opacity: 0;
+}
+
+.clickToPlay[fadeout][immediate] {
+  transition-property: opacity, background-size;
+  transition-duration: 0s, 0s;
+}
+.controlBar:not([immediate]) {
+  transition-property: opacity;
+  transition-duration: 200ms;
+}
+.controlBar[fadeout] {
+  opacity: 0;
+}
+.volumeStack:not([immediate]) {
+  transition-property: opacity, margin-top;
+  transition-duration: 200ms, 200ms;
+}
+.statusOverlay:not([immediate]) {
+  transition-property: opacity;
+  transition-duration: 300ms;
+  transition-delay: 750ms;
+}
 .statusOverlay[fadeout],
 .statusOverlay[error] + .controlsOverlay > .controlsSpacerStack {
   opacity: 0;

@@ -30,9 +30,9 @@ using namespace mozilla::gfx;
 //----------------------------------------------------------------------
 // Implementation
 
-nsSVGGradientFrame::nsSVGGradientFrame(ComputedStyle* aStyle,
+nsSVGGradientFrame::nsSVGGradientFrame(nsStyleContext* aContext,
                                        ClassID aID)
-  : nsSVGPaintServerFrame(aStyle, aID)
+  : nsSVGPaintServerFrame(aContext, aID)
   , mSource(nullptr)
   , mLoopFlag(false)
   , mNoHRefURI(false)
@@ -246,7 +246,7 @@ nsSVGGradientFrame::GetPaintServerPattern(nsIFrame* aSource,
     // Set mSource for this consumer.
     // If this gradient is applied to text, our caller will be the glyph, which
     // is not an element, so we need to get the parent
-    mSource = aSource->GetContent()->IsText() ?
+    mSource = aSource->GetContent()->IsNodeOfType(nsINode::eTEXT) ?
                 aSource->GetParent() : aSource;
   }
 
@@ -665,18 +665,18 @@ nsSVGRadialGradientFrame::CreateGradient()
 
 nsIFrame*
 NS_NewSVGLinearGradientFrame(nsIPresShell*   aPresShell,
-                             ComputedStyle* aStyle)
+                             nsStyleContext* aContext)
 {
-  return new (aPresShell) nsSVGLinearGradientFrame(aStyle);
+  return new (aPresShell) nsSVGLinearGradientFrame(aContext);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGLinearGradientFrame)
 
 nsIFrame*
 NS_NewSVGRadialGradientFrame(nsIPresShell*   aPresShell,
-                             ComputedStyle* aStyle)
+                             nsStyleContext* aContext)
 {
-  return new (aPresShell) nsSVGRadialGradientFrame(aStyle);
+  return new (aPresShell) nsSVGRadialGradientFrame(aContext);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGRadialGradientFrame)

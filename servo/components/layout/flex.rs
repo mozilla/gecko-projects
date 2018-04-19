@@ -75,16 +75,28 @@ impl AxisSize {
 fn from_flex_basis(
     flex_basis: FlexBasis,
     main_length: LengthOrPercentageOrAuto,
-    containing_length: Au,
+    containing_length: Option<Au>
 ) -> MaybeAuto {
-    let width = match flex_basis {
-        GenericFlexBasis::Content => return MaybeAuto::Auto,
-        GenericFlexBasis::Width(width) => width,
-    };
-
-    match width.0 {
-        LengthOrPercentageOrAuto::Auto => MaybeAuto::from_style(main_length, containing_length),
-        other => MaybeAuto::from_style(other, containing_length),
+    match (flex_basis, containing_length) {
+        (GenericFlexBasis::Length(LengthOrPercentage::Length(length)), _) =>
+            MaybeAuto::Specified(Au::from(length)),
+        (GenericFlexBasis::Length(LengthOrPercentage::Percentage(percent)), Some(size)) =>
+            MaybeAuto::Specified(size.scale_by(percent.0)),
+        (GenericFlexBasis::Length(LengthOrPercentage::Percentage(_)), None) =>
+            MaybeAuto::Auto,
+        (GenericFlexBasis::Length(LengthOrPercentage::Calc(calc)), _) =>
+            MaybeAuto::from_option(calc.to_used_value(containing_length)),
+        (GenericFlexBasis::Content, _) =>
+            MaybeAuto::Auto,
+        (GenericFlexBasis::Auto, Some(size)) =>
+            MaybeAuto::from_style(main_length, size),
+        (GenericFlexBasis::Auto, None) => {
+            if let LengthOrPercentageOrAuto::Length(length) = main_length {
+                MaybeAuto::Specified(Au::from(length))
+            } else {
+                MaybeAuto::Auto
+            }
+        }
     }
 }
 
@@ -149,7 +161,7 @@ impl FlexItem {
             Direction::Inline => {
                 let basis = from_flex_basis(block.fragment.style.get_position().flex_basis,
                                             block.fragment.style.content_inline_size(),
-                                            containing_length);
+                                            Some(containing_length));
 
                 // These methods compute auto margins to zero length, which is exactly what we want.
                 block.fragment.compute_border_and_padding(containing_length);
@@ -171,7 +183,7 @@ impl FlexItem {
             Direction::Block => {
                 let basis = from_flex_basis(block.fragment.style.get_position().flex_basis,
                                             block.fragment.style.content_block_size(),
-                                            containing_length);
+                                            Some(containing_length));
                 let content_size = block.fragment.border_box.size.block
                     - block.fragment.border_padding.block_start_end()
                     + block.fragment.box_sizing_boundary(direction);

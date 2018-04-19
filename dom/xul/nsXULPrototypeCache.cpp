@@ -192,16 +192,22 @@ nsXULPrototypeCache::PutPrototype(nsXULPrototypeDocument* aDocument)
 }
 
 mozilla::StyleSheet*
-nsXULPrototypeCache::GetStyleSheet(nsIURI* aURI)
+nsXULPrototypeCache::GetStyleSheet(nsIURI* aURI,
+                                   StyleBackendType aType)
 {
-    return mStyleSheetTable.GetWeak(aURI);
+    StyleSheetTable& table = StyleSheetTableFor(aType);
+    return table.GetWeak(aURI);
 }
 
 nsresult
-nsXULPrototypeCache::PutStyleSheet(StyleSheet* aStyleSheet)
+nsXULPrototypeCache::PutStyleSheet(StyleSheet* aStyleSheet,
+                                   StyleBackendType aType)
 {
     nsIURI* uri = aStyleSheet->GetSheetURI();
-    mStyleSheetTable.Put(uri, aStyleSheet);
+
+    StyleSheetTable& table = StyleSheetTableFor(aType);
+    table.Put(uri, aStyleSheet);
+
     return NS_OK;
 }
 
@@ -234,18 +240,24 @@ nsXULPrototypeCache::PutScript(nsIURI* aURI,
 }
 
 nsXBLDocumentInfo*
-nsXULPrototypeCache::GetXBLDocumentInfo(nsIURI* aURL)
+nsXULPrototypeCache::GetXBLDocumentInfo(nsIURI* aURL,
+                                        StyleBackendType aType)
 {
-  return mXBLDocTable.GetWeak(aURL);
+  MOZ_ASSERT(aType != StyleBackendType::None,
+             "Please use either gecko or servo when looking up for the cache!");
+  return XBLDocTableFor(aType).GetWeak(aURL);
 }
 
 nsresult
 nsXULPrototypeCache::PutXBLDocumentInfo(nsXBLDocumentInfo* aDocumentInfo)
 {
   nsIURI* uri = aDocumentInfo->DocumentURI();
-  nsXBLDocumentInfo* info = mXBLDocTable.GetWeak(uri);
+  XBLDocTable& table =
+    XBLDocTableFor(aDocumentInfo->GetDocument()->GetStyleBackendType());
+
+  nsXBLDocumentInfo* info = table.GetWeak(uri);
   if (!info) {
-    mXBLDocTable.Put(uri, aDocumentInfo);
+    table.Put(uri, aDocumentInfo);
   }
   return NS_OK;
 }
@@ -253,29 +265,36 @@ nsXULPrototypeCache::PutXBLDocumentInfo(nsXBLDocumentInfo* aDocumentInfo)
 void
 nsXULPrototypeCache::FlushSkinFiles()
 {
-  // Flush out skin XBL files from the cache.
-  for (auto iter = mXBLDocTable.Iter(); !iter.Done(); iter.Next()) {
-    nsAutoCString str;
-    iter.Key()->GetPathQueryRef(str);
-    if (strncmp(str.get(), "/skin", 5) == 0) {
-      iter.Remove();
-    }
-  }
+  StyleBackendType tableTypes[] = { StyleBackendType::Gecko,
+                                    StyleBackendType::Servo };
 
-  // Now flush out our skin stylesheets from the cache.
-  for (auto iter = mStyleSheetTable.Iter(); !iter.Done(); iter.Next()) {
-    nsAutoCString str;
-    iter.Data()->GetSheetURI()->GetPathQueryRef(str);
-    if (strncmp(str.get(), "/skin", 5) == 0) {
-      iter.Remove();
+  for (auto tableType : tableTypes) {
+    // Flush out skin XBL files from the cache.
+    XBLDocTable& xblDocTable = XBLDocTableFor(tableType);
+    for (auto iter = xblDocTable.Iter(); !iter.Done(); iter.Next()) {
+      nsAutoCString str;
+      iter.Key()->GetPathQueryRef(str);
+      if (strncmp(str.get(), "/skin", 5) == 0) {
+        iter.Remove();
+      }
     }
-  }
 
-  // Iterate over all the remaining XBL and make sure cached
-  // scoped skin stylesheets are flushed and refetched by the
-  // prototype bindings.
-  for (auto iter = mXBLDocTable.Iter(); !iter.Done(); iter.Next()) {
-    iter.Data()->FlushSkinStylesheets();
+    // Now flush out our skin stylesheets from the cache.
+    StyleSheetTable& table = StyleSheetTableFor(tableType);
+    for (auto iter = table.Iter(); !iter.Done(); iter.Next()) {
+      nsAutoCString str;
+      iter.Data()->GetSheetURI()->GetPathQueryRef(str);
+      if (strncmp(str.get(), "/skin", 5) == 0) {
+        iter.Remove();
+      }
+    }
+
+    // Iterate over all the remaining XBL and make sure cached
+    // scoped skin stylesheets are flushed and refetched by the
+    // prototype bindings.
+    for (auto iter = xblDocTable.Iter(); !iter.Done(); iter.Next()) {
+      iter.Data()->FlushSkinStylesheets();
+    }
   }
 }
 
@@ -290,8 +309,10 @@ nsXULPrototypeCache::Flush()
 {
     mPrototypeTable.Clear();
     mScriptTable.Clear();
-    mStyleSheetTable.Clear();
-    mXBLDocTable.Clear();
+    mGeckoStyleSheetTable.Clear();
+    mServoStyleSheetTable.Clear();
+    mGeckoXBLDocTable.Clear();
+    mServoXBLDocTable.Clear();
 }
 
 
@@ -590,8 +611,14 @@ nsXULPrototypeCache::BeginCaching(nsIURI* aURI)
 void
 nsXULPrototypeCache::MarkInCCGeneration(uint32_t aGeneration)
 {
-    for (auto iter = mXBLDocTable.Iter(); !iter.Done(); iter.Next()) {
-        iter.Data()->MarkInCCGeneration(aGeneration);
+    StyleBackendType tableTypes[] = { StyleBackendType::Gecko,
+                                      StyleBackendType::Servo };
+
+    for (auto tableType : tableTypes) {
+        XBLDocTable& xblDocTable = XBLDocTableFor(tableType);
+        for (auto iter = xblDocTable.Iter(); !iter.Done(); iter.Next()) {
+            iter.Data()->MarkInCCGeneration(aGeneration);
+        }
     }
     for (auto iter = mPrototypeTable.Iter(); !iter.Done(); iter.Next()) {
         iter.Data()->MarkInCCGeneration(aGeneration);
@@ -652,23 +679,30 @@ nsXULPrototypeCache::CollectMemoryReports(
   // TODO Report content in mPrototypeTable?
 
   other += sInstance->
-    mStyleSheetTable.ShallowSizeOfExcludingThis(mallocSizeOf);
-  // TODO Report content inside mStyleSheetTable?
+    mGeckoStyleSheetTable.ShallowSizeOfExcludingThis(mallocSizeOf);
+  // TODO Report content inside mGeckoStyleSheetTable?
+  other += sInstance->
+    mServoStyleSheetTable.ShallowSizeOfExcludingThis(mallocSizeOf);
+  // TODO Report content inside mServoStyleSheetTable?
 
   other += sInstance->
     mScriptTable.ShallowSizeOfExcludingThis(mallocSizeOf);
   // TODO Report content inside mScriptTable?
 
-  other += sInstance->mXBLDocTable.ShallowSizeOfExcludingThis(mallocSizeOf);
-  for (auto iter = sInstance->mXBLDocTable.ConstIter();
-       !iter.Done(); iter.Next()) {
-    nsAutoCString path;
-    path += "xbl-docs/(";
-    AppendURIForMemoryReport(iter.Key(), path);
-    path += ")";
-    size_t size = iter.UserData()->SizeOfIncludingThis(mallocSizeOf);
-    REPORT_SIZE(path, size, "Memory used by this XBL document.");
-  }
+  auto reportXBLDocTable =
+    [&](const nsACString& prefix, const XBLDocTable& table) {
+      other += table.ShallowSizeOfExcludingThis(mallocSizeOf);
+      for (auto iter = table.ConstIter(); !iter.Done(); iter.Next()) {
+        nsAutoCString path(prefix);
+        path += "-xbl-docs/(";
+        AppendURIForMemoryReport(iter.Key(), path);
+        path += ")";
+        size_t size = iter.UserData()->SizeOfIncludingThis(mallocSizeOf);
+        REPORT_SIZE(path, size, "Memory used by this XBL document.");
+      }
+    };
+  reportXBLDocTable(NS_LITERAL_CSTRING("gecko"), sInstance->mGeckoXBLDocTable);
+  reportXBLDocTable(NS_LITERAL_CSTRING("servo"), sInstance->mServoXBLDocTable);
 
   other += sInstance->
     mStartupCacheURITable.ShallowSizeOfExcludingThis(mallocSizeOf);

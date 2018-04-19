@@ -24,10 +24,6 @@ sw_CD{
         }
         MRO{
             "MRO",
-            "Ugwiya ya Moritania (1973–2017)",
-        }
-        MRU{
-            "MRU",
             "Ugwiya ya Moritania",
         }
         SCR{
@@ -43,5 +39,5 @@ sw_CD{
             "Faranga CFA BCEAO",
         }
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.37.6"}
 }

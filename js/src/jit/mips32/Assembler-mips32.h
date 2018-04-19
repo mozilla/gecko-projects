@@ -59,7 +59,6 @@ static constexpr FloatRegister ABINonArgDoubleReg { FloatRegisters::f16, FloatRe
 // Note: these three registers are all guaranteed to be different
 static constexpr Register ABINonArgReturnReg0 = t0;
 static constexpr Register ABINonArgReturnReg1 = t1;
-static constexpr Register ABINonVolatileReg = s0;
 
 // This register is guaranteed to be clobberable during the prologue and
 // epilogue of an ABI call which must preserve both ABI argument, return
@@ -99,6 +98,12 @@ struct ScratchDoubleScope : public AutoFloatRegisterScope
     { }
 };
 
+// Registers used in the GenerateFFIIonExit Disable Activation block.
+// None of these may be the second scratch register (t8).
+static constexpr Register WasmIonExitRegReturnData = JSReturnReg_Data;
+static constexpr Register WasmIonExitRegReturnType = JSReturnReg_Type;
+static constexpr Register WasmIonExitTlsReg = s5;
+
 static constexpr FloatRegister f0  = { FloatRegisters::f0, FloatRegister::Double };
 static constexpr FloatRegister f2  = { FloatRegisters::f2, FloatRegister::Double };
 static constexpr FloatRegister f4  = { FloatRegisters::f4, FloatRegister::Double };
@@ -130,7 +135,6 @@ static_assert(JitStackAlignment % sizeof(Value) == 0 && JitStackValueAlignment >
 // TODO Copy the static_asserts from x64/x86 assembler files.
 static constexpr uint32_t SimdMemoryAlignment = 8;
 static constexpr uint32_t WasmStackAlignment = SimdMemoryAlignment;
-static const uint32_t WasmTrapInstructionLength = 4;
 
 // Does this architecture support SIMD conversions between Uint32x4 and Float32x4?
 static constexpr bool SupportsUint32x4FloatConversions = false;
@@ -151,6 +155,9 @@ class Assembler : public AssemblerMIPSShared
 
     static Condition UnsignedCondition(Condition cond);
     static Condition ConditionWithoutEqual(Condition cond);
+
+    // MacroAssemblers hold onto gcthings, so they are traced by the GC.
+    void trace(JSTracer* trc);
 
     static uintptr_t GetPointer(uint8_t*);
 

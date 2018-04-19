@@ -7,10 +7,10 @@ const { assert } = require("devtools/shared/DevToolsUtils");
 const { actions } = require("../constants");
 const { refresh } = require("./refresh");
 
-exports.setCensusDisplayAndRefresh = function(heapWorker, display) {
-  return async function(dispatch, getState) {
+exports.setCensusDisplayAndRefresh = function (heapWorker, display) {
+  return function* (dispatch, getState) {
     dispatch(setCensusDisplay(display));
-    await dispatch(refresh(heapWorker));
+    yield dispatch(refresh(heapWorker));
   };
 };
 
@@ -20,7 +20,7 @@ exports.setCensusDisplayAndRefresh = function(heapWorker, display) {
  *
  * @param {censusDisplayModel} display
  */
-const setCensusDisplay = exports.setCensusDisplay = function(display) {
+const setCensusDisplay = exports.setCensusDisplay = function (display) {
   assert(typeof display === "object"
          && display
          && display.breakdown

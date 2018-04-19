@@ -193,7 +193,7 @@ add_task(async function observePushTopicDeviceDisconnected_current_device() {
     newAccountState() {
       return {
         async getUserAccountData() {
-          return {device: {id: deviceId}};
+          return { deviceId };
         }
       };
     },
@@ -243,7 +243,7 @@ add_task(async function observePushTopicDeviceDisconnected_another_device() {
     newAccountState() {
       return {
         async getUserAccountData() {
-          return {device: {id: "thelocaldevice"}};
+          return { deviceId: "thelocaldevice" };
         }
       };
     },

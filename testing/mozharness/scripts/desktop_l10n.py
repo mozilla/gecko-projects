@@ -13,6 +13,7 @@ import glob
 import re
 import sys
 import shlex
+import subprocess
 
 # load modules from parent dir
 sys.path.insert(1, os.path.dirname(sys.path[0]))
@@ -30,6 +31,7 @@ from mozharness.mozilla.building.buildbase import (
 from mozharness.mozilla.l10n.locales import LocalesMixin
 from mozharness.mozilla.mar import MarMixin
 from mozharness.mozilla.release import ReleaseMixin
+from mozharness.mozilla.signing import SigningMixin
 from mozharness.mozilla.updates.balrog import BalrogMixin
 from mozharness.base.python import VirtualenvMixin
 
@@ -66,7 +68,7 @@ runtime_config_tokens = ('buildid', 'version', 'locale', 'from_buildid',
 
 # DesktopSingleLocale {{{1
 class DesktopSingleLocale(LocalesMixin, ReleaseMixin, BuildbotMixin,
-                          VCSMixin, PurgeMixin, BaseScript,
+                          VCSMixin, SigningMixin, PurgeMixin, BaseScript,
                           BalrogMixin, MarMixin, VirtualenvMixin, TransferMixin):
     """Manages desktop repacks"""
     config_options = [[
@@ -371,6 +373,11 @@ class DesktopSingleLocale(LocalesMixin, ReleaseMixin, BuildbotMixin,
                       self.buildbot_config["properties"]["en_us_installer_binary_url"])
             bootstrap_env['EN_US_INSTALLER_BINARY_URL'] = str(
                 self.buildbot_config["properties"]["en_us_installer_binary_url"])
+        if 'MOZ_SIGNING_SERVERS' in os.environ:
+            sign_cmd = self.query_moz_sign_cmd(formats=None)
+            sign_cmd = subprocess.list2cmdline(sign_cmd)
+            # windows fix
+            bootstrap_env['MOZ_SIGN_CMD'] = sign_cmd.replace('\\', '\\\\\\\\')
         for binary in self._mar_binaries():
             # "mar -> MAR" and 'mar.exe -> MAR' (windows)
             name = binary.replace('.exe', '')
@@ -404,6 +411,11 @@ class DesktopSingleLocale(LocalesMixin, ReleaseMixin, BuildbotMixin,
 
     def query_l10n_env(self):
         l10n_env = self._query_upload_env().copy()
+        # both upload_env and bootstrap_env define MOZ_SIGN_CMD
+        # the one from upload_env is taken from os.environ, the one from
+        # bootstrap_env is set with query_moz_sign_cmd()
+        # we need to use the value provided my query_moz_sign_cmd or make upload
+        # will fail (signtool.py path is wrong)
         l10n_env.update(self.query_bootstrap_env())
         return l10n_env
 

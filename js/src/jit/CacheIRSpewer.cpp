@@ -55,18 +55,14 @@ CacheIRSpewer::~CacheIRSpewer()
 #endif
 
 bool
-CacheIRSpewer::init(const char* filename)
+CacheIRSpewer::init()
 {
     if (enabled())
         return true;
 
     char name[256];
     uint32_t pid = getpid();
-    // Default to JIT_SPEW_DIR/cacheir${pid}.json
-    if (filename[0] == '1')
-        SprintfLiteral(name, JIT_SPEW_DIR "/cacheir%" PRIu32 ".json", pid);
-    else
-        SprintfLiteral(name, "%s%" PRIu32 ".json", filename, pid);
+    SprintfLiteral(name, JIT_SPEW_DIR "/cacheir%" PRIu32 ".json", pid);
 
     if (!output.init(name))
         return false;

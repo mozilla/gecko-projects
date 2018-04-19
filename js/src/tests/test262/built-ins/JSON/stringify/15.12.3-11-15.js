@@ -8,8 +8,6 @@ description: >
     returns the replacer value.
 ---*/
 
-assert.sameValue(JSON.stringify(function() {}, function(k, v) {
-  return 99
-}), '99', 'JSON.stringify(function() {}, function(k,v) {return 99})');
+assert.sameValue(JSON.stringify(function() {}, function(k,v) {return 99}), '99', 'JSON.stringify(function() {}, function(k,v) {return 99})');
 
 reportCompare(0, 0);

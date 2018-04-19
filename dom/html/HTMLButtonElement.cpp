@@ -28,7 +28,7 @@
 #include "mozilla/TextEvents.h"
 #include "nsUnicharUtils.h"
 #include "nsLayoutUtils.h"
-#include "mozilla/PresState.h"
+#include "nsPresState.h"
 #include "nsError.h"
 #include "nsFocusManager.h"
 #include "mozilla/dom/HTMLFormElement.h"
@@ -183,12 +183,12 @@ HTMLButtonElement::IsDisabledForEvents(EventMessage aMessage)
   return IsElementDisabledForEvents(aMessage, formFrame);
 }
 
-void
+nsresult
 HTMLButtonElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   aVisitor.mCanHandle = false;
   if (IsDisabledForEvents(aVisitor.mEvent->mMessage)) {
-    return;
+    return NS_OK;
   }
 
   // Track whether we're in the outermost Dispatch invocation that will
@@ -212,7 +212,7 @@ HTMLButtonElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
     }
   }
 
-  nsGenericHTMLElement::GetEventTargetParent(aVisitor);
+  return nsGenericHTMLElement::GetEventTargetParent(aVisitor);
 }
 
 nsresult
@@ -448,21 +448,20 @@ HTMLButtonElement::SaveState()
     return NS_OK;
   }
 
-  PresState* state = GetPrimaryPresState();
+  nsPresState* state = GetPrimaryPresState();
   if (state) {
     // We do not want to save the real disabled state but the disabled
     // attribute.
-    state->disabled() = HasAttr(kNameSpaceID_None, nsGkAtoms::disabled);
-    state->disabledSet() = true;
+    state->SetDisabled(HasAttr(kNameSpaceID_None, nsGkAtoms::disabled));
   }
 
   return NS_OK;
 }
 
 bool
-HTMLButtonElement::RestoreState(PresState* aState)
+HTMLButtonElement::RestoreState(nsPresState* aState)
 {
-  if (aState && aState->disabledSet() && !aState->disabled()) {
+  if (aState && aState->IsDisabledSet() && !aState->GetDisabled()) {
     SetDisabled(false, IgnoreErrors());
   }
 

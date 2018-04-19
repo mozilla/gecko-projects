@@ -54,8 +54,13 @@ public:
   void AddListener(EventListener* aListener, ErrorResult& aRv);
   void RemoveListener(EventListener* aListener, ErrorResult& aRv);
 
-  using DOMEventTargetHelper::EventListenerAdded;
-  void EventListenerAdded(nsAtom* aType) override;
+  using nsIDOMEventTarget::AddEventListener;
+
+  virtual void AddEventListener(const nsAString& aType,
+                                EventListener* aCallback,
+                                const AddEventListenerOptionsOrBoolean& aOptions,
+                                const Nullable<bool>& aWantsUntrusted,
+                                ErrorResult& aRv) override;
 
   IMPL_EVENT_HANDLER(change)
 

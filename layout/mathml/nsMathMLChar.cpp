@@ -10,7 +10,6 @@
 #include "gfxTextRun.h"
 #include "gfxUtils.h"
 #include "mozilla/gfx/2D.h"
-#include "mozilla/ComputedStyle.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Unused.h"
 
@@ -21,6 +20,7 @@
 #include "nsIFrame.h"
 #include "nsLayoutUtils.h"
 #include "nsPresContext.h"
+#include "nsStyleContext.h"
 #include "nsUnicharUtils.h"
 
 #include "mozilla/Preferences.h"
@@ -758,18 +758,18 @@ nsMathMLChar::~nsMathMLChar()
   MOZ_COUNT_DTOR(nsMathMLChar);
 }
 
-ComputedStyle*
-nsMathMLChar::GetComputedStyle() const
+nsStyleContext*
+nsMathMLChar::GetStyleContext() const
 {
-  NS_ASSERTION(mComputedStyle, "chars should always have a ComputedStyle");
-  return mComputedStyle;
+  NS_ASSERTION(mStyleContext, "chars should always have style context");
+  return mStyleContext;
 }
 
 void
-nsMathMLChar::SetComputedStyle(ComputedStyle* aComputedStyle)
+nsMathMLChar::SetStyleContext(nsStyleContext* aStyleContext)
 {
-  MOZ_ASSERT(aComputedStyle);
-  mComputedStyle = aComputedStyle;
+  MOZ_ASSERT(aStyleContext);
+  mStyleContext = aStyleContext;
 }
 
 void
@@ -819,9 +819,9 @@ nsMathMLChar::SetData(nsString& aData)
        be in different fonts. For eg., the base size for '(' should
        come from a normal ascii font if CMEX10 is used, since CMEX10
        only contains the stretched versions. Hence, there are two
-       ComputedStyles in use throughout the process. The leaf style
+       style contexts in use throughout the process. The leaf style
        context of the char holds fonts with which to try to stretch
-       the char. The parent ComputedStyle of the char contains fonts
+       the char. The parent style context of the char contains fonts
        for normal rendering. So the parent context is the one used
        to get the initial base size at the start of the pipeline.
     b) For operators that can be largeop's in display mode,
@@ -833,7 +833,7 @@ nsMathMLChar::SetData(nsString& aData)
  2) We search for the first larger variant of the char that fits the
     container' size.  We first search for larger variants using the glyph
     table corresponding to the first existing font specified in the list of
-    stretchy fonts held by the leaf ComputedStyle (from -moz-math-stretchy in
+    stretchy fonts held by the leaf style context (from -moz-math-stretchy in
     mathml.css).  Generic fonts are resolved by the preference
     "font.mathfont-family".
     Issues :
@@ -989,7 +989,7 @@ nsMathMLChar::SetFontFamily(nsPresContext*          aPresContext,
   if (!*aFontGroup || !(aFont.fontlist == familyList)) {
     nsFont font = aFont;
     font.fontlist = familyList;
-    const nsStyleFont* styleFont = mComputedStyle->StyleFont();
+    const nsStyleFont* styleFont = mStyleContext->StyleFont();
     nsFontMetrics::Params params;
     params.language = styleFont->mLanguage;
     params.explicitLanguage = styleFont->mExplicitLanguage;
@@ -1095,8 +1095,8 @@ StretchEnumContext::TryVariants(nsGlyphTable* aGlyphTable,
                                 RefPtr<gfxFontGroup>* aFontGroup,
                                 const FontFamilyList& aFamilyList)
 {
-  // Use our stretchy ComputedStyle now that stretching is in progress
-  ComputedStyle *sc = mChar->mComputedStyle;
+  // Use our stretchy style context now that stretching is in progress
+  nsStyleContext *sc = mChar->mStyleContext;
   nsFont font = sc->StyleFont()->mFont;
   NormalizeDefaultFont(font, mFontSizeInflation);
 
@@ -1241,8 +1241,8 @@ nsMathMLChar::StretchEnumContext::TryParts(nsGlyphTable* aGlyphTable,
                                            RefPtr<gfxFontGroup>* aFontGroup,
                                            const FontFamilyList& aFamilyList)
 {
-  // Use our stretchy ComputedStyle now that stretching is in progress
-  nsFont font = mChar->mComputedStyle->StyleFont()->mFont;
+  // Use our stretchy style context now that stretching is in progress
+  nsFont font = mChar->mStyleContext->StyleFont()->mFont;
   NormalizeDefaultFont(font, mFontSizeInflation);
 
   // Compute the bounding metrics of all partial glyphs
@@ -1419,7 +1419,7 @@ nsMathMLChar::StretchEnumContext::EnumCallback(const FontFamilyName& aFamily,
 
   // Check font family if it is not a generic one
   // We test with the kNullGlyph
-  ComputedStyle *sc = context->mChar->mComputedStyle;
+  nsStyleContext *sc = context->mChar->mStyleContext;
   nsFont font = sc->StyleFont()->mFont;
   NormalizeDefaultFont(font, context->mFontSizeInflation);
   RefPtr<gfxFontGroup> fontGroup;
@@ -1526,12 +1526,12 @@ nsMathMLChar::StretchInternal(nsIFrame*                aForFrame,
   nsStretchDirection direction = nsMathMLOperators::GetStretchyDirection(mData);
 
   // Set default font and get the default bounding metrics
-  // mComputedStyle is a leaf context used only when stretching happens.
+  // mStyleContext is a leaf context used only when stretching happens.
   // For the base size, the default font should come from the parent context
   nsFont font = aForFrame->StyleFont()->mFont;
   NormalizeDefaultFont(font, aFontSizeInflation);
 
-  const nsStyleFont* styleFont = mComputedStyle->StyleFont();
+  const nsStyleFont* styleFont = mStyleContext->StyleFont();
   nsFontMetrics::Params params;
   params.language = styleFont->mLanguage;
   params.explicitLanguage = styleFont->mExplicitLanguage;
@@ -1642,7 +1642,7 @@ nsMathMLChar::StretchInternal(nsIFrame*                aForFrame,
 
   if (!done) { // normal case
     // Use the css font-family but add preferred fallback fonts.
-    font = mComputedStyle->StyleFont()->mFont;
+    font = mStyleContext->StyleFont()->mFont;
     NormalizeDefaultFont(font, aFontSizeInflation);
 
     // really shouldn't be doing things this way but for now
@@ -1945,7 +1945,7 @@ void nsDisplayMathMLCharDebug::Paint(nsDisplayListBuilder* aBuilder,
   // for visual debug
   Sides skipSides;
   nsPresContext* presContext = mFrame->PresContext();
-  ComputedStyle* computedStyle = mFrame->Style();
+  nsStyleContext* styleContext = mFrame->StyleContext();
   nsRect rect = mRect + ToReferenceFrame();
 
   PaintBorderFlags flags = aBuilder->ShouldSyncDecodeImages()
@@ -1956,10 +1956,10 @@ void nsDisplayMathMLCharDebug::Paint(nsDisplayListBuilder* aBuilder,
   // tracking the ImgDrawResult.
   Unused <<
     nsCSSRendering::PaintBorder(presContext, *aCtx, mFrame, mVisibleRect,
-                                rect, computedStyle, flags, skipSides);
+                                rect, styleContext, flags, skipSides);
 
   nsCSSRendering::PaintOutline(presContext, *aCtx, mFrame,
-                               mVisibleRect, rect, computedStyle);
+                               mVisibleRect, rect, styleContext);
 }
 #endif
 
@@ -1971,20 +1971,19 @@ nsMathMLChar::Display(nsDisplayListBuilder*   aBuilder,
                       uint32_t                aIndex,
                       const nsRect*           aSelectedRect)
 {
-  bool usingParentStyle = false;
-  ComputedStyle* computedStyle = mComputedStyle;
+  nsStyleContext* parentContext = aForFrame->StyleContext();
+  nsStyleContext* styleContext = mStyleContext;
 
   if (mDraw == DRAW_NORMAL) {
     // normal drawing if there is nothing special about this char
-    // Use our parent element's style
-    usingParentStyle = true;
-    computedStyle = aForFrame->Style();
+    // Set default context to the parent context
+    styleContext = parentContext;
   }
 
-  if (!computedStyle->StyleVisibility()->IsVisible())
+  if (!styleContext->StyleVisibility()->IsVisible())
     return;
 
-  // if the leaf computed style that we use for stretchy chars has a background
+  // if the leaf style context that we use for stretchy chars has a background
   // color we use it -- this feature is mostly used for testing and debugging
   // purposes. Normally, users will set the background on the container frame.
   // paint the selection background -- beware MathML frames overlap a lot
@@ -1993,12 +1992,12 @@ nsMathMLChar::Display(nsDisplayListBuilder*   aBuilder,
       MakeDisplayItem<nsDisplayMathMLSelectionRect>(aBuilder, aForFrame, *aSelectedRect));
   }
   else if (mRect.width && mRect.height) {
-    if (!usingParentStyle &&
-        NS_GET_A(computedStyle->StyleBackground()->
-                 BackgroundColor(computedStyle)) > 0) {
+    if (styleContext != parentContext &&
+        NS_GET_A(styleContext->StyleBackground()->
+                 BackgroundColor(styleContext)) > 0) {
       nsDisplayBackgroundImage::AppendBackgroundItemsToTop(
         aBuilder, aForFrame, mRect, aLists.BorderBackground(),
-        /* aAllowWillPaintBorderOptimization */ true, computedStyle);
+        /* aAllowWillPaintBorderOptimization */ true, styleContext);
     }
     //else
     //  our container frame will take care of painting its background
@@ -2050,17 +2049,18 @@ nsMathMLChar::PaintForeground(nsIFrame* aForFrame,
                               nsPoint aPt,
                               bool aIsSelected)
 {
-  ComputedStyle* computedStyle = mComputedStyle;
+  nsStyleContext* parentContext = aForFrame->StyleContext();
+  nsStyleContext* styleContext = mStyleContext;
   nsPresContext* presContext = aForFrame->PresContext();
 
   if (mDraw == DRAW_NORMAL) {
     // normal drawing if there is nothing special about this char
-    // Use our parent element's style
-    computedStyle = aForFrame->Style();
+    // Set default context to the parent context
+    styleContext = parentContext;
   }
 
   // Set color ...
-  nscolor fgColor = computedStyle->
+  nscolor fgColor = styleContext->
     GetVisitedDependentColor(&nsStyleText::mWebkitTextFillColor);
   if (aIsSelected) {
     // get color to use for selection from the look&feel object

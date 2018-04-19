@@ -15,21 +15,26 @@ const FRAME_SCRIPTS = [
   ROOT + "content-forms.js"
 ];
 
+var globalMM = Cc["@mozilla.org/globalmessagemanager;1"]
+           .getService(Ci.nsIMessageListenerManager);
+
 for (let script of FRAME_SCRIPTS) {
-  Services.mm.loadFrameScript(script, true);
+  globalMM.loadFrameScript(script, true);
 }
 
 registerCleanupFunction(() => {
   for (let script of FRAME_SCRIPTS) {
-    Services.mm.removeDelayedFrameScript(script, true);
+    globalMM.removeDelayedFrameScript(script, true);
   }
 });
 
+const {SessionStore} = ChromeUtils.import("resource:///modules/sessionstore/SessionStore.jsm", {});
 const {SessionSaver} = ChromeUtils.import("resource:///modules/sessionstore/SessionSaver.jsm", {});
 const {SessionFile} = ChromeUtils.import("resource:///modules/sessionstore/SessionFile.jsm", {});
 const {TabState} = ChromeUtils.import("resource:///modules/sessionstore/TabState.jsm", {});
 const {TabStateFlusher} = ChromeUtils.import("resource:///modules/sessionstore/TabStateFlusher.jsm", {});
-const ss = SessionStore;
+
+const ss = Cc["@mozilla.org/browser/sessionstore;1"].getService(Ci.nsISessionStore);
 
 // Some tests here assume that all restored tabs are loaded without waiting for
 // the user to bring them to the foreground. We ensure this by resetting the
@@ -502,10 +507,8 @@ for (let name of FORM_HELPERS) {
 
 // Removes the given tab immediately and returns a promise that resolves when
 // all pending status updates (messages) of the closing tab have been received.
-function promiseRemoveTabAndSessionState(tab) {
-  let sessionUpdatePromise = BrowserTestUtils.waitForSessionStoreUpdate(tab);
-  BrowserTestUtils.removeTab(tab);
-  return sessionUpdatePromise;
+function promiseRemoveTab(tab) {
+  return BrowserTestUtils.removeTab(tab);
 }
 
 // Write DOMSessionStorage data to the given browser.

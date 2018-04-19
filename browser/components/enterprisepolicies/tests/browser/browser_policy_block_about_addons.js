@@ -25,5 +25,5 @@ add_task(async function test_about_addons() {
        "Policy Engine should report about:addons as not allowed");
   });
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

@@ -2854,21 +2854,10 @@ supplementalData:table(nofallback){
         MR{
             {
                 from:intvector{
-                    352,
-                    -1358655488,
-                }
-                id{"MRU"}
-            }
-            {
-                from:intvector{
                     25,
                     -1509149696,
                 }
                 id{"MRO"}
-                to:intvector{
-                    356,
-                    1394842623,
-                }
             }
             {
                 from:intvector{

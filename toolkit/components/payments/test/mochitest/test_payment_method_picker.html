@@ -10,10 +10,16 @@ Test the payment-method-picker component
   <script type="application/javascript" src="/tests/SimpleTest/SpawnTask.js"></script>
   <script type="application/javascript" src="/tests/SimpleTest/EventUtils.js"></script>
   <script src="payments_common.js"></script>
-  <script src="../../res/vendor/custom-elements.min.js"></script>
-
-  <link rel="stylesheet" type="text/css" href="../../res/components/rich-select.css"/>
-  <link rel="stylesheet" type="text/css" href="../../res/components/basic-card-option.css"/>
+  <script src="custom-elements.min.js"></script>
+  <script src="PaymentsStore.js"></script>
+  <script src="ObservedPropertiesMixin.js"></script>
+  <script src="PaymentStateSubscriberMixin.js"></script>
+  <script src="rich-select.js"></script>
+  <script src="payment-method-picker.js"></script>
+  <script src="rich-option.js"></script>
+  <script src="basic-card-option.js"></script>
+  <link rel="stylesheet" type="text/css" href="rich-select.css"/>
+  <link rel="stylesheet" type="text/css" href="basic-card-option.css"/>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
 </head>
 <body>
@@ -26,12 +32,11 @@ Test the payment-method-picker component
 </div>
 <pre id="test">
 </pre>
-<script type="module">
+<script type="application/javascript">
 /** Test the payment-method-picker component **/
 
 /* import-globals-from payments_common.js */
-import "../../res/components/basic-card-option.js";
-import "../../res/containers/payment-method-picker.js";
+/* import-globals-from ../../res/components/basic-card-option.js */
 
 let picker1 = document.getElementById("picker1");
 
@@ -78,7 +83,7 @@ add_task(async function test_update() {
         "cc-exp": "2017-09",
         "cc-exp-month": 9,
         "cc-exp-year": 2017,
-        // cc-name was cleared which means it's not returned
+        "cc-name": "John Edit Doe",
         "cc-number": "************9876",
         "guid": "48bnds6854t",
       },
@@ -95,7 +100,7 @@ add_task(async function test_update() {
   await asyncElementRendered();
   let options = picker1.dropdown.popupBox.children;
   is(options.length, 2, "Check dropdown still has both cards");
-  ok(!options[0].textContent.includes("John Doe"), "Check cleared first cc-name");
+  ok(options[0].textContent.includes("John Edit Doe"), "Check updated first cc-name");
   ok(options[0].textContent.includes("9876"), "Check updated first cc-number");
   ok(options[0].textContent.includes("09"), "Check updated first exp-month");
 

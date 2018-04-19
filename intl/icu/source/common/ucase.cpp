@@ -77,12 +77,9 @@ ucase_addPropertyStarts(const USetAdder *sa, UErrorCode *pErrorCode) {
 
 /* data access primitives --------------------------------------------------- */
 
-U_CFUNC const UTrie2 * U_EXPORT2
-ucase_getTrie() {
-    return &ucase_props_singleton.trie;
-}
-
 #define GET_EXCEPTIONS(csp, props) ((csp)->exceptions+((props)>>UCASE_EXC_SHIFT))
+
+#define PROPS_HAS_EXCEPTION(props) ((props)&UCASE_EXCEPTION)
 
 /* number of bits in an 8-bit integer value */
 static const uint8_t flagsOffset[256]={
@@ -131,8 +128,8 @@ static const uint8_t flagsOffset[256]={
 U_CAPI UChar32 U_EXPORT2
 ucase_tolower(UChar32 c) {
     uint16_t props=UTRIE2_GET16(&ucase_props_singleton.trie, c);
-    if(!UCASE_HAS_EXCEPTION(props)) {
-        if(UCASE_IS_UPPER_OR_TITLE(props)) {
+    if(!PROPS_HAS_EXCEPTION(props)) {
+        if(UCASE_GET_TYPE(props)>=UCASE_UPPER) {
             c+=UCASE_GET_DELTA(props);
         }
     } else {
@@ -148,7 +145,7 @@ ucase_tolower(UChar32 c) {
 U_CAPI UChar32 U_EXPORT2
 ucase_toupper(UChar32 c) {
     uint16_t props=UTRIE2_GET16(&ucase_props_singleton.trie, c);
-    if(!UCASE_HAS_EXCEPTION(props)) {
+    if(!PROPS_HAS_EXCEPTION(props)) {
         if(UCASE_GET_TYPE(props)==UCASE_LOWER) {
             c+=UCASE_GET_DELTA(props);
         }
@@ -165,7 +162,7 @@ ucase_toupper(UChar32 c) {
 U_CAPI UChar32 U_EXPORT2
 ucase_totitle(UChar32 c) {
     uint16_t props=UTRIE2_GET16(&ucase_props_singleton.trie, c);
-    if(!UCASE_HAS_EXCEPTION(props)) {
+    if(!PROPS_HAS_EXCEPTION(props)) {
         if(UCASE_GET_TYPE(props)==UCASE_LOWER) {
             c+=UCASE_GET_DELTA(props);
         }
@@ -226,7 +223,7 @@ ucase_addCaseClosure(UChar32 c, const USetAdder *sa) {
     }
 
     props=UTRIE2_GET16(&ucase_props_singleton.trie, c);
-    if(!UCASE_HAS_EXCEPTION(props)) {
+    if(!PROPS_HAS_EXCEPTION(props)) {
         if(UCASE_GET_TYPE(props)!=UCASE_NONE) {
             /* add the one simple case mapping, no matter what type it is */
             int32_t delta=UCASE_GET_DELTA(props);
@@ -422,138 +419,6 @@ FullCaseFoldingIterator::next(UnicodeString &full) {
     return c;
 }
 
-namespace LatinCase {
-
-const int8_t TO_LOWER_NORMAL[LIMIT] = {
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-
-    0, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32,
-    32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, EXC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-
-    32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32,
-    32, 32, 32, 32, 32, 32, 32, 0, 32, 32, 32, 32, 32, 32, 32, EXC,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-    EXC, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1,
-
-    0, 1, 0, 1, 0, 1, 0, 1, 0, EXC, 1, 0, 1, 0, 1, 0,
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-    1, 0, 1, 0, 1, 0, 1, 0, -121, 1, 0, 1, 0, 1, 0, EXC
-};
-
-const int8_t TO_LOWER_TR_LT[LIMIT] = {
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-
-    0, 32, 32, 32, 32, 32, 32, 32, 32, EXC, EXC, 32, 32, 32, 32, 32,
-    32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, EXC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-
-    32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, EXC, EXC, 32, 32,
-    32, 32, 32, 32, 32, 32, 32, 0, 32, 32, 32, 32, 32, 32, 32, EXC,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-    1, 0, 1, 0, 1, 0, 1, 0, EXC, 0, 1, 0, 1, 0, EXC, 0,
-    EXC, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1,
-
-    0, 1, 0, 1, 0, 1, 0, 1, 0, EXC, 1, 0, 1, 0, 1, 0,
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-    1, 0, 1, 0, 1, 0, 1, 0, -121, 1, 0, 1, 0, 1, 0, EXC
-};
-
-const int8_t TO_UPPER_NORMAL[LIMIT] = {
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32,
-    -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, 0, 0, 0, 0, 0,
-
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, EXC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, EXC,
-    -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32,
-    -32, -32, -32, -32, -32, -32, -32, 0, -32, -32, -32, -32, -32, -32, -32, 121,
-
-    0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1,
-    0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1,
-    0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1,
-    0, EXC, 0, -1, 0, -1, 0, -1, 0, 0, -1, 0, -1, 0, -1, 0,
-
-    -1, 0, -1, 0, -1, 0, -1, 0, -1, EXC, 0, -1, 0, -1, 0, -1,
-    0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1,
-    0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1,
-    0, -1, 0, -1, 0, -1, 0, -1, 0, 0, -1, 0, -1, 0, -1, EXC
-};
-
-const int8_t TO_UPPER_TR[LIMIT] = {
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, -32, -32, -32, -32, -32, -32, -32, -32, EXC, -32, -32, -32, -32, -32, -32,
-    -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, 0, 0, 0, 0, 0,
-
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, EXC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, EXC,
-    -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32,
-    -32, -32, -32, -32, -32, -32, -32, 0, -32, -32, -32, -32, -32, -32, -32, 121,
-
-    0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1,
-    0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1,
-    0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1,
-    0, EXC, 0, -1, 0, -1, 0, -1, 0, 0, -1, 0, -1, 0, -1, 0,
-
-    -1, 0, -1, 0, -1, 0, -1, 0, -1, EXC, 0, -1, 0, -1, 0, -1,
-    0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1,
-    0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1,
-    0, -1, 0, -1, 0, -1, 0, -1, 0, 0, -1, 0, -1, 0, -1, EXC
-};
-
-}  // namespace LatinCase
-
 U_NAMESPACE_END
 
 /** @return UCASE_NONE, UCASE_LOWER, UCASE_UPPER, UCASE_TITLE */
@@ -574,7 +439,7 @@ ucase_getTypeOrIgnorable(UChar32 c) {
 static inline int32_t
 getDotType(UChar32 c) {
     uint16_t props=UTRIE2_GET16(&ucase_props_singleton.trie, c);
-    if(!UCASE_HAS_EXCEPTION(props)) {
+    if(!PROPS_HAS_EXCEPTION(props)) {
         return props&UCASE_DOT_MASK;
     } else {
         const uint16_t *pe=GET_EXCEPTIONS(&ucase_props_singleton, props);
@@ -1013,8 +878,8 @@ ucase_toFullLower(UChar32 c,
     U_ASSERT(c >= 0);
     UChar32 result=c;
     uint16_t props=UTRIE2_GET16(&ucase_props_singleton.trie, c);
-    if(!UCASE_HAS_EXCEPTION(props)) {
-        if(UCASE_IS_UPPER_OR_TITLE(props)) {
+    if(!PROPS_HAS_EXCEPTION(props)) {
+        if(UCASE_GET_TYPE(props)>=UCASE_UPPER) {
             result=c+UCASE_GET_DELTA(props);
         }
     } else {
@@ -1159,7 +1024,7 @@ toUpperOrTitle(UChar32 c,
     U_ASSERT(c >= 0);
     UChar32 result=c;
     uint16_t props=UTRIE2_GET16(&ucase_props_singleton.trie, c);
-    if(!UCASE_HAS_EXCEPTION(props)) {
+    if(!PROPS_HAS_EXCEPTION(props)) {
         if(UCASE_GET_TYPE(props)==UCASE_LOWER) {
             result=c+UCASE_GET_DELTA(props);
         }
@@ -1304,8 +1169,8 @@ ucase_toFullTitle(UChar32 c,
 U_CAPI UChar32 U_EXPORT2
 ucase_fold(UChar32 c, uint32_t options) {
     uint16_t props=UTRIE2_GET16(&ucase_props_singleton.trie, c);
-    if(!UCASE_HAS_EXCEPTION(props)) {
-        if(UCASE_IS_UPPER_OR_TITLE(props)) {
+    if(!PROPS_HAS_EXCEPTION(props)) {
+        if(UCASE_GET_TYPE(props)>=UCASE_UPPER) {
             c+=UCASE_GET_DELTA(props);
         }
     } else {
@@ -1369,8 +1234,8 @@ ucase_toFullFolding(UChar32 c,
     U_ASSERT(c >= 0);
     UChar32 result=c;
     uint16_t props=UTRIE2_GET16(&ucase_props_singleton.trie, c);
-    if(!UCASE_HAS_EXCEPTION(props)) {
-        if(UCASE_IS_UPPER_OR_TITLE(props)) {
+    if(!PROPS_HAS_EXCEPTION(props)) {
+        if(UCASE_GET_TYPE(props)>=UCASE_UPPER) {
             result=c+UCASE_GET_DELTA(props);
         }
     } else {

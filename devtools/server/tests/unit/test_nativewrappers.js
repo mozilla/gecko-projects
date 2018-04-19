@@ -6,7 +6,7 @@ function run_test() {
 
   let dbg = new Debugger();
   dbg.addDebuggee(g);
-  dbg.onDebuggerStatement = function(frame) {
+  dbg.onDebuggerStatement = function (frame) {
     let args = frame.arguments;
     try {
       args[0];
@@ -18,7 +18,7 @@ function run_test() {
 
   g.eval("function stopMe(arg) {debugger;}");
 
-  let g2 = testGlobal("test2");
+  g2 = testGlobal("test2");
   g2.g = g;
   g2.eval("(" + function createBadEvent() {
     let parser = Cc["@mozilla.org/xmlextras/domparser;1"]

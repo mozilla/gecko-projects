@@ -9,7 +9,8 @@ const { Cu } = require("chrome");
 const ObjectClient = require("devtools/shared/client/object-client");
 
 const defer = require("devtools/shared/defer");
-const EventEmitter = require("devtools/shared/event-emitter");
+const EventEmitter = require("devtools/shared/old-event-emitter");
+const { Task } = require("devtools/shared/task");
 
 /**
  * This object represents DOM panel. It's responsibility is to
@@ -35,7 +36,7 @@ DomPanel.prototype = {
    * @return object
    *         A promise that is resolved when the DOM panel completes opening.
    */
-  async open() {
+  open: Task.async(function* () {
     if (this._opening) {
       return this._opening;
     }
@@ -45,7 +46,7 @@ DomPanel.prototype = {
 
     // Local monitoring needs to make the target remote.
     if (!this.target.isRemote) {
-      await this.target.makeRemote();
+      yield this.target.makeRemote();
     }
 
     this.initialize();
@@ -55,11 +56,11 @@ DomPanel.prototype = {
     deferred.resolve(this);
 
     return this._opening;
-  },
+  }),
 
   // Initialization
 
-  initialize: function() {
+  initialize: function () {
     this.panelWin.addEventListener("devtools/content/message",
       this.onContentMessage, true);
 
@@ -77,7 +78,7 @@ DomPanel.prototype = {
     this.shouldRefresh = true;
   },
 
-  async destroy() {
+  destroy: Task.async(function* () {
     if (this._destroying) {
       return this._destroying;
     }
@@ -92,11 +93,11 @@ DomPanel.prototype = {
 
     deferred.resolve();
     return this._destroying;
-  },
+  }),
 
   // Events
 
-  refresh: function() {
+  refresh: function () {
     // Do not refresh if the panel isn't visible.
     if (!this.isPanelVisible()) {
       return;
@@ -120,7 +121,7 @@ DomPanel.prototype = {
    * The panel is refreshed immediately if it's currently selected
    * or lazily  when the user actually selects it.
    */
-  onTabNavigated: function() {
+  onTabNavigated: function () {
     this.shouldRefresh = true;
     this.refresh();
   },
@@ -128,7 +129,7 @@ DomPanel.prototype = {
   /**
    * Make sure the panel is refreshed (if needed) when it's selected.
    */
-  onPanelVisibilityChange: function() {
+  onPanelVisibilityChange: function () {
     this.refresh();
   },
 
@@ -137,11 +138,11 @@ DomPanel.prototype = {
   /**
    * Return true if the DOM panel is currently selected.
    */
-  isPanelVisible: function() {
+  isPanelVisible: function () {
     return this._toolbox.currentToolId === "dom";
   },
 
-  getPrototypeAndProperties: function(grip) {
+  getPrototypeAndProperties: function (grip) {
     let deferred = defer();
 
     if (!grip.actor) {
@@ -178,14 +179,14 @@ DomPanel.prototype = {
     return deferred.promise;
   },
 
-  openLink: function(url) {
+  openLink: function (url) {
     let parentDoc = this._toolbox.doc;
     let iframe = parentDoc.getElementById("this._toolbox");
     let top = iframe.ownerDocument.defaultView.top;
-    top.openWebLinkIn(url, "tab");
+    top.openUILinkIn(url, "tab");
   },
 
-  getRootGrip: function() {
+  getRootGrip: function () {
     let deferred = defer();
 
     // Attach Console. It might involve RDP communication, so wait
@@ -197,7 +198,7 @@ DomPanel.prototype = {
     return deferred.promise;
   },
 
-  postContentMessage: function(type, args) {
+  postContentMessage: function (type, args) {
     let data = {
       type: type,
       args: args,
@@ -212,7 +213,7 @@ DomPanel.prototype = {
     this.panelWin.dispatchEvent(event);
   },
 
-  onContentMessage: function(event) {
+  onContentMessage: function (event) {
     let data = event.data;
     let method = data.type;
     if (typeof this[method] == "function") {

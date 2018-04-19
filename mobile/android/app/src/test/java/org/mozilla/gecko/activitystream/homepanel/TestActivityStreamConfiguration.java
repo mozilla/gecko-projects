@@ -6,14 +6,17 @@ package org.mozilla.gecko.activitystream.homepanel;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.RobolectricTestRunner;
+import org.mozilla.gecko.background.testhelpers.TestRunner;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
 
+import static android.R.attr.tag;
 import static junit.framework.Assert.*;
 
-@RunWith(RobolectricTestRunner.class)
+@RunWith(TestRunner.class)
 public class TestActivityStreamConfiguration {
 
     @Test

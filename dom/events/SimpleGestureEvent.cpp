@@ -4,7 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/dom/SimpleGestureEvent.h"
 #include "mozilla/TouchEvents.h"
 #include "prtime.h"
@@ -30,7 +29,7 @@ SimpleGestureEvent::SimpleGestureEvent(EventTarget* aOwner,
     mEvent->mTime = PR_Now();
     mEvent->mRefPoint = LayoutDeviceIntPoint(0, 0);
     static_cast<WidgetMouseEventBase*>(mEvent)->inputSource =
-      MouseEventBinding::MOZ_SOURCE_UNKNOWN;
+      nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
   }
 }
 

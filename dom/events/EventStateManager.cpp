@@ -18,13 +18,9 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/DragEvent.h"
 #include "mozilla/dom/Event.h"
-#include "mozilla/dom/FrameLoaderBinding.h"
-#include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/dom/UIEvent.h"
-#include "mozilla/dom/UIEventBinding.h"
-#include "mozilla/dom/WheelEventBinding.h"
 
 #include "ContentEventHandler.h"
 #include "IMEContentObserver.h"
@@ -58,8 +54,11 @@
 #include "nsPluginFrame.h"
 #include "nsMenuPopupFrame.h"
 
+#include "nsIDOMXULElement.h"
 #include "nsIObserverService.h"
 #include "nsIDocShell.h"
+#include "nsIDOMWheelEvent.h"
+#include "nsIDOMUIEvent.h"
 #include "nsIMozBrowserFrame.h"
 
 #include "nsSubDocumentFrame.h"
@@ -284,12 +283,6 @@ TimeStamp EventStateManager::sHandlingInputStart;
 EventStateManager::WheelPrefs*
   EventStateManager::WheelPrefs::sInstance = nullptr;
 bool EventStateManager::WheelPrefs::sWheelEventsEnabledOnPlugins = true;
-#ifdef EARLY_BETA_OR_EARLIER
-bool EventStateManager::WheelPrefs::sIsAutoDirEnabled = true;
-#else
-bool EventStateManager::WheelPrefs::sIsAutoDirEnabled = false;
-#endif
-bool EventStateManager::WheelPrefs::sHonoursRootForAutoDir = false;
 EventStateManager::DeltaAccumulator*
   EventStateManager::DeltaAccumulator::sInstance = nullptr;
 
@@ -1368,9 +1361,10 @@ EventStateManager::DispatchCrossProcessEvent(WidgetEvent* aEvent,
       dragSession->DragEventDispatchedToChildProcess();
       dragSession->GetDragAction(&action);
       dragSession->GetTriggeringPrincipalURISpec(principalURISpec);
-      RefPtr<DataTransfer> initialDataTransfer = dragSession->GetDataTransfer();
+      nsCOMPtr<nsIDOMDataTransfer> initialDataTransfer;
+      dragSession->GetDataTransfer(getter_AddRefs(initialDataTransfer));
       if (initialDataTransfer) {
-        dropEffect = initialDataTransfer->DropEffectInt();
+        initialDataTransfer->GetDropEffectInt(&dropEffect);
       }
     }
 
@@ -1465,6 +1459,12 @@ EventStateManager::HandleCrossProcessEvent(WidgetEvent* aEvent,
 
     RefPtr<nsFrameLoader> frameLoader = loaderOwner->GetFrameLoader();
     if (!frameLoader) {
+      continue;
+    }
+
+    uint32_t eventMode;
+    frameLoader->GetEventMode(&eventMode);
+    if (eventMode == nsIFrameLoader::EVENT_MODE_DONT_FORWARD_TO_CHILD) {
       continue;
     }
 
@@ -1917,7 +1917,7 @@ EventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
       if (aEvent->AsMouseEvent()) {
         startEvent.inputSource = aEvent->AsMouseEvent()->inputSource;
       } else if (aEvent->AsTouchEvent()) {
-        startEvent.inputSource = MouseEventBinding::MOZ_SOURCE_TOUCH;
+        startEvent.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_TOUCH;
       } else {
         MOZ_ASSERT(false);
       }
@@ -2017,7 +2017,7 @@ EventStateManager::DetermineDragTargetAndDefaultData(nsPIDOMWindowOuter* aWindow
   // found, just use the clicked node.
   if (!*aSelection) {
     while (dragContent) {
-      if (auto htmlElement = nsGenericHTMLElement::FromNode(dragContent)) {
+      if (auto htmlElement = nsGenericHTMLElement::FromContent(dragContent)) {
         if (htmlElement->Draggable()) {
           break;
         }
@@ -2083,12 +2083,10 @@ EventStateManager::DoDefaultDragStart(nsPresContext* aPresContext,
   // No drag session is currently active, so check if a handler added
   // any items to be dragged. If not, there isn't anything to drag.
   uint32_t count = 0;
-  if (aDataTransfer) {
-    count = aDataTransfer->MozItemCount();
-  }
-  if (!count) {
+  if (aDataTransfer)
+    aDataTransfer->GetMozItemCount(&count);
+  if (!count)
     return false;
-  }
 
   // Get the target being dragged, which may not be the same as the
   // target of the mouse event. If one wasn't set in the
@@ -2103,7 +2101,8 @@ EventStateManager::DoDefaultDragStart(nsPresContext* aPresContext,
 
   // check which drag effect should initially be used. If the effect was not
   // set, just use all actions, otherwise Windows won't allow a drop.
-  uint32_t action = aDataTransfer->EffectAllowedInt();
+  uint32_t action;
+  aDataTransfer->GetEffectAllowedInt(&action);
   if (action == nsIDragService::DRAGDROP_ACTION_UNINITIALIZED)
     action = nsIDragService::DRAGDROP_ACTION_COPY |
              nsIDragService::DRAGDROP_ACTION_MOVE |
@@ -2126,7 +2125,9 @@ EventStateManager::DoDefaultDragStart(nsPresContext* aPresContext,
                        false, getter_AddRefs(dataTransfer));
 
   // Copy over the drop effect, as Clone doesn't copy it for us.
-  dataTransfer->SetDropEffectInt(aDataTransfer->DropEffectInt());
+  uint32_t dropEffect;
+  aDataTransfer->GetDropEffectInt(&dropEffect);
+  dataTransfer->SetDropEffectInt(dropEffect);
 
   // XXXndeakin don't really want to create a new drag DOM event
   // here, but we need something to pass to the InvokeDragSession
@@ -2330,8 +2331,8 @@ EventStateManager::DispatchLegacyMouseScrollEvents(nsIFrame* aTargetFrame,
   // Ignore mouse wheel transaction for computing legacy mouse wheel
   // events' delta value.
   nsIFrame* scrollFrame =
-    ComputeScrollTargetAndMayAdjustWheelEvent(
-      aTargetFrame, aEvent, COMPUTE_LEGACY_MOUSE_SCROLL_EVENT_TARGET);
+    ComputeScrollTarget(aTargetFrame, aEvent,
+                        COMPUTE_LEGACY_MOUSE_SCROLL_EVENT_TARGET);
 
   nsIScrollableFrame* scrollTarget = do_QueryFrame(scrollFrame);
   nsPresContext* pc =
@@ -2352,27 +2353,27 @@ EventStateManager::DispatchLegacyMouseScrollEvents(nsIFrame* aTargetFrame,
   //     rare cases.
   int32_t scrollDeltaX, scrollDeltaY, pixelDeltaX, pixelDeltaY;
   switch (aEvent->mDeltaMode) {
-    case WheelEventBinding::DOM_DELTA_PAGE:
+    case nsIDOMWheelEvent::DOM_DELTA_PAGE:
       scrollDeltaX =
         !aEvent->mLineOrPageDeltaX ? 0 :
-          (aEvent->mLineOrPageDeltaX > 0  ? UIEventBinding::SCROLL_PAGE_DOWN :
-                                            UIEventBinding::SCROLL_PAGE_UP);
+          (aEvent->mLineOrPageDeltaX > 0  ? nsIDOMUIEvent::SCROLL_PAGE_DOWN :
+                                            nsIDOMUIEvent::SCROLL_PAGE_UP);
       scrollDeltaY =
         !aEvent->mLineOrPageDeltaY ? 0 :
-          (aEvent->mLineOrPageDeltaY > 0  ? UIEventBinding::SCROLL_PAGE_DOWN :
-                                            UIEventBinding::SCROLL_PAGE_UP);
+          (aEvent->mLineOrPageDeltaY > 0  ? nsIDOMUIEvent::SCROLL_PAGE_DOWN :
+                                            nsIDOMUIEvent::SCROLL_PAGE_UP);
       pixelDeltaX = RoundDown(aEvent->mDeltaX * scrollAmountInCSSPixels.width);
       pixelDeltaY = RoundDown(aEvent->mDeltaY * scrollAmountInCSSPixels.height);
       break;
 
-    case WheelEventBinding::DOM_DELTA_LINE:
+    case nsIDOMWheelEvent::DOM_DELTA_LINE:
       scrollDeltaX = aEvent->mLineOrPageDeltaX;
       scrollDeltaY = aEvent->mLineOrPageDeltaY;
       pixelDeltaX = RoundDown(aEvent->mDeltaX * scrollAmountInCSSPixels.width);
       pixelDeltaY = RoundDown(aEvent->mDeltaY * scrollAmountInCSSPixels.height);
       break;
 
-    case WheelEventBinding::DOM_DELTA_PIXEL:
+    case nsIDOMWheelEvent::DOM_DELTA_PIXEL:
       scrollDeltaX = aEvent->mLineOrPageDeltaX;
       scrollDeltaY = aEvent->mLineOrPageDeltaY;
       pixelDeltaX = RoundDown(aEvent->mDeltaX);
@@ -2456,7 +2457,7 @@ EventStateManager::SendLineScrollEvent(nsIFrame* aTargetFrame,
   if (!targetContent)
     return;
 
-  while (targetContent->IsText()) {
+  while (targetContent->IsNodeOfType(nsINode::eTEXT)) {
     targetContent = targetContent->GetParent();
   }
 
@@ -2495,7 +2496,7 @@ EventStateManager::SendPixelScrollEvent(nsIFrame* aTargetFrame,
       return;
   }
 
-  while (targetContent->IsText()) {
+  while (targetContent->IsNodeOfType(nsINode::eTEXT)) {
     targetContent = targetContent->GetParent();
   }
 
@@ -2521,58 +2522,27 @@ EventStateManager::SendPixelScrollEvent(nsIFrame* aTargetFrame,
 }
 
 nsIFrame*
-EventStateManager::ComputeScrollTargetAndMayAdjustWheelEvent(
-                     nsIFrame* aTargetFrame,
-                     WidgetWheelEvent* aEvent,
-                     ComputeScrollTargetOptions aOptions)
+EventStateManager::ComputeScrollTarget(nsIFrame* aTargetFrame,
+                                       WidgetWheelEvent* aEvent,
+                                       ComputeScrollTargetOptions aOptions)
 {
-  return ComputeScrollTargetAndMayAdjustWheelEvent(aTargetFrame,
-                                                   aEvent->mDeltaX,
-                                                   aEvent->mDeltaY,
-                                                   aEvent, aOptions);
+  return ComputeScrollTarget(aTargetFrame, aEvent->mDeltaX, aEvent->mDeltaY,
+                             aEvent, aOptions);
 }
 
-// Overload ComputeScrollTargetAndMayAdjustWheelEvent method to allow passing
-// "test" dx and dy when looking for which scrollbarmediators to activate when
-// two finger down on trackpad and before any actual motion
+// Overload ComputeScrollTarget method to allow passing "test" dx and dy when looking
+// for which scrollbarmediators to activate when two finger down on trackpad
+// and before any actual motion
 nsIFrame*
-EventStateManager::ComputeScrollTargetAndMayAdjustWheelEvent(
-                     nsIFrame* aTargetFrame,
-                     double aDirectionX,
-                     double aDirectionY,
-                     WidgetWheelEvent* aEvent,
-                     ComputeScrollTargetOptions aOptions)
+EventStateManager::ComputeScrollTarget(nsIFrame* aTargetFrame,
+                                       double aDirectionX,
+                                       double aDirectionY,
+                                       WidgetWheelEvent* aEvent,
+                                       ComputeScrollTargetOptions aOptions)
 {
   if ((aOptions & INCLUDE_PLUGIN_AS_TARGET) &&
       !WheelPrefs::WheelEventsEnabledOnPlugins()) {
     aOptions = RemovePluginFromTarget(aOptions);
-  }
-
-  bool isAutoDir = false;
-  bool honoursRoot = false;
-  if (MAY_BE_ADJUSTED_BY_AUTO_DIR & aOptions) {
-    // If the scroll is respected as auto-dir, aDirection* should always be
-    // equivalent to the event's delta vlaues(Currently, there are only one case
-    // where aDirection*s have different values from the widget wheel event's
-    // original delta values and the only case isn't auto-dir, see
-    // ScrollbarsForWheel::TemporarilyActivateAllPossibleScrollTargets).
-    MOZ_ASSERT(aDirectionX == aEvent->mDeltaX &&
-                 aDirectionY == aEvent->mDeltaY);
-
-    WheelDeltaAdjustmentStrategy strategy =
-      GetWheelDeltaAdjustmentStrategy(*aEvent);
-    switch (strategy) {
-      case WheelDeltaAdjustmentStrategy::eAutoDir:
-        isAutoDir = true;
-        honoursRoot = false;
-        break;
-      case WheelDeltaAdjustmentStrategy::eAutoDirWithRootHonour:
-        isAutoDir = true;
-        honoursRoot = true;
-        break;
-      default:
-        break;
-    }
   }
 
   if (aOptions & PREFER_MOUSE_WHEEL_TRANSACTION) {
@@ -2599,16 +2569,6 @@ EventStateManager::ComputeScrollTargetAndMayAdjustWheelEvent(
       if (scrollableFrame) {
         nsIFrame* frameToScroll = do_QueryFrame(scrollableFrame);
         MOZ_ASSERT(frameToScroll);
-        if (isAutoDir) {
-          ESMAutoDirWheelDeltaAdjuster adjuster(*aEvent,
-                                                *lastScrollFrame,
-                                                honoursRoot);
-          // Note that calling this function will not always cause the delta to
-          // be adjusted, it only adjusts the delta when it should, because
-          // Adjust() internally calls ShouldBeAdjusted() before making
-          // adjustment.
-          adjuster.Adjust();
-        }
         return frameToScroll;
       }
     }
@@ -2621,21 +2581,10 @@ EventStateManager::ComputeScrollTargetAndMayAdjustWheelEvent(
     return nullptr;
   }
 
-  bool checkIfScrollableX;
-  bool checkIfScrollableY;
-  if (isAutoDir) {
-    // Always check the frame's scrollability in both the two directions for an
-    // auto-dir scroll. That is, for an auto-dir scroll,
-    // PREFER_ACTUAL_SCROLLABLE_TARGET_ALONG_X_AXIS and
-    // PREFER_ACTUAL_SCROLLABLE_TARGET_ALONG_Y_AXIS should be ignored.
-    checkIfScrollableX = true;
-    checkIfScrollableY = true;
-  } else {
-    checkIfScrollableX =
-      aDirectionX && (aOptions & PREFER_ACTUAL_SCROLLABLE_TARGET_ALONG_X_AXIS);
-    checkIfScrollableY =
-      aDirectionY && (aOptions & PREFER_ACTUAL_SCROLLABLE_TARGET_ALONG_Y_AXIS);
-  }
+  bool checkIfScrollableX =
+    aDirectionX && (aOptions & PREFER_ACTUAL_SCROLLABLE_TARGET_ALONG_X_AXIS);
+  bool checkIfScrollableY =
+    aDirectionY && (aOptions & PREFER_ACTUAL_SCROLLABLE_TARGET_ALONG_Y_AXIS);
 
   nsIFrame* scrollFrame =
     !(aOptions & START_FROM_PARENT) ? aTargetFrame :
@@ -2698,23 +2647,10 @@ EventStateManager::ComputeScrollTargetAndMayAdjustWheelEvent(
       continue;
     }
 
-    // Computes whether the currently checked frame is scrollable by this wheel
-    // event.
-    bool canScroll = false;
-    if (isAutoDir) {
-      ESMAutoDirWheelDeltaAdjuster adjuster(*aEvent, *scrollFrame, honoursRoot);
-      if (adjuster.ShouldBeAdjusted()) {
-        adjuster.Adjust();
-        canScroll = true;
-      } else if (WheelHandlingUtils::CanScrollOn(scrollableFrame,
-                                                 aDirectionX, aDirectionY)) {
-        canScroll = true;
-      }
-    } else if (WheelHandlingUtils::CanScrollOn(scrollableFrame,
-                                               aDirectionX, aDirectionY)) {
-      canScroll = true;
-    }
-
+    // For default action, we should climb up the tree if cannot scroll it
+    // by the event actually.
+    bool canScroll = WheelHandlingUtils::CanScrollOn(scrollableFrame,
+                                                     aDirectionX, aDirectionY);
     // Comboboxes need special care.
     nsIComboboxControlFrame* comboBox = do_QueryFrame(scrollFrame);
     if (comboBox) {
@@ -2729,20 +2665,13 @@ EventStateManager::ComputeScrollTargetAndMayAdjustWheelEvent(
     if (canScroll) {
       return frameToScroll;
     }
-
-    // Where we are at is the block ending in a for loop.
-    // The current frame has been checked to be unscrollable by this wheel
-    // event, continue the loop to check its parent, if any.
   }
 
   nsIFrame* newFrame = nsLayoutUtils::GetCrossDocParentFrame(
       aTargetFrame->PresShell()->GetRootFrame());
   aOptions =
     static_cast<ComputeScrollTargetOptions>(aOptions & ~START_FROM_PARENT);
-  if (!newFrame) {
-    return nullptr;
-  }
-  return ComputeScrollTargetAndMayAdjustWheelEvent(newFrame, aEvent, aOptions);
+  return newFrame ? ComputeScrollTarget(newFrame, aEvent, aOptions) : nullptr;
 }
 
 nsSize
@@ -2753,7 +2682,7 @@ EventStateManager::GetScrollAmount(nsPresContext* aPresContext,
   MOZ_ASSERT(aPresContext);
   MOZ_ASSERT(aEvent);
 
-  bool isPage = (aEvent->mDeltaMode == WheelEventBinding::DOM_DELTA_PAGE);
+  bool isPage = (aEvent->mDeltaMode == nsIDOMWheelEvent::DOM_DELTA_PAGE);
   if (aScrollableFrame) {
     return isPage ? aScrollableFrame->GetPageScrollAmount() :
                     aScrollableFrame->GetLineScrollAmount();
@@ -2813,15 +2742,15 @@ EventStateManager::DoScrollText(nsIScrollableFrame* aScrollableFrame,
   nsIScrollbarMediator::ScrollSnapMode snapMode = nsIScrollbarMediator::DISABLE_SNAP;
   nsAtom* origin = nullptr;
   switch (aEvent->mDeltaMode) {
-    case WheelEventBinding::DOM_DELTA_LINE:
+    case nsIDOMWheelEvent::DOM_DELTA_LINE:
       origin = nsGkAtoms::mouseWheel;
       snapMode = nsIScrollableFrame::ENABLE_SNAP;
       break;
-    case WheelEventBinding::DOM_DELTA_PAGE:
+    case nsIDOMWheelEvent::DOM_DELTA_PAGE:
       origin = nsGkAtoms::pages;
       snapMode = nsIScrollableFrame::ENABLE_SNAP;
       break;
-    case WheelEventBinding::DOM_DELTA_PIXEL:
+    case nsIDOMWheelEvent::DOM_DELTA_PIXEL:
       origin = nsGkAtoms::pixels;
       break;
     default:
@@ -2848,7 +2777,7 @@ EventStateManager::DoScrollText(nsIScrollableFrame* aScrollableFrame,
   }
 
   bool isDeltaModePixel =
-    (aEvent->mDeltaMode == WheelEventBinding::DOM_DELTA_PIXEL);
+    (aEvent->mDeltaMode == nsIDOMWheelEvent::DOM_DELTA_PIXEL);
 
   nsIScrollableFrame::ScrollMode mode;
   switch (aEvent->mScrollType) {
@@ -2907,16 +2836,14 @@ EventStateManager::DoScrollText(nsIScrollableFrame* aScrollableFrame,
   if (scrollFrameWeak.IsAlive()) {
     if (aEvent->mDeltaX &&
         overflowStyle.mHorizontal == NS_STYLE_OVERFLOW_HIDDEN &&
-        !ComputeScrollTargetAndMayAdjustWheelEvent(
-           scrollFrame, aEvent,
-           COMPUTE_SCROLLABLE_ANCESTOR_ALONG_X_AXIS_WITH_AUTO_DIR)) {
+        !ComputeScrollTarget(scrollFrame, aEvent,
+                             COMPUTE_SCROLLABLE_ANCESTOR_ALONG_X_AXIS)) {
       aEvent->mOverflowDeltaX = aEvent->mDeltaX;
     }
     if (aEvent->mDeltaY &&
         overflowStyle.mVertical == NS_STYLE_OVERFLOW_HIDDEN &&
-        !ComputeScrollTargetAndMayAdjustWheelEvent(
-           scrollFrame, aEvent,
-           COMPUTE_SCROLLABLE_ANCESTOR_ALONG_Y_AXIS_WITH_AUTO_DIR)) {
+        !ComputeScrollTarget(scrollFrame, aEvent,
+                             COMPUTE_SCROLLABLE_ANCESTOR_ALONG_Y_AXIS)) {
       aEvent->mOverflowDeltaY = aEvent->mDeltaY;
     }
   }
@@ -3321,7 +3248,7 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
             uint32_t flags = nsIFocusManager::FLAG_BYMOUSE |
                              nsIFocusManager::FLAG_NOSCROLL;
             // If this was a touch-generated event, pass that information:
-            if (mouseEvent->inputSource == MouseEventBinding::MOZ_SOURCE_TOUCH) {
+            if (mouseEvent->inputSource == nsIDOMMouseEvent::MOZ_SOURCE_TOUCH) {
               flags |= nsIFocusManager::FLAG_BYTOUCH;
             }
             nsCOMPtr<nsIDOMElement> newFocusElement = do_QueryInterface(newFocus);
@@ -3401,7 +3328,7 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
     PointerEventHandler::ImplicitlyReleasePointerCapture(pointerEvent);
 
     if (pointerEvent->mMessage == ePointerCancel ||
-        pointerEvent->inputSource == MouseEventBinding::MOZ_SOURCE_TOUCH) {
+        pointerEvent->inputSource == nsIDOMMouseEvent::MOZ_SOURCE_TOUCH) {
       // After pointercancel, pointer becomes invalid so we can remove relevant
       // helper from table. Regarding pointerup with non-hoverable device, the
       // pointer also becomes invalid. Hoverable (mouse/pen) pointers are valid
@@ -3440,10 +3367,8 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
       ScrollbarsForWheel::MayInactivate();
       WidgetWheelEvent* wheelEvent = aEvent->AsWheelEvent();
       nsIScrollableFrame* scrollTarget =
-        do_QueryFrame(
-          ComputeScrollTargetAndMayAdjustWheelEvent(
-            mCurrentTarget, wheelEvent,
-            COMPUTE_DEFAULT_ACTION_TARGET_WITH_AUTO_DIR));
+        do_QueryFrame(ComputeScrollTarget(mCurrentTarget, wheelEvent,
+                                          COMPUTE_DEFAULT_ACTION_TARGET));
       if (scrollTarget) {
         scrollTarget->ScrollSnap();
       }
@@ -3469,45 +3394,27 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
           WheelPrefs::ACTION_NONE :
           WheelPrefs::GetInstance()->ComputeActionFor(wheelEvent);
 
-      WheelDeltaAdjustmentStrategy strategy =
-        GetWheelDeltaAdjustmentStrategy(*wheelEvent);
-      // Adjust the delta values of the wheel event if the current default
-      // action is to horizontalize scrolling. I.e., deltaY values are set to
-      // deltaX and deltaY and deltaZ values are set to 0.
-      // If horizontalized, the delta values will be restored and its overflow
-      // deltaX will become 0 when the WheelDeltaHorizontalizer instance is
-      // being destroyed.
-      WheelDeltaHorizontalizer horizontalizer(*wheelEvent);
-      if (WheelDeltaAdjustmentStrategy::eHorizontalize == strategy) {
-        horizontalizer.Horizontalize();
-      }
+      // Make the wheel event a horizontal scroll event.  I.e., deltaY values
+      // are set to deltaX and deltaY and deltaZ values are set to 0.
+      // When AutoWheelDeltaAdjuster instance is destroyed, the delta values
+      // are restored and make overflow deltaX becomes 0.
+      AutoWheelDeltaAdjuster adjuster(*wheelEvent);
 
-      // Since ComputeScrollTargetAndMayAdjustWheelEvent() may adjust the delta
-      // if the event is auto-dir. So we use |ESMAutoDirWheelDeltaRestorer|
-      // here.
-      // An instance of |ESMAutoDirWheelDeltaRestorer| is used to monitor
-      // auto-dir adjustment which may happen during its lifetime. If the delta
-      // values is adjusted during its lifetime, the instance will restore the
-      // adjusted delta when it's being destrcuted.
-      ESMAutoDirWheelDeltaRestorer restorer(*wheelEvent);
       // Check if the frame to scroll before checking the default action
       // because if the scroll target is a plugin, the default action should be
       // chosen by the plugin rather than by our prefs.
       nsIFrame* frameToScroll =
-        ComputeScrollTargetAndMayAdjustWheelEvent(
-          mCurrentTarget, wheelEvent,
-          COMPUTE_DEFAULT_ACTION_TARGET_WITH_AUTO_DIR);
+        ComputeScrollTarget(mCurrentTarget, wheelEvent,
+                            COMPUTE_DEFAULT_ACTION_TARGET);
       nsPluginFrame* pluginFrame = do_QueryFrame(frameToScroll);
       if (pluginFrame) {
         MOZ_ASSERT(pluginFrame->WantsToHandleWheelEventAsDefaultAction());
-        // Plugins should receive original values instead of adjusted values.
-        horizontalizer.CancelHorizontalization();
         action = WheelPrefs::ACTION_SEND_TO_PLUGIN;
       }
 
       switch (action) {
         case WheelPrefs::ACTION_SCROLL:
-        case WheelPrefs::ACTION_HORIZONTALIZED_SCROLL: {
+        case WheelPrefs::ACTION_HORIZONTAL_SCROLL: {
           // For scrolling of default action, we should honor the mouse wheel
           // transaction.
 
@@ -3588,8 +3495,8 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
               // scrolling is possible in the requested direction. It does this
               // by looking at the scroll overflow values on mCanTriggerSwipe
               // events after they have been processed.
-              allDeltaOverflown = !ComputeScrollTarget(
-                                     mCurrentTarget, wheelEvent,
+              allDeltaOverflown =
+                !ComputeScrollTarget(mCurrentTarget, wheelEvent,
                                      COMPUTE_DEFAULT_ACTION_TARGET);
             }
           } else {
@@ -3652,8 +3559,9 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
 
       // the initial dataTransfer is the one from the dragstart event that
       // was set on the dragSession when the drag began.
-      RefPtr<DataTransfer> dataTransfer;
-      RefPtr<DataTransfer> initialDataTransfer = dragSession->GetDataTransfer();
+      nsCOMPtr<nsIDOMDataTransfer> dataTransfer;
+      nsCOMPtr<nsIDOMDataTransfer> initialDataTransfer;
+      dragSession->GetDataTransfer(getter_AddRefs(initialDataTransfer));
 
       WidgetDragEvent *dragEvent = aEvent->AsDragEvent();
 
@@ -3676,8 +3584,8 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
         // if the event has a dataTransfer set, use it.
         if (dragEvent->mDataTransfer) {
           // get the dataTransfer and the dropEffect that was set on it
-          dataTransfer = dragEvent->mDataTransfer;
-          dropEffect = dataTransfer->DropEffectInt();
+          dataTransfer = do_QueryInterface(dragEvent->mDataTransfer);
+          dataTransfer->GetDropEffectInt(&dropEffect);
         }
         else {
           // if dragEvent->mDataTransfer is null, it means that no attempt was
@@ -3701,9 +3609,8 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
         // drag was originally started by directly calling the drag service.
         // Just assume that all effects are allowed.
         uint32_t effectAllowed = nsIDragService::DRAGDROP_ACTION_UNINITIALIZED;
-        if (dataTransfer) {
-          effectAllowed = dataTransfer->EffectAllowedInt();
-        }
+        if (dataTransfer)
+          dataTransfer->GetEffectAllowedInt(&effectAllowed);
 
         // set the drag action based on the drop effect and effect allowed.
         // The drop effect field on the drag transfer object specifies the
@@ -4378,7 +4285,8 @@ EventStateManager::NotifyMouseOut(WidgetMouseEvent* aMouseEvent,
     // tell the subdocument that we're moving out of it
     nsSubDocumentFrame* subdocFrame = do_QueryFrame(wrapper->mLastOverFrame.GetFrame());
     if (subdocFrame) {
-      nsIDocShell* docshell = subdocFrame->GetDocShell();
+      nsCOMPtr<nsIDocShell> docshell;
+      subdocFrame->GetDocShell(getter_AddRefs(docshell));
       if (docshell) {
         RefPtr<nsPresContext> presContext;
         docshell->GetPresContext(getter_AddRefs(presContext));
@@ -4470,15 +4378,15 @@ EventStateManager::NotifyMouseOver(WidgetMouseEvent* aMouseEvent,
                                        aMouseEvent,
                                        isPointer ? ePointerEnter : eMouseEnter);
 
-  if (!isPointer) {
-    SetContentState(aContent, NS_EVENT_STATE_HOVER);
-  }
-
   NotifyMouseOut(aMouseEvent, aContent);
 
   // Store the first mouseOver event we fire and don't refire mouseOver
   // to that element while the first mouseOver is still ongoing.
   wrapper->mFirstOverEventElement = aContent;
+
+  if (!isPointer) {
+    SetContentState(aContent, NS_EVENT_STATE_HOVER);
+  }
 
   // Fire mouseover
   wrapper->mLastOverFrame =
@@ -4899,7 +4807,8 @@ EventStateManager::UpdateDragDataTransfer(WidgetDragEvent* dragEvent)
   if (dragSession) {
     // the initial dataTransfer is the one from the dragstart event that
     // was set on the dragSession when the drag began.
-    RefPtr<DataTransfer> initialDataTransfer = dragSession->GetDataTransfer();
+    nsCOMPtr<nsIDOMDataTransfer> initialDataTransfer;
+    dragSession->GetDataTransfer(getter_AddRefs(initialDataTransfer));
     if (initialDataTransfer) {
       // retrieve the current moz cursor setting and save it.
       nsAutoString mozCursor;
@@ -4920,7 +4829,7 @@ EventStateManager::SetClickCount(WidgetMouseEvent* aEvent,
     mCurrentTarget->GetContentForEvent(aEvent, getter_AddRefs(mouseContent));
   }
   if (mouseContent) {
-    if (mouseContent->IsText()) {
+    if (mouseContent->IsNodeOfType(nsINode::eTEXT)) {
       mouseContent = mouseContent->GetParent();
     }
     if (mouseContent && mouseContent->IsRootOfNativeAnonymousSubtree()) {
@@ -5139,7 +5048,7 @@ static Element*
 GetLabelTarget(nsIContent* aPossibleLabel)
 {
   mozilla::dom::HTMLLabelElement* label =
-    mozilla::dom::HTMLLabelElement::FromNode(aPossibleLabel);
+    mozilla::dom::HTMLLabelElement::FromContent(aPossibleLabel);
   if (!label)
     return nullptr;
 
@@ -5800,7 +5709,7 @@ EventStateManager::DeltaAccumulator::InitLineOrPageDelta(
   mX += aEvent->mDeltaX;
   mY += aEvent->mDeltaY;
 
-  if (mHandlingDeltaMode == WheelEventBinding::DOM_DELTA_PIXEL) {
+  if (mHandlingDeltaMode == nsIDOMWheelEvent::DOM_DELTA_PIXEL) {
     // Records pixel delta values and init mLineOrPageDeltaX and
     // mLineOrPageDeltaY for wheel events which are caused by pixel only
     // devices.  Ignore mouse wheel transaction for computing this.  The
@@ -5854,12 +5763,12 @@ EventStateManager::DeltaAccumulator::ComputeScrollAmountForDefaultAction(
   // system settings, allow to override the system speed.
   bool allowScrollSpeedOverride =
     (!aEvent->mCustomizedByUserPrefs &&
-     aEvent->mDeltaMode == WheelEventBinding::DOM_DELTA_LINE);
+     aEvent->mDeltaMode == nsIDOMWheelEvent::DOM_DELTA_LINE);
   DeltaValues acceleratedDelta =
     WheelTransaction::AccelerateWheelDelta(aEvent, allowScrollSpeedOverride);
 
   nsIntPoint result(0, 0);
-  if (aEvent->mDeltaMode == WheelEventBinding::DOM_DELTA_PIXEL) {
+  if (aEvent->mDeltaMode == nsIDOMWheelEvent::DOM_DELTA_PIXEL) {
     mPendingScrollAmountX += acceleratedDelta.deltaX;
     mPendingScrollAmountY += acceleratedDelta.deltaY;
   } else {
@@ -5915,12 +5824,6 @@ EventStateManager::WheelPrefs::WheelPrefs()
   Preferences::AddBoolVarCache(&sWheelEventsEnabledOnPlugins,
                                "plugin.mousewheel.enabled",
                                true);
-  Preferences::AddBoolVarCache(&sIsAutoDirEnabled,
-                               "mousewheel.autodir.enabled",
-                               true);
-  Preferences::AddBoolVarCache(&sHonoursRootForAutoDir,
-                               "mousewheel.autodir.honourroot",
-                               false);
 }
 
 EventStateManager::WheelPrefs::~WheelPrefs()
@@ -6033,12 +5936,12 @@ EventStateManager::WheelPrefs::Init(EventStateManager::WheelPrefs::Index aIndex)
   // Compute action values overridden by .override_x pref.
   // At present, override is possible only for the x-direction
   // because this pref is introduced mainly for tilt wheels.
-  // Note that ACTION_HORIZONTALIZED_SCROLL isn't a valid value for this pref
+  // Note that ACTION_HORIZONTAL_SCROLL isn't a valid value for this pref
   // because it affects only to deltaY.
   prefNameAction.AppendLiteral(".override_x");
   int32_t actionOverrideX = Preferences::GetInt(prefNameAction.get(), -1);
   if (actionOverrideX < -1 || actionOverrideX > int32_t(ACTION_LAST) ||
-      actionOverrideX == ACTION_HORIZONTALIZED_SCROLL) {
+      actionOverrideX == ACTION_HORIZONTAL_SCROLL) {
     NS_WARNING("Unsupported action override pref value, didn't override.");
     actionOverrideX = -1;
   }
@@ -6054,14 +5957,14 @@ EventStateManager::WheelPrefs::GetMultiplierForDeltaXAndY(
                                  double* aMultiplierForDeltaX,
                                  double* aMultiplierForDeltaY)
 {
+  // If the event should be treated as horizontal wheel operation, deltaY
+  // should be multiplied by mMultiplierY, however, it might be moved to
+  // deltaX for handling default action.  In such case, we need to treat
+  // mMultiplierX and mMultiplierY as swapped.
   *aMultiplierForDeltaX = mMultiplierX[aIndex];
   *aMultiplierForDeltaY = mMultiplierY[aIndex];
-  // If the event has been horizontalized(I.e. treated as a horizontal wheel
-  // scroll for a vertical wheel scroll), then we should swap mMultiplierX and
-  // mMultiplierY. By doing this, multipliers will still apply to the delta
-  // values they origianlly corresponded to.
-  if (aEvent->mDeltaValuesHorizontalizedForDefaultHandler &&
-      ComputeActionFor(aEvent) == ACTION_HORIZONTALIZED_SCROLL) {
+  if (aEvent->mDeltaValuesAdjustedForDefaultHandler &&
+      ComputeActionFor(aEvent) == ACTION_HORIZONTAL_SCROLL) {
     std::swap(*aMultiplierForDeltaX, *aMultiplierForDeltaY);
   }
 }
@@ -6135,7 +6038,7 @@ EventStateManager::WheelPrefs::ComputeActionFor(const WidgetWheelEvent* aEvent)
   Action* actions = deltaXPreferred ? mOverriddenActionsX : mActions;
   if (actions[index] == ACTION_NONE ||
       actions[index] == ACTION_SCROLL ||
-      actions[index] == ACTION_HORIZONTALIZED_SCROLL) {
+      actions[index] == ACTION_HORIZONTAL_SCROLL) {
     return actions[index];
   }
 
@@ -6144,7 +6047,7 @@ EventStateManager::WheelPrefs::ComputeActionFor(const WidgetWheelEvent* aEvent)
     // Use the default action.  Note that user might kill the wheel scrolling.
     Init(INDEX_DEFAULT);
     if (actions[INDEX_DEFAULT] == ACTION_SCROLL ||
-        actions[INDEX_DEFAULT] == ACTION_HORIZONTALIZED_SCROLL) {
+        actions[INDEX_DEFAULT] == ACTION_HORIZONTAL_SCROLL) {
       return actions[INDEX_DEFAULT];
     }
     return ACTION_NONE;
@@ -6192,26 +6095,6 @@ EventStateManager::WheelPrefs::WheelEventsEnabledOnPlugins()
 
 // static
 bool
-EventStateManager::WheelPrefs::IsAutoDirEnabled()
-{
-  if (!sInstance) {
-    GetInstance(); // initializing sIsAutoDirEnabled
-  }
-  return sIsAutoDirEnabled;
-}
-
-// static
-bool
-EventStateManager::WheelPrefs::HonoursRootForAutoDir()
-{
-  if (!sInstance) {
-    GetInstance(); // initializing sHonoursRootForAutoDir
-  }
-  return sHonoursRootForAutoDir;
-}
-
-// static
-bool
 EventStateManager::WheelEventIsScrollAction(const WidgetWheelEvent* aEvent)
 {
   if (aEvent->mMessage != eWheel) {
@@ -6220,32 +6103,20 @@ EventStateManager::WheelEventIsScrollAction(const WidgetWheelEvent* aEvent)
   WheelPrefs::Action action =
     WheelPrefs::GetInstance()->ComputeActionFor(aEvent);
   return action == WheelPrefs::ACTION_SCROLL ||
-         action == WheelPrefs::ACTION_HORIZONTALIZED_SCROLL;
+         action == WheelPrefs::ACTION_HORIZONTAL_SCROLL;
 }
 
 // static
-WheelDeltaAdjustmentStrategy
-EventStateManager::GetWheelDeltaAdjustmentStrategy(
-                     const WidgetWheelEvent& aEvent)
+bool
+EventStateManager::WheelEventIsHorizontalScrollAction(
+                     const WidgetWheelEvent* aEvent)
 {
-  if (aEvent.mMessage != eWheel) {
-    return WheelDeltaAdjustmentStrategy::eNone;
+  if (aEvent->mMessage != eWheel) {
+    return false;
   }
-  switch (WheelPrefs::GetInstance()->ComputeActionFor(&aEvent)) {
-    case WheelPrefs::ACTION_SCROLL:
-      if (WheelPrefs::IsAutoDirEnabled() && 0 == aEvent.mDeltaZ) {
-        if (WheelPrefs::HonoursRootForAutoDir()) {
-          return WheelDeltaAdjustmentStrategy::eAutoDirWithRootHonour;
-        }
-        return WheelDeltaAdjustmentStrategy::eAutoDir;
-      }
-      return WheelDeltaAdjustmentStrategy::eNone;
-    case WheelPrefs::ACTION_HORIZONTALIZED_SCROLL:
-      return WheelDeltaAdjustmentStrategy::eHorizontalize;
-    default:
-      break;
-  }
-  return WheelDeltaAdjustmentStrategy::eNone;
+  WheelPrefs::Action action =
+    WheelPrefs::GetInstance()->ComputeActionFor(aEvent);
+  return action == WheelPrefs::ACTION_HORIZONTAL_SCROLL;
 }
 
 void

@@ -7,24 +7,19 @@
 var EXPORTED_SYMBOLS = ["GeckoViewContentModule"];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/GeckoViewUtils.jsm");
-
-GeckoViewUtils.initLogging("GeckoView.Module.[C]", this);
 
 ChromeUtils.defineModuleGetter(this, "EventDispatcher",
   "resource://gre/modules/Messaging.jsm");
 
+XPCOMUtils.defineLazyGetter(this, "dump", () =>
+    ChromeUtils.import("resource://gre/modules/AndroidLog.jsm",
+                       {}).AndroidLog.d.bind(null, "ViewContentModule"));
+
+// function debug(aMsg) {
+//   dump(aMsg);
+// }
+
 class GeckoViewContentModule {
-  static initLogging(aModuleName) {
-    this._moduleName = aModuleName;
-    const tag = aModuleName.replace("GeckoView", "GeckoView.") + ".[C]";
-    return GeckoViewUtils.initLogging(tag, {});
-  }
-
-  static create(aGlobal, aModuleName) {
-    return new this(aModuleName || this._moduleName, aGlobal);
-  }
-
   constructor(aModuleName, aMessageManager) {
     this.moduleName = aModuleName;
     this.messageManager = aMessageManager;
@@ -42,9 +37,7 @@ class GeckoViewContentModule {
       aMsg => {
         if (aMsg.data.module == this.moduleName) {
           this.settings = aMsg.data.settings;
-          this.onEnable();
-          this.messageManager.sendAsyncMessage(
-            "GeckoView:ContentRegistered", { module: this.moduleName });
+          this.register();
         }
       }
     );
@@ -52,23 +45,16 @@ class GeckoViewContentModule {
       "GeckoView:Unregister",
       aMsg => {
         if (aMsg.data.module == this.moduleName) {
-          this.onDisable();
+          this.unregister();
         }
       }
     );
 
-    this.onInit();
+    this.init();
   }
 
-  // Override to initialize module.
-  onInit() {}
-
-  // Override to detect settings change. Access settings via this.settings.
+  init() {}
+  register() {}
+  unregister() {}
   onSettingsUpdate() {}
-
-  // Override to enable module after setting a Java delegate.
-  onEnable() {}
-
-  // Override to disable module after clearing the Java delegate.
-  onDisable() {}
 }

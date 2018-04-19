@@ -351,7 +351,7 @@ nsTreeContentView::IsSorted(bool *_retval)
 
 bool
 nsTreeContentView::CanDrop(int32_t aRow, int32_t aOrientation,
-                           ErrorResult& aError)
+                           DataTransfer* aDataTransfer, ErrorResult& aError)
 {
   if (!IsValidRowIndex(aRow)) {
     aError.Throw(NS_ERROR_INVALID_ARG);
@@ -359,43 +359,30 @@ nsTreeContentView::CanDrop(int32_t aRow, int32_t aOrientation,
   return false;
 }
 
-bool
-nsTreeContentView::CanDrop(int32_t aRow, int32_t aOrientation,
-                           DataTransfer* aDataTransfer, ErrorResult& aError)
-{
-  return CanDrop(aRow, aOrientation, aError);
-}
-
 NS_IMETHODIMP
 nsTreeContentView::CanDrop(int32_t aIndex, int32_t aOrientation,
-                           nsISupports* aDataTransfer, bool *_retval)
+                           nsIDOMDataTransfer* aDataTransfer, bool *_retval)
 {
   ErrorResult rv;
-  *_retval = CanDrop(aIndex, aOrientation, rv);
+  *_retval = CanDrop(aIndex, aOrientation, DataTransfer::Cast(aDataTransfer),
+                     rv);
   return rv.StealNSResult();
-}
-
-void
-nsTreeContentView::Drop(int32_t aRow, int32_t aOrientation, ErrorResult& aError)
-{
-  if (!IsValidRowIndex(aRow)) {
-    aError.Throw(NS_ERROR_INVALID_ARG);
-  }
 }
 
 void
 nsTreeContentView::Drop(int32_t aRow, int32_t aOrientation,
                         DataTransfer* aDataTransfer, ErrorResult& aError)
 {
-  Drop(aRow, aOrientation, aError);
+  if (!IsValidRowIndex(aRow)) {
+    aError.Throw(NS_ERROR_INVALID_ARG);
+  }
 }
 
 NS_IMETHODIMP
-nsTreeContentView::Drop(int32_t aRow, int32_t aOrientation,
-                        nsISupports* aDataTransfer)
+nsTreeContentView::Drop(int32_t aRow, int32_t aOrientation, nsIDOMDataTransfer* aDataTransfer)
 {
   ErrorResult rv;
-  Drop(aRow, aOrientation, rv);
+  Drop(aRow, aOrientation, DataTransfer::Cast(aDataTransfer), rv);
   return rv.StealNSResult();
 }
 

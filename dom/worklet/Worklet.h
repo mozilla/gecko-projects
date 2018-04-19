@@ -8,7 +8,6 @@
 #define mozilla_dom_Worklet_h
 
 #include "mozilla/Attributes.h"
-#include "mozilla/BasePrincipal.h"
 #include "mozilla/ErrorResult.h"
 #include "nsRefPtrHashtable.h"
 #include "nsWrapperCache.h"
@@ -21,43 +20,9 @@ namespace mozilla {
 namespace dom {
 
 class Promise;
-class Worklet;
-class WorkletFetchHandler;
 class WorkletGlobalScope;
-class WorkletThread;
+class WorkletFetchHandler;
 enum class CallerType : uint32_t;
-
-class WorkletLoadInfo
-{
-public:
-  WorkletLoadInfo();
-  ~WorkletLoadInfo();
-
-  uint64_t OuterWindowID() const { return mOuterWindowID; }
-  uint64_t InnerWindowID() const { return mInnerWindowID; }
-  bool DumpEnabled() const { return mDumpEnabled; }
-
-  const OriginAttributes& OriginAttributesRef() const
-  {
-    return mOriginAttributes;
-  }
-
-  nsIPrincipal* Principal() const
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-    return mPrincipal;
-  }
-
-private:
-  uint64_t mOuterWindowID;
-  uint64_t mInnerWindowID;
-  bool mDumpEnabled;
-  OriginAttributes mOriginAttributes;
-  nsCOMPtr<nsIPrincipal> mPrincipal;
-
-  friend class Worklet;
-  friend class WorkletThread;
-};
 
 class Worklet final : public nsISupports
                     , public nsWrapperCache
@@ -86,22 +51,8 @@ public:
   Import(const nsAString& aModuleURL, CallerType aCallerType,
          ErrorResult& aRv);
 
-  WorkletType Type() const
-  {
-    return mWorkletType;
-  }
-
-  static already_AddRefed<WorkletGlobalScope>
-  CreateGlobalScope(JSContext* aCx, WorkletType aWorkletType);
-
-  WorkletThread*
-  GetOrCreateThread();
-
-  const WorkletLoadInfo&
-  LoadInfo() const
-  {
-    return mWorkletLoadInfo;
-  }
+  WorkletGlobalScope*
+  GetOrCreateGlobalScope(JSContext* aCx);
 
 private:
   ~Worklet();
@@ -112,18 +63,13 @@ private:
   void
   AddImportFetchHandler(const nsACString& aURI, WorkletFetchHandler* aHandler);
 
-  void
-  TerminateThread();
-
   nsCOMPtr<nsPIDOMWindowInner> mWindow;
+  nsCOMPtr<nsIPrincipal> mPrincipal;
 
   WorkletType mWorkletType;
 
+  RefPtr<WorkletGlobalScope> mScope;
   nsRefPtrHashtable<nsCStringHashKey, WorkletFetchHandler> mImportHandlers;
-
-  RefPtr<WorkletThread> mWorkletThread;
-
-  WorkletLoadInfo mWorkletLoadInfo;
 
   friend class WorkletFetchHandler;
 };

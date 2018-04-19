@@ -13,10 +13,9 @@
 #include "mozilla/EventForwards.h"
 #include "mozilla/FlushType.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/ServoStyleSet.h"
 #include "mozilla/StaticPtr.h"
+#include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSheet.h"
-#include "mozilla/UniquePtr.h"
 #include "mozilla/WeakPtr.h"
 #include "GeckoProfiler.h"
 #include "gfxPoint.h"
@@ -57,7 +56,7 @@ class nsCanvasFrame;
 class nsCaret;
 namespace mozilla {
 class AccessibleCaretEventHub;
-class ServoStyleSheet;
+class CSSStyleSheet;
 } // namespace mozilla
 class nsFrameSelection;
 class nsFrameManager;
@@ -96,7 +95,6 @@ class EventStates;
 
 namespace dom {
 class Element;
-class HTMLSlotElement;
 class Touch;
 class Selection;
 class ShadowRoot;
@@ -280,7 +278,7 @@ public:
   }
 #endif
 
-  mozilla::ServoStyleSet* StyleSet() const { return mStyleSet.get(); }
+  mozilla::StyleSetHandle StyleSet() const { return mStyleSet; }
 
   nsCSSFrameConstructor* FrameConstructor() const { return mFrameConstructor; }
 
@@ -526,18 +524,7 @@ public:
    *
    * Note that this may destroy frames for an ancestor instead.
    */
-  void DestroyFramesForAndRestyle(mozilla::dom::Element* aElement);
-
-  /**
-   * Handles all the layout stuff needed when the slot assignment for an element
-   * is about to change.
-   *
-   * Only called when the slot attribute of the element changes, the rest of
-   * the changes should be handled in ShadowRoot.
-   */
-  void SlotAssignmentWillChange(mozilla::dom::Element& aElement,
-                                mozilla::dom::HTMLSlotElement* aOldSlot,
-                                mozilla::dom::HTMLSlotElement* aNewSlot);
+  virtual void DestroyFramesForAndRestyle(mozilla::dom::Element* aElement) = 0;
 
   void PostRecreateFramesFor(mozilla::dom::Element* aElement);
   void RestyleForAnimation(mozilla::dom::Element* aElement,
@@ -554,12 +541,6 @@ public:
   bool IsSafeToFlush() const;
 
   /**
-   * Informs the document's FontFaceSet that the refresh driver ticked,
-   * flushing style and layout.
-   */
-  void NotifyFontFaceSetOnRefresh();
-
-  /**
    * Flush pending notifications of the type specified.  This method
    * will not affect the content model; it'll just affect style and
    * frames. Callers that actually want up-to-date presentation (other
@@ -574,6 +555,7 @@ public:
    *
    * @param aType the type of notifications to flush
    */
+public:
   void FlushPendingNotifications(mozilla::FlushType aType)
   {
     if (!NeedFlush(aType)) {
@@ -627,23 +609,6 @@ public:
   inline void SetNeedStyleFlush();
   inline void SetNeedLayoutFlush();
   inline void SetNeedThrottledAnimationFlush();
-
-  // Removes ourself from the list of layout / style / and resize refresh driver
-  // observers.
-  //
-  // Right now this is only used for documents in the BFCache, so if you want to
-  // use this for anything else you need to ensure we don't end up in those
-  // lists after calling this, but before calling StartObservingRefreshDriver
-  // again.
-  //
-  // That is handled by the mDocument->GetBFCacheEntry checks in
-  // DoObserve*Flushes functions, though that could conceivably become a boolean
-  // member in the shell if needed.
-  //
-  // Callers are responsible of manually calling StartObservingRefreshDriver
-  // again.
-  void StopObservingRefreshDriver();
-  void StartObservingRefreshDriver();
 
   bool ObservingStyleFlushes() const { return mObservingStyleFlushes; }
   bool ObservingLayoutFlushes() const { return mObservingLayoutFlushes; }
@@ -1007,13 +972,13 @@ public:
    * Get the set of agent style sheets for this presentation
    */
   virtual nsresult GetAgentStyleSheets(
-      nsTArray<RefPtr<mozilla::ServoStyleSheet>>& aSheets) = 0;
+      nsTArray<RefPtr<mozilla::StyleSheet>>& aSheets) = 0;
 
   /**
    * Replace the set of agent style sheets
    */
   virtual nsresult SetAgentStyleSheets(
-      const nsTArray<RefPtr<mozilla::ServoStyleSheet>>& aSheets) = 0;
+      const nsTArray<RefPtr<mozilla::StyleSheet>>& aSheets) = 0;
 
   /**
    * Add an override style sheet for this presentation
@@ -1066,9 +1031,10 @@ public:
 
 #ifdef DEBUG
   // Debugging hooks
-  virtual void ListComputedStyles(FILE *out, int32_t aIndent = 0) = 0;
+  virtual void ListStyleContexts(FILE *out, int32_t aIndent = 0) = 0;
 
   virtual void ListStyleSheets(FILE *out, int32_t aIndent = 0) = 0;
+  virtual void VerifyStyleTree() = 0;
 #endif
 
 #ifdef ACCESSIBILITY
@@ -1193,7 +1159,7 @@ public:
    * frames.
    */
   virtual already_AddRefed<mozilla::gfx::SourceSurface>
-  RenderSelection(mozilla::dom::Selection* aSelection,
+  RenderSelection(nsISelection* aSelection,
                   const mozilla::LayoutDeviceIntPoint aPoint,
                   mozilla::LayoutDeviceIntRect* aScreenRect,
                   uint32_t aFlags) = 0;
@@ -1514,7 +1480,8 @@ public:
   virtual void ScheduleViewManagerFlush(PaintType aType = PAINT_DEFAULT) = 0;
   virtual void ClearMouseCaptureOnView(nsView* aView) = 0;
   virtual bool IsVisible() = 0;
-  void DispatchSynthMouseMove(mozilla::WidgetGUIEvent* aEvent);
+  virtual void DispatchSynthMouseMove(mozilla::WidgetGUIEvent* aEvent,
+                                      bool aFlushOnHoverChange) = 0;
 
   virtual void AddSizeOfIncludingThis(nsWindowSizes& aWindowSizes) const = 0;
 
@@ -1706,7 +1673,7 @@ protected:
   // we must share ownership.
   nsCOMPtr<nsIDocument>     mDocument;
   RefPtr<nsPresContext>   mPresContext;
-  mozilla::UniquePtr<mozilla::ServoStyleSet> mStyleSet;
+  mozilla::StyleSetHandle   mStyleSet;      // [OWNS]
   nsCSSFrameConstructor*    mFrameConstructor; // [OWNS]
   nsViewManager*           mViewManager;   // [WEAK] docViewer owns it so I don't have to
   nsPresArena               mFrameArena;
@@ -1807,8 +1774,6 @@ protected:
   //
   // Guaranteed to be false if mReflowContinueTimer is non-null.
   bool mObservingLayoutFlushes: 1;
-
-  bool mResizeEventPending : 1;
 
   // True if there are throttled animations that would be processed when
   // performing a flush with mFlushAnimations == true.

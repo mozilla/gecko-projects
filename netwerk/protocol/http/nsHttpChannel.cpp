@@ -3993,19 +3993,8 @@ nsHttpChannel::OnCacheEntryCheck(nsICacheEntry* entry, nsIApplicationCache* appC
     // Don't bother to validate if this is a fallback entry.
     if (!mApplicationCacheForWrite &&
         (appCache ||
-         (mCacheEntryIsReadOnly && !(mLoadFlags & nsIRequest::INHIBIT_CACHING)))) {
-
-        if (!appCache) {
-            int64_t size, contentLength;
-            rv = CheckPartial(entry, &size, &contentLength);
-            NS_ENSURE_SUCCESS(rv, rv);
-
-            if (contentLength != int64_t(-1) && contentLength != size) {
-                *aResult = ENTRY_NOT_WANTED;
-                return NS_OK;
-            }
-        }
-
+         (mCacheEntryIsReadOnly && !(mLoadFlags & nsIRequest::INHIBIT_CACHING)) ||
+         mFallbackChannel)) {
         rv = OpenCacheInputStream(entry, true, !!appCache);
         if (NS_SUCCEEDED(rv)) {
             mCachedContentIsValid = true;
@@ -6068,10 +6057,8 @@ nsHttpChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *context)
 
     // The common case for HTTP channels is to begin proxy resolution and return
     // at this point. The only time we know mProxyInfo already is if we're
-    // proxying a non-http protocol like ftp. We don't need to discover proxy
-    // settings if we are never going to make a network connection.
-    if (!mProxyInfo && !(mLoadFlags & (LOAD_ONLY_FROM_CACHE | LOAD_NO_NETWORK_IO)) &&
-        NS_SUCCEEDED(ResolveProxy())) {
+    // proxying a non-http protocol like ftp.
+    if (!mProxyInfo && NS_SUCCEEDED(ResolveProxy())) {
         return NS_OK;
     }
 
@@ -7287,57 +7274,27 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
         kHttpsNetEarlyFail = 11,
         kHttpsNetLateFail = 12
     } chanDisposition = kHttpCanceled;
-    // HTTP_CHANNEL_DISPOSITION_UPGRADE TELEMETRY
-    Telemetry::LABELS_HTTP_CHANNEL_DISPOSITION_UPGRADE upgradeChanDisposition = Telemetry::LABELS_HTTP_CHANNEL_DISPOSITION_UPGRADE::cancel;
 
     // HTTP 0.9 is more likely to be an error than really 0.9, so count it that way
     if (mCanceled) {
         chanDisposition  = kHttpCanceled;
-        upgradeChanDisposition = Telemetry::LABELS_HTTP_CHANNEL_DISPOSITION_UPGRADE::cancel;
     } else if (!mUsedNetwork ||
                (mRaceCacheWithNetwork &&
                 mFirstResponseSource == RESPONSE_FROM_CACHE)) {
         chanDisposition = kHttpDisk;
-        upgradeChanDisposition = Telemetry::LABELS_HTTP_CHANNEL_DISPOSITION_UPGRADE::disk;
     } else if (NS_SUCCEEDED(status) &&
                mResponseHead &&
                mResponseHead->Version() != NS_HTTP_VERSION_0_9) {
         chanDisposition = kHttpNetOK;
-        upgradeChanDisposition = Telemetry::LABELS_HTTP_CHANNEL_DISPOSITION_UPGRADE::netOk;
     } else if (!mTransferSize) {
         chanDisposition = kHttpNetEarlyFail;
-        upgradeChanDisposition = Telemetry::LABELS_HTTP_CHANNEL_DISPOSITION_UPGRADE::netEarlyFail;
     } else {
         chanDisposition = kHttpNetLateFail;
-        upgradeChanDisposition = Telemetry::LABELS_HTTP_CHANNEL_DISPOSITION_UPGRADE::netLateFail;
     }
-    // Browser upgrading only happens on HTTPS pages for mixed passive content when upgrading is enabled.
-    nsCString upgradeKey;
     if (IsHTTPS()) {
-        // Browser upgrading is disabled and the content is already HTTPS
-        upgradeKey = NS_LITERAL_CSTRING("disabledNoReason");
-        // Checks "security.mixed_content.upgrade_display_content" is true
-        if (nsMixedContentBlocker::ShouldUpgradeMixedDisplayContent()) {
-            if (mLoadInfo && mLoadInfo->GetBrowserUpgradeInsecureRequests()) {
-                // HTTP content the browser has upgraded to HTTPS
-                upgradeKey = NS_LITERAL_CSTRING("enabledUpgrade");
-            } else {
-                // Content wasn't upgraded but is already HTTPS
-                upgradeKey = NS_LITERAL_CSTRING("enabledNoReason");
-            }
-        }
         // shift http to https disposition enums
         chanDisposition = static_cast<ChannelDisposition>(chanDisposition + kHttpsCanceled);
-    } else if (mLoadInfo && mLoadInfo->GetBrowserWouldUpgradeInsecureRequests()) {
-        // HTTP content the browser would upgrade to HTTPS if upgrading was enabled
-        upgradeKey = NS_LITERAL_CSTRING("disabledUpgrade");
-    } else {
-        // HTTP content that wouldn't upgrade
-        upgradeKey = nsMixedContentBlocker::ShouldUpgradeMixedDisplayContent() ?
-                     NS_LITERAL_CSTRING("enabledWont") :
-                     NS_LITERAL_CSTRING("disabledWont");
     }
-    Telemetry::AccumulateCategoricalKeyed(upgradeKey, upgradeChanDisposition);
     LOG(("  nsHttpChannel::OnStopRequest ChannelDisposition %d\n", chanDisposition));
     Telemetry::Accumulate(Telemetry::HTTP_CHANNEL_DISPOSITION, chanDisposition);
 
@@ -7929,24 +7886,46 @@ nsHttpChannel::SetOfflineCacheToken(nsISupports *token)
 }
 
 NS_IMETHODIMP
-nsHttpChannel::GetCacheKey(uint32_t* key)
+nsHttpChannel::GetCacheKey(nsISupports **key)
 {
+    nsresult rv;
     NS_ENSURE_ARG_POINTER(key);
 
     LOG(("nsHttpChannel::GetCacheKey [this=%p]\n", this));
 
-    *key = mPostID;
-    return NS_OK;
+    *key = nullptr;
+
+    nsCOMPtr<nsISupportsPRUint32> container =
+        do_CreateInstance(NS_SUPPORTS_PRUINT32_CONTRACTID, &rv);
+
+    if (!container)
+        return NS_ERROR_OUT_OF_MEMORY;
+
+    rv = container->SetData(mPostID);
+    if (NS_FAILED(rv)) return rv;
+
+    return CallQueryInterface(container.get(), key);
 }
 
 NS_IMETHODIMP
-nsHttpChannel::SetCacheKey(uint32_t key)
+nsHttpChannel::SetCacheKey(nsISupports *key)
 {
-    LOG(("nsHttpChannel::SetCacheKey [this=%p key=%u]\n", this, key));
+    nsresult rv;
+
+    LOG(("nsHttpChannel::SetCacheKey [this=%p key=%p]\n", this, key));
 
     ENSURE_CALLED_BEFORE_CONNECT();
 
-    mPostID = key;
+    if (!key)
+        mPostID = 0;
+    else {
+        // extract the post id
+        nsCOMPtr<nsISupportsPRUint32> container = do_QueryInterface(key, &rv);
+        if (NS_FAILED(rv)) return rv;
+
+        rv = container->GetData(&mPostID);
+        if (NS_FAILED(rv)) return rv;
+    }
     return NS_OK;
 }
 
@@ -8262,7 +8241,8 @@ nsHttpChannel::OnRedirectVerifyCallback(nsresult result)
     for (uint32_t i = mRedirectFuncStack.Length(); i > 0;) {
         --i;
         // Pop the last function pushed to the stack
-        nsContinueRedirectionFunc func = mRedirectFuncStack.PopLastElement();
+        nsContinueRedirectionFunc func = mRedirectFuncStack[i];
+        mRedirectFuncStack.RemoveElementAt(mRedirectFuncStack.Length() - 1);
 
         // Call it with the result we got from the callback or the deeper
         // function call.

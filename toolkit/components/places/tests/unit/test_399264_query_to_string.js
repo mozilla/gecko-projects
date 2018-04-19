@@ -18,7 +18,7 @@ function query_string(aFolderID) {
   var query = hs.getNewQuery();
   query.setFolders([aFolderID], 1);
   var options = hs.getNewQueryOptions();
-  return hs.queryToQueryString(query, options);
+  return hs.queriesToQueryString([query], 1, options);
 }
 
 function run_test() {

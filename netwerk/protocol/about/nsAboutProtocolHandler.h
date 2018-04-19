@@ -56,15 +56,17 @@ private:
 class nsNestedAboutURI final
     : public nsSimpleNestedURI
 {
-private:
+public:
     nsNestedAboutURI(nsIURI* aInnerURI, nsIURI* aBaseURI)
         : nsSimpleNestedURI(aInnerURI)
         , mBaseURI(aBaseURI)
     {}
+
+    // For use only from deserialization
     nsNestedAboutURI() : nsSimpleNestedURI() {}
+
     virtual ~nsNestedAboutURI() {}
 
-public:
     // Override QI so we can QI to our CID as needed
     NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr) override;
 
@@ -85,14 +87,11 @@ public:
 
 protected:
     nsCOMPtr<nsIURI> mBaseURI;
-    nsresult ReadPrivate(nsIObjectInputStream *stream);
 
 public:
     class Mutator final
         : public nsIURIMutator
         , public BaseURIMutator<nsNestedAboutURI>
-        , public nsISerializable
-        , public nsINestedAboutURIMutator
     {
         NS_DECL_ISUPPORTS
         NS_FORWARD_SAFE_NSIURISETTERS_RET(mURI)
@@ -105,12 +104,6 @@ public:
         Deserialize(const mozilla::ipc::URIParams& aParams) override
         {
             return InitFromIPCParams(aParams);
-        }
-
-        NS_IMETHOD
-        Write(nsIObjectOutputStream *aOutputStream) override
-        {
-            return NS_ERROR_NOT_IMPLEMENTED;
         }
 
         MOZ_MUST_USE NS_IMETHOD
@@ -134,13 +127,6 @@ public:
                 NS_ADDREF(*aMutator = this);
             }
             return InitFromSpec(aSpec);
-        }
-
-        MOZ_MUST_USE NS_IMETHOD
-        InitWithBase(nsIURI* aInnerURI, nsIURI* aBaseURI) override
-        {
-            mURI = new nsNestedAboutURI(aInnerURI, aBaseURI);
-            return NS_OK;
         }
 
         void ResetMutable()

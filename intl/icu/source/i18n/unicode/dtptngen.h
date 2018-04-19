@@ -263,28 +263,13 @@ public:
 
     /**
      * Getter corresponding to setAppendItemNames. Values below 0 or at or above
-     * UDATPG_FIELD_COUNT are illegal arguments. Note: The more general method
-     * for getting date/time field display names is getFieldDisplayName.
+     * UDATPG_FIELD_COUNT are illegal arguments.
      *
      * @param field  such as UDATPG_ERA_FIELD.
      * @return name for field
-     * @see getFieldDisplayName
      * @stable ICU 3.8
      */
     const UnicodeString& getAppendItemName(UDateTimePatternField field) const;
-
-#ifndef U_HIDE_DRAFT_API
-    /**
-     * The general interface to get a display name for a particular date/time field,
-     * in one of several possible display widths.
-     *
-     * @param field  The desired UDateTimePatternField, such as UDATPG_ERA_FIELD.
-     * @param width  The desired UDateTimePGDisplayWidth, such as UDATPG_ABBREVIATED.
-     * @return.      The display name for field
-     * @draft ICU 61
-     */
-    UnicodeString getFieldDisplayName(UDateTimePatternField field, UDateTimePGDisplayWidth width) const;
-#endif  // U_HIDE_DRAFT_API
 
     /**
      * The DateTimeFormat is a message format pattern used to compose date and
@@ -522,17 +507,13 @@ private:
      */
     DateTimePatternGenerator& operator=(const DateTimePatternGenerator& other);
 
-    // TODO(ticket:13619): re-enable when UDATPG_NARROW no longer in  draft mode.
-    // static const int32_t UDATPG_WIDTH_COUNT = UDATPG_NARROW + 1;
-
     Locale pLocale;  // pattern locale
     FormatParser *fp;
     DateTimeMatcher* dtMatcher;
     DistanceInfo *distanceInfo;
     PatternMap *patternMap;
     UnicodeString appendItemFormats[UDATPG_FIELD_COUNT];
-    // TODO(ticket:13619): [3] -> UDATPG_WIDTH_COUNT
-    UnicodeString fieldDisplayNames[UDATPG_FIELD_COUNT][3];
+    UnicodeString appendItemNames[UDATPG_FIELD_COUNT];
     UnicodeString dateTimeFormat;
     UnicodeString decimal;
     DateTimeMatcher *skipMatcher;
@@ -562,11 +543,8 @@ private:
     void setDateTimeFromCalendar(const Locale& locale, UErrorCode& status);
     void setDecimalSymbols(const Locale& locale, UErrorCode& status);
     UDateTimePatternField getAppendFormatNumber(const char* field) const;
-#ifndef U_HIDE_DRAFT_API
-    UDateTimePatternField getFieldAndWidthIndices(const char* key, UDateTimePGDisplayWidth* widthP) const;
-    void setFieldDisplayName(UDateTimePatternField field, UDateTimePGDisplayWidth width, const UnicodeString& value);
-    UnicodeString& getMutableFieldDisplayName(UDateTimePatternField field, UDateTimePGDisplayWidth width);
-#endif  // U_HIDE_DRAFT_API
+    UDateTimePatternField getAppendNameNumber(const char* field) const;
+    UnicodeString& getMutableAppendItemName(UDateTimePatternField field);
     void getAppendName(UDateTimePatternField field, UnicodeString& value);
     UnicodeString mapSkeletonMetacharacters(const UnicodeString& patternForm, int32_t* flags, UErrorCode& status);
     int32_t getCanonicalIndex(const UnicodeString& field);

@@ -53,10 +53,8 @@ impl Deref for RefPtr<nsCSSShadowArray> {
             &[]
         } else {
             unsafe {
-                slice::from_raw_parts(
-                    (*self.mRawPtr).mArray.as_ptr(),
-                    (*self.mRawPtr).mLength as usize,
-                )
+                slice::from_raw_parts((*self.mRawPtr).mArray.as_ptr(),
+                                      (*self.mRawPtr).mLength as usize)
             }
         }
     }
@@ -68,10 +66,8 @@ impl DerefMut for RefPtr<nsCSSShadowArray> {
             &mut []
         } else {
             unsafe {
-                slice::from_raw_parts_mut(
-                    (*self.mRawPtr).mArray.as_mut_ptr(),
-                    (*self.mRawPtr).mLength as usize,
-                )
+                slice::from_raw_parts_mut((*self.mRawPtr).mArray.as_mut_ptr(),
+                                          (*self.mRawPtr).mLength as usize)
             }
         }
     }

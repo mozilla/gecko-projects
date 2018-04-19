@@ -5,7 +5,6 @@
 use cssparser::RGBA;
 use euclid::{Transform2D, Point2D, Vector2D, Rect, Size2D};
 use ipc_channel::ipc::IpcSender;
-use serde_bytes::ByteBuf;
 use std::default::Default;
 use std::str::FromStr;
 use webrender_api;
@@ -16,16 +15,13 @@ pub enum FillRule {
     Evenodd,
 }
 
-#[derive(Clone, Deserialize, MallocSizeOf, PartialEq, Serialize)]
-pub struct CanvasId(pub u64);
-
 #[derive(Clone, Deserialize, Serialize)]
 pub enum CanvasMsg {
-    Canvas2d(Canvas2dMsg, CanvasId),
-    FromLayout(FromLayoutMsg, CanvasId),
-    FromScript(FromScriptMsg, CanvasId),
-    Recreate(Size2D<i32>, CanvasId),
-    Close(CanvasId),
+    Canvas2d(Canvas2dMsg),
+    FromLayout(FromLayoutMsg),
+    FromScript(FromScriptMsg),
+    Recreate(Size2D<i32>),
+    Close,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -37,10 +33,10 @@ pub struct CanvasImageData {
 pub enum Canvas2dMsg {
     Arc(Point2D<f32>, f32, f32, f32, bool),
     ArcTo(Point2D<f32>, Point2D<f32>, f32),
-    DrawImage(ByteBuf, Size2D<f64>, Rect<f64>, Rect<f64>, bool),
+    DrawImage(Vec<u8>, Size2D<f64>, Rect<f64>, Rect<f64>, bool),
     DrawImageSelf(Size2D<f64>, Rect<f64>, Rect<f64>, bool),
     DrawImageInOther(
-        IpcSender<CanvasMsg>, CanvasId, Size2D<f64>, Rect<f64>, Rect<f64>, bool, IpcSender<()>),
+        IpcSender<CanvasMsg>, Size2D<f64>, Rect<f64>, Rect<f64>, bool, IpcSender<()>),
     BeginPath,
     BezierCurveTo(Point2D<f32>, Point2D<f32>, Point2D<f32>),
     ClearRect(Rect<f32>),
@@ -50,11 +46,11 @@ pub enum Canvas2dMsg {
     Fill,
     FillText(String, f64, f64, Option<f64>),
     FillRect(Rect<f32>),
-    GetImageData(Rect<i32>, Size2D<f64>, IpcSender<ByteBuf>),
+    GetImageData(Rect<i32>, Size2D<f64>, IpcSender<Vec<u8>>),
     IsPointInPath(f64, f64, FillRule, IpcSender<bool>),
     LineTo(Point2D<f32>),
     MoveTo(Point2D<f32>),
-    PutImageData(ByteBuf, Vector2D<f64>, Size2D<f64>, Rect<f64>),
+    PutImageData(Vec<u8>, Vector2D<f64>, Size2D<f64>, Rect<f64>),
     QuadraticCurveTo(Point2D<f32>, Point2D<f32>),
     Rect(Rect<f32>),
     RestoreContext,
@@ -83,7 +79,7 @@ pub enum FromLayoutMsg {
 
 #[derive(Clone, Deserialize, Serialize)]
 pub enum FromScriptMsg {
-    SendPixels(IpcSender<Option<ByteBuf>>),
+    SendPixels(IpcSender<Option<Vec<u8>>>),
 }
 
 #[derive(Clone, Deserialize, MallocSizeOf, Serialize)]
@@ -142,24 +138,20 @@ impl RadialGradientStyle {
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct SurfaceStyle {
-    pub surface_data: ByteBuf,
+    pub surface_data: Vec<u8>,
     pub surface_size: Size2D<i32>,
     pub repeat_x: bool,
     pub repeat_y: bool,
 }
 
 impl SurfaceStyle {
-    pub fn new(
-        surface_data: Vec<u8>,
-        surface_size: Size2D<i32>,
-        repeat_x: bool,
-        repeat_y: bool,
-    ) -> Self {
-        Self {
-            surface_data: surface_data.into(),
-            surface_size,
-            repeat_x,
-            repeat_y,
+    pub fn new(surface_data: Vec<u8>, surface_size: Size2D<i32>, repeat_x: bool, repeat_y: bool)
+        -> SurfaceStyle {
+        SurfaceStyle {
+            surface_data: surface_data,
+            surface_size: surface_size,
+            repeat_x: repeat_x,
+            repeat_y: repeat_y,
         }
     }
 }

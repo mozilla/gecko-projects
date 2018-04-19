@@ -8,13 +8,7 @@ description: >
     property)
 ---*/
 
-var o = {
-  get foo() {
-    return 42;
-  },
-  set foo(x) {;
-  }
-};
+    var o = { get foo() { return 42;}, set foo(x) {;} };
 
 assert(o.hasOwnProperty("foo"), 'o.hasOwnProperty("foo") !== true');
 

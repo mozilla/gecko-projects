@@ -73,7 +73,8 @@ AbortSignal::Abort()
     Event::Constructor(this, NS_LITERAL_STRING("abort"), init);
   event->SetTrusted(true);
 
-  DispatchEvent(*event);
+  bool dummy;
+  DispatchEvent(event, &dummy);
 }
 
 void

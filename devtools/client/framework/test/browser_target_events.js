@@ -5,7 +5,8 @@
 
 var target;
 
-function test() {
+function test()
+{
   waitForExplicitFinish();
 
   gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
@@ -30,20 +31,19 @@ function onHidden() {
 function onVisible() {
   ok(true, "Visible event received");
   target.once("will-navigate", onWillNavigate);
-
-  ContentTask.spawn(gBrowser.selectedBrowser, null, () => {
-    content.location = "data:text/html,<meta charset='utf8'/>test navigation";
-  });
+  let mm = loadFrameScriptUtils();
+  mm.sendAsyncMessage("devtools:test:navigate", { location: "data:text/html,<meta charset='utf8'/>test navigation" });
 }
 
-async function onWillNavigate() {
+function onWillNavigate(event, request) {
   ok(true, "will-navigate event received");
-  target.on("navigate", onNavigate);
+  // Wait for navigation handling to complete before removing the tab, in order
+  // to avoid triggering assertions.
+  target.once("navigate", executeSoon.bind(null, onNavigate));
 }
 
 function onNavigate() {
   ok(true, "navigate event received");
-  target.off("navigate", onNavigate);
   target.once("close", onClose);
   gBrowser.removeCurrentTab();
 }

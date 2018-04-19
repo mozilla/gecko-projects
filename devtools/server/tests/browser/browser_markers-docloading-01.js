@@ -9,8 +9,10 @@
 const { TimelineFront } = require("devtools/shared/fronts/timeline");
 const MARKER_NAMES = ["document::DOMContentLoaded", "document::Load"];
 
-add_task(async function() {
+add_task(async function () {
   let browser = await addTab(MAIN_DOMAIN + "doc_innerHTML.html");
+  // eslint-disable-next-line mozilla/no-cpows-in-tests
+  let doc = browser.contentDocumentAsCPOW;
 
   initDebuggerServer();
   let client = new DebuggerClient(DebuggerServer.connectPipe());
@@ -22,9 +24,7 @@ add_task(async function() {
     ok(false, "Should not be emitting doc-loading events.");
   });
 
-  ContentTask.spawn(browser, null, function() {
-    content.location.reload();
-  });
+  executeSoon(() => doc.location.reload());
 
   await waitForMarkerType(front, MARKER_NAMES, () => true, e => e, "markers");
   await front.stop(rec);

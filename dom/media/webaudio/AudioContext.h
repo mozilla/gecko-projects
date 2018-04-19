@@ -116,7 +116,6 @@ private:
 };
 
 enum class AudioContextOperation { Suspend, Resume, Close };
-struct AudioContextOptions;
 
 class AudioContext final : public DOMEventTargetHelper,
                            public nsIMemoryReporter,
@@ -145,7 +144,6 @@ public:
   }
 
   virtual void DisconnectFromOwner() override;
-  virtual void BindToOwner(nsIGlobalObject* aNew) override;
 
   void Shutdown(); // idempotent
 
@@ -155,9 +153,7 @@ public:
 
   // Constructor for regular AudioContext
   static already_AddRefed<AudioContext>
-  Constructor(const GlobalObject& aGlobal,
-              const AudioContextOptions& aOptions,
-              ErrorResult& aRv);
+  Constructor(const GlobalObject& aGlobal, ErrorResult& aRv);
 
   // Constructor for offline AudioContext with options object
   static already_AddRefed<AudioContext>

@@ -32,11 +32,7 @@
       video.addEventListener("loadedmetadata", () => SimpleTest.executeSoon(resolve));
     });
 
-    // Wait for the fade out transition to complete in case the throbber
-    // shows up on slower platforms.
-    await SimpleTest.promiseWaitForCondition(() => statusOverlay.hidden,
-      "statusOverlay should not present without error");
-
+    ok(statusOverlay.hidden, "statusOverlay shoud not present without error");
     ok(!statusOverlay.hasAttribute("error"), "statusOverlay should not in error state");
     isnot(statusIcon.getAttribute("type"), "error", "should not show error icon");
   });

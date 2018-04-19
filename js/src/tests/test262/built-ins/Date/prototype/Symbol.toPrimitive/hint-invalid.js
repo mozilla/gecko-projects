@@ -48,11 +48,7 @@ assert.throws(TypeError, function() {
 });
 
 assert.throws(TypeError, function() {
-  d[Symbol.toPrimitive]({
-    toString: function() {
-      'number';
-    }
-  });
+  d[Symbol.toPrimitive]({ toString: function() { 'number'; } });
 });
 
 reportCompare(0, 0);

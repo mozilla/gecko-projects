@@ -155,6 +155,10 @@ extern nsresult nsStringInputStreamConstructor(nsISupports*, REFNSIID, void**);
 
 #include "gfxPlatform.h"
 
+#if EXPOSE_INTL_API
+#include "unicode/putil.h"
+#endif
+
 using namespace mozilla;
 using base::AtExitManager;
 using mozilla::ipc::BrowserProcessSubThread;
@@ -468,10 +472,7 @@ NS_InitXPCOM2(nsIServiceManager** aResult,
 
   NS_InitAtomTable();
 
-  // We don't have the arguments by hand here.  If logging has already been
-  // initialized by a previous call to LogModule::Init with the arguments
-  // passed, passing (0, nullptr) is alright here.
-  mozilla::LogModule::Init(0, nullptr);
+  mozilla::LogModule::Init();
 
   nsresult rv = NS_OK;
 
@@ -654,6 +655,17 @@ NS_InitXPCOM2(nsIServiceManager** aResult,
                         memmove);
 #endif
 
+#if EXPOSE_INTL_API && defined(MOZ_ICU_DATA_ARCHIVE)
+  nsCOMPtr<nsIFile> greDir;
+  nsDirectoryService::gService->Get(NS_GRE_DIR,
+                                    NS_GET_IID(nsIFile),
+                                    getter_AddRefs(greDir));
+  MOZ_ASSERT(greDir);
+  nsAutoCString nativeGREPath;
+  greDir->GetNativePath(nativeGREPath);
+  u_setDataDirectory(nativeGREPath.get());
+#endif
+
   // Initialize the JS engine.
   const char* jsInitFailureReason = JS_InitWithFailureDiagnostic();
   if (jsInitFailureReason) {
@@ -731,11 +743,7 @@ NS_InitMinimalXPCOM()
   mozilla::TimeStamp::Startup();
   NS_LogInit();
   NS_InitAtomTable();
-
-  // We don't have the arguments by hand here.  If logging has already been
-  // initialized by a previous call to LogModule::Init with the arguments
-  // passed, passing (0, nullptr) is alright here.
-  mozilla::LogModule::Init(0, nullptr);
+  mozilla::LogModule::Init();
 
   nsresult rv = nsThreadManager::get().Init();
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -1000,14 +1008,15 @@ ShutdownXPCOM(nsIServiceManager* aServMgr)
   // down, any remaining objects that could be holding NSS resources (should)
   // have been released, so we can safely shut down NSS.
   if (NSS_IsInitialized()) {
+    // It would be nice to enforce that this succeeds, at least on debug builds.
+    // This would alert us to NSS resource leaks. Unfortunately there are some
+    // architectural roadblocks in the way. Some tests (e.g. pkix gtests) need
+    // to be re-worked to release their NSS resources when they're done. In the
+    // meantime, just emit a warning. Chasing down these leaks is tracked in
+    // bug 1230312.
     if (NSS_Shutdown() != SECSuccess) {
-      // If you're seeing this crash and/or warning, some NSS resources are
-      // still in use (see bugs 1417680 and 1230312).
-#if defined(DEBUG) && !defined(ANDROID)
-      MOZ_CRASH("NSS_Shutdown failed");
-#else
-      NS_WARNING("NSS_Shutdown failed");
-#endif
+      NS_WARNING("NSS_Shutdown failed - some NSS resources are still in use "
+                 "(see bugs 1417680 and 1230312)");
     }
   }
 

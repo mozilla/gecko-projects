@@ -233,7 +233,7 @@ uz{
         minimumGroupingDigits{"1"}
         native{"latn"}
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.37.1"}
     calendar{
         generic{
             DateTimePatterns{
@@ -439,8 +439,8 @@ uz{
                 yQQQ{"y, QQQ"}
                 yQQQQ{"y, QQQQ"}
                 yw{
-                    one{"y, w-'hafta'"}
-                    other{"y, w-'hafta'"}
+                    one{"Y, w-'hafta'"}
+                    other{"Y, w-'hafta'"}
                 }
             }
             dayNames{
@@ -986,15 +986,6 @@ uz{
                     other{"{0} kun oldin"}
                 }
             }
-        }
-        dayOfYear{
-            dn{"yilning kuni"}
-        }
-        dayOfYear-narrow{
-            dn{"yilning kuni"}
-        }
-        dayOfYear-short{
-            dn{"yilning kuni"}
         }
         dayperiod{
             dn{"TO/TK"}

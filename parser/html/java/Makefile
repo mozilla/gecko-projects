@@ -37,7 +37,7 @@ translate:: translator \
 ; mkdir -p ../javasrc ; \
   java -jar translator.jar \
     htmlparser/src/nu/validator/htmlparser/impl \
-    .. ../../../xpcom/ds/nsGkAtomList.h
+    .. ../../../dom/base/nsGkAtomList.h
 
 translate_from_snapshot:: translator \
 ; mkdir -p ../javasrc ; \

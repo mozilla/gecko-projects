@@ -24,7 +24,6 @@ var TAConstructors = [
   Uint8Array,
   Uint8ClampedArray
 ];
-
 var length = TAConstructors.length;
 
 assert(

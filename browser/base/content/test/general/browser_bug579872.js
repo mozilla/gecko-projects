@@ -11,13 +11,13 @@ function test() {
     gBrowser.pinTab(newTab);
     gBrowser.selectedTab = newTab;
 
-    openTrustedLinkIn("javascript:var x=0;", "current");
+    openUILinkIn("javascript:var x=0;", "current");
     is(gBrowser.tabs.length, 2, "Should open in current tab");
 
-    openTrustedLinkIn("http://example.com/1", "current");
+    openUILinkIn("http://example.com/1", "current");
     is(gBrowser.tabs.length, 2, "Should open in current tab");
 
-    openTrustedLinkIn("http://example.org/", "current");
+    openUILinkIn("http://example.org/", "current");
     is(gBrowser.tabs.length, 3, "Should open in new tab");
 
     gBrowser.removeTab(newTab);

@@ -12,8 +12,6 @@ async function serverForFoo(engine) {
   await generateNewKeys(Service.collectionKeys);
 
   let clientsEngine = Service.clientsEngine;
-  let clientsSyncID = await clientsEngine.resetLocalSyncID();
-  let engineSyncID = await engine.resetLocalSyncID();
   return serverForUsers({"foo": "password"}, {
     meta: {
       global: {
@@ -22,11 +20,11 @@ async function serverForFoo(engine) {
         engines: {
           clients: {
             version: clientsEngine.version,
-            syncID: clientsSyncID,
+            syncID: clientsEngine.syncID,
           },
           [engine.name]: {
             version: engine.version,
-            syncID: engineSyncID,
+            syncID: engine.syncID,
           },
         },
       },
@@ -733,7 +731,6 @@ add_task(async function test_bookmark_order() {
     index: 4,
   }], "Move 20 back to front -> update 20, f30");
 
-  await engine.wipeClient();
-  await Service.startOver();
+  engine.resetClient();
   await engine.finalize();
 });

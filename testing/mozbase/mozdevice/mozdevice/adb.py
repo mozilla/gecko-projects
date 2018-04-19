@@ -8,7 +8,6 @@ import os
 import posixpath
 import re
 import shutil
-import signal
 import subprocess
 import tempfile
 import time
@@ -25,7 +24,7 @@ class ADBProcess(object):
         #: command argument argument list.
         self.args = args
         #: Temporary file handle to be used for stdout.
-        self.stdout_file = tempfile.TemporaryFile(mode='w+b')
+        self.stdout_file = tempfile.TemporaryFile()
         #: boolean indicating if the command timed out.
         self.timedout = None
         #: exitcode of the process.
@@ -61,15 +60,6 @@ class ADBError(Exception):
     be handled and the device can continue to be used.
     """
     pass
-
-
-class ADBProcessError(ADBError):
-    """ADBProcessError is raised when an associated ADBProcess is
-    available and relevant.
-    """
-    def __init__(self, adb_process):
-        ADBError.__init__(self, str(adb_process))
-        self.adb_process = adb_process
 
 
 class ADBListDevicesError(ADBError):
@@ -290,7 +280,7 @@ class ADBCommand(object):
             if adb_process.timedout:
                 raise ADBTimeoutError("%s" % adb_process)
             elif adb_process.exitcode:
-                raise ADBProcessError(adb_process)
+                raise ADBError("%s" % adb_process)
             output = adb_process.stdout_file.read().rstrip()
             if self._verbose:
                 self._logger.debug('command_output: %s, '
@@ -811,15 +801,14 @@ class ADBDevice(ADBCommand):
 
     def _try_test_root(self, test_root):
         base_path, sub_path = posixpath.split(test_root)
-        if not self.is_dir(base_path, root=True):
+        if not self.is_dir(base_path):
             return False
 
         try:
             dummy_dir = posixpath.join(test_root, 'dummy')
-            if self.is_dir(dummy_dir, root=True):
-                self.rm(dummy_dir, recursive=True, root=True)
-            self.mkdir(dummy_dir, parents=True, root=True)
-            self.chmod(test_root, recursive=True, root=True)
+            if self.is_dir(dummy_dir):
+                self.rm(dummy_dir, recursive=True)
+            self.mkdir(dummy_dir, parents=True)
         except ADBError:
             self._logger.debug("%s is not writable" % test_root)
             return False
@@ -978,8 +967,7 @@ class ADBDevice(ADBCommand):
 
     # Device Shell methods
 
-    def shell(self, cmd, env=None, cwd=None, timeout=None, root=False,
-              stdout_callback=None):
+    def shell(self, cmd, env=None, cwd=None, timeout=None, root=False):
         """Executes a shell command on the device.
 
         :param str cmd: The command to be executed.
@@ -996,7 +984,6 @@ class ADBDevice(ADBCommand):
         :type timeout: integer or None
         :param bool root: Flag specifying if the command should
             be executed as root.
-        :param stdout_callback: Function called for each line of output.
         :returns: :class:`mozdevice.ADBProcess`
         :raises: ADBRootError
 
@@ -1035,31 +1022,6 @@ class ADBDevice(ADBCommand):
         the stdout temporary files.
 
         """
-        def _timed_read_line_handler(signum, frame):
-            raise IOError('ReadLineTimeout')
-
-        def _timed_read_line(filehandle, timeout=None):
-            """
-            Attempt to readline from filehandle. If readline does not return
-            within timeout seconds, raise IOError('ReadLineTimeout').
-            On Windows, required signal facilities are usually not available;
-            as a result, the timeout is not respected and some reads may
-            block on Windows.
-            """
-            if not hasattr(signal, 'SIGALRM'):
-                return filehandle.readline().rstrip()
-            if timeout is None:
-                timeout = 5
-            default_alarm_handler = signal.getsignal(signal.SIGALRM)
-            signal.signal(signal.SIGALRM, _timed_read_line_handler)
-            signal.alarm(timeout)
-            try:
-                line = filehandle.readline().rstrip()
-            finally:
-                signal.alarm(0)
-                signal.signal(signal.SIGALRM, default_alarm_handler)
-            return line
-
         if root and not self._have_root_shell:
             # If root was requested and we do not already have a root
             # shell, then use the appropriate version of su to invoke
@@ -1096,23 +1058,7 @@ class ADBDevice(ADBCommand):
 
         start_time = time.time()
         exitcode = adb_process.proc.poll()
-        if stdout_callback:
-            stdout_dup = os.fdopen(os.dup(adb_process.stdout_file.fileno()))
-            offset = 0
         while ((time.time() - start_time) <= timeout) and exitcode is None:
-            if stdout_callback:
-                while True:
-                    try:
-                        stdout_dup.seek(offset, os.SEEK_SET)
-                        line = _timed_read_line(stdout_dup)
-                        offset = stdout_dup.tell()
-                        if line and len(line) > 0:
-                            stdout_callback(line)
-                        else:
-                            # no new output, so sleep and poll
-                            break
-                    except IOError:
-                        pass
             time.sleep(self._polling_interval)
             exitcode = adb_process.proc.poll()
         if exitcode is None:
@@ -1192,7 +1138,7 @@ class ADBDevice(ADBCommand):
             if adb_process.timedout:
                 raise ADBTimeoutError("%s" % adb_process)
             elif adb_process.exitcode:
-                raise ADBProcessError(adb_process)
+                raise ADBError("%s" % adb_process)
             output = adb_process.stdout_file.read().rstrip()
             if self._verbose:
                 self._logger.debug('shell_output: %s, '
@@ -1970,7 +1916,7 @@ class ADBDevice(ADBCommand):
             if adb_process.timedout:
                 raise ADBTimeoutError("%s" % adb_process)
             elif adb_process.exitcode:
-                raise ADBProcessError(adb_process)
+                raise ADBError("%s" % adb_process)
             # first line is the headers
             header = adb_process.stdout_file.readline()
             pid_i = -1

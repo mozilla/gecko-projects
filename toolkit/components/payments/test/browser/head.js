@@ -149,29 +149,6 @@ async function addSampleAddressesAndBasicCard() {
 }
 
 /**
- * Checks that an address from autofill storage matches a Payment Request PaymentAddress.
- * @param {PaymentAddress} paymentAddress
- * @param {object} storageAddress
- * @param {string} msg to describe the check
- */
-function checkPaymentAddressMatchesStorageAddress(paymentAddress, storageAddress, msg) {
-  info(msg);
-  let addressLines = storageAddress["street-address"].split("\n");
-  is(paymentAddress.addressLine[0], addressLines[0], "Address line 1 should match");
-  is(paymentAddress.addressLine[1], addressLines[1], "Address line 2 should match");
-  is(paymentAddress.country, storageAddress.country, "Country should match");
-  is(paymentAddress.region, storageAddress["address-level1"], "Region should match");
-  is(paymentAddress.city, storageAddress["address-level2"], "City should match");
-  is(paymentAddress.postalCode, storageAddress["postal-code"], "Zip code should match");
-  is(paymentAddress.organization, storageAddress.organization, "Org should match");
-  is(paymentAddress.recipient,
-     `${storageAddress["given-name"]} ${storageAddress["additional-name"]} ` +
-     `${storageAddress["family-name"]}`,
-     "Recipient name should match");
-  is(paymentAddress.phone, storageAddress.tel, "Phone should match");
-}
-
-/**
  * Create a PaymentRequest object with the given parameters, then
  * run the given merchantTaskFn.
  *
@@ -239,19 +216,11 @@ async function spawnInDialogForMerchantTask(merchantTaskFn, dialogTaskFn, taskAr
   });
 }
 
-async function setupFormAutofillStorage() {
-  await formAutofillStorage.initialize();
-}
-
-function cleanupFormAutofillStorage() {
-  formAutofillStorage.addresses._nukeAllRecords();
-  formAutofillStorage.creditCards._nukeAllRecords();
-}
-
 add_task(async function setup_head() {
-  await setupFormAutofillStorage();
+  await formAutofillStorage.initialize();
   registerCleanupFunction(function cleanup() {
     paymentSrv.cleanup();
-    cleanupFormAutofillStorage();
+    formAutofillStorage.addresses._nukeAllRecords();
+    formAutofillStorage.creditCards._nukeAllRecords();
   });
 });

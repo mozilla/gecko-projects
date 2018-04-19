@@ -13,7 +13,7 @@
 namespace mozilla {
 namespace layers {
 
-OverscrollHandoffChain::~OverscrollHandoffChain() = default;
+OverscrollHandoffChain::~OverscrollHandoffChain() {}
 
 void
 OverscrollHandoffChain::Add(AsyncPanZoomController* aApzc)

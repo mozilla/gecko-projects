@@ -172,7 +172,7 @@ class MOZ_STACK_CLASS NativeRegExpMacroAssembler final : public RegExpMacroAssem
     void LoadCurrentCharacterUnchecked(int cp_offset, int characters);
 
   private:
-    jit::StackMacroAssembler masm;
+    jit::MacroAssembler masm;
     RegExpShared::JitCodeTables& tables;
 
     JSContext* cx;

@@ -8,7 +8,6 @@
 
 #![deny(unsafe_code)]
 
-extern crate bincode;
 extern crate ipc_channel;
 #[macro_use]
 extern crate log;
@@ -18,6 +17,5 @@ extern crate signpost;
 
 #[allow(unsafe_code)]
 pub mod energy;
-pub mod ipc;
 pub mod mem;
 pub mod time;

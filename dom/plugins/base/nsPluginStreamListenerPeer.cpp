@@ -173,12 +173,26 @@ nsPluginStreamListenerPeer::OnStartRequest(nsIRequest *request,
     return rv;
 
   // Check ShouldProcess with content policy
-  nsCOMPtr<nsILoadInfo> loadInfo = channel->GetLoadInfo();
+  RefPtr<nsPluginInstanceOwner> owner;
+  if (mPluginInstance) {
+    owner = mPluginInstance->GetOwner();
+  }
+  nsCOMPtr<nsIDOMElement> element;
+  nsCOMPtr<nsIDocument> doc;
+  if (owner) {
+    owner->GetDOMElement(getter_AddRefs(element));
+    owner->GetDocument(getter_AddRefs(doc));
+  }
+  nsCOMPtr<nsIPrincipal> principal = doc ? doc->NodePrincipal() : nullptr;
 
   int16_t shouldLoad = nsIContentPolicy::ACCEPT;
-  rv = NS_CheckContentProcessPolicy(mURL,
-                                    loadInfo,
+  rv = NS_CheckContentProcessPolicy(nsIContentPolicy::TYPE_OBJECT_SUBREQUEST,
+                                    mURL,
+                                    principal, // loading principal
+                                    principal, // triggering principal
+                                    element,
                                     contentType,
+                                    nullptr,
                                     &shouldLoad);
   if (NS_FAILED(rv) || NS_CP_REJECTED(shouldLoad)) {
     mRequestFailed = true;

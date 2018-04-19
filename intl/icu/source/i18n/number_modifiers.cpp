@@ -74,29 +74,19 @@ bool ConstantAffixModifier::isStrong() const {
 
 SimpleModifier::SimpleModifier(const SimpleFormatter &simpleFormatter, Field field, bool strong)
         : fCompiledPattern(simpleFormatter.compiledPattern), fField(field), fStrong(strong) {
-    int32_t argLimit = SimpleFormatter::getArgumentLimit(
-            fCompiledPattern.getBuffer(), fCompiledPattern.length());
-    if (argLimit == 0) {
-        // No arguments in compiled pattern
+    U_ASSERT(1 ==
+             SimpleFormatter::getArgumentLimit(fCompiledPattern.getBuffer(), fCompiledPattern.length()));
+    if (fCompiledPattern.charAt(1) != 0) {
         fPrefixLength = fCompiledPattern.charAt(1) - ARG_NUM_LIMIT;
-        U_ASSERT(2 + fPrefixLength == fCompiledPattern.length());
-        // Set suffixOffset = -1 to indicate no arguments in compiled pattern.
-        fSuffixOffset = -1;
-        fSuffixLength = 0;
+        fSuffixOffset = 3 + fPrefixLength;
     } else {
-        U_ASSERT(argLimit == 1);
-        if (fCompiledPattern.charAt(1) != 0) {
-            fPrefixLength = fCompiledPattern.charAt(1) - ARG_NUM_LIMIT;
-            fSuffixOffset = 3 + fPrefixLength;
-        } else {
-            fPrefixLength = 0;
-            fSuffixOffset = 2;
-        }
-        if (3 + fPrefixLength < fCompiledPattern.length()) {
-            fSuffixLength = fCompiledPattern.charAt(fSuffixOffset) - ARG_NUM_LIMIT;
-        } else {
-            fSuffixLength = 0;
-        }
+        fPrefixLength = 0;
+        fSuffixOffset = 2;
+    }
+    if (3 + fPrefixLength < fCompiledPattern.length()) {
+        fSuffixLength = fCompiledPattern.charAt(fSuffixOffset) - ARG_NUM_LIMIT;
+    } else {
+        fSuffixLength = 0;
     }
 }
 
@@ -133,37 +123,26 @@ bool SimpleModifier::isStrong() const {
 int32_t
 SimpleModifier::formatAsPrefixSuffix(NumberStringBuilder &result, int32_t startIndex, int32_t endIndex,
                                      Field field, UErrorCode &status) const {
-    if (fSuffixOffset == -1) {
-        // There is no argument for the inner number; overwrite the entire segment with our string.
-        return result.splice(startIndex, endIndex, fCompiledPattern, 2, 2 + fPrefixLength, field, status);
-    } else {
-        if (fPrefixLength > 0) {
-            result.insert(startIndex, fCompiledPattern, 2, 2 + fPrefixLength, field, status);
-        }
-        if (fSuffixLength > 0) {
-            result.insert(
-                    endIndex + fPrefixLength,
-                    fCompiledPattern,
-                    1 + fSuffixOffset,
-                    1 + fSuffixOffset + fSuffixLength,
-                    field,
-                    status);
-        }
-        return fPrefixLength + fSuffixLength;
+    if (fPrefixLength > 0) {
+        result.insert(startIndex, fCompiledPattern, 2, 2 + fPrefixLength, field, status);
     }
+    if (fSuffixLength > 0) {
+        result.insert(
+                endIndex + fPrefixLength,
+                fCompiledPattern,
+                1 + fSuffixOffset,
+                1 + fSuffixOffset + fSuffixLength,
+                field,
+                status);
+    }
+    return fPrefixLength + fSuffixLength;
 }
 
 int32_t ConstantMultiFieldModifier::apply(NumberStringBuilder &output, int leftIndex, int rightIndex,
                                           UErrorCode &status) const {
-    int32_t length = output.insert(leftIndex, fPrefix, status);
-    if (fOverwrite) {
-        length += output.splice(
-            leftIndex + length,
-            rightIndex + length,
-            UnicodeString(), 0, 0,
-            UNUM_FIELD_COUNT, status);
-    }
-    length += output.insert(rightIndex + length, fSuffix, status);
+    // Insert the suffix first since inserting the prefix will change the rightIndex
+    int32_t length = output.insert(rightIndex, fSuffix, status);
+    length += output.insert(leftIndex, fPrefix, status);
     return length;
 }
 
@@ -183,11 +162,10 @@ bool ConstantMultiFieldModifier::isStrong() const {
 
 CurrencySpacingEnabledModifier::CurrencySpacingEnabledModifier(const NumberStringBuilder &prefix,
                                                                const NumberStringBuilder &suffix,
-                                                               bool overwrite,
                                                                bool strong,
                                                                const DecimalFormatSymbols &symbols,
                                                                UErrorCode &status)
-        : ConstantMultiFieldModifier(prefix, suffix, overwrite, strong) {
+        : ConstantMultiFieldModifier(prefix, suffix, strong) {
     // Check for currency spacing. Do not build the UnicodeSets unless there is
     // a currency code point at a boundary.
     if (prefix.length() > 0 && prefix.fieldAt(prefix.length() - 1) == UNUM_CURRENCY_FIELD) {

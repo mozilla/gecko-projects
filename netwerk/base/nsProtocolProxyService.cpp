@@ -709,6 +709,8 @@ NS_IMPL_ISUPPORTS(AsyncGetPACURIRequest, nsIRunnable)
 
 //----------------------------------------------------------------------------
 
+#define IS_ASCII_SPACE(_c) ((_c) == ' ' || (_c) == '\t')
+
 //
 // apply mask to address (zeros out excluded bits).
 //
@@ -1612,7 +1614,7 @@ class nsAsyncBridgeRequest final  : public nsPACManCallback
 
     void Lock()   { mMutex.Lock(); }
     void Unlock() { mMutex.Unlock(); }
-    void Wait()   { mCondVar.Wait(TimeDuration::FromSeconds(3)); }
+    void Wait()   { mCondVar.Wait(PR_SecondsToInterval(3)); }
 
 private:
     ~nsAsyncBridgeRequest()

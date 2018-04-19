@@ -34,14 +34,13 @@ jobs:
             # See https://github.com/mozilla-releng/pushapkscript#aurora-beta-release-vs-alpha-beta-production
             by-project:
                mozilla-central: 'beta'
-               mozilla-beta: 'rollout'
+               mozilla-beta: 'production'
                mozilla-release: 'rollout'
-               maple: 'rollout'
                default: 'invalid'
          rc-google-play-track:
             by-project:
                mozilla-release: 'rollout'
-               maple: 'rollout'
+               birch: 'rollout'
                default: 'invalid'
          implementation: push-apk
          commit:
@@ -55,14 +54,11 @@ jobs:
                # XXX Please make sure to change PUSH_APK_GOOGLE_PLAY_TRACT to
                # 'rollout' if you add a new supported project
                mozilla-release: 10
-               mozilla-beta: 10
-               maple: 10
                default: null
          rc-rollout-percentage:
             by-project:
                mozilla-release: 5
                birch: 5
-               maple: 5
                default: null
       requires: all-resolved
       scopes:  # see transforms

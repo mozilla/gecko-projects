@@ -157,16 +157,12 @@ nsMacDockSupport::RedrawIcon()
   if (InitProgress()) {
     // TODO: - Implement ERROR and PAUSED states?
     NSImage *icon = [mProgressBackground copyWithZone:nil];
+    bool isIndeterminate = (mProgressState != STATE_NORMAL);
 
     [icon lockFocus];
     CGContextRef ctx = (CGContextRef)[[NSGraphicsContext currentContext] graphicsPort];
-    nsNativeThemeCocoa::ProgressParams params;
-    params.value = mProgressFraction;
-    params.max = 1.0;
-    params.insideActiveWindow = true;
-    params.indeterminate = (mProgressState != STATE_NORMAL);
-    params.horizontal = true;
-    mTheme->DrawProgress(ctx, mProgressBounds, params);
+    mTheme->DrawProgress(ctx, mProgressBounds, isIndeterminate,
+      true, mProgressFraction, 1.0, NULL);
     [icon unlockFocus];
     [NSApp setApplicationIconImage:icon];
     [icon release];

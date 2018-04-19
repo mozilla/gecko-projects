@@ -32,7 +32,7 @@ namespace mozilla { namespace net {
 
 extern LazyLogModule gHttpLog;
 
-class nsHttpConnectionInfo final : public ARefBase
+class nsHttpConnectionInfo: public ARefBase
 {
 public:
     nsHttpConnectionInfo(const nsACString &originHost,

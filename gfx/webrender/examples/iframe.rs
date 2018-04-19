@@ -38,7 +38,6 @@ impl Example for App {
         let info = LayoutPrimitiveInfo::new(sub_bounds);
         sub_builder.push_stacking_context(
             &info,
-            None,
             ScrollPolicy::Scrollable,
             None,
             TransformStyle::Flat,
@@ -64,7 +63,6 @@ impl Example for App {
         // And this is for the root pipeline
         builder.push_stacking_context(
             &info,
-            None,
             ScrollPolicy::Scrollable,
             Some(PropertyBinding::Binding(PropertyBindingKey::new(42))),
             TransformStyle::Flat,

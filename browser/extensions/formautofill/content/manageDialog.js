@@ -8,6 +8,7 @@
 
 const EDIT_ADDRESS_URL = "chrome://formautofill/content/editAddress.xhtml";
 const EDIT_CREDIT_CARD_URL = "chrome://formautofill/content/editCreditCard.xhtml";
+const AUTOFILL_BUNDLE_URI = "chrome://formautofill/locale/formautofill.properties";
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -48,7 +49,7 @@ class ManageRecords {
 
   localizeDocument() {
     document.documentElement.style.minWidth = FormAutofillUtils.stringBundle.GetStringFromName("manageDialogsWidth");
-    FormAutofillUtils.localizeMarkup(document);
+    FormAutofillUtils.localizeMarkup(AUTOFILL_BUNDLE_URI, document);
   }
 
   /**
@@ -317,12 +318,7 @@ class ManageCreditCards extends ManageRecords {
     // If master password is set, ask for password if user is trying to edit an
     // existing credit card.
     if (!creditCard || !this._hasMasterPassword || await MasterPassword.ensureLoggedIn(true)) {
-      let decryptedCCNumObj = {};
-      if (creditCard) {
-        decryptedCCNumObj["cc-number"] = await MasterPassword.decrypt(creditCard["cc-number-encrypted"]);
-      }
-      let decryptedCreditCard = Object.assign({}, creditCard, decryptedCCNumObj);
-      this.prefWin.gSubDialog.open(EDIT_CREDIT_CARD_URL, "resizable=no", decryptedCreditCard);
+      this.prefWin.gSubDialog.open(EDIT_CREDIT_CARD_URL, "resizable=no", creditCard);
     }
   }
 

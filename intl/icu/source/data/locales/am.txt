@@ -219,7 +219,7 @@ am{
         native{"latn"}
         traditional{"ethi"}
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.37.5"}
     calendar{
         buddhist{
             DateTimePatterns{
@@ -1286,15 +1286,15 @@ am{
         animals_nature{"እንስሳት እና ተፈጥሮ"}
         arrows{"ቀስቶች"}
         body{"ሰውነት"}
-        box_drawing{"ስዕላዊ ሳጥን"}
+        box_drawing{"Box Drawing"}
         braille{"ብሬይል"}
         building{"ህንጻ"}
-        bullets_stars{"ጥይቶች ወይም ኮከቦች"}
-        consonantal_jamo{"የጃሞ ሆሄያት"}
+        bullets_stars{"ጥይቶች/ኮከቦች"}
+        consonantal_jamo{"Consonantal Jamo"}
         currency_symbols{"የምንዛሪ ምልክቶች"}
-        dash_connector{"ጭረት ወይም አያያዥ"}
+        dash_connector{"Dash/Connector"}
         digits{"ዲጂት"}
-        dingbats{"ነቁጥ"}
+        dingbats{"Dingbats"}
         divination_symbols{"የመለኮት ምልክቶች"}
         downwards_arrows{"ወደታች ቀስቶች"}
         downwards_upwards_arrows{"ወደታች ወደላይ ቀስቶች"}
@@ -1303,22 +1303,22 @@ am{
         european_scripts{"የኤውሮጳ ስክሪፕቶች"}
         female{"ሴት"}
         flag{"ባንዲራ"}
-        flags{"ባንዲራዎች"}
+        flags{"Flags"}
         food_drink{"ምግብ እና መጠጥ"}
         format{"ቅርጸት"}
         format_whitespace{"ቅርጸት እና ባዶቦታ"}
-        full_width_form_variant{"ሙሉ ስፋት የተለያየ መልክ"}
+        full_width_form_variant{"Full-Width Form Variants"}
         geometric_shapes{"ጂኦሜትሪክ ቅርጽ"}
-        half_width_form_variant{"ግማሽ ስፋት የተለያየ መልክ"}
-        han_characters{"ሃን ቁምፊ"}
+        half_width_form_variant{"Half-Width Form Variants"}
+        han_characters{"Han Characters"}
         han_radicals{"ሃን ራዲካልስ"}
         hanja{"ሃንጃ"}
         hanzi_simplified{"ሃንዚ(በቀላሉ)"}
         hanzi_traditional{"ሃንዚ(ባህላዊ)"}
         heart{"ልብ"}
         historic_scripts{"ታሪካዊ ስክሪፕቶች"}
-        ideographic_desc_characters{"ሃሳባዊ ቁምፊዎች"}
-        japanese_kana{"የጃፓን ፊደል"}
+        ideographic_desc_characters{"Ideographic Desc. Characters"}
+        japanese_kana{"Japanese Kana"}
         kanbun{"ካንቡን"}
         kanji{"ካንጂ"}
         keycap{"የአብይ ሆሄ ቁልፍ ማብሪያ"}
@@ -1328,43 +1328,43 @@ am{
         limited_use{"የተወሰነ ኣጠቃቀም"}
         male{"ወንድ"}
         math_symbols{"የሂሳብ ምልክቶች"}
-        middle_eastern_scripts{"የመካከለኛው ምስራቅ ስክሪፕቶች"}
+        middle_eastern_scripts{"Middle Eastern Scripts"}
         miscellaneous{"የተለያዩ"}
-        modern_scripts{"ዘመናዊ ስክሪፕቶች"}
+        modern_scripts{"Modern Scripts"}
         modifier{"ማሻሻያ"}
         musical_symbols{"የሙዚቃ ምልክቶች"}
         nature{"ተፈጥሮ"}
-        nonspacing{"የተጣበቁ ቃላት"}
+        nonspacing{"Nonspacing"}
         numbers{"ቁጥሮች"}
         objects{"ነገሮች"}
         other{"ሌሎች"}
         paired{"የተጣመረ"}
         person{"ሰው"}
-        phonetic_alphabet{"የድምፅ ፊደል"}
-        pictographs{"ስዕላዊ"}
+        phonetic_alphabet{"Phonetic Alphabet"}
+        pictographs{"Pictographs"}
         place{"ቦታ"}
         plant{"አትክልት"}
         punctuation{"ስርዓተ ነጥብ"}
         rightwards_arrows{"ወደቀኝ ቀስቶች"}
-        sign_standard_symbols{"አርማ ወይም ምልክት"}
-        small_form_variant{"ትንሽ የተለያየ መልክ"}
+        sign_standard_symbols{"Sign/Standard Symbols"}
+        small_form_variant{"Small Form Variants"}
         smiley{"ሳቅ"}
-        smileys_people{"ሳቂታ ወይም ሰው"}
-        south_asian_scripts{"ደቡብ እስያ ስክሪፕት"}
-        southeast_asian_scripts{"ደቡብ ምስራቅ እስያ ስክሪፕት"}
-        spacing{"ባዶ ቦታ"}
+        smileys_people{"Smileys & People"}
+        south_asian_scripts{"ደቡብ ኤስያ ስክሪፕት"}
+        southeast_asian_scripts{"Southeast Asian Scripts"}
+        spacing{"Spacing"}
         sport{"ስፖርት"}
         symbols{"ምልክቶች"}
         technical_symbols{"ቴክኒካል ምልክቶች"}
-        tone_marks{"የኖታ ምልክት"}
+        tone_marks{"Tone Marks"}
         travel{"ጉዞ"}
         travel_places{"ጉዞ እና ቦታ"}
         upwards_arrows{"ወደላይ ቀስቶች"}
-        variant_forms{"የተለያየ መልክ ቅጾች"}
+        variant_forms{"Variant Forms"}
         vocalic_jamo{"ቮልካኒክ ጃሞ"}
         weather{"የአየር ሁኔታ"}
         western_asian_scripts{"ምእራባዊ ኤስያ ስክሪፕት"}
-        whitespace{"ባዶ ቦታ"}
+        whitespace{"Whitespace"}
     }
     delimiters{
         alternateQuotationEnd{"›"}

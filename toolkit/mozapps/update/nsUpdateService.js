@@ -185,6 +185,8 @@ const APPID_TO_TOPIC = {
   "{92650c4d-4b8e-4d2a-b7eb-24ecf4f6b63a}": "sessionstore-windows-restored",
   // Thunderbird
   "{3550f703-e582-4d05-9a08-453d09bdfdc6}": "mail-startup-done",
+  // Instantbird
+  "{33cb9019-c295-46dd-be21-8c4936574bee}": "xul-window-visible",
 };
 
 // A var is used for the delay so tests can set a smaller value.
@@ -199,8 +201,6 @@ ChromeUtils.defineModuleGetter(this, "AsyncShutdown",
                                "resource://gre/modules/AsyncShutdown.jsm");
 ChromeUtils.defineModuleGetter(this, "OS",
                                "resource://gre/modules/osfile.jsm");
-ChromeUtils.defineModuleGetter(this, "CertUtils",
-                               "resource://gre/modules/CertUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "DeferredTask",
                                "resource://gre/modules/DeferredTask.jsm");
 
@@ -210,6 +210,13 @@ XPCOMUtils.defineLazyGetter(this, "gLogEnabled", function aus_gLogEnabled() {
 
 XPCOMUtils.defineLazyGetter(this, "gUpdateBundle", function aus_gUpdateBundle() {
   return Services.strings.createBundle(URI_UPDATES_PROPERTIES);
+});
+
+// shared code for suppressing bad cert dialogs
+XPCOMUtils.defineLazyGetter(this, "gCertUtils", function aus_gCertUtils() {
+  let temp = { };
+  ChromeUtils.import("resource://gre/modules/CertUtils.jsm", temp);
+  return temp;
 });
 
 /**
@@ -1617,6 +1624,7 @@ UpdateService.prototype = {
         // intentional fallthrough
       case "sessionstore-windows-restored":
       case "mail-startup-done":
+      case "xul-window-visible":
         if (Services.appinfo.ID in APPID_TO_TOPIC) {
           Services.obs.removeObserver(this,
                                       APPID_TO_TOPIC[Services.appinfo.ID]);
@@ -2981,7 +2989,7 @@ Checker.prototype = {
 
       this._request = new XMLHttpRequest();
       this._request.open("GET", url, true);
-      this._request.channel.notificationCallbacks = new CertUtils.BadCertHandler(false);
+      this._request.channel.notificationCallbacks = new gCertUtils.BadCertHandler(false);
       // Prevent the request from reading from the cache.
       this._request.channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE;
       // Prevent the request from writing to the cache.
@@ -3076,7 +3084,6 @@ Checker.prototype = {
    */
   onLoad: function UC_onLoad(event) {
     LOG("Checker:onLoad - request completed downloading document");
-    Services.prefs.clearUserPref("security.pki.mitm_canary_issuer");
 
     try {
       // Analyze the resulting DOM and determine the set of updates.
@@ -3119,19 +3126,6 @@ Checker.prototype = {
     var request = event.target;
     var status = this._getChannelStatus(request);
     LOG("Checker:onError - request.status: " + status);
-
-    // Set MitM pref.
-    try {
-      var sslStatus = request.channel.QueryInterface(Ci.nsIRequest)
-                        .securityInfo.QueryInterface(Ci.nsISSLStatusProvider)
-                        .SSLStatus.QueryInterface(Ci.nsISSLStatus);
-      if (sslStatus && sslStatus.serverCert && sslStatus.serverCert.issuerName) {
-        Services.prefs.setStringPref("security.pki.mitm_canary_issuer",
-                                     sslStatus.serverCert.issuerName);
-      }
-    } catch (e) {
-      LOG("Checker:onError - Getting sslStatus failed.");
-    }
 
     // If we can't find an error string specific to this status code,
     // just use the 200 message from above, which means everything

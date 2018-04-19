@@ -6,7 +6,7 @@
 /**
  * This file contains the definitions of nsNavHistoryQuery,
  * nsNavHistoryQueryOptions, and those functions in nsINavHistory that directly
- * support queries (specifically QueryStringToQuery and QueryToQueryString).
+ * support queries (specifically QueryStringToQueries and QueriesToQueryString).
  */
 
 #include "mozilla/DebugOnly.h"
@@ -114,6 +114,7 @@ static void SetOptionsKeyUint32(const nsCString& aValue,
 #define QUERYKEY_NOTANNOTATION "!annotation"
 #define QUERYKEY_ANNOTATION "annotation"
 #define QUERYKEY_URI "uri"
+#define QUERYKEY_SEPARATOR "OR"
 #define QUERYKEY_GROUP "group"
 #define QUERYKEY_SORT "sort"
 #define QUERYKEY_SORTING_ANNOTATION "sortingAnnotation"
@@ -242,181 +243,251 @@ namespace PlacesFolderConversion {
   }
 } // namespace PlacesFolderConversion
 
-NS_IMETHODIMP
-nsNavHistory::QueryStringToQuery(const nsACString& aQueryString,
-                                 nsINavHistoryQuery** _query,
-                                 nsINavHistoryQueryOptions** _options)
-{
-  NS_ENSURE_ARG_POINTER(_query);
-  NS_ENSURE_ARG_POINTER(_options);
+// nsNavHistory::QueryStringToQueries
+//
+//    From C++ places code, you should use QueryStringToQueryArray, this is
+//    the harder-to-use XPCOM version.
 
-  nsTArray<QueryKeyValuePair> tokens;
-  nsresult rv = TokenizeQueryString(aQueryString, &tokens);
+NS_IMETHODIMP
+nsNavHistory::QueryStringToQueries(const nsACString& aQueryString,
+                                   nsINavHistoryQuery*** aQueries,
+                                   uint32_t* aResultCount,
+                                   nsINavHistoryQueryOptions** aOptions)
+{
+  NS_ENSURE_ARG_POINTER(aQueries);
+  NS_ENSURE_ARG_POINTER(aResultCount);
+  NS_ENSURE_ARG_POINTER(aOptions);
+
+  *aQueries = nullptr;
+  *aResultCount = 0;
+  nsCOMPtr<nsNavHistoryQueryOptions> options;
+  nsCOMArray<nsNavHistoryQuery> queries;
+  nsresult rv = QueryStringToQueryArray(aQueryString, &queries,
+                                        getter_AddRefs(options));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  RefPtr<nsNavHistoryQueryOptions> options = new nsNavHistoryQueryOptions();
-  RefPtr<nsNavHistoryQuery> query = new nsNavHistoryQuery();
-  rv = TokensToQuery(tokens, query, options);
-  MOZ_ASSERT(NS_SUCCEEDED(rv), "The query string should be valid");
-  if (NS_FAILED(rv)) {
-    NS_WARNING("Unable to parse the query string: ");
-    NS_WARNING(PromiseFlatCString(aQueryString).get());
+  *aResultCount = queries.Count();
+  if (queries.Count() > 0) {
+    // convert COM array to raw
+    *aQueries = static_cast<nsINavHistoryQuery**>
+                           (moz_xmalloc(sizeof(nsINavHistoryQuery*) * queries.Count()));
+    NS_ENSURE_TRUE(*aQueries, NS_ERROR_OUT_OF_MEMORY);
+    for (int32_t i = 0; i < queries.Count(); i ++) {
+      (*aQueries)[i] = queries[i];
+      NS_ADDREF((*aQueries)[i]);
+    }
   }
-
-  options.forget(_options);
-  query.forget(_query);
+  options.forget(aOptions);
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsNavHistory::QueryToQueryString(nsINavHistoryQuery *aQuery,
-                                 nsINavHistoryQueryOptions* aOptions,
-                                 nsACString& aQueryString)
+
+// nsNavHistory::QueryStringToQueryArray
+//
+//    An internal version of QueryStringToQueries that fills a COM array for
+//    ease-of-use.
+
+nsresult
+nsNavHistory::QueryStringToQueryArray(const nsACString& aQueryString,
+                                      nsCOMArray<nsNavHistoryQuery>* aQueries,
+                                      nsNavHistoryQueryOptions** aOptions)
 {
-  NS_ENSURE_ARG(aQuery);
+  nsresult rv;
+  aQueries->Clear();
+  *aOptions = nullptr;
+
+  RefPtr<nsNavHistoryQueryOptions> options(new nsNavHistoryQueryOptions());
+  if (! options)
+    return NS_ERROR_OUT_OF_MEMORY;
+
+  nsTArray<QueryKeyValuePair> tokens;
+  rv = TokenizeQueryString(aQueryString, &tokens);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  rv = TokensToQueries(tokens, aQueries, options);
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Unable to parse the query string: ");
+    NS_WARNING(PromiseFlatCString(aQueryString).get());
+    return rv;
+  }
+
+  options.forget(aOptions);
+  return NS_OK;
+}
+
+
+// nsNavHistory::QueriesToQueryString
+
+NS_IMETHODIMP
+nsNavHistory::QueriesToQueryString(nsINavHistoryQuery **aQueries,
+                                   uint32_t aQueryCount,
+                                   nsINavHistoryQueryOptions* aOptions,
+                                   nsACString& aQueryString)
+{
+  NS_ENSURE_ARG(aQueries);
   NS_ENSURE_ARG(aOptions);
 
-  RefPtr<nsNavHistoryQuery> query = do_QueryObject(aQuery);
-  NS_ENSURE_STATE(query);
-  RefPtr<nsNavHistoryQueryOptions> options = do_QueryObject(aOptions);
-  NS_ENSURE_STATE(options);
+  nsCOMPtr<nsNavHistoryQueryOptions> options = do_QueryInterface(aOptions);
+  NS_ENSURE_TRUE(options, NS_ERROR_INVALID_ARG);
 
   nsAutoCString queryString;
-  bool hasIt;
-
-  // begin time
-  query->GetHasBeginTime(&hasIt);
-  if (hasIt) {
-    AppendInt64KeyValueIfNonzero(queryString,
-                                 NS_LITERAL_CSTRING(QUERYKEY_BEGIN_TIME),
-                                 query, &nsINavHistoryQuery::GetBeginTime);
-    AppendUint32KeyValueIfNonzero(queryString,
-                                  NS_LITERAL_CSTRING(QUERYKEY_BEGIN_TIME_REFERENCE),
-                                  query, &nsINavHistoryQuery::GetBeginTimeReference);
-  }
-
-  // end time
-  query->GetHasEndTime(&hasIt);
-  if (hasIt) {
-    AppendInt64KeyValueIfNonzero(queryString,
-                                 NS_LITERAL_CSTRING(QUERYKEY_END_TIME),
-                                 query, &nsINavHistoryQuery::GetEndTime);
-    AppendUint32KeyValueIfNonzero(queryString,
-                                  NS_LITERAL_CSTRING(QUERYKEY_END_TIME_REFERENCE),
-                                  query, &nsINavHistoryQuery::GetEndTimeReference);
-  }
-
-  // search terms
-  if (!query->SearchTerms().IsEmpty()) {
-    const nsString& searchTerms = query->SearchTerms();
-    nsCString escapedTerms;
-    if (! NS_Escape(NS_ConvertUTF16toUTF8(searchTerms), escapedTerms,
-                    url_XAlphas))
-      return NS_ERROR_OUT_OF_MEMORY;
-
-    AppendAmpersandIfNonempty(queryString);
-    queryString += NS_LITERAL_CSTRING(QUERYKEY_SEARCH_TERMS "=");
-    queryString += escapedTerms;
-  }
-
-  // min and max visits
-  int32_t minVisits;
-  if (NS_SUCCEEDED(query->GetMinVisits(&minVisits)) && minVisits >= 0) {
-    AppendAmpersandIfNonempty(queryString);
-    queryString.AppendLiteral(QUERYKEY_MIN_VISITS "=");
-    AppendInt32(queryString, minVisits);
-  }
-
-  int32_t maxVisits;
-  if (NS_SUCCEEDED(query->GetMaxVisits(&maxVisits)) && maxVisits >= 0) {
-    AppendAmpersandIfNonempty(queryString);
-    queryString.AppendLiteral(QUERYKEY_MAX_VISITS "=");
-    AppendInt32(queryString, maxVisits);
-  }
-
-  // only bookmarked
-  AppendBoolKeyValueIfTrue(queryString,
-                           NS_LITERAL_CSTRING(QUERYKEY_ONLY_BOOKMARKED),
-                           query, &nsINavHistoryQuery::GetOnlyBookmarked);
-
-  // domain (+ is host), only call if hasDomain, which means non-IsVoid
-  // this means we may get an empty string for the domain in the result,
-  // which is valid
-  if (!query->Domain().IsVoid()) {
-    AppendBoolKeyValueIfTrue(queryString,
-                             NS_LITERAL_CSTRING(QUERYKEY_DOMAIN_IS_HOST),
-                             query, &nsINavHistoryQuery::GetDomainIsHost);
-    const nsCString& domain = query->Domain();
-    nsCString escapedDomain;
-    bool success = NS_Escape(domain, escapedDomain, url_XAlphas);
-    NS_ENSURE_TRUE(success, NS_ERROR_OUT_OF_MEMORY);
-
-    AppendAmpersandIfNonempty(queryString);
-    queryString.AppendLiteral(QUERYKEY_DOMAIN "=");
-    queryString.Append(escapedDomain);
-  }
-
-  // uri
-  if (query->Uri()) {
-    nsCOMPtr<nsIURI> uri = query->Uri();
-    nsAutoCString uriSpec;
-    nsresult rv = uri->GetSpec(uriSpec);
-    NS_ENSURE_SUCCESS(rv, rv);
-    nsAutoCString escaped;
-    bool success = NS_Escape(uriSpec, escaped, url_XAlphas);
-    NS_ENSURE_TRUE(success, NS_ERROR_OUT_OF_MEMORY);
-
-    AppendAmpersandIfNonempty(queryString);
-    queryString.AppendLiteral(QUERYKEY_URI "=");
-    queryString.Append(escaped);
-  }
-
-  // annotation
-  if (!query->Annotation().IsEmpty()) {
-    AppendAmpersandIfNonempty(queryString);
-    if (query->AnnotationIsNot()) {
-      queryString.AppendLiteral(QUERYKEY_NOTANNOTATION "=");
-    } else {
-      queryString.AppendLiteral(QUERYKEY_ANNOTATION "=");
+  for (uint32_t queryIndex = 0; queryIndex < aQueryCount;  queryIndex ++) {
+    nsCOMPtr<nsNavHistoryQuery> query = do_QueryInterface(aQueries[queryIndex]);
+    if (queryIndex > 0) {
+      AppendAmpersandIfNonempty(queryString);
+      queryString += NS_LITERAL_CSTRING(QUERYKEY_SEPARATOR);
     }
-    const nsCString& annot = query->Annotation();
-    nsAutoCString escaped;
-    bool success = NS_Escape(annot, escaped, url_XAlphas);
-    NS_ENSURE_TRUE(success, NS_ERROR_OUT_OF_MEMORY);
-    queryString.Append(escaped);
-  }
 
-  // folders
-  const nsTArray<int64_t>& folders = query->Folders();
-  for (uint32_t i = 0; i < folders.Length(); ++i) {
-    AppendAmpersandIfNonempty(queryString);
-    queryString += NS_LITERAL_CSTRING(QUERYKEY_FOLDER "=");
-    nsresult rv = PlacesFolderConversion::AppendFolder(queryString, folders[i]);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
+    bool hasIt;
 
-  // tags
-  const nsTArray<nsString>& tags = query->Tags();
-  for (uint32_t i = 0; i < tags.Length(); ++i) {
-    nsAutoCString escapedTag;
-    if (!NS_Escape(NS_ConvertUTF16toUTF8(tags[i]), escapedTag, url_XAlphas))
-      return NS_ERROR_OUT_OF_MEMORY;
+    // begin time
+    query->GetHasBeginTime(&hasIt);
+    if (hasIt) {
+      AppendInt64KeyValueIfNonzero(queryString,
+                                   NS_LITERAL_CSTRING(QUERYKEY_BEGIN_TIME),
+                                   query, &nsINavHistoryQuery::GetBeginTime);
+      AppendUint32KeyValueIfNonzero(queryString,
+                                    NS_LITERAL_CSTRING(QUERYKEY_BEGIN_TIME_REFERENCE),
+                                    query, &nsINavHistoryQuery::GetBeginTimeReference);
+    }
 
-    AppendAmpersandIfNonempty(queryString);
-    queryString += NS_LITERAL_CSTRING(QUERYKEY_TAG "=");
-    queryString += escapedTag;
-  }
-  AppendBoolKeyValueIfTrue(queryString,
-                           NS_LITERAL_CSTRING(QUERYKEY_NOTTAGS),
-                           query,
-                           &nsINavHistoryQuery::GetTagsAreNot);
+    // end time
+    query->GetHasEndTime(&hasIt);
+    if (hasIt) {
+      AppendInt64KeyValueIfNonzero(queryString,
+                                   NS_LITERAL_CSTRING(QUERYKEY_END_TIME),
+                                   query, &nsINavHistoryQuery::GetEndTime);
+      AppendUint32KeyValueIfNonzero(queryString,
+                                    NS_LITERAL_CSTRING(QUERYKEY_END_TIME_REFERENCE),
+                                    query, &nsINavHistoryQuery::GetEndTimeReference);
+    }
 
-  // transitions
-  const nsTArray<uint32_t>& transitions = query->Transitions();
-  for (uint32_t i = 0; i < transitions.Length(); ++i) {
-    AppendAmpersandIfNonempty(queryString);
-    queryString += NS_LITERAL_CSTRING(QUERYKEY_TRANSITION "=");
-    AppendInt64(queryString, transitions[i]);
+    // search terms
+    query->GetHasSearchTerms(&hasIt);
+    if (hasIt) {
+      nsAutoString searchTerms;
+      query->GetSearchTerms(searchTerms);
+      nsCString escapedTerms;
+      if (! NS_Escape(NS_ConvertUTF16toUTF8(searchTerms), escapedTerms,
+                      url_XAlphas))
+        return NS_ERROR_OUT_OF_MEMORY;
+
+      AppendAmpersandIfNonempty(queryString);
+      queryString += NS_LITERAL_CSTRING(QUERYKEY_SEARCH_TERMS "=");
+      queryString += escapedTerms;
+    }
+
+    // min and max visits
+    int32_t minVisits;
+    if (NS_SUCCEEDED(query->GetMinVisits(&minVisits)) && minVisits >= 0) {
+      AppendAmpersandIfNonempty(queryString);
+      queryString.AppendLiteral(QUERYKEY_MIN_VISITS "=");
+      AppendInt32(queryString, minVisits);
+    }
+
+    int32_t maxVisits;
+    if (NS_SUCCEEDED(query->GetMaxVisits(&maxVisits)) && maxVisits >= 0) {
+      AppendAmpersandIfNonempty(queryString);
+      queryString.AppendLiteral(QUERYKEY_MAX_VISITS "=");
+      AppendInt32(queryString, maxVisits);
+    }
+
+    // only bookmarked
+    AppendBoolKeyValueIfTrue(queryString,
+                             NS_LITERAL_CSTRING(QUERYKEY_ONLY_BOOKMARKED),
+                             query, &nsINavHistoryQuery::GetOnlyBookmarked);
+
+    // domain (+ is host), only call if hasDomain, which means non-IsVoid
+    // this means we may get an empty string for the domain in the result,
+    // which is valid
+    query->GetHasDomain(&hasIt);
+    if (hasIt) {
+      AppendBoolKeyValueIfTrue(queryString,
+                               NS_LITERAL_CSTRING(QUERYKEY_DOMAIN_IS_HOST),
+                               query, &nsINavHistoryQuery::GetDomainIsHost);
+      nsAutoCString domain;
+      nsresult rv = query->GetDomain(domain);
+      NS_ENSURE_SUCCESS(rv, rv);
+      nsCString escapedDomain;
+      bool success = NS_Escape(domain, escapedDomain, url_XAlphas);
+      NS_ENSURE_TRUE(success, NS_ERROR_OUT_OF_MEMORY);
+
+      AppendAmpersandIfNonempty(queryString);
+      queryString.AppendLiteral(QUERYKEY_DOMAIN "=");
+      queryString.Append(escapedDomain);
+    }
+
+    // uri
+    query->GetHasUri(&hasIt);
+    if (hasIt) {
+      nsCOMPtr<nsIURI> uri;
+      query->GetUri(getter_AddRefs(uri));
+      NS_ENSURE_TRUE(uri, NS_ERROR_FAILURE); // hasURI should tell is if invalid
+      nsAutoCString uriSpec;
+      nsresult rv = uri->GetSpec(uriSpec);
+      NS_ENSURE_SUCCESS(rv, rv);
+      nsAutoCString escaped;
+      bool success = NS_Escape(uriSpec, escaped, url_XAlphas);
+      NS_ENSURE_TRUE(success, NS_ERROR_OUT_OF_MEMORY);
+
+      AppendAmpersandIfNonempty(queryString);
+      queryString.AppendLiteral(QUERYKEY_URI "=");
+      queryString.Append(escaped);
+    }
+
+    // annotation
+    query->GetHasAnnotation(&hasIt);
+    if (hasIt) {
+      AppendAmpersandIfNonempty(queryString);
+      bool annotationIsNot;
+      query->GetAnnotationIsNot(&annotationIsNot);
+      if (annotationIsNot)
+        queryString.AppendLiteral(QUERYKEY_NOTANNOTATION "=");
+      else
+        queryString.AppendLiteral(QUERYKEY_ANNOTATION "=");
+      nsAutoCString annot;
+      query->GetAnnotation(annot);
+      nsAutoCString escaped;
+      bool success = NS_Escape(annot, escaped, url_XAlphas);
+      NS_ENSURE_TRUE(success, NS_ERROR_OUT_OF_MEMORY);
+      queryString.Append(escaped);
+    }
+
+    // folders
+    int64_t *folders = nullptr;
+    uint32_t folderCount = 0;
+    query->GetFolders(&folderCount, &folders);
+    for (uint32_t i = 0; i < folderCount; ++i) {
+      AppendAmpersandIfNonempty(queryString);
+      queryString += NS_LITERAL_CSTRING(QUERYKEY_FOLDER "=");
+      nsresult rv = PlacesFolderConversion::AppendFolder(queryString, folders[i]);
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
+    free(folders);
+
+    // tags
+    const nsTArray<nsString> &tags = query->Tags();
+    for (uint32_t i = 0; i < tags.Length(); ++i) {
+      nsAutoCString escapedTag;
+      if (!NS_Escape(NS_ConvertUTF16toUTF8(tags[i]), escapedTag, url_XAlphas))
+        return NS_ERROR_OUT_OF_MEMORY;
+
+      AppendAmpersandIfNonempty(queryString);
+      queryString += NS_LITERAL_CSTRING(QUERYKEY_TAG "=");
+      queryString += escapedTag;
+    }
+    AppendBoolKeyValueIfTrue(queryString,
+                             NS_LITERAL_CSTRING(QUERYKEY_NOTTAGS),
+                             query,
+                             &nsINavHistoryQuery::GetTagsAreNot);
+
+    // transitions
+    const nsTArray<uint32_t>& transitions = query->Transitions();
+    for (uint32_t i = 0; i < transitions.Length(); ++i) {
+      AppendAmpersandIfNonempty(queryString);
+      queryString += NS_LITERAL_CSTRING(QUERYKEY_TRANSITION "=");
+      AppendInt64(queryString, transitions[i]);
+    }
   }
 
   // sorting
@@ -542,15 +613,23 @@ TokenizeQueryString(const nsACString& aQuery,
   return NS_OK;
 }
 
+// nsNavHistory::TokensToQueries
+
 nsresult
-nsNavHistory::TokensToQuery(const nsTArray<QueryKeyValuePair>& aTokens,
-                            nsNavHistoryQuery* aQuery,
-                            nsNavHistoryQueryOptions* aOptions)
+nsNavHistory::TokensToQueries(const nsTArray<QueryKeyValuePair>& aTokens,
+                              nsCOMArray<nsNavHistoryQuery>* aQueries,
+                              nsNavHistoryQueryOptions* aOptions)
 {
   nsresult rv;
 
+  nsCOMPtr<nsNavHistoryQuery> query(new nsNavHistoryQuery());
+  if (! query)
+    return NS_ERROR_OUT_OF_MEMORY;
+  if (! aQueries->AppendObject(query))
+    return NS_ERROR_OUT_OF_MEMORY;
+
   if (aTokens.Length() == 0)
-    return NS_OK;
+    return NS_OK; // nothing to do
 
   nsTArray<int64_t> folders;
   nsTArray<nsString> tags;
@@ -560,32 +639,32 @@ nsNavHistory::TokensToQuery(const nsTArray<QueryKeyValuePair>& aTokens,
 
     // begin time
     if (kvp.key.EqualsLiteral(QUERYKEY_BEGIN_TIME)) {
-      SetQueryKeyInt64(kvp.value, aQuery, &nsINavHistoryQuery::SetBeginTime);
+      SetQueryKeyInt64(kvp.value, query, &nsINavHistoryQuery::SetBeginTime);
 
     // begin time reference
     } else if (kvp.key.EqualsLiteral(QUERYKEY_BEGIN_TIME_REFERENCE)) {
-      SetQueryKeyUint32(kvp.value, aQuery, &nsINavHistoryQuery::SetBeginTimeReference);
+      SetQueryKeyUint32(kvp.value, query, &nsINavHistoryQuery::SetBeginTimeReference);
 
     // end time
     } else if (kvp.key.EqualsLiteral(QUERYKEY_END_TIME)) {
-      SetQueryKeyInt64(kvp.value, aQuery, &nsINavHistoryQuery::SetEndTime);
+      SetQueryKeyInt64(kvp.value, query, &nsINavHistoryQuery::SetEndTime);
 
     // end time reference
     } else if (kvp.key.EqualsLiteral(QUERYKEY_END_TIME_REFERENCE)) {
-      SetQueryKeyUint32(kvp.value, aQuery, &nsINavHistoryQuery::SetEndTimeReference);
+      SetQueryKeyUint32(kvp.value, query, &nsINavHistoryQuery::SetEndTimeReference);
 
     // search terms
     } else if (kvp.key.EqualsLiteral(QUERYKEY_SEARCH_TERMS)) {
       nsCString unescapedTerms = kvp.value;
       NS_UnescapeURL(unescapedTerms); // modifies input
-      rv = aQuery->SetSearchTerms(NS_ConvertUTF8toUTF16(unescapedTerms));
+      rv = query->SetSearchTerms(NS_ConvertUTF8toUTF16(unescapedTerms));
       NS_ENSURE_SUCCESS(rv, rv);
 
     // min visits
     } else if (kvp.key.EqualsLiteral(QUERYKEY_MIN_VISITS)) {
       int32_t visits = kvp.value.ToInteger(&rv);
       if (NS_SUCCEEDED(rv))
-        aQuery->SetMinVisits(visits);
+        query->SetMinVisits(visits);
       else
         NS_WARNING("Bad number for minVisits in query");
 
@@ -593,23 +672,23 @@ nsNavHistory::TokensToQuery(const nsTArray<QueryKeyValuePair>& aTokens,
     } else if (kvp.key.EqualsLiteral(QUERYKEY_MAX_VISITS)) {
       int32_t visits = kvp.value.ToInteger(&rv);
       if (NS_SUCCEEDED(rv))
-        aQuery->SetMaxVisits(visits);
+        query->SetMaxVisits(visits);
       else
         NS_WARNING("Bad number for maxVisits in query");
 
     // onlyBookmarked flag
     } else if (kvp.key.EqualsLiteral(QUERYKEY_ONLY_BOOKMARKED)) {
-      SetQueryKeyBool(kvp.value, aQuery, &nsINavHistoryQuery::SetOnlyBookmarked);
+      SetQueryKeyBool(kvp.value, query, &nsINavHistoryQuery::SetOnlyBookmarked);
 
     // domainIsHost flag
     } else if (kvp.key.EqualsLiteral(QUERYKEY_DOMAIN_IS_HOST)) {
-      SetQueryKeyBool(kvp.value, aQuery, &nsINavHistoryQuery::SetDomainIsHost);
+      SetQueryKeyBool(kvp.value, query, &nsINavHistoryQuery::SetDomainIsHost);
 
     // domain string
     } else if (kvp.key.EqualsLiteral(QUERYKEY_DOMAIN)) {
       nsAutoCString unescapedDomain(kvp.value);
       NS_UnescapeURL(unescapedDomain); // modifies input
-      rv = aQuery->SetDomain(unescapedDomain);
+      rv = query->SetDomain(unescapedDomain);
       NS_ENSURE_SUCCESS(rv, rv);
 
     // folders
@@ -634,22 +713,22 @@ nsNavHistory::TokensToQuery(const nsTArray<QueryKeyValuePair>& aTokens,
       if (NS_FAILED(rv)) {
         NS_WARNING("Unable to parse URI");
       }
-      rv = aQuery->SetUri(uri);
+      rv = query->SetUri(uri);
       NS_ENSURE_SUCCESS(rv, rv);
 
     // not annotation
     } else if (kvp.key.EqualsLiteral(QUERYKEY_NOTANNOTATION)) {
       nsAutoCString unescaped(kvp.value);
       NS_UnescapeURL(unescaped); // modifies input
-      aQuery->SetAnnotationIsNot(true);
-      aQuery->SetAnnotation(unescaped);
+      query->SetAnnotationIsNot(true);
+      query->SetAnnotation(unescaped);
 
     // annotation
     } else if (kvp.key.EqualsLiteral(QUERYKEY_ANNOTATION)) {
       nsAutoCString unescaped(kvp.value);
       NS_UnescapeURL(unescaped); // modifies input
-      aQuery->SetAnnotationIsNot(false);
-      aQuery->SetAnnotation(unescaped);
+      query->SetAnnotationIsNot(false);
+      query->SetAnnotation(unescaped);
 
     // tag
     } else if (kvp.key.EqualsLiteral(QUERYKEY_TAG)) {
@@ -662,7 +741,7 @@ nsNavHistory::TokensToQuery(const nsTArray<QueryKeyValuePair>& aTokens,
 
     // not tags
     } else if (kvp.key.EqualsLiteral(QUERYKEY_NOTTAGS)) {
-      SetQueryKeyBool(kvp.value, aQuery, &nsINavHistoryQuery::SetTagsAreNot);
+      SetQueryKeyBool(kvp.value, query, &nsINavHistoryQuery::SetTagsAreNot);
 
     // transition
     } else if (kvp.key.EqualsLiteral(QUERYKEY_TRANSITION)) {
@@ -675,6 +754,32 @@ nsNavHistory::TokensToQuery(const nsTArray<QueryKeyValuePair>& aTokens,
       else {
         NS_WARNING("Invalid Int32 transition value.");
       }
+
+    // new query component
+    } else if (kvp.key.EqualsLiteral(QUERYKEY_SEPARATOR)) {
+
+      if (folders.Length() != 0) {
+        query->SetFolders(folders.Elements(), folders.Length());
+        folders.Clear();
+      }
+
+      if (tags.Length() > 0) {
+        rv = query->SetTags(tags);
+        NS_ENSURE_SUCCESS(rv, rv);
+        tags.Clear();
+      }
+
+      if (transitions.Length() > 0) {
+        rv = query->SetTransitions(transitions);
+        NS_ENSURE_SUCCESS(rv, rv);
+        transitions.Clear();
+      }
+
+      query = new nsNavHistoryQuery();
+      if (! query)
+        return NS_ERROR_OUT_OF_MEMORY;
+      if (! aQueries->AppendObject(query))
+        return NS_ERROR_OUT_OF_MEMORY;
 
     // sorting mode
     } else if (kvp.key.EqualsLiteral(QUERYKEY_SORT)) {
@@ -734,15 +839,15 @@ nsNavHistory::TokensToQuery(const nsTArray<QueryKeyValuePair>& aTokens,
   }
 
   if (folders.Length() != 0)
-    aQuery->SetFolders(folders.Elements(), folders.Length());
+    query->SetFolders(folders.Elements(), folders.Length());
 
   if (tags.Length() > 0) {
-    rv = aQuery->SetTags(tags);
+    rv = query->SetTags(tags);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
   if (transitions.Length() > 0) {
-    rv = aQuery->SetTransitions(transitions);
+    rv = query->SetTransitions(transitions);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -793,17 +898,16 @@ nsNavHistoryQuery::nsNavHistoryQuery()
 
 nsNavHistoryQuery::nsNavHistoryQuery(const nsNavHistoryQuery& aOther)
   : mMinVisits(aOther.mMinVisits), mMaxVisits(aOther.mMaxVisits),
-    mBeginTime(aOther.mBeginTime), mBeginTimeReference(aOther.mBeginTimeReference),
+    mBeginTime(aOther.mBeginTime),
+    mBeginTimeReference(aOther.mBeginTimeReference),
     mEndTime(aOther.mEndTime), mEndTimeReference(aOther.mEndTimeReference),
     mSearchTerms(aOther.mSearchTerms), mOnlyBookmarked(aOther.mOnlyBookmarked),
     mDomainIsHost(aOther.mDomainIsHost), mDomain(aOther.mDomain),
-    mUri(aOther.mUri), mAnnotationIsNot(aOther.mAnnotationIsNot),
-    mAnnotation(aOther.mAnnotation),
-    mFolders(aOther.mFolders),
-    mTags(aOther.mTags), mTagsAreNot(aOther.mTagsAreNot),
-    mTransitions(aOther.mTransitions)
-{
-}
+    mUri(aOther.mUri),
+    mAnnotationIsNot(aOther.mAnnotationIsNot),
+    mAnnotation(aOther.mAnnotation), mTags(aOther.mTags),
+    mTagsAreNot(aOther.mTagsAreNot), mTransitions(aOther.mTransitions)
+{}
 
 NS_IMETHODIMP nsNavHistoryQuery::GetBeginTime(PRTime *aBeginTime)
 {
@@ -1201,55 +1305,20 @@ NS_IMETHODIMP nsNavHistoryQuery::SetTransitions(const uint32_t* aTransitions,
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsNavHistoryQuery::Clone(nsINavHistoryQuery** _clone)
+NS_IMETHODIMP nsNavHistoryQuery::Clone(nsINavHistoryQuery** _retval)
 {
-  nsNavHistoryQuery *clone = nullptr;
-  Unused << Clone(&clone);
-  *_clone = clone;
+  *_retval = nullptr;
+
+  RefPtr<nsNavHistoryQuery> clone = new nsNavHistoryQuery(*this);
+  NS_ENSURE_TRUE(clone, NS_ERROR_OUT_OF_MEMORY);
+
+  clone.forget(_retval);
   return NS_OK;
 }
 
-nsresult
-nsNavHistoryQuery::Clone(nsNavHistoryQuery** _clone)
-{
-  *_clone = nullptr;
-  RefPtr<nsNavHistoryQuery> clone = new nsNavHistoryQuery(*this);
-  clone.forget(_clone);
-  return NS_OK;
-}
 
 // nsNavHistoryQueryOptions
 NS_IMPL_ISUPPORTS(nsNavHistoryQueryOptions, nsNavHistoryQueryOptions, nsINavHistoryQueryOptions)
-
-nsNavHistoryQueryOptions::nsNavHistoryQueryOptions()
-: mSort(0)
-, mResultType(0)
-, mExcludeItems(false)
-, mExcludeQueries(false)
-, mExcludeReadOnlyFolders(false)
-, mExpandQueries(true)
-, mIncludeHidden(false)
-, mMaxResults(0)
-, mQueryType(nsINavHistoryQueryOptions::QUERY_TYPE_HISTORY)
-, mAsyncEnabled(false)
-{
-}
-
-nsNavHistoryQueryOptions::nsNavHistoryQueryOptions(const nsNavHistoryQueryOptions& other)
-: mSort(other.mSort)
-, mSortingAnnotation(other.mSortingAnnotation)
-, mResultType(other.mResultType)
-, mExcludeItems(other.mExcludeItems)
-, mExcludeQueries(other.mExcludeQueries)
-, mExcludeReadOnlyFolders(other.mExcludeReadOnlyFolders)
-, mExpandQueries(other.mExpandQueries)
-, mIncludeHidden(other.mIncludeHidden)
-, mMaxResults(other.mMaxResults)
-, mQueryType(other.mQueryType)
-, mAsyncEnabled(other.mAsyncEnabled)
-{
-}
 
 // sortingMode
 NS_IMETHODIMP
@@ -1290,14 +1359,13 @@ nsNavHistoryQueryOptions::GetResultType(uint16_t* aType)
 NS_IMETHODIMP
 nsNavHistoryQueryOptions::SetResultType(uint16_t aType)
 {
-  if (aType > RESULTS_AS_LEFT_PANE_QUERY)
+  if (aType > RESULTS_AS_ROOTS_QUERY)
     return NS_ERROR_INVALID_ARG;
   // Tag queries, containers and the roots query are bookmarks related, so we
   // set the QueryType accordingly.
-  if (aType == RESULTS_AS_TAGS_ROOT || aType == RESULTS_AS_ROOTS_QUERY ||
-      aType == RESULTS_AS_LEFT_PANE_QUERY) {
+  if (aType == RESULTS_AS_TAG_QUERY || aType == RESULTS_AS_TAG_CONTENTS ||
+      aType == RESULTS_AS_ROOTS_QUERY)
     mQueryType = QUERY_TYPE_BOOKMARKS;
-  }
   mResultType = aType;
   return NS_OK;
 }
@@ -1398,9 +1466,8 @@ nsNavHistoryQueryOptions::SetQueryType(uint16_t aQueryType)
 {
   // Tag query and containers are forced to QUERY_TYPE_BOOKMARKS when the
   // resultType is set.
-  if (mResultType == RESULTS_AS_TAGS_ROOT ||
-      mResultType == RESULTS_AS_LEFT_PANE_QUERY ||
-      mResultType == RESULTS_AS_ROOTS_QUERY)
+  if (mResultType == RESULTS_AS_TAG_CONTENTS ||
+      mResultType == RESULTS_AS_TAG_QUERY)
    return NS_OK;
   mQueryType = aQueryType;
   return NS_OK;
@@ -1420,23 +1487,37 @@ nsNavHistoryQueryOptions::SetAsyncEnabled(bool aAsyncEnabled)
   return NS_OK;
 }
 
+
 NS_IMETHODIMP
-nsNavHistoryQueryOptions::Clone(nsINavHistoryQueryOptions** _clone)
+nsNavHistoryQueryOptions::Clone(nsINavHistoryQueryOptions** aResult)
 {
   nsNavHistoryQueryOptions *clone = nullptr;
-  Unused << Clone(&clone);
-  *_clone = clone;
-  return NS_OK;
+  nsresult rv = Clone(&clone);
+  *aResult = clone;
+  return rv;
 }
 
 nsresult
-nsNavHistoryQueryOptions::Clone(nsNavHistoryQueryOptions** _clone)
+nsNavHistoryQueryOptions::Clone(nsNavHistoryQueryOptions **aResult)
 {
-  *_clone = nullptr;
-  RefPtr<nsNavHistoryQueryOptions> clone = new nsNavHistoryQueryOptions(*this);
-  clone.forget(_clone);
+  *aResult = nullptr;
+  nsNavHistoryQueryOptions *result = new nsNavHistoryQueryOptions();
+
+  RefPtr<nsNavHistoryQueryOptions> resultHolder(result);
+  result->mSort = mSort;
+  result->mResultType = mResultType;
+  result->mExcludeItems = mExcludeItems;
+  result->mExcludeQueries = mExcludeQueries;
+  result->mExpandQueries = mExpandQueries;
+  result->mMaxResults = mMaxResults;
+  result->mQueryType = mQueryType;
+  result->mParentAnnotationToExclude = mParentAnnotationToExclude;
+  result->mAsyncEnabled = mAsyncEnabled;
+
+  resultHolder.forget(aResult);
   return NS_OK;
 }
+
 
 // AppendBoolKeyValueIfTrue
 

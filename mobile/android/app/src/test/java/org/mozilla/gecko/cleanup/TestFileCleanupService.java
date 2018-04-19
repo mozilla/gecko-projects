@@ -11,7 +11,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
-import org.robolectric.RobolectricTestRunner;
+import org.mozilla.gecko.background.testhelpers.TestRunner;
 
 import java.io.File;
 import java.io.IOException;
@@ -23,7 +23,7 @@ import static org.junit.Assert.*;
 /**
  * Tests the methods of {@link FileCleanupService}.
  */
-@RunWith(RobolectricTestRunner.class)
+@RunWith(TestRunner.class)
 public class TestFileCleanupService {
     @Rule
     public final TemporaryFolder tempFolder = new TemporaryFolder();

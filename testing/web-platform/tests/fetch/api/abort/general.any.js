@@ -57,7 +57,7 @@ for (const { args, testName } of badRequestArgTests) {
       // Add signal to 2nd arg
       args[1] = args[1] || {};
       args[1].signal = controller.signal;
-      await promise_rejects(t, new TypeError, fetch(...args));
+      await promise_rejects(t, err, fetch(...args));
     }
   }, `TypeError from request constructor takes priority - ${testName}`);
 }
@@ -78,7 +78,6 @@ promise_test(async t => {
   assert_true(Boolean(request.signal), "Signal member is present & truthy");
   assert_equals(request.signal.constructor, AbortSignal);
   assert_not_equals(request.signal, signal, 'Request has a new signal, not a reference');
-  assert_true(request.signal.aborted, `Request's signal has aborted`);
 
   const fetchPromise = fetch(request);
 

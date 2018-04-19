@@ -1,6 +1,3 @@
-/* Any copyright is dedicated to the Public Domain.
- * http://creativecommons.org/publicdomain/zero/1.0/ */
-
 const JS_NOW = Date.now();
 const DB_NOW = JS_NOW * 1000;
 const TEST_URI = uri("http://example.com/");
@@ -67,11 +64,11 @@ add_task(async function remove_visits_outside_bookmarked_uri() {
   }
   await PlacesTestUtils.addVisits(visits);
   info("Bookmark the URI.");
-  await PlacesUtils.bookmarks.insert({
-    parentGuid: PlacesUtils.bookmarks.unfiledGuid,
-    url: TEST_URI,
-    title: "bookmark title"
-  });
+  PlacesUtils.bookmarks.insertBookmark(PlacesUtils.unfiledBookmarksFolderId,
+                                       TEST_URI,
+                                       PlacesUtils.bookmarks.DEFAULT_INDEX,
+                                       "bookmark title");
+  await PlacesTestUtils.promiseAsyncUpdates();
 
   info("Remove visits using timerange outside the URI's visits.");
   let filter = {
@@ -163,11 +160,11 @@ add_task(async function remove_visits_bookmarked_uri() {
   }
   await PlacesTestUtils.addVisits(visits);
   info("Bookmark the URI.");
-  await PlacesUtils.bookmarks.insert({
-    parentGuid: PlacesUtils.bookmarks.unfiledGuid,
-    url: TEST_URI,
-    title: "bookmark title"
-  });
+  PlacesUtils.bookmarks.insertBookmark(PlacesUtils.unfiledBookmarksFolderId,
+                                       TEST_URI,
+                                       PlacesUtils.bookmarks.DEFAULT_INDEX,
+                                       "bookmark title");
+  await PlacesTestUtils.promiseAsyncUpdates();
 
   info("Remove the 5 most recent visits.");
   let filter = {
@@ -251,11 +248,10 @@ add_task(async function remove_all_visits_bookmarked_uri() {
   }
   await PlacesTestUtils.addVisits(visits);
   info("Bookmark the URI.");
-  await PlacesUtils.bookmarks.insert({
-    parentGuid: PlacesUtils.bookmarks.unfiledGuid,
-    url: TEST_URI,
-    title: "bookmark title"
-  });
+  PlacesUtils.bookmarks.insertBookmark(PlacesUtils.unfiledBookmarksFolderId,
+                                       TEST_URI,
+                                       PlacesUtils.bookmarks.DEFAULT_INDEX,
+                                       "bookmark title");
   await PlacesTestUtils.promiseAsyncUpdates();
   let initialFrecency = frecencyForUrl(TEST_URI);
 

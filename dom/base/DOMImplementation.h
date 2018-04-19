@@ -67,7 +67,7 @@ public:
   already_AddRefed<nsIDocument>
   CreateDocument(const nsAString& aNamespaceURI,
                  const nsAString& aQualifiedName,
-                 DocumentType* aDoctype,
+                 nsIDOMDocumentType* aDoctype,
                  ErrorResult& aRv);
 
   already_AddRefed<nsIDocument>
@@ -76,7 +76,7 @@ public:
 private:
   nsresult CreateDocument(const nsAString& aNamespaceURI,
                           const nsAString& aQualifiedName,
-                          DocumentType* aDoctype,
+                          nsIDOMDocumentType* aDoctype,
                           nsIDocument** aDocument);
   nsresult CreateHTMLDocument(const nsAString& aTitle,
                               nsIDocument** aDocument);

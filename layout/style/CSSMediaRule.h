@@ -19,6 +19,8 @@ protected:
   virtual ~CSSMediaRule() {}
 
 public:
+  int32_t GetType() const override { return css::Rule::MEDIA_RULE; }
+
   // WebIDL interface
   uint16_t Type() const override { return CSSRuleBinding::MEDIA_RULE; }
   virtual MediaList* Media() = 0;

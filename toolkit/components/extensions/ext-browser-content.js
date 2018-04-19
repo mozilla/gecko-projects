@@ -281,8 +281,7 @@ const BrowserListener = {
         background = null;
       }
 
-      if (background === null ||
-          background !== this.oldBackground) {
+      if (background !== this.oldBackground) {
         sendAsyncMessage("Extension:BrowserBackgroundChanged", {background});
       }
       this.oldBackground = background;

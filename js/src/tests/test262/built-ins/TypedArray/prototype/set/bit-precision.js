@@ -1,7 +1,8 @@
 // Copyright (C) 2016 the V8 project authors. All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
 /*---
-esid: sec-%typedarray%.prototype.set.2
+esid: sec-%typedarray%.prototype.set
+es6id: 22.2.3.22.2
 description: Preservation of bit-level encoding
 info: |
   [...]
@@ -16,12 +17,11 @@ info: |
          iii. Set srcByteIndex to srcByteIndex + 1.
          iv. Set targetByteIndex to targetByteIndex + 1.
 includes: [nans.js, compareArray.js, testTypedArray.js]
-features: [TypedArray]
 ---*/
 
-function body(FA) {
-  var source = new FA(NaNs);
-  var target = new FA(NaNs.length);
+function body(FloatArray) {
+  var source = new FloatArray(distinctNaNs);
+  var target = new FloatArray(distinctNaNs.length);
   var sourceBytes, targetBytes;
 
   target.set(source);

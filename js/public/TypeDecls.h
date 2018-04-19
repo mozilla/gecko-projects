@@ -32,6 +32,7 @@ class JSObject;
 struct JSRuntime;
 class JSScript;
 class JSString;
+class JSAddonId;
 struct JSFreeOp;
 
 struct jsid;
@@ -41,7 +42,7 @@ namespace JS {
 typedef unsigned char Latin1Char;
 
 class Symbol;
-union Value;
+class Value;
 class Realm;
 struct Runtime;
 struct Zone;

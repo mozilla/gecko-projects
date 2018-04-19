@@ -266,10 +266,10 @@ impl LineBreaker {
     }
 
     /// Reinitializes the pending line to blank data.
-    fn reset_line(&mut self) {
+    fn reset_line(&mut self) -> Line {
         self.last_known_line_breaking_opportunity = None;
-        // https://github.com/rust-lang/rust/issues/49282
-        self.pending_line = Line::new(self.floats.writing_mode, &self.minimum_metrics);
+        mem::replace(&mut self.pending_line,
+                     Line::new(self.floats.writing_mode, &self.minimum_metrics))
     }
 
     /// Reflows fragments for the given inline flow.

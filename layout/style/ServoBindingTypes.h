@@ -9,7 +9,6 @@
 
 #include "mozilla/RefPtr.h"
 #include "mozilla/ServoTypes.h"
-#include "mozilla/SheetType.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/gfx/Types.h"
 #include "nsCSSPropertyID.h"
@@ -29,7 +28,7 @@ struct RustString;
 
 namespace mozilla {
 class ServoElementSnapshot;
-class ComputedStyle;
+class ServoStyleContext;
 struct StyleAnimation;
 struct URLExtraData;
 namespace dom {
@@ -114,14 +113,14 @@ typedef mozilla::dom::StyleChildrenIterator RawGeckoStyleChildrenIterator;
 #include "mozilla/ServoArcTypeList.h"
 #undef SERVO_ARC_TYPE
 
-typedef mozilla::ComputedStyle const* ComputedStyleBorrowed;
-typedef mozilla::ComputedStyle const* ComputedStyleBorrowedOrNull;
+typedef mozilla::ServoStyleContext const* ServoStyleContextBorrowed;
+typedef mozilla::ServoStyleContext const* ServoStyleContextBorrowedOrNull;
 typedef ServoComputedData const* ServoComputedDataBorrowed;
 
-struct MOZ_MUST_USE_TYPE ComputedStyleStrong
+struct MOZ_MUST_USE_TYPE ServoStyleContextStrong
 {
-  mozilla::ComputedStyle* mPtr;
-  already_AddRefed<mozilla::ComputedStyle> Consume();
+  mozilla::ServoStyleContext* mPtr;
+  already_AddRefed<mozilla::ServoStyleContext> Consume();
 };
 
 #define DECL_OWNED_REF_TYPE_FOR(type_)    \
@@ -236,12 +235,5 @@ DEFINE_BOXED_TYPE(SelectorList, RawServoSelectorList);
 DEFINE_BOXED_TYPE(SourceSizeList, RawServoSourceSizeList);
 
 #undef DEFINE_BOXED_TYPE
-
-// used for associating sheet type with specific @font-face rules
-struct nsFontFaceRuleContainer
-{
-  RefPtr<RawServoFontFaceRule> mRule;
-  mozilla::SheetType mSheetType;
-};
 
 #endif // mozilla_ServoBindingTypes_h

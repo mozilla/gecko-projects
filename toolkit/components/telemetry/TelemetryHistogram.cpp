@@ -50,7 +50,6 @@ using mozilla::Telemetry::Common::GetNameForProcessID;
 using mozilla::Telemetry::Common::IsExpiredVersion;
 using mozilla::Telemetry::Common::CanRecordDataset;
 using mozilla::Telemetry::Common::IsInDataset;
-using mozilla::Telemetry::Common::ToJSString;
 
 namespace TelemetryIPCAccumulator = mozilla::TelemetryIPCAccumulator;
 
@@ -885,7 +884,8 @@ KeyedHistogram::GetJSKeys(JSContext* cx, JS::CallArgs& args)
 
   for (auto iter = mHistogramMap.Iter(); !iter.Done(); iter.Next()) {
     JS::RootedValue jsKey(cx);
-    jsKey.setString(ToJSString(cx, iter.Get()->GetKey()));
+    const NS_ConvertUTF8toUTF16 key(iter.Get()->GetKey());
+    jsKey.setString(JS_NewUCStringCopyN(cx, key.Data(), key.Length()));
     if (!keys.append(jsKey)) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
@@ -1193,22 +1193,21 @@ internal_JSHistogram_CoerceValue(JSContext* aCx, JS::Handle<JS::Value> aElement,
 bool
 internal_JSHistogram_Add(JSContext *cx, unsigned argc, JS::Value *vp)
 {
-  JS::CallArgs args = CallArgsFromVp(argc, vp);
-
-  if (!args.thisv().isObject() ||
-      JS_GetClass(&args.thisv().toObject()) != &sJSHistogramClass) {
+  JSObject *obj = JS_THIS_OBJECT(cx, vp);
+  MOZ_ASSERT(obj);
+  if (!obj ||
+      JS_GetClass(obj) != &sJSHistogramClass) {
     JS_ReportErrorASCII(cx, "Wrong JS class, expected JSHistogram class");
     return false;
   }
 
-  JSObject* obj = &args.thisv().toObject();
   JSHistogramData* data = static_cast<JSHistogramData*>(JS_GetPrivate(obj));
   MOZ_ASSERT(data);
   HistogramID id = data->histogramId;
   MOZ_ASSERT(internal_IsHistogramEnumId(id));
   uint32_t type = gHistogramInfos[id].histogramType;
 
-
+  JS::CallArgs args = CallArgsFromVp(argc, vp);
   // This function should always return |undefined| and never fail but
   // rather report failures using the console.
   args.rval().setUndefined();
@@ -1292,14 +1291,13 @@ bool
 internal_JSHistogram_Snapshot(JSContext *cx, unsigned argc, JS::Value *vp)
 {
   JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-
-  if (!args.thisv().isObject() ||
-      JS_GetClass(&args.thisv().toObject()) != &sJSHistogramClass) {
+  JSObject *obj = JS_THIS_OBJECT(cx, vp);
+  if (!obj ||
+      JS_GetClass(obj) != &sJSHistogramClass) {
     JS_ReportErrorASCII(cx, "Wrong JS class, expected JSHistogram class");
     return false;
   }
 
-  JSObject* obj = &args.thisv().toObject();
   JSHistogramData* data = static_cast<JSHistogramData*>(JS_GetPrivate(obj));
   MOZ_ASSERT(data);
   HistogramID id = data->histogramId;
@@ -1343,19 +1341,18 @@ internal_JSHistogram_Snapshot(JSContext *cx, unsigned argc, JS::Value *vp)
 bool
 internal_JSHistogram_Clear(JSContext *cx, unsigned argc, JS::Value *vp)
 {
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-
-  if (!args.thisv().isObject() ||
-      JS_GetClass(&args.thisv().toObject()) != &sJSHistogramClass) {
+  JSObject *obj = JS_THIS_OBJECT(cx, vp);
+  if (!obj ||
+      JS_GetClass(obj) != &sJSHistogramClass) {
     JS_ReportErrorASCII(cx, "Wrong JS class, expected JSHistogram class");
     return false;
   }
 
-  JSObject* obj = &args.thisv().toObject();
   JSHistogramData* data = static_cast<JSHistogramData*>(JS_GetPrivate(obj));
   MOZ_ASSERT(data);
 
   bool onlySubsession = false;
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
   // This function should always return |undefined| and never fail but
   // rather report failures using the console.
   args.rval().setUndefined();
@@ -1470,20 +1467,19 @@ internal_KeyedHistogram_SnapshotImpl(JSContext *cx, unsigned argc,
                                      JS::Value *vp,
                                      bool subsession, bool clearSubsession)
 {
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-
-  if (!args.thisv().isObject() ||
-      JS_GetClass(&args.thisv().toObject()) != &sJSKeyedHistogramClass) {
+  JSObject *obj = JS_THIS_OBJECT(cx, vp);
+  if (!obj ||
+      JS_GetClass(obj) != &sJSKeyedHistogramClass) {
     JS_ReportErrorASCII(cx, "Wrong JS class, expected JSKeyedHistogram class");
     return false;
   }
 
-  JSObject *obj = &args.thisv().toObject();
   JSHistogramData* data = static_cast<JSHistogramData*>(JS_GetPrivate(obj));
   MOZ_ASSERT(data);
   HistogramID id = data->histogramId;
   MOZ_ASSERT(internal_IsHistogramEnumId(id));
 
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
   // This function should always return |undefined| and never fail but
   // rather report failures using the console.
   args.rval().setUndefined();
@@ -1548,20 +1544,19 @@ internal_KeyedHistogram_SnapshotImpl(JSContext *cx, unsigned argc,
 bool
 internal_JSKeyedHistogram_Add(JSContext *cx, unsigned argc, JS::Value *vp)
 {
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-
-  if (!args.thisv().isObject() ||
-      JS_GetClass(&args.thisv().toObject()) != &sJSKeyedHistogramClass) {
+  JSObject *obj = JS_THIS_OBJECT(cx, vp);
+  if (!obj ||
+      JS_GetClass(obj) != &sJSKeyedHistogramClass) {
     JS_ReportErrorASCII(cx, "Wrong JS class, expected JSKeyedHistogram class");
     return false;
   }
 
-  JSObject *obj = &args.thisv().toObject();
   JSHistogramData* data = static_cast<JSHistogramData*>(JS_GetPrivate(obj));
   MOZ_ASSERT(data);
   HistogramID id = data->histogramId;
   MOZ_ASSERT(internal_IsHistogramEnumId(id));
 
+  JS::CallArgs args = CallArgsFromVp(argc, vp);
   // This function should always return |undefined| and never fail but
   // rather report failures using the console.
   args.rval().setUndefined();
@@ -1592,31 +1587,43 @@ internal_JSKeyedHistogram_Add(JSContext *cx, unsigned argc, JS::Value *vp)
 
   // If we don't have an argument for the count histogram, assume an increment of 1.
   // Otherwise, make sure to run some sanity checks on the argument.
-
-  // Special case of only key argument and count histogram
-  if (args.length() == 1) {
-    if (!(type == nsITelemetry::HISTOGRAM_COUNT)) {
+  uint32_t value = 1;
+  if ((type != nsITelemetry::HISTOGRAM_COUNT) || (args.length() == 2)) {
+    if (args.length() < 2) {
       LogToBrowserConsole(nsIScriptError::errorFlag,
-          NS_LITERAL_STRING("Need at least one argument for non count type histogram"));
+                          NS_LITERAL_STRING("Expected two arguments for this histogram type"));
       return true;
     }
 
-    {
-      StaticMutexAutoLock locker(gTelemetryHistogramMutex);
-      internal_Accumulate(id, NS_ConvertUTF16toUTF8(key), 1);
+    if (type == nsITelemetry::HISTOGRAM_CATEGORICAL && args[1].isString()) {
+      // For categorical histograms we allow passing a string argument that specifies the label.
+
+      // Get label string.
+      nsAutoJSString label;
+      if (!label.init(cx, args[1])) {
+        LogToBrowserConsole(nsIScriptError::errorFlag, NS_LITERAL_STRING("Invalid string parameter"));
+        return true;
+      }
+
+      // Get label id value.
+      nsresult rv = gHistogramInfos[id].label_id(NS_ConvertUTF16toUTF8(label).get(), &value);
+      if (NS_FAILED(rv)) {
+        LogToBrowserConsole(nsIScriptError::errorFlag,
+                            NS_LITERAL_STRING("Unknown label for categorical histogram"));
+        return true;
+      }
+    } else {
+      // All other accumulations expect one numerical argument.
+      if (!(args[1].isNumber() || args[1].isBoolean())) {
+        LogToBrowserConsole(nsIScriptError::errorFlag, NS_LITERAL_STRING("Not a number"));
+        return true;
+      }
+
+      if (!JS::ToUint32(cx, args[1], &value)) {
+        LogToBrowserConsole(nsIScriptError::errorFlag, NS_LITERAL_STRING("Failed to convert argument"));
+        return true;
+      }
     }
-    return true;
-  }
-
-  if (args.length() < 2) {
-    LogToBrowserConsole(nsIScriptError::errorFlag,
-                        NS_LITERAL_STRING("Expected two arguments for this histogram type"));
-    return true;
-  }
-
-  uint32_t value = 0;
-  if (!internal_JSHistogram_CoerceValue(cx, args[1], id, type, value)) {
-    return true;
   }
 
   {
@@ -1630,15 +1637,13 @@ internal_JSKeyedHistogram_Add(JSContext *cx, unsigned argc, JS::Value *vp)
 bool
 internal_JSKeyedHistogram_Keys(JSContext *cx, unsigned argc, JS::Value *vp)
 {
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-
-  if (!args.thisv().isObject() ||
-      JS_GetClass(&args.thisv().toObject()) != &sJSKeyedHistogramClass) {
+  JSObject *obj = JS_THIS_OBJECT(cx, vp);
+  if (!obj ||
+      JS_GetClass(obj) != &sJSKeyedHistogramClass) {
     JS_ReportErrorASCII(cx, "Wrong JS class, expected JSKeyedHistogram class");
     return false;
   }
 
-  JSObject *obj = &args.thisv().toObject();
   JSHistogramData* data = static_cast<JSHistogramData*>(JS_GetPrivate(obj));
   MOZ_ASSERT(data);
   HistogramID id = data->histogramId;
@@ -1659,6 +1664,7 @@ internal_JSKeyedHistogram_Keys(JSContext *cx, unsigned argc, JS::Value *vp)
     return false;
   }
 
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
   return NS_SUCCEEDED(keyed->GetJSKeys(cx, args));
 }
 
@@ -1695,19 +1701,18 @@ internal_JSKeyedHistogram_SnapshotSubsessionAndClear(JSContext *cx,
 bool
 internal_JSKeyedHistogram_Clear(JSContext *cx, unsigned argc, JS::Value *vp)
 {
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-
-  if (!args.thisv().isObject() ||
-      JS_GetClass(&args.thisv().toObject()) != &sJSKeyedHistogramClass) {
+  JSObject *obj = JS_THIS_OBJECT(cx, vp);
+  if (!obj ||
+      JS_GetClass(obj) != &sJSKeyedHistogramClass) {
     JS_ReportErrorASCII(cx, "Wrong JS class, expected JSKeyedHistogram class");
     return false;
   }
 
-  JSObject *obj = &args.thisv().toObject();
   JSHistogramData* data = static_cast<JSHistogramData*>(JS_GetPrivate(obj));
   MOZ_ASSERT(data);
   HistogramID id = data->histogramId;
 
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
   // This function should always return |undefined| and never fail but
   // rather report failures using the console.
   args.rval().setUndefined();

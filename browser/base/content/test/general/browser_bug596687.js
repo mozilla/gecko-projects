@@ -15,7 +15,7 @@ add_task(async function test() {
 
   tab.addEventListener("TabClose", onTabClose);
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 
   ok(gotTabClose, "should have got the TabClose event");
   ok(!gotTabAttrModified, "shouldn't have got the TabAttrModified event after TabClose");

@@ -8,7 +8,6 @@
 
 #include "mozilla/MathAlgorithms.h"
 
-#include "jit/Lowering.h"
 #include "jit/MIR.h"
 
 #include "jit/shared/Lowering-shared-inl.h"
@@ -35,7 +34,7 @@ LIRGeneratorX86Shared::newLTableSwitchV(MTableSwitch* tableswitch)
 }
 
 void
-LIRGenerator::visitPowHalf(MPowHalf* ins)
+LIRGeneratorX86Shared::visitPowHalf(MPowHalf* ins)
 {
     MDefinition* input = ins->input();
     MOZ_ASSERT(input->type() == MIRType::Double);
@@ -267,7 +266,7 @@ LIRGeneratorX86Shared::lowerModI(MMod* mod)
 }
 
 void
-LIRGenerator::visitWasmSelect(MWasmSelect* ins)
+LIRGeneratorX86Shared::visitWasmSelect(MWasmSelect* ins)
 {
     if (ins->type() == MIRType::Int64) {
         auto* lir = new(alloc()) LWasmSelectI64(useInt64RegisterAtStart(ins->trueExpr()),
@@ -286,7 +285,7 @@ LIRGenerator::visitWasmSelect(MWasmSelect* ins)
 }
 
 void
-LIRGenerator::visitWasmNeg(MWasmNeg* ins)
+LIRGeneratorX86Shared::visitWasmNeg(MWasmNeg* ins)
 {
     switch (ins->type()) {
       case MIRType::Int32:
@@ -611,7 +610,7 @@ LIRGeneratorX86Shared::lowerAtomicTypedArrayElementBinop(MAtomicTypedArrayElemen
 }
 
 void
-LIRGenerator::visitSimdInsertElement(MSimdInsertElement* ins)
+LIRGeneratorX86Shared::visitSimdInsertElement(MSimdInsertElement* ins)
 {
     MOZ_ASSERT(IsSimdType(ins->type()));
 
@@ -644,7 +643,7 @@ LIRGenerator::visitSimdInsertElement(MSimdInsertElement* ins)
 }
 
 void
-LIRGenerator::visitSimdExtractElement(MSimdExtractElement* ins)
+LIRGeneratorX86Shared::visitSimdExtractElement(MSimdExtractElement* ins)
 {
     MOZ_ASSERT(IsSimdType(ins->input()->type()));
     MOZ_ASSERT(!IsSimdType(ins->type()));
@@ -696,7 +695,7 @@ LIRGenerator::visitSimdExtractElement(MSimdExtractElement* ins)
 }
 
 void
-LIRGenerator::visitSimdBinaryArith(MSimdBinaryArith* ins)
+LIRGeneratorX86Shared::visitSimdBinaryArith(MSimdBinaryArith* ins)
 {
     MOZ_ASSERT(IsSimdType(ins->lhs()->type()));
     MOZ_ASSERT(IsSimdType(ins->rhs()->type()));
@@ -750,7 +749,7 @@ LIRGenerator::visitSimdBinaryArith(MSimdBinaryArith* ins)
 }
 
 void
-LIRGenerator::visitSimdBinarySaturating(MSimdBinarySaturating* ins)
+LIRGeneratorX86Shared::visitSimdBinarySaturating(MSimdBinarySaturating* ins)
 {
     MOZ_ASSERT(IsSimdType(ins->lhs()->type()));
     MOZ_ASSERT(IsSimdType(ins->rhs()->type()));
@@ -767,7 +766,7 @@ LIRGenerator::visitSimdBinarySaturating(MSimdBinarySaturating* ins)
 }
 
 void
-LIRGenerator::visitSimdSelect(MSimdSelect* ins)
+LIRGeneratorX86Shared::visitSimdSelect(MSimdSelect* ins)
 {
     MOZ_ASSERT(IsSimdType(ins->type()));
 
@@ -785,7 +784,7 @@ LIRGenerator::visitSimdSelect(MSimdSelect* ins)
 }
 
 void
-LIRGenerator::visitSimdSplat(MSimdSplat* ins)
+LIRGeneratorX86Shared::visitSimdSplat(MSimdSplat* ins)
 {
     LAllocation x = useRegisterAtStart(ins->getOperand(0));
 
@@ -816,7 +815,7 @@ LIRGenerator::visitSimdSplat(MSimdSplat* ins)
 }
 
 void
-LIRGenerator::visitSimdValueX4(MSimdValueX4* ins)
+LIRGeneratorX86Shared::visitSimdValueX4(MSimdValueX4* ins)
 {
     switch (ins->type()) {
       case MIRType::Float32x4: {
@@ -847,7 +846,7 @@ LIRGenerator::visitSimdValueX4(MSimdValueX4* ins)
 }
 
 void
-LIRGenerator::visitSimdSwizzle(MSimdSwizzle* ins)
+LIRGeneratorX86Shared::visitSimdSwizzle(MSimdSwizzle* ins)
 {
     MOZ_ASSERT(IsSimdType(ins->input()->type()));
     MOZ_ASSERT(IsSimdType(ins->type()));
@@ -878,7 +877,7 @@ LIRGenerator::visitSimdSwizzle(MSimdSwizzle* ins)
 }
 
 void
-LIRGenerator::visitSimdShuffle(MSimdShuffle* ins)
+LIRGeneratorX86Shared::visitSimdShuffle(MSimdShuffle* ins)
 {
     MOZ_ASSERT(IsSimdType(ins->lhs()->type()));
     MOZ_ASSERT(IsSimdType(ins->rhs()->type()));
@@ -917,7 +916,7 @@ LIRGenerator::visitSimdShuffle(MSimdShuffle* ins)
 }
 
 void
-LIRGenerator::visitSimdGeneralShuffle(MSimdGeneralShuffle* ins)
+LIRGeneratorX86Shared::visitSimdGeneralShuffle(MSimdGeneralShuffle* ins)
 {
     MOZ_ASSERT(IsSimdType(ins->type()));
 
@@ -963,7 +962,7 @@ LIRGenerator::visitSimdGeneralShuffle(MSimdGeneralShuffle* ins)
 }
 
 void
-LIRGenerator::visitCopySign(MCopySign* ins)
+LIRGeneratorX86Shared::visitCopySign(MCopySign* ins)
 {
     MDefinition* lhs = ins->lhs();
     MDefinition* rhs = ins->rhs();

@@ -24,5 +24,5 @@ add_task(async function testDismissHanger() {
 
   ok(hasLocation, "Location is not shared");
 
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });

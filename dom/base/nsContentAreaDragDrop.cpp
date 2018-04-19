@@ -14,11 +14,13 @@
 
 // Interfaces needed to be included
 #include "nsCopySupport.h"
+#include "nsIDOMUIEvent.h"
 #include "nsISelection.h"
 #include "nsISelectionController.h"
 #include "nsIDOMNode.h"
 #include "nsIDOMNodeList.h"
 #include "nsIDOMEvent.h"
+#include "nsIDOMDragEvent.h"
 #include "nsPIDOMWindow.h"
 #include "nsIDOMRange.h"
 #include "nsIFormControl.h"
@@ -165,7 +167,7 @@ nsContentAreaDragDropDataProvider::SaveURIToFile(nsIURI* inSourceURI,
   persist->SetPersistFlags(nsIWebBrowserPersist::PERSIST_FLAGS_AUTODETECT_APPLY_CONVERSION);
 
   // referrer policy can be anything since the referrer is nullptr
-  return persist->SavePrivacyAwareURI(inSourceURI, 0, nullptr,
+  return persist->SavePrivacyAwareURI(inSourceURI, nullptr, nullptr,
                                       mozilla::net::RP_Unset,
                                       nullptr, nullptr,
                                       inDestFile, isPrivate);
@@ -459,7 +461,7 @@ DragDataProducer::GetNodeString(nsIContent* inNode,
   RefPtr<nsRange> range = doc->CreateRange(IgnoreErrors());
   if (range) {
     range->SelectNode(*node, IgnoreErrors());
-    range->ToString(outNodeString, IgnoreErrors());
+    range->ToString(outNodeString);
   }
 }
 
@@ -683,7 +685,7 @@ DragDataProducer::Produce(DataTransfer* aDataTransfer,
       // set for linked images, and links
       nsCOMPtr<nsIContent> linkNode;
 
-      RefPtr<HTMLAreaElement> areaElem = HTMLAreaElement::FromNodeOrNull(draggedNode);
+      RefPtr<HTMLAreaElement> areaElem = HTMLAreaElement::FromContentOrNull(draggedNode);
       if (areaElem) {
         // use the alt text (or, if missing, the href) as the title
         areaElem->GetAttribute(NS_LITERAL_STRING("alt"), mTitleString);

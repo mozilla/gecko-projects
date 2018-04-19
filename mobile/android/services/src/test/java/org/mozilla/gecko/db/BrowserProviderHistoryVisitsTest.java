@@ -9,13 +9,13 @@ import android.net.Uri;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mozilla.gecko.background.testhelpers.TestRunner;
 
 import org.mozilla.gecko.db.BrowserContract.History;
-import org.robolectric.RobolectricTestRunner;
 
 import static org.junit.Assert.*;
 
-@RunWith(RobolectricTestRunner.class)
+@RunWith(TestRunner.class)
 /**
  * Testing insertion/deletion of visits as by-product of updating history records through BrowserProvider
  */

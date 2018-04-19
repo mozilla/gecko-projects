@@ -27,5 +27,5 @@ add_task(async function block_plug_in() {
   await waitForTabPlayingEvent(tab, true);
 
   info("- remove tab -");
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

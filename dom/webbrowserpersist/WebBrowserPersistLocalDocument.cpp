@@ -18,7 +18,6 @@
 #include "mozilla/dom/HTMLSharedElement.h"
 #include "mozilla/dom/HTMLTextAreaElement.h"
 #include "mozilla/dom/NodeFilterBinding.h"
-#include "mozilla/dom/ProcessingInstruction.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/dom/TreeWalker.h"
 #include "mozilla/Unused.h"
@@ -30,9 +29,11 @@
 #include "nsFrameLoader.h"
 #include "nsIComponentRegistrar.h"
 #include "nsIContent.h"
+#include "nsIDOMComment.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMNode.h"
 #include "nsIDOMNodeList.h"
+#include "nsIDOMProcessingInstruction.h"
 #include "nsIDOMWindowUtils.h"
 #include "nsIDocShell.h"
 #include "nsIDocument.h"
@@ -168,12 +169,23 @@ WebBrowserPersistLocalDocument::GetContentDisposition(nsAString& aCD)
 NS_IMETHODIMP
 WebBrowserPersistLocalDocument::GetCacheKey(uint32_t* aKey)
 {
-    *aKey = 0;
     nsCOMPtr<nsISHEntry> history = GetHistory();
-    if (history) {
-        history->GetCacheKey(aKey);
+    if (!history) {
+        *aKey = 0;
+        return NS_OK;
     }
-    return NS_OK;
+    nsCOMPtr<nsISupports> abstractKey;
+    nsresult rv = history->GetCacheKey(getter_AddRefs(abstractKey));
+    if (NS_WARN_IF(NS_FAILED(rv)) || !abstractKey) {
+        *aKey = 0;
+        return NS_OK;
+    }
+    nsCOMPtr<nsISupportsPRUint32> u32 = do_QueryInterface(abstractKey);
+    if (NS_WARN_IF(!u32)) {
+        *aKey = 0;
+        return NS_OK;
+    }
+    return u32->GetData(aKey);
 }
 
 NS_IMETHODIMP
@@ -318,9 +330,7 @@ ResourceReader::OnWalkSubframe(nsIDOMNode* aNode)
     // Pass in 0 as the outer window ID so that we start
     // persisting the root of this subframe, and not some other
     // subframe child of this subframe.
-    ErrorResult err;
-    loader->StartPersistence(0, this, err);
-    nsresult rv = err.StealNSResult();
+    nsresult rv = loader->StartPersistence(0, this);
     if (NS_FAILED(rv)) {
         if (rv == NS_ERROR_NO_CONTENT) {
             // Just ignore frames with no content document.
@@ -421,10 +431,12 @@ ResourceReader::OnWalkAttribute(nsIDOMNode* aNode,
 }
 
 static nsresult
-GetXMLStyleSheetLink(dom::ProcessingInstruction *aPI, nsAString &aHref)
+GetXMLStyleSheetLink(nsIDOMProcessingInstruction *aPI, nsAString &aHref)
 {
+    nsresult rv;
     nsAutoString data;
-    aPI->GetData(data);
+    rv = aPI->GetData(data);
+    NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
 
     nsContentUtils::GetPseudoAttributeValue(data, nsGkAtoms::href, aHref);
     return NS_OK;
@@ -433,15 +445,14 @@ GetXMLStyleSheetLink(dom::ProcessingInstruction *aPI, nsAString &aHref)
 nsresult
 ResourceReader::OnWalkDOMNode(nsIDOMNode* aNode)
 {
-    nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
-    if (!content) {
-        return NS_OK;
-    }
+    nsresult rv;
 
     // Fixup xml-stylesheet processing instructions
-    if (auto nodeAsPI = dom::ProcessingInstruction::FromNode(content)) {
+    nsCOMPtr<nsIDOMProcessingInstruction> nodeAsPI = do_QueryInterface(aNode);
+    if (nodeAsPI) {
         nsAutoString target;
-        nodeAsPI->GetTarget(target);
+        rv = nodeAsPI->GetTarget(target);
+        NS_ENSURE_SUCCESS(rv, rv);
         if (target.EqualsLiteral("xml-stylesheet")) {
             nsAutoString href;
             GetXMLStyleSheetLink(nodeAsPI, href);
@@ -449,6 +460,11 @@ ResourceReader::OnWalkDOMNode(nsIDOMNode* aNode)
                 return OnWalkURI(NS_ConvertUTF16toUTF8(href));
             }
         }
+        return NS_OK;
+    }
+
+    nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
+    if (!content) {
         return NS_OK;
     }
 
@@ -501,7 +517,7 @@ ResourceReader::OnWalkDOMNode(nsIDOMNode* aNode)
         return OnWalkAttribute(aNode, "data");
     }
 
-    if (auto nodeAsLink = dom::HTMLLinkElement::FromNode(content)) {
+    if (auto nodeAsLink = dom::HTMLLinkElement::FromContent(content)) {
         // Test if the link has a rel value indicating it to be a stylesheet
         nsAutoString linkRel;
         nodeAsLink->GetRel(linkRel);
@@ -549,7 +565,7 @@ ResourceReader::OnWalkDOMNode(nsIDOMNode* aNode)
         return OnWalkSubframe(aNode);
     }
 
-    auto nodeAsInput = dom::HTMLInputElement::FromNode(content);
+    auto nodeAsInput = dom::HTMLInputElement::FromContent(content);
     if (nodeAsInput) {
         return OnWalkAttribute(aNode, "src");
     }
@@ -586,7 +602,7 @@ private:
                             const char* aAttribute,
                             const char* aNamespaceURI = "");
     nsresult FixupAnchor(nsINode* aNode);
-    nsresult FixupXMLStyleSheetLink(dom::ProcessingInstruction* aPI,
+    nsresult FixupXMLStyleSheetLink(nsIDOMProcessingInstruction* aPI,
                                     const nsAString& aHref);
 
     using IWBP = nsIWebBrowserPersist;
@@ -771,13 +787,15 @@ AppendXMLAttr(const nsAString& key, const nsAString& aValue, nsAString& aBuffer)
 }
 
 nsresult
-PersistNodeFixup::FixupXMLStyleSheetLink(dom::ProcessingInstruction* aPI,
+PersistNodeFixup::FixupXMLStyleSheetLink(nsIDOMProcessingInstruction* aPI,
                                          const nsAString& aHref)
 {
     NS_ENSURE_ARG_POINTER(aPI);
+    nsresult rv = NS_OK;
 
     nsAutoString data;
-    aPI->GetData(data);
+    rv = aPI->GetData(data);
+    NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
 
     nsAutoString href;
     nsContentUtils::GetPseudoAttributeValue(data,
@@ -826,10 +844,10 @@ PersistNodeFixup::FixupXMLStyleSheetLink(dom::ProcessingInstruction* aPI,
         if (!alternate.IsEmpty()) {
             AppendXMLAttr(NS_LITERAL_STRING("alternate"), alternate, newData);
         }
-        aPI->SetData(newData, IgnoreErrors());
+        aPI->SetData(newData);
     }
 
-    return NS_OK;
+    return rv;
 }
 
 NS_IMETHODIMP
@@ -866,25 +884,22 @@ PersistNodeFixup::FixupNode(nsINode* aNodeIn,
         return NS_OK;
     }
 
-    MOZ_ASSERT(aNodeIn->IsContent());
-
     // Fixup xml-stylesheet processing instructions
-    if (auto nodeAsPI =
-          dom::ProcessingInstruction::FromNode(aNodeIn)) {
+    nsCOMPtr<nsIDOMProcessingInstruction> nodeAsPI = do_QueryInterface(aNodeIn);
+    if (nodeAsPI) {
         nsAutoString target;
         nodeAsPI->GetTarget(target);
         if (target.EqualsLiteral("xml-stylesheet"))
         {
             nsresult rv = GetNodeToFixup(aNodeIn, aNodeOut);
             if (NS_SUCCEEDED(rv) && *aNodeOut) {
-                MOZ_ASSERT((*aNodeOut)->IsProcessingInstruction());
-                auto nodeAsPI =
-                  static_cast<dom::ProcessingInstruction*>(*aNodeOut);
+                nsCOMPtr<nsIDOMProcessingInstruction> outNode =
+                    do_QueryInterface(*aNodeOut);
                 nsAutoString href;
                 GetXMLStyleSheetLink(nodeAsPI, href);
                 if (!href.IsEmpty()) {
                     FixupURI(href);
-                    FixupXMLStyleSheetLink(nodeAsPI, href);
+                    FixupXMLStyleSheetLink(outNode, href);
                 }
             }
         }
@@ -918,7 +933,7 @@ PersistNodeFixup::FixupNode(nsINode* aNodeIn,
     }
 
     // Fix up href and file links in the elements
-    RefPtr<dom::HTMLAnchorElement> nodeAsAnchor = dom::HTMLAnchorElement::FromNode(content);
+    RefPtr<dom::HTMLAnchorElement> nodeAsAnchor = dom::HTMLAnchorElement::FromContent(content);
     if (nodeAsAnchor) {
         nsresult rv = GetNodeToFixup(aNodeIn, aNodeOut);
         if (NS_SUCCEEDED(rv) && *aNodeOut) {
@@ -927,7 +942,7 @@ PersistNodeFixup::FixupNode(nsINode* aNodeIn,
         return rv;
     }
 
-    RefPtr<dom::HTMLAreaElement> nodeAsArea = dom::HTMLAreaElement::FromNode(content);
+    RefPtr<dom::HTMLAreaElement> nodeAsArea = dom::HTMLAreaElement::FromContent(content);
     if (nodeAsArea) {
         nsresult rv = GetNodeToFixup(aNodeIn, aNodeOut);
         if (NS_SUCCEEDED(rv) && *aNodeOut) {
@@ -1078,7 +1093,7 @@ PersistNodeFixup::FixupNode(nsINode* aNodeIn,
     }
 
     RefPtr<dom::HTMLInputElement> nodeAsInput =
-        dom::HTMLInputElement::FromNodeOrNull(content);
+        dom::HTMLInputElement::FromContentOrNull(content);
     if (nodeAsInput) {
         nsresult rv = GetNodeToFixup(aNodeIn, aNodeOut);
         if (NS_SUCCEEDED(rv) && *aNodeOut) {
@@ -1095,7 +1110,7 @@ PersistNodeFixup::FixupNode(nsINode* aNodeIn,
             NS_NAMED_LITERAL_STRING(valueAttr, "value");
             // Update element node attributes with user-entered form state
             RefPtr<dom::HTMLInputElement> outElt =
-                dom::HTMLInputElement::FromNode((*aNodeOut)->AsContent());
+                dom::HTMLInputElement::FromContent((*aNodeOut)->AsContent());
             nsCOMPtr<nsIFormControl> formControl = do_QueryInterface(*aNodeOut);
             switch (formControl->ControlType()) {
                 case NS_FORM_INPUT_EMAIL:
@@ -1130,7 +1145,7 @@ PersistNodeFixup::FixupNode(nsINode* aNodeIn,
         return rv;
     }
 
-    dom::HTMLTextAreaElement* nodeAsTextArea = dom::HTMLTextAreaElement::FromNode(content);
+    dom::HTMLTextAreaElement* nodeAsTextArea = dom::HTMLTextAreaElement::FromContent(content);
     if (nodeAsTextArea) {
         nsresult rv = GetNodeToFixup(aNodeIn, aNodeOut);
         if (NS_SUCCEEDED(rv) && *aNodeOut) {
@@ -1145,12 +1160,12 @@ PersistNodeFixup::FixupNode(nsINode* aNodeIn,
         return rv;
     }
 
-    dom::HTMLOptionElement* nodeAsOption = dom::HTMLOptionElement::FromNode(content);
+    dom::HTMLOptionElement* nodeAsOption = dom::HTMLOptionElement::FromContent(content);
     if (nodeAsOption) {
         nsresult rv = GetNodeToFixup(aNodeIn, aNodeOut);
         if (NS_SUCCEEDED(rv) && *aNodeOut) {
             dom::HTMLOptionElement* outElt =
-                dom::HTMLOptionElement::FromNode((*aNodeOut)->AsContent());
+                dom::HTMLOptionElement::FromContent((*aNodeOut)->AsContent());
             bool selected = nodeAsOption->Selected();
             outElt->SetDefaultSelected(selected, IgnoreErrors());
         }

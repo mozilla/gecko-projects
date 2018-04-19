@@ -138,10 +138,7 @@ impl From<RGBA> for Color {
 }
 
 impl ToCss for Color {
-    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
-    where
-        W: fmt::Write,
-    {
+    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result where W: fmt::Write {
         if self.is_numeric() {
             self.color.to_css(dest)
         } else if self.is_currentcolor() {
@@ -188,6 +185,11 @@ impl ToAnimatedValue for RGBA {
     #[inline]
     fn from_animated_value(animated: Self::AnimatedValue) -> Self {
         // RGBA::from_floats clamps each component values.
-        RGBA::from_floats(animated.red, animated.green, animated.blue, animated.alpha)
+        RGBA::from_floats(
+            animated.red,
+            animated.green,
+            animated.blue,
+            animated.alpha,
+        )
     }
 }

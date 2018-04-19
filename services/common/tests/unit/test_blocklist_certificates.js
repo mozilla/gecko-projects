@@ -1,9 +1,8 @@
 const { Constructor: CC } = Components;
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://testing-common/httpd.js");
 
-const BlocklistClients = ChromeUtils.import("resource://services-common/blocklist-clients.js", {});
+const { OneCRLBlocklistClient } = ChromeUtils.import("resource://services-common/blocklist-clients.js", {});
 
 const BinaryInputStream = CC("@mozilla.org/binaryinputstream;1",
   "nsIBinaryInputStream", "setInputStream");
@@ -20,10 +19,6 @@ add_task(async function test_something() {
 
   const dummyServerURL = `http://localhost:${server.identity.primaryPort}/v1`;
   Services.prefs.setCharPref("services.settings.server", dummyServerURL);
-
-  BlocklistClients.initialize();
-
-  const OneCRLBlocklistClient = BlocklistClients.OneCRLBlocklistClient;
 
   // register a handler
   function handleResponse(request, response) {
@@ -53,11 +48,13 @@ add_task(async function test_something() {
   // Test an empty db populates
   await OneCRLBlocklistClient.maybeSync(2000, Date.now());
 
-  // Open the collection, verify it's been populated:
-  const list = await OneCRLBlocklistClient.get();
-  // We know there will be initial values from the JSON dump.
-  // (at least as many as in the dump shipped when this test was written).
-  Assert.ok(list.length >= 363);
+  await OneCRLBlocklistClient.openCollection(async (collection) => {
+    // Open the collection, verify it's been populated:
+    const list = await collection.list();
+    // We know there will be initial values from the JSON dump.
+    // (at least as many as in the dump shipped when this test was written).
+    Assert.ok(list.data.length >= 363);
+  });
 
   // No sync will be intented if maybeSync() is up-to-date.
   Services.prefs.clearUserPref("services.settings.server");
@@ -70,28 +67,33 @@ add_task(async function test_something() {
   // Restore server pref.
   Services.prefs.setCharPref("services.settings.server", dummyServerURL);
 
-  // clear the collection, save a non-zero lastModified so we don't do
-  // import of initial data when we sync again.
-  const collection = await OneCRLBlocklistClient.openCollection();
-  await collection.clear();
-  // a lastModified value of 1000 means we get a remote collection with a
-  // single record
-  await collection.db.saveLastModified(1000);
+  await OneCRLBlocklistClient.openCollection(async (collection) => {
+    // clear the collection, save a non-zero lastModified so we don't do
+    // import of initial data when we sync again.
+    await collection.clear();
+    // a lastModified value of 1000 means we get a remote collection with a
+    // single record
+    await collection.db.saveLastModified(1000);
+  });
 
   await OneCRLBlocklistClient.maybeSync(2000, Date.now());
 
-  // Open the collection, verify it's been updated:
-  // Our test data now has two records; both should be in the local collection
-  const before = await OneCRLBlocklistClient.get();
-  Assert.equal(before.length, 1);
+  await OneCRLBlocklistClient.openCollection(async (collection) => {
+    // Open the collection, verify it's been updated:
+    // Our test data now has two records; both should be in the local collection
+    const list = await collection.list();
+    Assert.equal(list.data.length, 1);
+  });
 
   // Test the db is updated when we call again with a later lastModified value
   await OneCRLBlocklistClient.maybeSync(4000, Date.now());
 
-  // Open the collection, verify it's been updated:
-  // Our test data now has two records; both should be in the local collection
-  const after = await OneCRLBlocklistClient.get();
-  Assert.equal(after.length, 3);
+  await OneCRLBlocklistClient.openCollection(async (collection) => {
+    // Open the collection, verify it's been updated:
+    // Our test data now has two records; both should be in the local collection
+    const list = await collection.list();
+    Assert.equal(list.data.length, 3);
+  });
 
   // Try to maybeSync with the current lastModified value - no connection
   // should be attempted.
@@ -119,7 +121,7 @@ add_task(async function test_something() {
 function run_test() {
   // Ensure that signature verification is disabled to prevent interference
   // with basic certificate sync tests
-  Services.prefs.setBoolPref("services.settings.verify_signature", false);
+  Services.prefs.setBoolPref("services.blocklist.signing.enforced", false);
 
   // Set up an HTTP Server
   server = new HttpServer();

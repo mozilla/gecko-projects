@@ -79,7 +79,7 @@ IsSpellCheckingTextNode(nsINode* aNode)
   nsIContent *parent = aNode->GetParent();
   if (parent && parent->IsAnyOfHTMLElements(nsGkAtoms::script, nsGkAtoms::style))
       return false;
-  return aNode->IsText();
+  return aNode->IsNodeOfType(nsINode::eTEXT);
 }
 
 typedef void (* OnLeaveNodeFunPtr)(nsINode* aNode, void* aClosure);
@@ -845,7 +845,7 @@ mozInlineSpellWordUtil::BuildSoftText()
                                          mozilla::fallible);
         if (!ok) {
             // probably out of memory, remove from mSoftTextDOMMapping
-            mSoftTextDOMMapping.RemoveLastElement();
+            mSoftTextDOMMapping.RemoveElementAt(mSoftTextDOMMapping.Length() - 1);
             exit = true;
         }
       }

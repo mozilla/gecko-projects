@@ -90,6 +90,7 @@ class _LanguagePrompt {
       }
     } else {
       this._removeObservers();
+      Services.prefs.setIntPref(kPrefSpoofEnglish, 0);
     }
   }
 

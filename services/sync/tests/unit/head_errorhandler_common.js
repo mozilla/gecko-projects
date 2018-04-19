@@ -26,17 +26,13 @@ const EHTestsCommon = {
   },
 
   async sync_httpd_setup() {
-    let clientsEngine = Service.clientsEngine;
-    let clientsSyncID = await clientsEngine.resetLocalSyncID();
-    let catapultEngine = Service.engineManager.get("catapult");
-    let catapultSyncID = await catapultEngine.resetLocalSyncID();
     let global = new ServerWBO("global", {
       syncID: Service.syncID,
       storageVersion: STORAGE_VERSION,
-      engines: {clients: {version: clientsEngine.version,
-                          syncID: clientsSyncID},
-                catapult: {version: catapultEngine.version,
-                           syncID: catapultSyncID}}
+      engines: {clients: {version: Service.clientsEngine.version,
+                          syncID: Service.clientsEngine.syncID},
+                catapult: {version: Service.engineManager.get("catapult").version,
+                           syncID: Service.engineManager.get("catapult").syncID}}
     });
     let clientsColl = new ServerCollection({}, true);
 

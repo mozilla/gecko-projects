@@ -680,11 +680,11 @@ async function initializeIdentityWithHAWKResponseFactory(config, cbGetResponse) 
   }
   MockRESTRequest.prototype = {
     setHeader() {},
-    async post(data) {
+    post(data, callback) {
       this.response = cbGetResponse("post", data, this._uri, this._credentials, this._extra);
-      return this.response;
+      callback.call(this);
     },
-    async get() {
+    get(callback) {
       // Skip /status requests (browserid_identity checks if the account still
       // exists after an auth error)
       if (this._uri.startsWith("http://mockedserver:9999/account/status")) {
@@ -696,7 +696,7 @@ async function initializeIdentityWithHAWKResponseFactory(config, cbGetResponse) 
       } else {
         this.response = cbGetResponse("get", null, this._uri, this._credentials, this._extra);
       }
-      return this.response;
+      callback.call(this);
     }
   };
 
@@ -753,9 +753,9 @@ function mockTokenServer(func) {
   MockRESTRequest.prototype = {
     _log: requestLog,
     setHeader() {},
-    async get() {
+    get(callback) {
       this.response = func();
-      return this.response;
+      callback.call(this);
     }
   };
   // The mocked TokenServer client which will get the response.

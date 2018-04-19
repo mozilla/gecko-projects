@@ -1,7 +1,7 @@
 // Copyright (C) 2016 the V8 project authors. All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
 /*---
-esid: sec-%typedarray%.prototype.indexof
+es6id: 22.2.3.13
 description: Throws a TypeError exception when invoked as a function
 info: |
   22.2.3.13 %TypedArray%.prototype.indexOf (searchElement [ , fromIndex ] )

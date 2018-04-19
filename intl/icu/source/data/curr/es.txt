@@ -616,10 +616,6 @@ es{
         }
         MRO{
             "MRO",
-            "uguiya (1973–2017)",
-        }
-        MRU{
-            "MRU",
             "uguiya",
         }
         MTL{
@@ -848,10 +844,6 @@ es{
         }
         STD{
             "STD",
-            "dobra (1977–2017)",
-        }
-        STN{
-            "STN",
             "dobra",
         }
         SUR{
@@ -1195,7 +1187,7 @@ es{
         SHP{"£"}
         SRD{"$"}
         SSP{"£"}
-        STN{"Db"}
+        STD{"Db"}
         SYP{"£"}
         THB{"฿"}
         TOP{"T$"}
@@ -1777,10 +1769,6 @@ es{
             other{"patacas de Macao"}
         }
         MRO{
-            one{"uguiya (1973–2017)"}
-            other{"uguiyas (1973–2017)"}
-        }
-        MRU{
             one{"uguiya"}
             other{"uguiyas"}
         }
@@ -1997,10 +1985,6 @@ es{
             other{"libras sursudanesas"}
         }
         STD{
-            one{"dobra (1977–2017)"}
-            other{"dobras (1977–2017)"}
-        }
-        STN{
             one{"dobra"}
             other{"dobras"}
         }
@@ -2213,5 +2197,5 @@ es{
         one{"{0} {1}"}
         other{"{0} {1}"}
     }
-    Version{"2.1.39.20"}
+    Version{"2.1.37.22"}
 }

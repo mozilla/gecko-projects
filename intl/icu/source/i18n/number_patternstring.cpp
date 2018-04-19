@@ -95,10 +95,6 @@ bool ParsedPatternInfo::containsSymbolType(AffixPatternType type, UErrorCode &st
     return AffixUtils::containsType(UnicodeStringCharSequence(pattern), type, status);
 }
 
-bool ParsedPatternInfo::hasBody() const {
-    return positive.integerTotal > 0;
-}
-
 /////////////////////////////////////////////////////
 /// BEGIN RECURSIVE DESCENT PARSER IMPLEMENTATION ///
 /////////////////////////////////////////////////////

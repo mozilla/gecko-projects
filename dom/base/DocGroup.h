@@ -16,14 +16,10 @@
 #include "mozilla/RefPtr.h"
 #include "mozilla/dom/CustomElementRegistry.h"
 #include "mozilla/dom/HTMLSlotElement.h"
-#include "mozilla/PerformanceCounter.h"
-
 
 namespace mozilla {
 class AbstractThread;
 namespace dom {
-
-class PerformanceInfo;
 
 // Two browsing contexts are considered "related" if they are reachable from one
 // another through window.opener, window.parent, or window.frames. This is the
@@ -58,15 +54,6 @@ public:
   {
     return aKey == mKey;
   }
-#ifndef RELEASE_OR_BETA
-  PerformanceCounter* GetPerformanceCounter()
-  {
-    return mPerformanceCounter;
-  }
-
-  PerformanceInfo
-  ReportPerformanceInfo();
-#endif
   TabGroup* GetTabGroup()
   {
     return mTabGroup;
@@ -139,9 +126,6 @@ private:
   nsTArray<nsIDocument*> mDocuments;
   RefPtr<mozilla::dom::CustomElementReactionsStack> mReactionsStack;
   nsTArray<RefPtr<HTMLSlotElement>> mSignalSlotList;
-#ifndef RELEASE_OR_BETA
-  RefPtr<mozilla::PerformanceCounter> mPerformanceCounter;
-#endif
 };
 
 } // namespace dom

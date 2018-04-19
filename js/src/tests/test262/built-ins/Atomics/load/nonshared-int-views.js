@@ -1,4 +1,3 @@
-// |reftest| skip-if(!this.hasOwnProperty('Atomics')) -- Atomics is not enabled unconditionally
 // Copyright (C) 2017 Mozilla Corporation.  All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
 
@@ -7,7 +6,7 @@ esid: sec-atomics.load
 description: >
   Test Atomics.load on non-shared integer TypedArrays
 includes: [testTypedArray.js]
-features: [Atomics, TypedArray]
+features: [TypedArray]
 ---*/
 
 var ab = new ArrayBuffer(16);
@@ -20,9 +19,9 @@ if (typeof BigInt !== "undefined") {
 }
 
 testWithTypedArrayConstructors(function(View) {
-  var view = new View(ab);
+    var view = new View(ab);
 
-  assert.throws(TypeError, (() => Atomics.load(view, 0)));
+    assert.throws(TypeError, (() => Atomics.load(view, 0)));
 }, int_views);
 
 reportCompare(0, 0);

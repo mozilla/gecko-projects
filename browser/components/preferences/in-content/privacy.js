@@ -329,7 +329,12 @@ var gPrivacyPane = {
         document.getElementById("notificationsDoNotDisturbBox");
       notificationsDoNotDisturbBox.removeAttribute("hidden");
       let checkbox = document.getElementById("notificationsDoNotDisturb");
-      document.l10n.setAttributes(checkbox, "permissions-notification-pause");
+      let brandName = document.getElementById("bundleBrand")
+        .getString("brandShortName");
+      checkbox.setAttribute("label",
+        bundlePrefs.getFormattedString("pauseNotifications.label",
+          [brandName]));
+      checkbox.setAttribute("accesskey", bundlePrefs.getString("pauseNotifications.accesskey"));
       if (AlertsServiceDND.manualDoNotDisturb) {
         let notificationsDoNotDisturb =
           document.getElementById("notificationsDoNotDisturb");
@@ -337,21 +342,25 @@ var gPrivacyPane = {
       }
     }
 
-    Services.obs.addObserver(this, "sitedatamanager:sites-updated");
-    Services.obs.addObserver(this, "sitedatamanager:updating-sites");
-    let unload = () => {
-      window.removeEventListener("unload", unload);
-      Services.obs.removeObserver(this, "sitedatamanager:sites-updated");
-      Services.obs.removeObserver(this, "sitedatamanager:updating-sites");
-    };
-    window.addEventListener("unload", unload);
-    SiteDataManager.updateSites();
-    setEventListener("clearSiteDataButton", "command",
-      gPrivacyPane.clearSiteData);
-    setEventListener("siteDataSettings", "command",
-      gPrivacyPane.showSiteDataSettings);
-    let url = Services.urlFormatter.formatURLPref("app.support.baseURL") + "storage-permissions";
-    document.getElementById("siteDataLearnMoreLink").setAttribute("href", url);
+    if (Services.prefs.getBoolPref("browser.storageManager.enabled")) {
+      Services.obs.addObserver(this, "sitedatamanager:sites-updated");
+      Services.obs.addObserver(this, "sitedatamanager:updating-sites");
+      let unload = () => {
+        window.removeEventListener("unload", unload);
+        Services.obs.removeObserver(this, "sitedatamanager:sites-updated");
+        Services.obs.removeObserver(this, "sitedatamanager:updating-sites");
+      };
+      window.addEventListener("unload", unload);
+      SiteDataManager.updateSites();
+      setEventListener("clearSiteDataButton", "command",
+        gPrivacyPane.clearSiteData);
+      setEventListener("siteDataSettings", "command",
+        gPrivacyPane.showSiteDataSettings);
+      let url = Services.urlFormatter.formatURLPref("app.support.baseURL") + "storage-permissions";
+      document.getElementById("siteDataLearnMoreLink").setAttribute("href", url);
+      let siteDataGroup = document.getElementById("siteDataGroup");
+      siteDataGroup.removeAttribute("data-hidden-from-search");
+    }
 
     let notificationInfoURL =
       Services.urlFormatter.formatURLPref("app.support.baseURL") + "push";
@@ -400,6 +409,10 @@ var gPrivacyPane = {
       bundlePrefs.getString("trackingprotectionpermissionstitle"),
       bundlePrefs.getString("trackingprotectionpermissionstext2"),
     ]);
+    appendSearchKeywords("changeBlockList", [
+      bundlePrefs.getString("blockliststitle"),
+      bundlePrefs.getString("blockliststext"),
+    ]);
     appendSearchKeywords("popupPolicyButton", [
       bundlePrefs.getString("popuppermissionstitle2"),
       bundlePrefs.getString("popuppermissionstext"),
@@ -437,7 +450,8 @@ var gPrivacyPane = {
     ]);
     appendSearchKeywords("siteDataSettings", [
       bundlePrefs.getString("siteDataSettings3.description"),
-      bundlePrefs.getString("removeAllSiteData.label"),
+      bundlePrefs.getString("removeAllCookies.label"),
+      bundlePrefs.getString("removeSelectedCookies.label"),
     ]);
 
     if (!PrivateBrowsingUtils.enabled) {
@@ -621,8 +635,6 @@ var gPrivacyPane = {
     document.getElementById("keepCookiesUntil").value = this.readKeepCookiesUntil();
     this.readAcceptCookies();
 
-    let clearDataSettings = document.getElementById("clearDataSettings");
-
     if (document.getElementById("historyMode").value == "custom") {
       let disabled = Preferences.get("browser.privatebrowsing.autostart").value;
       this.dependentControls.forEach(function(aElement) {
@@ -640,8 +652,6 @@ var gPrivacyPane = {
         control.disabled = disabled || preference.locked;
       });
 
-      clearDataSettings.removeAttribute("hidden");
-
       // adjust the checked state of the sanitizeOnShutdown checkbox
       document.getElementById("alwaysClear").checked = disabled ? false :
         Preferences.get("privacy.sanitize.sanitizeOnShutdown").value;
@@ -656,8 +666,6 @@ var gPrivacyPane = {
         // adjust the Settings button for sanitizeOnShutdown
         this._updateSanitizeSettingsButton();
       }
-    } else {
-      clearDataSettings.setAttribute("hidden", "true");
     }
   },
 
@@ -789,7 +797,16 @@ var gPrivacyPane = {
    * Displays the available block lists for tracking protection.
    */
   showBlockLists() {
-    gSubDialog.open("chrome://browser/content/preferences/blocklists.xul", null);
+    var bundlePreferences = document.getElementById("bundlePreferences");
+    let brandName = document.getElementById("bundleBrand")
+      .getString("brandShortName");
+    var params = {
+      brandShortName: brandName,
+      windowTitle: bundlePreferences.getString("blockliststitle"),
+      introText: bundlePreferences.getString("blockliststext")
+    };
+    gSubDialog.open("chrome://browser/content/preferences/blocklists.xul",
+      null, params);
   },
 
   // COOKIES AND SITE DATA

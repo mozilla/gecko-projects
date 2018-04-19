@@ -39,7 +39,14 @@ public:
    */
   virtual nsINode* GetParentObject() = 0;
 
-  virtual uint32_t Length() = 0;
+  using nsIDOMNodeList::Item;
+
+  uint32_t Length()
+  {
+    uint32_t length;
+    GetLength(&length);
+    return length;
+  }
   virtual nsIContent* Item(uint32_t aIndex) = 0;
   nsIContent* IndexedGetter(uint32_t aIndex, bool& aFound)
   {
@@ -47,13 +54,10 @@ public:
     aFound = !!item;
     return item;
   }
-
-  static nsINodeList* FromDOMNodeList(nsIDOMNodeList *list)
-  {
-    return static_cast<nsINodeList*>(list);
-  }
-
 };
+
+#define NS_NODELIST_OFFSET_AND_INTERFACE_TABLE_BEGIN(_class)                  \
+  NS_OFFSET_AND_INTERFACE_TABLE_BEGIN_AMBIGUOUS(_class, nsINodeList)
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsINodeList, NS_INODELIST_IID)
 

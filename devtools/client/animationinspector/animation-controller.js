@@ -13,6 +13,7 @@
 "use strict";
 
 var { loader, require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+var { Task } = require("devtools/shared/task");
 
 loader.lazyRequireGetter(this, "promise");
 loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
@@ -29,7 +30,7 @@ var gToolbox, gInspector;
  * Startup the animationinspector controller and view, called by the sidebar
  * widget when loading/unloading the iframe into the tab.
  */
-var startup = async function(inspector) {
+var startup = Task.async(function* (inspector) {
   gInspector = inspector;
   gToolbox = inspector.toolbox;
 
@@ -42,22 +43,22 @@ var startup = async function(inspector) {
   // Startup first initalizes the controller and then the panel, in sequence.
   // If you want to know when everything's ready, do:
   // AnimationsPanel.once(AnimationsPanel.PANEL_INITIALIZED)
-  await AnimationsController.initialize();
-  await AnimationsPanel.initialize();
-};
+  yield AnimationsController.initialize();
+  yield AnimationsPanel.initialize();
+});
 
 /**
  * Shutdown the animationinspector controller and view, called by the sidebar
  * widget when loading/unloading the iframe into the tab.
  */
-var shutdown = async function() {
-  await AnimationsController.destroy();
+var shutdown = Task.async(function* () {
+  yield AnimationsController.destroy();
   // Don't assume that AnimationsPanel is defined here, it's in another file.
   if (typeof AnimationsPanel !== "undefined") {
-    await AnimationsPanel.destroy();
+    yield AnimationsPanel.destroy();
   }
   gToolbox = gInspector = null;
-};
+});
 
 // This is what makes the sidebar widget able to load/unload the panel.
 function setPanel(panel) {
@@ -73,7 +74,7 @@ function destroy() {
  * @param {Target} target The current toolbox target.
  * @return {Object} An object with boolean properties.
  */
-var getServerTraits = async function(target) {
+var getServerTraits = Task.async(function* (target) {
   let config = [
     { name: "hasToggleAll", actor: "animations",
       method: "toggleAll" },
@@ -103,11 +104,11 @@ var getServerTraits = async function(target) {
 
   let traits = {};
   for (let {name, actor, method} of config) {
-    traits[name] = await target.actorHasMethod(actor, method);
+    traits[name] = yield target.actorHasMethod(actor, method);
   }
 
   return traits;
-};
+});
 
 /**
  * The animationinspector controller's job is to retrieve AnimationPlayerFronts
@@ -131,9 +132,9 @@ var AnimationsController = {
   PLAYERS_UPDATED_EVENT: "players-updated",
   ALL_ANIMATIONS_TOGGLED_EVENT: "all-animations-toggled",
 
-  async initialize() {
+  initialize: Task.async(function* () {
     if (this.initialized) {
-      await this.initialized;
+      yield this.initialized;
       return;
     }
 
@@ -150,7 +151,7 @@ var AnimationsController = {
     this.animationsFront = new AnimationsFront(target.client, target.form);
 
     // Expose actor capabilities.
-    this.traits = await getServerTraits(target);
+    this.traits = yield getServerTraits(target);
 
     if (this.destroyed) {
       console.warn("Could not fully initialize the AnimationsController");
@@ -160,22 +161,22 @@ var AnimationsController = {
     // Let the AnimationsActor know what WalkerActor we're using. This will
     // come in handy later to return references to DOM Nodes.
     if (this.traits.hasSetWalkerActor) {
-      await this.animationsFront.setWalkerActor(gInspector.walker);
+      yield this.animationsFront.setWalkerActor(gInspector.walker);
     }
 
     this.startListeners();
-    await this.onNewNodeFront();
+    yield this.onNewNodeFront();
 
     resolver();
-  },
+  }),
 
-  async destroy() {
+  destroy: Task.async(function* () {
     if (!this.initialized) {
       return;
     }
 
     if (this.destroyed) {
-      await this.destroyed;
+      yield this.destroyed;
       return;
     }
 
@@ -193,9 +194,9 @@ var AnimationsController = {
       this.animationsFront = null;
     }
     resolver();
-  },
+  }),
 
-  startListeners: function() {
+  startListeners: function () {
     // Re-create the list of players when a new node is selected, except if the
     // sidebar isn't visible.
     gInspector.selection.on("new-node-front", this.onNewNodeFront);
@@ -203,7 +204,7 @@ var AnimationsController = {
     gToolbox.on("select", this.onPanelVisibilityChange);
   },
 
-  stopListeners: function() {
+  stopListeners: function () {
     gInspector.selection.off("new-node-front", this.onNewNodeFront);
     gInspector.sidebar.off("select", this.onPanelVisibilityChange);
     gToolbox.off("select", this.onPanelVisibilityChange);
@@ -212,19 +213,19 @@ var AnimationsController = {
     }
   },
 
-  isPanelVisible: function() {
+  isPanelVisible: function () {
     return gToolbox.currentToolId === "inspector" &&
            gInspector.sidebar &&
            gInspector.sidebar.getCurrentTabID() == "animationinspector";
   },
 
-  async onPanelVisibilityChange() {
+  onPanelVisibilityChange: Task.async(function* () {
     if (this.isPanelVisible()) {
       this.onNewNodeFront();
     }
-  },
+  }),
 
-  async onNewNodeFront() {
+  onNewNodeFront: Task.async(function* () {
     // Ignore if the panel isn't visible.
     // Or the node selection hasn't changed and no animation mutations event occurs during
     // hidden.
@@ -246,16 +247,16 @@ var AnimationsController = {
       return;
     }
 
-    await this.refreshAnimationPlayers(this.nodeFront);
+    yield this.refreshAnimationPlayers(this.nodeFront);
     this.emit(this.PLAYERS_UPDATED_EVENT, this.animationPlayers);
 
     done();
-  },
+  }),
 
   /**
    * Toggle (pause/play) all animations in the current target.
    */
-  toggleAll: function() {
+  toggleAll: function () {
     if (!this.traits.hasToggleAll) {
       return promise.resolve();
     }
@@ -272,22 +273,22 @@ var AnimationsController = {
    * if they should be played.
    * @return {Promise} Resolves when the playState has been changed.
    */
-  async toggleCurrentAnimations(shouldPause) {
+  toggleCurrentAnimations: Task.async(function* (shouldPause) {
     if (this.traits.hasToggleSeveral) {
-      await this.animationsFront.toggleSeveral(this.animationPlayers,
+      yield this.animationsFront.toggleSeveral(this.animationPlayers,
                                                shouldPause);
     } else {
       // Fall back to pausing/playing the players one by one, which is bound to
       // introduce some de-synchronization.
       for (let player of this.animationPlayers) {
         if (shouldPause) {
-          await player.pause();
+          yield player.pause();
         } else {
-          await player.play();
+          yield player.play();
         }
       }
     }
-  },
+  }),
 
   /**
    * Set all known animations' currentTimes to the provided time.
@@ -295,38 +296,38 @@ var AnimationsController = {
    * @param {Boolean} shouldPause Should the animations be paused too.
    * @return {Promise} Resolves when the current time has been set.
    */
-  async setCurrentTimeAll(time, shouldPause) {
+  setCurrentTimeAll: Task.async(function* (time, shouldPause) {
     if (this.traits.hasSetCurrentTimes) {
-      await this.animationsFront.setCurrentTimes(this.animationPlayers, time,
+      yield this.animationsFront.setCurrentTimes(this.animationPlayers, time,
                                                  shouldPause);
     } else {
       // Fall back to pausing and setting the current time on each player, one
       // by one, which is bound to introduce some de-synchronization.
       for (let animation of this.animationPlayers) {
         if (shouldPause) {
-          await animation.pause();
+          yield animation.pause();
         }
-        await animation.setCurrentTime(time);
+        yield animation.setCurrentTime(time);
       }
     }
-  },
+  }),
 
   /**
    * Set all known animations' playback rates to the provided rate.
    * @param {Number} rate.
    * @return {Promise} Resolves when the rate has been set.
    */
-  async setPlaybackRateAll(rate) {
+  setPlaybackRateAll: Task.async(function* (rate) {
     if (this.traits.hasSetPlaybackRates) {
       // If the backend can set all playback rates at the same time, use that.
-      await this.animationsFront.setPlaybackRates(this.animationPlayers, rate);
+      yield this.animationsFront.setPlaybackRates(this.animationPlayers, rate);
     } else if (this.traits.hasSetPlaybackRate) {
       // Otherwise, fall back to setting each rate individually.
       for (let animation of this.animationPlayers) {
-        await animation.setPlaybackRate(rate);
+        yield animation.setPlaybackRate(rate);
       }
     }
-  },
+  }),
 
   // AnimationPlayerFront objects are managed by this controller. They are
   // retrieved when refreshAnimationPlayers is called, stored in the
@@ -334,10 +335,10 @@ var AnimationsController = {
   // called again.
   animationPlayers: [],
 
-  async refreshAnimationPlayers(nodeFront) {
+  refreshAnimationPlayers: Task.async(function* (nodeFront) {
     this.destroyAnimationPlayers();
 
-    this.animationPlayers = await this.animationsFront
+    this.animationPlayers = yield this.animationsFront
                                       .getAnimationPlayersForNode(nodeFront);
 
     // Start listening for animation mutations only after the first method call
@@ -346,9 +347,9 @@ var AnimationsController = {
       this.animationsFront.on("mutations", this.onAnimationMutations);
       this.isListeningToMutations = true;
     }
-  },
+  }),
 
-  onAnimationMutations: function(changes) {
+  onAnimationMutations: function (changes) {
     // Insert new players into this.animationPlayers when new animations are
     // added.
     for (let {type, player} of changes) {
@@ -391,7 +392,7 @@ var AnimationsController = {
     return time;
   },
 
-  destroyAnimationPlayers: function() {
+  destroyAnimationPlayers: function () {
     this.animationPlayers = [];
   }
 };

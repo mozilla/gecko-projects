@@ -305,9 +305,8 @@ SandboxLaunchPrepare(GeckoProcessType aType,
       // Unshare network namespace if allowed by graphics; see
       // function definition above for details.  (The display
       // local-ness is cached because it won't change.)
-      static const bool canCloneNet =
-        IsDisplayLocal() && !PR_GetEnv("RENDERDOC_CAPTUREOPTS");
-      if (canCloneNet) {
+      static const bool isDisplayLocal = IsDisplayLocal();
+      if (isDisplayLocal) {
         flags |= CLONE_NEWNET;
       }
     }

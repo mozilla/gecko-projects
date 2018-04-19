@@ -198,7 +198,7 @@ class TicklerTimer final : public nsITimerCallback, public nsINamed
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSITIMERCALLBACK
 
-  explicit TicklerTimer(Tickler *aTickler)
+  TicklerTimer(Tickler *aTickler)
   {
     mTickler = do_GetWeakReference(aTickler);
   }

@@ -74,6 +74,11 @@ const Types = exports.__TypesForTests = [
     spec: "devtools/shared/specs/environment",
     front: null,
   },
+  {
+    types: ["eventLoopLag"],
+    spec: "devtools/shared/specs/eventlooplag",
+    front: "devtools/shared/fronts/eventlooplag",
+  },
   /* frame has old fashion client and no front */
   {
     types: ["frame"],
@@ -193,11 +198,6 @@ const Types = exports.__TypesForTests = [
     types: ["mediarule", "stylesheet", "stylesheets"],
     spec: "devtools/shared/specs/stylesheets",
     front: "devtools/shared/fronts/stylesheets",
-  },
-  {
-    types: ["symbolIterator"],
-    spec: "devtools/shared/specs/symbol-iterator",
-    front: null,
   },
   {
     types: ["timeline"],

@@ -40,14 +40,11 @@ This is a list of list-pairs, for ordering.
 SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
     'all-nightly-branches', set([
         'mozilla-central',
-        'comm-central',
     ])
 ], [
     'all-release-branches', set([
         'mozilla-beta',
         'mozilla-release',
-        'maple',
-        'comm-beta',
     ])
 ]]
 
@@ -62,7 +59,6 @@ SIGNING_CERT_SCOPES = {
 DEVEDITION_SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
     'beta', set([
         'mozilla-beta',
-        'maple',
     ])
 ]]
 
@@ -147,7 +143,7 @@ BEETMOVER_ACTION_SCOPES = {
     'all-candidates-tasks': 'beetmover:action:push-to-candidates',
     'all-push-tasks': 'beetmover:action:push-to-releases',
     'all-nightly-tasks': 'beetmover:action:push-to-nightly',
-    'default': 'beetmover:action:push-to-nightly',
+    'default': 'beetmover:action:push-to-staging',
 }
 
 
@@ -201,10 +197,6 @@ PUSH_APK_SCOPE_ALIAS_TO_PROJECT = [[
         'mozilla-central',
     ])
 ], [
-    'maple', set([
-        'maple',
-    ])
-], [
     'beta', set([
         'mozilla-beta',
     ])
@@ -219,7 +211,7 @@ PUSH_APK_SCOPES = {
     'central': 'googleplay:aurora',
     'beta': 'googleplay:beta',
     'release': 'googleplay:release',
-    'default': 'googleplay:dep',
+    'default': 'googleplay:invalid',
 }
 
 

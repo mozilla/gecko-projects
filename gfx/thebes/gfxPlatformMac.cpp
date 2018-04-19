@@ -18,7 +18,6 @@
 #include "nsTArray.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/VsyncDispatcher.h"
-#include "nsCocoaFeatures.h"
 #include "nsUnicodeProperties.h"
 #include "qcms.h"
 #include "gfx2DGlue.h"
@@ -79,7 +78,10 @@ gfxPlatformMac::gfxPlatformMac()
     DisableFontActivation();
     mFontAntiAliasingThreshold = ReadAntiAliasingThreshold();
 
-    InitBackendPrefs(GetBackendPrefs());
+    uint32_t canvasMask = BackendTypeBit(BackendType::SKIA);
+    uint32_t contentMask = BackendTypeBit(BackendType::SKIA);
+    InitBackendPrefs(canvasMask, BackendType::SKIA,
+                     contentMask, BackendType::SKIA);
 
     // XXX: Bug 1036682 - we run out of fds on Mac when using tiled layers because
     // with 256x256 tiles we can easily hit the soft limit of 800 when using double
@@ -99,19 +101,6 @@ gfxPlatformMac::gfxPlatformMac()
 gfxPlatformMac::~gfxPlatformMac()
 {
     gfxCoreTextShaper::Shutdown();
-}
-
-BackendPrefsData
-gfxPlatformMac::GetBackendPrefs()
-{
-  BackendPrefsData data;
-
-  data.mCanvasBitmask = BackendTypeBit(BackendType::SKIA);
-  data.mContentBitmask = BackendTypeBit(BackendType::SKIA);
-  data.mCanvasDefault = BackendType::SKIA;
-  data.mContentDefault = BackendType::SKIA;
-
-  return mozilla::Move(data);
 }
 
 bool
@@ -634,13 +623,4 @@ gfxPlatformMac::GetPlatformCMSOutputProfile(void* &mem, size_t &size)
     }
 
     ::CFRelease(iccp);
-}
-
-bool
-gfxPlatformMac::CheckVariationFontSupport()
-{
-    // We don't allow variation fonts to be enabled before 10.12,
-    // as although the Core Text APIs existed, they are known to be
-    // fairly buggy.
-    return nsCocoaFeatures::OnSierraOrLater();
 }

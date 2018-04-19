@@ -8,21 +8,20 @@ description: >
     accessor property
 ---*/
 
-var obj = {};
+        var obj = {};
 
-function get_func() {
-  return 10;
-}
+        function get_func() {
+            return 10;
+        }
+        function set_func() { }
 
-function set_func() {}
+        Object.defineProperty(obj, "foo", {
+            get: get_func,
+            set: set_func,
+            configurable: true
+        });
 
-Object.defineProperty(obj, "foo", {
-  get: get_func,
-  set: set_func,
-  configurable: true
-});
-
-Object.preventExtensions(obj);
+        Object.preventExtensions(obj);
 
 assert.sameValue(Object.isFrozen(obj), false, 'Object.isFrozen(obj)');
 

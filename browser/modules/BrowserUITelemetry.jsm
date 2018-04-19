@@ -11,6 +11,8 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "AppConstants",
   "resource://gre/modules/AppConstants.jsm");
+ChromeUtils.defineModuleGetter(this, "UITelemetry",
+  "resource://gre/modules/UITelemetry.jsm");
 ChromeUtils.defineModuleGetter(this, "RecentWindow",
   "resource:///modules/RecentWindow.jsm");
 ChromeUtils.defineModuleGetter(this, "CustomizableUI",
@@ -128,6 +130,7 @@ XPCOMUtils.defineLazyGetter(this, "ALL_BUILTIN_ITEMS", function() {
     "BMB_bookmarksToolbarPopup",
     "search-go-button",
     "soundplaying-icon",
+    "restore-tabs-button",
   ];
   return DEFAULT_ITEMS.concat(PALETTE_ITEMS)
                       .concat(SPECIAL_CASES);
@@ -163,6 +166,18 @@ const BUCKET_SEPARATOR = "|";
 
 var BrowserUITelemetry = {
   init() {
+    UITelemetry.addSimpleMeasureFunction("toolbars",
+                                         this.getToolbarMeasures.bind(this));
+    UITelemetry.addSimpleMeasureFunction("contextmenu",
+                                         this.getContextMenuInfo.bind(this));
+    // Ensure that UITour.jsm remains lazy-loaded, yet always registers its
+    // simple measure function with UITelemetry.
+    UITelemetry.addSimpleMeasureFunction("UITour",
+                                         () => UITour.getTelemetry());
+
+    UITelemetry.addSimpleMeasureFunction("syncstate",
+                                         this.getSyncState.bind(this));
+
     Services.obs.addObserver(this, "autocomplete-did-enter-text");
     CustomizableUI.addListener(this);
 
@@ -693,7 +708,7 @@ var BrowserUITelemetry = {
     "spell-add-dictionaries-main", "spell-dictionaries",
     "spell-dictionaries-menu", "spell-add-dictionaries",
     "bidi-text-direction-toggle", "bidi-page-direction-toggle", "inspect",
-    "inspect-a11y", "media-eme-learn-more"
+    "media-eme-learn-more"
   ]),
 
   _contextMenuInteractions: {},

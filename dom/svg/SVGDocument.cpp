@@ -155,8 +155,13 @@ SVGDocument::EnsureNonSVGUserAgentStyleSheetsLoaded()
     }
   }
 
-  auto cache = nsLayoutStylesheetCache::Singleton();
+  auto cache = nsLayoutStylesheetCache::For(GetStyleBackendType());
 
+  StyleSheet* sheet = cache->NumberControlSheet();
+  if (sheet) {
+    // number-control.css can be behind a pref
+    EnsureOnDemandBuiltInUASheet(sheet);
+  }
   EnsureOnDemandBuiltInUASheet(cache->FormsSheet());
   EnsureOnDemandBuiltInUASheet(cache->CounterStylesSheet());
   EnsureOnDemandBuiltInUASheet(cache->HTMLSheet());

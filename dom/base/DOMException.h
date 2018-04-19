@@ -18,6 +18,7 @@
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsID.h"
+#include "nsIDOMDOMException.h"
 #include "nsWrapperCache.h"
 #include "nsIException.h"
 #include "nsString.h"
@@ -143,13 +144,15 @@ protected:
 
 NS_DEFINE_STATIC_IID_ACCESSOR(Exception, MOZILLA_EXCEPTION_IID)
 
-class DOMException : public Exception
+class DOMException : public Exception,
+                     public nsIDOMDOMException
 {
 public:
   DOMException(nsresult aRv, const nsACString& aMessage,
                const nsACString& aName, uint16_t aCode);
 
-  NS_INLINE_DECL_REFCOUNTING_INHERITED(DOMException, Exception)
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_NSIDOMDOMEXCEPTION
 
   // nsWrapperCache overrides
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)

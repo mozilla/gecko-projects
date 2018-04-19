@@ -3,7 +3,7 @@ package org.mozilla.gecko.util.publicsuffix;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.RobolectricTestRunner;
+import org.mozilla.gecko.background.testhelpers.TestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 import java.util.ArrayList;
@@ -12,7 +12,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-@RunWith(RobolectricTestRunner.class)
+@RunWith(TestRunner.class)
 public class TestPublicSuffix {
     @Test
     public void testStripPublicSuffix() {

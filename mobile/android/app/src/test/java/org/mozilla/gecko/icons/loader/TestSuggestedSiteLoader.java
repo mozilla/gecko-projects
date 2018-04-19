@@ -16,6 +16,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.background.testhelpers.TestRunner;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.db.SuggestedSites;
 import org.mozilla.gecko.helpers.MockUserManager;
@@ -24,7 +25,6 @@ import org.mozilla.gecko.icons.IconRequest;
 import org.mozilla.gecko.icons.IconRequestBuilder;
 import org.mozilla.gecko.icons.IconResponse;
 import org.mozilla.gecko.icons.Icons;
-import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 import java.io.IOException;
@@ -34,7 +34,7 @@ import static org.mockito.Matchers.anyString;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.spy;
 
-@RunWith(RobolectricTestRunner.class)
+@RunWith(TestRunner.class)
 public class TestSuggestedSiteLoader {
 
     private Context context;

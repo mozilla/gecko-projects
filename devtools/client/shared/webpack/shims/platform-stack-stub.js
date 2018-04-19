@@ -18,22 +18,18 @@ function callFunctionWithAsyncStack(callee, stack, id) {
 }
 
 /**
- * Return the Nth path from the stack excluding substr.
+ * Return a description of the Nth caller, suitable for logging.
  *
- * @param {Number}
- *        n the Nth path from the stack to describe.
- * @param {String} substr
- *        A segment of the path that should be excluded.
+ * @param {Number} n the caller to describe
+ * @return {String} a description of the nth caller.
  */
-function getNthPathExcluding(n, substr) {
+function describeNthCaller(n) {
   if (isWorker) {
     return "";
   }
 
   let stack = new Error().stack.split("\n");
-  stack = stack.filter(line => {
-    return line && !line.includes(substr);
-  });
+  // Add one here to skip this function.
   return stack[n + 1];
 }
 
@@ -49,5 +45,5 @@ function getStack() {
 }
 
 exports.callFunctionWithAsyncStack = callFunctionWithAsyncStack;
-exports.getNthPathExcluding = getNthPathExcluding;
+exports.describeNthCaller = describeNthCaller;
 exports.getStack = getStack;

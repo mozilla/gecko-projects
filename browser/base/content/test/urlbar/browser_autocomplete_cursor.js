@@ -16,5 +16,5 @@ add_task(async function() {
   is(gURLBar.selectionStart, 5, "Should have moved the cursor");
   is(gURLBar.selectionEnd, 5, "And not selected anything");
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

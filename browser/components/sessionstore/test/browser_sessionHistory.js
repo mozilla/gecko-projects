@@ -19,7 +19,7 @@ add_task(async function test_load_start() {
 
   // Remove the tab before it has finished loading.
   await promiseContentMessage(browser, "ss-test:OnHistoryReplaceEntry");
-  await promiseRemoveTabAndSessionState(tab);
+  await promiseRemoveTab(tab);
 
   // Undo close the tab.
   tab = ss.undoCloseTab(window, 0);

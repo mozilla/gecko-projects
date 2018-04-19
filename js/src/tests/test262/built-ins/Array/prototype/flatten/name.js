@@ -19,4 +19,5 @@ verifyNotEnumerable(Array.prototype.flatten, 'name');
 verifyNotWritable(Array.prototype.flatten, 'name');
 verifyConfigurable(Array.prototype.flatten, 'name');
 
+
 reportCompare(0, 0);

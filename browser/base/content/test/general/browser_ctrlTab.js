@@ -61,9 +61,7 @@ add_task(async function() {
     checkTabs(4);
     selectTabs([0, 1, 2, 3]);
 
-    let promise = BrowserTestUtils.waitForSessionStoreUpdate(tabToClose);
-    BrowserTestUtils.removeTab(tabToClose);
-    await promise;
+    await BrowserTestUtils.removeTab(tabToClose);
     checkTabs(3);
     undoCloseTab();
     checkTabs(4);

@@ -9,17 +9,17 @@ requestLongerTimeout(2);
 // Verify that if the animation's duration, iterations or delay change in
 // content, then the widget reflects the changes.
 
-add_task(async function() {
-  await addTab(URL_ROOT + "doc_simple_animation.html");
-  let {panel, controller, inspector} = await openAnimationInspector();
+add_task(function* () {
+  yield addTab(URL_ROOT + "doc_simple_animation.html");
+  let {panel, controller, inspector} = yield openAnimationInspector();
 
   info("Select the test node");
-  await selectNodeAndWaitForAnimations(".animated", inspector);
+  yield selectNodeAndWaitForAnimations(".animated", inspector);
 
   let animation = controller.animationPlayers[0];
-  await setStyle(animation, panel, "animationDuration", "5.5s", ".animated");
-  await setStyle(animation, panel, "animationIterationCount", "300", ".animated");
-  await setStyle(animation, panel, "animationDelay", "45s", ".animated");
+  yield setStyle(animation, panel, "animationDuration", "5.5s", ".animated");
+  yield setStyle(animation, panel, "animationIterationCount", "300", ".animated");
+  yield setStyle(animation, panel, "animationDelay", "45s", ".animated");
 
   let animationsEl = panel.animationsTimelineComponent.animationsEl;
   let timeBlockEl = animationsEl.querySelector(".time-block");

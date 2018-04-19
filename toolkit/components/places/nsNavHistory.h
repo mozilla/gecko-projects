@@ -40,7 +40,6 @@
 #define QUERYUPDATE_COMPLEX_WITH_BOOKMARKS 3
 #define QUERYUPDATE_HOST 4
 #define QUERYUPDATE_MOBILEPREF 5
-#define QUERYUPDATE_NONE 6
 
 // Clamp title and URL to generously large, but not too large, length.
 // See bug 319004 for details.
@@ -258,8 +257,8 @@ public:
   // this actually executes a query and gives you results, it is used by
   // nsNavHistoryQueryResultNode
   nsresult GetQueryResults(nsNavHistoryQueryResultNode *aResultNode,
-                           const RefPtr<nsNavHistoryQuery>& aQuery,
-                           const RefPtr<nsNavHistoryQueryOptions>& aOptions,
+                           const nsCOMArray<nsNavHistoryQuery>& aQueries,
+                           nsNavHistoryQueryOptions *aOptions,
                            nsCOMArray<nsNavHistoryResultNode>* aResults);
 
   // Take a row of kGetInfoIndex_* columns and construct a ResultNode.
@@ -297,6 +296,16 @@ public:
    */
   int32_t GetDaysOfHistory();
 
+  // used by query result nodes to update: see comment on body of CanLiveUpdateQuery
+  static uint32_t GetUpdateRequirements(const nsCOMArray<nsNavHistoryQuery>& aQueries,
+                                        nsNavHistoryQueryOptions* aOptions,
+                                        bool* aHasSearchTerms);
+  bool EvaluateQueryForNode(const nsCOMArray<nsNavHistoryQuery>& aQueries,
+                              nsNavHistoryQueryOptions* aOptions,
+                              nsNavHistoryResultNode* aNode);
+
+  static nsresult AsciiHostNameFromHostString(const nsACString& aHostName,
+                                              nsACString& aAscii);
   void DomainNameFromURI(nsIURI* aURI,
                          nsACString& aDomainName);
   static PRTime NormalizeTime(uint32_t aRelative, PRTime aOffset);
@@ -310,6 +319,11 @@ public:
   int32_t mBatchLevel;
   // Current active transaction for a batch.
   mozStorageTransaction* mBatchDBTransaction;
+
+  // better alternative to QueryStringToQueries (in nsNavHistoryQuery.cpp)
+  nsresult QueryStringToQueryArray(const nsACString& aQueryString,
+                                   nsCOMArray<nsNavHistoryQuery>* aQueries,
+                                   nsNavHistoryQueryOptions** aOptions);
 
   typedef nsDataHashtable<nsCStringHashKey, nsCString> StringHash;
 
@@ -489,13 +503,6 @@ public:
   }
 #endif
 
-
-  static nsresult FilterResultSet(nsNavHistoryQueryResultNode *aParentNode,
-                                  const nsCOMArray<nsNavHistoryResultNode>& aSet,
-                                  nsCOMArray<nsNavHistoryResultNode>* aFiltered,
-                                  const RefPtr<nsNavHistoryQuery>& aQuery,
-                                  nsNavHistoryQueryOptions* aOptions);
-
 private:
   ~nsNavHistory();
 
@@ -536,24 +543,32 @@ protected:
    */
   static void expireNowTimerCallback(nsITimer* aTimer, void* aClosure);
 
-  nsresult ConstructQueryString(const RefPtr<nsNavHistoryQuery>& aQuery,
-                                const RefPtr<nsNavHistoryQueryOptions>& aOptions,
+  nsresult ConstructQueryString(const nsCOMArray<nsNavHistoryQuery>& aQueries,
+                                nsNavHistoryQueryOptions* aOptions,
                                 nsCString& queryString,
                                 bool& aParamsPresent,
                                 StringHash& aAddParams);
 
-  nsresult QueryToSelectClause(const RefPtr<nsNavHistoryQuery>& aQuery,
-                               const RefPtr<nsNavHistoryQueryOptions>& aOptions,
+  nsresult QueryToSelectClause(nsNavHistoryQuery* aQuery,
+                               nsNavHistoryQueryOptions* aOptions,
+                               int32_t aQueryIndex,
                                nsCString* aClause);
   nsresult BindQueryClauseParameters(mozIStorageBaseStatement* statement,
-                                     const RefPtr<nsNavHistoryQuery>& aQuery,
-                                     const RefPtr<nsNavHistoryQueryOptions>& aOptions);
+                                     int32_t aQueryIndex,
+                                     nsNavHistoryQuery* aQuery,
+                                     nsNavHistoryQueryOptions* aOptions);
 
   nsresult ResultsAsList(mozIStorageStatement* statement,
                          nsNavHistoryQueryOptions* aOptions,
                          nsCOMArray<nsNavHistoryResultNode>* aResults);
 
   void TitleForDomain(const nsCString& domain, nsACString& aTitle);
+
+  nsresult FilterResultSet(nsNavHistoryQueryResultNode *aParentNode,
+                           const nsCOMArray<nsNavHistoryResultNode>& aSet,
+                           nsCOMArray<nsNavHistoryResultNode>* aFiltered,
+                           const nsCOMArray<nsNavHistoryQuery>& aQueries,
+                           nsNavHistoryQueryOptions* aOptions);
 
   // observers
   nsMaybeWeakPtrArray<nsINavHistoryObserver> mObservers;
@@ -629,9 +644,9 @@ protected:
   int32_t mReloadVisitBonus;
 
   // in nsNavHistoryQuery.cpp
-  nsresult TokensToQuery(const nsTArray<QueryKeyValuePair>& aTokens,
-                         nsNavHistoryQuery* aQuery,
-                         nsNavHistoryQueryOptions* aOptions);
+  nsresult TokensToQueries(const nsTArray<QueryKeyValuePair>& aTokens,
+                           nsCOMArray<nsNavHistoryQuery>* aQueries,
+                           nsNavHistoryQueryOptions* aOptions);
 
   int64_t mTagsFolder;
 

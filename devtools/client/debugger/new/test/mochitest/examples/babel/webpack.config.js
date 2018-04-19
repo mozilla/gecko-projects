@@ -48,11 +48,8 @@ module.exports = [
   }
 ].concat(
   tests.map(({ name, dirname, input, output }) => {
-    const babelEnabled = name !== "webpackStandalone";
-    const babelEnv = !name.match(/Es6/);
+    const babelEnv = name !== "webpackModulesEs6";
     const babelModules = name !== "webpackModules";
-    const devtool =
-      name === "evalSourceMaps" ? "eval-source-map" : "source-map";
 
     return {
       context: __dirname,
@@ -64,27 +61,22 @@ module.exports = [
         libraryTarget: "var",
         library: name
       },
-      devtool,
+      devtool: "sourcemap",
       module: {
-        loaders: babelEnabled
-          ? [
-              {
-                test: /\.js$/,
-                exclude: /node_modules/,
-                loader: "babel-loader",
-                options: {
-                  babelrc: false,
-                  presets: babelEnv
-                    ? [["env", { modules: babelModules ? "commonjs" : false }]]
-                    : [],
-                  plugins:
-                    (babelEnv && babelModules ? ["add-module-exports"] : []).concat([
-                      "babel-plugin-transform-flow-strip-types",
-                    ])
-                }
-              }
-            ]
-          : []
+        loaders: [
+          {
+            test: /\.js$/,
+            exclude: /node_modules/,
+            loader: "babel-loader",
+            options: {
+              babelrc: false,
+              presets: babelEnv
+                ? [["env", { modules: babelModules ? "commonjs" : false }]]
+                : [],
+              plugins: babelEnv && babelModules ? ["add-module-exports"] : []
+            }
+          }
+        ]
       }
     };
   })

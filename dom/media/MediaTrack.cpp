@@ -12,12 +12,11 @@
 namespace mozilla {
 namespace dom {
 
-MediaTrack::MediaTrack(nsIGlobalObject* aOwnerGlobal,
-                       const nsAString& aId,
+MediaTrack::MediaTrack(const nsAString& aId,
                        const nsAString& aKind,
                        const nsAString& aLabel,
                        const nsAString& aLanguage)
-  : DOMEventTargetHelper(aOwnerGlobal)
+  : DOMEventTargetHelper()
   , mId(aId)
   , mKind(aKind)
   , mLabel(aLabel)
@@ -40,6 +39,12 @@ void
 MediaTrack::SetTrackList(MediaTrackList* aList)
 {
   mList = aList;
+}
+
+void
+MediaTrack::Init(nsPIDOMWindowInner* aOwnerWindow)
+{
+  BindToOwner(aOwnerWindow);
 }
 
 } // namespace dom

@@ -4,11 +4,12 @@
 
 const {HUDService} = require("devtools/client/webconsole/hudservice");
 
-function test() {
+function test()
+{
   waitForExplicitFinish();
 
   gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
-  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(function() {
+  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(function () {
     openScratchpad(runTests);
   });
 
@@ -16,7 +17,8 @@ function test() {
                    "openErrorConsole()");
 }
 
-function runTests() {
+function runTests()
+{
   Services.obs.addObserver(function observer(aSubject) {
     Services.obs.removeObserver(observer, "web-console-created");
     aSubject.QueryInterface(Ci.nsISupportsString);

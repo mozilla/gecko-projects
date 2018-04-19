@@ -1,7 +1,7 @@
 // Copyright (C) 2016 the V8 project authors. All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
 /*---
-esid: sec-get-%typedarray%.prototype.buffer
+es6id: 22.2.3.1
 description: >
   Requires this value to have a [[ViewedArrayBuffer]] internal slot
 info: |

@@ -85,12 +85,12 @@ public:
   static bool CompositorIsInGPUProcess();
 
   virtual mozilla::ipc::IPCResult
-  RecvDidComposite(const LayersId& aId, const uint64_t& aTransactionId,
+  RecvDidComposite(const uint64_t& aId, const uint64_t& aTransactionId,
                    const TimeStamp& aCompositeStart,
                    const TimeStamp& aCompositeEnd) override;
 
   virtual mozilla::ipc::IPCResult
-  RecvInvalidateLayers(const LayersId& aLayersId) override;
+  RecvInvalidateLayers(const uint64_t& aLayersId) override;
 
   virtual mozilla::ipc::IPCResult
   RecvUpdatePluginConfigurations(const LayoutDeviceIntPoint& aContentOffset,
@@ -107,7 +107,7 @@ public:
                                             const ReadLockDescriptor& aReadLock,
                                             const LayersBackend& aLayersBackend,
                                             const TextureFlags& aFlags,
-                                            const LayersId& aId,
+                                            const uint64_t& aId,
                                             const uint64_t& aSerial,
                                             const wr::MaybeExternalImageId& aExternalImageId) override;
 
@@ -142,8 +142,8 @@ public:
   bool SendWillClose();
   bool SendPause();
   bool SendResume();
-  bool SendNotifyChildCreated(const LayersId& id, CompositorOptions* aOptions);
-  bool SendAdoptChild(const LayersId& id);
+  bool SendNotifyChildCreated(const uint64_t& id, CompositorOptions* aOptions);
+  bool SendAdoptChild(const uint64_t& id);
   bool SendMakeSnapshot(const SurfaceDescriptor& inSnapshot, const gfx::IntRect& dirtyRect);
   bool SendFlushRendering();
   bool SendGetTileSize(int32_t* tileWidth, int32_t* tileHeight);
@@ -151,6 +151,9 @@ public:
   bool SendStopFrameTimeRecording(const uint32_t& startIndex, nsTArray<float>* intervals);
   bool SendNotifyRegionInvalidated(const nsIntRegion& region);
   bool SendRequestNotifyAfterRemotePaint();
+  bool SendClearApproximatelyVisibleRegions(uint64_t aLayersId, uint32_t aPresShellId);
+  bool SendNotifyApproximatelyVisibleRegion(const ScrollableLayerGuid& aGuid,
+                                            const mozilla::CSSIntRegion& aRegion);
   bool SendAllPluginsCaptured();
   bool IsSameProcess() const override;
 
@@ -199,10 +202,10 @@ public:
   PCompositorWidgetChild* AllocPCompositorWidgetChild(const CompositorWidgetInitData& aInitData) override;
   bool DeallocPCompositorWidgetChild(PCompositorWidgetChild* aActor) override;
 
-  PAPZCTreeManagerChild* AllocPAPZCTreeManagerChild(const LayersId& aLayersId) override;
+  PAPZCTreeManagerChild* AllocPAPZCTreeManagerChild(const uint64_t& aLayersId) override;
   bool DeallocPAPZCTreeManagerChild(PAPZCTreeManagerChild* aActor) override;
 
-  PAPZChild* AllocPAPZChild(const LayersId& aLayersId) override;
+  PAPZChild* AllocPAPZChild(const uint64_t& aLayersId) override;
   bool DeallocPAPZChild(PAPZChild* aActor) override;
 
   void WillEndTransaction();
@@ -297,7 +300,7 @@ private:
 
   virtual PLayerTransactionChild*
     AllocPLayerTransactionChild(const nsTArray<LayersBackend>& aBackendHints,
-                                const LayersId& aId) override;
+                                const uint64_t& aId) override;
 
   virtual bool DeallocPLayerTransactionChild(PLayerTransactionChild *aChild) override;
 
@@ -305,7 +308,7 @@ private:
 
   virtual mozilla::ipc::IPCResult RecvSharedCompositorFrameMetrics(const mozilla::ipc::SharedMemoryBasic::Handle& metrics,
                                                                    const CrossProcessMutexHandle& handle,
-                                                                   const LayersId& aLayersId,
+                                                                   const uint64_t& aLayersId,
                                                                    const uint32_t& aAPZCId) override;
 
   virtual mozilla::ipc::IPCResult RecvReleaseSharedCompositorFrameMetrics(const ViewID& aId,
@@ -314,7 +317,7 @@ private:
   virtual mozilla::ipc::IPCResult
   RecvRemotePaintIsReady() override;
 
-  mozilla::ipc::IPCResult RecvObserveLayerUpdate(const LayersId& aLayersId,
+  mozilla::ipc::IPCResult RecvObserveLayerUpdate(const uint64_t& aLayersId,
                                                  const uint64_t& aEpoch,
                                                  const bool& aActive) override;
 
@@ -329,14 +332,14 @@ private:
     SharedFrameMetricsData(
         const mozilla::ipc::SharedMemoryBasic::Handle& metrics,
         const CrossProcessMutexHandle& handle,
-        const LayersId& aLayersId,
+        const uint64_t& aLayersId,
         const uint32_t& aAPZCId);
 
     ~SharedFrameMetricsData();
 
     void CopyFrameMetrics(FrameMetrics* aFrame);
     FrameMetrics::ViewID GetViewID();
-    LayersId GetLayersId() const;
+    uint64_t GetLayersId() const;
     uint32_t GetAPZCId();
 
   private:
@@ -344,7 +347,7 @@ private:
     // the shared FrameMetrics
     RefPtr<mozilla::ipc::SharedMemoryBasic> mBuffer;
     CrossProcessMutex* mMutex;
-    LayersId mLayersId;
+    uint64_t mLayersId;
     // Unique ID of the APZC that is sharing the FrameMetrics
     uint32_t mAPZCId;
   };

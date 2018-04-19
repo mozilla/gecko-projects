@@ -243,7 +243,7 @@ public:
    *
    * (See mozILocaleService.idl for a JS-callable version of this.)
    */
-  void NegotiateLanguages(const nsTArray<nsCString>& aRequested,
+  bool NegotiateLanguages(const nsTArray<nsCString>& aRequested,
                           const nsTArray<nsCString>& aAvailable,
                           const nsACString& aDefaultLocale,
                           LangNegStrategy aLangNegStrategy,

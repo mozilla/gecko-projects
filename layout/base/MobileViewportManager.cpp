@@ -9,7 +9,6 @@
 #include "gfxPrefs.h"
 #include "LayersLogging.h"
 #include "mozilla/PresShell.h"
-#include "mozilla/dom/EventTarget.h"
 #include "nsIDOMEvent.h"
 #include "nsIFrame.h"
 #include "nsLayoutUtils.h"

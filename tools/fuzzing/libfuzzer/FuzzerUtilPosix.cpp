@@ -18,6 +18,7 @@
 #include <errno.h>
 #include <iomanip>
 #include <signal.h>
+#include <sstream>
 #include <stdio.h>
 #include <sys/resource.h>
 #include <sys/syscall.h>
@@ -40,31 +41,14 @@ static void InterruptHandler(int, siginfo_t *, void *) {
   Fuzzer::StaticInterruptCallback();
 }
 
-static void GracefulExitHandler(int, siginfo_t *, void *) {
-  Fuzzer::StaticGracefulExitCallback();
-}
-
 static void FileSizeExceedHandler(int, siginfo_t *, void *) {
   Fuzzer::StaticFileSizeExceedCallback();
 }
 
 static void SetSigaction(int signum,
                          void (*callback)(int, siginfo_t *, void *)) {
-  struct sigaction sigact = {};
-  if (sigaction(signum, nullptr, &sigact)) {
-    Printf("libFuzzer: sigaction failed with %d\n", errno);
-    exit(1);
-  }
-  if (sigact.sa_flags & SA_SIGINFO) {
-    if (sigact.sa_sigaction)
-      return;
-  } else {
-    if (sigact.sa_handler != SIG_DFL && sigact.sa_handler != SIG_IGN &&
-        sigact.sa_handler != SIG_ERR)
-      return;
-  }
-
-  sigact = {};
+  struct sigaction sigact;
+  memset(&sigact, 0, sizeof(sigact));
   sigact.sa_sigaction = callback;
   if (sigaction(signum, &sigact, 0)) {
     Printf("libFuzzer: sigaction failed with %d\n", errno);
@@ -102,10 +86,6 @@ void SetSignalHandler(const FuzzingOptions& Options) {
     SetSigaction(SIGFPE, CrashHandler);
   if (Options.HandleXfsz)
     SetSigaction(SIGXFSZ, FileSizeExceedHandler);
-  if (Options.HandleUsr1)
-    SetSigaction(SIGUSR1, GracefulExitHandler);
-  if (Options.HandleUsr2)
-    SetSigaction(SIGUSR2, GracefulExitHandler);
 }
 
 void SleepSeconds(int Seconds) {
@@ -118,7 +98,7 @@ size_t GetPeakRSSMb() {
   struct rusage usage;
   if (getrusage(RUSAGE_SELF, &usage))
     return 0;
-  if (LIBFUZZER_LINUX || LIBFUZZER_FREEBSD || LIBFUZZER_NETBSD) {
+  if (LIBFUZZER_LINUX) {
     // ru_maxrss is in KiB
     return usage.ru_maxrss >> 10;
   } else if (LIBFUZZER_APPLE) {

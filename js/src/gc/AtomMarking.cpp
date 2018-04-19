@@ -46,11 +46,12 @@ namespace gc {
 // single Cell.
 
 void
-AtomMarkingRuntime::registerArena(Arena* arena, const AutoLockGC& lock)
+AtomMarkingRuntime::registerArena(Arena* arena)
 {
     MOZ_ASSERT(arena->getThingSize() != 0);
     MOZ_ASSERT(arena->getThingSize() % CellAlignBytes == 0);
     MOZ_ASSERT(arena->zone->isAtomsZone());
+    MOZ_ASSERT(arena->zone->runtimeFromAnyThread()->currentThreadHasExclusiveAccess());
 
     // We need to find a range of bits from the atoms bitmap for this arena.
 
@@ -66,7 +67,7 @@ AtomMarkingRuntime::registerArena(Arena* arena, const AutoLockGC& lock)
 }
 
 void
-AtomMarkingRuntime::unregisterArena(Arena* arena, const AutoLockGC& lock)
+AtomMarkingRuntime::unregisterArena(Arena* arena)
 {
     MOZ_ASSERT(arena->zone->isAtomsZone());
 
@@ -77,8 +78,7 @@ AtomMarkingRuntime::unregisterArena(Arena* arena, const AutoLockGC& lock)
 bool
 AtomMarkingRuntime::computeBitmapFromChunkMarkBits(JSRuntime* runtime, DenseBitmap& bitmap)
 {
-    MOZ_ASSERT(CurrentThreadIsPerformingGC());
-    MOZ_ASSERT(!runtime->hasHelperThreadZones());
+    MOZ_ASSERT(runtime->currentThreadHasExclusiveAccess());
 
     if (!bitmap.ensureSpace(allocatedWords))
         return false;
@@ -130,8 +130,7 @@ AddBitmapToChunkMarkBits(JSRuntime* runtime, Bitmap& bitmap)
 void
 AtomMarkingRuntime::updateChunkMarkBits(JSRuntime* runtime)
 {
-    MOZ_ASSERT(CurrentThreadIsPerformingGC());
-    MOZ_ASSERT(!runtime->hasHelperThreadZones());
+    MOZ_ASSERT(runtime->currentThreadHasExclusiveAccess());
 
     // Try to compute a simple union of the zone atom bitmaps before updating
     // the chunk mark bitmaps. If this allocation fails then fall back to
@@ -196,8 +195,7 @@ AtomMarkingRuntime::markAtomValue(JSContext* cx, const Value& value)
 void
 AtomMarkingRuntime::adoptMarkedAtoms(Zone* target, Zone* source)
 {
-    MOZ_ASSERT(CurrentThreadCanAccessZone(source));
-    MOZ_ASSERT(CurrentThreadCanAccessZone(target));
+    MOZ_ASSERT(target->runtimeFromAnyThread()->currentThreadHasExclusiveAccess());
     target->markedAtoms().bitwiseOrWith(source->markedAtoms());
 }
 
@@ -219,6 +217,12 @@ AtomMarkingRuntime::atomIsMarked(Zone* zone, T* thing)
 
     if (ThingIsPermanent(thing))
         return true;
+
+    if (mozilla::IsSame<T, JSAtom>::value) {
+        JSAtom* atom = reinterpret_cast<JSAtom*>(thing);
+        if (AtomIsPinnedInRuntime(zone->runtimeFromAnyThread(), atom))
+            return true;
+    }
 
     size_t bit = GetAtomBit(&thing->asTenured());
     return zone->markedAtoms().getBit(bit);

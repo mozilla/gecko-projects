@@ -10,7 +10,6 @@
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/dom/PaymentRequestBinding.h"
 #include "mozilla/dom/Promise.h"
-#include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/ErrorResult.h"
 #include "nsWrapperCache.h"
 #include "PaymentRequestUpdateEvent.h"
@@ -23,7 +22,6 @@ class PaymentAddress;
 class PaymentResponse;
 
 class PaymentRequest final : public DOMEventTargetHelper
-                           , public PromiseNativeHandler
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
@@ -92,8 +90,7 @@ public:
   already_AddRefed<Promise> CanMakePayment(ErrorResult& aRv);
   void RespondCanMakePayment(bool aResult);
 
-  already_AddRefed<Promise> Show(const Optional<OwningNonNull<Promise>>& detailsPromise,
-                                 ErrorResult& aRv);
+  already_AddRefed<Promise> Show(ErrorResult& aRv);
   void RespondShowPayment(const nsAString& aMethodName,
                           const nsAString& aDetails,
                           const nsAString& aPayerName,
@@ -113,7 +110,6 @@ public:
   bool Equals(const nsAString& aInternalId) const;
 
   bool ReadyForUpdate();
-  bool IsUpdating() const { return mUpdating; }
   void SetUpdating(bool aUpdating);
 
   already_AddRefed<PaymentAddress> GetShippingAddress() const;
@@ -140,16 +136,6 @@ public:
 
   void SetShippingType(const Nullable<PaymentShippingType>& aShippingType);
   Nullable<PaymentShippingType> GetShippingType() const;
-
-  inline void ShippingWasRequested()
-  {
-    mRequestShipping = true;
-  }
-
-  void
-  ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) override;
-  void
-  RejectedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) override;
 
   IMPL_EVENT_HANDLER(shippingaddresschange);
   IMPL_EVENT_HANDLER(shippingoptionchange);
@@ -187,10 +173,6 @@ protected:
   // "true" when there is a pending updateWith() call to update the payment request
   // and "false" otherwise.
   bool mUpdating;
-
-  // Whether shipping was requested. This models [[options]].requestShipping,
-  // but we don't actually store the full [[options]] internal slot.
-  bool mRequestShipping;
   // The error is set in AbortUpdate(). The value is NS_OK by default.
   nsresult mUpdateError;
 

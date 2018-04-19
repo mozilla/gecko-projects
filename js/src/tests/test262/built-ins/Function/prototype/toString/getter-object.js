@@ -4,7 +4,6 @@
 /*---
 esid: sec-method-definitions-runtime-semantics-propertydefinitionevaluation
 description: Function.prototype.toString on a getter (object)
-includes: [nativeFunctionMatcher.js]
 ---*/
 
 let x = "h";
@@ -12,8 +11,8 @@ let f = Object.getOwnPropertyDescriptor({ /* before */get /* a */ f /* b */ ( /*
 let g = Object.getOwnPropertyDescriptor({ /* before */get /* a */ [ /* b */ "g" /* c */ ] /* d */ ( /* e */ ) /* f */ { /* g */ }/* after */ }, "g").get;
 let h = Object.getOwnPropertyDescriptor({ /* before */get /* a */ [ /* b */ x /* c */ ] /* d */ ( /* e */ ) /* f */ { /* g */ }/* after */ }, "h").get;
 
-assertToStringOrNativeFunction(f, "get /* a */ f /* b */ ( /* c */ ) /* d */ { /* e */ }");
-assertToStringOrNativeFunction(g, "get /* a */ [ /* b */ \"g\" /* c */ ] /* d */ ( /* e */ ) /* f */ { /* g */ }");
-assertToStringOrNativeFunction(h, "get /* a */ [ /* b */ x /* c */ ] /* d */ ( /* e */ ) /* f */ { /* g */ }");
+assert.sameValue(f.toString(), "get /* a */ f /* b */ ( /* c */ ) /* d */ { /* e */ }");
+assert.sameValue(g.toString(), "get /* a */ [ /* b */ \"g\" /* c */ ] /* d */ ( /* e */ ) /* f */ { /* g */ }");
+assert.sameValue(h.toString(), "get /* a */ [ /* b */ x /* c */ ] /* d */ ( /* e */ ) /* f */ { /* g */ }");
 
 reportCompare(0, 0);

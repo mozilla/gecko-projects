@@ -615,9 +615,8 @@ PresentationConnection::DispatchConnectionCloseEvent(
   closedEvent->SetTrusted(true);
 
   if (aDispatchNow) {
-    ErrorResult rv;
-    DispatchEvent(*closedEvent, rv);
-    return rv.StealNSResult();
+    bool ignore;
+    return DOMEventTargetHelper::DispatchEvent(closedEvent, &ignore);
   }
 
   RefPtr<AsyncEventDispatcher> asyncDispatcher =

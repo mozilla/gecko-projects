@@ -9,7 +9,7 @@
 #include "nsIContent.h"
 #include "nsAtom.h"
 #include "nsPresContext.h"
-#include "mozilla/ComputedStyle.h"
+#include "nsStyleContext.h"
 #include "nsCSSRendering.h"
 #include "nsNameSpaceManager.h"
 #include "nsViewManager.h"
@@ -19,6 +19,7 @@
 #include "nsPopupSetFrame.h"
 #include "nsPIDOMWindow.h"
 #include "nsIDOMEvent.h"
+#include "nsIDOMScreen.h"
 #include "nsIDOMXULMenuListElement.h"
 #include "nsIPresShell.h"
 #include "nsFrameManager.h"
@@ -56,9 +57,11 @@
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/KeyboardEvent.h"
 #include "mozilla/dom/KeyboardEventBinding.h"
+#include "mozilla/dom/PopupBoxObject.h"
 #include <algorithm>
 
 using namespace mozilla;
+using mozilla::dom::PopupBoxObject;
 using mozilla::dom::KeyboardEvent;
 
 int8_t nsMenuPopupFrame::sDefaultLevelIsTop = -1;
@@ -79,9 +82,9 @@ const char* kPrefIncrementalSearchTimeout =
 // Wrapper for creating a new menu popup container
 //
 nsIFrame*
-NS_NewMenuPopupFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
+NS_NewMenuPopupFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
-  return new (aPresShell) nsMenuPopupFrame(aStyle);
+  return new (aPresShell) nsMenuPopupFrame(aContext);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMenuPopupFrame)
@@ -93,8 +96,8 @@ NS_QUERYFRAME_TAIL_INHERITING(nsBoxFrame)
 //
 // nsMenuPopupFrame ctor
 //
-nsMenuPopupFrame::nsMenuPopupFrame(ComputedStyle* aStyle)
-  : nsBoxFrame(aStyle, kClassID)
+nsMenuPopupFrame::nsMenuPopupFrame(nsStyleContext* aContext)
+  : nsBoxFrame(aContext, kClassID)
   , mCurrentMenu(nullptr)
   , mView(nullptr)
   , mPrefSize(-1, -1)
@@ -107,6 +110,7 @@ nsMenuPopupFrame::nsMenuPopupFrame(ComputedStyle* aStyle)
   , mPopupAlignment(POPUPALIGNMENT_NONE)
   , mPopupAnchor(POPUPALIGNMENT_NONE)
   , mPosition(POPUPPOSITION_UNKNOWN)
+  , mConsumeRollupEvent(PopupBoxObject::ROLLUP_DEFAULT)
   , mFlip(FlipType_Default)
   , mIsOpenChanged(false)
   , mIsContextMenu(false)
@@ -155,10 +159,14 @@ nsMenuPopupFrame::Init(nsIContent*       aContent,
   viewManager->SetViewFloating(ourView, true);
 
   mPopupType = ePopupTypePanel;
-  if (aContent->IsAnyOfXULElements(nsGkAtoms::menupopup, nsGkAtoms::popup)) {
-    mPopupType = ePopupTypeMenu;
-  } else if (aContent->IsXULElement(nsGkAtoms::tooltip)) {
-    mPopupType = ePopupTypeTooltip;
+  nsIDocument* doc = aContent->OwnerDoc();
+  int32_t namespaceID;
+  RefPtr<nsAtom> tag = doc->BindingManager()->ResolveTag(aContent, &namespaceID);
+  if (namespaceID == kNameSpaceID_XUL) {
+    if (tag == nsGkAtoms::menupopup || tag == nsGkAtoms::popup)
+      mPopupType = ePopupTypeMenu;
+    else if (tag == nsGkAtoms::tooltip)
+      mPopupType = ePopupTypeTooltip;
   }
 
   nsCOMPtr<nsIDocShellTreeItem> dsti = PresContext()->GetDocShell();
@@ -1430,7 +1438,7 @@ nsMenuPopupFrame::SetPopupPosition(nsIFrame* aAnchorFrame, bool aIsMove, bool aS
     // If anchored to a rectangle, use that rectangle. Otherwise, determine the
     // rectangle from the anchor.
     if (mAnchorType == MenuPopupAnchorType_Rect) {
-      anchorRect = ToAppUnits(mScreenRect, nsPresContext::AppUnitsPerCSSPixel());
+      anchorRect = ToAppUnits(mScreenRect, presContext->AppUnitsPerCSSPixel());
     }
     else {
       // if the frame is not specified, use the anchor node passed to OpenPopup. If
@@ -1512,7 +1520,7 @@ nsMenuPopupFrame::SetPopupPosition(nsIFrame* aAnchorFrame, bool aIsMove, bool aS
     // mXPos and mYPos specify an additonal offset passed to OpenPopup that
     // should be added to the position.  We also add the offset to the anchor
     // pos so a later flip/resize takes the offset into account.
-    nscoord anchorXOffset = nsPresContext::CSSPixelsToAppUnits(mXPos);
+    nscoord anchorXOffset = presContext->CSSPixelsToAppUnits(mXPos);
     if (IsDirectionRTL()) {
       screenPoint.x -= anchorXOffset;
       anchorRect.x -= anchorXOffset;
@@ -1520,7 +1528,7 @@ nsMenuPopupFrame::SetPopupPosition(nsIFrame* aAnchorFrame, bool aIsMove, bool aS
       screenPoint.x += anchorXOffset;
       anchorRect.x += anchorXOffset;
     }
-    nscoord anchorYOffset = nsPresContext::CSSPixelsToAppUnits(mYPos);
+    nscoord anchorYOffset = presContext->CSSPixelsToAppUnits(mYPos);
     screenPoint.y += anchorYOffset;
     anchorRect.y += anchorYOffset;
 
@@ -1534,8 +1542,8 @@ nsMenuPopupFrame::SetPopupPosition(nsIFrame* aAnchorFrame, bool aIsMove, bool aS
       // Account for the margin that will end up being added to the screen coordinate
       // the next time SetPopupPosition is called.
       mAnchorType = MenuPopupAnchorType_Point;
-      mScreenRect.x = nsPresContext::AppUnitsToIntCSSPixels(screenPoint.x - margin.left);
-      mScreenRect.y = nsPresContext::AppUnitsToIntCSSPixels(screenPoint.y - margin.top);
+      mScreenRect.x = presContext->AppUnitsToIntCSSPixels(screenPoint.x - margin.left);
+      mScreenRect.y = presContext->AppUnitsToIntCSSPixels(screenPoint.y - margin.top);
     }
   }
   else {
@@ -1809,6 +1817,12 @@ void nsMenuPopupFrame::CanAdjustEdges(Side aHorizontalSide,
 
 ConsumeOutsideClicksResult nsMenuPopupFrame::ConsumeOutsideClicks()
 {
+  // If the popup has explicitly set a consume mode, honor that.
+  if (mConsumeRollupEvent != PopupBoxObject::ROLLUP_DEFAULT) {
+    return (mConsumeRollupEvent == PopupBoxObject::ROLLUP_CONSUME) ?
+           ConsumeOutsideClicks_True : ConsumeOutsideClicks_ParentOnly;
+  }
+
   if (mContent->AsElement()->AttrValueIs(kNameSpaceID_None,
                                          nsGkAtoms::consumeoutsideclicks,
                                          nsGkAtoms::_true, eCaseMatters)) {
@@ -2266,6 +2280,12 @@ nsMenuPopupFrame::GetWidget()
   return view->GetWidget();
 }
 
+void
+nsMenuPopupFrame::AttachedDismissalListener()
+{
+  mConsumeRollupEvent = PopupBoxObject::ROLLUP_DEFAULT;
+}
+
 // helpers /////////////////////////////////////////////////////////////
 
 nsresult
@@ -2391,9 +2411,10 @@ nsMenuPopupFrame::MoveTo(const CSSIntPoint& aPos, bool aUpdateAttrs)
                      LookAndFeel::eIntID_ContextMenuOffsetVertical));
   }
 
+  nsPresContext* presContext = PresContext();
   mAnchorType = MenuPopupAnchorType_Point;
-  mScreenRect.x = aPos.x - nsPresContext::AppUnitsToIntCSSPixels(margin.left);
-  mScreenRect.y = aPos.y - nsPresContext::AppUnitsToIntCSSPixels(margin.top);
+  mScreenRect.x = aPos.x - presContext->AppUnitsToIntCSSPixels(margin.left);
+  mScreenRect.y = aPos.y - presContext->AppUnitsToIntCSSPixels(margin.top);
 
   SetPopupPosition(nullptr, true, false, true);
 
@@ -2441,6 +2462,12 @@ nsMenuPopupFrame::SetAutoPosition(bool aShouldAutoPosition)
   if (pm) {
     pm->UpdateFollowAnchor(this);
   }
+}
+
+void
+nsMenuPopupFrame::SetConsumeRollupEvent(uint32_t aConsumeMode)
+{
+  mConsumeRollupEvent = aConsumeMode;
 }
 
 int8_t

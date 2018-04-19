@@ -407,12 +407,6 @@ struct TraversalTracer : public JS::CallbackTracer
 void
 TraversalTracer::onChild(const JS::GCCellPtr& aThing)
 {
-  // Checking strings and symbols for being gray is rather slow, and we don't
-  // need either of them for the cycle collector.
-  if (aThing.is<JSString>() || aThing.is<JS::Symbol>()) {
-    return;
-  }
-
   // Don't traverse non-gray objects, unless we want all traces.
   if (!JS::GCThingIsMarkedGray(aThing) && !mCb.WantAllTraces()) {
     return;
@@ -441,7 +435,7 @@ TraversalTracer::onChild(const JS::GCCellPtr& aThing)
     // due to information attached to the groups which can lead other groups to
     // be traced.
     JS_TraceObjectGroupCycleCollectorChildren(this, aThing);
-  } else {
+  } else if (!aThing.is<JSString>()) {
     JS::TraceChildren(this, aThing);
   }
 }

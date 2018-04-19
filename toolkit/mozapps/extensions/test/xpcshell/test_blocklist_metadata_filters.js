@@ -7,11 +7,14 @@
 
 const URI_EXTENSION_BLOCKLIST_DIALOG = "chrome://mozapps/content/extensions/blocklist.xul";
 
+ChromeUtils.import("resource://testing-common/httpd.js");
 ChromeUtils.import("resource://testing-common/MockRegistrar.jsm");
-var testserver = AddonTestUtils.createHttpServer({hosts: ["example.com"]});
+var testserver = new HttpServer();
+testserver.start(-1);
 gPort = testserver.identity.primaryPort;
 
-testserver.registerDirectory("/data/", do_get_file("data"));
+// register static files with server and interpolate port numbers in them
+mapFile("/data/test_blocklist_metadata_filters_1.xml", testserver);
 
 const profileDir = gProfD.clone();
 profileDir.append("extensions");
@@ -62,7 +65,7 @@ function load_blocklist(aFile, aCallback) {
 
 
 function end_test() {
-  do_test_finished();
+  testserver.stop(do_test_finished);
 }
 
 function run_test() {
@@ -75,7 +78,6 @@ function run_test() {
     id: "block1@tests.mozilla.org",
     version: "1.0",
     name: "Mozilla Corp.",
-    bootstrap: true,
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "1",
@@ -88,7 +90,6 @@ function run_test() {
     id: "block2@tests.mozilla.org",
     version: "1.0",
     name: "Moz-addon",
-    bootstrap: true,
     creator: "Dangerous",
     homepageURL: "www.extension.dangerous.com",
     updateURL: "www.extension.dangerous.com/update.rdf",
@@ -105,7 +106,6 @@ function run_test() {
     id: "block3@tests.mozilla.org",
     version: "1.0",
     name: "Moz-addon",
-    bootstrap: true,
     creator: "Dangerous",
     homepageURL: "www.extensions.dangerous.com",
     updateURL: "www.extension.dangerous.com/update.rdf",

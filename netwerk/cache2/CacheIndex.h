@@ -666,9 +666,8 @@ private:
 #endif
 };
 
-class CacheIndex final
-  : public CacheFileIOListener
-  , public nsIRunnable
+class CacheIndex : public CacheFileIOListener
+                 , public nsIRunnable
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS

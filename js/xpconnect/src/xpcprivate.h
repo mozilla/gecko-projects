@@ -177,6 +177,7 @@ class Exception;
 #define XPC_DYING_NATIVE_PROTO_MAP_LENGTH        8
 #define XPC_NATIVE_INTERFACE_MAP_LENGTH         32
 #define XPC_NATIVE_SET_MAP_LENGTH               32
+#define XPC_THIS_TRANSLATOR_MAP_LENGTH           4
 #define XPC_WRAPPER_MAP_LENGTH                   8
 
 /***************************************************************************/
@@ -415,8 +416,6 @@ public:
 
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 
-    bool IsSystemCaller() const override;
-
     AutoMarkingPtr** GetAutoRootsAdr() {return &mAutoRoots;}
 
     nsresult GetPendingResult() { return mPendingResult; }
@@ -466,7 +465,6 @@ public:
         IDX_MESSAGE                 ,
         IDX_LASTINDEX               ,
         IDX_THEN                    ,
-        IDX_ISINSTANCE              ,
         IDX_TOTAL_COUNT // just a count of the above
     };
 
@@ -551,6 +549,9 @@ public:
 
     NativeSetMap* GetNativeSetMap() const
         {return mNativeSetMap;}
+
+    IID2ThisTranslatorMap* GetThisTranslatorMap() const
+        {return mThisTranslatorMap;}
 
     XPCWrappedNativeProtoMap* GetDyingWrappedNativeProtoMap() const
         {return mDyingWrappedNativeProtoMap;}
@@ -653,6 +654,7 @@ private:
     IID2NativeInterfaceMap*  mIID2NativeInterfaceMap;
     ClassInfo2NativeSetMap*  mClassInfo2NativeSetMap;
     NativeSetMap*            mNativeSetMap;
+    IID2ThisTranslatorMap*   mThisTranslatorMap;
     XPCWrappedNativeProtoMap* mDyingWrappedNativeProtoMap;
     bool mGCIsRunning;
     nsTArray<nsISupports*> mNativesToReleaseArray;
@@ -924,6 +926,8 @@ public:
     void TraceInside(JSTracer* trc) {
         if (mContentXBLScope)
             mContentXBLScope.trace(trc, "XPCWrappedNativeScope::mXBLScope");
+        for (size_t i = 0; i < mAddonScopes.Length(); i++)
+            mAddonScopes[i].trace(trc, "XPCWrappedNativeScope::mAddonScopes");
         if (mXrayExpandos.initialized())
             mXrayExpandos.trace(trc);
     }
@@ -970,10 +974,16 @@ public:
     static bool
     IsDyingScope(XPCWrappedNativeScope* scope);
 
+    typedef js::HashSet<JSAddonId*,
+                        js::PointerHasher<JSAddonId*>,
+                        js::SystemAllocPolicy> AddonSet;
+
     // Gets the appropriate scope object for XBL in this scope. The context
     // must be same-compartment with the global upon entering, and the scope
     // object is wrapped into the compartment of the global.
     JSObject* EnsureContentXBLScope(JSContext* cx);
+
+    JSObject* EnsureAddonScope(JSContext* cx, JSAddonId* addonId);
 
     XPCWrappedNativeScope(JSContext* cx, JS::HandleObject aGlobal);
 
@@ -986,14 +996,29 @@ public:
     bool UseContentXBLScope() { return mUseContentXBLScope; }
     void ClearContentXBLScope() { mContentXBLScope = nullptr; }
 
+    bool IsAddonScope() { return xpc::IsAddonCompartment(Compartment()); }
+
+    static bool AllowCPOWsInAddon(JSContext* cx, JSAddonId* addonId, bool allow);
+
 protected:
     virtual ~XPCWrappedNativeScope();
 
     XPCWrappedNativeScope() = delete;
 
 private:
+    class ClearInterpositionsObserver final : public nsIObserver {
+        ~ClearInterpositionsObserver() {}
+
+      public:
+        NS_DECL_ISUPPORTS
+        NS_DECL_NSIOBSERVER
+    };
+
     static XPCWrappedNativeScope* gScopes;
     static XPCWrappedNativeScope* gDyingScopes;
+
+    static bool                      gShutdownObserverInitialized;
+    static AddonSet*                 gAllowCPOWAddonSet;
 
     Native2WrappedNativeMap*         mWrappedNativeMap;
     ClassInfo2WrappedNativeProtoMap* mWrappedNativeProtoMap;
@@ -1009,6 +1034,9 @@ private:
     // EnsureContentXBLScope() decides whether it needs to be created or not.
     // This reference is wrapped into the compartment of mGlobalJSObject.
     JS::ObjectPtr                    mContentXBLScope;
+
+    // Lazily created sandboxes for addon code.
+    nsTArray<JS::ObjectPtr>          mAddonScopes;
 
     JS::WeakMapPtr<JSObject*, JSObject*> mXrayExpandos;
 
@@ -2582,6 +2610,9 @@ xpc_GetSafeJSContext()
 
 namespace xpc {
 
+JSAddonId*
+NewAddonId(JSContext* cx, const nsACString& id);
+
 // JSNatives to expose atob and btoa in various non-DOM XPConnect scopes.
 bool
 Atob(JSContext* cx, unsigned argc, JS::Value* vp);
@@ -2626,7 +2657,6 @@ struct GlobalProperties {
     bool URL : 1;
     bool URLSearchParams : 1;
     bool XMLHttpRequest : 1;
-    bool XMLSerializer : 1;
 
     // Ad-hoc property names we implement.
     bool atob : 1;
@@ -2683,6 +2713,8 @@ public:
         , wantExportHelpers(false)
         , isWebExtensionContentScript(false)
         , proto(cx)
+        , addonId(cx)
+        , writeToGlobalPrototype(false)
         , sameZoneAs(cx)
         , freshZone(false)
         , isContentXBLScope(false)
@@ -2702,6 +2734,8 @@ public:
     bool isWebExtensionContentScript;
     JS::RootedObject proto;
     nsCString sandboxName;
+    JS::RootedString addonId;
+    bool writeToGlobalPrototype;
     JS::RootedObject sameZoneAs;
     bool freshZone;
     bool isContentXBLScope;
@@ -2851,6 +2885,10 @@ EvalInSandbox(JSContext* cx, JS::HandleObject sandbox, const nsAString& source,
               const nsACString& filename, int32_t lineNo,
               JS::MutableHandleValue rval);
 
+nsresult
+GetSandboxAddonId(JSContext* cx, JS::HandleObject sandboxArg,
+                  JS::MutableHandleValue rval);
+
 // Helper for retrieving metadata stored in a reserved slot. The metadata
 // is set during the sandbox creation using the "metadata" option.
 nsresult
@@ -2943,6 +2981,17 @@ public:
     // want to prevent code from depending on Xray Waivers (which might make it
     // more portable to other browser architectures).
     bool allowWaivers;
+
+    // This flag is intended for a very specific use, internal to Gecko. It may
+    // go away or change behavior at any time. It should not be added to any
+    // documentation and it should not be used without consulting the XPConnect
+    // module owner.
+    bool writeToGlobalPrototype;
+
+    // When writeToGlobalPrototype is true, we use this flag to temporarily
+    // disable the writeToGlobalPrototype behavior (when resolving standard
+    // classes, for example).
+    bool skipWriteToGlobalPrototype;
 
     // This compartment corresponds to a WebExtension content script, and
     // receives various bits of special compatibility behavior.
@@ -3083,6 +3132,17 @@ public:
         JS::Realm* realm = JS::GetObjectRealmOrNull(object);
         return Get(realm);
     }
+
+    // This flag is intended for a very specific use, internal to Gecko. It may
+    // go away or change behavior at any time. It should not be added to any
+    // documentation and it should not be used without consulting the XPConnect
+    // module owner.
+    bool writeToGlobalPrototype;
+
+    // When writeToGlobalPrototype is true, we use this flag to temporarily
+    // disable the writeToGlobalPrototype behavior (when resolving standard
+    // classes, for example).
+    bool skipWriteToGlobalPrototype;
 
     // The scriptability of this realm.
     Scriptability scriptability;

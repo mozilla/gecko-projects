@@ -15,7 +15,9 @@ test(function(t) {
 
 test(function(t) {
   assert_throws(
-      new TypeError,
+      new TypeError("Failed to execute 'setActionHandler' on 'MediaSession':" +
+                    "The provided value 'invalid' is not a valid enum value" +
+                    "of type MediaSessionAction."),
       _ => { window.navigator.mediaSession.setActionHandler("invalid", null); });
 }, "Test that setActionHandler() throws exception for unsupported actions");
 

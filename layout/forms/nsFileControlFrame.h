@@ -14,11 +14,11 @@
 #include "nsIAnonymousContentCreator.h"
 #include "nsCOMPtr.h"
 
+class nsIDOMDataTransfer;
+class nsIDOMFileList;
 namespace mozilla {
 namespace dom {
-class FileList;
 class BlobImpl;
-class DataTransfer;
 } // namespace dom
 } // namespace mozilla
 
@@ -27,7 +27,7 @@ class nsFileControlFrame : public nsBlockFrame,
                            public nsIAnonymousContentCreator
 {
 public:
-  explicit nsFileControlFrame(ComputedStyle* aStyle);
+  explicit nsFileControlFrame(nsStyleContext* aContext);
 
   virtual void Init(nsIContent*       aContent,
                     nsContainerFrame* aParent,
@@ -119,12 +119,11 @@ protected:
 
     NS_DECL_NSIDOMEVENTLISTENER
 
-    nsresult GetBlobImplForWebkitDirectory(mozilla::dom::FileList* aFileList,
+    nsresult GetBlobImplForWebkitDirectory(nsIDOMFileList* aFileList,
                                            mozilla::dom::BlobImpl** aBlobImpl);
 
-    bool IsValidDropData(mozilla::dom::DataTransfer* aDataTransfer);
-    bool CanDropTheseFiles(mozilla::dom::DataTransfer* aDataTransfer,
-                           bool aSupportsMultiple);
+    bool IsValidDropData(nsIDOMDataTransfer* aDOMDataTransfer);
+    bool CanDropTheseFiles(nsIDOMDataTransfer* aDOMDataTransfer, bool aSupportsMultiple);
   };
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override

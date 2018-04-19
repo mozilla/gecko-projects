@@ -592,12 +592,7 @@ void
 TextureClient::EnableReadLock()
 {
   if (!mReadLock) {
-    if (mAllocator->GetTileLockAllocator()) {
-      mReadLock = NonBlockingTextureReadLock::Create(mAllocator);
-    } else {
-      // IPC is down
-      gfxCriticalError() << "TextureClient::EnableReadLock IPC is down";
-    }
+    mReadLock = NonBlockingTextureReadLock::Create(mAllocator);
   }
 }
 
@@ -1684,7 +1679,6 @@ ShmemTextureReadLock::ShmemTextureReadLock(LayersIPCChannel* aAllocator)
 {
   MOZ_COUNT_CTOR(ShmemTextureReadLock);
   MOZ_ASSERT(mClientAllocator);
-  MOZ_ASSERT(mClientAllocator->GetTileLockAllocator());
 #define MOZ_ALIGN_WORD(x) (((x) + 3) & ~3)
   if (mClientAllocator->GetTileLockAllocator()->AllocShmemSection(
       MOZ_ALIGN_WORD(sizeof(ShmReadLockInfo)), &mShmemSection)) {

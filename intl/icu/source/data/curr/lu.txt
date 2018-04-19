@@ -124,10 +124,6 @@ lu{
         }
         MRO{
             "MRO",
-            "Ugwiya wa Moritani (1973–2017)",
-        }
-        MRU{
-            "MRU",
             "Ugwiya wa Moritani",
         }
         MUR{
@@ -184,10 +180,6 @@ lu{
         }
         STD{
             "STD",
-            "Dobra wa Sao Tome ne Presipe (1977–2017)",
-        }
-        STN{
-            "STN",
             "Dobra wa Sao Tome ne Presipe",
         }
         SZL{
@@ -235,5 +227,5 @@ lu{
             "Ndola wa Zimbabwe",
         }
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.37.1"}
 }

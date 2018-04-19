@@ -30,19 +30,19 @@ require.config({
     "devtools/client/shared": "resource://devtools-client-shared",
     "devtools/shared": "resource://devtools/shared",
     "devtools/client/shared/vendor/react":
-      JSONView.debugJsModules
+      JSONView.debug
       ? "resource://devtools-client-shared/vendor/react-dev"
       : "resource://devtools-client-shared/vendor/react",
     "devtools/client/shared/vendor/react-dom":
-      JSONView.debugJsModules
+      JSONView.debug
       ? "resource://devtools-client-shared/vendor/react-dom-dev"
       : "resource://devtools-client-shared/vendor/react-dom",
     "devtools/client/shared/vendor/react-prop-types":
-      JSONView.debugJsModules
+      JSONView.debug
       ? "resource://devtools-client-shared/vendor/react-prop-types-dev"
       : "resource://devtools-client-shared/vendor/react-prop-types",
     "devtools/client/shared/vendor/react-dom-test-utils":
-      JSONView.debugJsModules
+      JSONView.debug
       ? "resource://devtools-client-shared/vendor/react-dom-test-utils-dev"
       : "resource://devtools-client-shared/vendor/react-dom-test-utils",
   }

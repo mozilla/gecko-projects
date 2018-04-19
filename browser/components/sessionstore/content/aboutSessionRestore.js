@@ -8,8 +8,6 @@ ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "AppConstants",
   "resource://gre/modules/AppConstants.jsm");
-ChromeUtils.defineModuleGetter(this, "SessionStore",
-  "resource:///modules/sessionstore/SessionStore.jsm");
 
 var gStateObject;
 var gTreeData;
@@ -153,11 +151,12 @@ function restoreSession() {
   }
   var stateString = JSON.stringify(gStateObject);
 
+  var ss = Cc["@mozilla.org/browser/sessionstore;1"].getService(Ci.nsISessionStore);
   var top = getBrowserWindow();
 
   // if there's only this page open, reuse the window for restoring the session
   if (top.gBrowser.tabs.length == 1) {
-    SessionStore.setWindowState(top, stateString, true);
+    ss.setWindowState(top, stateString, true);
     return;
   }
 
@@ -170,7 +169,7 @@ function restoreSession() {
     }
 
     Services.obs.removeObserver(observe, topic);
-    SessionStore.setWindowState(newWindow, stateString, true);
+    ss.setWindowState(newWindow, stateString, true);
 
     var tabbrowser = top.gBrowser;
     var tabIndex = tabbrowser.getBrowserIndexForDocument(document);
@@ -269,11 +268,12 @@ function restoreSingleTab(aIx, aShifted) {
   var newTab = tabbrowser.addTab();
   var item = gTreeData[aIx];
 
+  var ss = Cc["@mozilla.org/browser/sessionstore;1"].getService(Ci.nsISessionStore);
   var tabState = gStateObject.windows[item.parent.ix]
                              .tabs[aIx - gTreeData.indexOf(item.parent) - 1];
   // ensure tab would be visible on the tabstrip.
   tabState.hidden = false;
-  SessionStore.setTabState(newTab, JSON.stringify(tabState));
+  ss.setTabState(newTab, JSON.stringify(tabState));
 
   // respect the preference as to whether to select the tab (the Shift key inverses)
   if (Services.prefs.getBoolPref("browser.tabs.loadInBackground") != !aShifted)

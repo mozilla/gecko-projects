@@ -10,28 +10,35 @@ Test the paymentOptions address-picker
   <script type="application/javascript" src="/tests/SimpleTest/SpawnTask.js"></script>
   <script src="payments_common.js"></script>
 
-  <script src="../../res/vendor/custom-elements.min.js"></script>
+  <script src="custom-elements.min.js"></script>
+  <script src="PaymentsStore.js"></script>
+  <script src="ObservedPropertiesMixin.js"></script>
+  <script src="PaymentStateSubscriberMixin.js"></script>
+  <script src="payment-dialog.js"></script>
 
-  <link rel="stylesheet" type="text/css" href="../../res/components/rich-select.css"/>
-  <link rel="stylesheet" type="text/css" href="../../res/components/address-option.css"/>
-  <link rel="stylesheet" type="text/css" href="../../res/paymentRequest.css"/>
+  <script src="rich-select.js"></script>
+  <script src="address-picker.js"></script>
+  <script src="rich-option.js"></script>
+  <script src="address-option.js"></script>
+  <script src="currency-amount.js"></script>
+  <link rel="stylesheet" type="text/css" href="rich-select.css"/>
+  <link rel="stylesheet" type="text/css" href="address-option.css"/>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
+  <link rel="stylesheet" type="text/css" href="paymentRequest.css"/>
 </head>
 <body>
   <p id="display">
-    <iframe id="templateFrame" src="../../res/paymentRequest.xhtml" width="0" height="0"></iframe>
+    <iframe id="templateFrame" src="paymentRequest.xhtml" width="0" height="0"></iframe>
   </p>
 <div id="content" style="display: none">
 
 </div>
 <pre id="test">
 </pre>
-<script type="module">
+<script type="application/javascript">
 /** Test the payer requested details functionality **/
 
 /* import-globals-from payments_common.js */
-
-import PaymentDialog from "../../res/containers/payment-dialog.js";
 
 function getVisiblePickerOptions(picker) {
   let select = picker.querySelector(":scope > rich-select");
@@ -78,49 +85,6 @@ const SAVED_ADDRESSES = {
   },
 };
 
-let DUPED_ADDRESSES = {
-  "a9e830667189": {
-    "street-address": "Unit 1\n1505 Northeast Kentucky Industrial Parkway \n",
-    "address-level2": "Greenup",
-    "address-level1": "KY",
-    "postal-code": "41144",
-    "country": "US",
-    "email": "bob@example.com",
-    "guid": "a9e830667189",
-    "name": "Bob Smith",
-  },
-  "72a15aed206d": {
-    "street-address": "1 New St",
-    "address-level2": "York",
-    "address-level1": "SC",
-    "postal-code": "29745",
-    "country": "US",
-    "guid": "72a15aed206d",
-    "email": "mary@example.com",
-    "name": "Mary Sue",
-  },
-  "2b4dce0fbc1f": {
-    "street-address": "123 Park St",
-    "address-level2": "Springfield",
-    "address-level1": "OR",
-    "postal-code": "97403",
-    "country": "US",
-    "email": "rita@foo.com",
-    "guid": "2b4dce0fbc1f",
-    "name": "Rita Foo",
-  },
-  "46b2635a5b26": {
-    "street-address": "432 Another St",
-    "address-level2": "Springfield",
-    "address-level1": "OR",
-    "postal-code": "97402",
-    "country": "US",
-    "guid": "46b2635a5b26",
-    "name": "Rita Foo",
-    "tel": "+19871234567",
-  },
-};
-
 let elPicker;
 let elDialog;
 let initialState;
@@ -136,7 +100,7 @@ add_task(async function setup_once() {
     displayEl.appendChild(imported);
   }
 
-  elDialog = new PaymentDialog();
+  elDialog = document.createElement("payment-dialog");
   displayEl.appendChild(elDialog);
   elPicker = elDialog.querySelector("address-picker.payer-related");
 
@@ -237,79 +201,6 @@ add_task(async function test_selective_fields() {
        "tel field is correctly toggled");
   }
 });
-
-add_task(async function test_filtered_options() {
-  await setup();
-  let requestStore = elPicker.requestStore;
-  setPaymentOptions(requestStore, {
-    requestPayerName: true,
-    requestPayerEmail: true,
-  });
-
-  requestStore.setState({
-    savedAddresses: DUPED_ADDRESSES,
-    selectedPayerAddress: "a9e830667189",
-  });
-
-  await asyncElementRendered();
-
-  let visibleOptions = getVisiblePickerOptions(elPicker);
-  let visibleOption = visibleOptions[0];
-
-  is(elPicker.dropdown.popupBox.children.length, 4, "Check dropdown has 3 addresses");
-  is(visibleOptions.length, 1, "One option should be visible");
-  is(visibleOption.getAttribute("guid"), "a9e830667189", "expected option is visible");
-
-  for (let fieldName of ["name", "email"]) {
-    let elem = visibleOption.querySelector(`.${fieldName}`);
-    ok(elem, `field ${fieldName} exists`);
-    ok(isVisible(elem), `field ${fieldName} is visible`);
-  }
-
-  setPaymentOptions(requestStore, {
-    requestPayerPhone: true,
-  });
-  await asyncElementRendered();
-
-  is(elPicker.dropdown.popupBox.children.length, 1, "Check dropdown has 1 addresses");
-  is(visibleOptions.length, 1, "One option should be visible");
-
-  setPaymentOptions(requestStore, {});
-  await asyncElementRendered();
-
-  is(elPicker.dropdown.popupBox.children.length, 4, "Check dropdown has 4 addresses");
-  is(visibleOptions.length, 1, "One option should be visible");
-});
-
-add_task(async function test_no_matches() {
-  await setup();
-  let requestStore = elPicker.requestStore;
-  setPaymentOptions(requestStore, {
-    requestPayerPhone: true,
-  });
-
-  requestStore.setState({
-    savedAddresses: {
-      "2b4dce0fbc1f": {
-        "email": "rita@foo.com",
-        "guid": "2b4dce0fbc1f",
-        "name": "Rita Foo",
-      },
-      "46b2635a5b26": {
-        "guid": "46b2635a5b26",
-        "name": "Rita Foo",
-      },
-    },
-    selectedPayerAddress: "a9e830667189",
-  });
-
-  await asyncElementRendered();
-
-  let visibleOptions = getVisiblePickerOptions(elPicker);
-  is(elPicker.dropdown.popupBox.children.length, 0, "Check dropdown is empty");
-  is(visibleOptions.length, 0, "No options should be visible");
-});
-
 </script>
 
 </body>

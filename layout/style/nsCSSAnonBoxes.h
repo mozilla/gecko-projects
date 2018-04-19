@@ -12,46 +12,14 @@
 #include "nsAtom.h"
 #include "nsStaticAtom.h"
 
-// Trivial subclass of nsStaticAtom so that function signatures can require an
-// atom from this atom list.
-class nsICSSAnonBoxPseudo : public nsStaticAtom
-{
-public:
-  constexpr nsICSSAnonBoxPseudo(const char16_t* aStr, uint32_t aLength,
-                                uint32_t aStringOffset)
-    : nsStaticAtom(aStr, aLength, aStringOffset)
-  {}
-};
-
-namespace mozilla {
-namespace detail {
-
-struct CSSAnonBoxAtoms
-{
-  #define CSS_ANON_BOX(name_, value_) NS_STATIC_ATOM_DECL_STRING(name_, value_)
-  #include "nsCSSAnonBoxList.h"
-  #undef CSS_ANON_BOX
-
-  enum class Atoms {
-    #define CSS_ANON_BOX(name_, value_) \
-      NS_STATIC_ATOM_ENUM(name_)
-    #include "nsCSSAnonBoxList.h"
-    #undef CSS_ANON_BOX
-    AtomsCount
-  };
-
-  const nsICSSAnonBoxPseudo mAtoms[static_cast<size_t>(Atoms::AtomsCount)];
-};
-
-extern const CSSAnonBoxAtoms gCSSAnonBoxAtoms;
-
-} // namespace detail
-} // namespace mozilla
+// Empty class derived from nsAtom so that function signatures can
+// require an atom from this atom list.
+class nsICSSAnonBoxPseudo : public nsAtom {};
 
 class nsCSSAnonBoxes {
 public:
 
-  static void RegisterStaticAtoms();
+  static void AddRefAtoms();
 
   static bool IsAnonBox(nsAtom *aAtom);
 #ifdef MOZ_XUL
@@ -63,16 +31,10 @@ public:
            aPseudo == firstLetterContinuation;
   }
 
-private:
-  static const nsStaticAtom* const sAtoms;
-  static constexpr size_t sAtomsLen =
-    mozilla::ArrayLength(mozilla::detail::gCSSAnonBoxAtoms.mAtoms);
-
-public:
-  #define CSS_ANON_BOX(name_, value_) \
-    NS_STATIC_ATOM_DECL_PTR(nsICSSAnonBoxPseudo, name_)
-  #include "nsCSSAnonBoxList.h"
-  #undef CSS_ANON_BOX
+#define CSS_ANON_BOX(name_, value_) \
+  NS_STATIC_ATOM_SUBCLASS_DECL(nsICSSAnonBoxPseudo, name_)
+#include "nsCSSAnonBoxList.h"
+#undef CSS_ANON_BOX
 
   typedef uint8_t NonInheritingBase;
   enum class NonInheriting : NonInheritingBase {
@@ -137,6 +99,10 @@ public:
   // Get the NonInheriting type for a given pseudo tag.  The pseudo tag must
   // test true for IsNonInheritingAnonBox.
   static NonInheriting NonInheritingTypeForPseudoTag(nsAtom* aPseudo);
+
+  // Get the atom for a given non-inheriting anon box type.  aBoxType must be <
+  // NonInheriting::_Count.
+  static nsAtom* GetNonInheritingPseudoAtom(NonInheriting aBoxType);
 };
 
 #endif /* nsCSSAnonBoxes_h___ */

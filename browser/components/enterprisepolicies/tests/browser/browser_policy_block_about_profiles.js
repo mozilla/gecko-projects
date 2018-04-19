@@ -25,5 +25,5 @@ add_task(async function test_about_profiles() {
        "Policy Engine should report about:profiles as not allowed");
   });
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

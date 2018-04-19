@@ -326,7 +326,7 @@ public:
       return nullptr;
     }
 
-    explicit SignedEntity(uint32_t magic): signature(magic) { }
+    SignedEntity(uint32_t magic): signature(magic) { }
   private:
     le_uint32 signature;
   };

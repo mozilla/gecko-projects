@@ -162,6 +162,8 @@ public:
   Tile& GetTile(size_t i) { return mRetainedTiles[i]; }
 
   const nsIntRegion& GetValidRegion() const { return mValidRegion; }
+  const nsIntRegion& GetPaintedRegion() const { return mPaintedRegion; }
+  void ClearPaintedRegion() { mPaintedRegion.SetEmpty(); }
 
   // Get and set draw scaling. mResolution affects the resolution at which the
   // contents of the buffer are drawn. mResolution has no effect on the
@@ -177,6 +179,7 @@ public:
 protected:
 
   nsIntRegion     mValidRegion;
+  nsIntRegion     mPaintedRegion;
 
   /**
    * mRetainedTiles is a rectangular buffer of mTiles.mSize.width x mTiles.mSize.height

@@ -957,12 +957,6 @@ InterceptedHttpChannel::SetChannelResetEnd(mozilla::TimeStamp aTimeStamp)
 NS_IMETHODIMP
 InterceptedHttpChannel::SaveTimeStamps(void)
 {
-  // If we were not able to start the fetch event for some reason (like
-  // corrupted scripts), then just do nothing here.
-  if (mHandleFetchEventStart.IsNull()) {
-    return NS_OK;
-  }
-
   bool isNonSubresourceRequest = nsContentUtils::IsNonSubresourceRequest(this);
   nsCString navigationOrSubresource = isNonSubresourceRequest ?
     NS_LITERAL_CSTRING("navigation") : NS_LITERAL_CSTRING("subresource");
@@ -1330,7 +1324,7 @@ InterceptedHttpChannel::OpenAlternativeOutputStream(const nsACString & type, nsI
 }
 
 NS_IMETHODIMP
-InterceptedHttpChannel::GetCacheKey(uint32_t* key)
+InterceptedHttpChannel::GetCacheKey(nsISupports **key)
 {
   if (mSynthesizedCacheInfo) {
     return mSynthesizedCacheInfo->GetCacheKey(key);
@@ -1339,7 +1333,7 @@ InterceptedHttpChannel::GetCacheKey(uint32_t* key)
 }
 
 NS_IMETHODIMP
-InterceptedHttpChannel::SetCacheKey(uint32_t key)
+InterceptedHttpChannel::SetCacheKey(nsISupports *key)
 {
   if (mSynthesizedCacheInfo) {
     return mSynthesizedCacheInfo->SetCacheKey(key);

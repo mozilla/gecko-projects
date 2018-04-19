@@ -29,15 +29,20 @@ class nsContentPolicy : public nsIContentPolicy
     //Array of policies
     nsCategoryCache<nsIContentPolicy> mPolicies;
 
+    nsCOMPtr<nsIContentPolicy> mMixedContentBlocker;
+    nsCOMPtr<nsIContentPolicy> mCSPService;
+
     //Helper type for CheckPolicy
     typedef decltype(&nsIContentPolicy::ShouldProcess) CPMethod;
 
     //Helper method that applies policyMethod across all policies in mPolicies
     // with the given parameters
     nsresult CheckPolicy(CPMethod policyMethod,
-                         nsIURI *aURI, 
-                         nsILoadInfo *aLoadInfo,
-                         const nsACString &mimeGuess,
+                         nsContentPolicyType contentType,
+                         nsIURI *aURI, nsIURI *origURI,
+                         nsISupports *requestingContext,
+                         const nsACString &mimeGuess, nsISupports *extra,
+                         nsIPrincipal *requestPrincipal,
                          int16_t *decision);
 };
 

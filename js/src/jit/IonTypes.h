@@ -568,8 +568,6 @@ MIRTypeToSize(MIRType type)
         return 4;
       case MIRType::Double:
         return 8;
-      case MIRType::Pointer:
-        return sizeof(uintptr_t);
       default:
         MOZ_CRASH("MIRTypeToSize - unhandled case");
     }

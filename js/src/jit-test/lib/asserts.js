@@ -6,7 +6,7 @@
 load(libdir + "../../tests/non262/shell.js");
 
 if (typeof assertWarning === 'undefined') {
-    var assertWarning = function assertWarning(f, pattern) {
+    var assertWarning = function assertWarning(f, errorClass, msg) {
         var hadWerror = options().split(",").indexOf("werror") !== -1;
 
         // Ensure the "werror" option is disabled.
@@ -19,6 +19,10 @@ if (typeof assertWarning === 'undefined') {
             if (hadWerror)
                 options("werror");
 
+            // print() rather than throw a different exception value, in case
+            // the caller wants exc.stack.
+            if (msg)
+                print("assertWarning: " + msg);
             print("assertWarning: Unexpected exception calling " + f +
                   " with warnings-as-errors disabled");
             throw exc;
@@ -28,21 +32,20 @@ if (typeof assertWarning === 'undefined') {
         options("werror");
 
         try {
-            f();
+            assertThrowsInstanceOf(f, errorClass, msg);
         } catch (exc) {
-            if (!String(exc).match(pattern))
-                throw new Error(`assertWarning failed: "${exc}" does not match "${pattern}"`);
-            return;
+            if (msg)
+                print("assertWarning: " + msg);
+            throw exc;
         } finally {
             if (!hadWerror)
                 options("werror");
         }
-        throw new Error("assertWarning failed: no warning");
     };
 }
 
 if (typeof assertNoWarning === 'undefined') {
-    var assertNoWarning = function assertNoWarning(f, msg) {
+    var assertNoWarning = function assertWarning(f, msg) {
         // Ensure the "werror" option is enabled.
         var hadWerror = options().split(",").indexOf("werror") !== -1;
         if (!hadWerror)

@@ -54,10 +54,19 @@ const TEST_URI = "data:text/html;charset=UTF-8," + encodeURIComponent(
    " </html>"
   ].join("\n"));
 
-add_task(async function test() {
-  let tab = await addTab(TEST_URI);
-  let browser = tab.linkedBrowser;
+var doc = null;
+function test() {
+  waitForExplicitFinish();
+  gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser, TEST_URI);
+  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(() => {
+    /* eslint-disable mozilla/no-cpows-in-tests */
+    doc = gBrowser.contentDocumentAsCPOW;
+    /* eslint-enable mozilla/no-cpows-in-tests */
+    runTests();
+  });
+}
 
+function runTests() {
   let completer = new CSSCompleter({
     cssProperties: getClientCssProperties()
   });
@@ -81,15 +90,12 @@ add_task(async function test() {
     return false;
   };
 
+  let progress = doc.getElementById("progress");
+  let progressDiv = doc.querySelector("#progress > div");
   let i = 0;
   for (let testcase of tests) {
-    ++i;
-    await ContentTask.spawn(browser, [i, tests.length], function([idx, len]) {
-      let progress = content.document.getElementById("progress");
-      let progressDiv = content.document.querySelector("#progress > div");
-      progress.dataset.progress = idx;
-      progressDiv.style.width = 100 * idx / len + "%";
-    });
+    progress.dataset.progress = ++i;
+    progressDiv.style.width = 100 * i / tests.length + "%";
     completer.resolveState(limit(source, testcase[0]),
                            {line: testcase[0][0], ch: testcase[0][1]});
     if (checkState(testcase[1])) {
@@ -99,11 +105,9 @@ add_task(async function test() {
          "but found [" + completer.state + ", " + completer.selectorState +
          ", " + completer.completing + ", " +
          (completer.propertyName || completer.selector) + "].");
-      await ContentTask.spawn(browser, null, function() {
-        let progress = content.document.getElementById("progress");
-        progress.classList.add("failed");
-      });
+      progress.classList.add("failed");
     }
   }
   gBrowser.removeCurrentTab();
-});
+  finish();
+}

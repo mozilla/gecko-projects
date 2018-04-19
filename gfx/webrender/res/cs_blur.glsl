@@ -24,6 +24,7 @@ in int aBlurDirection;
 struct BlurTask {
     RenderTaskCommonData common_data;
     float blur_radius;
+    vec4 color;
 };
 
 BlurTask fetch_blur_task(int address) {
@@ -31,7 +32,8 @@ BlurTask fetch_blur_task(int address) {
 
     BlurTask task = BlurTask(
         task_data.common_data,
-        task_data.data1.x
+        task_data.data1.x,
+        task_data.data2
     );
 
     return task;

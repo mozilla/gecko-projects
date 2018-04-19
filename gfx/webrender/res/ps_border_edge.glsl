@@ -100,9 +100,7 @@ void write_clip_params(float style,
                        float border_width,
                        float edge_length,
                        float edge_offset,
-                       float center_line,
-                       bool start_corner_has_radius,
-                       bool end_corner_has_radius) {
+                       float center_line) {
     // x = offset
     // y = dash on + off length
     // z = dash length
@@ -123,27 +121,13 @@ void write_clip_params(float style,
         case BORDER_STYLE_DOTTED: {
             float diameter = border_width;
             float radius = 0.5 * diameter;
-
-            // If this edge connects a corner with a radius to a corner without a radius, we
-            // act as if we have space for one more dot. This will position the dots so that
-            // there is a half dot on one of the ends.
-            float full_edge_length = edge_length +
-                (float(start_corner_has_radius ^^ end_corner_has_radius) * diameter);
-
-            float dot_count = ceil(0.5 * full_edge_length / diameter);
-            float empty_space = full_edge_length - (dot_count * diameter);
+            float dot_count = ceil(0.5 * edge_length / diameter);
+            float empty_space = edge_length - dot_count * diameter;
             float distance_between_centers = diameter + empty_space / dot_count;
-
-            // If the starting corner has a radius, we want to position the half dot right
-            // against that edge.
-            float starting_offset =
-                edge_offset + radius + (-diameter * float(start_corner_has_radius));
-
-            vClipParams = vec4(starting_offset,
+            vClipParams = vec4(edge_offset - radius,
                                distance_between_centers,
                                radius,
                                center_line);
-
             vClipSelect = 1.0;
             break;
         }
@@ -152,10 +136,6 @@ void write_clip_params(float style,
             vClipSelect = 0.0;
             break;
     }
-}
-
-bool hasRadius(vec2 radius) {
-    return any(notEqual(radius, vec2(0.0)));
 }
 
 void main(void) {
@@ -186,9 +166,7 @@ void main(void) {
                               border.widths.x,
                               segment_rect.size.y,
                               segment_rect.p0.y,
-                              segment_rect.p0.x + 0.5 * segment_rect.size.x,
-                              hasRadius(border.radii[0].xy),
-                              hasRadius(border.radii[1].zw));
+                              segment_rect.p0.x + 0.5 * segment_rect.size.x);
             edge_mask = vec4(1.0, 0.0, 1.0, 0.0);
             break;
         }
@@ -203,9 +181,7 @@ void main(void) {
                               border.widths.y,
                               segment_rect.size.x,
                               segment_rect.p0.x,
-                              segment_rect.p0.y + 0.5 * segment_rect.size.y,
-                              hasRadius(border.radii[0].xy),
-                              hasRadius(border.radii[0].zw));
+                              segment_rect.p0.y + 0.5 * segment_rect.size.y);
             edge_mask = vec4(0.0, 1.0, 0.0, 1.0);
             break;
         }
@@ -220,9 +196,7 @@ void main(void) {
                               border.widths.z,
                               segment_rect.size.y,
                               segment_rect.p0.y,
-                              segment_rect.p0.x + 0.5 * segment_rect.size.x,
-                              hasRadius(border.radii[0].zw),
-                              hasRadius(border.radii[1].xy));
+                              segment_rect.p0.x + 0.5 * segment_rect.size.x);
             edge_mask = vec4(1.0, 0.0, 1.0, 0.0);
             break;
         }
@@ -237,9 +211,7 @@ void main(void) {
                               border.widths.w,
                               segment_rect.size.x,
                               segment_rect.p0.x,
-                              segment_rect.p0.y + 0.5 * segment_rect.size.y,
-                              hasRadius(border.radii[1].zw),
-                              hasRadius(border.radii[1].xy));
+                              segment_rect.p0.y + 0.5 * segment_rect.size.y);
             edge_mask = vec4(0.0, 1.0, 0.0, 1.0);
             break;
         }

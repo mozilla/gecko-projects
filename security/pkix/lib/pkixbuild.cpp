@@ -36,8 +36,7 @@ static Result BuildForward(TrustDomain& trustDomain,
                            KeyPurposeId requiredEKUIfPresent,
                            const CertPolicyId& requiredPolicy,
                            /*optional*/ const Input* stapledOCSPResponse,
-                           unsigned int subCACount,
-                           unsigned int& buildForwardCallBudget);
+                           unsigned int subCACount);
 
 TrustDomain::IssuerChecker::IssuerChecker() { }
 TrustDomain::IssuerChecker::~IssuerChecker() { }
@@ -47,23 +46,21 @@ TrustDomain::IssuerChecker::~IssuerChecker() { }
 class PathBuildingStep final : public TrustDomain::IssuerChecker
 {
 public:
-  PathBuildingStep(TrustDomain& aTrustDomain, const BackCert& aSubject,
-                   Time aTime, KeyPurposeId aRequiredEKUIfPresent,
-                   const CertPolicyId& aRequiredPolicy,
-                   /*optional*/ const Input* aStapledOCSPResponse,
-                   unsigned int aSubCACount, Result aDeferredSubjectError,
-                   unsigned int& aBuildForwardCallBudget)
-    : trustDomain(aTrustDomain)
-    , subject(aSubject)
-    , time(aTime)
-    , requiredEKUIfPresent(aRequiredEKUIfPresent)
-    , requiredPolicy(aRequiredPolicy)
-    , stapledOCSPResponse(aStapledOCSPResponse)
-    , subCACount(aSubCACount)
-    , deferredSubjectError(aDeferredSubjectError)
+  PathBuildingStep(TrustDomain& trustDomain, const BackCert& subject,
+                   Time time, KeyPurposeId requiredEKUIfPresent,
+                   const CertPolicyId& requiredPolicy,
+                   /*optional*/ const Input* stapledOCSPResponse,
+                   unsigned int subCACount, Result deferredSubjectError)
+    : trustDomain(trustDomain)
+    , subject(subject)
+    , time(time)
+    , requiredEKUIfPresent(requiredEKUIfPresent)
+    , requiredPolicy(requiredPolicy)
+    , stapledOCSPResponse(stapledOCSPResponse)
+    , subCACount(subCACount)
+    , deferredSubjectError(deferredSubjectError)
     , result(Result::FATAL_ERROR_LIBRARY_FAILURE)
     , resultWasSet(false)
-    , buildForwardCallBudget(aBuildForwardCallBudget)
   {
   }
 
@@ -91,7 +88,6 @@ private:
   Result RecordResult(Result currentResult, /*out*/ bool& keepGoing);
   Result result;
   bool resultWasSet;
-  unsigned int& buildForwardCallBudget;
 
   PathBuildingStep(const PathBuildingStep&) = delete;
   void operator=(const PathBuildingStep&) = delete;
@@ -196,20 +192,11 @@ PathBuildingStep::Check(Input potentialIssuerDER,
     return RecordResult(rv, keepGoing);
   }
 
-  // If we've ran out of budget, stop searching.
-  if (buildForwardCallBudget == 0) {
-    Result savedRv = RecordResult(Result::ERROR_UNKNOWN_ISSUER, keepGoing);
-    keepGoing = false;
-    return savedRv;
-  }
-  buildForwardCallBudget--;
-
   // RFC 5280, Section 4.2.1.3: "If the keyUsage extension is present, then the
   // subject public key MUST NOT be used to verify signatures on certificates
   // or CRLs unless the corresponding keyCertSign or cRLSign bit is set."
   rv = BuildForward(trustDomain, potentialIssuer, time, KeyUsage::keyCertSign,
-                    requiredEKUIfPresent, requiredPolicy, nullptr, subCACount,
-                    buildForwardCallBudget);
+                    requiredEKUIfPresent, requiredPolicy, nullptr, subCACount);
   if (rv != Success) {
     return RecordResult(rv, keepGoing);
   }
@@ -298,8 +285,7 @@ BuildForward(TrustDomain& trustDomain,
              KeyPurposeId requiredEKUIfPresent,
              const CertPolicyId& requiredPolicy,
              /*optional*/ const Input* stapledOCSPResponse,
-             unsigned int subCACount,
-             unsigned int& buildForwardCallBudget)
+             unsigned int subCACount)
 {
   Result rv;
 
@@ -357,7 +343,7 @@ BuildForward(TrustDomain& trustDomain,
   PathBuildingStep pathBuilder(trustDomain, subject, time,
                                requiredEKUIfPresent, requiredPolicy,
                                stapledOCSPResponse, subCACount,
-                               deferredEndEntityError, buildForwardCallBudget);
+                               deferredEndEntityError);
 
   // TODO(bug 965136): Add SKI/AKI matching optimizations
   rv = trustDomain.FindIssuer(subject.GetIssuer(), pathBuilder, time);
@@ -396,22 +382,9 @@ BuildCertChain(TrustDomain& trustDomain, Input certDER,
     return rv;
   }
 
-  // See bug 1056341 for context. If mozilla::pkix is being used in an
-  // environment where there are many certificates that all have the same
-  // distinguished name as their subject and issuer (but different SPKIs - see
-  // the loop prevention as per RFC4158 Section 5.2 in PathBuildingStep::Check),
-  // the space to search becomes exponential. Because it would be prohibitively
-  // expensive to explore the entire space, we introduce a budget here that,
-  // when exhausted, terminates the search with the result
-  // Result::ERROR_UNKNOWN_ISSUER. Essentially, we limit the total number of
-  // times `BuildForward` can be called. The current value appears to be a good
-  // balance between finding a path when one exists (when the space isn't too
-  // large) and timing out quickly enough when the space is too large or there
-  // is no valid path to a trust anchor.
-  unsigned int buildForwardCallBudget = 200000;
   return BuildForward(trustDomain, cert, time, requiredKeyUsageIfPresent,
                       requiredEKUIfPresent, requiredPolicy, stapledOCSPResponse,
-                      0/*subCACount*/, buildForwardCallBudget);
+                      0/*subCACount*/);
 }
 
 } } // namespace mozilla::pkix

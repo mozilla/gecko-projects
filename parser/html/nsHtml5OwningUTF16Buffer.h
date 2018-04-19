@@ -10,59 +10,60 @@
 
 class nsHtml5OwningUTF16Buffer : public nsHtml5UTF16Buffer
 {
-private:
-  /**
-   * Passes a buffer and its length to the superclass constructor.
-   */
-  explicit nsHtml5OwningUTF16Buffer(char16_t* aBuffer);
+  private:
 
-public:
-  /**
-   * Constructor for a parser key placeholder. (No actual buffer.)
-   * @param aKey a parser key
-   */
-  explicit nsHtml5OwningUTF16Buffer(void* aKey);
+    /**
+     * Passes a buffer and its length to the superclass constructor.
+     */
+    explicit nsHtml5OwningUTF16Buffer(char16_t* aBuffer);
+
+  public:
+
+    /**
+     * Constructor for a parser key placeholder. (No actual buffer.)
+     * @param aKey a parser key
+     */
+    explicit nsHtml5OwningUTF16Buffer(void* aKey);
 
 protected:
-  /**
-   * Takes care of releasing the owned buffer.
-   */
-  ~nsHtml5OwningUTF16Buffer();
+    /**
+     * Takes care of releasing the owned buffer.
+     */
+    ~nsHtml5OwningUTF16Buffer();
 
 public:
-  /**
-   * The next buffer in a queue.
-   */
-  RefPtr<nsHtml5OwningUTF16Buffer> next;
+    /**
+     * The next buffer in a queue.
+     */
+    RefPtr<nsHtml5OwningUTF16Buffer> next;
 
-  /**
-   * A parser key.
-   */
-  void* key;
+    /**
+     * A parser key.
+     */
+    void* key;
 
-  static already_AddRefed<nsHtml5OwningUTF16Buffer> FalliblyCreate(
-    int32_t aLength);
+    static already_AddRefed<nsHtml5OwningUTF16Buffer>
+    FalliblyCreate(int32_t aLength);
 
-  /**
-   * Swap start, end and buffer fields with another object.
-   */
-  void Swap(nsHtml5OwningUTF16Buffer* aOther);
+    /**
+     * Swap start, end and buffer fields with another object.
+     */
+    void Swap(nsHtml5OwningUTF16Buffer* aOther);
 
-  /**
-   * Return a span from `end` to `aBufferSize`.
-   */
-  mozilla::Span<char16_t> TailAsSpan(int32_t aBufferSize);
+    /**
+     * Return a span from `end` to `aBufferSize`.
+     */
+    mozilla::Span<char16_t> TailAsSpan(int32_t aBufferSize);
 
-  /**
-   * Add the argument to `end`.
-   */
-  void AdvanceEnd(int32_t aNumberOfCodeUnits);
+    /**
+     * Add the argument to `end`.
+     */
+    void AdvanceEnd(int32_t aNumberOfCodeUnits);
 
-  nsrefcnt AddRef();
-  nsrefcnt Release();
-
-private:
-  nsAutoRefCnt mRefCnt;
+    nsrefcnt AddRef();
+    nsrefcnt Release();
+  private:
+    nsAutoRefCnt mRefCnt;
 };
 
 #endif // nsHtml5OwningUTF16Buffer_h

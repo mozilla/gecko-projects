@@ -16,6 +16,7 @@
 #include "nsIContent.h"
 #include "nsNameSpaceManager.h"
 #include "nsIDocument.h"
+#include "nsIDOMMouseEvent.h"
 #include "nsIDOMElement.h"
 #include "nsIDOMNodeList.h"
 #include "nsCSSFrameConstructor.h"
@@ -23,11 +24,11 @@
 #include "nsScrollbarFrame.h"
 #include "nsView.h"
 #include "nsViewManager.h"
-#include "mozilla/ComputedStyle.h"
+#include "nsStyleContext.h"
 #include "nsFontMetrics.h"
 #include "nsITimer.h"
-#include "mozilla/ServoStyleSet.h"
-#include "mozilla/dom/Text.h"
+#include "mozilla/StyleSetHandle.h"
+#include "mozilla/StyleSetHandleInlines.h"
 #include "nsPIBoxObject.h"
 #include "nsLayoutUtils.h"
 #include "nsPIListBoxObject.h"
@@ -148,9 +149,9 @@ nsListScrollSmoother::Stop()
 
 /////////////// nsListBoxBodyFrame //////////////////
 
-nsListBoxBodyFrame::nsListBoxBodyFrame(ComputedStyle* aStyle,
+nsListBoxBodyFrame::nsListBoxBodyFrame(nsStyleContext* aContext,
                                        nsBoxLayout* aLayoutManager)
-  : nsBoxFrame(aStyle, kClassID, false, aLayoutManager),
+  : nsBoxFrame(aContext, kClassID, false, aLayoutManager),
     mTopFrame(nullptr),
     mBottomFrame(nullptr),
     mLinkupFrame(nullptr),
@@ -714,17 +715,17 @@ nsListBoxBodyFrame::ComputeIntrinsicISize(nsBoxLayoutState& aBoxLayoutState)
 
   if (firstRowContent) {
     nsPresContext* presContext = aBoxLayoutState.PresContext();
-    RefPtr<ComputedStyle> computedStyle =
+    RefPtr<nsStyleContext> styleContext =
       presContext->StyleSet()->ResolveStyleFor(
           firstRowContent->AsElement(), nullptr, LazyComputeBehavior::Allow);
 
     nscoord width = 0;
     nsMargin margin(0,0,0,0);
 
-    if (computedStyle->StylePadding()->GetPadding(margin))
+    if (styleContext->StylePadding()->GetPadding(margin))
       width += margin.LeftRight();
-    width += computedStyle->StyleBorder()->GetComputedBorder().LeftRight();
-    if (computedStyle->StyleMargin()->GetMargin(margin))
+    width += styleContext->StyleBorder()->GetComputedBorder().LeftRight();
+    if (styleContext->StyleMargin()->GetMargin(margin))
       width += margin.LeftRight();
 
     FlattenedChildIterator iter(mContent);
@@ -733,16 +734,15 @@ nsListBoxBodyFrame::ComputeIntrinsicISize(nsBoxLayoutState& aBoxLayoutState)
         gfxContext* rendContext = aBoxLayoutState.GetRenderingContext();
         if (rendContext) {
           nsAutoString value;
-          for (nsIContent* content = child->GetFirstChild();
-               content; content = content->GetNextSibling()) {
-            if (Text* text = content->GetAsText()) {
+          for (nsIContent* text = child->GetFirstChild();
+               text; text = text->GetNextSibling()) {
+            if (text->IsNodeOfType(nsINode::eTEXT)) {
               text->AppendTextTo(value);
             }
           }
 
           RefPtr<nsFontMetrics> fm =
-            nsLayoutUtils::GetFontMetricsForComputedStyle(computedStyle,
-                                                          presContext);
+            nsLayoutUtils::GetFontMetricsForStyleContext(styleContext);
 
           nscoord textWidth =
             nsLayoutUtils::AppUnitWidthOfStringBidi(value, this, *fm,
@@ -1525,10 +1525,10 @@ nsListBoxBodyFrame::RemoveChildFrame(nsBoxLayoutState &aState,
 already_AddRefed<nsBoxLayout> NS_NewListBoxLayout();
 
 nsIFrame*
-NS_NewListBoxBodyFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
+NS_NewListBoxBodyFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
   nsCOMPtr<nsBoxLayout> layout = NS_NewListBoxLayout();
-  return new (aPresShell) nsListBoxBodyFrame(aStyle, layout);
+  return new (aPresShell) nsListBoxBodyFrame(aContext, layout);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsListBoxBodyFrame)

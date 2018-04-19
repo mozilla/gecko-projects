@@ -15,6 +15,7 @@ return async (...args) => (
 decorate_task(
   withAboutStudies,
   async function testAboutStudiesWorks(browser) {
+    // eslint-disable-next-line mozilla/no-cpows-in-tests
     ok(browser.contentDocumentAsCPOW.getElementById("app"), "App element was found");
   }
 );
@@ -62,7 +63,7 @@ decorate_task(
       "Clicking Update Preferences opens the privacy section of the new about:preferences.",
     );
 
-    BrowserTestUtils.removeTab(tab);
+    await BrowserTestUtils.removeTab(tab);
   }
 );
 

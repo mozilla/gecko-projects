@@ -71,5 +71,5 @@ add_task(async function mute_web_audio() {
   await waitForTabPlayingEvent(tab, true);
 
   info("- remove tab -");
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

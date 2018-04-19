@@ -338,11 +338,12 @@ var FullScreen = {
       // This is needed if they use the context menu to quit fullscreen
       this._isPopupOpen = false;
       this.cleanup();
-      // TabsInTitlebar skips appearance updates on resize events for exiting
-      // fullscreen, since that happens before we change the UI here in the
-      // "fullscreen" event. Hence we need to call it here to ensure the
-      // appearance is properly updated. See bug 1173768.
-      TabsInTitlebar.update();
+      // In TabsInTitlebar._update(), we cancel the appearance update on
+      // resize event for exiting fullscreen, since that happens before we
+      // change the UI here in the "fullscreen" event. Hence we need to
+      // call it here to ensure the appearance is properly updated. See
+      // TabsInTitlebar._update() and bug 1173768.
+      TabsInTitlebar.updateAppearance(true);
     }
 
     if (enterFS && !document.fullscreenElement) {
@@ -590,7 +591,7 @@ var FullScreen = {
 
     // Track whether mouse is near the toolbox
     if (trackMouse && !this.useLionFullScreen) {
-      let rect = gBrowser.tabpanels.getBoundingClientRect();
+      let rect = gBrowser.mPanelContainer.getBoundingClientRect();
       this._mouseTargetRect = {
         top: rect.top + 50,
         bottom: rect.bottom,

@@ -40,7 +40,7 @@ add_task(async function openInTab() {
   }
 
   // Clean up.
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });
 
 add_task(async function keepEmptyTab() {
@@ -59,7 +59,7 @@ add_task(async function keepEmptyTab() {
   }
 
   // Clean up.
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });
 
 add_task(async function reuseEmptyTab() {
@@ -79,7 +79,7 @@ add_task(async function reuseEmptyTab() {
   }
 
   // Clean up.
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });
 
 add_task(async function openInCurrentTab() {
@@ -107,6 +107,6 @@ add_task(async function openInCurrentTab() {
     is(where, "current", "URL would open in the current tab");
 
     // Clean up.
-    BrowserTestUtils.removeTab(tab);
+    await BrowserTestUtils.removeTab(tab);
   }
 });

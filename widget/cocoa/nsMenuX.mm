@@ -639,19 +639,25 @@ void nsMenuX::GetMenuPopupContent(nsIContent** aResult)
     return;
   *aResult = nullptr;
 
+  int32_t dummy;
 
   // Check to see if we are a "menupopup" node (if we are a native menu).
-  if (mContent->IsXULElement(nsGkAtoms::menupopup)) {
-    NS_ADDREF(*aResult = mContent);
-    return;
+  {
+    RefPtr<nsAtom> tag = mContent->OwnerDoc()->BindingManager()->ResolveTag(mContent, &dummy);
+    if (tag == nsGkAtoms::menupopup) {
+      NS_ADDREF(*aResult = mContent);
+      return;
+    }
   }
 
   // Otherwise check our child nodes.
 
   for (nsIContent* child = mContent->GetFirstChild();
        child; child = child->GetNextSibling()) {
-    if (child->IsXULElement(nsGkAtoms::menupopup)) {
-      NS_ADDREF(*aResult = child);
+    RefPtr<nsAtom> tag = child->OwnerDoc()->BindingManager()->ResolveTag(child, &dummy);
+    if (tag == nsGkAtoms::menupopup) {
+      *aResult = child;
+      NS_ADDREF(*aResult);
       return;
     }
   }

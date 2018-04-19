@@ -126,6 +126,6 @@ add_task(async function test() {
 
   is(uci, USER_CONTEXT_ID, "Tab runs with UCI " + USER_CONTEXT_ID);
 
-  BrowserTestUtils.removeTab(newTab);
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(newTab);
+  await BrowserTestUtils.removeTab(tab);
 });

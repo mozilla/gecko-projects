@@ -8,6 +8,7 @@
 
 #include "mozilla/Maybe.h"
 #include "BitReader.h"
+#include "nsAutoPtr.h"
 #include "prenv.h"
 #include "FlacFrameParser.h"
 #include "VideoUtils.h"
@@ -962,7 +963,7 @@ FlacTrackDemuxer::GetNextFrame(const flac::Frame& aFrame)
   RefPtr<MediaRawData> frame = new MediaRawData();
   frame->mOffset = offset;
 
-  UniquePtr<MediaRawDataWriter> frameWriter(frame->CreateWriter());
+  nsAutoPtr<MediaRawDataWriter> frameWriter(frame->CreateWriter());
   if (!frameWriter->SetSize(size)) {
     LOG("GetNext() Exit failed to allocated media buffer");
     return nullptr;

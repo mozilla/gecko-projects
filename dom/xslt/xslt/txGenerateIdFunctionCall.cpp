@@ -104,9 +104,11 @@ GenerateIdFunctionCall::isSensitiveTo(ContextSensitivity aContext)
 }
 
 #ifdef TX_TO_STRING
-void
-GenerateIdFunctionCall::appendName(nsAString& aDest)
+nsresult
+GenerateIdFunctionCall::getNameAtom(nsAtom** aAtom)
 {
-    aDest.Append(nsGkAtoms::generateId->GetUTF16String());
+    *aAtom = nsGkAtoms::generateId;
+    NS_ADDREF(*aAtom);
+    return NS_OK;
 }
 #endif

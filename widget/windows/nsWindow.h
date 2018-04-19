@@ -30,7 +30,6 @@
 #include "mozilla/MouseEvents.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/webrender/WebRenderTypes.h"
-#include "mozilla/dom/MouseEventBinding.h"
 #include "nsMargin.h"
 #include "nsRegionFwd.h"
 
@@ -46,6 +45,7 @@
 #endif
 
 #include "nsUXThemeData.h"
+#include "nsIDOMMouseEvent.h"
 #include "nsIIdleServiceInternal.h"
 
 #include "IMMHandler.h"
@@ -223,7 +223,6 @@ public:
 
   virtual void            UpdateThemeGeometries(const nsTArray<ThemeGeometry>& aThemeGeometries) override;
   virtual uint32_t        GetMaxTouchPoints() const override;
-  virtual void            SetWindowClass(const nsAString& xulWinType) override;
 
   /**
    * Event helpers
@@ -236,7 +235,7 @@ public:
                             int16_t aButton =
                               mozilla::WidgetMouseEvent::eLeftButton,
                             uint16_t aInputSource =
-                              mozilla::dom::MouseEventBinding::MOZ_SOURCE_MOUSE,
+                              nsIDOMMouseEvent::MOZ_SOURCE_MOUSE,
                             WinPointerInfo* aPointerInfo = nullptr);
   virtual bool            DispatchWindowEvent(mozilla::WidgetGUIEvent* aEvent,
                                               nsEventStatus& aStatus);
@@ -549,7 +548,6 @@ protected:
   bool                  mMousePresent;
   bool                  mDestroyCalled;
   bool                  mOpeningAnimationSuppressed;
-  bool                  mIsEarlyBlankWindow;
   uint32_t              mBlurSuppressLevel;
   DWORD_PTR             mOldStyle;
   DWORD_PTR             mOldExStyle;

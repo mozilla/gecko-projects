@@ -30,6 +30,8 @@ from taskgraph.util.schema import (
 )
 from taskgraph.util.scriptworker import (
     BALROG_ACTIONS,
+    get_balrog_action_scope,
+    get_balrog_server_scope,
     get_release_config,
 )
 from voluptuous import Any, Required, Optional, Extra
@@ -376,7 +378,6 @@ task_description_schema = Schema({
 
         # optional features
         Required('chain-of-trust'): bool,
-        Optional('taskcluster-proxy'): bool,
     }, {
         Required('implementation'): 'buildbot-bridge',
 
@@ -461,8 +462,6 @@ task_description_schema = Schema({
 
         # locale key, if this is a locale beetmover job
         Optional('locale'): basestring,
-
-        Optional('partner-public'): bool,
 
         Required('release-properties'): {
             'app-name': basestring,
@@ -617,9 +616,25 @@ V2_L10N_TEMPLATES = [
 # the roots of the treeherder routes
 TREEHERDER_ROUTE_ROOT = 'tc-treeherder'
 
+# Which repository repository revision to use when reporting results to treeherder.
+DEFAULT_BRANCH_REV_PARAM = 'head_rev'
+BRANCH_REV_PARAM = {
+    'comm-esr45': 'comm_head_rev',
+    'comm-esr52': 'comm_head_rev',
+    'comm-beta': 'comm_head_rev',
+    'comm-central': 'comm_head_rev',
+    'comm-aurora': 'comm_head_rev',
+    'try-comm-central': 'comm_head_rev',
+}
+
 
 def get_branch_rev(config):
-    return config.params['{}head_rev'.format(config.graph_config['project-repo-param-prefix'])]
+    return config.params[
+        BRANCH_REV_PARAM.get(
+            config.params['project'],
+            DEFAULT_BRANCH_REV_PARAM
+        )
+    ]
 
 
 COALESCE_KEY = '{project}.{job-identifier}'
@@ -952,9 +967,6 @@ def build_generic_worker_payload(config, task, task_def):
     if worker.get('chain-of-trust'):
         features['chainOfTrust'] = True
 
-    if worker.get('taskcluster-proxy'):
-        features['taskclusterProxy'] = True
-
     if features:
         task_def['payload']['features'] = features
 
@@ -1015,8 +1027,6 @@ def build_beetmover_payload(config, task, task_def):
     }
     if worker.get('locale'):
         task_def['payload']['locale'] = worker['locale']
-    if worker.get('partner-public'):
-        task_def['payload']['is_partner_repack_public'] = worker['partner-public']
     if release_config:
         task_def['payload'].update(release_config)
 
@@ -1038,6 +1048,10 @@ def build_beetmover_cdns_payload(config, task, task_def):
 def build_balrog_payload(config, task, task_def):
     worker = task['worker']
     release_config = get_release_config(config)
+
+    server_scope = get_balrog_server_scope(config)
+    action_scope = get_balrog_action_scope(config, action=worker['balrog-action'])
+    task_def['scopes'] = [server_scope, action_scope]
 
     if worker['balrog-action'] == 'submit-locale':
         task_def['payload'] = {
@@ -1541,7 +1555,7 @@ def build_task(config, tasks):
             )
 
         if 'expires-after' not in task:
-            task['expires-after'] = '28 days' if config.params.is_try() else '1 year'
+            task['expires-after'] = '28 days' if config.params['project'] == 'try' else '1 year'
 
         if 'deadline-after' not in task:
             task['deadline-after'] = '1 day'

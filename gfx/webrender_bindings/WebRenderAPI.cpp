@@ -5,9 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "WebRenderAPI.h"
-
 #include "DisplayItemClipChain.h"
-#include "gfxPrefs.h"
 #include "LayersLogging.h"
 #include "mozilla/webrender/RendererOGL.h"
 #include "mozilla/gfx/gfxVars.h"
@@ -136,15 +134,8 @@ private:
 
 TransactionBuilder::TransactionBuilder()
 {
-  // We need the if statement to avoid miscompilation on windows, see
-  // bug 1449982 comment 22.
-  if (gfxPrefs::WebRenderAsyncSceneBuild()) {
-    mTxn = wr_transaction_new(true);
-    mResourceUpdates = wr_resource_updates_new();
-  } else {
-    mResourceUpdates = wr_resource_updates_new();
-    mTxn = wr_transaction_new(false);
-  }
+  mTxn = wr_transaction_new();
+  mResourceUpdates = wr_resource_updates_new();
 }
 
 TransactionBuilder::~TransactionBuilder()
@@ -206,21 +197,13 @@ void
 TransactionBuilder::UpdateDynamicProperties(const nsTArray<wr::WrOpacityProperty>& aOpacityArray,
                                      const nsTArray<wr::WrTransformProperty>& aTransformArray)
 {
-  wr_transaction_update_dynamic_properties(
-      mTxn,
-      aOpacityArray.IsEmpty() ?  nullptr : aOpacityArray.Elements(),
-      aOpacityArray.Length(),
-      aTransformArray.IsEmpty() ?  nullptr : aTransformArray.Elements(),
-      aTransformArray.Length());
-}
-
-void
-TransactionBuilder::AppendTransformProperties(const nsTArray<wr::WrTransformProperty>& aTransformArray)
-{
-  wr_transaction_append_transform_properties(
-      mTxn,
-      aTransformArray.IsEmpty() ? nullptr : aTransformArray.Elements(),
-      aTransformArray.Length());
+  wr_transaction_update_dynamic_properties(mTxn,
+                                           aOpacityArray.IsEmpty() ?
+                                             nullptr : aOpacityArray.Elements(),
+                                           aOpacityArray.Length(),
+                                           aTransformArray.IsEmpty() ?
+                                             nullptr : aTransformArray.Elements(),
+                                           aTransformArray.Length());
 }
 
 bool
@@ -268,15 +251,15 @@ WebRenderAPI::ShutdownExternalLogHandler()
 }
 
 /*static*/ already_AddRefed<WebRenderAPI>
-WebRenderAPI::Create(layers::CompositorBridgeParent* aBridge,
+WebRenderAPI::Create(layers::CompositorBridgeParentBase* aBridge,
                      RefPtr<widget::CompositorWidget>&& aWidget,
-                     const wr::WrWindowId& aWindowId,
                      LayoutDeviceIntSize aSize)
 {
   MOZ_ASSERT(aBridge);
   MOZ_ASSERT(aWidget);
-  static_assert(sizeof(size_t) == sizeof(uintptr_t),
-      "The FFI bindings assume size_t is the same size as uintptr_t!");
+
+  static uint64_t sNextId = 1;
+  auto id = NewWindowId(sNextId++);
 
   wr::DocumentHandle* docHandle = nullptr;
   uint32_t maxTextureSize = 0;
@@ -290,7 +273,7 @@ WebRenderAPI::Create(layers::CompositorBridgeParent* aBridge,
   auto event = MakeUnique<NewRenderer>(&docHandle, aBridge, &maxTextureSize, &useANGLE,
                                        Move(aWidget), &task, aSize,
                                        &syncHandle);
-  RenderThread::Get()->RunEvent(aWindowId, Move(event));
+  RenderThread::Get()->RunEvent(id, Move(event));
 
   task.Wait();
 
@@ -298,7 +281,7 @@ WebRenderAPI::Create(layers::CompositorBridgeParent* aBridge,
     return nullptr;
   }
 
-  return RefPtr<WebRenderAPI>(new WebRenderAPI(docHandle, aWindowId, maxTextureSize, useANGLE, syncHandle)).forget();
+  return RefPtr<WebRenderAPI>(new WebRenderAPI(docHandle, id, maxTextureSize, useANGLE, syncHandle)).forget();
 }
 
 already_AddRefed<WebRenderAPI>
@@ -512,12 +495,6 @@ WebRenderAPI::Resume()
 
     task.Wait();
     return result;
-}
-
-void
-WebRenderAPI::WakeSceneBuilder()
-{
-    wr_api_wake_scene_builder(mDocHandle);
 }
 
 void
@@ -770,7 +747,6 @@ DisplayListBuilder::Finalize(wr::LayoutSize& aOutContentSize,
 
 void
 DisplayListBuilder::PushStackingContext(const wr::LayoutRect& aBounds,
-                                        const wr::WrClipId* aClipNodeId,
                                         const WrAnimationProperty* aAnimation,
                                         const float* aOpacity,
                                         const gfx::Matrix4x4* aTransform,
@@ -790,10 +766,9 @@ DisplayListBuilder::PushStackingContext(const wr::LayoutRect& aBounds,
     perspective = ToLayoutTransform(*aPerspective);
   }
   const wr::LayoutTransform* maybePerspective = aPerspective ? &perspective : nullptr;
-  const size_t* maybeClipNodeId = aClipNodeId ? &aClipNodeId->id : nullptr;
   WRDL_LOG("PushStackingContext b=%s t=%s\n", mWrState, Stringify(aBounds).c_str(),
       aTransform ? Stringify(*aTransform).c_str() : "none");
-  wr_dp_push_stacking_context(mWrState, aBounds, maybeClipNodeId, aAnimation, aOpacity,
+  wr_dp_push_stacking_context(mWrState, aBounds, aAnimation, aOpacity,
                               maybeTransform, aTransformStyle, maybePerspective,
                               aMixBlendMode, aFilters.Elements(), aFilters.Length(), aIsBackfaceVisible);
 }
@@ -964,7 +939,7 @@ Maybe<wr::WrScrollId>
 DisplayListBuilder::GetScrollIdForDefinedScrollLayer(layers::FrameMetrics::ViewID aViewId) const
 {
   if (aViewId == layers::FrameMetrics::NULL_SCROLL_ID) {
-    return Some(wr::WrScrollId::RootScrollNode());
+    return Some(wr::WrScrollId { 0 });
   }
 
   auto it = mScrollIds.find(aViewId);
@@ -1343,7 +1318,7 @@ DisplayListBuilder::TopmostScrollId()
       return it->as<wr::WrScrollId>();
     }
   }
-  return wr::WrScrollId::RootScrollNode();
+  return wr::WrScrollId { 0 };
 }
 
 bool

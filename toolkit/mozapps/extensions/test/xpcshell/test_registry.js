@@ -14,7 +14,6 @@ var addon1 = {
   id: "addon1@tests.mozilla.org",
   version: "1.0",
   name: "Test 1",
-  bootstrap: true,
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -26,7 +25,6 @@ var addon2 = {
   id: "addon2@tests.mozilla.org",
   version: "2.0",
   name: "Test 2",
-  bootstrap: true,
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -34,127 +32,127 @@ var addon2 = {
   }]
 };
 
-const IDS = ["addon1@tests.mozilla.org",
-             "addon2@tests.mozilla.org",
-             "addon3@tests.mozilla.org"];
-
-
 const addon1Dir = writeInstallRDFForExtension(addon1, gProfD, "addon1");
 const addon2Dir = writeInstallRDFForExtension(addon2, gProfD, "addon2");
-const addon3Dir = gProfD.clone();
-addon3Dir.append("addon3@tests.mozilla.org");
 
 let registry;
 
-add_task(async function setup() {
+function run_test() {
+  // This test only works where there is a registry.
+  if (!("nsIWindowsRegKey" in AM_Ci))
+    return;
+
   registry = new MockRegistry();
   registerCleanupFunction(() => {
     registry.shutdown();
   });
-});
+
+  do_test_pending();
+
+  run_test_1();
+}
 
 // Tests whether basic registry install works
-add_task(async function test_1() {
-  registry.setValue(Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
+function run_test_1() {
+  registry.setValue(AM_Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
                    "SOFTWARE\\Mozilla\\XPCShell\\Extensions",
                     "addon1@tests.mozilla.org", addon1Dir.path);
-  registry.setValue(Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
+  registry.setValue(AM_Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
                     "SOFTWARE\\Mozilla\\XPCShell\\Extensions",
                     "addon2@tests.mozilla.org", addon2Dir.path);
-  registry.setValue(Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
-                    "SOFTWARE\\Mozilla\\XPCShell\\Extensions",
-                    "addon3@tests.mozilla.org", addon3Dir.path);
 
-  await promiseStartupManager();
+  startupManager();
 
-  let [a1, a2, a3] = await AddonManager.getAddonsByIDs(IDS);
-  notEqual(a1, null);
-  ok(a1.isActive);
-  ok(!hasFlag(a1.permissions, AddonManager.PERM_CAN_UNINSTALL));
-  equal(a1.scope, AddonManager.SCOPE_SYSTEM);
+  AddonManager.getAddonsByIDs(["addon1@tests.mozilla.org",
+                               "addon2@tests.mozilla.org"], function([a1, a2]) {
+    Assert.notEqual(a1, null);
+    Assert.ok(a1.isActive);
+    Assert.ok(!hasFlag(a1.permissions, AddonManager.PERM_CAN_UNINSTALL));
+    Assert.equal(a1.scope, AddonManager.SCOPE_SYSTEM);
 
-  notEqual(a2, null);
-  ok(a2.isActive);
-  ok(!hasFlag(a2.permissions, AddonManager.PERM_CAN_UNINSTALL));
-  equal(a2.scope, AddonManager.SCOPE_USER);
+    Assert.notEqual(a2, null);
+    Assert.ok(a2.isActive);
+    Assert.ok(!hasFlag(a2.permissions, AddonManager.PERM_CAN_UNINSTALL));
+    Assert.equal(a2.scope, AddonManager.SCOPE_USER);
 
-  equal(a3, null);
-});
+    executeSoon(run_test_2);
+  });
+}
 
 // Tests whether uninstalling from the registry works
-add_task(async function test_2() {
-  registry.setValue(Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
+function run_test_2() {
+  registry.setValue(AM_Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
                     "SOFTWARE\\Mozilla\\XPCShell\\Extensions",
                     "addon1@tests.mozilla.org", null);
-  registry.setValue(Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
+  registry.setValue(AM_Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
                     "SOFTWARE\\Mozilla\\XPCShell\\Extensions",
                     "addon2@tests.mozilla.org", null);
-  registry.setValue(Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
-                    "SOFTWARE\\Mozilla\\XPCShell\\Extensions",
-                    "addon3@tests.mozilla.org", null);
 
-  await promiseRestartManager();
+  restartManager();
 
-  let [a1, a2, a3] = await AddonManager.getAddonsByIDs(IDS);
-  equal(a1, null);
-  equal(a2, null);
-  equal(a3, null);
-});
+  AddonManager.getAddonsByIDs(["addon1@tests.mozilla.org",
+                               "addon2@tests.mozilla.org"], function([a1, a2]) {
+    Assert.equal(a1, null);
+    Assert.equal(a2, null);
+
+    executeSoon(run_test_3);
+  });
+}
 
 // Checks that the ID in the registry must match that in the install manifest
-add_task(async function test_3() {
-  registry.setValue(Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
+function run_test_3() {
+  registry.setValue(AM_Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
                     "SOFTWARE\\Mozilla\\XPCShell\\Extensions",
                     "addon1@tests.mozilla.org", addon2Dir.path);
-  registry.setValue(Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
+  registry.setValue(AM_Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
                     "SOFTWARE\\Mozilla\\XPCShell\\Extensions",
                     "addon2@tests.mozilla.org", addon1Dir.path);
-  registry.setValue(Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
-                    "SOFTWARE\\Mozilla\\XPCShell\\Extensions",
-                    "addon3@tests.mozilla.org", addon3Dir.path);
 
-  await promiseRestartManager();
+  restartManager();
 
-  let [a1, a2, a3] = await AddonManager.getAddonsByIDs(IDS);
-  equal(a1, null);
-  equal(a2, null);
-  equal(a3, null);
-});
+  AddonManager.getAddonsByIDs(["addon1@tests.mozilla.org",
+                               "addon2@tests.mozilla.org"], function([a1, a2]) {
+    Assert.equal(a1, null);
+    Assert.equal(a2, null);
+
+    executeSoon(run_test_4);
+  });
+}
 
 // Tests whether an extension's ID can change without its directory changing
-add_task(async function test_4() {
+function run_test_4() {
   // Restarting with bad items in the registry should not force an EM restart
-  await promiseRestartManager();
+  restartManager();
 
-  registry.setValue(Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
+  registry.setValue(AM_Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
                     "SOFTWARE\\Mozilla\\XPCShell\\Extensions",
                     "addon1@tests.mozilla.org", null);
-  registry.setValue(Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
+  registry.setValue(AM_Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
                     "SOFTWARE\\Mozilla\\XPCShell\\Extensions",
                     "addon2@tests.mozilla.org", null);
-  registry.setValue(Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
-                    "SOFTWARE\\Mozilla\\XPCShell\\Extensions",
-                    "addon3@tests.mozilla.org", null);
 
-  await promiseRestartManager();
+  restartManager();
 
-  registry.setValue(Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
+  registry.setValue(AM_Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
                     "SOFTWARE\\Mozilla\\XPCShell\\Extensions",
                     "addon1@tests.mozilla.org", addon1Dir.path);
-  await promiseRestartManager();
+  restartManager();
 
-  registry.setValue(Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
+  registry.setValue(AM_Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
                     "SOFTWARE\\Mozilla\\XPCShell\\Extensions",
                     "addon1@tests.mozilla.org", null);
-  registry.setValue(Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
+  registry.setValue(AM_Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
                     "SOFTWARE\\Mozilla\\XPCShell\\Extensions",
                     "addon2@tests.mozilla.org", addon1Dir.path);
   writeInstallRDFForExtension(addon2, gProfD, "addon1");
 
-  await promiseRestartManager();
+  restartManager();
 
-  let [a1, a2, a3] = await AddonManager.getAddonsByIDs(IDS);
-  equal(a1, null);
-  notEqual(a2, null);
-  equal(a3, null);
-});
+  AddonManager.getAddonsByIDs(["addon1@tests.mozilla.org",
+                               "addon2@tests.mozilla.org"], function([a1, a2]) {
+    Assert.equal(a1, null);
+    Assert.notEqual(a2, null);
+
+    executeSoon(do_test_finished);
+  });
+}

@@ -32,8 +32,7 @@ add_task(async function test_412_not_treated_as_failure() {
     let saw412 = false;
     let _uploadOutgoing = engine._uploadOutgoing;
     engine._uploadOutgoing = async () => {
-      let lastSync = await engine.getLastSync();
-      await engine.setLastSync(lastSync - 2);
+      engine.lastSync -= 2;
       try {
         await _uploadOutgoing.call(engine);
       } catch (ex) {

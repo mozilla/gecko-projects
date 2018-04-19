@@ -1694,7 +1694,7 @@ module.exports = {
     "!type": "fn()",
     "prototype": "Event.prototype",
     "!url": "https://developer.mozilla.org/en/docs/DOM/MouseEvent",
-    "!doc": "The DOM MouseEvent represents events that occur due to the user interacting with a pointing device (such as a mouse)."
+    "!doc": "The DOM MouseEvent represents events that occur due to the user interacting with a pointing device (such as a mouse). It's represented by the nsINSDOMMouseEvent interface, which extends the nsIDOMMouseEvent interface."
   },
   "KeyboardEvent": {
     "!type": "fn()",

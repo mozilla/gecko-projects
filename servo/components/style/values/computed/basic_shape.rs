@@ -9,31 +9,32 @@
 
 use std::fmt::{self, Write};
 use style_traits::{CssWriter, ToCss};
-use values::computed::{Image, LengthOrPercentage};
-use values::computed::url::ComputedUrl;
-use values::generics::basic_shape as generic;
+use values::computed::{LengthOrPercentage, ComputedUrl, Image};
+use values::generics::basic_shape::{BasicShape as GenericBasicShape};
+use values::generics::basic_shape::{Circle as GenericCircle, ClippingShape as GenericClippingShape};
+use values::generics::basic_shape::{Ellipse as GenericEllipse, FloatAreaShape as GenericFloatAreaShape};
+use values::generics::basic_shape::{InsetRect as GenericInsetRect, ShapeRadius as GenericShapeRadius};
 
 /// A computed clipping shape.
-pub type ClippingShape = generic::ClippingShape<BasicShape, ComputedUrl>;
+pub type ClippingShape = GenericClippingShape<BasicShape, ComputedUrl>;
 
 /// A computed float area shape.
-pub type FloatAreaShape = generic::FloatAreaShape<BasicShape, Image>;
+pub type FloatAreaShape = GenericFloatAreaShape<BasicShape, Image>;
 
 /// A computed basic shape.
-pub type BasicShape =
-    generic::BasicShape<LengthOrPercentage, LengthOrPercentage, LengthOrPercentage>;
+pub type BasicShape = GenericBasicShape<LengthOrPercentage, LengthOrPercentage, LengthOrPercentage>;
 
 /// The computed value of `inset()`
-pub type InsetRect = generic::InsetRect<LengthOrPercentage>;
+pub type InsetRect = GenericInsetRect<LengthOrPercentage>;
 
 /// A computed circle.
-pub type Circle = generic::Circle<LengthOrPercentage, LengthOrPercentage, LengthOrPercentage>;
+pub type Circle = GenericCircle<LengthOrPercentage, LengthOrPercentage, LengthOrPercentage>;
 
 /// A computed ellipse.
-pub type Ellipse = generic::Ellipse<LengthOrPercentage, LengthOrPercentage, LengthOrPercentage>;
+pub type Ellipse = GenericEllipse<LengthOrPercentage, LengthOrPercentage, LengthOrPercentage>;
 
 /// The computed value of `ShapeRadius`
-pub type ShapeRadius = generic::ShapeRadius<LengthOrPercentage>;
+pub type ShapeRadius = GenericShapeRadius<LengthOrPercentage>;
 
 impl ToCss for Circle {
     fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result

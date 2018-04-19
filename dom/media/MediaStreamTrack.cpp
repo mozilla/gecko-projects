@@ -52,7 +52,7 @@ MediaStreamTrackSource::ApplyConstraints(
 {
   RefPtr<PledgeVoid> p = new PledgeVoid();
   p->Reject(new MediaStreamError(aWindow,
-                                 MediaStreamError::Name::OverconstrainedError,
+                                 NS_LITERAL_STRING("OverconstrainedError"),
                                  NS_LITERAL_STRING("")));
   return p.forget();
 }

@@ -49,7 +49,7 @@ set(bindinggen_deps
   ${bindings_src}/CodegenRust.py
   ${bindings_src}/parser/WebIDL.py
   )
-
+  
 add_custom_command(
   OUTPUT Bindings
   COMMAND ${CMAKE_COMMAND} -E make_directory Bindings
@@ -59,12 +59,9 @@ add_custom_command(
   COMMAND ${CMAKE_COMMAND} -E make_directory _cache
   )
 
-# Specify python 2 as required
-find_package( PythonInterp 2 REQUIRED )
-
 add_custom_command(
   OUTPUT ParserResults.pkl
-  COMMAND ${PYTHON_EXECUTABLE} -B ${bindings_src}/pythonpath.py -I ${bindings_src}/parser -I ${bindings_src}/ply
+  COMMAND python -B ${bindings_src}/pythonpath.py -I ${bindings_src}/parser -I ${bindings_src}/ply
                  ${bindings_src}/GlobalGen.py
                  --cachedir=_cache
                  --filelist=webidls.list
@@ -77,7 +74,7 @@ add_custom_command(
 
 add_custom_command(
   OUTPUT apis.html
-  COMMAND ${PYTHON_EXECUTABLE} -B ${bindings_src}/pythonpath.py -I ${bindings_src}/parser -I ${bindings_src}/ply
+  COMMAND python -B ${bindings_src}/pythonpath.py -I ${bindings_src}/parser -I ${bindings_src}/ply
                  ${bindings_src}/GlobalGen.py
                  --cachedir=_cache
                  --filelist=webidls.list
@@ -103,7 +100,7 @@ add_custom_target(generate-bindings ALL)
 foreach(binding IN LISTS bindings)
   add_custom_command(
     OUTPUT Bindings/${binding}Binding.rs
-    COMMAND ${PYTHON_EXECUTABLE} -B ${bindings_src}/pythonpath.py -I ${bindings_src}/parser -I ${bindings_src}/ply
+    COMMAND python -B ${bindings_src}/pythonpath.py -I ${bindings_src}/parser -I ${bindings_src}/ply
                    ${bindings_src}/BindingGen.py
                    ${bindings_src}/Bindings.conf
                    .

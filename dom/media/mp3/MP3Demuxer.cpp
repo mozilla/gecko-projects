@@ -11,6 +11,7 @@
 #include <limits>
 
 #include "mozilla/Assertions.h"
+#include "nsAutoPtr.h"
 #include "TimeUnits.h"
 #include "VideoUtils.h"
 
@@ -643,7 +644,7 @@ MP3TrackDemuxer::GetNextFrame(const MediaByteRange& aRange)
   RefPtr<MediaRawData> frame = new MediaRawData();
   frame->mOffset = aRange.mStart;
 
-  UniquePtr<MediaRawDataWriter> frameWriter(frame->CreateWriter());
+  nsAutoPtr<MediaRawDataWriter> frameWriter(frame->CreateWriter());
   if (!frameWriter->SetSize(aRange.Length())) {
     MP3LOG("GetNext() Exit failed to allocated media buffer");
     return nullptr;

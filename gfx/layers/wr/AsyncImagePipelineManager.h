@@ -97,7 +97,6 @@ public:
 
 private:
 
-  wr::Epoch GetNextImageEpoch();
   uint32_t GetNextResourceId() { return ++mResourceId; }
   wr::IdNamespace GetNamespace() { return mIdNamespace; }
   wr::ImageKey GenerateImageKey()
@@ -172,7 +171,7 @@ private:
 
   nsClassHashtable<nsUint64HashKey, PipelineTexturesHolder> mPipelineTexturesHolders;
   nsClassHashtable<nsUint64HashKey, AsyncImagePipeline> mAsyncImagePipelines;
-  wr::Epoch mAsyncImageEpoch;
+  uint32_t mAsyncImageEpoch;
   bool mWillGenerateFrame;
   bool mDestroyed;
 

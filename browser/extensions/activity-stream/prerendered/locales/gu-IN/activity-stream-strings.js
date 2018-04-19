@@ -35,7 +35,7 @@ window.gActivityStreamStrings = {
   "prefs_section_rows_option": "{num} પંક્તિ;{num} પંક્તિઓ",
   "prefs_search_header": "વેબ શોધ",
   "prefs_topsites_description": "તમે સૌથી વધુ મુલાકાત લો છો તે સાઇટ્સ",
-  "prefs_topstories_description2": "Great content from around the web, personalized for you",
+  "prefs_topstories_description": "ઉચ્ચ ગુણવત્તાવાળી સામગ્રી તમે અન્યથા ચૂકી શકો છો",
   "prefs_topstories_show_sponsored_label": "{provider} પ્રાયોજિત વાર્તાઓ",
   "prefs_topstories_sponsored_learn_more": "વધુ શીખો",
   "prefs_highlights_description": "સાઇટ્સની પસંદગી કે જે તમે સાચવી અથવા મુલાકાત લીધી છે",
@@ -89,6 +89,5 @@ window.gActivityStreamStrings = {
   "section_menu_action_add_topsite": "ટોચની સાઇટ ઉમેરો",
   "section_menu_action_move_up": "ઉપર કરો",
   "section_menu_action_move_down": "નીચે કરો",
-  "section_menu_action_privacy_notice": "ખાનગી સૂચના",
-  "prefs_topstories_description": "ઉચ્ચ ગુણવત્તાવાળી સામગ્રી તમે અન્યથા ચૂકી શકો છો"
+  "section_menu_action_privacy_notice": "ખાનગી સૂચના"
 };

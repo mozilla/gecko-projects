@@ -29,7 +29,6 @@ Structure:
         buildId: <string>, // e.g. "20141126041045"
         version: <string>, // e.g. "35.0"
         vendor: <string>, // e.g. "Mozilla"
-        displayVersion: <string>, // e.g. "35.0b1"
         platformVersion: <string>, // e.g. "35.0"
         xpcomAbi: <string>, // e.g. "x86-msvc"
         updaterAvailable: <bool>, // Whether the app was built with app update available (MOZ_UPDATER)
@@ -265,7 +264,7 @@ Structure:
             },
             ...
         },
-        activeExperiment: { // obsolete in firefox 61, section is empty if there's no active experiment
+        activeExperiment: { // section is empty if there's no active experiment
             id: <string>, // id
             branch: <string>, // branch name
         },
@@ -418,4 +417,4 @@ Just like activePlugins, this will report dummy values until the blocklist is lo
 
 experiments
 -----------
-For each experiment we collect the ``id`` and the ``branch`` the client is enrolled in. Both fields are truncated to 100 characters and a warning is printed when that happens.
+For each experiment we collect the ``id`` and the ``branch`` the client is enrolled in. Both fields are truncated to 100 characters and a warning is printed when that happens. This section will eventually supersede ``addons/activeExperiment``.

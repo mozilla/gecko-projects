@@ -3,7 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/FontPropertyTypes.h"
 #include "mozilla/layers/CompositorManagerChild.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/ImageBridgeChild.h"
@@ -31,6 +30,7 @@
 #include "gfxTextRun.h"
 #include "gfxUserFontSet.h"
 #include "gfxConfig.h"
+#include "MediaPrefs.h"
 #include "VRThread.h"
 
 #ifdef XP_WIN
@@ -427,8 +427,6 @@ NS_IMPL_ISUPPORTS(SRGBOverrideObserver, nsIObserver, nsISupportsWeakReference)
 
 #define GFX_PREF_CMS_FORCE_SRGB "gfx.color_management.force_srgb"
 
-#define FONT_VARIATIONS_PREF "layout.css.font-variations.enabled"
-
 NS_IMETHODIMP
 SRGBOverrideObserver::Observe(nsISupports *aSubject,
                               const char *aTopic,
@@ -517,7 +515,14 @@ gfxPlatform::gfxPlatform()
 
     mSkiaGlue = nullptr;
 
-    InitBackendPrefs(GetBackendPrefs());
+    uint32_t canvasMask = BackendTypeBit(BackendType::CAIRO);
+    uint32_t contentMask = BackendTypeBit(BackendType::CAIRO);
+#ifdef USE_SKIA
+    canvasMask |= BackendTypeBit(BackendType::SKIA);
+    contentMask |= BackendTypeBit(BackendType::SKIA);
+#endif
+    InitBackendPrefs(canvasMask, BackendType::CAIRO,
+                     contentMask, BackendType::CAIRO);
 
     mTotalSystemMemory = PR_GetPhysicalMemorySize();
 
@@ -656,6 +661,7 @@ gfxPlatform::Init()
 
     // Initialize the preferences by creating the singleton.
     gfxPrefs::GetSingleton();
+    MediaPrefs::GetSingleton();
     gfxVars::Initialize();
 
     gfxConfig::Init();
@@ -851,14 +857,6 @@ gfxPlatform::Init()
 
     if (XRE_IsParentProcess()) {
       gfxVars::SetDXInterop2Blocked(IsDXInterop2Blocked());
-      Preferences::Unlock(FONT_VARIATIONS_PREF);
-      if (!gPlatform->CheckVariationFontSupport()) {
-        // Ensure variation fonts are disabled and the pref is locked.
-        Preferences::SetBool(FONT_VARIATIONS_PREF, false,
-                             PrefValueKind::Default);
-        Preferences::SetBool(FONT_VARIATIONS_PREF, false);
-        Preferences::Lock(FONT_VARIATIONS_PREF);
-      }
     }
 
     if (obs) {
@@ -1395,8 +1393,7 @@ bool gfxPlatform::AllowOpenGLCanvas()
   // so we let content process always assume correct compositor backend.
   // The callers have to do the right thing.
   bool correctBackend = !XRE_IsParentProcess() ||
-    ((mCompositorBackend == LayersBackend::LAYERS_OPENGL ||
-      mCompositorBackend == LayersBackend::LAYERS_WR) &&
+    ((mCompositorBackend == LayersBackend::LAYERS_OPENGL) &&
      (GetContentBackendFor(mCompositorBackend) == BackendType::SKIA));
 
   if (gfxPrefs::CanvasAzureAccelerated() && correctBackend) {
@@ -1756,8 +1753,8 @@ gfxPlatform::IsFontFormatSupported(uint32_t aFormatFlags)
 
 gfxFontEntry*
 gfxPlatform::LookupLocalFont(const nsAString& aFontName,
-                             FontWeight aWeight,
-                             uint16_t aStretch,
+                             uint16_t aWeight,
+                             int16_t aStretch,
                              uint8_t aStyle)
 {
     return gfxPlatformFontList::PlatformFontList()->LookupLocalFont(aFontName,
@@ -1768,8 +1765,8 @@ gfxPlatform::LookupLocalFont(const nsAString& aFontName,
 
 gfxFontEntry*
 gfxPlatform::MakePlatformFont(const nsAString& aFontName,
-                              FontWeight aWeight,
-                              uint16_t aStretch,
+                              uint16_t aWeight,
+                              int16_t aStretch,
                               uint8_t aStyle,
                               const uint8_t* aFontData,
                               uint32_t aLength)
@@ -1801,29 +1798,13 @@ gfxPlatform::GetLayerDiagnosticTypes()
   return type;
 }
 
-BackendPrefsData
-gfxPlatform::GetBackendPrefs()
-{
-  BackendPrefsData data;
-
-  data.mCanvasBitmask = BackendTypeBit(BackendType::CAIRO);
-  data.mContentBitmask = BackendTypeBit(BackendType::CAIRO);
-#ifdef USE_SKIA
-  data.mCanvasBitmask |= BackendTypeBit(BackendType::SKIA);
-  data.mContentBitmask |= BackendTypeBit(BackendType::SKIA);
-#endif
-  data.mCanvasDefault = BackendType::CAIRO;
-  data.mContentDefault = BackendType::CAIRO;
-
-  return mozilla::Move(data);
-}
-
 void
-gfxPlatform::InitBackendPrefs(BackendPrefsData&& aPrefsData)
+gfxPlatform::InitBackendPrefs(uint32_t aCanvasBitmask, BackendType aCanvasDefault,
+                              uint32_t aContentBitmask, BackendType aContentDefault)
 {
-    mPreferredCanvasBackend = GetCanvasBackendPref(aPrefsData.mCanvasBitmask);
+    mPreferredCanvasBackend = GetCanvasBackendPref(aCanvasBitmask);
     if (mPreferredCanvasBackend == BackendType::NONE) {
-        mPreferredCanvasBackend = aPrefsData.mCanvasDefault;
+        mPreferredCanvasBackend = aCanvasDefault;
     }
 
     if (mPreferredCanvasBackend == BackendType::DIRECT2D1_1) {
@@ -1831,22 +1812,22 @@ gfxPlatform::InitBackendPrefs(BackendPrefsData&& aPrefsData)
       // fails it means the surface was too big or there's something wrong with
       // the device. D2D 1.0 will encounter a similar situation.
       mFallbackCanvasBackend =
-          GetCanvasBackendPref(aPrefsData.mCanvasBitmask &
+          GetCanvasBackendPref(aCanvasBitmask &
                                ~(BackendTypeBit(mPreferredCanvasBackend) | BackendTypeBit(BackendType::DIRECT2D)));
     } else {
       mFallbackCanvasBackend =
-          GetCanvasBackendPref(aPrefsData.mCanvasBitmask & ~BackendTypeBit(mPreferredCanvasBackend));
+          GetCanvasBackendPref(aCanvasBitmask & ~BackendTypeBit(mPreferredCanvasBackend));
     }
 
 
-    mContentBackendBitmask = aPrefsData.mContentBitmask;
+    mContentBackendBitmask = aContentBitmask;
     mContentBackend = GetContentBackendPref(mContentBackendBitmask);
     if (mContentBackend == BackendType::NONE) {
-        mContentBackend = aPrefsData.mContentDefault;
+        mContentBackend = aContentDefault;
         // mContentBackendBitmask is our canonical reference for supported
         // backends so we need to add the default if we are using it and
         // overriding the prefs.
-        mContentBackendBitmask |= BackendTypeBit(aPrefsData.mContentDefault);
+        mContentBackendBitmask |= BackendTypeBit(aContentDefault);
     }
 
     uint32_t swBackendBits = BackendTypeBit(BackendType::SKIA) |
@@ -2609,17 +2590,6 @@ gfxPlatform::InitWebRenderConfig()
                                                  WR_DEBUG_PREF);
     }
   }
-
-#ifdef XP_WIN
-  if (Preferences::GetBool("gfx.webrender.dcomp-win.enabled", false)) {
-    // XXX relax win version to windows 8.
-    if (IsWin10OrLater() &&
-        gfxVars::UseWebRender() &&
-        gfxVars::UseWebRenderANGLE()) {
-      gfxVars::SetUseWebRenderDCompWin(true);
-    }
-  }
-#endif
 }
 
 void
@@ -2728,14 +2698,7 @@ gfxPlatform::UsesOffMainThreadCompositing()
 bool
 gfxPlatform::UsesTiling() const
 {
-  bool isSkiaPOMTP = XRE_IsContentProcess() &&
-      GetDefaultContentBackend() == BackendType::SKIA &&
-      gfxVars::UseOMTP() &&
-      (gfxPrefs::LayersOMTPPaintWorkers() == -1 ||
-      gfxPrefs::LayersOMTPPaintWorkers() > 1);
-
-  return gfxPrefs::LayersTilesEnabled() ||
-    (gfxPrefs::LayersTilesEnabledIfSkiaPOMTP() && isSkiaPOMTP);
+  return gfxPrefs::LayersTilesEnabled();
 }
 
 /***
@@ -2793,18 +2756,10 @@ gfxPlatform::GetAzureBackendInfo(mozilla::widget::InfoObject& aObj)
     aObj.DefineProperty("AzureFallbackCanvasBackend (UI Process)", GetBackendName(mFallbackCanvasBackend));
     aObj.DefineProperty("AzureContentBackend (UI Process)", GetBackendName(mContentBackend));
 
-    // Assume content process' backend prefs.
-    BackendPrefsData data = GetBackendPrefs();
-    BackendType canvasBackend = GetCanvasBackendPref(data.mCanvasBitmask);
-    if (canvasBackend == BackendType::NONE) {
-      canvasBackend = data.mCanvasDefault;
+    if (gfxConfig::IsEnabled(gfx::Feature::DIRECT2D)) {
+      aObj.DefineProperty("AzureCanvasBackend", "Direct2D 1.1");
+      aObj.DefineProperty("AzureContentBackend", "Direct2D 1.1");
     }
-    BackendType contentBackend = GetContentBackendPref(data.mContentBitmask);
-    if (contentBackend == BackendType::NONE) {
-      contentBackend = data.mContentDefault;
-    }
-    aObj.DefineProperty("AzureCanvasBackend", GetBackendName(canvasBackend));
-    aObj.DefineProperty("AzureContentBackend", GetBackendName(contentBackend));
   } else {
     aObj.DefineProperty("AzureCanvasBackend", GetBackendName(mPreferredCanvasBackend));
     aObj.DefineProperty("AzureFallbackCanvasBackend", GetBackendName(mFallbackCanvasBackend));

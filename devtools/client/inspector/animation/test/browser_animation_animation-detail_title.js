@@ -5,34 +5,33 @@
 
 // Test that whether title in header of animations detail.
 
-const TEST_DATA = [
+const TEST_CASES = [
   {
-    targetClass: "cssanimation-normal",
+    target: ".cssanimation-normal",
     expectedTitle: "cssanimation - CSS Animation",
   },
   {
-    targetClass: "delay-positive",
+    target: ".delay-positive",
     expectedTitle: "test-delay-animation - Script Animation",
   },
   {
-    targetClass: "easing-step",
+    target: ".easing-step",
     expectedTitle: "Script Animation",
   },
 ];
 
-add_task(async function() {
+add_task(async function () {
   await addTab(URL_ROOT + "doc_multi_timings.html");
-  await removeAnimatedElementsExcept(TEST_DATA.map(t => `.${ t.targetClass }`));
-  const { animationInspector, panel } = await openAnimationInspector();
+  const { inspector, panel } = await openAnimationInspector();
 
   info("Checking title in each header of animation detail");
 
-  for (const { targetClass, expectedTitle } of TEST_DATA) {
-    info(`Checking title at ${ targetClass }`);
-    await clickOnAnimationByTargetSelector(animationInspector,
-                                           panel, `.${ targetClass }`);
+  for (const testCase of TEST_CASES) {
+    info(`Checking title at ${ testCase.target }`);
+    const animatedNode = await getNodeFront(testCase.target, inspector);
+    await selectNodeAndWaitForAnimations(animatedNode, inspector);
     const titleEl = panel.querySelector(".animation-detail-title");
-    is(titleEl.textContent, expectedTitle,
-      `Title of "${ targetClass }" should be "${ expectedTitle }"`);
+    is(titleEl.textContent, testCase.expectedTitle,
+       `Title of "${ testCase.target }" should be "${ testCase.expectedTitle }"`);
   }
 });

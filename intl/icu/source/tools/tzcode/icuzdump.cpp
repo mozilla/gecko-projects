@@ -40,7 +40,6 @@
 #include "uoptions.h"
 
 using namespace std;
-using namespace icu;
 
 class DumpFormatter {
 public:

@@ -7,6 +7,7 @@ ChromeUtils.import("resource://normandy/lib/SandboxManager.jsm", this);
 ChromeUtils.import("resource://normandy/lib/NormandyDriver.jsm", this);
 ChromeUtils.import("resource://normandy/lib/NormandyApi.jsm", this);
 ChromeUtils.import("resource://normandy/lib/TelemetryEvents.jsm", this);
+ChromeUtils.import("resource://normandy/lib/Utils.jsm", this);
 
 // Load mocking/stubbing library, sinon
 // docs: http://sinonjs.org/docs/
@@ -128,7 +129,7 @@ this.withMockNormandyApi = function(testFunction) {
       async action => {
         const impl = mockApi.implementations[action.name];
         if (!impl) {
-          throw new Error(`Missing implementation for ${action.name}`);
+          throw new Error("Missing");
         }
         return impl;
       }

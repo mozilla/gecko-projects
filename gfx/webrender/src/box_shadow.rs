@@ -2,15 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{BorderRadius, BoxShadowClipMode, ClipMode, ColorF, DeviceIntSize, LayerPrimitiveInfo};
-use api::{LayerRect, LayerSize, LayerVector2D, LayoutSize};
+use api::{BorderRadius, BoxShadowClipMode, ClipMode, ColorF, ComplexClipRegion};
+use api::{LayerPrimitiveInfo, LayerRect, LayerSize, LayerVector2D, LayoutSize, LocalClip};
+use api::{DeviceIntSize};
 use clip::ClipSource;
 use display_list_flattener::DisplayListFlattener;
 use gpu_cache::GpuCacheHandle;
-use gpu_types::BoxShadowStretchMode;
 use prim_store::{BrushKind, BrushPrimitive, PrimitiveContainer};
 use prim_store::ScrollNodeAndClipChain;
-use render_task::RenderTaskCacheEntryHandle;
+use resource_cache::CacheItem;
 use util::RectHelpers;
 
 #[derive(Debug)]
@@ -19,13 +19,11 @@ pub struct BoxShadowClipSource {
     pub shadow_radius: BorderRadius,
     pub blur_radius: f32,
     pub clip_mode: BoxShadowClipMode,
-    pub stretch_mode_x: BoxShadowStretchMode,
-    pub stretch_mode_y: BoxShadowStretchMode,
 
     // The current cache key (in device-pixels), and handles
     // to the cached clip region and blurred texture.
     pub cache_key: Option<(DeviceIntSize, BoxShadowCacheKey)>,
-    pub cache_handle: Option<RenderTaskCacheEntryHandle>,
+    pub cache_item: CacheItem,
     pub clip_data_handle: GpuCacheHandle,
 
     // Local-space size of the required render task size.
@@ -115,7 +113,9 @@ impl<'a> DisplayListFlattener<'a> {
             }
 
             let mut clips = Vec::with_capacity(2);
-            let (final_prim_rect, clip_radius) = match clip_mode {
+            clips.push(ClipSource::Rectangle(*prim_info.local_clip.clip_rect()));
+
+            let fast_info = match clip_mode {
                 BoxShadowClipMode::Outset => {
                     if !shadow_rect.is_well_formed_and_nonempty() {
                         return;
@@ -128,7 +128,17 @@ impl<'a> DisplayListFlattener<'a> {
                         ClipMode::ClipOut
                     ));
 
-                    (shadow_rect, shadow_radius)
+                    LayerPrimitiveInfo::with_clip(
+                        shadow_rect,
+                        LocalClip::RoundedRect(
+                            shadow_rect,
+                            ComplexClipRegion::new(
+                                shadow_rect,
+                                shadow_radius,
+                                ClipMode::Clip,
+                            ),
+                        ),
+                    )
                 }
                 BoxShadowClipMode::Inset => {
                     if shadow_rect.is_well_formed_and_nonempty() {
@@ -139,15 +149,23 @@ impl<'a> DisplayListFlattener<'a> {
                         ));
                     }
 
-                    (prim_info.rect, border_radius)
+                    LayerPrimitiveInfo::with_clip(
+                        prim_info.rect,
+                        LocalClip::RoundedRect(
+                            prim_info.rect,
+                            ComplexClipRegion::new(
+                                prim_info.rect,
+                                border_radius,
+                                ClipMode::Clip
+                            ),
+                        ),
+                    )
                 }
             };
 
-            clips.push(ClipSource::new_rounded_rect(final_prim_rect, clip_radius, ClipMode::Clip));
-
             self.add_primitive(
                 clip_and_scroll,
-                &LayerPrimitiveInfo::with_clip_rect(final_prim_rect, prim_info.clip_rect),
+                &fast_info,
                 clips,
                 PrimitiveContainer::Brush(
                     BrushPrimitive::new(BrushKind::Solid {
@@ -204,7 +222,10 @@ impl<'a> DisplayListFlattener<'a> {
 
                     // Outset shadows are expanded by the shadow
                     // region from the original primitive.
-                    LayerPrimitiveInfo::with_clip_rect(dest_rect, prim_info.clip_rect)
+                    LayerPrimitiveInfo::with_clip_rect(
+                        dest_rect,
+                        *prim_info.local_clip.clip_rect()
+                    )
                 }
                 BoxShadowClipMode::Inset => {
                     // If the inner shadow rect contains the prim

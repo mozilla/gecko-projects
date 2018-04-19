@@ -42,6 +42,26 @@ function run_test()
     isException(e, Cr.NS_ERROR_ALREADY_INITIALIZED);
   }
 
+  try
+  {
+    srv.stop();
+    do_throw("missing argument to stop");
+  }
+  catch (e)
+  {
+    isException(e, Cr.NS_ERROR_NULL_POINTER);
+  }
+
+  try
+  {
+    srv.stop(null);
+    do_throw("null argument to stop");
+  }
+  catch (e)
+  {
+    isException(e, Cr.NS_ERROR_NULL_POINTER);
+  }
+
   do_test_pending();
   srv.stop(function()
   {
@@ -105,49 +125,22 @@ function run_test_3()
 
   do_test_finished();
 
-  srv.start(PORT);
-
-  do_test_pending();
-  try
-  {
-    srv.stop().then(function()
-    {
-      try {
-        do_test_pending();
-        run_test_4();
-      } finally {
-        do_test_finished();
-      }
-    });
-  }
-  catch (e)
-  {
-    do_throw("error stopping with an object: " + e);
-  }
-}
-
-function run_test_4()
-{
-  dumpn("*** run_test_4");
-
-  do_test_finished();
-
   srv.registerPathHandler("/handle", handle);
   srv.start(PORT);
 
   // Don't rely on the exact (but implementation-constant) sequence of events
-  // as it currently exists by making either run_test_5 or serverStopped handle
+  // as it currently exists by making either run_test_4 or serverStopped handle
   // the final shutdown.
   do_test_pending();
 
-  runHttpTests([new Test(PREPATH + "/handle")], run_test_5);
+  runHttpTests([new Test(PREPATH + "/handle")], run_test_4);
 }
 
 var testsComplete = false;
 
-function run_test_5()
+function run_test_4()
 {
-  dumpn("*** run_test_5");
+  dumpn("*** run_test_4");
 
   testsComplete = true;
   if (stopped)

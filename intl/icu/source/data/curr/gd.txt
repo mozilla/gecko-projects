@@ -680,10 +680,6 @@ gd{
         }
         MRO{
             "MRO",
-            "Ouguiya Moratàineach (1973–2017)",
-        }
-        MRU{
-            "MRU",
             "Ouguiya Moratàineach",
         }
         MTL{
@@ -916,10 +912,6 @@ gd{
         }
         STD{
             "STD",
-            "Dobra São Tomé agus Príncipe (1977–2017)",
-        }
-        STN{
-            "STN",
             "Dobra São Tomé agus Príncipe",
         }
         SUR{
@@ -1287,7 +1279,7 @@ gd{
         SHP{"£"}
         SRD{"$"}
         SSP{"£"}
-        STN{"Db"}
+        STD{"Db"}
         SYP{"£"}
         THB{"฿"}
         TOP{"T$"}
@@ -2322,12 +2314,6 @@ gd{
             two{"phataca Macàthuach"}
         }
         MRO{
-            few{"ouguiya Moratàineach (1973–2017)"}
-            one{"ouguiya Moratàineach (1973–2017)"}
-            other{"ouguiya Moratàineach (1973–2017)"}
-            two{"ouguiya Moratàineach (1973–2017)"}
-        }
-        MRU{
             few{"ouguiya Moratàineach"}
             one{"ouguiya Moratàineach"}
             other{"ouguiya Moratàineach"}
@@ -2676,12 +2662,6 @@ gd{
             two{"phunnd Sudàin a Deas"}
         }
         STD{
-            few{"dobra São Tomé agus Príncipe (1977–2017)"}
-            one{"dobra São Tomé agus Príncipe (1977–2017)"}
-            other{"dobra São Tomé agus Príncipe (1977–2017)"}
-            two{"dhobra São Tomé agus Príncipe (1977–2017)"}
-        }
-        STN{
             few{"dobra São Tomé agus Príncipe"}
             one{"dobra São Tomé agus Príncipe"}
             other{"dobra São Tomé agus Príncipe"}
@@ -3114,5 +3094,5 @@ gd{
         other{"{0} {1}"}
         two{"{0} {1}"}
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.37.1"}
 }

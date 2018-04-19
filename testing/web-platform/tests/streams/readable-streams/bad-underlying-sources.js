@@ -306,7 +306,7 @@ promise_test(() => {
   const closed = new ReadableStream({
     start(c) {
       c.error(theError);
-      c.error();
+      assert_throws(new TypeError(), () => c.error(), 'second call to error should throw a TypeError');
       startCalled = true;
     }
   }).getReader().closed;
@@ -316,7 +316,7 @@ promise_test(() => {
     assert_equals(e, theError, 'closed should reject with the error');
   });
 
-}, 'Underlying source: calling error twice should not throw');
+}, 'Underlying source: calling error twice should throw the second time');
 
 promise_test(() => {
 
@@ -325,14 +325,14 @@ promise_test(() => {
   const closed = new ReadableStream({
     start(c) {
       c.close();
-      c.error();
+      assert_throws(new TypeError(), () => c.error(), 'second call to error should throw a TypeError');
       startCalled = true;
     }
   }).getReader().closed;
 
   return closed.then(() => assert_true(startCalled));
 
-}, 'Underlying source: calling error after close should not throw');
+}, 'Underlying source: calling error after close should throw');
 
 promise_test(() => {
 

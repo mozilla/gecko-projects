@@ -92,7 +92,7 @@ GetLayerManager(nsFrameLoader* aFrameLoader)
 }
 
 RenderFrameParent::RenderFrameParent(nsFrameLoader* aFrameLoader)
-  : mLayersId{0}
+  : mLayersId(0)
   , mLayersConnected(false)
   , mFrameLoader(aFrameLoader)
   , mFrameLoaderDestroyed(false)
@@ -183,7 +183,7 @@ RenderFrameParent::BuildLayer(nsDisplayListBuilder* aBuilder,
     return nullptr;
   }
 
-  if (!mLayersId.IsValid()) {
+  if (!mLayersId) {
     return nullptr;
   }
 
@@ -242,7 +242,7 @@ RenderFrameParent::OwnerContentChanged(nsIContent* aContent)
 void
 RenderFrameParent::ActorDestroy(ActorDestroyReason why)
 {
-  if (mLayersId.IsValid()) {
+  if (mLayersId != 0) {
     if (XRE_IsParentProcess()) {
       GPUProcessManager::Get()->UnmapLayerTreeId(mLayersId, OtherPid());
     } else if (XRE_IsContentProcess()) {
@@ -391,7 +391,7 @@ nsDisplayRemote::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuild
     mFrame->GetContentRectRelativeToSelf(), mFrame->PresContext()->AppUnitsPerDevPixel());
   rect += mOffset;
 
-  aBuilder.PushIFrame(mozilla::wr::ToRoundedLayoutRect(rect),
+  aBuilder.PushIFrame(aSc.ToRelativeLayoutRect(rect),
       !BackfaceIsHidden(),
       mozilla::wr::AsPipelineId(GetRemoteLayersId()));
 
@@ -410,7 +410,7 @@ nsDisplayRemote::UpdateScrollData(mozilla::layers::WebRenderScrollData* aData,
   return true;
 }
 
-LayersId
+uint64_t
 nsDisplayRemote::GetRemoteLayersId() const
 {
   return mRemoteFrame->GetLayersId();

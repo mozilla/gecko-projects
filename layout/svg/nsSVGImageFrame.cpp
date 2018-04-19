@@ -38,9 +38,9 @@ NS_QUERYFRAME_HEAD(nsSVGImageFrame)
 NS_QUERYFRAME_TAIL_INHERITING(SVGGeometryFrame)
 
 nsIFrame*
-NS_NewSVGImageFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
+NS_NewSVGImageFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
-  return new (aPresShell) nsSVGImageFrame(aStyle);
+  return new (aPresShell) nsSVGImageFrame(aContext);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGImageFrame)
@@ -356,7 +356,6 @@ nsSVGImageFrame::PaintSVG(gfxContext& aContext,
         nsLayoutUtils::GetSamplingFilterForFrame(this),
         nsPoint(0, 0),
         aDirtyRect ? &dirtyRect : nullptr,
-        Nothing(),
         flags);
     }
 

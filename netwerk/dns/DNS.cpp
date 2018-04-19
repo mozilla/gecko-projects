@@ -318,11 +318,11 @@ AddrInfo::AddrInfo(const char *host, const PRAddrInfo *prAddrInfo,
   } while (iter);
 }
 
-AddrInfo::AddrInfo(const char *host, const char *cname, unsigned int aTRR)
+AddrInfo::AddrInfo(const char *host, const char *cname)
   : mHostName(nullptr)
   , mCanonicalName(nullptr)
   , ttl(NO_TTL_DATA)
-  , mFromTRR(aTRR)
+  , mFromTRR(false)
 {
   Init(host, cname);
 }

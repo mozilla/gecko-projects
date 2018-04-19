@@ -597,31 +597,13 @@ MacroAssembler::storeUnboxedValue(const ConstantOrRegister& value, MIRType value
 // wasm specific methods, used in both the wasm baseline compiler and ion.
 
 void
-MacroAssembler::wasmBoundsCheck(Condition cond, Register index, Register boundsCheckLimit, Label* label)
-{
-    cmp32(index, boundsCheckLimit);
-    j(cond, label);
-    if (JitOptions.spectreIndexMasking)
-        cmovCCl(cond, Operand(boundsCheckLimit), index);
-}
-
-void
-MacroAssembler::wasmBoundsCheck(Condition cond, Register index, Address boundsCheckLimit, Label* label)
-{
-    cmp32(index, Operand(boundsCheckLimit));
-    j(cond, label);
-    if (JitOptions.spectreIndexMasking)
-        cmovCCl(cond, Operand(boundsCheckLimit), index);
-}
-
-void
 MacroAssembler::wasmLoad(const wasm::MemoryAccessDesc& access, Operand srcAddr, AnyRegister out)
 {
     MOZ_ASSERT(srcAddr.kind() == Operand::MEM_REG_DISP || srcAddr.kind() == Operand::MEM_SCALE);
 
     memoryBarrierBefore(access.sync());
 
-    append(access, size());
+    size_t loadOffset = size();
     switch (access.type()) {
       case Scalar::Int8:
         movsbl(srcAddr, out.gpr());
@@ -678,6 +660,7 @@ MacroAssembler::wasmLoad(const wasm::MemoryAccessDesc& access, Operand srcAddr, 
       case Scalar::MaxTypedArrayViewType:
         MOZ_CRASH("unexpected type");
     }
+    append(access, loadOffset, framePushed());
 
     memoryBarrierAfter(access.sync());
 }
@@ -692,38 +675,44 @@ MacroAssembler::wasmLoadI64(const wasm::MemoryAccessDesc& access, Operand srcAdd
 
     memoryBarrierBefore(access.sync());
 
-    append(access, size());
+    size_t loadOffset = size();
     switch (access.type()) {
       case Scalar::Int8:
         MOZ_ASSERT(out == Register64(edx, eax));
         movsbl(srcAddr, out.low);
+        append(access, loadOffset, framePushed());
 
         cdq();
         break;
       case Scalar::Uint8:
         movzbl(srcAddr, out.low);
+        append(access, loadOffset, framePushed());
 
         xorl(out.high, out.high);
         break;
       case Scalar::Int16:
         MOZ_ASSERT(out == Register64(edx, eax));
         movswl(srcAddr, out.low);
+        append(access, loadOffset, framePushed());
 
         cdq();
         break;
       case Scalar::Uint16:
         movzwl(srcAddr, out.low);
+        append(access, loadOffset, framePushed());
 
         xorl(out.high, out.high);
         break;
       case Scalar::Int32:
         MOZ_ASSERT(out == Register64(edx, eax));
         movl(srcAddr, out.low);
+        append(access, loadOffset, framePushed());
 
         cdq();
         break;
       case Scalar::Uint32:
         movl(srcAddr, out.low);
+        append(access, loadOffset, framePushed());
 
         xorl(out.high, out.high);
         break;
@@ -736,9 +725,11 @@ MacroAssembler::wasmLoadI64(const wasm::MemoryAccessDesc& access, Operand srcAdd
             MOZ_RELEASE_ASSERT(srcAddr.toAddress().base != out.low);
 
         movl(LowWord(srcAddr), out.low);
+        append(access, loadOffset, framePushed());
 
-        append(access, size());
+        loadOffset = size();
         movl(HighWord(srcAddr), out.high);
+        append(access, loadOffset, framePushed());
 
         break;
       }
@@ -764,7 +755,7 @@ MacroAssembler::wasmStore(const wasm::MemoryAccessDesc& access, AnyRegister valu
 
     memoryBarrierBefore(access.sync());
 
-    append(access, size());
+    size_t storeOffset = size();
     switch (access.type()) {
       case Scalar::Int8:
       case Scalar::Uint8Clamped:
@@ -818,6 +809,7 @@ MacroAssembler::wasmStore(const wasm::MemoryAccessDesc& access, AnyRegister valu
       case Scalar::MaxTypedArrayViewType:
         MOZ_CRASH("unexpected type");
     }
+    append(access, storeOffset, framePushed());
 
     memoryBarrierAfter(access.sync());
 }
@@ -830,11 +822,13 @@ MacroAssembler::wasmStoreI64(const wasm::MemoryAccessDesc& access, Register64 va
     MOZ_ASSERT(!access.isSimd());
     MOZ_ASSERT(dstAddr.kind() == Operand::MEM_REG_DISP || dstAddr.kind() == Operand::MEM_SCALE);
 
-    append(access, size());
+    size_t storeOffset = size();
     movl(value.low, LowWord(dstAddr));
+    append(access, storeOffset, framePushed());
 
-    append(access, size());
+    storeOffset = size();
     movl(value.high, HighWord(dstAddr));
+    append(access, storeOffset, framePushed());
 }
 
 template <typename T>

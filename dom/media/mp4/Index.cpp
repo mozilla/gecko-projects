@@ -110,7 +110,7 @@ already_AddRefed<MediaRawData> SampleIterator::GetNext()
   sample->mOffset = s->mByteRange.mStart;
   sample->mKeyframe = s->mSync;
 
-  UniquePtr<MediaRawDataWriter> writer(sample->CreateWriter());
+  nsAutoPtr<MediaRawDataWriter> writer(sample->CreateWriter());
   // Do the blocking read
   if (!writer->SetSize(s->mByteRange.Length())) {
     return nullptr;

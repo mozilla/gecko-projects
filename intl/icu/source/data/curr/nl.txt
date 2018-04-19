@@ -684,10 +684,6 @@ nl{
         }
         MRO{
             "MRO",
-            "Mauritaanse ouguiya (1973–2017)",
-        }
-        MRU{
-            "MRU",
             "Mauritaanse ouguiya",
         }
         MTL{
@@ -920,10 +916,6 @@ nl{
         }
         STD{
             "STD",
-            "Santomese dobra (1977–2017)",
-        }
-        STN{
-            "STN",
             "Santomese dobra",
         }
         SUR{
@@ -1289,7 +1281,7 @@ nl{
         SHP{"£"}
         SRD{"$"}
         SSP{"£"}
-        STN{"Db"}
+        STD{"Db"}
         SYP{"£"}
         THB{"฿"}
         TOP{"T$"}
@@ -1991,10 +1983,6 @@ nl{
             other{"Macause pataca"}
         }
         MRO{
-            one{"Mauritaanse ouguiya (1973–2017)"}
-            other{"Mauritaanse ouguiya (1973–2017)"}
-        }
-        MRU{
             one{"Mauritaanse ouguiya"}
             other{"Mauritaanse ouguiya"}
         }
@@ -2227,10 +2215,6 @@ nl{
             other{"Zuid-Soedanees pond"}
         }
         STD{
-            one{"Santomese dobra (1977–2017)"}
-            other{"Santomese dobra (1977–2017)"}
-        }
-        STN{
             one{"Santomese dobra"}
             other{"Santomese dobra"}
         }
@@ -2519,5 +2503,5 @@ nl{
         one{"{0} {1}"}
         other{"{0} {1}"}
     }
-    Version{"2.1.39.20"}
+    Version{"2.1.37.1"}
 }

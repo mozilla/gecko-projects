@@ -311,6 +311,7 @@ static_assert(nsIContentPolicy::TYPE_INVALID == 0 &&
               nsIContentPolicy::TYPE_FETCH == 20 &&
               nsIContentPolicy::TYPE_IMAGESET == 21 &&
               nsIContentPolicy::TYPE_WEB_MANIFEST == 22 &&
+              nsIContentPolicy::TYPE_SAVEAS_DOWNLOAD == 43 &&
               nsIContentPolicy::TYPE_INTERNAL_SCRIPT == 23 &&
               nsIContentPolicy::TYPE_INTERNAL_WORKER == 24 &&
               nsIContentPolicy::TYPE_INTERNAL_SHARED_WORKER == 25 &&
@@ -330,9 +331,7 @@ static_assert(nsIContentPolicy::TYPE_INVALID == 0 &&
               nsIContentPolicy::TYPE_INTERNAL_STYLESHEET == 39 &&
               nsIContentPolicy::TYPE_INTERNAL_STYLESHEET_PRELOAD == 40 &&
               nsIContentPolicy::TYPE_INTERNAL_IMAGE_FAVICON == 41 &&
-              nsIContentPolicy::TYPE_INTERNAL_WORKER_IMPORT_SCRIPTS == 42 &&
-              nsIContentPolicy::TYPE_SAVEAS_DOWNLOAD == 43 &&
-              nsIContentPolicy::TYPE_SPECULATIVE == 44,
+              nsIContentPolicy::TYPE_INTERNAL_WORKER_IMPORT_SCRIPTS == 42,
               "nsContentPolicyType values are as expected");
 
 namespace {
@@ -2122,12 +2121,15 @@ ReadResponse(mozIStorageConnection* aConn, EntryId aEntryId,
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
 #ifdef DEBUG
-    nsDependentCSubstring scheme = url->Scheme();
+    nsCString scheme;
+    rv = url->GetScheme(scheme);
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
     MOZ_ASSERT(scheme == "http" || scheme == "https" || scheme == "file");
 #endif
 
     nsCString origin;
-    url->Origin(origin);
+    rv = url->GetOrigin(origin);
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
     aSavedResponseOut->mValue.principalInfo() =
       mozilla::ipc::ContentPrincipalInfo(attrs, origin, specNoSuffix);

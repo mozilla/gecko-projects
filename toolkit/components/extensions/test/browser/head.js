@@ -1,6 +1,5 @@
 /* exported ACCENT_COLOR, BACKGROUND, ENCODED_IMAGE_DATA, FRAME_COLOR, TAB_TEXT_COLOR,
-   TEXT_COLOR, TAB_BACKGROUND_TEXT_COLOR, imageBufferFromDataURI, hexToCSS, hexToRGB, testBorderColor,
-   waitForTransition */
+   TEXT_COLOR, TAB_BACKGROUND_TEXT_COLOR, imageBufferFromDataURI, hexToCSS, hexToRGB, testBorderColor */
 
 "use strict";
 
@@ -53,12 +52,6 @@ function hexToCSS(hex) {
 function imageBufferFromDataURI(encodedImageData) {
   let decodedImageData = atob(encodedImageData);
   return Uint8Array.from(decodedImageData, byte => byte.charCodeAt(0)).buffer;
-}
-
-function waitForTransition(element, propertyName) {
-  return BrowserTestUtils.waitForEvent(element, "transitionend", false, event => {
-    return event.target == element && event.propertyName == propertyName;
-  });
 }
 
 function testBorderColor(element, expected) {

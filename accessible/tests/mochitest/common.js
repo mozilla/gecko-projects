@@ -48,6 +48,7 @@ const nsIDOMDocument = Ci.nsIDOMDocument;
 const nsIDOMEvent = Ci.nsIDOMEvent;
 const nsIDOMNode = Ci.nsIDOMNode;
 const nsIDOMWindow = Ci.nsIDOMWindow;
+const nsIDOMXULElement = Ci.nsIDOMXULElement;
 
 const nsIPropertyElement = Ci.nsIPropertyElement;
 

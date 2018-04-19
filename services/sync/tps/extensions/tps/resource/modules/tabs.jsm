@@ -11,14 +11,13 @@ const EXPORTED_SYMBOLS = ["BrowserTabs"];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://services-sync/main.js");
-ChromeUtils.import("resource:///modules/sessionstore/TabStateFlusher.jsm");
 
 // Unfortunately, due to where TPS is run, we can't directly reuse the logic from
 // BrowserTestUtils.jsm. Moreover, we can't resolve the URI it loads the content
 // frame script from ("chrome://mochikit/content/tests/BrowserTestUtils/content-utils.js"),
 // hence the hackiness here and in BrowserTabs.Add.
-Services
-.mm
+Cc["@mozilla.org/globalmessagemanager;1"]
+.getService(Ci.nsIMessageListenerManager)
 .loadFrameScript("data:application/javascript;charset=utf-8," + encodeURIComponent(`
   Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
   addEventListener("load", function(event) {
@@ -31,29 +30,24 @@ var BrowserTabs = {
    * Add
    *
    * Opens a new tab in the current browser window for the
-   * given uri. Rejects on error.
+   * given uri.  Throws on error.
    *
    * @param uri The uri to load in the new tab
-   * @return Promise
+   * @return nothing
    */
-  async Add(uri) {
+  Add(uri, fn) {
+
+    // Open the uri in a new tab in the current browser window, and calls
+    // the callback fn from the tab's onload handler.
     let mainWindow = Services.wm.getMostRecentWindow("navigator:browser");
     let browser = mainWindow.getBrowser();
-    let newtab = browser.addTab(uri);
-
-    // Wait for the tab to load.
-    await new Promise(resolve => {
-      let mm = browser.ownerGlobal.messageManager;
-      mm.addMessageListener("tps:loadEvent", function onLoad(msg) {
-        mm.removeMessageListener("tps:loadEvent", onLoad);
-        resolve();
-      });
+    let mm = browser.ownerGlobal.messageManager;
+    mm.addMessageListener("tps:loadEvent", function onLoad(msg) {
+      mm.removeMessageListener("tps:loadEvent", onLoad);
+      fn();
     });
-
+    let newtab = browser.addTab(uri);
     browser.selectedTab = newtab;
-    // We might sync before SessionStore is done recording information, so try
-    // and force it to record everything. This is overkill, but effective.
-    await TabStateFlusher.flushWindow(mainWindow);
   },
 
   /**

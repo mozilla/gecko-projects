@@ -45,16 +45,8 @@ class VerifyToolsMixin(object):
         for (path, suite) in manifests:
             if os.path.exists(path):
                 man = TestManifest([path], strict=False)
-                active = man.active_tests(exists=False, disabled=True, filters=[], **mozinfo.info)
-                # Remove disabled tests. Also, remove tests with the same path as
-                # disabled tests, even if they are not disabled, since test-verify
-                # specifies tests by path (it cannot distinguish between two or more
-                # tests with the same path specified in multiple manifests).
-                disabled = [t['relpath'] for t in active if 'disabled' in t]
-                new_by_path = {t['relpath']:(suite,t.get('subsuite')) \
-                               for t in active if 'disabled' not in t and \
-                               t['relpath'] not in disabled}
-                tests_by_path.update(new_by_path)
+                active = man.active_tests(exists=False, disabled=False, filters=[], **mozinfo.info)
+                tests_by_path.update({t['relpath']:(suite,t.get('subsuite')) for t in active})
                 self.info("Verification updated with manifest %s" % path)
 
         ref_manifests = [
@@ -183,8 +175,8 @@ class VerifyToolsMixin(object):
         mozinfo.update({"e10s": e10s})
         headless = self.config.get('headless', False)
         mozinfo.update({"headless": headless})
-        # FIXME(emilio): Need to update test expectations.
-        mozinfo.update({'stylo': True})
+        stylo = self.config.get('enable_stylo', False)
+        mozinfo.update({'stylo': stylo})
         mozinfo.update({'verify': True})
         self.info("Verification using mozinfo: %s" % str(mozinfo.info))
 
@@ -225,7 +217,7 @@ class VerifyToolsMixin(object):
             # in verify mode, run nothing by default (unsupported suite or no files modified)
             args = []
             # otherwise, run once for each file in requested suite
-            references = re.compile(r"(-ref|-notref|-noref|-noref.)\.")
+            references = re.compile(r"(-ref|-noref|-noref.)\.")
             files = []
             jsreftest_extra_dir = os.path.join('js', 'src', 'tests')
             # For some suites, the test path needs to be updated before passing to

@@ -18,16 +18,12 @@ includes: [testTypedArray.js, compareArray.js]
 features: [TypedArray]
 ---*/
 
-var toStringCalled = false;
-Number.prototype.toString = function() {
-  toStringCalled = true;
-}
+var origToString = Number.prototype.toString;
 
 testWithTypedArrayConstructors(function(TA) {
   var sample = new TA([20, 100, 3]);
   var result = sample.sort();
-  assert.sameValue(toStringCalled, false, "Number.prototype.toString will not be called");
-  assert(compareArray(result, [3, 20, 100]), "Default sorting by value");
+  assert(compareArray(result, [3, 20, 100]));
 });
 
 reportCompare(0, 0);

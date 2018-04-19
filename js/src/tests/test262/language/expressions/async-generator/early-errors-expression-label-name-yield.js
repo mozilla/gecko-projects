@@ -4,16 +4,10 @@
 
 /*---
 author: Caitlin Potter <caitp@igalia.com>
-esid: sec-identifiers-static-semantics-early-errors
+esid: sec-identifiers
 description: >
   `yield` is a reserved keyword within async generator function bodies and may
   not be used as a label.
-info: |
-  BindingIdentifier : Identifier
-  LabelIdentifier : Identifier
-
-    It is a Syntax Error if this production has an [Await] parameter and
-    StringValue of Identifier is "await".
 negative:
   phase: parse
   type: SyntaxError

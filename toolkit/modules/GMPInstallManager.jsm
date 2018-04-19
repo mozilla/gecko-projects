@@ -19,8 +19,13 @@ ChromeUtils.import("resource://gre/modules/addons/ProductAddonChecker.jsm");
 var EXPORTED_SYMBOLS = ["GMPInstallManager", "GMPExtractor", "GMPDownloader",
                         "GMPAddon"];
 
-ChromeUtils.defineModuleGetter(this, "CertUtils",
-                               "resource://gre/modules/CertUtils.jsm");
+// Shared code for suppressing bad cert dialogs
+XPCOMUtils.defineLazyGetter(this, "gCertUtils", function() {
+  let temp = { };
+  ChromeUtils.import("resource://gre/modules/CertUtils.jsm", temp);
+  return temp;
+});
+
 ChromeUtils.defineModuleGetter(this, "UpdateUtils",
                                "resource://gre/modules/UpdateUtils.jsm");
 
@@ -84,7 +89,7 @@ GMPInstallManager.prototype = {
     if (!Services.prefs.prefHasUserValue(GMPPrefs.KEY_URL_OVERRIDE)) {
       allowNonBuiltIn = !GMPPrefs.getString(GMPPrefs.KEY_CERT_REQUIREBUILTIN, true);
       if (GMPPrefs.getBool(GMPPrefs.KEY_CERT_CHECKATTRS, true)) {
-        certs = CertUtils.readCertPrefs(GMPPrefs.KEY_CERTS_BRANCH);
+        certs = gCertUtils.readCertPrefs(GMPPrefs.KEY_CERTS_BRANCH);
       }
     }
 

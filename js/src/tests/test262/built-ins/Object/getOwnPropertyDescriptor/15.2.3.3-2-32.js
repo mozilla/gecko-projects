@@ -8,11 +8,9 @@ description: >
     empty string
 ---*/
 
-var obj = {
-  "": 1
-};
+        var obj = { "": 1 };
 
-var desc = Object.getOwnPropertyDescriptor(obj, "");
+        var desc = Object.getOwnPropertyDescriptor(obj, "");
 
 assert.sameValue(desc.value, 1, 'desc.value');
 

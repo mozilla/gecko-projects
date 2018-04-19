@@ -77,11 +77,7 @@ typedef struct {
 typedef struct  {
     uint32_t          count;
     uint32_t          reserved;
-    /**
-     * Variable-length array declared with length 1 to disable bounds checkers.
-     * The actual array length is in the count field.
-     */
-    PointerTOCEntry   entry[1];
+    PointerTOCEntry   entry[2];   /* Actual size is from count. */
 }  PointerTOC;
 
 

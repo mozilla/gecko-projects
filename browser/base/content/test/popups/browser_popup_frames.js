@@ -72,6 +72,6 @@ add_task(async function test_opening_blocked_popups() {
   ok(!gBrowser.getNotificationBox().getNotificationWithValue("popup-blocked"),
      "Should no longer have notification");
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });
 

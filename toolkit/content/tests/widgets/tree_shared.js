@@ -1299,7 +1299,7 @@ function mouseClickOnColumnHeader(aColumns, aColumnIndex, aButton, aClickCount) 
     // Target the middle of the column header.
     synthesizeMouse(columnHeader, columnWidth / 2, 3,
                     { button: aButton,
-                      clickCount: i });
+                      clickCount: i }, null);
   }
 }
 
@@ -1312,7 +1312,7 @@ function mouseDblClickOnCell(tree, row, column, testname) {
   // get cell coordinates
   var rect = tree.treeBoxObject.getCoordsForCellItem(row, column, "text");
 
-  synthesizeMouse(tree.body, rect.x, rect.y, { clickCount: 2 });
+  synthesizeMouse(tree.body, rect.x, rect.y, { clickCount: 2 }, null);
 }
 
 function compareArrays(arr1, arr2) {

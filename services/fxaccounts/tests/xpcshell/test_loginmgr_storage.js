@@ -46,7 +46,7 @@ function createFxAccounts() {
       async recoveryEmailStatus() {
         return { verified: true };
       },
-      async signOut() {},
+      async signOutAndDestroyDevice() {},
     },
     _getDeviceName() {
       return "mock device name";

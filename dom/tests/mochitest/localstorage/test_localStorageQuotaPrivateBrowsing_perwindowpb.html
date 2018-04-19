@@ -168,8 +168,7 @@ function testOnWindow(aIsPrivate, callback) {
                          .QueryInterface(Ci.nsIInterfaceRequestor)
                          .getInterface(Ci.nsIDOMWindow);
 
-  mainWindow.openWebLinkIn(CONTENT_PAGE, "window", {
-                                  private: aIsPrivate });
+  mainWindow.openUILinkIn(CONTENT_PAGE, "window", {private: aIsPrivate});
   whenDelayedStartupFinished(callback);
 };
 </script>

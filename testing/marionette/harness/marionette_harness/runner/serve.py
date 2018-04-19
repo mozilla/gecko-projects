@@ -71,11 +71,10 @@ class ServerProxy(multiprocessing.Process, BlockingChannel):
         self.init_kwargs = init_kwargs
 
     def run(self):
-        try:
-            server = self.init_func(*self.init_args, **self.init_kwargs)
-            server.start(block=False)
-            self.send(("ok", ()))
+        server = self.init_func(*self.init_args, **self.init_kwargs)
+        server.start(block=False)
 
+        try:
             while True:
                 # ["func", ("arg", ...)]
                 # ["prop", ()]
@@ -95,9 +94,6 @@ class ServerProxy(multiprocessing.Process, BlockingChannel):
                 if sattr == "stop":
                     return
 
-        except Exception as e:
-            self.send(("stop", e))
-
         except KeyboardInterrupt:
             server.stop()
 
@@ -116,10 +112,6 @@ class ServerProc(BlockingChannel):
             self.child_chan, self._init_func, doc_root, ssl_config, **kwargs)
         self.proc.daemon = True
         self.proc.start()
-
-        res, exc = self.recv()
-        if res == "stop":
-            raise exc
 
     def get_url(self, url):
         return self.call("get_url", (url,))

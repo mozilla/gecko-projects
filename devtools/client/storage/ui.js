@@ -5,12 +5,11 @@
 
 "use strict";
 
-const EventEmitter = require("devtools/shared/event-emitter");
+const EventEmitter = require("devtools/shared/old-event-emitter");
 const {LocalizationHelper, ELLIPSIS} = require("devtools/shared/l10n");
 const KeyShortcuts = require("devtools/client/shared/key-shortcuts");
 const JSOL = require("devtools/client/shared/vendor/jsol");
 const {KeyCodes} = require("devtools/client/shared/keycodes");
-const { getUnicodeHostname } = require("devtools/client/shared/unicode-url");
 
 // GUID to be used as a separator in compound keys. This must match the same
 // constant in devtools/server/actors/storage.js,
@@ -59,8 +58,6 @@ const COOKIE_KEY_MAP = {
   creationTime: "CreationTime",
   lastAccessed: "LastAccessed"
 };
-
-const SAFE_HOSTS_PREFIXES_REGEX = /^(about:|https?:|file:|moz-extension:)/;
 
 // Maximum length of item name to show in context menu label - will be
 // trimmed with ellipsis if it's longer.
@@ -132,26 +129,6 @@ class StorageUI {
     });
 
     this.front.listStores().then(storageTypes => {
-      // When we are in the browser console we list indexedDBs internal to
-      // Firefox e.g. defined inside a .jsm. Because there is no way before this
-      // point to know whether or not we are inside the browser toolbox we have
-      // already fetched the hostnames of these databases.
-      //
-      // If we are not inside the browser toolbox we need to delete these
-      // hostnames.
-      if (!this._target.chrome && storageTypes.indexedDB) {
-        let hosts = storageTypes.indexedDB.hosts;
-        let newHosts = {};
-
-        for (let [host, dbs] of Object.entries(hosts)) {
-          if (SAFE_HOSTS_PREFIXES_REGEX.test(host)) {
-            newHosts[host] = dbs;
-          }
-        }
-
-        storageTypes.indexedDB.hosts = newHosts;
-      }
-
       this.populateStorageTree(storageTypes);
     }).catch(e => {
       if (!this._toolbox || this._toolbox._destroyer) {
@@ -164,8 +141,8 @@ class StorageUI {
       console.error(e);
     });
 
-    this.onEdit = this.onEdit.bind(this);
-    this.front.on("stores-update", this.onEdit);
+    this.onUpdate = this.onUpdate.bind(this);
+    this.front.on("stores-update", this.onUpdate);
     this.onCleared = this.onCleared.bind(this);
     this.front.on("stores-cleared", this.onCleared);
 
@@ -239,7 +216,7 @@ class StorageUI {
     this.table.off(TableWidget.EVENTS.CELL_EDIT, this.editItem);
     this.table.destroy();
 
-    this.front.off("stores-update", this.onEdit);
+    this.front.off("stores-update", this.onUpdate);
     this.front.off("stores-cleared", this.onCleared);
     this._panelDoc.removeEventListener("keypress", this.handleKeypress);
     this.searchBox.removeEventListener("input", this.filterItems);
@@ -424,7 +401,7 @@ class StorageUI {
    *        of the changed store objects. This array is empty for deleted object
    *        if the host was completely removed.
    */
-  async onEdit({ changed, added, deleted }) {
+  async onUpdate({ changed, added, deleted }) {
     if (added) {
       await this.handleAddedItems(added);
     }
@@ -444,20 +421,19 @@ class StorageUI {
     }
 
     if (added || deleted || changed) {
-      this.emit("store-objects-edit");
+      this.emit("store-objects-updated");
     }
   }
 
   /**
-   * Handle added items received by onEdit
+   * Handle added items received by onUpdate
    *
-   * @param {object} See onEdit docs
+   * @param {object} See onUpdate docs
    */
   async handleAddedItems(added) {
     for (let type in added) {
       for (let host in added[type]) {
-        const label = this.getReadableLabelFromHostname(host);
-        this.tree.add([type, {id: host, label: label, type: "url"}]);
+        this.tree.add([type, {id: host, type: "url"}]);
         for (let name of added[type][host]) {
           try {
             name = JSON.parse(name);
@@ -484,9 +460,9 @@ class StorageUI {
   }
 
   /**
-   * Handle deleted items received by onEdit
+   * Handle deleted items received by onUpdate
    *
-   * @param {object} See onEdit docs
+   * @param {object} See onUpdate docs
    */
   async handleDeletedItems(deleted) {
     for (let type in deleted) {
@@ -536,9 +512,9 @@ class StorageUI {
   }
 
   /**
-   * Handle changed items received by onEdit
+   * Handle changed items received by onUpdate
    *
-   * @param {object} See onEdit docs
+   * @param {object} See onUpdate docs
    */
   async handleChangedItems(changed) {
     let [type, host, db, objectStore] = this.tree.selectedItem;
@@ -674,8 +650,7 @@ class StorageUI {
       }
       this.storageTypes[type] = storageTypes[type];
       for (let host in storageTypes[type].hosts) {
-        const label = this.getReadableLabelFromHostname(host);
-        this.tree.add([type, {id: host, label: label, type: "url"}]);
+        this.tree.add([type, {id: host, type: "url"}]);
         for (let name of storageTypes[type].hosts[host]) {
           try {
             let names = JSON.parse(name);
@@ -776,42 +751,13 @@ class StorageUI {
   }
 
   /**
-   * Gets a readable label from the hostname. If the hostname is a Punycode
-   * domain(I.e. an ASCII domain name representing a Unicode domain name), then
-   * this function decodes it to the readable Unicode domain name, and label
-   * the Unicode domain name toggether with the original domian name, and then
-   * return the label; if the hostname isn't a Punycode domain(I.e. it isn't
-   * encoded and is readable on its own), then this function simply returns the
-   * original hostname.
-   *
-   * @param {string} host
-   *        The string representing a host, e.g, example.com, example.com:8000
-   */
-  getReadableLabelFromHostname(host) {
-    try {
-      const { hostname } = new URL(host);
-      const unicodeHostname = getUnicodeHostname(hostname);
-      if (hostname !== unicodeHostname) {
-        // If the hostname is a Punycode domain representing a Unicode domain,
-        // we decode it to the Unicode domain name, and then label the Unicode
-        // domain name together with the original domain name.
-        return host.replace(hostname, unicodeHostname) + " [ " + host + " ]";
-      }
-    } catch (_) {
-      // Skip decoding for a host which doesn't include a domain name, simply
-      // consider them to be readable.
-    }
-    return host;
-  }
-
-  /**
    * Tries to parse a string value into either a json or a key-value separated
    * object and populates the sidebar with the parsed value. The value can also
    * be a key separated array.
    *
    * @param {string} name
    *        The key corresponding to the `value` string in the object
-   * @param {string} originalValue
+   * @param {string} value
    *        The string to be parsed into an object
    */
   parseItemValue(name, originalValue) {
@@ -913,6 +859,8 @@ class StorageUI {
    * Select handler for the storage tree. Fetches details of the selected item
    * from the storage details and populates the storage tree.
    *
+   * @param {string} event
+   *        The name of the event fired
    * @param {array} item
    *        An array of ids which represent the location of the selected item in
    *        the storage tree

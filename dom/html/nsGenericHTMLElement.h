@@ -25,6 +25,7 @@ class nsIFormControlFrame;
 class nsIFrame;
 class nsILayoutHistoryState;
 class nsIURI;
+class nsPresState;
 struct nsSize;
 
 namespace mozilla {
@@ -34,7 +35,6 @@ class EventChainVisitor;
 class EventListenerManager;
 class EventStates;
 class TextEditor;
-class PresState;
 namespace dom {
 class HTMLFormElement;
 class HTMLMenuElement;
@@ -63,7 +63,7 @@ public:
 
   NS_DECL_ISUPPORTS_INHERITED
 
-  NS_IMPL_FROMNODE(nsGenericHTMLElement, kNameSpaceID_XHTML)
+  NS_IMPL_FROMCONTENT(nsGenericHTMLElement, kNameSpaceID_XHTML)
 
   // From Element
   nsresult CopyInnerTo(mozilla::dom::Element* aDest, bool aPreallocateChildren);
@@ -149,7 +149,7 @@ public:
   bool IsContentEditable()
   {
     for (nsIContent* node = this; node; node = node->GetParent()) {
-      nsGenericHTMLElement* element = FromNode(node);
+      nsGenericHTMLElement* element = FromContent(node);
       if (element) {
         ContentEditableTristate value = element->GetContentEditableValue();
         if (value != eInherit) {
@@ -301,7 +301,8 @@ public:
    */
   bool CheckHandleEventForAnchorsPreconditions(
          mozilla::EventChainVisitor& aVisitor);
-  void GetEventTargetParentForAnchors(mozilla::EventChainPreVisitor& aVisitor);
+  nsresult GetEventTargetParentForAnchors(
+             mozilla::EventChainPreVisitor& aVisitor);
   nsresult PostHandleEventForAnchors(mozilla::EventChainPostVisitor& aVisitor);
   bool IsHTMLLink(nsIURI** aURI) const;
 
@@ -698,8 +699,22 @@ protected:
   /**
    * Add/remove this element to the documents name cache
    */
-  void AddToNameTable(nsAtom* aName);
-  void RemoveFromNameTable();
+  void AddToNameTable(nsAtom* aName) {
+    NS_ASSERTION(HasName(), "Node doesn't have name?");
+    nsIDocument* doc = GetUncomposedDoc();
+    if (doc && !IsInAnonymousSubtree()) {
+      doc->AddToNameTable(this, aName);
+    }
+  }
+  void RemoveFromNameTable() {
+    if (HasName() && CanHaveName(NodeInfo()->NameAtom())) {
+      nsIDocument* doc = GetUncomposedDoc();
+      if (doc) {
+        doc->RemoveFromNameTable(this, GetParsedAttr(nsGkAtoms::name)->
+                                         GetAtomValue());
+      }
+    }
+  }
 
   /**
    * Register or unregister an access key to this element based on the
@@ -752,7 +767,7 @@ protected:
 
   void GetHTMLAttr(nsAtom* aName, nsAString& aResult) const
   {
-    GetAttr(aName, aResult);
+    GetAttr(kNameSpaceID_None, aName, aResult);
   }
   void GetHTMLAttr(nsAtom* aName, mozilla::dom::DOMString& aResult) const
   {
@@ -773,15 +788,15 @@ protected:
   }
   void SetHTMLAttr(nsAtom* aName, const nsAString& aValue, mozilla::ErrorResult& aError)
   {
-    SetAttr(aName, aValue, aError);
+    mozilla::dom::Element::SetAttr(aName, aValue, aError);
   }
   void SetHTMLAttr(nsAtom* aName, const nsAString& aValue, nsIPrincipal* aTriggeringPrincipal, mozilla::ErrorResult& aError)
   {
-    SetAttr(aName, aValue, aTriggeringPrincipal, aError);
+    mozilla::dom::Element::SetAttr(aName, aValue, aTriggeringPrincipal, aError);
   }
   void UnsetHTMLAttr(nsAtom* aName, mozilla::ErrorResult& aError)
   {
-    UnsetAttr(aName, aError);
+    mozilla::dom::Element::UnsetAttr(aName, aError);
   }
   void SetHTMLBoolAttr(nsAtom* aName, bool aValue, mozilla::ErrorResult& aError)
   {
@@ -996,15 +1011,17 @@ public:
   {
     return mForm;
   }
-  virtual void SetForm(mozilla::dom::HTMLFormElement* aForm) override;
+  virtual void SetForm(nsIDOMHTMLFormElement* aForm) override;
   virtual void ClearForm(bool aRemoveFromForm, bool aUnbindOrDelete) override;
+
+  nsresult GetForm(nsIDOMHTMLFormElement** aForm);
 
   NS_IMETHOD SaveState() override
   {
     return NS_OK;
   }
 
-  virtual bool RestoreState(mozilla::PresState* aState) override
+  virtual bool RestoreState(nsPresState* aState) override
   {
     return false;
   }
@@ -1022,7 +1039,8 @@ public:
   virtual IMEState GetDesiredIMEState() override;
   virtual mozilla::EventStates IntrinsicState() const override;
 
-  void GetEventTargetParent(mozilla::EventChainPreVisitor& aVisitor) override;
+  virtual nsresult GetEventTargetParent(
+                     mozilla::EventChainPreVisitor& aVisitor) override;
   virtual nsresult PreHandleEvent(
                      mozilla::EventChainVisitor& aVisitor) override;
 
@@ -1170,7 +1188,7 @@ public:
    * Get the presentation state for a piece of content, or create it if it does
    * not exist.  Generally used by SaveState().
    */
-  mozilla::PresState* GetPrimaryPresState();
+  nsPresState* GetPrimaryPresState();
 
   /**
    * Get the layout history object for a particular piece of content.

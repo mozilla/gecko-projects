@@ -26,10 +26,7 @@ var mDBConn = hs.QueryInterface(Ci.nsPIPlacesDatabase).DBConnection;
 // Helpers
 
 var defaultBookmarksMaxId = 0;
-async function cleanDatabase() {
-  // First clear any bookmarks the "proper way" to ensure caches like GuidHelper
-  // are properly cleared.
-  await PlacesUtils.bookmarks.eraseEverything();
+function cleanDatabase() {
   mDBConn.executeSimpleSQL("DELETE FROM moz_places");
   mDBConn.executeSimpleSQL("DELETE FROM moz_historyvisits");
   mDBConn.executeSimpleSQL("DELETE FROM moz_anno_attributes");
@@ -706,25 +703,23 @@ tests.push({
 
   async setup() {
     const NUM_BOOKMARKS = 20;
-    let children = [];
-    for (let i = 0; i < NUM_BOOKMARKS; i++) {
-      children.push({
-        title: "testbookmark",
-        url: "http://example.com",
-      });
-    }
-
-    // Add bookmarks to two folders to better perturbate the table.
-    await PlacesUtils.bookmarks.insertTree({
-      guid: PlacesUtils.bookmarks.unfiledGuid,
-      children,
-      source: PlacesUtils.bookmarks.SOURCES.SYNC,
-    });
-    await PlacesUtils.bookmarks.insertTree({
-      guid: PlacesUtils.bookmarks.toolbarGuid,
-      children,
-      source: PlacesUtils.bookmarks.SOURCES.SYNC,
-    });
+    bs.runInBatchMode({
+      runBatched(aUserData) {
+        // Add bookmarks to two folders to better perturbate the table.
+        for (let i = 0; i < NUM_BOOKMARKS; i++) {
+          bs.insertBookmark(PlacesUtils.unfiledBookmarksFolderId,
+                            NetUtil.newURI("http://example.com/"),
+                            bs.DEFAULT_INDEX, "testbookmark", null,
+                            PlacesUtils.bookmarks.SOURCES.SYNC);
+        }
+        for (let i = 0; i < NUM_BOOKMARKS; i++) {
+          bs.insertBookmark(PlacesUtils.toolbarFolderId,
+                            NetUtil.newURI("http://example.com/"),
+                            bs.DEFAULT_INDEX, "testbookmark", null,
+                            PlacesUtils.bookmarks.SOURCES.SYNC);
+        }
+      }
+    }, null);
 
     function randomize_positions(aParent, aResultArray) {
       let stmt = mDBConn.createStatement(
@@ -1692,7 +1687,7 @@ add_task(async function test_preventive_maintenance() {
 
     await test.check();
 
-    await cleanDatabase();
+    cleanDatabase();
   }
 
   // Sanity check: all roots should be intact

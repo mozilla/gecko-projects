@@ -25,7 +25,8 @@ info: |
      2. Let realm be the current Realm Record.
      3. Let templateRegistry be realm.[[TemplateMap]].
      4. For each element e of templateRegistry, do
-        a. If _e_.[[Site]] is the same Parse Node as _templateLiteral_, then
+        a, If e.[[Strings]] and rawStrings contain the same values in the same
+           order, then
            i. Return e.[[Array]].
 features: [cross-realm]
 ---*/

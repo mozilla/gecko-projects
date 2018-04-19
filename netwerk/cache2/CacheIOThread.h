@@ -28,7 +28,7 @@ namespace detail {
 class BlockingIOWatcher;
 }
 
-class CacheIOThread final : public nsIThreadObserver
+class CacheIOThread : public nsIThreadObserver
 {
   virtual ~CacheIOThread();
 

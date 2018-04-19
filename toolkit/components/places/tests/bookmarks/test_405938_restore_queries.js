@@ -107,8 +107,18 @@ var test = {
       title: this._queryTitle2
     });
 
-    // Create a query URI for most recent bookmarks with NO folders specified.
-    this._queryURI3 = "place:queryType=1&sort=12&maxResults=10&excludeQueries=1";
+    // create a query URI with _count queries (each with a folder)
+    // first get a query object for each folder
+    var queries = folderIds.map(function(aFolderId) {
+      var query = PlacesUtils.history.getNewQuery();
+      query.setFolders([aFolderId], 1);
+      return query;
+    });
+
+    var options = PlacesUtils.history.getNewQueryOptions();
+    options.queryType = options.QUERY_TYPE_BOOKMARKS;
+    this._queryURI3 =
+      PlacesUtils.history.queriesToQueryString(queries, queries.length, options);
     this._queryTitle3 = "query3";
     await PlacesUtils.bookmarks.insert({
       parentGuid: insertedBookmarks[0].guid,
@@ -116,6 +126,19 @@ var test = {
       url: this._queryURI3,
       title: this._queryTitle3
     });
+
+    // Create a query URI for most recent bookmarks with NO folders specified.
+    this._queryURI4 = "place:queryType=1&sort=12&excludeItemIfParentHasAnnotation=livemark%2FfeedURI&maxResults=10&excludeQueries=1";
+    this._queryTitle4 = "query4";
+    await PlacesUtils.bookmarks.insert({
+      parentGuid: insertedBookmarks[0].guid,
+      dateAdded,
+      url: this._queryURI4,
+      title: this._queryTitle4
+    });
+
+    dump_table("moz_bookmarks");
+    dump_table("moz_places");
   },
 
   clean() {},
@@ -146,7 +169,7 @@ var test = {
     folderNode.containerOpen = true;
 
     // |_count| folders + the query nodes
-    Assert.equal(folderNode.childCount, this._count + 3);
+    Assert.equal(folderNode.childCount, this._count + 4);
 
     for (let i = 0; i < this._count; i++) {
       var subFolder = folderNode.getChild(i);
@@ -165,8 +188,11 @@ var test = {
     // validate folders query
     this.validateQueryNode2(folderNode.getChild(this._count + 1));
 
-    // validate recent folders query
+    // validate multiple queries query
     this.validateQueryNode3(folderNode.getChild(this._count + 2));
+
+    // validate recent folders query
+    this.validateQueryNode4(folderNode.getChild(this._count + 3));
 
     // clean up
     folderNode.containerOpen = false;
@@ -201,8 +227,23 @@ var test = {
     aNode.containerOpen = false;
   },
 
-  validateQueryNode3(aNode) {
+  validateQueryNode3: function validateQueryNode3(aNode) {
     Assert.equal(aNode.title, this._queryTitle3);
+    Assert.ok(PlacesUtils.nodeIsQuery(aNode));
+
+    aNode.QueryInterface(Ci.nsINavHistoryContainerResultNode);
+    aNode.containerOpen = true;
+    Assert.equal(aNode.childCount, this._count);
+    for (var i = 0; i < aNode.childCount; i++) {
+      var child = aNode.getChild(i);
+      Assert.ok(uri(child.uri).equals(uri("http://" + i)));
+      Assert.equal(child.title, "bookmark" + i);
+    }
+    aNode.containerOpen = false;
+  },
+
+  validateQueryNode4(aNode) {
+    Assert.equal(aNode.title, this._queryTitle4);
     Assert.ok(PlacesUtils.nodeIsQuery(aNode));
 
     aNode.QueryInterface(Ci.nsINavHistoryContainerResultNode);
@@ -238,7 +279,7 @@ add_task(async function() {
   }
 
   // restore json file
-  await BookmarkJSONUtils.importFromFile(jsonFile, { replace: true });
+  await BookmarkJSONUtils.importFromFile(jsonFile, true);
 
   // validate
   for (let singleTest of tests) {

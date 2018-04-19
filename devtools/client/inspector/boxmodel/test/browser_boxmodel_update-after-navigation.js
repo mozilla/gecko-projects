@@ -10,81 +10,81 @@
 const IFRAME1 = URL_ROOT + "doc_boxmodel_iframe1.html";
 const IFRAME2 = URL_ROOT + "doc_boxmodel_iframe2.html";
 
-add_task(async function() {
-  await addTab(IFRAME1);
-  let {inspector, boxmodel, testActor} = await openLayoutView();
+add_task(function* () {
+  yield addTab(IFRAME1);
+  let {inspector, view, testActor} = yield openBoxModelView();
 
-  await testFirstPage(inspector, boxmodel, testActor);
+  yield testFirstPage(inspector, view, testActor);
 
   info("Navigate to the second page");
   let onMarkupLoaded = waitForMarkupLoaded(inspector);
-  await testActor.eval(`location.href="${IFRAME2}"`);
-  await onMarkupLoaded;
+  yield testActor.eval(`location.href="${IFRAME2}"`);
+  yield onMarkupLoaded;
 
-  await testSecondPage(inspector, boxmodel, testActor);
+  yield testSecondPage(inspector, view, testActor);
 
   info("Go back to the first page");
   onMarkupLoaded = waitForMarkupLoaded(inspector);
-  await testActor.eval("history.back();");
-  await onMarkupLoaded;
+  yield testActor.eval("history.back();");
+  yield onMarkupLoaded;
 
-  await testBackToFirstPage(inspector, boxmodel, testActor);
+  yield testBackToFirstPage(inspector, view, testActor);
 });
 
-async function testFirstPage(inspector, boxmodel, testActor) {
+function* testFirstPage(inspector, view, testActor) {
   info("Test that the box model view works on the first page");
 
-  await selectNode("p", inspector);
+  yield selectNode("p", inspector);
 
   info("Checking that the box model view shows the right value");
-  let paddingElt = boxmodel.document.querySelector(
+  let paddingElt = view.document.querySelector(
     ".boxmodel-padding.boxmodel-top > span");
   is(paddingElt.textContent, "50");
 
   info("Listening for box model view changes and modifying the padding");
   let onUpdated = waitForUpdate(inspector);
-  await setStyle(testActor, "p", "padding", "20px");
-  await onUpdated;
+  yield setStyle(testActor, "p", "padding", "20px");
+  yield onUpdated;
   ok(true, "Box model view got updated");
 
   info("Checking that the box model view shows the right value after update");
   is(paddingElt.textContent, "20");
 }
 
-async function testSecondPage(inspector, boxmodel, testActor) {
+function* testSecondPage(inspector, view, testActor) {
   info("Test that the box model view works on the second page");
 
-  await selectNode("p", inspector);
+  yield selectNode("p", inspector);
 
   info("Checking that the box model view shows the right value");
-  let sizeElt = boxmodel.document.querySelector(".boxmodel-size > span");
+  let sizeElt = view.document.querySelector(".boxmodel-size > span");
   is(sizeElt.textContent, "100" + "\u00D7" + "100");
 
   info("Listening for box model view changes and modifying the size");
   let onUpdated = waitForUpdate(inspector);
-  await setStyle(testActor, "p", "width", "200px");
-  await onUpdated;
+  yield setStyle(testActor, "p", "width", "200px");
+  yield onUpdated;
   ok(true, "Box model view got updated");
 
   info("Checking that the box model view shows the right value after update");
   is(sizeElt.textContent, "200" + "\u00D7" + "100");
 }
 
-async function testBackToFirstPage(inspector, boxmodel, testActor) {
+function* testBackToFirstPage(inspector, view, testActor) {
   info("Test that the box model view works on the first page after going back");
 
-  await selectNode("p", inspector);
+  yield selectNode("p", inspector);
 
   info("Checking that the box model view shows the right value, which is the" +
     "modified value from step one because of the bfcache");
-  let paddingElt = boxmodel.document.querySelector(
+  let paddingElt = view.document.querySelector(
     ".boxmodel-padding.boxmodel-top > span");
   is(paddingElt.textContent, "20");
 
   info("Listening for box model view changes and modifying the padding");
   let onUpdated = waitForUpdate(inspector);
-  await setStyle(testActor, "p", "padding", "100px");
-  await onUpdated;
+  yield setStyle(testActor, "p", "padding", "100px");
+  yield onUpdated;
   ok(true, "Box model view got updated");
 
   info("Checking that the box model view shows the right value after update");

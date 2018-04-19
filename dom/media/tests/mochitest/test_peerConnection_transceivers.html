@@ -392,10 +392,12 @@
 
     let expected = [];
 
-    if (options.offerToReceiveAudio) {
+    // NOTE: The ordering here is not laid out in the spec at all, this is
+    // firefox specific.
+    if (options.offerToReceiveVideo) {
       expected.push(
         {
-          receiver: {track: {kind: "audio"}},
+          receiver: {track: {kind: "video"}},
           sender: {track: null},
           direction: "recvonly",
           mid: null,
@@ -404,10 +406,10 @@
         });
     }
 
-    if (options.offerToReceiveVideo) {
+    if (options.offerToReceiveAudio) {
       expected.push(
         {
-          receiver: {track: {kind: "video"}},
+          receiver: {track: {kind: "audio"}},
           sender: {track: null},
           direction: "recvonly",
           mid: null,

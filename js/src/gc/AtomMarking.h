@@ -22,7 +22,7 @@ class Arena;
 class AtomMarkingRuntime
 {
     // Unused arena atom bitmap indexes. Protected by the GC lock.
-    js::GCLockData<Vector<size_t, 0, SystemAllocPolicy>> freeArenaIndexes;
+    js::ExclusiveAccessLockOrGCTaskData<Vector<size_t, 0, SystemAllocPolicy>> freeArenaIndexes;
 
     void markChildren(JSContext* cx, JSAtom*) {}
 
@@ -41,10 +41,10 @@ class AtomMarkingRuntime
     {}
 
     // Mark an arena as holding things in the atoms zone.
-    void registerArena(Arena* arena, const AutoLockGC& lock);
+    void registerArena(Arena* arena);
 
     // Mark an arena as no longer holding things in the atoms zone.
-    void unregisterArena(Arena* arena, const AutoLockGC& lock);
+    void unregisterArena(Arena* arena);
 
     // Fill |bitmap| with an atom marking bitmap based on the things that are
     // currently marked in the chunks used by atoms zone arenas. This returns

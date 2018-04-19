@@ -32,34 +32,20 @@ namespace mozilla {
 
 using namespace dom;
 
-template already_AddRefed<CreateElementTransaction>
-CreateElementTransaction::Create(
-                            EditorBase& aEditorBase,
-                            nsAtom& aTag,
-                            const EditorDOMPoint& aPointToInsert);
-template already_AddRefed<CreateElementTransaction>
-CreateElementTransaction::Create(
-                            EditorBase& aEditorBase,
-                            nsAtom& aTag,
-                            const EditorRawDOMPoint& aPointToInsert);
-
-template<typename PT, typename CT>
 already_AddRefed<CreateElementTransaction>
-CreateElementTransaction::Create(
-                            EditorBase& aEditorBase,
-                            nsAtom& aTag,
-                            const EditorDOMPointBase<PT, CT>& aPointToInsert)
+CreateElementTransaction::Create(EditorBase& aEditorBase,
+                                 nsAtom& aTag,
+                                 const EditorRawDOMPoint& aPointToInsert)
 {
   RefPtr<CreateElementTransaction> transaction =
     new CreateElementTransaction(aEditorBase, aTag, aPointToInsert);
   return transaction.forget();
 }
 
-template<typename PT, typename CT>
 CreateElementTransaction::CreateElementTransaction(
                             EditorBase& aEditorBase,
                             nsAtom& aTag,
-                            const EditorDOMPointBase<PT, CT>& aPointToInsert)
+                            const EditorRawDOMPoint& aPointToInsert)
   : EditTransactionBase()
   , mEditorBase(&aEditorBase)
   , mTag(&aTag)

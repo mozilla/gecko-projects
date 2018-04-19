@@ -7,17 +7,12 @@
 #ifndef MOZILLA_GFX_RENDERCOMPOSITOR_ANGLE_H
 #define MOZILLA_GFX_RENDERCOMPOSITOR_ANGLE_H
 
-#include "GLTypes.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/webrender/RenderCompositor.h"
 
 struct ID3D11DeviceContext;
 struct ID3D11Device;
 struct ID3D11Query;
-struct IDCompositionDevice;
-struct IDCompositionTarget;
-struct IDCompositionVisual;
-struct IDXGIFactory2;
 struct IDXGISwapChain;
 
 namespace mozilla {
@@ -50,7 +45,6 @@ protected:
   bool ResizeBufferIfNeeded();
   void DestroyEGLSurface();
   ID3D11Device* GetDeviceOfEGLDisplay();
-  void CreateSwapChainForDCompIfPossible(IDXGIFactory2* aDXGIFactory2);
 
   RefPtr<gl::GLContext> mGL;
   EGLConfig mEGLConfig;
@@ -59,10 +53,6 @@ protected:
   RefPtr<ID3D11Device> mDevice;
   RefPtr<ID3D11DeviceContext> mCtx;
   RefPtr<IDXGISwapChain> mSwapChain;
-
-  RefPtr<IDCompositionDevice> mCompositionDevice;
-  RefPtr<IDCompositionTarget> mCompositionTarget;
-  RefPtr<IDCompositionVisual> mVisual;
 
   RefPtr<ID3D11Query> mWaitForPresentQuery;
   RefPtr<ID3D11Query> mNextWaitForPresentQuery;

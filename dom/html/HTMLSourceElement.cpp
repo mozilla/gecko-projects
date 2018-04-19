@@ -61,7 +61,8 @@ HTMLSourceElement::WouldMatchMediaForDocument(const nsAString& aMedia,
 
   nsPresContext* pctx = aDocument->GetPresContext();
 
-  RefPtr<MediaList> mediaList = MediaList::Create(aMedia);
+  RefPtr<MediaList> mediaList =
+    MediaList::Create(aDocument->GetStyleBackendType(), aMedia);
   return pctx && mediaList->Matches(pctx);
 }
 
@@ -74,7 +75,7 @@ HTMLSourceElement::UpdateMediaList(const nsAttrValue* aValue)
     return;
   }
 
-  mMediaList = MediaList::Create(mediaStr);
+  mMediaList = MediaList::Create(OwnerDoc()->GetStyleBackendType(), mediaStr);
 }
 
 nsresult

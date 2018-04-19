@@ -26,7 +26,7 @@ class RequestListContextMenu {
     this.props = props;
   }
 
-  open(event, selectedRequest, requests) {
+  open(event, selectedRequest, sortedRequests) {
     let {
       id,
       isCustom,
@@ -143,8 +143,8 @@ class RequestListContextMenu {
       id: "request-list-context-copy-all-as-har",
       label: L10N.getStr("netmonitor.context.copyAllAsHar"),
       accesskey: L10N.getStr("netmonitor.context.copyAllAsHar.accesskey"),
-      visible: requests.size > 0,
-      click: () => this.copyAllAsHar(requests),
+      visible: sortedRequests.size > 0,
+      click: () => this.copyAllAsHar(sortedRequests),
     });
 
     menu.push({
@@ -158,8 +158,8 @@ class RequestListContextMenu {
       id: "request-list-context-save-all-as-har",
       label: L10N.getStr("netmonitor.context.saveAllAsHar"),
       accesskey: L10N.getStr("netmonitor.context.saveAllAsHar.accesskey"),
-      visible: requests.size > 0,
-      click: () => this.saveAllAsHar(requests),
+      visible: sortedRequests.size > 0,
+      click: () => this.saveAllAsHar(sortedRequests),
     });
 
     menu.push({
@@ -194,7 +194,7 @@ class RequestListContextMenu {
       label: L10N.getStr("netmonitor.context.newTab"),
       accesskey: L10N.getStr("netmonitor.context.newTab.accesskey"),
       visible: !!selectedRequest,
-      click: () => this.openRequestInTab(id, url, requestPostData),
+      click: () => this.openRequestInTab(selectedRequest),
     });
 
     menu.push({
@@ -219,7 +219,7 @@ class RequestListContextMenu {
       id: "request-list-context-perf",
       label: L10N.getStr("netmonitor.context.perfTools"),
       accesskey: L10N.getStr("netmonitor.context.perfTools.accesskey"),
-      visible: requests.size > 0,
+      visible: sortedRequests.size > 0,
       click: () => openStatistics(true),
     });
 
@@ -229,10 +229,8 @@ class RequestListContextMenu {
   /**
    * Opens selected item in a new tab.
    */
-  async openRequestInTab(id, url, requestPostData) {
-    requestPostData = requestPostData ||
-      await this.props.connector.requestData(id, "requestPostData");
-    openRequestInTab(url, requestPostData);
+  openRequestInTab(selectedRequest) {
+    openRequestInTab(selectedRequest);
   }
 
   /**
@@ -273,16 +271,13 @@ class RequestListContextMenu {
    */
   async copyPostData(id, formDataSections, requestPostData) {
     let params = [];
-    // Try to extract any form data parameters if formDataSections is already
-    // available, which is only true if ParamsPanel has ever been mounted before.
-    if (formDataSections) {
-      formDataSections.forEach(section => {
-        let paramsArray = parseQueryString(section);
-        if (paramsArray) {
-          params = [...params, ...paramsArray];
-        }
-      });
-    }
+    // Try to extract any form data parameters.
+    formDataSections.forEach(section => {
+      let paramsArray = parseQueryString(section);
+      if (paramsArray) {
+        params = [...params, ...paramsArray];
+      }
+    });
 
     let string = params
       .map(param => param.name + (param.value ? "=" + param.value : ""))
@@ -291,7 +286,7 @@ class RequestListContextMenu {
     // Fall back to raw payload.
     if (!string) {
       requestPostData = requestPostData ||
-        await this.props.connector.requestData(id, "requestPostData");
+        await this.props.connector.requestData(id, "requestPostData").requestPostData;
 
       string = requestPostData.postData.text;
       if (Services.appinfo.OS !== "WINNT") {
@@ -309,7 +304,7 @@ class RequestListContextMenu {
       await this.props.connector.requestData(id, "requestHeaders");
 
     requestPostData = requestPostData ||
-      await this.props.connector.requestData(id, "requestPostData");
+      await this.props.connector.requestData(id, "requestPostData").requestPostData;
 
     // Create a sanitized object for the Curl command generator.
     let data = {
@@ -398,25 +393,25 @@ class RequestListContextMenu {
   /**
    * Copy HAR from the network panel content to the clipboard.
    */
-  copyAllAsHar(requests) {
-    return HarExporter.copy(this.getDefaultHarOptions(requests));
+  copyAllAsHar(sortedRequests) {
+    return HarExporter.copy(this.getDefaultHarOptions(sortedRequests));
   }
 
   /**
    * Save HAR from the network panel content to a file.
    */
-  saveAllAsHar(requests) {
+  saveAllAsHar(sortedRequests) {
     // This will not work in launchpad
     // document.execCommand(‘cut’/‘copy’) was denied because it was not called from
     // inside a short running user-generated event handler.
     // https://developer.mozilla.org/en-US/Add-ons/WebExtensions/Interact_with_the_clipboard
-    return HarExporter.save(this.getDefaultHarOptions(requests));
+    return HarExporter.save(this.getDefaultHarOptions(sortedRequests));
   }
 
-  getDefaultHarOptions(requests) {
+  getDefaultHarOptions(sortedRequests) {
     return {
       connector: this.props.connector,
-      items: requests,
+      items: sortedRequests,
     };
   }
 }

@@ -30,73 +30,94 @@ function getOCSPResponder(expectedCertNames) {
 }
 
 // Tests that in ocspOff mode, OCSP fetches are never done.
-async function testOff() {
-  Services.prefs.setIntPref("security.OCSP.enabled", 0);
-  info("Setting security.OCSP.enabled to 0");
+function testOff() {
+  add_test(() => {
+    Services.prefs.setIntPref("security.OCSP.enabled", 0);
+    info("Setting security.OCSP.enabled to 0");
+    run_next_test();
+  });
 
   // EV chains should verify successfully but never get EV status.
-  clearOCSPCache();
-  let ocspResponder = getFailingOCSPResponder();
-  await checkEVStatus(gCertDB, certFromFile("test-oid-path-ee"),
-                      certificateUsageSSLServer, false);
-  await stopOCSPResponder(ocspResponder);
+  add_test(() => {
+    clearOCSPCache();
+    let ocspResponder = getFailingOCSPResponder();
+    checkEVStatus(gCertDB, certFromFile("test-oid-path-ee"), certificateUsageSSLServer,
+                  false);
+    ocspResponder.stop(run_next_test);
+  });
 
   // A DV chain should verify successfully.
-  clearOCSPCache();
-  ocspResponder = getFailingOCSPResponder();
-  await checkCertErrorGeneric(gCertDB, certFromFile("non-ev-root-path-ee"),
-                              PRErrorCodeSuccess, certificateUsageSSLServer);
-  await stopOCSPResponder(ocspResponder);
+  add_test(() => {
+    clearOCSPCache();
+    let ocspResponder = getFailingOCSPResponder();
+    checkCertErrorGeneric(gCertDB, certFromFile("non-ev-root-path-ee"),
+                          PRErrorCodeSuccess, certificateUsageSSLServer);
+    ocspResponder.stop(run_next_test);
+  });
 }
 
 // Tests that in ocspOn mode, OCSP fetches are done for both EV and DV certs.
-async function testOn() {
-  Services.prefs.setIntPref("security.OCSP.enabled", 1);
-  info("Setting security.OCSP.enabled to 1");
+function testOn() {
+  add_test(() => {
+    Services.prefs.setIntPref("security.OCSP.enabled", 1);
+    info("Setting security.OCSP.enabled to 1");
+    run_next_test();
+  });
 
   // If a successful OCSP response is fetched, then an EV chain should verify
   // successfully and get EV status as well.
-  clearOCSPCache();
-  let ocspResponder =
+  add_test(() => {
+    clearOCSPCache();
+    let ocspResponder =
       getOCSPResponder(gEVExpected ? ["test-oid-path-int", "test-oid-path-ee"]
                                    : ["test-oid-path-ee"]);
-  await checkEVStatus(gCertDB, certFromFile("test-oid-path-ee"),
-                      certificateUsageSSLServer, gEVExpected);
-  await stopOCSPResponder(ocspResponder);
+    checkEVStatus(gCertDB, certFromFile("test-oid-path-ee"), certificateUsageSSLServer,
+                  gEVExpected);
+    ocspResponder.stop(run_next_test);
+  });
 
   // If a successful OCSP response is fetched, then a DV chain should verify
   // successfully.
-  clearOCSPCache();
-  ocspResponder = getOCSPResponder(["non-ev-root-path-ee"]);
-  await checkCertErrorGeneric(gCertDB, certFromFile("non-ev-root-path-ee"),
-                              PRErrorCodeSuccess, certificateUsageSSLServer);
-  await stopOCSPResponder(ocspResponder);
+  add_test(() => {
+    clearOCSPCache();
+    let ocspResponder = getOCSPResponder(["non-ev-root-path-ee"]);
+    checkCertErrorGeneric(gCertDB, certFromFile("non-ev-root-path-ee"),
+                          PRErrorCodeSuccess, certificateUsageSSLServer);
+    ocspResponder.stop(run_next_test);
+  });
 }
 
 // Tests that in ocspEVOnly mode, OCSP fetches are done for EV certs only.
-async function testEVOnly() {
-  Services.prefs.setIntPref("security.OCSP.enabled", 2);
-  info("Setting security.OCSP.enabled to 2");
+function testEVOnly() {
+  add_test(() => {
+    Services.prefs.setIntPref("security.OCSP.enabled", 2);
+    info("Setting security.OCSP.enabled to 2");
+    run_next_test();
+  });
 
   // If a successful OCSP response is fetched, then an EV chain should verify
   // successfully and get EV status as well.
-  clearOCSPCache();
-  let ocspResponder = gEVExpected
-                    ? getOCSPResponder(["test-oid-path-int", "test-oid-path-ee"])
-                    : getFailingOCSPResponder();
-  await checkEVStatus(gCertDB, certFromFile("test-oid-path-ee"),
-                      certificateUsageSSLServer, gEVExpected);
-  await stopOCSPResponder(ocspResponder);
+  add_test(() => {
+    clearOCSPCache();
+    let ocspResponder = gEVExpected
+                      ? getOCSPResponder(["test-oid-path-int", "test-oid-path-ee"])
+                      : getFailingOCSPResponder();
+    checkEVStatus(gCertDB, certFromFile("test-oid-path-ee"), certificateUsageSSLServer,
+                  gEVExpected);
+    ocspResponder.stop(run_next_test);
+  });
 
   // A DV chain should verify successfully even without doing OCSP fetches.
-  clearOCSPCache();
-  ocspResponder = getFailingOCSPResponder();
-  await checkCertErrorGeneric(gCertDB, certFromFile("non-ev-root-path-ee"),
-                              PRErrorCodeSuccess, certificateUsageSSLServer);
-  await stopOCSPResponder(ocspResponder);
+  add_test(() => {
+    clearOCSPCache();
+    let ocspResponder = getFailingOCSPResponder();
+    checkCertErrorGeneric(gCertDB, certFromFile("non-ev-root-path-ee"),
+                          PRErrorCodeSuccess, certificateUsageSSLServer);
+    ocspResponder.stop(run_next_test);
+  });
 }
 
-add_task(async function() {
+function run_test() {
   registerCleanupFunction(() => {
     Services.prefs.clearUserPref("network.dns.localDomains");
     Services.prefs.clearUserPref("security.OCSP.enabled");
@@ -112,7 +133,9 @@ add_task(async function() {
   loadCert("non-evroot-ca", "CTu,,");
   loadCert("non-ev-root-path-int", ",,");
 
-  await testOff();
-  await testOn();
-  await testEVOnly();
-});
+  testOff();
+  testOn();
+  testEVOnly();
+
+  run_next_test();
+}

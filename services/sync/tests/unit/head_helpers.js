@@ -10,7 +10,6 @@
 // is used (from service.js).
 /* global Service */
 
-ChromeUtils.import("resource://testing-common/AddonTestUtils.jsm");
 ChromeUtils.import("resource://services-common/async.js");
 ChromeUtils.import("resource://services-common/utils.js");
 ChromeUtils.import("resource://testing-common/PlacesTestUtils.jsm");
@@ -20,8 +19,6 @@ ChromeUtils.import("resource://gre/modules/PlacesUtils.jsm");
 ChromeUtils.import("resource://gre/modules/PlacesSyncUtils.jsm");
 ChromeUtils.import("resource://gre/modules/ObjectUtils.jsm");
 ChromeUtils.import("resource://testing-common/services/sync/utils.js");
-ChromeUtils.defineModuleGetter(this, "AddonManager",
-                               "resource://gre/modules/AddonManager.jsm");
 
 add_task(async function head_setup() {
   // Initialize logging. This will sometimes be reset by a pref reset,
@@ -82,6 +79,22 @@ function ExtensionsTestPath(path) {
   return "../../../../toolkit/mozapps/extensions/test/xpcshell" + path;
 }
 
+/**
+ * Loads the AddonManager test functions by importing its test file.
+ *
+ * This should be called in the global scope of any test file needing to
+ * interface with the AddonManager. It should only be called once, or the
+ * universe will end.
+ */
+function loadAddonTestFunctions() {
+  const path = ExtensionsTestPath("/head_addons.js");
+  let file = do_get_file(path);
+  let uri = Services.io.newFileURI(file);
+  /* import-globals-from ../../../../toolkit/mozapps/extensions/test/xpcshell/head_addons.js */
+  Services.scriptloader.loadSubScript(uri.spec, gGlobalScope);
+  createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1.9.2");
+}
+
 function webExtensionsTestPath(path) {
   if (path[0] != "/") {
     throw Error("Path must begin with '/': " + path);
@@ -99,6 +112,12 @@ function loadWebExtensionTestFunctions() {
   let file = do_get_file(path);
   let uri = Services.io.newFileURI(file);
   Services.scriptloader.loadSubScript(uri.spec, gGlobalScope);
+}
+
+// Returns a promise
+function getAddonInstall(name) {
+  let f = do_get_file(ExtensionsTestPath("/addons/" + name + ".xpi"));
+  return AddonManager.getInstallForFile(f);
 }
 
 /**
@@ -127,15 +146,15 @@ async function installAddonFromInstall(install) {
 /**
  * Convenience function to install an add-on from the extensions unit tests.
  *
- * @param  file
- *         Add-on file to install.
+ * @param  name
+ *         String name of add-on to install. e.g. test_install1
  * @param  reconciler
  *         addons reconciler, if passed we will wait on the events to be
  *         processed before resolving
  * @return addon object that was installed
  */
-async function installAddon(file, reconciler = null) {
-  let install = await AddonManager.getInstallForFile(file);
+async function installAddon(name, reconciler = null) {
+  let install = await getAddonInstall(name);
   Assert.notEqual(null, install);
   const addon = await installAddonFromInstall(install);
   if (reconciler) {
@@ -486,10 +505,9 @@ async function registerRotaryEngine() {
 
   await Service.engineManager.register(RotaryEngine);
   let engine = Service.engineManager.get("rotary");
-  let syncID = await engine.resetLocalSyncID();
   engine.enabled = true;
 
-  return { engine, syncID, tracker: engine._tracker };
+  return { engine, tracker: engine._tracker };
 }
 
 // Set the validation prefs to attempt validation every time to avoid non-determinism.
@@ -509,13 +527,16 @@ async function serverForEnginesWithKeys(users, engines, callback) {
 
   let allEngines = [Service.clientsEngine].concat(engines);
 
-  let globalEngines = {};
-  for (let engine of allEngines) {
-    let syncID = await engine.resetLocalSyncID();
-    globalEngines[engine.name] = { version: engine.version, syncID };
-  }
+  let globalEngines = allEngines.reduce((entries, engine) => {
+    let { name, version, syncID } = engine;
+    entries[name] = { version, syncID };
+    return entries;
+  }, {});
 
-  let contents = {
+  let contents = allEngines.reduce((collections, engine) => {
+    collections[engine.name] = {};
+    return collections;
+  }, {
     meta: {
       global: {
         syncID: Service.syncID,
@@ -526,10 +547,7 @@ async function serverForEnginesWithKeys(users, engines, callback) {
     crypto: {
       keys: encryptPayload(wbo.cleartext),
     },
-  };
-  for (let engine of allEngines) {
-    contents[engine.name] = {};
-  }
+  });
 
   return serverForUsers(users, contents, callback);
 }

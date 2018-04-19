@@ -151,10 +151,8 @@ nsAboutProtocolHandler::NewURI(const nsACString &aSpec,
         rv = NS_NewURI(getter_AddRefs(inner), spec);
         NS_ENSURE_SUCCESS(rv, rv);
 
-        nsCOMPtr<nsIURI> base(aBaseURI);
-        rv = NS_MutateURI(new nsNestedAboutURI::Mutator())
-               .Apply(NS_MutatorMethod(&nsINestedAboutURIMutator::InitWithBase,
-                                       inner, base))
+        RefPtr<nsSimpleNestedURI> outer = new nsNestedAboutURI(inner, aBaseURI);
+        rv = NS_MutateURI(outer)
                .SetSpec(aSpec)
                .Finalize(url);
         NS_ENSURE_SUCCESS(rv, rv);
@@ -362,18 +360,10 @@ NS_INTERFACE_MAP_BEGIN(nsNestedAboutURI)
 NS_INTERFACE_MAP_END_INHERITING(nsSimpleNestedURI)
 
 // nsISerializable
-
 NS_IMETHODIMP
-nsNestedAboutURI::Read(nsIObjectInputStream *aStream)
+nsNestedAboutURI::Read(nsIObjectInputStream* aStream)
 {
-    NS_NOTREACHED("Use nsIURIMutator.read() instead");
-    return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-nsresult
-nsNestedAboutURI::ReadPrivate(nsIObjectInputStream *aStream)
-{
-    nsresult rv = nsSimpleNestedURI::ReadPrivate(aStream);
+    nsresult rv = nsSimpleNestedURI::Read(aStream);
     if (NS_FAILED(rv)) return rv;
 
     bool haveBase;
@@ -449,12 +439,7 @@ nsNestedAboutURI::StartClone(nsSimpleURI::RefHandlingEnum aRefHandlingMode,
     return url;
 }
 
-// Queries this list of interfaces. If none match, it queries mURI.
-NS_IMPL_NSIURIMUTATOR_ISUPPORTS(nsNestedAboutURI::Mutator,
-                                nsIURISetters,
-                                nsIURIMutator,
-                                nsISerializable,
-                                nsINestedAboutURIMutator)
+NS_IMPL_ISUPPORTS(nsNestedAboutURI::Mutator, nsIURISetters, nsIURIMutator)
 
 NS_IMETHODIMP
 nsNestedAboutURI::Mutate(nsIURIMutator** aMutator)

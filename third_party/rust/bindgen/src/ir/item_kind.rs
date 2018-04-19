@@ -135,11 +135,11 @@ impl DotAttributes for ItemKind {
     where
         W: io::Write,
     {
-        writeln!(
+        try!(writeln!(
             out,
             "<tr><td>kind</td><td>{}</td></tr>",
             self.kind_name()
-        )?;
+        ));
 
         match *self {
             ItemKind::Module(ref module) => module.dot_attributes(ctx, out),

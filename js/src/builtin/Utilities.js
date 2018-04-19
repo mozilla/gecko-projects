@@ -219,78 +219,67 @@ function GetInternalError(msg) {
 // To be used when a function is required but calling it shouldn't do anything.
 function NullFunction() {}
 
-// ES2019 draft rev 4c2df13f4194057f09b920ee88712e5a70b1a556
-// 7.3.23 CopyDataProperties (target, source, excludedItems)
-function CopyDataProperties(target, source, excludedItems) {
+// Object Rest/Spread Properties proposal
+// Abstract operation: CopyDataProperties (target, source, excluded)
+function CopyDataProperties(target, source, excluded) {
     // Step 1.
     assert(IsObject(target), "target is an object");
 
     // Step 2.
-    assert(IsObject(excludedItems), "excludedItems is an object");
+    assert(IsObject(excluded), "excluded is an object");
 
-    // Steps 3 and 7.
+    // Steps 3, 6.
     if (source === undefined || source === null)
         return;
 
-    // Step 4.
-    var from = ToObject(source);
+    // Step 4.a.
+    source = ToObject(source);
+
+    // Step 4.b.
+    var keys = OwnPropertyKeys(source);
 
     // Step 5.
-    var keys = CopyDataPropertiesOrGetOwnKeys(target, from, excludedItems);
-
-    // Return if we copied all properties in native code.
-    if (keys === null)
-        return;
-
-    // Step 6.
     for (var index = 0; index < keys.length; index++) {
         var key = keys[index];
 
         // We abbreviate this by calling propertyIsEnumerable which is faster
         // and returns false for not defined properties.
-        if (!hasOwn(key, excludedItems) &&
-            callFunction(std_Object_propertyIsEnumerable, from, key))
-        {
-            _DefineDataProperty(target, key, from[key]);
-        }
+        if (!hasOwn(key, excluded) && callFunction(std_Object_propertyIsEnumerable, source, key))
+            _DefineDataProperty(target, key, source[key]);
     }
 
-    // Step 7 (Return).
+    // Step 6 (Return).
 }
 
-// ES2019 draft rev 4c2df13f4194057f09b920ee88712e5a70b1a556
-// 7.3.23 CopyDataProperties (target, source, excludedItems)
+// Object Rest/Spread Properties proposal
+// Abstract operation: CopyDataProperties (target, source, excluded)
 function CopyDataPropertiesUnfiltered(target, source) {
     // Step 1.
     assert(IsObject(target), "target is an object");
 
     // Step 2 (Not applicable).
 
-    // Steps 3 and 7.
+    // Steps 3, 6.
     if (source === undefined || source === null)
         return;
 
-    // Step 4.
-    var from = ToObject(source);
+    // Step 4.a.
+    source = ToObject(source);
+
+    // Step 4.b.
+    var keys = OwnPropertyKeys(source);
 
     // Step 5.
-    var keys = CopyDataPropertiesOrGetOwnKeys(target, from, null);
-
-    // Return if we copied all properties in native code.
-    if (keys === null)
-        return;
-
-    // Step 6.
     for (var index = 0; index < keys.length; index++) {
         var key = keys[index];
 
         // We abbreviate this by calling propertyIsEnumerable which is faster
         // and returns false for not defined properties.
-        if (callFunction(std_Object_propertyIsEnumerable, from, key))
-            _DefineDataProperty(target, key, from[key]);
+        if (callFunction(std_Object_propertyIsEnumerable, source, key))
+            _DefineDataProperty(target, key, source[key]);
     }
 
-    // Step 7 (Return).
+    // Step 6 (Return).
 }
 
 /*************************************** Testing functions ***************************************/

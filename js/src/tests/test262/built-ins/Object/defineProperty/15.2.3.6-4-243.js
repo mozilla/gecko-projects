@@ -16,15 +16,15 @@ includes: [propertyHelper.js]
 var arrObj = [];
 
 function getFunc() {
-  return 3;
+    return 3;
 }
 Object.defineProperty(arrObj, "1", {
-  get: getFunc,
-  configurable: true
+    get: getFunc,
+    configurable: true
 });
 
 Object.defineProperty(arrObj, "1", {
-  value: 12
+    value: 12
 });
 
 verifyEqualTo(arrObj, "1", 12);
@@ -34,5 +34,6 @@ verifyNotWritable(arrObj, "1");
 verifyNotEnumerable(arrObj, "1");
 
 verifyConfigurable(arrObj, "1");
+
 
 reportCompare(0, 0);

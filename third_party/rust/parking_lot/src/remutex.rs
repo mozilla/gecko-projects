@@ -33,8 +33,8 @@ pub struct ReentrantMutex<T: ?Sized> {
     data: UnsafeCell<T>,
 }
 
-unsafe impl<T: ?Sized + Send> Send for ReentrantMutex<T> {}
-unsafe impl<T: ?Sized + Send> Sync for ReentrantMutex<T> {}
+unsafe impl<T: Send> Send for ReentrantMutex<T> {}
+unsafe impl<T: Send> Sync for ReentrantMutex<T> {}
 
 /// An RAII implementation of a "scoped lock" of a reentrant mutex. When this structure
 /// is dropped (falls out of scope), the lock will be unlocked.
@@ -43,12 +43,13 @@ unsafe impl<T: ?Sized + Send> Sync for ReentrantMutex<T> {}
 /// `Deref` implementation.
 #[must_use]
 pub struct ReentrantMutexGuard<'a, T: ?Sized + 'a> {
-    raw: &'a RawReentrantMutex,
-    data: *const T,
-    marker: PhantomData<&'a T>,
+    mutex: &'a ReentrantMutex<T>,
+
+    // The raw pointer here ensures that ReentrantMutexGuard is !Send
+    marker: PhantomData<(&'a T, *mut ())>,
 }
 
-unsafe impl<'a, T: ?Sized + Sync + 'a> Sync for ReentrantMutexGuard<'a, T> {}
+unsafe impl<'a, T: ?Sized + 'a + Sync> Sync for ReentrantMutexGuard<'a, T> {}
 
 impl<T> ReentrantMutex<T> {
     /// Creates a new reentrant mutex in an unlocked state ready for use.
@@ -79,15 +80,6 @@ impl<T> ReentrantMutex<T> {
 }
 
 impl<T: ?Sized> ReentrantMutex<T> {
-    #[inline]
-    fn guard(&self) -> ReentrantMutexGuard<T> {
-        ReentrantMutexGuard {
-            raw: &self.raw,
-            data: self.data.get(),
-            marker: PhantomData,
-        }
-    }
-
     /// Acquires a reentrant mutex, blocking the current thread until it is able
     /// to do so.
     ///
@@ -101,7 +93,10 @@ impl<T: ?Sized> ReentrantMutex<T> {
     #[inline]
     pub fn lock(&self) -> ReentrantMutexGuard<T> {
         self.raw.lock();
-        self.guard()
+        ReentrantMutexGuard {
+            mutex: self,
+            marker: PhantomData,
+        }
     }
 
     /// Attempts to acquire this lock.
@@ -114,7 +109,10 @@ impl<T: ?Sized> ReentrantMutex<T> {
     #[inline]
     pub fn try_lock(&self) -> Option<ReentrantMutexGuard<T>> {
         if self.raw.try_lock() {
-            Some(self.guard())
+            Some(ReentrantMutexGuard {
+                mutex: self,
+                marker: PhantomData,
+            })
         } else {
             None
         }
@@ -128,7 +126,10 @@ impl<T: ?Sized> ReentrantMutex<T> {
     #[inline]
     pub fn try_lock_for(&self, timeout: Duration) -> Option<ReentrantMutexGuard<T>> {
         if self.raw.try_lock_for(timeout) {
-            Some(self.guard())
+            Some(ReentrantMutexGuard {
+                mutex: self,
+                marker: PhantomData,
+            })
         } else {
             None
         }
@@ -142,7 +143,10 @@ impl<T: ?Sized> ReentrantMutex<T> {
     #[inline]
     pub fn try_lock_until(&self, timeout: Instant) -> Option<ReentrantMutexGuard<T>> {
         if self.raw.try_lock_until(timeout) {
-            Some(self.guard())
+            Some(ReentrantMutexGuard {
+                mutex: self,
+                marker: PhantomData,
+            })
         } else {
             None
         }
@@ -235,31 +239,8 @@ impl<'a, T: ?Sized + 'a> ReentrantMutexGuard<'a, T> {
     /// using this method instead of dropping the `ReentrantMutexGuard` normally.
     #[inline]
     pub fn unlock_fair(self) {
-        self.raw.unlock(true);
+        self.mutex.raw.unlock(true);
         mem::forget(self);
-    }
-
-    /// Make a new `ReentrantMutexGuard` for a component of the locked data.
-    ///
-    /// This operation cannot fail as the `ReentrantMutexGuard` passed
-    /// in already locked the mutex.
-    ///
-    /// This is an associated function that needs to be
-    /// used as `ReentrantMutexGuard::map(...)`. A method would interfere with
-    /// methods of the same name on the contents of the locked data.
-    #[inline]
-    pub fn map<U: ?Sized, F>(orig: Self, f: F) -> ReentrantMutexGuard<'a, U>
-    where
-        F: FnOnce(&T) -> &U,
-    {
-        let raw = orig.raw;
-        let data = f(unsafe { &*orig.data });
-        mem::forget(orig);
-        ReentrantMutexGuard {
-            raw,
-            data,
-            marker: PhantomData,
-        }
     }
 }
 
@@ -267,14 +248,14 @@ impl<'a, T: ?Sized + 'a> Deref for ReentrantMutexGuard<'a, T> {
     type Target = T;
     #[inline]
     fn deref(&self) -> &T {
-        unsafe { &*self.data }
+        unsafe { &*self.mutex.data.get() }
     }
 }
 
 impl<'a, T: ?Sized + 'a> Drop for ReentrantMutexGuard<'a, T> {
     #[inline]
     fn drop(&mut self) {
-        self.raw.unlock(false);
+        self.mutex.raw.unlock(false);
     }
 }
 
@@ -329,9 +310,10 @@ mod tests {
         let _lock = m.try_lock();
         let _lock2 = m.try_lock();
         thread::spawn(move || {
-            let lock = m2.try_lock();
-            assert!(lock.is_none());
-        }).join()
+                let lock = m2.try_lock();
+                assert!(lock.is_none());
+            })
+            .join()
             .unwrap();
         let _lock3 = m.try_lock();
     }

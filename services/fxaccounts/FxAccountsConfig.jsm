@@ -177,26 +177,31 @@ var FxAccountsConfig = {
       return;
     }
     let configURL = rootURL + "/.well-known/fxa-client-configuration";
-    let request = new RESTRequest(configURL);
-    request.setHeader("Accept", "application/json");
-
-    // Catch and rethrow the error inline.
-    let resp = await request.get().catch(e => {
-      log.error(`Failed to get configuration object from "${configURL}"`, e);
-      throw e;
+    let jsonStr = await new Promise((resolve, reject) => {
+      let request = new RESTRequest(configURL);
+      request.setHeader("Accept", "application/json");
+      request.get(error => {
+        if (error) {
+          log.error(`Failed to get configuration object from "${configURL}"`, error);
+          reject(error);
+          return;
+        }
+        if (!request.response.success) {
+          log.error(`Received HTTP response code ${request.response.status} from configuration object request`);
+          if (request.response && request.response.body) {
+            log.debug("Got error response", request.response.body);
+          }
+          reject(request.response.status);
+          return;
+        }
+        resolve(request.response.body);
+      });
     });
-    if (!resp.success) {
-      log.error(`Received HTTP response code ${resp.status} from configuration object request`);
-      if (resp.body) {
-        log.debug("Got error response", resp.body);
-      }
-      throw new Error(`HTTP status ${resp.status} from configuration object request`);
-    }
 
-    log.debug("Got successful configuration response", resp.body);
+    log.debug("Got successful configuration response", jsonStr);
     try {
       // Update the prefs directly specified by the config.
-      let config = JSON.parse(resp.body);
+      let config = JSON.parse(jsonStr);
       let authServerBase = config.auth_server_base_url;
       if (!authServerBase.endsWith("/v1")) {
         authServerBase += "/v1";

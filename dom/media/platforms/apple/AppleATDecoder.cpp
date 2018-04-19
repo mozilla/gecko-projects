@@ -5,15 +5,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "AppleATDecoder.h"
-#include "Adts.h"
 #include "AppleUtils.h"
 #include "MP4Decoder.h"
+#include "Adts.h"
 #include "MediaInfo.h"
-#include "VideoUtils.h"
 #include "mozilla/Logging.h"
 #include "mozilla/SyncRunnable.h"
 #include "mozilla/UniquePtr.h"
-#include "nsTArray.h"
+#include "VideoUtils.h"
 
 #define LOG(...) DDMOZ_LOG(sPDMLog, mozilla::LogLevel::Debug, __VA_ARGS__)
 #define LOGEX(_this, ...)                                                      \
@@ -314,27 +313,26 @@ AppleATDecoder::DecodeSample(MediaRawData* aSample)
     return NS_ERROR_OUT_OF_MEMORY;
   }
   if (mChannelLayout && !mAudioConverter) {
-    AudioConfig in(*mChannelLayout, channels, rate);
-    AudioConfig out(AudioConfig::ChannelLayout::SMPTEDefault(*mChannelLayout),
-                    channels, rate);
+    AudioConfig in(*mChannelLayout.get(), rate);
+    AudioConfig out(channels, rate);
+    if (!in.IsValid() || !out.IsValid()) {
+      return MediaResult(NS_ERROR_DOM_MEDIA_DECODE_ERR,
+                         RESULT_DETAIL("Invalid audio config"));
+    }
     mAudioConverter = MakeUnique<AudioConverter>(in, out);
   }
-  if (mAudioConverter && mChannelLayout && mChannelLayout->IsValid()) {
+  if (mAudioConverter) {
     MOZ_ASSERT(mAudioConverter->CanWorkInPlace());
     data = mAudioConverter->Process(Move(data));
   }
 
-  RefPtr<AudioData> audio =
-    new AudioData(aSample->mOffset,
-                  aSample->mTime,
-                  duration,
-                  numFrames,
-                  data.Forget(),
-                  channels,
-                  rate,
-                  mChannelLayout && mChannelLayout->IsValid()
-                    ? mChannelLayout->Map()
-                    : AudioConfig::ChannelLayout::UNKNOWN_MAP);
+  RefPtr<AudioData> audio = new AudioData(aSample->mOffset,
+                                          aSample->mTime,
+                                          duration,
+                                          numFrames,
+                                          data.Forget(),
+                                          channels,
+                                          rate);
   mDecodedSamples.AppendElement(Move(audio));
   return NS_OK;
 }
@@ -420,25 +418,26 @@ AudioConfig::Channel
 ConvertChannelLabel(AudioChannelLabel id)
 {
   switch (id) {
-    case kAudioChannelLabel_Left:
-      return AudioConfig::CHANNEL_FRONT_LEFT;
-    case kAudioChannelLabel_Right:
-      return AudioConfig::CHANNEL_FRONT_RIGHT;
     case kAudioChannelLabel_Mono:
+      return AudioConfig::CHANNEL_MONO;
+    case kAudioChannelLabel_Left:
+      return AudioConfig::CHANNEL_LEFT;
+    case kAudioChannelLabel_Right:
+      return AudioConfig::CHANNEL_RIGHT;
     case kAudioChannelLabel_Center:
-      return AudioConfig::CHANNEL_FRONT_CENTER;
+      return AudioConfig::CHANNEL_CENTER;
     case kAudioChannelLabel_LFEScreen:
       return AudioConfig::CHANNEL_LFE;
     case kAudioChannelLabel_LeftSurround:
-      return AudioConfig::CHANNEL_SIDE_LEFT;
+      return AudioConfig::CHANNEL_LS;
     case kAudioChannelLabel_RightSurround:
-      return AudioConfig::CHANNEL_SIDE_RIGHT;
+      return AudioConfig::CHANNEL_RS;
     case kAudioChannelLabel_CenterSurround:
-      return AudioConfig::CHANNEL_BACK_CENTER;
+      return AudioConfig::CHANNEL_RCENTER;
     case kAudioChannelLabel_RearSurroundLeft:
-      return AudioConfig::CHANNEL_BACK_LEFT;
+      return AudioConfig::CHANNEL_RLS;
     case kAudioChannelLabel_RearSurroundRight:
-      return AudioConfig::CHANNEL_BACK_RIGHT;
+      return AudioConfig::CHANNEL_RRS;
     default:
       return AudioConfig::CHANNEL_INVALID;
   }
@@ -529,13 +528,13 @@ AppleATDecoder::SetupChannelLayout()
     layout->mChannelLayoutTag = kAudioChannelLayoutTag_UseChannelDescriptions;
   }
 
-  if (layout->mNumberChannelDescriptions != mOutputFormat.mChannelsPerFrame) {
-    LOG("Not matching the original channel number");
+  if (layout->mNumberChannelDescriptions > MAX_AUDIO_CHANNELS ||
+      layout->mNumberChannelDescriptions != mOutputFormat.mChannelsPerFrame) {
+    LOG("Nonsensical channel layout or not matching the original channel number");
     return NS_ERROR_FAILURE;
   }
 
-  AutoTArray<AudioConfig::Channel, 8> channels;
-  channels.SetLength(layout->mNumberChannelDescriptions);
+  AudioConfig::Channel channels[MAX_AUDIO_CHANNELS];
   for (uint32_t i = 0; i < layout->mNumberChannelDescriptions; i++) {
     AudioChannelLabel id = layout->mChannelDescriptions[i].mChannelLabel;
     AudioConfig::Channel channel = ConvertChannelLabel(id);
@@ -543,7 +542,7 @@ AppleATDecoder::SetupChannelLayout()
   }
   mChannelLayout =
     MakeUnique<AudioConfig::ChannelLayout>(mOutputFormat.mChannelsPerFrame,
-                                           channels.Elements());
+                                           channels);
   return NS_OK;
 }
 

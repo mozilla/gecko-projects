@@ -23,7 +23,7 @@ async function makeAndInstallXPI(id, backgroundScript, loadedURL) {
   // A WebExtension is started asynchronously, we have our test extension
   // open a new tab to signal that the background script has executed.
   let loadTab = await loadPromise;
-  BrowserTestUtils.removeTab(loadTab);
+  await BrowserTestUtils.removeTab(loadTab);
 
   return addon;
 }
@@ -90,5 +90,5 @@ add_task(async function test_setuninstallurl() {
 
   let uninstalledTab = await uninstallPromise;
   isnot(uninstalledTab, null, "opened tab with uninstall url");
-  BrowserTestUtils.removeTab(uninstalledTab);
+  await BrowserTestUtils.removeTab(uninstalledTab);
 });

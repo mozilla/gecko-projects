@@ -26,15 +26,6 @@ UNIFIED_SOURCES += [
     'nsPerformanceStats.cpp'
 ]
 
-if not CONFIG['RELEASE_OR_BETA']:
-    UNIFIED_SOURCES += [
-        'PerformanceUtils.cpp'
-    ]
-
-    EXPORTS.mozilla += [
-        'PerformanceUtils.h'
-    ]
-
 EXPORTS += [
     'nsPerformanceStats.h'
 ]
@@ -44,5 +35,3 @@ LOCAL_INCLUDES += [
 ]
 
 FINAL_LIBRARY = 'xul'
-
-include('/ipc/chromium/chromium-config.mozbuild')

@@ -11,6 +11,7 @@ with Files("**"):
 XPIDL_SOURCES += [
     'nsCWebBrowserPersist.idl',
     'nsIWebBrowserPersist.idl',
+    'nsIWebBrowserPersistable.idl',
     'nsIWebBrowserPersistDocument.idl',
 ]
 

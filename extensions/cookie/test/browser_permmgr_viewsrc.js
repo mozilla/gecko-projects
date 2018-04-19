@@ -15,5 +15,5 @@ add_task(async function() {
                                      "viewsourceTestingPerm"),
        Services.perms.ALLOW_ACTION);
   });
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

@@ -59,5 +59,5 @@ add_task(async function pp_after_orientation_change() {
 
   PrintUtils.exitPrintPreview();
 
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });

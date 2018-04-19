@@ -8,7 +8,6 @@ consistency.
 """
 
 from __future__ import absolute_import, print_function, unicode_literals
-from taskgraph.util.taskcluster import get_artifact_prefix
 
 SECRET_SCOPE = 'secrets:get:project/releng/gecko/{}/level-{}/{}'
 
@@ -36,25 +35,22 @@ def docker_worker_add_workspace_cache(config, job, taskdesc, extra=None):
         )
 
 
-def add_artifacts(config, job, taskdesc, path):
+def add_public_artifacts(config, job, taskdesc, path):
     taskdesc['worker'].setdefault('artifacts', []).append({
-        'name': get_artifact_prefix(taskdesc),
+        'name': 'public/build',
         'path': path,
         'type': 'directory',
     })
 
 
-def docker_worker_add_artifacts(config, job, taskdesc):
-    """ Adds an artifact directory to the task """
-    add_artifacts(config, job, taskdesc, path='/builds/worker/artifacts/')
+def docker_worker_add_public_artifacts(config, job, taskdesc):
+    """ Adds a public artifact directory to the task """
+    add_public_artifacts(config, job, taskdesc, path='/builds/worker/artifacts/')
 
 
-def generic_worker_add_artifacts(config, job, taskdesc):
-    """ Adds an artifact directory to the task """
-    # The path is the location on disk; it doesn't necessarily
-    # mean the artifacts will be public or private; that is set via the name
-    # attribute in add_artifacts.
-    add_artifacts(config, job, taskdesc, path=get_artifact_prefix(taskdesc))
+def generic_worker_add_public_artifacts(config, job, taskdesc):
+    """ Adds a public artifact directory to the task """
+    add_public_artifacts(config, job, taskdesc, path=r'public/build')
 
 
 def docker_worker_add_gecko_vcs_env_vars(config, job, taskdesc):

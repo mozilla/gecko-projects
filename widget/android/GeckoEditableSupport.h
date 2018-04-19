@@ -40,8 +40,8 @@ class GeckoEditableSupport final
 
     using EditableBase =
             java::GeckoEditableChild::Natives<GeckoEditableSupport>;
-    using EditableClient = java::SessionTextInput::EditableClient;
-    using EditableListener = java::SessionTextInput::EditableListener;
+    using EditableClient = java::TextInputController::EditableClient;
+    using EditableListener = java::TextInputController::EditableListener;
 
     // RAII helper class that automatically sends an event reply through
     // OnImeSynchronize, as required by events like OnImeReplaceText.
@@ -49,7 +49,7 @@ class GeckoEditableSupport final
     {
         GeckoEditableSupport* const mGES;
     public:
-        explicit AutoIMESynchronize(GeckoEditableSupport* ges) : mGES(ges) {}
+        AutoIMESynchronize(GeckoEditableSupport* ges) : mGES(ges) {}
         ~AutoIMESynchronize() { mGES->OnImeSynchronize(); }
     };
 
@@ -59,7 +59,7 @@ class GeckoEditableSupport final
         IMETextChange() :
             mStart(-1), mOldEnd(-1), mNewEnd(-1) {}
 
-        explicit IMETextChange(const IMENotification& aIMENotification)
+        IMETextChange(const IMENotification& aIMENotification)
             : mStart(aIMENotification.mTextChangeData.mStartOffset)
             , mOldEnd(aIMENotification.mTextChangeData.mRemovedEndOffset)
             , mNewEnd(aIMENotification.mTextChangeData.mAddedEndOffset)
@@ -106,10 +106,6 @@ class GeckoEditableSupport final
     bool mIMETextChangedDuringFlush;
     bool mIMEMonitorCursor;
 
-    static bool sDispatchKeyEventsInCompositionForAnyApps;
-
-    void ObservePrefs();
-
     nsIWidget* GetWidget() const
     {
         return mDispatcher ? mDispatcher->GetWidget() : mWindow;
@@ -143,7 +139,7 @@ public:
     {
         struct IMEEvent : nsAppShell::LambdaEvent<Functor>
         {
-            explicit IMEEvent(Functor&& l) : nsAppShell::LambdaEvent<Functor>(Move(l)) {}
+            IMEEvent(Functor&& l) : nsAppShell::LambdaEvent<Functor>(Move(l)) {}
 
             nsAppShell::Event::Type ActivityType() const override
             {
@@ -184,15 +180,12 @@ public:
         , mIMESelectionChanged(false)
         , mIMETextChangedDuringFlush(false)
         , mIMEMonitorCursor(false)
-    {
-        ObservePrefs();
-    }
+    {}
 
     // Constructor for content process GeckoEditableChild.
-    explicit GeckoEditableSupport(java::GeckoEditableChild::Param aEditableChild)
+    GeckoEditableSupport(java::GeckoEditableChild::Param aEditableChild)
         : GeckoEditableSupport(nullptr, nullptr, aEditableChild)
-    {
-    }
+    {}
 
     NS_DECL_ISUPPORTS
 

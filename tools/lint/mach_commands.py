@@ -38,7 +38,7 @@ class MachCommands(MachCommandBase):
         """Run linters."""
         from mozlint import cli
         lintargs.setdefault('root', self.topsrcdir)
-        lintargs['exclude'] = ['obj*', 'tools/lint/test/files']
+        lintargs['exclude'] = ['obj*']
         cli.SEARCH_PATHS.append(here)
         self._activate_virtualenv()
         return cli.run(*runargs, **lintargs)

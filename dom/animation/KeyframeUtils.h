@@ -15,7 +15,7 @@
 struct JSContext;
 class JSObject;
 class nsIDocument;
-class ComputedStyle;
+class nsStyleContext;
 struct RawServoDeclarationBlock;
 
 namespace mozilla {
@@ -81,17 +81,19 @@ public:
    *
    * @param aKeyframes The input keyframes.
    * @param aElement The context element.
-   * @param aStyle The computed style values.
+   * @param aStyleType The |ServoStyleContext| or |GeckoStyleContext| to use
+   *   when computing values.
    * @param aEffectComposite The composite operation specified on the effect.
    *   For any keyframes in |aKeyframes| that do not specify a composite
    *   operation, this value will be used.
    * @return The set of animation properties. If an error occurs, the returned
    *   array will be empty.
    */
+  template<typename StyleType>
   static nsTArray<AnimationProperty> GetAnimationPropertiesFromKeyframes(
     const nsTArray<Keyframe>& aKeyframes,
     dom::Element* aElement,
-    const ComputedStyle* aStyle,
+    StyleType* aStyleType,
     dom::CompositeOperation aEffectComposite);
 
   /**
@@ -103,7 +105,8 @@ public:
    *                  if the property is animatable or not.
    * @return true if |aProperty| is animatable.
    */
-  static bool IsAnimatableProperty(nsCSSPropertyID aProperty);
+  static bool IsAnimatableProperty(nsCSSPropertyID aProperty,
+                                   StyleBackendType aBackend);
 };
 
 } // namespace mozilla

@@ -13,8 +13,12 @@ add_task(async function() {
   // The source itself doesn't even exist yet, and using
   // `selectSourceURL` will set a pending request to load this source
   // and highlight a specific line.
+  dbg.actions.selectSourceURL(sourceUrl, { location: { line: 66 } });
 
-  await selectSource(dbg, sourceUrl, 66)
+  // Wait for the source text to load and make sure we're in the right
+  // place.
+  await waitForSelectedSource(dbg, sourceUrl);
+  log(`loaded source`);
 
   // TODO: revisit highlighting lines when the debugger opens
   // assertHighlightLocation(dbg, "long.js", 66);
@@ -40,6 +44,6 @@ add_task(async function() {
   is(getSource(getState(), simple1.id).get("loadedState"), "loading");
 
   await waitForSelectedSource(dbg, "simple1.js");
-  ok(getSource(getState(), simple1.id).text);
+  ok(getSource(getState(), simple1.id).get("text"));
   assertHighlightLocation(dbg, "simple1.js", 6);
 });

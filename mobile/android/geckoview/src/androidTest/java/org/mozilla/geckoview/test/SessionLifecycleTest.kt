@@ -1,7 +1,5 @@
-/* -*- Mode: Java; c-basic-offset: 4; tab-width: 4; indent-tabs-mode: nil; -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* Any copyright is dedicated to the Public Domain.
+   http://creativecommons.org/publicdomain/zero/1.0/ */
 
 package org.mozilla.geckoview.test
 
@@ -19,41 +17,49 @@ import org.junit.runner.RunWith
 @MediumTest
 class SessionLifecycleTest : BaseSessionTest() {
 
-    @Test fun open_interleaved() {
+    @Test fun openWindow_allowNullContext() {
+        sessionRule.session.closeWindow()
+
+        sessionRule.session.openWindow(null)
+        sessionRule.session.reload()
+        sessionRule.session.waitForPageStop()
+    }
+
+    @Test fun openWindow_interleaved() {
         val session1 = sessionRule.createOpenSession()
         val session2 = sessionRule.createOpenSession()
-        session1.close()
+        session1.closeWindow()
         val session3 = sessionRule.createOpenSession()
-        session2.close()
-        session3.close()
+        session2.closeWindow()
+        session3.closeWindow()
 
         sessionRule.session.reload()
         sessionRule.session.waitForPageStop()
     }
 
-    @Test fun open_repeated() {
+    @Test fun openWindow_repeated() {
         for (i in 1..5) {
-            sessionRule.session.close()
-            sessionRule.session.open()
+            sessionRule.session.closeWindow()
+            sessionRule.session.openWindow()
         }
         sessionRule.session.reload()
         sessionRule.session.waitForPageStop()
     }
 
-    @Test fun open_allowCallsWhileClosed() {
-        sessionRule.session.close()
+    @Test fun openWindow_allowCallsWhileClosed() {
+        sessionRule.session.closeWindow()
 
         sessionRule.session.loadUri(HELLO_HTML_PATH)
         sessionRule.session.reload()
 
-        sessionRule.session.open()
+        sessionRule.session.openWindow()
         sessionRule.session.waitForPageStops(2)
     }
 
     @Test(expected = IllegalStateException::class)
-    fun open_throwOnAlreadyOpen() {
+    fun openWindow_throwOnAlreadyOpen() {
         // Throw exception if retrying to open again; otherwise we would leak the old open window.
-        sessionRule.session.open()
+        sessionRule.session.openWindow()
     }
 
     @Test(expected = IllegalStateException::class)
@@ -89,7 +95,7 @@ class SessionLifecycleTest : BaseSessionTest() {
                        newSession.settings, equalTo(session.settings))
             assertThat("New session is open", newSession.isOpen, equalTo(true))
 
-            newSession.close()
+            newSession.closeWindow()
             assertThat("New session can be closed", newSession.isOpen, equalTo(false))
         }
 
@@ -134,7 +140,7 @@ class SessionLifecycleTest : BaseSessionTest() {
         val session = sessionRule.createOpenSession()
 
         session.toParcel { parcel ->
-            session.close()
+            session.closeWindow()
 
             val newSession = sessionRule.createClosedSession()
             newSession.readFromParcel(parcel)
@@ -153,8 +159,8 @@ class SessionLifecycleTest : BaseSessionTest() {
             newSession.readFromParcel(parcel)
         }
 
-        newSession.close()
-        newSession.open()
+        newSession.closeWindow()
+        newSession.openWindow()
 
         newSession.reload()
         newSession.waitForPageStop()
@@ -202,7 +208,7 @@ class SessionLifecycleTest : BaseSessionTest() {
                        newSession.settings, equalTo(session.settings))
             assertThat("New session is open", newSession.isOpen, equalTo(true))
 
-            newSession.close()
+            newSession.closeWindow()
             assertThat("New session can be closed", newSession.isOpen, equalTo(false))
         }
 

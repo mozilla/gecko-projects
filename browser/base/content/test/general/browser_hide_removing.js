@@ -14,7 +14,9 @@ add_task(async function() {
 
   // We have to animate the tab removal in order to get an async
   // tab close.
-  BrowserTestUtils.removeTab(testTab, { animate: true });
+  let tabClosed = BrowserTestUtils.waitForEvent(gBrowser.tabContainer, "TabClose");
+  let tabRemoved = BrowserTestUtils.removeTab(testTab, { animate: true });
+  await tabClosed;
 
   numVisBeforeHide = gBrowser.visibleTabs.length;
   gBrowser.hideTab(testTab);
@@ -22,4 +24,6 @@ add_task(async function() {
 
   is(numVisBeforeHide, 1, "animated remove has in 1 tab left");
   is(numVisAfterHide, 1, "hiding a removing tab also has 1 tab");
+
+  await tabRemoved;
 });

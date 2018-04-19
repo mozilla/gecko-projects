@@ -5,7 +5,7 @@
 
 /*---
 author: Caitlin Potter <caitp@igalia.com>
-esid: sec-identifiers-static-semantics-early-errors
+esid: pending
 description: >
   If the source code matching this production is strict code, it is a
   Syntax Error if BindingIdentifier is the IdentifierName arguments.

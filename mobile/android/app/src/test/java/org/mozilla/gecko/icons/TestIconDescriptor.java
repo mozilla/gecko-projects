@@ -6,9 +6,9 @@ package org.mozilla.gecko.icons;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.RobolectricTestRunner;
+import org.mozilla.gecko.background.testhelpers.TestRunner;
 
-@RunWith(RobolectricTestRunner.class)
+@RunWith(TestRunner.class)
 public class TestIconDescriptor {
     private static final String ICON_URL = "https://www.mozilla.org/favicon.ico";
     private static final String MIME_TYPE = "image/png";

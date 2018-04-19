@@ -57,16 +57,21 @@ mv package-lock.json npm-shrinkwrap.json
 echo "Creating eslint.tar.gz..."
 tar cvz --exclude=eslint-plugin-mozilla --exclude=eslint-plugin-spidermonkey-js -f eslint.tar.gz node_modules
 
+echo "Downloading tooltool..."
+wget https://raw.githubusercontent.com/mozilla/build-tooltool/master/tooltool.py
+chmod +x tooltool.py
+
 echo "Adding eslint.tar.gz to tooltool..."
 rm tools/lint/eslint/manifest.tt
-./python/mozbuild/mozbuild/action/tooltool.py add --visibility public --unpack eslint.tar.gz --url="https://api.pub.build.mozilla.org/tooltool/"
+./tooltool.py add --visibility public --unpack eslint.tar.gz
 
 echo "Uploading eslint.tar.gz to tooltool..."
-./python/mozbuild/mozbuild/action/tooltool.py upload --authentication-file=~/.tooltool-token --message "node_modules folder update for tools/lint/eslint" --url="https://api.pub.build.mozilla.org/tooltool/"
+./tooltool.py upload --authentication-file=~/.tooltool-token --message "node_modules folder update for tools/lint/eslint"
 
 echo "Cleaning up..."
 mv manifest.tt tools/lint/eslint/manifest.tt
 rm eslint.tar.gz
+rm tooltool.py
 
 cd $DIR
 

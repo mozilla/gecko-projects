@@ -55,16 +55,16 @@ HTMLFieldSetElement::IsDisabledForEvents(EventMessage aMessage)
 }
 
 // nsIContent
-void
+nsresult
 HTMLFieldSetElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   // Do not process any DOM events if the element is disabled.
   aVisitor.mCanHandle = false;
   if (IsDisabledForEvents(aVisitor.mEvent->mMessage)) {
-    return;
+    return NS_OK;
   }
 
-  nsGenericHTMLFormElement::GetEventTargetParent(aVisitor);
+  return nsGenericHTMLFormElement::GetEventTargetParent(aVisitor);
 }
 
 nsresult
@@ -263,7 +263,7 @@ HTMLFieldSetElement::AddElement(nsGenericHTMLFormElement* aElement)
 
   // If the element that we are adding aElement is a fieldset, then all the
   // invalid elements in aElement are also invalid elements of this.
-  HTMLFieldSetElement* fieldSet = FromNode(aElement);
+  HTMLFieldSetElement* fieldSet = FromContent(aElement);
   if (fieldSet) {
     for (int32_t i = 0; i < fieldSet->mInvalidElementsCount; i++) {
       UpdateValidity(false);
@@ -281,7 +281,7 @@ HTMLFieldSetElement::AddElement(nsGenericHTMLFormElement* aElement)
 #if DEBUG
   int32_t debugInvalidElementsCount = 0;
   for (uint32_t i = 0; i < mDependentElements.Length(); i++) {
-    HTMLFieldSetElement* fieldSet = FromNode(mDependentElements[i]);
+    HTMLFieldSetElement* fieldSet = FromContent(mDependentElements[i]);
     if (fieldSet) {
       debugInvalidElementsCount += fieldSet->mInvalidElementsCount;
       continue;
@@ -305,7 +305,7 @@ HTMLFieldSetElement::RemoveElement(nsGenericHTMLFormElement* aElement)
 
   // If the element that we are removing aElement is a fieldset, then all the
   // invalid elements in aElement are also removed from this.
-  HTMLFieldSetElement* fieldSet = FromNode(aElement);
+  HTMLFieldSetElement* fieldSet = FromContent(aElement);
   if (fieldSet) {
     for (int32_t i = 0; i < fieldSet->mInvalidElementsCount; i++) {
       UpdateValidity(true);
@@ -323,7 +323,7 @@ HTMLFieldSetElement::RemoveElement(nsGenericHTMLFormElement* aElement)
 #if DEBUG
   int32_t debugInvalidElementsCount = 0;
   for (uint32_t i = 0; i < mDependentElements.Length(); i++) {
-    HTMLFieldSetElement* fieldSet = FromNode(mDependentElements[i]);
+    HTMLFieldSetElement* fieldSet = FromContent(mDependentElements[i]);
     if (fieldSet) {
       debugInvalidElementsCount += fieldSet->mInvalidElementsCount;
       continue;

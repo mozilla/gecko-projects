@@ -17,7 +17,6 @@ if test "$OS_ARCH" = "WINNT"; then
   MOZ_MAINTENANCE_SERVICE=1
   if ! test "$HAVE_64BIT_BUILD"; then
     if test "$MOZ_UPDATE_CHANNEL" = "nightly" -o \
-            "$MOZ_UPDATE_CHANNEL" = "nightly-maple" -o \
             "$MOZ_UPDATE_CHANNEL" = "nightly-try" -o \
             "$MOZ_UPDATE_CHANNEL" = "aurora" -o \
             "$MOZ_UPDATE_CHANNEL" = "beta" -o \

@@ -92,10 +92,6 @@
       animation: compositor-notall 2s infinite;
     }
 
-    .longhand {
-      animation: longhand 10s infinite;
-    }
-
     @keyframes simple-animation {
       100% {
         transform: translateX(300px);
@@ -130,17 +126,6 @@
         transform: translate(100px);
       }
     }
-
-    @keyframes longhand {
-      from {
-        background: red;
-        padding: 0 0 0 10px;
-      }
-      to {
-        background: lime;
-        padding: 0 0 0 20px;
-      }
-    }
   </style>
 </head>
 <body>
@@ -154,20 +139,19 @@
   <div class="ball long"></div>
   <div class="ball negative-delay"></div>
   <div class="ball no-compositor"></div>
-  <div class="ball end-delay"></div>
+  <div class="ball" id="endDelayed"></div>
   <div class="ball compositor-all"></div>
   <div class="ball compositor-notall"></div>
-  <div class="ball longhand"></div>
   <script>
     /* globals KeyframeEffect, Animation */
     "use strict";
 
-    const el = document.querySelector(".end-delay");
-    const effect = new KeyframeEffect(el, [
+    var el = document.getElementById("endDelayed");
+    let effect = new KeyframeEffect(el, [
       { opacity: 0, offset: 0 },
       { opacity: 1, offset: 1 }
     ], { duration: 1000000, endDelay: 500000, fill: "none" });
-    const animation = new Animation(effect, document.timeline);
+    let animation = new Animation(effect, document.timeline);
     animation.play();
   </script>
 </body>

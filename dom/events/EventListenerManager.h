@@ -189,13 +189,10 @@ public:
 
     enum ListenerType : uint8_t
     {
-      // No listener.
       eNoListener,
-      // A generic C++ implementation of nsIDOMEventListener.
       eNativeListener,
-      // An event handler attribute using JSEventHandler.
       eJSEventListener,
-      // A scripted EventListener.
+      eWrappedJSListener,
       eWebIDLListener,
     };
     ListenerType mListenerType;
@@ -300,11 +297,11 @@ public:
     RemoveEventListener(aType, EventListenerHolder(aListener), aOptions);
   }
 
-  void AddListenerForAllEvents(dom::EventListener* aListener,
+  void AddListenerForAllEvents(nsIDOMEventListener* aListener,
                                bool aUseCapture,
                                bool aWantsUntrusted,
                                bool aSystemEventGroup);
-  void RemoveListenerForAllEvents(dom::EventListener* aListener,
+  void RemoveListenerForAllEvents(nsIDOMEventListener* aListener,
                                   bool aUseCapture,
                                   bool aSystemEventGroup);
 
@@ -312,13 +309,7 @@ public:
   * Sets events listeners of all types.
   * @param an event listener
   */
-  void AddEventListenerByType(nsIDOMEventListener* aListener,
-                              const nsAString& type,
-                              const EventListenerFlags& aFlags)
-  {
-    AddEventListenerByType(EventListenerHolder(aListener), type, aFlags);
-  }
-  void AddEventListenerByType(dom::EventListener* aListener,
+  void AddEventListenerByType(nsIDOMEventListener *aListener,
                               const nsAString& type,
                               const EventListenerFlags& aFlags)
   {
@@ -326,16 +317,8 @@ public:
   }
   void AddEventListenerByType(EventListenerHolder aListener,
                               const nsAString& type,
-                              const EventListenerFlags& aFlags,
-                              const dom::Optional<bool>& aPassive =
-                                dom::Optional<bool>());
-  void RemoveEventListenerByType(nsIDOMEventListener* aListener,
-                                 const nsAString& type,
-                                 const EventListenerFlags& aFlags)
-  {
-    RemoveEventListenerByType(EventListenerHolder(aListener), type, aFlags);
-  }
-  void RemoveEventListenerByType(dom::EventListener* aListener,
+                              const EventListenerFlags& aFlags);
+  void RemoveEventListenerByType(nsIDOMEventListener *aListener,
                                  const nsAString& type,
                                  const EventListenerFlags& aFlags)
   {
@@ -422,18 +405,18 @@ public:
   /**
    * Returns true if there is at least one event listener for aEventName.
    */
-  bool HasListenersFor(const nsAString& aEventName) const;
+  bool HasListenersFor(const nsAString& aEventName);
 
   /**
    * Returns true if there is at least one event listener for aEventNameWithOn.
    * Note that aEventNameWithOn must start with "on"!
    */
-  bool HasListenersFor(nsAtom* aEventNameWithOn) const;
+  bool HasListenersFor(nsAtom* aEventNameWithOn);
 
   /**
    * Returns true if there is at least one event listener.
    */
-  bool HasListeners() const;
+  bool HasListeners();
 
   /**
    * Sets aList to the list of nsIEventListenerInfo objects representing the
@@ -655,5 +638,27 @@ protected:
 };
 
 } // namespace mozilla
+
+/**
+ * NS_AddSystemEventListener() is a helper function for implementing
+ * EventTarget::AddSystemEventListener().
+ */
+inline nsresult
+NS_AddSystemEventListener(mozilla::dom::EventTarget* aTarget,
+                          const nsAString& aType,
+                          nsIDOMEventListener *aListener,
+                          bool aUseCapture,
+                          bool aWantsUntrusted)
+{
+  mozilla::EventListenerManager* listenerManager =
+    aTarget->GetOrCreateListenerManager();
+  NS_ENSURE_STATE(listenerManager);
+  mozilla::EventListenerFlags flags;
+  flags.mInSystemGroup = true;
+  flags.mCapture = aUseCapture;
+  flags.mAllowUntrustedEvents = aWantsUntrusted;
+  listenerManager->AddEventListenerByType(aListener, aType, flags);
+  return NS_OK;
+}
 
 #endif // mozilla_EventListenerManager_h_

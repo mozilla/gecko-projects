@@ -756,7 +756,7 @@ nsImageMap::SearchForAreas(nsIContent* aParent)
   for (nsIContent* child = aParent->GetFirstChild();
        child;
        child = child->GetNextSibling()) {
-    if (auto* area = HTMLAreaElement::FromNode(child)) {
+    if (auto* area = HTMLAreaElement::FromContent(child)) {
       AddArea(area);
 
       // Continue to next child. This stops mConsiderWholeSubtree from
@@ -947,7 +947,7 @@ nsImageMap::ContentRemoved(nsIContent* aChild,
     return;
   }
 
-  auto* areaElement = HTMLAreaElement::FromNode(aChild);
+  auto* areaElement = HTMLAreaElement::FromContent(aChild);
   if (!areaElement) {
     return;
   }

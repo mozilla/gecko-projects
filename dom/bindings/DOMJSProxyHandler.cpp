@@ -9,6 +9,7 @@
 #include "xpcprivate.h"
 #include "XPCWrapper.h"
 #include "WrapperFactory.h"
+#include "nsDOMClassInfo.h"
 #include "nsWrapperCacheInlines.h"
 #include "mozilla/dom/BindingUtils.h"
 

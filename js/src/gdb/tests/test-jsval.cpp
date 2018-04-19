@@ -5,7 +5,6 @@ FRAGMENT(jsval, simple) {
   using namespace JS;
 
   RootedValue fortytwo(cx, Int32Value(42));
-  RootedValue fortytwoD(cx, DoubleValue(42));
   RootedValue negone(cx, Int32Value(-1));
   RootedValue undefined(cx, UndefinedValue());
   RootedValue null(cx, NullValue());
@@ -28,7 +27,6 @@ FRAGMENT(jsval, simple) {
   breakpoint();
 
   use(fortytwo);
-  use(fortytwoD);
   use(negone);
   use(undefined);
   use(js_true);

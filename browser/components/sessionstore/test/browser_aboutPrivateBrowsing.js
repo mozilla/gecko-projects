@@ -13,9 +13,9 @@ add_task(async function() {
      "we will be removing an about:privatebrowsing tab");
 
   let r = `rand-${Math.random()}`;
-  ss.setCustomTabValue(tab, "foobar", r);
+  ss.setTabValue(tab, "foobar", r);
 
-  await promiseRemoveTabAndSessionState(tab);
+  await promiseRemoveTab(tab);
   let closedTabData = ss.getClosedTabData(window);
   ok(!closedTabData.includes(r), "tab not stored in _closedTabs");
 });

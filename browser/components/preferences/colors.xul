@@ -8,24 +8,34 @@
 <?xml-stylesheet href="chrome://global/skin/" type="text/css"?>
 <?xml-stylesheet href="chrome://browser/skin/preferences/preferences.css"?>
 
+<!DOCTYPE dialog [
+  <!ENTITY % preferencesDTD SYSTEM "chrome://global/locale/preferences.dtd">
+  %preferencesDTD;
+  <!ENTITY % colorsDTD SYSTEM "chrome://browser/locale/preferences/colors.dtd">
+  %colorsDTD;
+]>
+
 <dialog id="ColorsDialog" type="child" class="prefwindow"
         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
-        data-l10n-id="colors-window"
-        data-l10n-attrs="title, style"
+        title="&colorsDialog.title;"
         buttons="accept,cancel,help"
         persist="lastSelected screenX screenY"
+        closebuttonlabel="&preferencesCloseButton.label;"
+        closebuttonaccesskey="&preferencesCloseButton.accesskey;"
         role="dialog"
         helpTopic="prefs-fonts-and-colors"
-        ondialoghelp="openPrefsHelp()">
-
-  <link rel="localization" href="browser/preferences/colors.ftl"/>
-  <script type="application/javascript" src="chrome://global/content/l10n.js"></script>
+        ondialoghelp="openPrefsHelp()"
+#ifdef XP_MACOSX
+        style="width: &window.macWidth; !important;">
+#else
+        style="width: &window.width; !important;">
+#endif
 
   <script type="application/javascript" src="chrome://browser/content/utilityOverlay.js"/>
   <script type="application/javascript" src="chrome://global/content/preferencesBindings.js"/>
 
   <keyset>
-    <key data-l10n-id="colors-close-key" modifiers="accel" oncommand="Preferences.close(event)"/>
+    <key key="&windowClose.key;" modifiers="accel" oncommand="Preferences.close(event)"/>
   </keyset>
 
   <vbox id="ColorsDialogPane" class="prefpane">
@@ -34,43 +44,43 @@
 
     <hbox>
       <groupbox flex="1">
-        <caption><label data-l10n-id="colors-text-and-background"/></caption>
+        <caption><label>&color;</label></caption>
         <hbox align="center">
-          <label data-l10n-id="colors-text-header" control="foregroundtextmenu"/>
+          <label accesskey="&textColor2.accesskey;" control="foregroundtextmenu">&textColor2.label;</label>
           <spacer flex="1"/>
           <colorpicker type="button" id="foregroundtextmenu" palettename="standard"
                        preference="browser.display.foreground_color"/>
         </hbox>
         <hbox align="center" style="margin-top: 5px">
-          <label data-l10n-id="colors-background" control="backgroundmenu" />
+          <label accesskey="&backgroundColor2.accesskey;" control="backgroundmenu">&backgroundColor2.label;</label>
           <spacer flex="1"/>
           <colorpicker type="button" id="backgroundmenu" palettename="standard"
                        preference="browser.display.background_color"/>
         </hbox>
         <separator class="thin"/>
         <hbox align="center">
-          <checkbox id="browserUseSystemColors" data-l10n-id="colors-use-system"
+          <checkbox id="browserUseSystemColors" label="&useSystemColors.label;" accesskey="&useSystemColors.accesskey;"
                     preference="browser.display.use_system_colors"/>
         </hbox>
       </groupbox>
 
       <groupbox flex="1">
-        <caption><label data-l10n-id="colors-links-header"/></caption>
+        <caption><label>&links;</label></caption>
         <hbox align="center">
-          <label data-l10n-id="colors-unvisited-links" control="unvisitedlinkmenu" />
+          <label accesskey="&linkColor2.accesskey;" control="unvisitedlinkmenu">&linkColor2.label;</label>
           <spacer flex="1"/>
           <colorpicker type="button" id="unvisitedlinkmenu" palettename="standard"
                        preference="browser.anchor_color"/>
         </hbox>
         <hbox align="center" style="margin-top: 5px">
-          <label data-l10n-id="colors-visited-links" control="visitedlinkmenu" />
+          <label accesskey="&visitedLinkColor2.accesskey;" control="visitedlinkmenu">&visitedLinkColor2.label;</label>
           <spacer flex="1"/>
           <colorpicker type="button" id="visitedlinkmenu" palettename="standard"
                        preference="browser.visited_color"/>
         </hbox>
         <separator class="thin"/>
         <hbox align="center">
-          <checkbox id="browserUnderlineAnchors" data-l10n-id="colors-underline-links"
+          <checkbox id="browserUnderlineAnchors" label="&underlineLinks.label;" accesskey="&underlineLinks.accesskey;"
                     preference="browser.underline_anchors"/>
         </hbox>
       </groupbox>
@@ -80,15 +90,16 @@
 #else
     <vbox>
 #endif
-      <label data-l10n-id="colors-page-override" control="useDocumentColors" />
+      <label accesskey="&overrideDefaultPageColors2.accesskey;"
+             control="useDocumentColors">&overrideDefaultPageColors2.label;</label>
       <hbox>
         <menulist id="useDocumentColors" preference="browser.display.document_color_use" flex="1">
           <menupopup>
-            <menuitem data-l10n-id="colors-page-override-option-always"
+            <menuitem label="&overrideDefaultPageColors.always.label;"
                       value="2" id="documentColorAlways"/>
-            <menuitem data-l10n-id="colors-page-override-option-auto"
+            <menuitem label="&overrideDefaultPageColors.auto.label;"
                       value="0" id="documentColorAutomatic"/>
-            <menuitem data-l10n-id="colors-page-override-option-never"
+            <menuitem label="&overrideDefaultPageColors.never.label;"
                       value="1" id="documentColorNever"/>
           </menupopup>
         </menulist>

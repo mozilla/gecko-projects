@@ -107,14 +107,11 @@ const requestConstructors = {
                     outputProtection: {digital : false, analogue: false, enforce: false},
                     storeLicense: (sessionType === 'persistent-license')};
 
-            if (!params || (params.expiration === undefined && params.playDuration === undefined)) {
+            if (!params || params.expiration === undefined) {
                 crt.profile = {purchase: {}};
             } else {
-                var expiration = params.expiration || (Date.now().valueOf() + 3600000),
-                    playDuration = params.playDuration || 3600000;
-
-                crt.profile = {rental: {absoluteExpiration: (new Date(expiration)).toISOString(),
-                                        playDuration: playDuration } };
+                crt.profile = {rental: {absoluteExpiration: (new Date(params.expiration)).toISOString(),
+                                        playDuration: 3600000 } };
             }
 
             if (content.variantId !== undefined) {

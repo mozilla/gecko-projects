@@ -40,8 +40,9 @@ nsSVGViewBoxRect::FromString(const nsAString& aStr, nsSVGViewBoxRect *aViewBox)
     return NS_OK;
   }
 
-  nsCharSeparatedTokenizerTemplate<nsContentUtils::IsHTMLWhitespace>
-    tokenizer(aStr, ',', nsCharSeparatedTokenizer::SEPARATOR_OPTIONAL);
+  nsCharSeparatedTokenizerTemplate<IsSVGWhitespace>
+  tokenizer(aStr, ',',
+            nsCharSeparatedTokenizer::SEPARATOR_OPTIONAL);
   float vals[NUM_VIEWBOX_COMPONENTS];
   uint32_t i;
   for (i = 0; i < NUM_VIEWBOX_COMPONENTS && tokenizer.hasMoreTokens(); ++i) {

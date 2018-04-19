@@ -7,17 +7,11 @@
 var EXPORTED_SYMBOLS = ["GeckoViewSettings"];
 
 ChromeUtils.import("resource://gre/modules/GeckoViewModule.jsm");
-ChromeUtils.import("resource://gre/modules/GeckoViewUtils.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
+  SafeBrowsing: "resource://gre/modules/SafeBrowsing.jsm",
   Services: "resource://gre/modules/Services.jsm",
-});
-
-/* global SafeBrowsing:false */
-GeckoViewUtils.addLazyGetter(this, "SafeBrowsing", {
-  module: "resource://gre/modules/SafeBrowsing.jsm",
-  init: sb => sb.init(),
 });
 
 XPCOMUtils.defineLazyGetter(
@@ -29,48 +23,67 @@ XPCOMUtils.defineLazyGetter(
            .replace(/Gecko\/[0-9\.]+/, "Gecko/20100101");
   });
 
+XPCOMUtils.defineLazyGetter(this, "dump", () =>
+    ChromeUtils.import("resource://gre/modules/AndroidLog.jsm",
+                       {}).AndroidLog.d.bind(null, "ViewSettings"));
+
+function debug(aMsg) {
+  // dump(aMsg);
+}
+
 // Handles GeckoView settings including:
 // * multiprocess
 // * user agent override
 class GeckoViewSettings extends GeckoViewModule {
-  onInitBrowser() {
-    if (this.settings.useMultiprocess) {
-      this.browser.setAttribute("remote", "true");
-    }
-  }
-
-  onInit() {
-    this._useTrackingProtection = false;
+  init() {
+    this._isSafeBrowsingInit = false;
     this._useDesktopMode = false;
 
-    this.registerContent(
-        "chrome://geckoview/content/GeckoViewContentSettings.js");
+    // We only allow to set this setting during initialization, further updates
+    // will be ignored.
+    this.useMultiprocess = !!this.settings.useMultiprocess;
+    this._displayMode = Ci.nsIDocShell.DISPLAY_MODE_BROWSER;
+
+    this.messageManager.loadFrameScript(
+      "chrome://geckoview/content/GeckoViewContentSettings.js", true);
   }
 
   onSettingsUpdate() {
-    const settings = this.settings;
-    debug `onSettingsUpdate: ${settings}`;
+    debug("onSettingsUpdate: " + JSON.stringify(this.settings));
 
-    this.displayMode = settings.displayMode;
-    this.useTrackingProtection = !!settings.useTrackingProtection;
-    this.useDesktopMode = !!settings.useDesktopMode;
+    this.displayMode = this.settings.displayMode;
+    this.useTrackingProtection = !!this.settings.useTrackingProtection;
+    this.useDesktopMode = !!this.settings.useDesktopMode;
   }
 
   get useMultiprocess() {
-    return this.browser.isRemoteBrowser;
+    return this.browser.getAttribute("remote") == "true";
   }
 
-  get useTrackingProtection() {
-    return this._useTrackingProtection;
+  set useMultiprocess(aUse) {
+    if (aUse == this.useMultiprocess) {
+      return;
+    }
+    let parentNode = this.browser.parentNode;
+    parentNode.removeChild(this.browser);
+
+    if (aUse) {
+      this.browser.setAttribute("remote", "true");
+    } else {
+      this.browser.removeAttribute("remote");
+    }
+    parentNode.appendChild(this.browser);
   }
 
   set useTrackingProtection(aUse) {
-    aUse && SafeBrowsing;
-    this._useTrackingProtection = aUse;
+    if (aUse && !this._isSafeBrowsingInit) {
+      SafeBrowsing.init();
+      this._isSafeBrowsingInit = true;
+    }
   }
 
   onUserAgentRequest(aSubject, aTopic, aData) {
-    debug `onUserAgentRequest`;
+    debug("onUserAgentRequest");
 
     let channel = aSubject.QueryInterface(Ci.nsIHttpChannel);
 
@@ -102,14 +115,20 @@ class GeckoViewSettings extends GeckoViewModule {
   }
 
   get displayMode() {
-    return this.window.QueryInterface(Ci.nsIInterfaceRequestor)
-                      .getInterface(Ci.nsIDocShell)
-                      .displayMode;
+    return this._displayMode;
   }
 
   set displayMode(aMode) {
-    this.window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIDocShell)
-               .displayMode = aMode;
+    if (!this.useMultiprocess) {
+      this.window.QueryInterface(Ci.nsIInterfaceRequestor)
+                   .getInterface(Ci.nsIDocShell)
+                   .displayMode = aMode;
+    } else {
+      this.messageManager.loadFrameScript("data:," +
+        `docShell.displayMode = ${aMode}`,
+        true
+      );
+    }
+    this._displayMode = aMode;
   }
 }

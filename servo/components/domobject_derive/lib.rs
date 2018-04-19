@@ -40,7 +40,7 @@ fn expand_dom_object(input: syn::DeriveInput) -> quote::Tokens {
             #[allow(unsafe_code)]
             unsafe fn to_jsval(&self,
                                 cx: *mut ::js::jsapi::JSContext,
-                                rval: ::js::rust::MutableHandleValue) {
+                                rval: ::js::jsapi::MutableHandleValue) {
                 let object = ::dom::bindings::reflector::DomObject::reflector(self).get_jsobject();
                 object.to_jsval(cx, rval)
             }

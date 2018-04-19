@@ -39,7 +39,7 @@ GenerateStubs(const ModuleEnvironment& env, const FuncImportVector& imports,
 extern bool
 GenerateEntryStubs(jit::MacroAssembler& masm, size_t funcExportIndex,
                    const FuncExport& funcExport, const Maybe<jit::ImmPtr>& callee,
-                   bool isAsmJS, HasGcTypes gcTypesEnabled, CodeRangeVector* codeRanges);
+                   bool isAsmJS, CodeRangeVector* codeRanges);
 
 } // namespace wasm
 } // namespace js

@@ -9,6 +9,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/dom/WorkerHolder.h"
 
 #include "nsIAsyncInputStream.h"
 #include "nsIInterfaceRequestor.h"
@@ -27,8 +28,7 @@ namespace dom {
 
 class Blob;
 class DOMException;
-class StrongWorkerRef;
-class WeakWorkerRef;
+class WorkerPrivate;
 
 extern const uint64_t kUnknownSize;
 
@@ -39,13 +39,14 @@ class FileReader final : public DOMEventTargetHelper,
                          public nsSupportsWeakReference,
                          public nsIInputStreamCallback,
                          public nsITimerCallback,
-                         public nsINamed
+                         public nsINamed,
+                         public WorkerHolder
 {
   friend class FileReaderDecreaseBusyCounter;
 
 public:
   FileReader(nsIGlobalObject* aGlobal,
-             WeakWorkerRef* aWorkerRef);
+             WorkerPrivate* aWorkerPrivate);
 
   NS_DECL_ISUPPORTS_INHERITED
 
@@ -109,6 +110,9 @@ public:
   {
     ReadFileContent(aBlob, EmptyString(), FILE_AS_BINARY, aRv);
   }
+
+  // WorkerHolder
+  bool Notify(WorkerStatus) override;
 
 private:
   virtual ~FileReader();
@@ -193,14 +197,8 @@ private:
 
   uint64_t mBusyCount;
 
-  // This is set if FileReader is created on workers, but it is null if the
-  // worker is shutting down. The null value is checked in ReadFileContent()
-  // before starting any reading.
-  RefPtr<WeakWorkerRef> mWeakWorkerRef;
-
-  // This value is set when the reading starts in order to keep the worker alive
-  // during the process.
-  RefPtr<StrongWorkerRef> mStrongWorkerRef;
+  // Kept alive with a WorkerHolder.
+  WorkerPrivate* mWorkerPrivate;
 };
 
 } // dom namespace

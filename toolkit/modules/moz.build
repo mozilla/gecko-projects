@@ -187,6 +187,7 @@ EXTRA_JS_MODULES += [
     'Console.jsm',
     'css-selector.js',
     'DateTimePickerHelper.jsm',
+    'debug.js',
     'DeferredTask.jsm',
     'Deprecated.jsm',
     'E10SUtils.jsm',
@@ -259,6 +260,9 @@ EXTRA_JS_MODULES.sessionstore += [
     'sessionstore/SessionHistory.jsm',
     'sessionstore/Utils.jsm',
 ]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('windows', 'cocoa', 'gtk3'):
+    DEFINES['CAN_DRAW_IN_TITLEBAR'] = 1
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('windows', 'gtk3'):
     DEFINES['MENUBAR_CAN_AUTOHIDE'] = 1

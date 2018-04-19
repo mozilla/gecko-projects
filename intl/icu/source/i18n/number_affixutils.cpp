@@ -70,7 +70,6 @@ int32_t AffixUtils::estimateLength(const CharSequence &patternString, UErrorCode
         case STATE_FIRST_QUOTE:
         case STATE_INSIDE_QUOTE:
             status = U_ILLEGAL_ARGUMENT_ERROR;
-            break;
         default:
             break;
     }

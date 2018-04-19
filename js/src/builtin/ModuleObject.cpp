@@ -149,10 +149,11 @@ ImportEntryObject::create(JSContext* cx,
     if (!proto)
         return nullptr;
 
-    ImportEntryObject* self = NewObjectWithGivenProto<ImportEntryObject>(cx, proto);
-    if (!self)
+    RootedObject obj(cx, NewObjectWithGivenProto(cx, &class_, proto));
+    if (!obj)
         return nullptr;
 
+    RootedImportEntryObject self(cx, &obj->as<ImportEntryObject>());
     self->initReservedSlot(ModuleRequestSlot, StringValue(moduleRequest));
     self->initReservedSlot(ImportNameSlot, StringValue(importName));
     self->initReservedSlot(LocalNameSlot, StringValue(localName));
@@ -237,10 +238,11 @@ ExportEntryObject::create(JSContext* cx,
     if (!proto)
         return nullptr;
 
-    ExportEntryObject* self = NewObjectWithGivenProto<ExportEntryObject>(cx, proto);
-    if (!self)
+    RootedObject obj(cx, NewObjectWithGivenProto(cx, &class_, proto));
+    if (!obj)
         return nullptr;
 
+    RootedExportEntryObject self(cx, &obj->as<ExportEntryObject>());
     self->initReservedSlot(ExportNameSlot, StringOrNullValue(maybeExportName));
     self->initReservedSlot(ModuleRequestSlot, StringOrNullValue(maybeModuleRequest));
     self->initReservedSlot(ImportNameSlot, StringOrNullValue(maybeImportName));
@@ -305,10 +307,11 @@ RequestedModuleObject::create(JSContext* cx,
     if (!proto)
         return nullptr;
 
-    RequestedModuleObject* self = NewObjectWithGivenProto<RequestedModuleObject>(cx, proto);
-    if (!self)
+    RootedObject obj(cx, NewObjectWithGivenProto(cx, &class_, proto));
+    if (!obj)
         return nullptr;
 
+    RootedRequestedModuleObject self(cx, &obj->as<RequestedModuleObject>());
     self->initReservedSlot(ModuleSpecifierSlot, StringValue(moduleSpecifier));
     self->initReservedSlot(LineNumberSlot, NumberValue(lineNumber));
     self->initReservedSlot(ColumnNumberSlot, NumberValue(columnNumber));
@@ -346,7 +349,7 @@ IndirectBindingMap::put(JSContext* cx, HandleId name,
     // different zone to the final module. Lazily allocate the map so we don't
     // have to switch its zone when merging compartments.
     if (!map_) {
-        MOZ_ASSERT(!cx->zone()->createdForHelperThread());
+        MOZ_ASSERT(!cx->zone()->group()->createdForHelperThread());
         map_.emplace(cx->zone());
         if (!map_->init()) {
             map_.reset();
@@ -768,9 +771,11 @@ ModuleObject::create(JSContext* cx)
     if (!proto)
         return nullptr;
 
-    RootedModuleObject self(cx, NewObjectWithGivenProto<ModuleObject>(cx, proto));
-    if (!self)
+    RootedObject obj(cx, NewObjectWithGivenProto(cx, &class_, proto));
+    if (!obj)
         return nullptr;
+
+    RootedModuleObject self(cx, &obj->as<ModuleObject>());
 
     Zone* zone = cx->zone();
     IndirectBindingMap* bindings = zone->new_<IndirectBindingMap>();
@@ -1211,9 +1216,9 @@ ModuleBuilder::ModuleBuilder(JSContext* cx, HandleModuleObject module,
     tokenStream_(tokenStream),
     requestedModuleSpecifiers_(cx, AtomSet(cx)),
     requestedModules_(cx, RequestedModuleVector(cx)),
-    importEntries_(cx, ImportEntryMap(cx)),
+    importedBoundNames_(cx, AtomVector(cx)),
+    importEntries_(cx, ImportEntryVector(cx)),
     exportEntries_(cx, ExportEntryVector(cx)),
-    exportNames_(cx, AtomSet(cx)),
     localExportEntries_(cx, ExportEntryVector(cx)),
     indirectExportEntries_(cx, ExportEntryVector(cx)),
     starExportEntries_(cx, ExportEntryVector(cx))
@@ -1222,9 +1227,7 @@ ModuleBuilder::ModuleBuilder(JSContext* cx, HandleModuleObject module,
 bool
 ModuleBuilder::init()
 {
-    return requestedModuleSpecifiers_.init() &&
-           importEntries_.init() &&
-           exportNames_.init();
+    return requestedModuleSpecifiers_.init();
 }
 
 bool
@@ -1321,24 +1324,20 @@ ModuleBuilder::processImport(frontend::ParseNode* pn)
         RootedAtom importName(cx_, spec->pn_left->pn_atom);
         RootedAtom localName(cx_, spec->pn_right->pn_atom);
 
+        if (!importedBoundNames_.append(localName))
+            return false;
+
         uint32_t line;
         uint32_t column;
         tokenStream_.lineAndColumnAt(spec->pn_left->pn_pos.begin, &line, &column);
 
         RootedImportEntryObject importEntry(cx_);
         importEntry = ImportEntryObject::create(cx_, module, importName, localName, line, column);
-        if (!importEntry || !appendImportEntryObject(importEntry))
+        if (!importEntry || !importEntries_.append(importEntry))
             return false;
     }
 
     return true;
-}
-
-bool
-ModuleBuilder::appendImportEntryObject(HandleImportEntryObject importEntry)
-{
-    MOZ_ASSERT(importEntry->localName());
-    return importEntries_.put(importEntry->localName(), importEntry);
 }
 
 bool
@@ -1518,19 +1517,21 @@ ModuleBuilder::processExportFrom(frontend::ParseNode* pn)
 ImportEntryObject*
 ModuleBuilder::importEntryFor(JSAtom* localName) const
 {
-    MOZ_ASSERT(localName);
-    auto ptr = importEntries_.lookup(localName);
-    if (!ptr)
-        return nullptr;
-
-    return ptr->value();
+    for (auto import : importEntries_) {
+        if (import->localName() == localName)
+            return import;
+    }
+    return nullptr;
 }
 
 bool
 ModuleBuilder::hasExportedName(JSAtom* name) const
 {
-    MOZ_ASSERT(name);
-    return exportNames_.has(name);
+    for (auto entry : exportEntries_) {
+        if (entry->exportName() == name)
+            return true;
+    }
+    return false;
 }
 
 bool
@@ -1544,7 +1545,7 @@ ModuleBuilder::appendExportEntry(HandleAtom exportName, HandleAtom localName, Pa
     Rooted<ExportEntryObject*> exportEntry(cx_);
     exportEntry = ExportEntryObject::create(cx_, exportName, nullptr, nullptr, localName,
                                             line, column);
-    return exportEntry && appendExportEntryObject(exportEntry);
+    return exportEntry && exportEntries_.append(exportEntry);
 }
 
 bool
@@ -1558,17 +1559,7 @@ ModuleBuilder::appendExportFromEntry(HandleAtom exportName, HandleAtom moduleReq
     Rooted<ExportEntryObject*> exportEntry(cx_);
     exportEntry = ExportEntryObject::create(cx_, exportName, moduleRequest, importName, nullptr,
                                             line, column);
-    return exportEntry && appendExportEntryObject(exportEntry);
-}
-
-bool
-ModuleBuilder::appendExportEntryObject(HandleExportEntryObject exportEntry)
-{
-    if (!exportEntries_.append(exportEntry))
-        return false;
-
-    JSAtom* exportName = exportEntry->exportName();
-    return !exportName || exportNames_.put(exportName);
+    return exportEntry && exportEntries_.append(exportEntry);
 }
 
 bool
@@ -1602,23 +1593,6 @@ ArrayObject* ModuleBuilder::createArray(const JS::Rooted<GCVector<T>>& vector)
     array->setDenseInitializedLength(length);
     for (uint32_t i = 0; i < length; i++)
         array->initDenseElement(i, ObjectValue(*vector[i]));
-
-    return array;
-}
-
-template <typename K, typename V>
-ArrayObject* ModuleBuilder::createArray(const JS::Rooted<GCHashMap<K, V>>& map)
-{
-    uint32_t length = map.count();
-    RootedArrayObject array(cx_, NewDenseFullyAllocatedArray(cx_, length));
-    if (!array)
-        return nullptr;
-
-    array->setDenseInitializedLength(length);
-
-    uint32_t i = 0;
-    for (auto r = map.all(); !r.empty(); r.popFront())
-        array->initDenseElement(i++, ObjectValue(*r.front().value()));
 
     return array;
 }

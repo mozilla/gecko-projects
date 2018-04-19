@@ -8,7 +8,7 @@
 // shared-head.js handles imports, constants, and utility functions
 Services.scriptloader.loadSubScript("chrome://mochitests/content/browser/devtools/client/shared/test/shared-head.js", this);
 
-const EventEmitter = require("devtools/shared/event-emitter");
+const EventEmitter = require("devtools/shared/old-event-emitter");
 
 function toggleAllTools(state) {
   for (let [, tool] of gDevTools._tools) {
@@ -23,7 +23,8 @@ function toggleAllTools(state) {
   }
 }
 
-function getChromeActors(callback) {
+function getChromeActors(callback)
+{
   let { DebuggerServer } = require("devtools/server/main");
   let { DebuggerClient } = require("devtools/shared/client/debugger-client");
 
@@ -54,14 +55,14 @@ function getSourceActor(aSources, aURL) {
  * @return nsIDOMWindow
  *         The new window object that holds Scratchpad.
  */
-async function openScratchpadWindow() {
+function* openScratchpadWindow() {
   let { promise: p, resolve } = defer();
   let win = ScratchpadManager.openScratchpad();
 
-  await once(win, "load");
+  yield once(win, "load");
 
   win.Scratchpad.addObserver({
-    onReady: function() {
+    onReady: function () {
       win.Scratchpad.removeObserver(this);
       resolve(win);
     }
@@ -108,8 +109,9 @@ function executeInContent(name, data = {}, objects = {}, expectResponse = true) 
   mm.sendAsyncMessage(name, data, objects);
   if (expectResponse) {
     return waitForContentMessage(name);
+  } else {
+    return promise.resolve();
   }
-  return promise.resolve();
 }
 
 /**
@@ -178,7 +180,7 @@ function waitForSourceLoad(toolbox, url) {
   return new Promise(resolve => {
     let target = toolbox.target;
 
-    function sourceHandler(sourceEvent) {
+    function sourceHandler(_, sourceEvent) {
       if (sourceEvent && sourceEvent.source && sourceEvent.source.url === url) {
         resolve();
         target.off("source-updated", sourceHandler);
@@ -205,7 +207,7 @@ function DevToolPanel(iframeWindow, toolbox) {
 }
 
 DevToolPanel.prototype = {
-  open: function() {
+  open: function () {
     let deferred = defer();
 
     executeSoon(() => {
@@ -235,7 +237,7 @@ DevToolPanel.prototype = {
 
   _isReady: false,
 
-  destroy: function() {
+  destroy: function () {
     return defer(null);
   },
 };
@@ -246,17 +248,4 @@ DevToolPanel.prototype = {
  */
 function createTestPanel(iframeWindow, toolbox) {
   return new DevToolPanel(iframeWindow, toolbox);
-}
-
-async function openChevronMenu(toolbox) {
-  let chevronMenuButton = toolbox.doc.querySelector(".tools-chevron-menu");
-  EventUtils.synthesizeMouseAtCenter(chevronMenuButton, {}, toolbox.win);
-
-  let menuPopup = toolbox.doc.querySelector("#tools-chevron-menupopup");
-  ok(menuPopup, "tools-chevron-menupopup is available");
-
-  info("Waiting for the menu popup to be displayed");
-  await waitUntil(() => menuPopup && menuPopup.state === "open");
-
-  return menuPopup;
 }

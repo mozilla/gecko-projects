@@ -3,8 +3,7 @@ function cleanup_and_finish() {
     cleanup_fake_appdir();
   } catch (ex) {}
   Services.prefs.clearUserPref("breakpad.reportURL");
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
-  finish();
+  BrowserTestUtils.removeTab(gBrowser.selectedTab).then(finish);
 }
 
 /*

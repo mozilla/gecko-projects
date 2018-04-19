@@ -1,5 +1,6 @@
 "use strict";
 
+/* eslint-disable mozilla/no-cpows-in-tests */
 add_task(async function test_total() {
   const testTask = ({methodData, details}) => {
     is(content.document.querySelector("#total > currency-amount").textContent,

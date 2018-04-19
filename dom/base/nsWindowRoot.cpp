@@ -70,24 +70,77 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsWindowRoot)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsWindowRoot)
 
-bool
-nsWindowRoot::DispatchEvent(Event& aEvent, CallerType aCallerType,
-                            ErrorResult& aRv)
+NS_IMPL_DOMTARGET_DEFAULTS(nsWindowRoot)
+
+NS_IMETHODIMP
+nsWindowRoot::RemoveEventListener(const nsAString& aType, nsIDOMEventListener* aListener, bool aUseCapture)
+{
+  if (RefPtr<EventListenerManager> elm = GetExistingListenerManager()) {
+    elm->RemoveEventListener(aType, aListener, aUseCapture);
+  }
+  return NS_OK;
+}
+
+NS_IMPL_REMOVE_SYSTEM_EVENT_LISTENER(nsWindowRoot)
+
+NS_IMETHODIMP
+nsWindowRoot::DispatchEvent(nsIDOMEvent* aEvt, bool *aRetVal)
 {
   nsEventStatus status = nsEventStatus_eIgnore;
   nsresult rv =  EventDispatcher::DispatchDOMEvent(
-    static_cast<EventTarget*>(this), nullptr, &aEvent, nullptr, &status);
-  bool retval = !aEvent.DefaultPrevented(aCallerType);
-  if (NS_FAILED(rv)) {
-    aRv.Throw(rv);
-  }
-  return retval;
+    static_cast<EventTarget*>(this), nullptr, aEvt, nullptr, &status);
+  *aRetVal = (status != nsEventStatus_eConsumeNoDefault);
+  return rv;
 }
 
-bool
-nsWindowRoot::ComputeDefaultWantsUntrusted(ErrorResult& aRv)
+NS_IMETHODIMP
+nsWindowRoot::AddEventListener(const nsAString& aType,
+                               nsIDOMEventListener *aListener,
+                               bool aUseCapture, bool aWantsUntrusted,
+                               uint8_t aOptionalArgc)
 {
-  return false;
+  NS_ASSERTION(!aWantsUntrusted || aOptionalArgc > 1,
+               "Won't check if this is chrome, you want to set "
+               "aWantsUntrusted to false or make the aWantsUntrusted "
+               "explicit by making optional_argc non-zero.");
+
+  EventListenerManager* elm = GetOrCreateListenerManager();
+  NS_ENSURE_STATE(elm);
+  elm->AddEventListener(aType, aListener, aUseCapture, aWantsUntrusted);
+  return NS_OK;
+}
+
+void
+nsWindowRoot::AddEventListener(const nsAString& aType,
+                                EventListener* aListener,
+                                const AddEventListenerOptionsOrBoolean& aOptions,
+                                const Nullable<bool>& aWantsUntrusted,
+                                ErrorResult& aRv)
+{
+  bool wantsUntrusted = !aWantsUntrusted.IsNull() && aWantsUntrusted.Value();
+  EventListenerManager* elm = GetOrCreateListenerManager();
+  if (!elm) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return;
+  }
+  elm->AddEventListener(aType, aListener, aOptions, wantsUntrusted);
+}
+
+
+NS_IMETHODIMP
+nsWindowRoot::AddSystemEventListener(const nsAString& aType,
+                                     nsIDOMEventListener *aListener,
+                                     bool aUseCapture,
+                                     bool aWantsUntrusted,
+                                     uint8_t aOptionalArgc)
+{
+  NS_ASSERTION(!aWantsUntrusted || aOptionalArgc > 1,
+               "Won't check if this is chrome, you want to set "
+               "aWantsUntrusted to false or make the aWantsUntrusted "
+               "explicit by making optional_argc non-zero.");
+
+  return NS_AddSystemEventListener(this, aType, aListener, aUseCapture,
+                                   aWantsUntrusted);
 }
 
 EventListenerManager*
@@ -107,7 +160,14 @@ nsWindowRoot::GetExistingListenerManager() const
   return mListenerManager;
 }
 
-void
+nsIScriptContext*
+nsWindowRoot::GetContextForEventHandlers(nsresult* aRv)
+{
+  *aRv = NS_OK;
+  return nullptr;
+}
+
+nsresult
 nsWindowRoot::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   aVisitor.mCanHandle = true;
@@ -115,6 +175,7 @@ nsWindowRoot::GetEventTargetParent(EventChainPreVisitor& aVisitor)
   // To keep mWindow alive
   aVisitor.mItemData = static_cast<nsISupports *>(mWindow);
   aVisitor.SetParentTarget(mParent, false);
+  return NS_OK;
 }
 
 nsresult
@@ -163,7 +224,7 @@ nsWindowRoot::GetControllers(bool aForVisibleWindow,
                                          getter_AddRefs(focusedWindow));
   if (focusedContent) {
 #ifdef MOZ_XUL
-    RefPtr<nsXULElement> xulElement = nsXULElement::FromNode(focusedContent);
+    RefPtr<nsXULElement> xulElement = nsXULElement::FromContent(focusedContent);
     if (xulElement) {
       ErrorResult rv;
       *aResult = xulElement->GetControllers(rv);
@@ -173,12 +234,12 @@ nsWindowRoot::GetControllers(bool aForVisibleWindow,
 #endif
 
     HTMLTextAreaElement* htmlTextArea =
-      HTMLTextAreaElement::FromNode(focusedContent);
+      HTMLTextAreaElement::FromContent(focusedContent);
     if (htmlTextArea)
       return htmlTextArea->GetControllers(aResult);
 
     HTMLInputElement* htmlInputElement =
-      HTMLInputElement::FromNode(focusedContent);
+      HTMLInputElement::FromContent(focusedContent);
     if (htmlInputElement)
       return htmlInputElement->GetControllers(aResult);
 

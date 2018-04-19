@@ -90,8 +90,6 @@ class Manifest(object):
                     hash_changed = True
                 else:
                     new_type, manifest_items = old_type, self._data[old_type][rel_path]
-                if old_type in ("reftest", "reftest_node") and new_type != old_type:
-                    reftest_changes = True
             else:
                 new_type, manifest_items = source_file.manifest_items()
 
@@ -224,9 +222,6 @@ def load(tests_root, manifest):
             with open(manifest) as f:
                 rv = Manifest.from_json(tests_root, json.load(f))
         except IOError:
-            return None
-        except ValueError:
-            logger.warning("%r may be corrupted", manifest)
             return None
         return rv
 

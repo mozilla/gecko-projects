@@ -33,7 +33,7 @@ function waitForNewTab(url, inBackground) {
         gBrowser.selectedTab, `The new tab is in the foreground`);
     }
 
-    BrowserTestUtils.removeTab(tab);
+    return BrowserTestUtils.removeTab(tab);
   });
 }
 
@@ -157,7 +157,7 @@ add_task(async function quickContextMenu() {
   promise = BrowserTestUtils.waitForEvent(placesContext, "popuphidden");
   placesContext.hidePopup();
   await promise;
-  BrowserTestUtils.removeTab(newTab);
+  await BrowserTestUtils.removeTab(newTab);
 
   await SpecialPowers.popPrefEnv();
 });

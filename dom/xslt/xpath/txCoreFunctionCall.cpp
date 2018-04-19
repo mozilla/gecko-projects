@@ -734,9 +734,10 @@ txCoreFunctionCall::getTypeFromAtom(nsAtom* aName, eType& aType)
 }
 
 #ifdef TX_TO_STRING
-void
-txCoreFunctionCall::appendName(nsAString& aDest)
+nsresult
+txCoreFunctionCall::getNameAtom(nsAtom** aAtom)
 {
-    aDest.Append((*descriptTable[mType].mName)->GetUTF16String());
+    NS_ADDREF(*aAtom = *descriptTable[mType].mName);
+    return NS_OK;
 }
 #endif

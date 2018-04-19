@@ -45,7 +45,7 @@ SVGStringList::SetValue(const nsAString& aValue)
   SVGStringList temp;
 
   if (mIsCommaSeparated) {
-    nsCharSeparatedTokenizerTemplate<nsContentUtils::IsHTMLWhitespace>
+    nsCharSeparatedTokenizerTemplate<IsSVGWhitespace>
       tokenizer(aValue, ',');
 
     while (tokenizer.hasMoreTokens()) {
@@ -57,8 +57,7 @@ SVGStringList::SetValue(const nsAString& aValue)
       return NS_ERROR_DOM_SYNTAX_ERR; // trailing comma
     }
   } else {
-    nsWhitespaceTokenizerTemplate<nsContentUtils::IsHTMLWhitespace>
-      tokenizer(aValue);
+    nsWhitespaceTokenizerTemplate<IsSVGWhitespace> tokenizer(aValue);
 
     while (tokenizer.hasMoreTokens()) {
       if (!temp.AppendItem(tokenizer.nextToken())) {

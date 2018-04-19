@@ -1,4 +1,3 @@
-// |reftest| skip-if(!this.hasOwnProperty('Atomics')) -- Atomics is not enabled unconditionally
 // Copyright (C) 2016 The V8 Project authors. All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
 
@@ -11,7 +10,6 @@ info: |
 
   The value of the [[Prototype]] internal slot of the Atomics object is the
   intrinsic object %ObjectPrototype%.
-features: [Atomics]
 ---*/
 
 var proto = Object.getPrototypeOf(Atomics);

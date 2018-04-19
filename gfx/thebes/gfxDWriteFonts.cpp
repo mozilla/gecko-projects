@@ -11,7 +11,6 @@
 #include "gfxTextRun.h"
 
 #include "harfbuzz/hb.h"
-#include "mozilla/FontPropertyTypes.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -136,7 +135,7 @@ bool
 gfxDWriteFont::GetFakeMetricsForArialBlack(DWRITE_FONT_METRICS *aFontMetrics)
 {
     gfxFontStyle style(mStyle);
-    style.weight = FontWeight(700);
+    style.weight = 700;
     bool needsBold;
 
     gfxFontEntry* fe =
@@ -157,7 +156,7 @@ void
 gfxDWriteFont::ComputeMetrics(AntialiasOption anAAOption)
 {
     DWRITE_FONT_METRICS fontMetrics;
-    if (!(mFontEntry->Weight() == FontWeight(900) &&
+    if (!(mFontEntry->Weight() == 900 &&
           !mFontEntry->IsUserFont() &&
           mFontEntry->Name().EqualsLiteral("Arial Black") &&
           GetFakeMetricsForArialBlack(&fontMetrics)))

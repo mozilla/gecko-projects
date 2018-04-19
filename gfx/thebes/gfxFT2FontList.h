@@ -24,7 +24,7 @@ class nsZipArchive;
 class FT2FontEntry : public gfxFontEntry
 {
 public:
-    explicit FT2FontEntry(const nsAString& aFaceName) :
+    FT2FontEntry(const nsAString& aFaceName) :
         gfxFontEntry(aFaceName),
         mFTFace(nullptr),
         mFontFace(nullptr),
@@ -43,8 +43,8 @@ public:
     // create a font entry for a downloaded font
     static FT2FontEntry* 
     CreateFontEntry(const nsAString& aFontName,
-                    FontWeight aWeight,
-                    uint16_t aStretch,
+                    uint16_t aWeight,
+                    int16_t aStretch,
                     uint8_t aStyle,
                     const uint8_t* aFontData,
                     uint32_t aLength);
@@ -108,7 +108,7 @@ public:
 class FT2FontFamily : public gfxFontFamily
 {
 public:
-    explicit FT2FontFamily(const nsAString& aName) :
+    FT2FontFamily(const nsAString& aName) :
         gfxFontFamily(aName) { }
 
     // Append this family's faces to the IPC fontlist
@@ -122,13 +122,13 @@ public:
     virtual ~gfxFT2FontList();
 
     virtual gfxFontEntry* LookupLocalFont(const nsAString& aFontName,
-                                          FontWeight aWeight,
-                                          uint16_t aStretch,
+                                          uint16_t aWeight,
+                                          int16_t aStretch,
                                           uint8_t aStyle) override;
 
     virtual gfxFontEntry* MakePlatformFont(const nsAString& aFontName,
-                                           FontWeight aWeight,
-                                           uint16_t aStretch,
+                                           uint16_t aWeight,
+                                           int16_t aStretch,
                                            uint8_t aStyle,
                                            const uint8_t* aFontData,
                                            uint32_t aLength) override;

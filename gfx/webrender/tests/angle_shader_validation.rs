@@ -40,13 +40,13 @@ const SHADERS: &[Shader] = &[
         name: "cs_clip_border",
         features: CLIP_FEATURES,
     },
-    Shader {
-        name: "cs_clip_line",
-        features: CLIP_FEATURES,
-    },
     // Cache shaders
     Shader {
         name: "cs_blur",
+        features: CACHE_FEATURES,
+    },
+    Shader {
+        name: "cs_text_run",
         features: CACHE_FEATURES,
     },
     // Prim shaders
@@ -56,6 +56,10 @@ const SHADERS: &[Shader] = &[
     },
     Shader {
         name: "ps_border_edge",
+        features: PRIM_FEATURES,
+    },
+    Shader {
+        name: "ps_hardware_composite",
         features: PRIM_FEATURES,
     },
     Shader {
@@ -76,19 +80,23 @@ const SHADERS: &[Shader] = &[
         features: &["", "YUV_NV12", "YUV_PLANAR", "YUV_INTERLEAVED", "YUV_NV12,TEXTURE_RECT"],
     },
     Shader {
-        name: "brush_solid",
+        name: "brush_mask",
         features: &[],
     },
     Shader {
-        name: "brush_image",
-        features: &["", "ALPHA_PASS"],
+        name: "brush_solid",
+        features: &[],
     },
     Shader {
         name: "brush_blend",
         features: &[],
     },
     Shader {
-        name: "brush_mix_blend",
+        name: "brush_composite",
+        features: &[],
+    },
+    Shader {
+        name: "brush_line",
         features: &[],
     },
     Shader {

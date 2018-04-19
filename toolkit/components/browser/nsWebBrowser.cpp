@@ -731,18 +731,30 @@ nsWebBrowser::GetReferringURI(nsIURI** aURI)
   return mDocShellAsNav->GetReferringURI(aURI);
 }
 
-// XXX(nika): Consider making the mozilla::dom::ChildSHistory version the
-// canonical one?
 NS_IMETHODIMP
-nsWebBrowser::GetSessionHistoryXPCOM(nsISupports** aSessionHistory)
+nsWebBrowser::SetSessionHistory(nsISHistory* aSessionHistory)
+{
+  if (mDocShell) {
+    return mDocShellAsNav->SetSessionHistory(aSessionHistory);
+  } else {
+    mInitInfo->sessionHistory = aSessionHistory;
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsWebBrowser::GetSessionHistory(nsISHistory** aSessionHistory)
 {
   NS_ENSURE_ARG_POINTER(aSessionHistory);
-  *aSessionHistory = nullptr;
   if (mDocShell) {
-    RefPtr<mozilla::dom::ChildSHistory> shistory =
-      mDocShellAsNav->GetSessionHistory();
-    shistory.forget(aSessionHistory);
+    return mDocShellAsNav->GetSessionHistory(aSessionHistory);
+  } else {
+    *aSessionHistory = mInitInfo->sessionHistory;
   }
+
+  NS_IF_ADDREF(*aSessionHistory);
+
   return NS_OK;
 }
 
@@ -986,7 +998,7 @@ nsWebBrowser::SetProgressListener(nsIWebProgressListener* aProgressListener)
 
 NS_IMETHODIMP
 nsWebBrowser::SaveURI(nsIURI* aURI,
-                      uint32_t aCacheKey,
+                      nsISupports* aCacheKey,
                       nsIURI* aReferrer,
                       uint32_t aReferrerPolicy,
                       nsIInputStream* aPostData,
@@ -1001,7 +1013,7 @@ nsWebBrowser::SaveURI(nsIURI* aURI,
 
 NS_IMETHODIMP
 nsWebBrowser::SavePrivacyAwareURI(nsIURI* aURI,
-                                  uint32_t aCacheKey,
+                                  nsISupports* aCacheKey,
                                   nsIURI* aReferrer,
                                   uint32_t aReferrerPolicy,
                                   nsIInputStream* aPostData,
@@ -1251,7 +1263,11 @@ nsWebBrowser::Create()
   // handler that always gets called (even for subframes) for any bubbling
   // event.
 
-  mDocShell->InitSessionHistory();
+  if (!mInitInfo->sessionHistory) {
+    mInitInfo->sessionHistory = do_CreateInstance(NS_SHISTORY_CONTRACTID, &rv);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+  mDocShellAsNav->SetSessionHistory(mInitInfo->sessionHistory);
 
   if (XRE_IsParentProcess()) {
     // Hook up global history. Do not fail if we can't - just warn.

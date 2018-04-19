@@ -8,8 +8,6 @@
 #define MOZILLA_GFX_RENDERCOMPOSITOR_H
 
 #include "mozilla/RefPtr.h"
-#include "mozilla/UniquePtr.h"
-#include "Units.h"
 
 namespace mozilla {
 

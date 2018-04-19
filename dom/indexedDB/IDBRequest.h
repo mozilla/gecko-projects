@@ -83,8 +83,9 @@ public:
   static uint64_t
   NextSerialNumber();
 
-  // EventTarget
-  void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
+  // nsIDOMEventTarget
+  virtual nsresult
+  GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
 
   void
   GetSource(Nullable<OwningIDBObjectStoreOrIDBIndexOrIDBCursor>& aSource) const;

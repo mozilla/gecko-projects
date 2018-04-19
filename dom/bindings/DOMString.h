@@ -223,8 +223,7 @@ public:
       } else {
         // Dynamic atoms always have a string buffer and never have 0 length,
         // because nsGkAtoms::_empty is a static atom.
-        SetKnownLiveStringBuffer(
-          aAtom->AsDynamic()->GetStringBuffer(), aAtom->GetLength());
+        SetKnownLiveStringBuffer(aAtom->GetStringBuffer(), aAtom->GetLength());
       }
     } else if (aNullHandling == eTreatNullAsNull) {
       SetNull();

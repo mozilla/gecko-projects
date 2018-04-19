@@ -1,4 +1,3 @@
-
 import os
 # The name of the directory we'll pull our source into.
 BUILD_DIR = "mozilla-central"
@@ -11,6 +10,8 @@ REPO_PATH = "mozilla-central"
 L10N_REPO_PATH = "l10n-central"
 # Currently this is assumed to be a subdirectory of your build dir
 OBJDIR = "objdir-droid"
+# Set this to mobile/xul for XUL Fennec
+ANDROID_DIR = "mobile/android"
 # Absolute path to your mozconfig.
 # By default it looks at "./mozconfig"
 MOZCONFIG = os.path.join(os.getcwd(), "mozconfig")
@@ -21,7 +22,7 @@ config = {
     "objdir": OBJDIR,
     "locales_file": "%s/mobile/locales/l10n-changesets.json" % BUILD_DIR,
     "locales_platform": "android-multilocale",
-    "locales_dir": "mobile/android/locales",
+    "locales_dir": "%s/locales" % ANDROID_DIR,
     "ignore_locales": ["en-US", "multi"],
     "repos": [{
         "repo": "https://hg.mozilla.org/%s" % REPO_PATH,
@@ -42,7 +43,6 @@ config = {
         "backup-objdir",
         "restore-objdir",
         "add-locales",
-        "android-assemble-app",
         "package-multi",
         "summary",
     ],

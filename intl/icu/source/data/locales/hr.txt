@@ -237,20 +237,10 @@ hr{
                 timeSeparator{":"}
             }
         }
-        minimalPairs{
-            ordinal{
-                other{"Skrenite {0}. desno."}
-            }
-            plural{
-                few{"{0} dana"}
-                one{"{0} dan"}
-                other{"{0} dan/a"}
-            }
-        }
         minimumGroupingDigits{"1"}
         native{"latn"}
     }
-    Version{"2.1.39.11"}
+    Version{"2.1.37.1"}
     calendar{
         buddhist{
             eras{

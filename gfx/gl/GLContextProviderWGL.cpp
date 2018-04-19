@@ -20,7 +20,6 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/layers/CompositorOptions.h"
-#include "mozilla/webrender/RenderThread.h"
 #include "mozilla/widget/CompositorWidget.h"
 #include "mozilla/widget/WinCompositorWidget.h"
 
@@ -434,22 +433,7 @@ CreateForWidget(const HWND window, const bool isWebRender, const bool requireAcc
             LOCAL_WGL_ACCELERATION_ARB, LOCAL_WGL_FULL_ACCELERATION_ARB,
             0
         };
-        const int kAttribsForWebRender[] = {
-            LOCAL_WGL_DRAW_TO_WINDOW_ARB, true,
-            LOCAL_WGL_SUPPORT_OPENGL_ARB, true,
-            LOCAL_WGL_DOUBLE_BUFFER_ARB, true,
-            LOCAL_WGL_DEPTH_BITS_ARB, 24,
-            LOCAL_WGL_ACCELERATION_ARB, LOCAL_WGL_FULL_ACCELERATION_ARB,
-            0
-        };
-        const int* attribs;
-        if (wr::RenderThread::IsInRenderThread()) {
-            attribs = kAttribsForWebRender;
-        } else {
-            attribs = kAttribs;
-        }
-
-        if (!wgl.mSymbols.fChoosePixelFormat(wgl.RootDc(), attribs, nullptr, 1,
+        if (!wgl.mSymbols.fChoosePixelFormat(wgl.RootDc(), kAttribs, nullptr, 1,
                                              &chosenFormat, &foundFormats))
         {
             foundFormats = 0;
@@ -465,22 +449,7 @@ CreateForWidget(const HWND window, const bool isWebRender, const bool requireAcc
             LOCAL_WGL_DOUBLE_BUFFER_ARB, true,
             0
         };
-        const int kAttribsForWebRender[] = {
-            LOCAL_WGL_DRAW_TO_WINDOW_ARB, true,
-            LOCAL_WGL_SUPPORT_OPENGL_ARB, true,
-            LOCAL_WGL_DOUBLE_BUFFER_ARB, true,
-            LOCAL_WGL_DEPTH_BITS_ARB, 24,
-            0
-        };
-
-        const int* attribs;
-        if (wr::RenderThread::IsInRenderThread()) {
-            attribs = kAttribsForWebRender;
-        } else {
-            attribs = kAttribs;
-        }
-
-        if (!wgl.mSymbols.fChoosePixelFormat(wgl.RootDc(), attribs, nullptr, 1,
+        if (!wgl.mSymbols.fChoosePixelFormat(wgl.RootDc(), kAttribs, nullptr, 1,
                                              &chosenFormat, &foundFormats))
         {
             foundFormats = 0;

@@ -12,13 +12,7 @@
     title: "Renegotiation: remove then add video track, no bundle"
   });
 
-  runNetworkTest(async function (options) {
-    // Use fake video here since the native fake device on linux doesn't
-    // change color as needed by checkVideoPlaying() below.
-    await pushPrefs(
-      ['media.video_loopback_dev', ''],
-      ['media.navigator.streams.fake', true]);
-
+  runNetworkTest(function (options) {
     options = options || { };
     options.bundle = false;
     const test = new PeerConnectionTest(options);
@@ -41,7 +35,7 @@
         function PC_LOCAL_ADD_VIDEO_TRACK(test) {
           // Use fake:true here since the native fake device on linux doesn't
           // change color as needed by checkVideoPlaying() below.
-          return test.pcLocal.getAllUserMediaAndAddStreams([{video: true}]);
+          return test.pcLocal.getAllUserMediaAndAddStreams([{video: true, fake: true}]);
         },
         function PC_LOCAL_EXPECT_ICE_CHECKING(test) {
           test.pcLocal.expectIceChecking();

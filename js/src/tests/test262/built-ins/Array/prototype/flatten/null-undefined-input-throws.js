@@ -19,4 +19,5 @@ assert.throws(TypeError, function() {
   [].flatten.call(void 0);
 }, 'undefined');
 
+
 reportCompare(0, 0);

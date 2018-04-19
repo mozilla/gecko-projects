@@ -18,7 +18,6 @@
 #include "nsPIDOMWindow.h"
 #include "nsPresContext.h"
 
-using mozilla::dom::KeyboardEvent;
 using namespace mozilla::widget;
 
 namespace mozilla {
@@ -482,9 +481,8 @@ bool
 TextInputProcessor::IsValidEventTypeForComposition(
                       const WidgetKeyboardEvent& aKeyboardEvent) const
 {
-  // The key event type of composition methods must be "", "keydown" or "keyup".
-  if (aKeyboardEvent.mMessage == eKeyDown ||
-      aKeyboardEvent.mMessage == eKeyUp) {
+  // The key event type of composition methods must be "" or "keydown".
+  if (aKeyboardEvent.mMessage == eKeyDown) {
     return true;
   }
   if (aKeyboardEvent.mMessage == eUnidentifiedEvent &&
@@ -510,12 +508,6 @@ TextInputProcessor::MaybeDispatchKeydownForComposition(
   }
 
   if (!aKeyboardEvent) {
-    return result;
-  }
-
-  // If the mMessage is eKeyUp, the caller doesn't want TIP to dispatch
-  // eKeyDown event.
-  if (aKeyboardEvent->mMessage == eKeyUp) {
     return result;
   }
 
@@ -553,7 +545,7 @@ TextInputProcessor::MaybeDispatchKeyupForComposition(
   }
 
   // If the mMessage is eKeyDown, the caller doesn't want TIP to dispatch
-  // eKeyUp event.
+  // keyup event.
   if (aKeyboardEvent->mMessage == eKeyDown) {
     return result;
   }
@@ -1134,12 +1126,6 @@ TextInputProcessor::KeydownInternal(const WidgetKeyboardEvent& aKeyboardEvent,
   }
   keyEvent.mModifiers = GetActiveModifiers();
 
-  if (!aAllowToDispatchKeypress &&
-      !(aKeyFlags & KEY_DONT_MARK_KEYDOWN_AS_PROCESSED)) {
-    keyEvent.mKeyCode = NS_VK_PROCESSKEY;
-    keyEvent.mKeyNameIndex = KEY_NAME_INDEX_Process;
-  }
-
   RefPtr<TextEventDispatcher> kungFuDeathGrip(mDispatcher);
   rv = IsValidStateForComposition();
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -1219,11 +1205,6 @@ TextInputProcessor::KeyupInternal(const WidgetKeyboardEvent& aKeyboardEvent,
     return NS_ERROR_INVALID_ARG;
   }
   keyEvent.mModifiers = GetActiveModifiers();
-
-  if (aKeyFlags & KEY_MARK_KEYUP_AS_PROCESSED) {
-    keyEvent.mKeyCode = NS_VK_PROCESSKEY;
-    keyEvent.mKeyNameIndex = KEY_NAME_INDEX_Process;
-  }
 
   RefPtr<TextEventDispatcher> kungFuDeathGrip(mDispatcher);
   rv = IsValidStateForComposition();

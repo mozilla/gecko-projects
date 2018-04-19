@@ -43,8 +43,8 @@ IdlePeriod::GetIdlePeriodHint(TimeStamp* aIdleDeadline)
 // NS_IMPL_NAMED_* relies on the mName field, which is not present on
 // release or beta. Instead, fall back to using "Runnable" for all
 // runnables.
-#ifndef MOZ_COLLECTING_RUNNABLE_TELEMETRY
-NS_IMPL_ISUPPORTS(Runnable, nsIRunnable)
+#ifdef RELEASE_OR_BETA
+NS_IMPL_ISUPPORTS(Runnable, nsIRunnable, nsINamed)
 #else
 NS_IMPL_NAMED_ADDREF(Runnable, mName)
 NS_IMPL_NAMED_RELEASE(Runnable, mName)
@@ -58,18 +58,20 @@ Runnable::Run()
   return NS_OK;
 }
 
-#ifdef MOZ_COLLECTING_RUNNABLE_TELEMETRY
 NS_IMETHODIMP
 Runnable::GetName(nsACString& aName)
 {
+#ifdef RELEASE_OR_BETA
+  aName.Truncate();
+#else
   if (mName) {
     aName.AssignASCII(mName);
   } else {
     aName.Truncate();
   }
+#endif
   return NS_OK;
 }
-#endif
 
 NS_IMPL_ISUPPORTS_INHERITED(CancelableRunnable, Runnable,
                             nsICancelableRunnable)
@@ -100,7 +102,6 @@ PrioritizableRunnable::PrioritizableRunnable(already_AddRefed<nsIRunnable>&& aRu
 #endif
 }
 
-#ifdef MOZ_COLLECTING_RUNNABLE_TELEMETRY
 NS_IMETHODIMP
 PrioritizableRunnable::GetName(nsACString& aName)
 {
@@ -111,7 +112,6 @@ PrioritizableRunnable::GetName(nsACString& aName)
   }
   return NS_OK;
 }
-#endif
 
 NS_IMETHODIMP
 PrioritizableRunnable::Run()
@@ -364,7 +364,6 @@ public:
                                 aTarget);
   }
 
-#ifdef MOZ_COLLECTING_RUNNABLE_TELEMETRY
   NS_IMETHOD GetName(nsACString& aName) override
   {
     aName.AssignLiteral("IdleRunnableWrapper");
@@ -378,7 +377,6 @@ public:
     }
     return NS_OK;
   }
-#endif
 
 private:
   ~IdleRunnableWrapper()

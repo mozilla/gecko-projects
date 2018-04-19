@@ -23,7 +23,7 @@
 
 #include "vm/JSCompartment.h"
 #include "vm/JSContext.h"
-#include "wasm/WasmOpIter.h"
+#include "wasm/WasmBinaryIterator.h"
 #include "wasm/WasmValidate.h"
 
 using namespace js;
@@ -102,7 +102,7 @@ class AstDecodeContext
        lifo(lifo),
        d(d),
        generateNames(generateNames),
-       env_(CompileMode::Once, Tier::Ion, DebugEnabled::False, HasGcTypes::False,
+       env_(CompileMode::Once, Tier::Ion, DebugEnabled::False,
             cx->compartment()->creationOptions().getSharedMemoryAndAtomicsEnabled()
             ? Shareable::True
             : Shareable::False),
@@ -1824,7 +1824,7 @@ AstDecodeFunctionBody(AstDecodeContext &c, uint32_t funcIndex, AstFunc** func)
     if (!locals.appendAll(sig->args()))
         return false;
 
-    if (!DecodeLocalEntries(c.d, ModuleKind::Wasm, c.env().gcTypesEnabled, &locals))
+    if (!DecodeLocalEntries(c.d, ModuleKind::Wasm, &locals))
         return false;
 
     AstDecodeOpIter iter(c.env(), c.d);
@@ -2277,7 +2277,7 @@ wasm::BinaryToAst(JSContext* cx, const uint8_t* bytes, uint32_t length, LifoAllo
         return false;
 
     UniqueChars error;
-    Decoder d(bytes, bytes + length, 0, &error, nullptr, /* resilient */ true);
+    Decoder d(bytes, bytes + length, 0, &error, /* resilient */ true);
     AstDecodeContext c(cx, lifo, d, *result, true);
 
     if (!AstDecodeEnvironment(c) ||

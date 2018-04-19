@@ -10,10 +10,8 @@
 #include "mozilla/Atomics.h"
 #include "mozilla/gfx/Logging.h"
 
-class gfxDWriteFontFileStream;
-
 static mozilla::Atomic<uint64_t> sNextFontFileKey;
-static std::unordered_map<uint64_t, gfxDWriteFontFileStream*> sFontFileStreams;
+static std::unordered_map<uint64_t, IDWriteFontFileStream*> sFontFileStreams;
 
 IDWriteFontFileLoader* gfxDWriteFontFileLoader::mInstance = nullptr;
 
@@ -78,14 +76,6 @@ public:
   virtual HRESULT STDMETHODCALLTYPE GetFileSize(OUT UINT64* fileSize);
 
   virtual HRESULT STDMETHODCALLTYPE GetLastWriteTime(OUT UINT64* lastWriteTime);
-
-  size_t SizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
-    return mData.ShallowSizeOfExcludingThis(mallocSizeOf);
-  }
-
-  size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
-    return mallocSizeOf(this) + SizeOfExcludingThis(mallocSizeOf);
-  }
 
 private:
   FallibleTArray<uint8_t> mData;
@@ -182,7 +172,7 @@ gfxDWriteFontFileLoader::CreateCustomFontFile(const uint8_t* aFontData,
   }
 
   uint64_t fontFileKey = sNextFontFileKey++;
-  RefPtr<gfxDWriteFontFileStream> ffsRef =
+  RefPtr<IDWriteFontFileStream> ffsRef =
       new gfxDWriteFontFileStream(aFontData, aLength, fontFileKey);
   sFontFileStreams[fontFileKey] = ffsRef;
 
@@ -197,19 +187,4 @@ gfxDWriteFontFileLoader::CreateCustomFontFile(const uint8_t* aFontData,
   ffsRef.forget(aFontFileStream);
 
   return S_OK;
-}
-
-size_t
-gfxDWriteFontFileLoader::SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const
-{
-  size_t sizes = mallocSizeOf(this);
-
-  // We are a singleton type that is effective owner of sFontFileStreams.
-  MOZ_ASSERT(this == mInstance);
-  for (const auto& entry : sFontFileStreams) {
-    gfxDWriteFontFileStream* fileStream = entry.second;
-    sizes += fileStream->SizeOfIncludingThis(mallocSizeOf);
-  }
-
-  return sizes;
 }

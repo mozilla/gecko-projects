@@ -6,8 +6,7 @@
 
 use dom::bindings::guard::Guard;
 use dom::bindings::interface::{create_object, define_on_global_object};
-use js::jsapi::{JSClass, JSContext, JSFunctionSpec};
-use js::rust::{HandleObject, MutableHandleObject};
+use js::jsapi::{HandleObject, JSClass, JSContext, JSFunctionSpec, MutableHandleObject};
 use libc;
 
 /// The class of a namespace object.

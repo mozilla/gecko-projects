@@ -35,7 +35,7 @@ add_task(async function() {
   registerCleanupFunction(async function() {
     await PlacesUtils.history.clear();
     Services.prefs.clearUserPref(ONEOFF_URLBAR_PREF);
-    BrowserTestUtils.removeTab(tab);
+    await BrowserTestUtils.removeTab(tab);
   });
 
   let visits = [];

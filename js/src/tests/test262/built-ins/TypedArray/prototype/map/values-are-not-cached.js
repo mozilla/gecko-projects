@@ -22,8 +22,6 @@ testWithTypedArrayConstructors(function(TA) {
     assert.sameValue(
       v, 42, "method does not cache values before callbackfn calls"
     );
-
-    return 0;
   });
 });
 

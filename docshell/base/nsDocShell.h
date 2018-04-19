@@ -17,7 +17,6 @@
 
 #include "mozilla/dom/ProfileTimelineMarkerBinding.h"
 #include "mozilla/gfx/Matrix.h"
-#include "mozilla/dom/ChildSHistory.h"
 
 #include "nsIAuthPromptProvider.h"
 #include "nsIBaseWindow.h"
@@ -75,6 +74,7 @@ typedef uint32_t ScreenOrientationInternal;
 } // namespace dom
 } // namespace mozilla
 
+class nsIClipboardDragDropHookList;
 class nsICommandManager;
 class nsIContentViewer;
 class nsIController;
@@ -875,6 +875,7 @@ private: // member functions
   nsresult PersistLayoutHistoryState();
   nsresult LoadHistoryEntry(nsISHEntry* aEntry, uint32_t aLoadType);
   nsresult SetBaseUrlForWyciwyg(nsIContentViewer* aContentViewer);
+  nsresult GetRootSessionHistory(nsISHistory** aReturn);
   nsresult GetHttpChannel(nsIChannel* aChannel, nsIHttpChannel** aReturn);
   nsresult ConfirmRepost(bool* aRepost);
   nsresult GetPromptAndStringBundle(nsIPrompt** aPrompt,
@@ -883,16 +884,9 @@ private: // member functions
   nsresult SetCurScrollPosEx(int32_t aCurHorizontalPos,
                              int32_t aCurVerticalPos);
 
-  already_AddRefed<mozilla::dom::ChildSHistory> GetRootSessionHistory();
-
   inline bool UseErrorPages()
   {
     return (mObserveErrorPages ? sUseErrorPages : mUseErrorPages);
-  }
-
-  bool CSSErrorReportingEnabled() const
-  {
-    return mCSSErrorReportingEnabled;
   }
 
 private: // data members
@@ -929,7 +923,7 @@ private: // data members
   nsCOMPtr<nsIDOMStorageManager> mSessionStorageManager;
   nsCOMPtr<nsIContentViewer> mContentViewer;
   nsCOMPtr<nsIWidget> mParentWidget;
-  RefPtr<mozilla::dom::ChildSHistory> mSessionHistory;
+  nsCOMPtr<nsISHistory> mSessionHistory;
   nsCOMPtr<nsIGlobalHistory2> mGlobalHistory;
   nsCOMPtr<nsIWebBrowserFind> mFind;
   nsCOMPtr<nsICommandManager> mCommandManager;
@@ -969,6 +963,9 @@ private: // data members
 
   // Editor data, if this document is designMode or contentEditable.
   nsAutoPtr<nsDocShellEditorData> mEditorData;
+
+  // Transferable hooks/callbacks
+  nsCOMPtr<nsIClipboardDragDropHookList> mTransferableHookData;
 
   // Secure browser UI object
   nsCOMPtr<nsISecureBrowserUI> mSecurityUI;
@@ -1113,7 +1110,6 @@ private: // data members
   bool mAllowContentRetargetingOnChildren : 1;
   bool mUseErrorPages : 1;
   bool mObserveErrorPages : 1;
-  bool mCSSErrorReportingEnabled : 1;
   bool mAllowAuth : 1;
   bool mAllowKeywordFixup : 1;
   bool mIsOffScreenBrowser : 1;

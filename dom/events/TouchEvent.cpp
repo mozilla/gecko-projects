@@ -244,7 +244,7 @@ TouchEvent::PrefEnabled(nsIDocShell* aDocShell)
 }
 
 // static
-already_AddRefed<TouchEvent>
+already_AddRefed<Event>
 TouchEvent::Constructor(const GlobalObject& aGlobal,
                         const nsAString& aType,
                         const TouchEventInit& aParam,

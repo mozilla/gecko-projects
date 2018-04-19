@@ -22,34 +22,31 @@ const TEST_DATA = [
   },
 ];
 
-add_task(async function() {
+add_task(async function () {
   await addTab(URL_ROOT + "doc_simple_animation.html");
-  await removeAnimatedElementsExcept([".compositor-notall"]);
-  const { panel } = await openAnimationInspector();
+  const { inspector, panel } = await openAnimationInspector();
 
   info("Checking animated property name component");
+  await selectNodeAndWaitForAnimations(".compositor-notall", inspector);
+
   const animatedPropertyNameEls = panel.querySelectorAll(".animated-property-name");
   is(animatedPropertyNameEls.length, TEST_DATA.length,
     `Number of animated property name elements should be ${ TEST_DATA.length }`);
 
   for (const [index, animatedPropertyNameEl] of animatedPropertyNameEls.entries()) {
-    const {
-      property,
-      isOnCompositor,
-      isWarning,
-    } = TEST_DATA[index];
+    const testData = TEST_DATA[index];
 
-    info(`Checking text content for ${ property }`);
+    info(`Checking text content for ${ testData.property }`);
 
     const spanEl = animatedPropertyNameEl.querySelector("span");
     ok(spanEl,
-      `<span> element should be in animated-property-name of ${ property }`);
-    is(spanEl.textContent, property,
-      `textContent should be ${ property }`);
+      `<span> element should be in animated-property-name of ${ testData.property }`);
+    is(spanEl.textContent, testData.property,
+      `textContent should be ${ testData.property }`);
 
-    info(`Checking compositor sign for ${ property }`);
+    info(`Checking compositor sign for ${ testData.property }`);
 
-    if (isOnCompositor) {
+    if (testData.isOnCompositor) {
       ok(animatedPropertyNameEl.classList.contains("compositor"),
         "animatedPropertyNameEl should has .compositor class");
       isnot(getComputedStyle(spanEl, "::before").width, "auto",
@@ -61,9 +58,9 @@ add_task(async function() {
         "width of ::before pseud should be auto");
     }
 
-    info(`Checking warning for ${ property }`);
+    info(`Checking warning for ${ testData.property }`);
 
-    if (isWarning) {
+    if (testData.isWarning) {
       ok(animatedPropertyNameEl.classList.contains("warning"),
         "animatedPropertyNameEl should has .warning class");
       is(getComputedStyle(spanEl).textDecorationStyle, "dotted",

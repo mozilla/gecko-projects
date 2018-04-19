@@ -13,16 +13,16 @@ function test() {
     /NS_ERROR_ILLEGAL_VALUE/,
     "Invalid window for setWindowState throws");
   Assert.throws(() => ss.getTabState({}),
-    /NS_ERROR_ILLEGAL_VALUE/,
+    /NS_ERROR_FAILURE/,
     "Invalid tab for getTabState throws");
   Assert.throws(() => ss.setTabState({}, "{}"),
-    /NS_ERROR_ILLEGAL_VALUE/,
+    /NS_ERROR_FAILURE/,
     "Invalid tab state for setTabState throws");
   Assert.throws(() => ss.setTabState({}, JSON.stringify({ entries: [] })),
-    /NS_ERROR_ILLEGAL_VALUE/,
+    /NS_ERROR_FAILURE/,
     "Invalid tab for setTabState throws");
   Assert.throws(() => ss.duplicateTab({}, {}),
-    /NS_ERROR_ILLEGAL_VALUE/,
+    /NS_ERROR_FAILURE/,
     "Invalid tab for duplicateTab throws");
   Assert.throws(() => ss.duplicateTab({}, gBrowser.selectedTab),
     /NS_ERROR_ILLEGAL_VALUE/,

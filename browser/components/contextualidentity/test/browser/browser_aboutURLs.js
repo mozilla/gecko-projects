@@ -47,6 +47,6 @@ add_task(async function() {
 
     ok(true, "Done loading about:" + url);
 
-    BrowserTestUtils.removeTab(tab);
+    await BrowserTestUtils.removeTab(tab);
   }
 });

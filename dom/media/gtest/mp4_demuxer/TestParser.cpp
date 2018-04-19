@@ -5,6 +5,7 @@
 
 #include "gtest/gtest.h"
 #include "MediaData.h"
+#include "MediaPrefs.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Preferences.h"
 #include "BufferStream.h"

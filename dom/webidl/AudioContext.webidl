@@ -10,12 +10,8 @@
  * liability, trademark and document use rules apply.
  */
 
-dictionary AudioContextOptions {
-             float        sampleRate = 0;
-};
-
-[Pref="dom.webaudio.enabled",
- Constructor(optional AudioContextOptions contextOptions)]
+[Constructor,
+ Pref="dom.webaudio.enabled"]
 interface AudioContext : BaseAudioContext {
 
     // Bug 1324545: readonly        attribute double outputLatency;

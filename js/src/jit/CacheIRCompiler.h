@@ -7,8 +7,6 @@
 #ifndef jit_CacheIRCompiler_h
 #define jit_CacheIRCompiler_h
 
-#include "mozilla/Maybe.h"
-
 #include "jit/CacheIR.h"
 
 namespace js {
@@ -23,7 +21,6 @@ namespace jit {
     _(GuardIsString)                      \
     _(GuardIsSymbol)                      \
     _(GuardIsNumber)                      \
-    _(GuardIsInt32)                       \
     _(GuardIsInt32Index)                  \
     _(GuardType)                          \
     _(GuardClass)                         \
@@ -49,10 +46,6 @@ namespace jit {
     _(LoadUndefinedResult)                \
     _(LoadBooleanResult)                  \
     _(LoadInt32ArrayLengthResult)         \
-    _(Int32NegationResult)                \
-    _(Int32NotResult)                     \
-    _(DoubleNegationResult)               \
-    _(TruncateDoubleToUInt32)             \
     _(LoadArgumentsObjectLengthResult)    \
     _(LoadFunctionLengthResult)           \
     _(LoadStringLengthResult)             \
@@ -544,7 +537,7 @@ class MOZ_RAII CacheIRCompiler
     JSContext* cx_;
     CacheIRReader reader;
     const CacheIRWriter& writer_;
-    StackMacroAssembler masm;
+    MacroAssembler masm;
 
     CacheRegisterAllocator allocator;
     Vector<FailurePath, 4, SystemAllocPolicy> failurePaths;
@@ -555,11 +548,11 @@ class MOZ_RAII CacheIRCompiler
     // the IC register allocator allocates GPRs.
     LiveFloatRegisterSet liveFloatRegs_;
 
-    mozilla::Maybe<TypedOrValueRegister> outputUnchecked_;
+    Maybe<TypedOrValueRegister> outputUnchecked_;
     Mode mode_;
 
     // Whether this IC may read double values from uint32 arrays.
-    mozilla::Maybe<bool> allowDoubleResult_;
+    Maybe<bool> allowDoubleResult_;
 
     CacheIRCompiler(JSContext* cx, const CacheIRWriter& writer, Mode mode)
       : cx_(cx),

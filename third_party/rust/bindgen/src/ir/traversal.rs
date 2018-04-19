@@ -469,7 +469,10 @@ where
     type Item = ItemId;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let id = self.queue.next()?;
+        let id = match self.queue.next() {
+            None => return None,
+            Some(id) => id,
+        };
 
         let newly_discovered = self.seen.add(None, id);
         debug_assert!(

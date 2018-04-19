@@ -48,8 +48,6 @@ extern crate lazy_static;
 extern crate log;
 #[macro_use]
 extern crate thread_profiler;
-#[macro_use]
-extern crate cfg_if;
 #[cfg(any(feature = "debugger", feature = "capture", feature = "replay"))]
 #[macro_use]
 extern crate serde;
@@ -63,9 +61,7 @@ mod clip;
 mod clip_scroll_node;
 mod clip_scroll_tree;
 mod debug_colors;
-#[cfg(feature = "debug_renderer")]
 mod debug_font_data;
-#[cfg(feature = "debug_renderer")]
 mod debug_render;
 #[cfg(feature = "debugger")]
 mod debug_server;
@@ -80,11 +76,8 @@ mod geometry;
 mod glyph_cache;
 mod glyph_rasterizer;
 mod gpu_cache;
-#[cfg(feature = "pathfinder")]
-mod gpu_glyph_renderer;
 mod gpu_types;
 mod hit_test;
-mod image;
 mod internal_types;
 mod picture;
 mod prim_store;
@@ -99,7 +92,7 @@ mod resource_cache;
 mod scene;
 mod scene_builder;
 mod segment;
-mod shade;
+mod spring;
 mod texture_allocator;
 mod texture_cache;
 mod tiling;
@@ -153,14 +146,6 @@ extern crate euclid;
 extern crate fxhash;
 extern crate gleam;
 extern crate num_traits;
-#[cfg(feature = "pathfinder")]
-extern crate pathfinder_font_renderer;
-#[cfg(feature = "pathfinder")]
-extern crate pathfinder_gfx_utils;
-#[cfg(feature = "pathfinder")]
-extern crate pathfinder_partitioner;
-#[cfg(feature = "pathfinder")]
-extern crate pathfinder_path_utils;
 extern crate plane_split;
 extern crate rayon;
 #[cfg(feature = "ron")]
@@ -172,7 +157,7 @@ extern crate time;
 #[cfg(feature = "debugger")]
 extern crate ws;
 #[cfg(feature = "debugger")]
-extern crate image as image_loader;
+extern crate image;
 #[cfg(feature = "debugger")]
 extern crate base64;
 #[cfg(all(feature = "capture", feature = "png"))]
@@ -182,9 +167,9 @@ pub extern crate webrender_api;
 
 #[doc(hidden)]
 pub use device::{build_shader_strings, ProgramCache, ReadPixelsFormat, UploadMethod, VertexUsageHint};
-pub use renderer::{AsyncPropertySampler, CpuProfile, DebugFlags, OutputImageHandler, RendererKind};
-pub use renderer::{ExternalImage, ExternalImageHandler, ExternalImageSource, GpuProfile};
-pub use renderer::{GraphicsApi, GraphicsApiInfo, PipelineInfo, Renderer, RendererOptions};
-pub use renderer::{RendererStats, SceneBuilderHooks, ThreadListener};
+pub use renderer::{CpuProfile, DebugFlags, GpuProfile, OutputImageHandler, RendererKind};
+pub use renderer::{ExternalImage, ExternalImageHandler, ExternalImageSource};
+pub use renderer::{GraphicsApi, GraphicsApiInfo, Renderer, RendererOptions};
+pub use renderer::{RendererStats, ThreadListener};
 pub use renderer::MAX_VERTEX_TEXTURE_WIDTH;
 pub use webrender_api as api;

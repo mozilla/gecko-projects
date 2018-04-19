@@ -1580,7 +1580,8 @@ function runTest() {
 
 setup({explicit_done: true});
 SpecialPowers.pushPrefEnv(
-  { set: [["dom.animations-api.core.enabled", true]] },
+  { set: [["dom.animations-api.core.enabled", true],
+          ["dom.animations-api.pending-member.enabled", true]] },
   function() {
     runTest();
     done();

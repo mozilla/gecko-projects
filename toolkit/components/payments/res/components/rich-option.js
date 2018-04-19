@@ -8,9 +8,10 @@
  * </rich-select>
  */
 
-import ObservedPropertiesMixin from "../mixins/ObservedPropertiesMixin.js";
+/* global ObservedPropertiesMixin */
+/* exported RichOption */
 
-export default class RichOption extends ObservedPropertiesMixin(HTMLElement) {
+class RichOption extends ObservedPropertiesMixin(HTMLElement) {
   static get observedAttributes() {
     return [
       "selected",

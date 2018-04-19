@@ -2,6 +2,7 @@
 add_task(async function() {
   let prefs = await openPreferencesViaOpenPreferencesAPI("search", {leaveOpen: true});
   is(prefs.selectedPane, "paneSearch", "Search pane is selected by default");
+  // eslint-disable-next-line mozilla/no-cpows-in-tests
   let doc = gBrowser.contentDocument;
 
   let tree = doc.querySelector("#engineList");
@@ -21,5 +22,5 @@ add_task(async function() {
   let cellKeyword = tree.view.getCellText(1, tree.columns.getNamedColumn("engineKeyword"));
   isnot(cellKeyword, "keyword", "Do not allow duplicated keywords");
 
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });

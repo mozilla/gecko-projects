@@ -24,7 +24,7 @@ RemoteCompositorSession::RemoteCompositorSession(nsBaseWidget* aWidget,
                                                  CompositorBridgeChild* aChild,
                                                  CompositorWidgetDelegate* aWidgetDelegate,
                                                  APZCTreeManagerChild* aAPZ,
-                                                 const LayersId& aRootLayerTreeId)
+                                                 const uint64_t& aRootLayerTreeId)
  : CompositorSession(aWidgetDelegate, aChild, aRootLayerTreeId),
    mWidget(aWidget),
    mAPZ(aAPZ)
@@ -64,7 +64,7 @@ void
 RemoteCompositorSession::SetContentController(GeckoContentController* aController)
 {
   mContentController = aController;
-  mCompositorBridgeChild->SendPAPZConstructor(new APZChild(aController), LayersId{0});
+  mCompositorBridgeChild->SendPAPZConstructor(new APZChild(aController), 0);
 }
 
 GeckoContentController*
@@ -91,7 +91,6 @@ RemoteCompositorSession::Shutdown()
   mContentController = nullptr;
   if (mAPZ) {
     mAPZ->SetCompositorSession(nullptr);
-    mAPZ->Destroy();
   }
   mCompositorBridgeChild->Destroy();
   mCompositorBridgeChild = nullptr;

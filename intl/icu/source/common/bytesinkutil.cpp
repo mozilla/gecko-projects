@@ -92,16 +92,20 @@ ByteSinkUtil::appendTwoBytes(UChar32 c, ByteSink &sink) {
     sink.Append(s8, 2);
 }
 
-void
-ByteSinkUtil::appendNonEmptyUnchanged(const uint8_t *s, int32_t length,
-                                      ByteSink &sink, uint32_t options, Edits *edits) {
-    U_ASSERT(length > 0);
-    if (edits != nullptr) {
-        edits->addUnchanged(length);
+UBool
+ByteSinkUtil::appendUnchanged(const uint8_t *s, int32_t length,
+                              ByteSink &sink, uint32_t options, Edits *edits,
+                              UErrorCode &errorCode) {
+    if (U_FAILURE(errorCode)) { return FALSE; }
+    if (length > 0) {
+        if (edits != nullptr) {
+            edits->addUnchanged(length);
+        }
+        if ((options & U_OMIT_UNCHANGED_TEXT) == 0) {
+            sink.Append(reinterpret_cast<const char *>(s), length);
+        }
     }
-    if ((options & U_OMIT_UNCHANGED_TEXT) == 0) {
-        sink.Append(reinterpret_cast<const char *>(s), length);
-    }
+    return TRUE;
 }
 
 UBool
@@ -113,11 +117,7 @@ ByteSinkUtil::appendUnchanged(const uint8_t *s, const uint8_t *limit,
         errorCode = U_INDEX_OUTOFBOUNDS_ERROR;
         return FALSE;
     }
-    int32_t length = (int32_t)(limit - s);
-    if (length > 0) {
-        appendNonEmptyUnchanged(s, length, sink, options, edits);
-    }
-    return TRUE;
+    return appendUnchanged(s, (int32_t)(limit - s), sink, options, edits, errorCode);
 }
 
 U_NAMESPACE_END

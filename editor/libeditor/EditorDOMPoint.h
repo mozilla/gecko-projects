@@ -231,7 +231,7 @@ public:
   bool
   IsInTextNode() const
   {
-    return mParent && mParent->IsText();
+    return mParent && mParent->IsNodeOfType(nsINode::eTEXT);
   }
 
   /**
@@ -627,6 +627,14 @@ public:
       return false;
     }
     return mChild->IsHTMLElement(nsGkAtoms::br);
+  }
+
+  // Convenience methods for switching between the two types
+  // of EditorDOMPointBase.
+  EditorDOMPointBase<nsINode*, nsIContent*>
+  AsRaw() const
+  {
+    return EditorRawDOMPoint(*this);
   }
 
   template<typename A, typename B>

@@ -5,7 +5,7 @@
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
-use api::{CaptureBits, ExternalImageData, ImageDescriptor, TexelRect};
+use api::{CaptureBits, ExternalImageData, ExternalImageId, ImageDescriptor, TexelRect};
 #[cfg(feature = "png")]
 use device::ReadPixelsFormat;
 use ron;
@@ -123,8 +123,10 @@ pub struct ExternalCaptureImage {
 pub struct PlainExternalImage {
     /// Path to the RON file describing the texel data.
     pub data: String,
-    /// External image data source.
-    pub external: ExternalImageData,
+    /// Public ID of the external image.
+    pub id: ExternalImageId,
+    /// Channel index of an external image.
+    pub channel_index: u8,
     /// UV sub-rectangle of the image.
     pub uv: TexelRect,
 }

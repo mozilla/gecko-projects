@@ -34,6 +34,17 @@ class OutOfLineCallVM;
 
 class OutOfLineTruncateSlow;
 
+struct PatchableBackedgeInfo
+{
+    CodeOffsetJump backedge;
+    Label* loopHeader;
+    Label* interruptCheck;
+
+    PatchableBackedgeInfo(CodeOffsetJump backedge, Label* loopHeader, Label* interruptCheck)
+      : backedge(backedge), loopHeader(loopHeader), interruptCheck(interruptCheck)
+    {}
+};
+
 struct ReciprocalMulConstants {
     int64_t multiplier;
     int32_t shiftAmount;
@@ -55,7 +66,7 @@ class CodeGeneratorShared : public LElementVisitor
     js::Vector<OutOfLineCode*, 0, SystemAllocPolicy> outOfLineCode_;
 
     MacroAssembler& ensureMasm(MacroAssembler* masm);
-    mozilla::Maybe<IonHeapMacroAssembler> maybeMasm_;
+    mozilla::Maybe<MacroAssembler> maybeMasm_;
 
   public:
     MacroAssembler& masm;
@@ -98,6 +109,9 @@ class CodeGeneratorShared : public LElementVisitor
         CodeOffset icOffsetForPush;
     };
     js::Vector<CompileTimeICInfo, 0, SystemAllocPolicy> icInfo_;
+
+    // Patchable backedges generated for loops.
+    Vector<PatchableBackedgeInfo, 0, SystemAllocPolicy> patchableBackedges_;
 
 #ifdef JS_TRACE_LOGGING
     struct PatchableTLEvent {
@@ -334,6 +348,22 @@ class CodeGeneratorShared : public LElementVisitor
     void emitTruncateDouble(FloatRegister src, Register dest, MTruncateToInt32* mir);
     void emitTruncateFloat32(FloatRegister src, Register dest, MTruncateToInt32* mir);
 
+    void emitWasmCallBase(MWasmCall* mir, bool needsBoundsCheck);
+    void visitWasmCall(LWasmCall* ins) {
+        emitWasmCallBase(ins->mir(), ins->needsBoundsCheck());
+    }
+    void visitWasmCallVoid(LWasmCallVoid* ins) {
+        emitWasmCallBase(ins->mir(), ins->needsBoundsCheck());
+    }
+    void visitWasmCallI64(LWasmCallI64* ins) {
+        emitWasmCallBase(ins->mir(), ins->needsBoundsCheck());
+    }
+
+    void visitWasmLoadGlobalVar(LWasmLoadGlobalVar* ins);
+    void visitWasmStoreGlobalVar(LWasmStoreGlobalVar* ins);
+    void visitWasmLoadGlobalVarI64(LWasmLoadGlobalVarI64* ins);
+    void visitWasmStoreGlobalVarI64(LWasmStoreGlobalVarI64* ins);
+
     void emitPreBarrier(Register base, const LAllocation* index, int32_t offsetAdjustment);
     void emitPreBarrier(Address address);
 
@@ -364,7 +394,7 @@ class CodeGeneratorShared : public LElementVisitor
         return true;
     }
 
-  protected:
+  public:
     // Save and restore all volatile registers to/from the stack, excluding the
     // specified register(s), before a function call made using callWithABI and
     // after storing the function call's return value to an output register.
@@ -419,7 +449,6 @@ class CodeGeneratorShared : public LElementVisitor
     inline void saveLiveVolatile(LInstruction* ins);
     inline void restoreLiveVolatile(LInstruction* ins);
 
-  public:
     template <typename T>
     void pushArg(const T& t) {
         masm.Push(t);
@@ -449,7 +478,6 @@ class CodeGeneratorShared : public LElementVisitor
         masm.storeCallResultValue(t);
     }
 
-  protected:
     void callVM(const VMFunction& f, LInstruction* ins, const Register* dynStack = nullptr);
 
     template <class ArgSeq, class StoreOutputTo>
@@ -470,15 +498,25 @@ class CodeGeneratorShared : public LElementVisitor
 
     Label* getJumpLabelForBranch(MBasicBlock* block);
 
-    // Generate a jump to the start of the specified block. Use this in place of
-    // jumping directly to mir->lir()->label(), or use getJumpLabelForBranch()
-    // if a label to use directly is needed.
+    // Generate a jump to the start of the specified block, adding information
+    // if this is a loop backedge. Use this in place of jumping directly to
+    // mir->lir()->label(), or use getJumpLabelForBranch() if a label to use
+    // directly is needed.
     void jumpToBlock(MBasicBlock* mir);
+
+    // Get a label for the start of block which can be used for jumping, in
+    // place of jumpToBlock.
+    Label* labelForBackedgeWithImplicitCheck(MBasicBlock* mir);
 
 // This function is not used for MIPS. MIPS has branchToBlock.
 #if !defined(JS_CODEGEN_MIPS32) && !defined(JS_CODEGEN_MIPS64)
     void jumpToBlock(MBasicBlock* mir, Assembler::Condition cond);
 #endif
+
+    template <class T>
+    wasm::OldTrapDesc oldTrap(T* mir, wasm::Trap trap) {
+        return wasm::OldTrapDesc(mir->bytecodeOffset(), trap, masm.framePushed());
+    }
 
   private:
     void generateInvalidateEpilogue();

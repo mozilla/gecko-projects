@@ -3,14 +3,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "gfxFontEntry.h"
-
 #include "mozilla/DebugOnly.h"
-#include "mozilla/FontPropertyTypes.h"
 #include "mozilla/MathAlgorithms.h"
 
 #include "mozilla/Logging.h"
 
+#include "gfxFontEntry.h"
 #include "gfxTextRun.h"
 #include "gfxPlatform.h"
 #include "nsGkAtoms.h"
@@ -1190,18 +1188,18 @@ StyleDistance(uint32_t aFontStyle, uint32_t aTargetStyle)
     return 1; // neither is normal; must be italic vs oblique ==> 1
 }
 
-#define REVERSE_STRETCH_DISTANCE 200
+#define REVERSE_STRETCH_DISTANCE 5
 
-// stretch distance ==> [0,350]
+// stretch distance ==> [0,13]
 static inline uint32_t
-StretchDistance(int32_t aFontStretch, int32_t aTargetStretch)
+StretchDistance(int16_t aFontStretch, int16_t aTargetStretch)
 {
     int32_t distance = 0;
     if (aTargetStretch != aFontStretch) {
-        // stretch values are in the range 50 .. 200
-        // if aTargetStretch is >100, we prefer larger values;
-        // if <=100, prefer smaller
-        if (aTargetStretch > 100) {
+        // stretch values are in the range -4 .. +4
+        // if aTargetStretch is positive, we prefer more-positive values;
+        // if zero or negative, prefer more-negative
+        if (aTargetStretch > 0) {
             distance = (aFontStretch - aTargetStretch);
         } else {
             distance = (aTargetStretch - aFontStretch);
@@ -1209,7 +1207,7 @@ StretchDistance(int32_t aFontStretch, int32_t aTargetStretch)
         // if the computed "distance" here is negative, it means that
         // aFontEntry lies in the "non-preferred" direction from aTargetStretch,
         // so we treat that as larger than any preferred-direction distance
-        // (max possible is 150) by adding an extra 200 to the absolute value
+        // (max possible is 4) by adding an extra 5 to the absolute value
         if (distance < 0) {
             distance = -distance + REVERSE_STRETCH_DISTANCE;
         }
@@ -1236,25 +1234,24 @@ StretchDistance(int32_t aFontStretch, int32_t aTargetStretch)
 
 // weight distance ==> [0,1598]
 static inline uint32_t
-WeightDistance(FontWeight aFontWeight, FontWeight aTargetWeight)
+WeightDistance(uint32_t aFontWeight, uint32_t aTargetWeight)
 {
     // Compute a measure of the "distance" between the requested
     // weight and the given fontEntry
 
-    float distance = 0.0f, addedDistance = 0.0f;
+    int32_t distance = 0, addedDistance = 0;
     if (aTargetWeight != aFontWeight) {
-        if (aTargetWeight > FontWeight(500)) {
+        if (aTargetWeight > 500) {
             distance = aFontWeight - aTargetWeight;
-        } else if (aTargetWeight < FontWeight(400)) {
+        } else if (aTargetWeight < 400) {
             distance = aTargetWeight - aFontWeight;
         } else {
             // special case - target is between 400 and 500
 
             // font weights between 400 and 500 are close
-            if (aFontWeight >= FontWeight(400) &&
-                aFontWeight <= FontWeight(500)) {
+            if (aFontWeight >= 400 && aFontWeight <= 500) {
                 if (aFontWeight < aTargetWeight) {
-                    distance = FontWeight(500) - aFontWeight;
+                    distance = 500 - aFontWeight;
                 } else {
                     distance = aFontWeight - aTargetWeight;
                 }
@@ -1266,7 +1263,7 @@ WeightDistance(FontWeight aFontWeight, FontWeight aTargetWeight)
                 addedDistance = 100;
             }
         }
-        if (distance < 0.0f) {
+        if (distance < 0) {
             distance = -distance + REVERSE_WEIGHT_DISTANCE;
         }
         distance += addedDistance;
@@ -1310,7 +1307,8 @@ gfxFontFamily::FindAllFontsForStyle(const gfxFontStyle& aFontStyle,
 
     aNeedsSyntheticBold = false;
 
-    bool wantBold = aFontStyle.weight >= FontWeight(600);
+    int8_t baseWeight = aFontStyle.ComputeWeight();
+    bool wantBold = baseWeight >= 6;
     gfxFontEntry *fe = nullptr;
 
     // If the family has only one face, we simply return it; no further
@@ -1409,7 +1407,7 @@ gfxFontFamily::FindAllFontsForStyle(const gfxFontStyle& aFontStyle,
 
     if (matched) {
         aFontEntryList.AppendElement(matched);
-        if (!matched->IsBold() && aFontStyle.weight >= FontWeight(600) &&
+        if (!matched->IsBold() && aFontStyle.weight >= 600 &&
             aFontStyle.allowSyntheticWeight) {
             aNeedsSyntheticBold = true;
         }
@@ -1435,7 +1433,7 @@ gfxFontFamily::CheckForSimpleFamily()
         return;
     }
 
-    uint16_t firstStretch = mAvailableFonts[0]->Stretch();
+    int16_t firstStretch = mAvailableFonts[0]->Stretch();
 
     gfxFontEntry *faces[4] = { 0 };
     for (uint8_t i = 0; i < count; ++i) {
@@ -1445,7 +1443,7 @@ gfxFontFamily::CheckForSimpleFamily()
             return;
         }
         uint8_t faceIndex = (fe->IsItalic() ? kItalicMask : 0) |
-                            (fe->Weight() >= FontWeight(600) ? kBoldMask : 0);
+                            (fe->Weight() >= 600 ? kBoldMask : 0);
         if (faces[faceIndex]) {
             return; // two faces resolve to the same slot; family isn't "simple"
         }
@@ -1504,7 +1502,7 @@ CalcStyleMatch(gfxFontEntry *aFontEntry, const gfxFontStyle *aStyle)
          }
 
         // measure of closeness of weight to the desired value
-        rank += 9 - Abs((aFontEntry->Weight() - aStyle->weight) / 100.0f);
+        rank += 9 - DeprecatedAbs(aFontEntry->Weight() / 100 - aStyle->ComputeWeight());
     } else {
         // if no font to match, prefer non-bold, non-italic fonts
         if (aFontEntry->IsUpright()) {

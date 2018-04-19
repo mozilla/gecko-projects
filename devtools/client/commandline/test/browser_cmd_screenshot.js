@@ -100,7 +100,7 @@ function* addTabWithToolbarRunTests(win) {
 
   yield helpers.audit(options, [
     {
-      setup: "screenshot " + file.path.replace(/\\/g, "\\\\"),
+      setup: "screenshot " + file.path,
       check: {
         args: {
           filename: { value: "" + file.path },

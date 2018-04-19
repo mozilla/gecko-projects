@@ -37,7 +37,7 @@ add_task(async function clickSuggestion() {
                                                    false, uri.spec);
   item.click();
   await loadPromise;
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 });
 
 async function testPressEnterOnSuggestion(expectedUrl = null, keyModifiers = {}) {
@@ -61,7 +61,7 @@ async function testPressEnterOnSuggestion(expectedUrl = null, keyModifiers = {})
   EventUtils.synthesizeKey("KEY_Enter", keyModifiers);
 
   await promiseLoad;
-  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.removeTab(tab);
 }
 
 add_task(async function plainEnterOnSuggestion() {

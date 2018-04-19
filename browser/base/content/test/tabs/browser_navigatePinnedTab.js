@@ -49,7 +49,7 @@ add_task(async function() {
   await ContentTask.spawn(extraTab.linkedBrowser, null, async function() {
     is(content.opener, null, "No opener should be available");
   });
-  BrowserTestUtils.removeTab(extraTab);
+  await BrowserTestUtils.removeTab(extraTab);
 });
 
 

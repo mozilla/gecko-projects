@@ -8,7 +8,7 @@
     <button class="action-button">
       ThisIsAButton
     </button>
-    <slot></slot>
+    <content></content>
   </div>
 </template>
 
@@ -21,7 +21,7 @@
     // Fires when an instance of the element is connected
     connectedCallback() {
       // Creates the shadow root
-      var shadowRoot = this.attachShadow({ mode: "open" });
+      var shadowRoot = this.createShadowRoot();
 
       // Adds a template clone into shadow root
       var clone = document.importNode(template, true);

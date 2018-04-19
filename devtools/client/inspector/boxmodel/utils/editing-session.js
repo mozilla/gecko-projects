@@ -4,6 +4,7 @@
 
 "use strict";
 
+const { Task } = require("devtools/shared/task");
 const { getCssProperties } = require("devtools/shared/fronts/css-properties");
 
 /**
@@ -37,7 +38,7 @@ EditingSession.prototype = {
    *         The name of the property.
    * @return {String} the value.
    */
-  getPropertyFromRule: function(rule, property) {
+  getPropertyFromRule: function (rule, property) {
     // Use the parsed declarations in the StyleRuleFront object if available.
     let index = this.getPropertyIndex(property, rule);
     if (index !== -1) {
@@ -57,7 +58,7 @@ EditingSession.prototype = {
    * @param  {String} property
    *         The name of the property as a string
    */
-  getProperty: function(property) {
+  getProperty: function (property) {
     // Create a hidden element for getPropertyFromRule to use
     let div = this._doc.createElement("div");
     div.setAttribute("style", "display: none");
@@ -88,7 +89,7 @@ EditingSession.prototype = {
    *         Optional, defaults to the element style rule.
    * @return {Number} The property index in the rule.
    */
-  getPropertyIndex: function(name, rule = this._rules[0]) {
+  getPropertyIndex: function (name, rule = this._rules[0]) {
     let elementStyleRule = this._rules[0];
     if (!elementStyleRule.declarations.length) {
       return -1;
@@ -106,7 +107,7 @@ EditingSession.prototype = {
    *         is removed.
    * @return {Promise} Resolves when the modifications are complete.
    */
-  async setProperties(properties) {
+  setProperties: Task.async(function* (properties) {
     for (let property of properties) {
       // Get a RuleModificationList or RuleRewriter helper object from the
       // StyleRuleActor to make changes to CSS properties.
@@ -134,16 +135,16 @@ EditingSession.prototype = {
         modifications.setProperty(index, property.name, property.value, "");
       }
 
-      await modifications.apply();
+      yield modifications.apply();
     }
-  },
+  }),
 
   /**
    * Reverts all of the property changes made by this instance.
    *
    * @return {Promise} Resolves when all properties have been reverted.
    */
-  async revert() {
+  revert: Task.async(function* () {
     // Revert each property that we modified previously, one by one. See
     // setProperties for information about why.
     for (let [property, value] of this._modifications) {
@@ -169,11 +170,11 @@ EditingSession.prototype = {
         modifications.removeProperty(index, property);
       }
 
-      await modifications.apply();
+      yield modifications.apply();
     }
-  },
+  }),
 
-  destroy: function() {
+  destroy: function () {
     this._doc = null;
     this._rules = null;
     this._modifications.clear();

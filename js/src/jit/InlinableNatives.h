@@ -146,11 +146,8 @@
     _(IntrinsicNewArrayIterator)    \
     _(IntrinsicNewStringIterator)   \
                                     \
-    _(IntrinsicIsArrayBuffer)       \
     _(IntrinsicArrayBufferByteLength) \
     _(IntrinsicPossiblyWrappedArrayBufferByteLength) \
-                                    \
-    _(IntrinsicIsSharedArrayBuffer) \
                                     \
     _(TypedArrayConstructor)        \
     _(IntrinsicIsTypedArray)        \

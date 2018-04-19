@@ -41,7 +41,7 @@ MIDIInput::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 void
 MIDIInput::Receive(const nsTArray<MIDIMessage>& aMsgs)
 {
-  nsCOMPtr<nsIDocument> doc = GetOwner() ? GetOwner()->GetDoc() : nullptr;
+  nsCOMPtr<nsIDocument> doc = GetOwner()->GetDoc();
   if (!doc) {
     NS_WARNING("No document available to send MIDIMessageEvent to!");
     return;

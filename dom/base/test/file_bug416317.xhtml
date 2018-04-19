@@ -227,7 +227,13 @@
   </span>
   <script><![CDATA[
   window.onload = function() {
-    doTest();
+    if (window.parent && window.parent.SpecialPowers) {
+      window.parent.SpecialPowers.pushPrefEnv(
+        { 'set': [[ "layout.css.scope-pseudo.enabled", true]] },
+        doTest);
+    } else {
+      doTest();
+    }
   }
 
   function doTest(){

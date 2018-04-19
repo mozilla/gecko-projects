@@ -8,7 +8,7 @@ function ObjectGetOwnPropertyDescriptors(O) {
     var obj = ToObject(O);
 
     // Step 2.
-    var keys = std_Reflect_ownKeys(obj);
+    var keys = OwnPropertyKeys(obj);
 
     // Step 3.
     var descriptors = {};

@@ -141,11 +141,7 @@ PasswordEngine.prototype = {
       changes[id] = info.timePasswordChanged / 1000;
     }
     return changes;
-  },
-
-  getValidator() {
-    return new PasswordValidator();
-  },
+  }
 };
 
 function PasswordStore(name, engine) {
@@ -380,6 +376,10 @@ PasswordTracker.prototype = {
         this.score += SCORE_INCREMENT_XLARGE;
         break;
     }
+  },
+
+  getValidator() {
+    return new PasswordValidator();
   },
 
   async _trackLogin(login) {

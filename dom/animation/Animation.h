@@ -311,7 +311,14 @@ public:
 
   bool IsPausedOrPausing() const
   {
-    return PlayState() == AnimationPlayState::Paused;
+    // FIXME: Once we drop the dom.animations-api.pending-member.enabled pref we
+    // can simplify the following check to just:
+    //
+    //   return PlayState() == AnimationPlayState::Paused;
+    //
+    // And at that point we might not need this method at all.
+    return PlayState() == AnimationPlayState::Paused ||
+           mPendingState == PendingState::PausePending;
   }
 
   bool HasCurrentEffect() const
@@ -325,10 +332,15 @@ public:
 
   bool IsPlaying() const
   {
+    // FIXME: Once we drop the dom.animations-api.pending-member.enabled pref we
+    // can simplify the last two conditions to just:
+    //
+    //   PlayState() == AnimationPlayState::Running
     return mPlaybackRate != 0.0 &&
            mTimeline &&
            !mTimeline->GetCurrentTime().IsNull() &&
-           PlayState() == AnimationPlayState::Running;
+           (PlayState() == AnimationPlayState::Running ||
+            mPendingState == PendingState::PlayPending);
   }
 
   bool ShouldBeSynchronizedWithMainThread(
@@ -373,7 +385,8 @@ public:
    * Any properties contained in |aPropertiesToSkip| will not be added or
    * updated in |aComposeResult|.
    */
-  void ComposeStyle(RawServoAnimationValueMap& aComposeResult,
+  template<typename ComposeAnimationResult>
+  void ComposeStyle(ComposeAnimationResult&& aComposeResult,
                     const nsCSSPropertyIDSet& aPropertiesToSkip);
 
   void NotifyEffectTimingUpdated();
@@ -432,11 +445,7 @@ protected:
   void UpdateFinishedState(SeekFlag aSeekFlag,
                            SyncNotifyFlag aSyncNotifyFlag);
   void UpdateEffect();
-  /**
-   * Flush all pending styles other than throttled animation styles (e.g.
-   * animations running on the compositor).
-   */
-  void FlushUnanimatedStyle() const;
+  void FlushStyle() const;
   void PostUpdate();
   void ResetFinishedPromise();
   void MaybeResolveFinishedPromise();

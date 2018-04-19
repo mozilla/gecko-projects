@@ -22,6 +22,7 @@ class HTMLAnchorElement final : public nsGenericHTMLElement,
 {
 public:
   using Element::GetText;
+  using Element::SetText;
 
   explicit HTMLAnchorElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
     : nsGenericHTMLElement(aNodeInfo)
@@ -36,7 +37,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(HTMLAnchorElement,
                                            nsGenericHTMLElement)
 
-  NS_IMPL_FROMNODE_HTML_WITH_TAG(HTMLAnchorElement, a);
+  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLAnchorElement, a);
 
   virtual int32_t TabIndexDefault() override;
   virtual bool Draggable() const override;
@@ -54,7 +55,8 @@ public:
                               bool aNullParent = true) override;
   virtual bool IsHTMLFocusable(bool aWithMouse, bool *aIsFocusable, int32_t *aTabIndex) override;
 
-  void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
+  virtual nsresult GetEventTargetParent(
+                     EventChainPreVisitor& aVisitor) override;
   virtual nsresult PostHandleEvent(
                      EventChainPostVisitor& aVisitor) override;
   virtual bool IsLink(nsIURI** aURI) const override;

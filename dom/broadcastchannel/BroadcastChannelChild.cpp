@@ -15,6 +15,7 @@
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "mozilla/dom/ipc/StructuredCloneData.h"
+#include "mozilla/dom/WorkerPrivate.h"
 
 namespace mozilla {
 
@@ -96,7 +97,8 @@ BroadcastChannelChild::RecvNotify(const ClonedMessageData& aData)
 
   event->SetTrusted(true);
 
-  mBC->DispatchEvent(*event);
+  bool status;
+  mBC->DispatchEvent(static_cast<Event*>(event.get()), &status);
 
   return IPC_OK();
 }
@@ -119,7 +121,8 @@ BroadcastChannelChild::DispatchError(JSContext* aCx)
     MessageEvent::Constructor(mBC, NS_LITERAL_STRING("messageerror"), init);
   event->SetTrusted(true);
 
-  mBC->DispatchEvent(*event);
+  bool dummy;
+  mBC->DispatchEvent(event, &dummy);
 }
 
 } // namespace dom

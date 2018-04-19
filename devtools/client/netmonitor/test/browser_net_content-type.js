@@ -7,7 +7,7 @@
  * Tests if different response content types are handled correctly.
  */
 
-add_task(async function() {
+add_task(async function () {
   let { tab, monitor } = await initNetMonitor(CONTENT_TYPE_WITHOUT_CACHE_URL);
   info("Starting test... ");
 
@@ -21,11 +21,14 @@ add_task(async function() {
 
   store.dispatch(Actions.batchEnable(false));
 
-  // Execute requests.
-  await performRequests(monitor, tab, CONTENT_TYPE_WITHOUT_CACHE_REQUESTS);
+  let wait = waitForNetworkEvents(monitor, CONTENT_TYPE_WITHOUT_CACHE_REQUESTS);
+  await ContentTask.spawn(tab.linkedBrowser, {}, function () {
+    content.wrappedJSObject.performRequests();
+  });
+  await wait;
 
   for (let requestItem of document.querySelectorAll(".request-list-item")) {
-    let requestsListStatus = requestItem.querySelector(".status-code");
+    let requestsListStatus = requestItem.querySelector(".requests-list-status");
     requestItem.scrollIntoView();
     EventUtils.sendMouseEvent({ type: "mouseover" }, requestsListStatus);
     await waitUntil(() => requestsListStatus.title);
@@ -268,7 +271,7 @@ add_task(async function() {
   }
 
   async function selectIndexAndWaitForJSONView(index) {
-    let onResponseContent = monitor.panelWin.api.once(EVENTS.RECEIVED_RESPONSE_CONTENT);
+    let onResponseContent = monitor.panelWin.once(EVENTS.RECEIVED_RESPONSE_CONTENT);
     let tabpanel = document.querySelector("#response-panel");
     let waitDOM = waitForDOM(tabpanel, ".treeTable");
     store.dispatch(Actions.selectRequestByIndex(index));
@@ -281,7 +284,7 @@ add_task(async function() {
   }
 
   async function selectIndexAndWaitForImageView(index) {
-    let onResponseContent = monitor.panelWin.api.once(EVENTS.RECEIVED_RESPONSE_CONTENT);
+    let onResponseContent = monitor.panelWin.once(EVENTS.RECEIVED_RESPONSE_CONTENT);
     let tabpanel = document.querySelector("#response-panel");
     let waitDOM = waitForDOM(tabpanel, ".response-image");
     store.dispatch(Actions.selectRequestByIndex(index));

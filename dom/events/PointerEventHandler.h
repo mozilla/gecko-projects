@@ -138,7 +138,6 @@ public:
                 WidgetPointerEvent* aPointerEvent,
                 WidgetGUIEvent* aMouseOrTouchEvent);
 
-  MOZ_CAN_RUN_SCRIPT
   static void DispatchPointerFromMouseOrTouch(PresShell* aShell,
                                               nsIFrame* aFrame,
                                               nsIContent* aContent,
@@ -172,7 +171,7 @@ public:
 private:
   // GetPointerType returns pointer type like mouse, pen or touch for pointer
   // event with pointerId. The return value must be one of
-  // MouseEventBinding::MOZ_SOURCE_*
+  // nsIDOMMouseEvent::MOZ_SOURCE_*
   static uint16_t GetPointerType(uint32_t aPointerId);
 
   // GetPointerPrimaryState returns state of attribute isPrimary for pointer

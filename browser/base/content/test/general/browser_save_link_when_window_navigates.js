@@ -98,7 +98,7 @@ var windowObserver = {
       return;
     }
 
-    let win = aSubject;
+    let win = aSubject.QueryInterface(Ci.nsIDOMEventTarget);
 
     win.addEventListener("load", function(event) {
       if (win.location == UCT_URI) {

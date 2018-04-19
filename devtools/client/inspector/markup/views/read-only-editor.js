@@ -20,8 +20,6 @@ function ReadOnlyEditor(container, node) {
   } else if (node.nodeType == nodeConstants.DOCUMENT_TYPE_NODE) {
     this.elt.classList.add("comment", "doctype");
     this.tag.textContent = node.doctypeString;
-  } else if (node.isShadowRoot) {
-    this.tag.textContent = "#shadow-root";
   } else {
     this.tag.textContent = node.nodeName;
   }
@@ -31,7 +29,7 @@ function ReadOnlyEditor(container, node) {
 }
 
 ReadOnlyEditor.prototype = {
-  buildMarkup: function() {
+  buildMarkup: function () {
     let doc = this.markup.doc;
 
     this.elt = doc.createElement("span");
@@ -42,7 +40,7 @@ ReadOnlyEditor.prototype = {
     this.elt.appendChild(this.tag);
   },
 
-  destroy: function() {
+  destroy: function () {
     // We might be already destroyed.
     if (!this.elt) {
       return;
@@ -56,7 +54,7 @@ ReadOnlyEditor.prototype = {
   /**
    * Stub method for consistency with ElementEditor.
    */
-  getInfoAtNode: function() {
+  getInfoAtNode: function () {
     return null;
   }
 };

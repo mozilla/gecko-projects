@@ -1,4 +1,4 @@
-﻿<!DOCTYPE HTML>
+<!DOCTYPE HTML>
 <html class="reftest-wait"><head>
     <meta charset="utf-8">
     <title>Testcase for bug 943249</title>
@@ -12,7 +12,7 @@ iframe { height: 80px; border:0; padding:0; margin:0; }
 
     </style>
 <script>
-function doTest() {
+function test() {
   var no = document.querySelectorAll('iframe[scrolling="no"]');
   var yes = document.querySelectorAll('iframe[scrolling="yes"]');
   for (i = 0; i < no.length; ++i) {
@@ -23,10 +23,9 @@ function doTest() {
   }
   document.documentElement.className='';
 }
-window.addEventListener("MozReftestInvalidate", doTest);
 </script>
 </head>
-<body>
+<body onload="test()">
 <div style="float:left">
 scrolling="no", overflow:scroll<br>
     <iframe scrolling="yes" src="data:text/html,<body style='overflow:scroll'>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>X<br>"></iframe><br>

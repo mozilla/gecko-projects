@@ -11,6 +11,7 @@ user_pref("browser.urlbar.speculativeConnect.enabled", false);
 user_pref("dom.allow_scripts_to_close_windows", true);
 user_pref("dom.disable_open_during_load", false);
 user_pref("dom.experimental_forms", true); // on for testing
+user_pref("dom.forms.number", true); // on for testing
 user_pref("dom.forms.color", true); // on for testing
 user_pref("dom.forms.datetime", true); // on for testing
 user_pref("dom.forms.datetime.others", true); // on for testing
@@ -34,7 +35,6 @@ user_pref("devtools.devedition.promo.enabled", false);
 user_pref("devtools.chrome.enabled", false);
 user_pref("devtools.debugger.remote-enabled", false);
 user_pref("devtools.debugger.prompt-connection", true);
-user_pref("devtools.testing", true);
 user_pref("browser.EULA.override", true);
 user_pref("gfx.color_management.force_srgb", true);
 user_pref("gfx.logging.level", 1);
@@ -72,6 +72,12 @@ user_pref("font.size.inflation.minTwips", 0);
 // Disable the caret blinking so we get stable snapshot
 user_pref("ui.caretBlinkTime", -1);
 
+// AddonManager tests require that the experiments provider be present.
+user_pref("experiments.supported", true);
+// Point the manifest at something local so we don't risk it hitting production
+// data and installing experiments that may vary over time.
+user_pref("experiments.manifest.uri", "http://%(server)s/experiments-dummy/manifest");
+
 // Don't allow background tabs to be zombified, otherwise for tests that
 // open additional tabs, the test harness tab itself might get unloaded.
 user_pref("browser.tabs.disableBackgroundZombification", true);
@@ -87,6 +93,7 @@ user_pref("extensions.installDistroAddons", false);
 // XPI extensions are required for test harnesses to load
 user_pref("extensions.defaultProviders.enabled", true);
 user_pref("xpinstall.signatures.required", false);
+user_pref("extensions.allow-non-mpc-extensions", true);
 user_pref("extensions.legacy.enabled", true);
 
 user_pref("geo.wifi.uri", "http://%(server)s/tests/dom/tests/mochitest/geolocation/network_geolocation.sjs");
@@ -260,6 +267,9 @@ user_pref("identity.fxaccounts.auth.uri", "https://%(server)s/fxa-dummy/");
 
 // Ditto for all the FxA content root URI.
 user_pref("identity.fxaccounts.remote.root", "https://%(server)s/");
+
+// We don't want browser tests to perform FxA device registration.
+user_pref("identity.fxaccounts.skipDeviceRegistration", true);
 
 // Increase the APZ content response timeout in tests to 1 minute.
 // This is to accommodate the fact that test environments tends to be slower

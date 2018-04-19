@@ -23,15 +23,13 @@
 #include "XULTreeAccessible.h"
 #endif
 
-#include "mozilla/dom/BindingUtils.h"
-#include "mozilla/dom/CustomEvent.h"
 #include "mozilla/dom/Element.h"
-#include "mozilla/dom/ScriptSettings.h"
 
 #include "nsIDocShellTreeItem.h"
 #include "nsIDocShellTreeOwner.h"
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/EventTarget.h"
+#include "nsIDOMCustomEvent.h"
 #include "nsIDOMXULMultSelectCntrlEl.h"
 #include "nsIDocument.h"
 #include "nsIInterfaceRequestorUtils.h"
@@ -192,7 +190,7 @@ RootAccessible::AddEventListeners()
                    * const* e_end = ArrayEnd(kEventTypes);
          e < e_end; ++e) {
       nsresult rv = nstarget->AddEventListener(NS_ConvertASCIItoUTF16(*e),
-                                               this, true, true);
+                                               this, true, true, 2);
       NS_ENSURE_SUCCESS(rv, rv);
     }
   }
@@ -208,7 +206,8 @@ RootAccessible::RemoveEventListeners()
     for (const char* const* e = kEventTypes,
                    * const* e_end = ArrayEnd(kEventTypes);
          e < e_end; ++e) {
-      target->RemoveEventListener(NS_ConvertASCIItoUTF16(*e), this, true);
+      nsresult rv = target->RemoveEventListener(NS_ConvertASCIItoUTF16(*e), this, true);
+      NS_ENSURE_SUCCESS(rv, rv);
     }
   }
 
@@ -651,42 +650,22 @@ RootAccessible::HandlePopupHidingEvent(nsINode* aPopupNode)
 }
 
 #ifdef MOZ_XUL
-static void
-GetPropertyBagFromEvent(nsIDOMEvent* aEvent, nsIPropertyBag2** aPropertyBag)
-{
-  *aPropertyBag = nullptr;
-
-  CustomEvent* customEvent = aEvent->InternalDOMEvent()->AsCustomEvent();
-  if (!customEvent)
-    return;
-
-  AutoJSAPI jsapi;
-  if (!jsapi.Init(customEvent->GetParentObject()))
-    return;
-
-  JSContext* cx = jsapi.cx();
-  JS::Rooted<JS::Value> detail(cx);
-  customEvent->GetDetail(cx, &detail);
-  if (!detail.isObject())
-    return;
-
-  JS::Rooted<JSObject*> detailObj(cx, &detail.toObject());
-
-  nsresult rv;
-  nsCOMPtr<nsIPropertyBag2> propBag;
-  rv = UnwrapArg<nsIPropertyBag2>(cx, detailObj, getter_AddRefs(propBag));
-  if (NS_FAILED(rv))
-    return;
-
-  propBag.forget(aPropertyBag);
-}
-
 void
 RootAccessible::HandleTreeRowCountChangedEvent(nsIDOMEvent* aEvent,
                                                XULTreeAccessible* aAccessible)
 {
-  nsCOMPtr<nsIPropertyBag2> propBag;
-  GetPropertyBagFromEvent(aEvent, getter_AddRefs(propBag));
+  nsCOMPtr<nsIDOMCustomEvent> customEvent(do_QueryInterface(aEvent));
+  if (!customEvent)
+    return;
+
+  nsCOMPtr<nsIVariant> detailVariant;
+  customEvent->GetDetail(getter_AddRefs(detailVariant));
+  if (!detailVariant)
+    return;
+
+  nsCOMPtr<nsISupports> supports;
+  detailVariant->GetAsISupports(getter_AddRefs(supports));
+  nsCOMPtr<nsIPropertyBag2> propBag(do_QueryInterface(supports));
   if (!propBag)
     return;
 
@@ -707,8 +686,18 @@ void
 RootAccessible::HandleTreeInvalidatedEvent(nsIDOMEvent* aEvent,
                                            XULTreeAccessible* aAccessible)
 {
-  nsCOMPtr<nsIPropertyBag2> propBag;
-  GetPropertyBagFromEvent(aEvent, getter_AddRefs(propBag));
+  nsCOMPtr<nsIDOMCustomEvent> customEvent(do_QueryInterface(aEvent));
+  if (!customEvent)
+    return;
+
+  nsCOMPtr<nsIVariant> detailVariant;
+  customEvent->GetDetail(getter_AddRefs(detailVariant));
+  if (!detailVariant)
+    return;
+
+  nsCOMPtr<nsISupports> supports;
+  detailVariant->GetAsISupports(getter_AddRefs(supports));
+  nsCOMPtr<nsIPropertyBag2> propBag(do_QueryInterface(supports));
   if (!propBag)
     return;
 

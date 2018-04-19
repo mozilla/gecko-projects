@@ -55,19 +55,19 @@ OutOfLineBailout::accept(CodeGeneratorARM64* codegen)
 }
 
 void
-CodeGenerator::visitTestIAndBranch(LTestIAndBranch* test)
+CodeGeneratorARM64::visitTestIAndBranch(LTestIAndBranch* test)
 {
     MOZ_CRASH("visitTestIAndBranch");
 }
 
 void
-CodeGenerator::visitCompare(LCompare* comp)
+CodeGeneratorARM64::visitCompare(LCompare* comp)
 {
     MOZ_CRASH("visitCompare");
 }
 
 void
-CodeGenerator::visitCompareAndBranch(LCompareAndBranch* comp)
+CodeGeneratorARM64::visitCompareAndBranch(LCompareAndBranch* comp)
 {
     MOZ_CRASH("visitCompareAndBranch");
 }
@@ -97,37 +97,37 @@ CodeGeneratorARM64::visitOutOfLineBailout(OutOfLineBailout* ool)
 }
 
 void
-CodeGenerator::visitMinMaxD(LMinMaxD* ins)
+CodeGeneratorARM64::visitMinMaxD(LMinMaxD* ins)
 {
     MOZ_CRASH("visitMinMaxD");
 }
 
 void
-CodeGenerator::visitMinMaxF(LMinMaxF* ins)
+CodeGeneratorARM64::visitMinMaxF(LMinMaxF* ins)
 {
     MOZ_CRASH("visitMinMaxF");
 }
 
 void
-CodeGenerator::visitAbsD(LAbsD* ins)
+CodeGeneratorARM64::visitAbsD(LAbsD* ins)
 {
     MOZ_CRASH("visitAbsD");
 }
 
 void
-CodeGenerator::visitAbsF(LAbsF* ins)
+CodeGeneratorARM64::visitAbsF(LAbsF* ins)
 {
     MOZ_CRASH("visitAbsF");
 }
 
 void
-CodeGenerator::visitSqrtD(LSqrtD* ins)
+CodeGeneratorARM64::visitSqrtD(LSqrtD* ins)
 {
     MOZ_CRASH("visitSqrtD");
 }
 
 void
-CodeGenerator::visitSqrtF(LSqrtF* ins)
+CodeGeneratorARM64::visitSqrtF(LSqrtF* ins)
 {
     MOZ_CRASH("visitSqrtF");
 }
@@ -167,34 +167,34 @@ ToCPURegister(const LDefinition* d, Scalar::Type type)
 }
 
 void
-CodeGenerator::visitAddI(LAddI* ins)
+CodeGeneratorARM64::visitAddI(LAddI* ins)
 {
     MOZ_CRASH("visitAddI");
 }
 
 void
-CodeGenerator::visitSubI(LSubI* ins)
+CodeGeneratorARM64::visitSubI(LSubI* ins)
 {
     MOZ_CRASH("visitSubI");
 }
 
 void
-CodeGenerator::visitMulI(LMulI* ins)
+CodeGeneratorARM64::visitMulI(LMulI* ins)
 {
     MOZ_CRASH("visitMulI");
 }
 
 
 void
-CodeGenerator::visitDivI(LDivI* ins)
+CodeGeneratorARM64::visitDivI(LDivI* ins)
 {
     MOZ_CRASH("visitDivI");
 }
 
 void
-CodeGenerator::visitDivPowTwoI(LDivPowTwoI* ins)
+CodeGeneratorARM64::visitDivPowTwoI(LDivPowTwoI* ins)
 {
-    MOZ_CRASH("CodeGenerator::visitDivPowTwoI");
+    MOZ_CRASH("CodeGeneratorARM64::visitDivPowTwoI");
 }
 
 void
@@ -205,49 +205,49 @@ CodeGeneratorARM64::modICommon(MMod* mir, Register lhs, Register rhs, Register o
 }
 
 void
-CodeGenerator::visitModI(LModI* ins)
+CodeGeneratorARM64::visitModI(LModI* ins)
 {
     MOZ_CRASH("visitModI");
 }
 
 void
-CodeGenerator::visitModPowTwoI(LModPowTwoI* ins)
+CodeGeneratorARM64::visitModPowTwoI(LModPowTwoI* ins)
 {
     MOZ_CRASH("visitModPowTwoI");
 }
 
 void
-CodeGenerator::visitModMaskI(LModMaskI* ins)
+CodeGeneratorARM64::visitModMaskI(LModMaskI* ins)
 {
-    MOZ_CRASH("CodeGenerator::visitModMaskI");
+    MOZ_CRASH("CodeGeneratorARM64::visitModMaskI");
 }
 
 void
-CodeGenerator::visitBitNotI(LBitNotI* ins)
+CodeGeneratorARM64::visitBitNotI(LBitNotI* ins)
 {
     MOZ_CRASH("visitBitNotI");
 }
 
 void
-CodeGenerator::visitBitOpI(LBitOpI* ins)
+CodeGeneratorARM64::visitBitOpI(LBitOpI* ins)
 {
     MOZ_CRASH("visitBitOpI");
 }
 
 void
-CodeGenerator::visitShiftI(LShiftI* ins)
+CodeGeneratorARM64::visitShiftI(LShiftI* ins)
 {
     MOZ_CRASH("visitShiftI");
 }
 
 void
-CodeGenerator::visitUrshD(LUrshD* ins)
+CodeGeneratorARM64::visitUrshD(LUrshD* ins)
 {
     MOZ_CRASH("visitUrshD");
 }
 
 void
-CodeGenerator::visitPowHalfD(LPowHalfD* ins)
+CodeGeneratorARM64::visitPowHalfD(LPowHalfD* ins)
 {
     MOZ_CRASH("visitPowHalfD");
 }
@@ -298,61 +298,61 @@ CodeGeneratorARM64::emitTableSwitchDispatch(MTableSwitch* mir, Register index_, 
 }
 
 void
-CodeGenerator::visitMathD(LMathD* math)
+CodeGeneratorARM64::visitMathD(LMathD* math)
 {
     MOZ_CRASH("visitMathD");
 }
 
 void
-CodeGenerator::visitMathF(LMathF* math)
+CodeGeneratorARM64::visitMathF(LMathF* math)
 {
     MOZ_CRASH("visitMathF");
 }
 
 void
-CodeGenerator::visitFloor(LFloor* lir)
+CodeGeneratorARM64::visitFloor(LFloor* lir)
 {
     MOZ_CRASH("visitFloor");
 }
 
 void
-CodeGenerator::visitFloorF(LFloorF* lir)
+CodeGeneratorARM64::visitFloorF(LFloorF* lir)
 {
     MOZ_CRASH("visitFloorF");
 }
 
 void
-CodeGenerator::visitCeil(LCeil* lir)
+CodeGeneratorARM64::visitCeil(LCeil* lir)
 {
     MOZ_CRASH("visitCeil");
 }
 
 void
-CodeGenerator::visitCeilF(LCeilF* lir)
+CodeGeneratorARM64::visitCeilF(LCeilF* lir)
 {
     MOZ_CRASH("visitCeilF");
 }
 
 void
-CodeGenerator::visitRound(LRound* lir)
+CodeGeneratorARM64::visitRound(LRound* lir)
 {
     MOZ_CRASH("visitRound");
 }
 
 void
-CodeGenerator::visitRoundF(LRoundF* lir)
+CodeGeneratorARM64::visitRoundF(LRoundF* lir)
 {
     MOZ_CRASH("visitRoundF");
 }
 
 void
-CodeGenerator::visitClzI(LClzI* lir)
+CodeGeneratorARM64::visitClzI(LClzI* lir)
 {
     MOZ_CRASH("visitClzI");
 }
 
 void
-CodeGenerator::visitCtzI(LCtzI* lir)
+CodeGeneratorARM64::visitCtzI(LCtzI* lir)
 {
     MOZ_CRASH("visitCtzI");
 }
@@ -364,13 +364,13 @@ CodeGeneratorARM64::emitRoundDouble(FloatRegister src, Register dest, Label* fai
 }
 
 void
-CodeGenerator::visitTruncateDToInt32(LTruncateDToInt32* ins)
+CodeGeneratorARM64::visitTruncateDToInt32(LTruncateDToInt32* ins)
 {
     MOZ_CRASH("visitTruncateDToInt32");
 }
 
 void
-CodeGenerator::visitTruncateFToInt32(LTruncateFToInt32* ins)
+CodeGeneratorARM64::visitTruncateFToInt32(LTruncateFToInt32* ins)
 {
     MOZ_CRASH("visitTruncateFToInt32");
 }
@@ -408,31 +408,31 @@ CodeGeneratorARM64::ToTempValue(LInstruction* ins, size_t pos)
 }
 
 void
-CodeGenerator::visitValue(LValue* value)
+CodeGeneratorARM64::visitValue(LValue* value)
 {
     MOZ_CRASH("visitValue");
 }
 
 void
-CodeGenerator::visitBox(LBox* box)
+CodeGeneratorARM64::visitBox(LBox* box)
 {
     MOZ_CRASH("visitBox");
 }
 
 void
-CodeGenerator::visitUnbox(LUnbox* unbox)
+CodeGeneratorARM64::visitUnbox(LUnbox* unbox)
 {
     MOZ_CRASH("visitUnbox");
 }
 
 void
-CodeGenerator::visitDouble(LDouble* ins)
+CodeGeneratorARM64::visitDouble(LDouble* ins)
 {
     MOZ_CRASH("visitDouble");
 }
 
 void
-CodeGenerator::visitFloat32(LFloat32* ins)
+CodeGeneratorARM64::visitFloat32(LFloat32* ins)
 {
     MOZ_CRASH("visitFloat32");
 }
@@ -444,85 +444,85 @@ CodeGeneratorARM64::splitTagForTest(const ValueOperand& value, ScratchTagScope& 
 }
 
 void
-CodeGenerator::visitTestDAndBranch(LTestDAndBranch* test)
+CodeGeneratorARM64::visitTestDAndBranch(LTestDAndBranch* test)
 {
     MOZ_CRASH("visitTestDAndBranch");
 }
 
 void
-CodeGenerator::visitTestFAndBranch(LTestFAndBranch* test)
+CodeGeneratorARM64::visitTestFAndBranch(LTestFAndBranch* test)
 {
     MOZ_CRASH("visitTestFAndBranch");
 }
 
 void
-CodeGenerator::visitCompareD(LCompareD* comp)
+CodeGeneratorARM64::visitCompareD(LCompareD* comp)
 {
     MOZ_CRASH("visitCompareD");
 }
 
 void
-CodeGenerator::visitCompareF(LCompareF* comp)
+CodeGeneratorARM64::visitCompareF(LCompareF* comp)
 {
     MOZ_CRASH("visitCompareF");
 }
 
 void
-CodeGenerator::visitCompareDAndBranch(LCompareDAndBranch* comp)
+CodeGeneratorARM64::visitCompareDAndBranch(LCompareDAndBranch* comp)
 {
     MOZ_CRASH("visitCompareDAndBranch");
 }
 
 void
-CodeGenerator::visitCompareFAndBranch(LCompareFAndBranch* comp)
+CodeGeneratorARM64::visitCompareFAndBranch(LCompareFAndBranch* comp)
 {
     MOZ_CRASH("visitCompareFAndBranch");
 }
 
 void
-CodeGenerator::visitCompareB(LCompareB* lir)
+CodeGeneratorARM64::visitCompareB(LCompareB* lir)
 {
     MOZ_CRASH("visitCompareB");
 }
 
 void
-CodeGenerator::visitCompareBAndBranch(LCompareBAndBranch* lir)
+CodeGeneratorARM64::visitCompareBAndBranch(LCompareBAndBranch* lir)
 {
     MOZ_CRASH("visitCompareBAndBranch");
 }
 
 void
-CodeGenerator::visitCompareBitwise(LCompareBitwise* lir)
+CodeGeneratorARM64::visitCompareBitwise(LCompareBitwise* lir)
 {
     MOZ_CRASH("visitCompareBitwise");
 }
 
 void
-CodeGenerator::visitCompareBitwiseAndBranch(LCompareBitwiseAndBranch* lir)
+CodeGeneratorARM64::visitCompareBitwiseAndBranch(LCompareBitwiseAndBranch* lir)
 {
     MOZ_CRASH("visitCompareBitwiseAndBranch");
 }
 
 void
-CodeGenerator::visitBitAndAndBranch(LBitAndAndBranch* baab)
+CodeGeneratorARM64::visitBitAndAndBranch(LBitAndAndBranch* baab)
 {
     MOZ_CRASH("visitBitAndAndBranch");
 }
 
 void
-CodeGenerator::visitWasmUint32ToDouble(LWasmUint32ToDouble* lir)
+CodeGeneratorARM64::visitWasmUint32ToDouble(LWasmUint32ToDouble* lir)
 {
     MOZ_CRASH("visitWasmUint32ToDouble");
 }
 
 void
-CodeGenerator::visitWasmUint32ToFloat32(LWasmUint32ToFloat32* lir)
+CodeGeneratorARM64::visitWasmUint32ToFloat32(LWasmUint32ToFloat32* lir)
 {
     MOZ_CRASH("visitWasmUint32ToFloat32");
 }
 
 void
-CodeGenerator::visitNotI(LNotI* ins)
+CodeGeneratorARM64::visitNotI(LNotI* ins)
 {
     MOZ_CRASH("visitNotI");
 }
@@ -533,15 +533,39 @@ CodeGenerator::visitNotI(LNotI* ins)
 // <   -> 1000
 // >   -> 0010
 void
-CodeGenerator::visitNotD(LNotD* ins)
+CodeGeneratorARM64::visitNotD(LNotD* ins)
 {
     MOZ_CRASH("visitNotD");
 }
 
 void
-CodeGenerator::visitNotF(LNotF* ins)
+CodeGeneratorARM64::visitNotF(LNotF* ins)
 {
     MOZ_CRASH("visitNotF");
+}
+
+void
+CodeGeneratorARM64::visitLoadSlotV(LLoadSlotV* load)
+{
+    MOZ_CRASH("CodeGeneratorARM64::visitLoadSlotV");
+}
+
+void
+CodeGeneratorARM64::visitLoadSlotT(LLoadSlotT* load)
+{
+    MOZ_CRASH("CodeGeneratorARM64::visitLoadSlotT");
+}
+
+void
+CodeGeneratorARM64::visitStoreSlotT(LStoreSlotT* store)
+{
+    MOZ_CRASH("CodeGeneratorARM64::visitStoreSlotT");
+}
+
+void
+CodeGeneratorARM64::visitLoadElementT(LLoadElementT* load)
+{
+    MOZ_CRASH("CodeGeneratorARM64::visitLoadElementT");
 }
 
 void
@@ -550,6 +574,12 @@ CodeGeneratorARM64::storeElementTyped(const LAllocation* value, MIRType valueTyp
                                       const LAllocation* index)
 {
     MOZ_CRASH("CodeGeneratorARM64::storeElementTyped");
+}
+
+void
+CodeGeneratorARM64::visitInterruptCheck(LInterruptCheck* lir)
+{
+    MOZ_CRASH("CodeGeneratorARM64::visitInterruptCheck");
 }
 
 void
@@ -569,73 +599,84 @@ getBase(U* mir)
 }
 
 void
-CodeGenerator::visitAsmJSLoadHeap(LAsmJSLoadHeap* ins)
+CodeGeneratorARM64::visitAsmJSLoadHeap(LAsmJSLoadHeap* ins)
 {
     MOZ_CRASH("visitAsmJSLoadHeap");
 }
 
 void
-CodeGenerator::visitAsmJSStoreHeap(LAsmJSStoreHeap* ins)
+CodeGeneratorARM64::visitAsmJSStoreHeap(LAsmJSStoreHeap* ins)
 {
     MOZ_CRASH("visitAsmJSStoreHeap");
 }
 
 void
-CodeGenerator::visitWasmCompareExchangeHeap(LWasmCompareExchangeHeap* ins)
+CodeGeneratorARM64::visitWasmCompareExchangeHeap(LWasmCompareExchangeHeap* ins)
 {
     MOZ_CRASH("visitWasmCompareExchangeHeap");
 }
 
 void
-CodeGenerator::visitWasmAtomicBinopHeap(LWasmAtomicBinopHeap* ins)
+CodeGeneratorARM64::visitWasmAtomicBinopHeap(LWasmAtomicBinopHeap* ins)
 {
     MOZ_CRASH("visitWasmAtomicBinopHeap");
 }
 
 void
-CodeGenerator::visitWasmStackArg(LWasmStackArg* ins)
+CodeGeneratorARM64::visitWasmStackArg(LWasmStackArg* ins)
 {
     MOZ_CRASH("visitWasmStackArg");
 }
 
 void
-CodeGenerator::visitUDiv(LUDiv* ins)
+CodeGeneratorARM64::visitUDiv(LUDiv* ins)
 {
     MOZ_CRASH("visitUDiv");
 }
 
 void
-CodeGenerator::visitUMod(LUMod* ins)
+CodeGeneratorARM64::visitUMod(LUMod* ins)
 {
     MOZ_CRASH("visitUMod");
 }
 
 void
-CodeGenerator::visitEffectiveAddress(LEffectiveAddress* ins)
+CodeGeneratorARM64::visitEffectiveAddress(LEffectiveAddress* ins)
 {
     MOZ_CRASH("visitEffectiveAddress");
 }
 
 void
-CodeGenerator::visitNegI(LNegI* ins)
+CodeGeneratorARM64::visitNegI(LNegI* ins)
 {
     MOZ_CRASH("visitNegI");
 }
 
 void
-CodeGenerator::visitNegD(LNegD* ins)
+CodeGeneratorARM64::visitNegD(LNegD* ins)
 {
     MOZ_CRASH("visitNegD");
 }
 
 void
-CodeGenerator::visitNegF(LNegF* ins)
+CodeGeneratorARM64::visitNegF(LNegF* ins)
 {
     MOZ_CRASH("visitNegF");
 }
 
 void
-CodeGenerator::visitCompareExchangeTypedArrayElement(LCompareExchangeTypedArrayElement* lir)
+CodeGeneratorARM64::setReturnDoubleRegs(LiveRegisterSet* regs)
+{
+    MOZ_ASSERT(ReturnFloat32Reg.code_ == FloatRegisters::s0);
+    MOZ_ASSERT(ReturnDoubleReg.code_ == FloatRegisters::d0);
+    FloatRegister s1 = {FloatRegisters::s1, FloatRegisters::Single};
+    regs->add(ReturnFloat32Reg);
+    regs->add(s1);
+    regs->add(ReturnDoubleReg);
+}
+
+void
+CodeGeneratorARM64::visitCompareExchangeTypedArrayElement(LCompareExchangeTypedArrayElement* lir)
 {
     Register elements = ToRegister(lir->elements());
     AnyRegister output = ToAnyRegister(lir->output());
@@ -657,7 +698,7 @@ CodeGenerator::visitCompareExchangeTypedArrayElement(LCompareExchangeTypedArrayE
 }
 
 void
-CodeGenerator::visitAtomicExchangeTypedArrayElement(LAtomicExchangeTypedArrayElement* lir)
+CodeGeneratorARM64::visitAtomicExchangeTypedArrayElement(LAtomicExchangeTypedArrayElement* lir)
 {
     Register elements = ToRegister(lir->elements());
     AnyRegister output = ToAnyRegister(lir->output());
@@ -675,484 +716,4 @@ CodeGenerator::visitAtomicExchangeTypedArrayElement(LAtomicExchangeTypedArrayEle
         BaseIndex dest(elements, ToRegister(lir->index()), ScaleFromElemWidth(width));
         masm.atomicExchangeJS(arrayType, Synchronization::Full(), dest, value, temp, output);
     }
-}
-
-void
-CodeGenerator::visitSimdSplatX4(LSimdSplatX4* lir)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimd128Int(LSimd128Int* ins)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimd128Float(LSimd128Float* ins)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdExtractElementI(LSimdExtractElementI* ins)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdExtractElementF(LSimdExtractElementF* ins)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdBinaryCompIx4(LSimdBinaryCompIx4* lir)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdBinaryCompFx4(LSimdBinaryCompFx4* lir)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdBinaryArithIx4(LSimdBinaryArithIx4* lir)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdBinaryArithFx4(LSimdBinaryArithFx4* lir)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdBinaryBitwise(LSimdBinaryBitwise* lir)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitAddI64(LAddI64*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitClzI64(LClzI64*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitCtzI64(LCtzI64*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitMulI64(LMulI64*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitNotI64(LNotI64*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSubI64(LSubI64*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitPopcntI(LPopcntI*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitBitOpI64(LBitOpI64*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitShiftI64(LShiftI64*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSoftDivI(LSoftDivI*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSoftModI(LSoftModI*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitWasmLoad(LWasmLoad*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitCopySignD(LCopySignD*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitCopySignF(LCopySignF*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitNearbyInt(LNearbyInt*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitPopcntI64(LPopcntI64*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitRotateI64(LRotateI64*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdShift(LSimdShift*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitWasmStore(LWasmStore*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitCompareI64(LCompareI64*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitNearbyIntF(LNearbyIntF*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdSelect(LSimdSelect*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitWasmSelect(LWasmSelect*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdAllTrue(LSimdAllTrue*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdAnyTrue(LSimdAnyTrue*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdShuffle(LSimdShuffle*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdSplatX8(LSimdSplatX8*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitWasmLoadI64(LWasmLoadI64*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdSplatX16(LSimdSplatX16*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdSwizzleF(LSimdSwizzleF*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdSwizzleI(LSimdSwizzleI*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitWasmStoreI64(LWasmStoreI64*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitMemoryBarrier(LMemoryBarrier*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdShuffleX4(LSimdShuffleX4*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSoftUDivOrMod(LSoftUDivOrMod*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitWasmAddOffset(LWasmAddOffset*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitWasmSelectI64(LWasmSelectI64*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSignExtendInt64(LSignExtendInt64*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitWasmReinterpret(LWasmReinterpret*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitWasmStackArgI64(LWasmStackArgI64*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitTestI64AndBranch(LTestI64AndBranch*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitWrapInt64ToInt32(LWrapInt64ToInt32*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdBinaryCompIx8(LSimdBinaryCompIx8*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdUnaryArithFx4(LSimdUnaryArithFx4*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdUnaryArithIx4(LSimdUnaryArithIx4*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdUnaryArithIx8(LSimdUnaryArithIx8*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitExtendInt32ToInt64(LExtendInt32ToInt64*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitFloat32x4ToInt32x4(LFloat32x4ToInt32x4*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitInt32x4ToFloat32x4(LInt32x4ToFloat32x4*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdBinaryArithIx8(LSimdBinaryArithIx8*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdBinaryCompIx16(LSimdBinaryCompIx16*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdInsertElementF(LSimdInsertElementF*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdInsertElementI(LSimdInsertElementI*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdUnaryArithIx16(LSimdUnaryArithIx16*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitCompareI64AndBranch(LCompareI64AndBranch*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitFloat32x4ToUint32x4(LFloat32x4ToUint32x4*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdBinaryArithIx16(LSimdBinaryArithIx16*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdExtractElementB(LSimdExtractElementB*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdGeneralShuffleF(LSimdGeneralShuffleF*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdGeneralShuffleI(LSimdGeneralShuffleI*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdReinterpretCast(LSimdReinterpretCast*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitWasmTruncateToInt32(LWasmTruncateToInt32*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdBinarySaturating(LSimdBinarySaturating*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitWasmReinterpretToI64(LWasmReinterpretToI64*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitSimdExtractElementU2D(LSimdExtractElementU2D*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitWasmAtomicExchangeHeap(LWasmAtomicExchangeHeap*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitWasmReinterpretFromI64(LWasmReinterpretFromI64*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitAtomicTypedArrayElementBinop(LAtomicTypedArrayElementBinop*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitWasmAtomicBinopHeapForEffect(LWasmAtomicBinopHeapForEffect*)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitAtomicTypedArrayElementBinopForEffect(LAtomicTypedArrayElementBinopForEffect*)
-{
-    MOZ_CRASH("NYI");
 }

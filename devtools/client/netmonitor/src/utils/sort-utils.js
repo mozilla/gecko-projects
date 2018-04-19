@@ -13,17 +13,7 @@ function sortObjectKeys(object) {
   if (object == null) {
     return null;
   }
-
-  if (Array.isArray(object)) {
-    for (let i = 0; i < object.length; i++) {
-      if (typeof object[i] === "object") {
-        object[i] = sortObjectKeys(object[i]);
-      }
-    }
-    return object;
-  }
-
-  return Object.keys(object).sort(function(left, right) {
+  return Object.keys(object).sort(function (left, right) {
     return left.toLowerCase().localeCompare(right.toLowerCase());
   }).reduce((acc, key) => {
     if (typeof object[key] === "object") {

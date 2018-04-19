@@ -6,7 +6,6 @@
 
 #include "WebMDecoder.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/StaticPrefs.h"
 #ifdef MOZ_AV1
 #include "AOMDecoder.h"
 #endif
@@ -70,8 +69,7 @@ WebMDecoder::IsSupportedType(const MediaContainerType& aContainerType)
       }
     }
 #ifdef MOZ_AV1
-    if (isVideo && StaticPrefs::MediaAv1Enabled() &&
-        AOMDecoder::IsSupportedCodec(codec)) {
+    if (isVideo && AOMDecoder::IsSupportedCodec(codec)) {
       continue;
     }
 #endif

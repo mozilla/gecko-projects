@@ -148,6 +148,19 @@ static constexpr uint32_t NumFloatArgRegs = 8;
 static constexpr FloatRegister FloatArgRegs[NumFloatArgRegs] = { xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7 };
 #endif
 
+// Registers used in the GenerateFFIIonExit Enable Activation block.
+static constexpr Register WasmIonExitRegCallee = r10;
+static constexpr Register WasmIonExitRegE0 = rax;
+static constexpr Register WasmIonExitRegE1 = rdi;
+
+// Registers used in the GenerateFFIIonExit Disable Activation block.
+static constexpr Register WasmIonExitRegReturnData = ecx;
+static constexpr Register WasmIonExitRegReturnType = ecx;
+static constexpr Register WasmIonExitTlsReg = r14;
+static constexpr Register WasmIonExitRegD0 = rax;
+static constexpr Register WasmIonExitRegD1 = rdi;
+static constexpr Register WasmIonExitRegD2 = rbx;
+
 // Registerd used in RegExpMatcher instruction (do not use JSReturnOperand).
 static constexpr Register RegExpMatcherRegExpReg = CallTempReg0;
 static constexpr Register RegExpMatcherStringReg = CallTempReg1;
@@ -237,7 +250,6 @@ static_assert(JitStackAlignment % SimdMemoryAlignment == 0,
   "spilled values.  Thus it should be larger than the alignment for SIMD accesses.");
 
 static const uint32_t WasmStackAlignment = SimdMemoryAlignment;
-static const uint32_t WasmTrapInstructionLength = 2;
 
 static const Scale ScalePointer = TimesEight;
 
@@ -300,7 +312,7 @@ class Assembler : public AssemblerX86Shared
     using AssemblerX86Shared::vmovq;
 
     static uint8_t* PatchableJumpAddress(JitCode* code, size_t index);
-    static void PatchJumpEntry(uint8_t* entry, uint8_t* target);
+    static void PatchJumpEntry(uint8_t* entry, uint8_t* target, ReprotectCode reprotect);
 
     Assembler()
       : extendedJumpTable_(0)
@@ -1119,14 +1131,24 @@ class Assembler : public AssemblerX86Shared
 };
 
 static inline void
-PatchJump(CodeLocationJump jump, CodeLocationLabel label)
+PatchJump(CodeLocationJump jump, CodeLocationLabel label, ReprotectCode reprotect = DontReprotect)
 {
     if (X86Encoding::CanRelinkJump(jump.raw(), label.raw())) {
+        MaybeAutoWritableJitCode awjc(jump.raw() - 8, 8, reprotect);
         X86Encoding::SetRel32(jump.raw(), label.raw());
     } else {
-        X86Encoding::SetRel32(jump.raw(), jump.jumpTableEntry());
-        Assembler::PatchJumpEntry(jump.jumpTableEntry(), label.raw());
+        {
+            MaybeAutoWritableJitCode awjc(jump.raw() - 8, 8, reprotect);
+            X86Encoding::SetRel32(jump.raw(), jump.jumpTableEntry());
+        }
+        Assembler::PatchJumpEntry(jump.jumpTableEntry(), label.raw(), reprotect);
     }
+}
+
+static inline void
+PatchBackedge(CodeLocationJump& jump_, CodeLocationLabel label, JitZoneGroup::BackedgeTarget target)
+{
+    PatchJump(jump_, label);
 }
 
 static inline bool

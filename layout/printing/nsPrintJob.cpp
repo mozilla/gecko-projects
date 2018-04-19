@@ -13,7 +13,6 @@
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/CustomEvent.h"
-#include "mozilla/dom/ScriptSettings.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsPIDOMWindow.h"
 #include "nsIDocShell.h"
@@ -80,6 +79,7 @@ static const char kPrintingPromptService[] = "@mozilla.org/embedcomp/printingpro
 #include "nsIDocumentObserver.h"
 #include "nsISelectionListener.h"
 #include "nsISelectionPrivate.h"
+#include "nsIDOMRange.h"
 #include "nsContentCID.h"
 #include "nsLayoutCID.h"
 #include "nsContentUtils.h"
@@ -119,7 +119,8 @@ static const char kPrintingPromptService[] = "@mozilla.org/embedcomp/printingpro
 #include "nsIChannel.h"
 #include "xpcpublic.h"
 #include "nsVariant.h"
-#include "mozilla/ServoStyleSet.h"
+#include "mozilla/StyleSetHandle.h"
+#include "mozilla/StyleSetHandleInlines.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -1629,17 +1630,14 @@ nsPrintJob::FirePrintingErrorEvent(nsresult aPrintError)
     NS_NewDOMCustomEvent(doc, nullptr, nullptr);
 
   MOZ_ASSERT(event);
+  nsCOMPtr<nsIWritableVariant> resultVariant = new nsVariant();
+  // nsresults are Uint32_t's, but XPConnect will interpret it as a double
+  // when any JS attempts to access it, and will therefore interpret it
+  // incorrectly. We preempt this by casting and setting as a double.
+  resultVariant->SetAsDouble(static_cast<double>(aPrintError));
 
-  AutoJSAPI jsapi;
-  if (!jsapi.Init(event->GetParentObject())) {
-    return;
-  }
-  JSContext* cx = jsapi.cx();
-
-  JS::Rooted<JS::Value> detail(cx,
-    JS::NumberValue(static_cast<double>(aPrintError)));
-  event->InitCustomEvent(cx, NS_LITERAL_STRING("PrintingError"), false, false,
-                         detail);
+  event->InitCustomEvent(NS_LITERAL_STRING("PrintingError"), false, false,
+                         resultVariant);
   event->SetTrusted(true);
 
   RefPtr<AsyncEventDispatcher> asyncDispatcher =
@@ -2164,13 +2162,13 @@ nsPrintJob::UpdateSelectionAndShrinkPrintObject(nsPrintObject* aPO,
   // Reset all existing selection ranges that might have been added by calling
   // this function before.
   if (selectionPS) {
-    selectionPS->RemoveAllRanges(IgnoreErrors());
+    selectionPS->RemoveAllRanges();
   }
   if (selection && selectionPS) {
     int32_t cnt = selection->RangeCount();
     int32_t inx;
     for (inx = 0; inx < cnt; ++inx) {
-      selectionPS->AddRange(*selection->GetRangeAt(inx), IgnoreErrors());
+        selectionPS->AddRange(selection->GetRangeAt(inx));
     }
   }
 
@@ -2344,20 +2342,19 @@ nsPrintJob::ReflowPrintObject(const UniquePtr<nsPrintObject>& aPO)
   rv = aPO->mViewManager->Init(printData->mPrintDC);
   NS_ENSURE_SUCCESS(rv,rv);
 
-  UniquePtr<ServoStyleSet> styleSet =
-    mDocViewerPrint->CreateStyleSet(aPO->mDocument);
+  StyleSetHandle styleSet = mDocViewerPrint->CreateStyleSet(aPO->mDocument);
 
   if (aPO->mDocument->IsSVGDocument()) {
     // The SVG document only loads minimal-xul.css, so it doesn't apply other
     // styles. We should add ua.css for applying style which related to print.
-    auto cache = nsLayoutStylesheetCache::Singleton();
-    styleSet->PrependStyleSheet(SheetType::Agent, cache->UASheet()->AsServo());
+    auto cache = nsLayoutStylesheetCache::For(aPO->mDocument->GetStyleBackendType());
+    styleSet->PrependStyleSheet(SheetType::Agent, cache->UASheet());
   }
 
   aPO->mPresShell = aPO->mDocument->CreateShell(aPO->mPresContext,
-                                                aPO->mViewManager,
-                                                Move(styleSet));
+                                                aPO->mViewManager, styleSet);
   if (!aPO->mPresShell) {
+    styleSet->Delete();
     return NS_ERROR_FAILURE;
   }
 
@@ -2369,7 +2366,7 @@ nsPrintJob::ReflowPrintObject(const UniquePtr<nsPrintObject>& aPO)
     DeleteUnselectedNodes(aPO->mDocument->GetOriginalDocument(), aPO->mDocument);
   }
 
-  aPO->mPresShell->StyleSet()->EndUpdate();
+  styleSet->EndUpdate();
 
   // The pres shell now owns the style set object.
 
@@ -2592,13 +2589,13 @@ DeleteUnselectedNodes(nsIDocument* aOrigDoc, nsIDocument* aDoc)
                                        endOffset, getter_AddRefs(range));
 
     if (NS_SUCCEEDED(rv) && !range->Collapsed()) {
-      selection->AddRange(*range, IgnoreErrors());
+      selection->AddRange(range);
 
       // Unless we've already added an ellipsis at the start, if we ended mid
       // text node then add ellipsis.
       Text* text = endNode->GetAsText();
       if (!ellipsisOffset && text && endOffset && endOffset < text->Length()) {
-        text->InsertData(endOffset, kEllipsis, IgnoreErrors());
+        text->InsertData(endOffset, kEllipsis);
         ellipsisOffset += kEllipsis.Length();
       }
     }
@@ -2616,7 +2613,7 @@ DeleteUnselectedNodes(nsIDocument* aOrigDoc, nsIDocument* aDoc)
     // If the next node will start mid text node then add ellipsis.
     Text* text = startNode ? startNode->GetAsText() : nullptr;
     if (text && startOffset && startOffset < text->Length()) {
-      text->InsertData(startOffset, kEllipsis, IgnoreErrors());
+      text->InsertData(startOffset, kEllipsis);
       startOffset += kEllipsis.Length();
       ellipsisOffset += kEllipsis.Length();
     }
@@ -2628,7 +2625,7 @@ DeleteUnselectedNodes(nsIDocument* aOrigDoc, nsIDocument* aDoc)
                                      bodyNode->GetChildCount(),
                                      getter_AddRefs(lastRange));
   if (NS_SUCCEEDED(rv) && !lastRange->Collapsed()) {
-    selection->AddRange(*lastRange, IgnoreErrors());
+    selection->AddRange(lastRange);
   }
 
   selection->DeleteFromDocument();
@@ -2764,7 +2761,7 @@ DocHasPrintCallbackCanvas(nsIDocument* aDoc, void* aData)
                                                        NS_LITERAL_STRING("canvas"));
   uint32_t canvasCount = canvases->Length(true);
   for (uint32_t i = 0; i < canvasCount; ++i) {
-    HTMLCanvasElement* canvas = HTMLCanvasElement::FromNodeOrNull(canvases->Item(i, false));
+    HTMLCanvasElement* canvas = HTMLCanvasElement::FromContentOrNull(canvases->Item(i, false));
     if (canvas && canvas->GetMozPrintCallback()) {
       // This subdocument has a print callback. Set result and return false to
       // stop iteration.

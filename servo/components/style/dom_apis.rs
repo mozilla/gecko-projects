@@ -7,7 +7,7 @@
 
 use Atom;
 use context::QuirksMode;
-use dom::{TDocument, TElement, TNode, TShadowRoot};
+use dom::{TDocument, TElement, TNode};
 use invalidation::element::invalidator::{DescendantInvalidationLists, Invalidation};
 use invalidation::element::invalidator::{InvalidationProcessor, InvalidationVector};
 use selectors::{Element, NthIndexCache, SelectorList};
@@ -26,9 +26,13 @@ pub fn element_matches<E>(
 where
     E: Element,
 {
-    let mut context = MatchingContext::new(MatchingMode::Normal, None, None, quirks_mode);
+    let mut context = MatchingContext::new(
+        MatchingMode::Normal,
+        None,
+        None,
+        quirks_mode,
+    );
     context.scope_element = Some(element.opaque());
-    context.current_host = element.containing_shadow_host().map(|e| e.opaque());
     matching::matches_selector_list(selector_list, element, &mut context)
 }
 
@@ -50,7 +54,6 @@ where
         quirks_mode,
     );
     context.scope_element = Some(element.opaque());
-    context.current_host = element.containing_shadow_host().map(|e| e.opaque());
 
     let mut current = Some(element);
     while let Some(element) = current.take() {
@@ -88,9 +91,7 @@ pub struct QueryAll;
 impl<E: TElement> SelectorQuery<E> for QueryAll {
     type Output = QuerySelectorAllResult<E>;
 
-    fn should_stop_after_first_match() -> bool {
-        false
-    }
+    fn should_stop_after_first_match() -> bool { false }
 
     fn append_element(output: &mut Self::Output, element: E) {
         output.push(element);
@@ -107,9 +108,7 @@ pub struct QueryFirst;
 impl<E: TElement> SelectorQuery<E> for QueryFirst {
     type Output = Option<E>;
 
-    fn should_stop_after_first_match() -> bool {
-        true
-    }
+    fn should_stop_after_first_match() -> bool { true }
 
     fn append_element(output: &mut Self::Output, element: E) {
         if output.is_none() {
@@ -139,9 +138,7 @@ where
     Q: SelectorQuery<E>,
     Q::Output: 'a,
 {
-    fn light_tree_only(&self) -> bool {
-        true
-    }
+    fn light_tree_only(&self) -> bool { true }
 
     fn collect_invalidations(
         &mut self,
@@ -165,11 +162,12 @@ where
         // For now, assert it's a root element.
         debug_assert!(element.parent_element().is_none());
 
-        let target_vector = if self.matching_context.scope_element.is_some() {
-            &mut descendant_invalidations.dom_descendants
-        } else {
-            self_invalidations
-        };
+        let target_vector =
+            if self.matching_context.scope_element.is_some() {
+                &mut descendant_invalidations.dom_descendants
+            } else {
+                self_invalidations
+            };
 
         for selector in self.selector_list.0.iter() {
             target_vector.push(Invalidation::new(selector, 0))
@@ -184,7 +182,7 @@ where
 
     fn should_process_descendants(&mut self, _: E) -> bool {
         if Q::should_stop_after_first_match() {
-            return Q::is_empty(&self.results);
+            return Q::is_empty(&self.results)
         }
 
         true
@@ -198,7 +196,11 @@ where
     fn invalidated_descendants(&mut self, _e: E, _child: E) {}
 }
 
-fn collect_all_elements<E, Q, F>(root: E::ConcreteNode, results: &mut Q::Output, mut filter: F)
+fn collect_all_elements<E, Q, F>(
+    root: E::ConcreteNode,
+    results: &mut Q::Output,
+    mut filter: F,
+)
 where
     E: TElement,
     Q: SelectorQuery<E>,
@@ -275,7 +277,8 @@ fn collect_elements_with_id<E, Q, F>(
     results: &mut Q::Output,
     quirks_mode: QuirksMode,
     mut filter: F,
-) where
+)
+where
     E: TElement,
     Q: SelectorQuery<E>,
     F: FnMut(E) -> bool,
@@ -284,14 +287,15 @@ fn collect_elements_with_id<E, Q, F>(
     let elements = match fast_connected_elements_with_id(&doc, root, id, quirks_mode) {
         Ok(elements) => elements,
         Err(()) => {
-            let case_sensitivity = quirks_mode.classes_and_ids_case_sensitivity();
+            let case_sensitivity =
+                quirks_mode.classes_and_ids_case_sensitivity();
 
             collect_all_elements::<E, Q, _>(root, results, |e| {
                 e.has_id(id, case_sensitivity) && filter(e)
             });
 
             return;
-        },
+        }
     };
 
     for element in elements {
@@ -326,28 +330,35 @@ where
     match *component {
         Component::ExplicitUniversalType => {
             collect_all_elements::<E, Q, _>(root, results, |_| true)
-        },
+        }
         Component::ID(ref id) => {
-            collect_elements_with_id::<E, Q, _>(root, id, results, quirks_mode, |_| true);
-        },
+            collect_elements_with_id::<E, Q, _>(
+                root,
+                id,
+                results,
+                quirks_mode,
+                |_| true,
+            );
+        }
         Component::Class(ref class) => {
             let case_sensitivity = quirks_mode.classes_and_ids_case_sensitivity();
             collect_all_elements::<E, Q, _>(root, results, |element| {
                 element.has_class(class, case_sensitivity)
             })
-        },
-        Component::LocalName(LocalName {
-            ref name,
-            ref lower_name,
-        }) => collect_all_elements::<E, Q, _>(root, results, |element| {
-            if element.is_html_element_in_html_document() {
-                element.local_name() == lower_name.borrow()
-            } else {
-                element.local_name() == name.borrow()
-            }
-        }),
+        }
+        Component::LocalName(LocalName { ref name, ref lower_name }) => {
+            collect_all_elements::<E, Q, _>(root, results, |element| {
+                if element.is_html_element_in_html_document() {
+                    element.local_name() == lower_name.borrow()
+                } else {
+                    element.local_name() == name.borrow()
+                }
+            })
+        }
         // TODO(emilio): More fast paths?
-        _ => return Err(()),
+        _ => {
+            return Err(())
+        }
     }
 
     Ok(())
@@ -398,15 +409,26 @@ where
                     if combinator.is_none() {
                         // In the rightmost compound, just find descendants of
                         // root that match the selector list with that id.
-                        collect_elements_with_id::<E, Q, _>(root, id, results, quirks_mode, |e| {
-                            matching::matches_selector_list(selector_list, &e, matching_context)
-                        });
+                        collect_elements_with_id::<E, Q, _>(
+                            root,
+                            id,
+                            results,
+                            quirks_mode,
+                            |e| {
+                                matching::matches_selector_list(
+                                    selector_list,
+                                    &e,
+                                    matching_context,
+                                )
+                            }
+                        );
 
                         return Ok(());
                     }
 
                     let doc = root.owner_doc();
-                    let elements = fast_connected_elements_with_id(&doc, root, id, quirks_mode)?;
+                    let elements =
+                        fast_connected_elements_with_id(&doc, root, id, quirks_mode)?;
 
                     if elements.is_empty() {
                         return Ok(());
@@ -449,7 +471,7 @@ where
                     }
 
                     return Ok(());
-                },
+                }
                 _ => {},
             }
         }
@@ -481,7 +503,8 @@ fn query_selector_slow<E, Q>(
     selector_list: &SelectorList<E::Impl>,
     results: &mut Q::Output,
     matching_context: &mut MatchingContext<E::Impl>,
-) where
+)
+where
     E: TElement,
     Q: SelectorQuery<E>,
 {
@@ -505,7 +528,8 @@ pub fn query_selector<E, Q>(
     selector_list: &SelectorList<E::Impl>,
     results: &mut Q::Output,
     may_use_invalidation: MayUseInvalidation,
-) where
+)
+where
     E: TElement,
     Q: SelectorQuery<E>,
 {
@@ -523,13 +547,13 @@ pub fn query_selector<E, Q>(
 
     let root_element = root.as_element();
     matching_context.scope_element = root_element.map(|e| e.opaque());
-    matching_context.current_host = match root_element {
-        Some(root) => root.containing_shadow_host().map(|host| host.opaque()),
-        None => root.as_shadow_root().map(|root| root.host().opaque()),
-    };
 
-    let fast_result =
-        query_selector_fast::<E, Q>(root, selector_list, results, &mut matching_context);
+    let fast_result = query_selector_fast::<E, Q>(
+        root,
+        selector_list,
+        results,
+        &mut matching_context,
+    );
 
     if fast_result.is_ok() {
         return;
@@ -547,11 +571,17 @@ pub fn query_selector<E, Q>(
     //
     // A selector with a combinator needs to have a length of at least 3: A
     // simple selector, a combinator, and another simple selector.
-    let invalidation_may_be_useful = may_use_invalidation == MayUseInvalidation::Yes &&
+    let invalidation_may_be_useful =
+        may_use_invalidation == MayUseInvalidation::Yes &&
         selector_list.0.iter().any(|s| s.len() > 2);
 
     if root_element.is_some() || !invalidation_may_be_useful {
-        query_selector_slow::<E, Q>(root, selector_list, results, &mut matching_context);
+        query_selector_slow::<E, Q>(
+            root,
+            selector_list,
+            results,
+            &mut matching_context,
+        );
     } else {
         let mut processor = QuerySelectorProcessor::<E, Q> {
             results,
@@ -561,8 +591,11 @@ pub fn query_selector<E, Q>(
 
         for node in root.dom_children() {
             if let Some(e) = node.as_element() {
-                TreeStyleInvalidator::new(e, /* stack_limit_checker = */ None, &mut processor)
-                    .invalidate();
+                TreeStyleInvalidator::new(
+                    e,
+                    /* stack_limit_checker = */ None,
+                    &mut processor,
+                ).invalidate();
             }
         }
     }

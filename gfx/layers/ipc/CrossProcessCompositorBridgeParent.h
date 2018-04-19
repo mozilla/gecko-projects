@@ -37,15 +37,15 @@ public:
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
   // FIXME/bug 774388: work out what shutdown protocol we need.
-  mozilla::ipc::IPCResult RecvInitialize(const LayersId& aRootLayerTreeId) override { return IPC_FAIL_NO_REASON(this); }
+  mozilla::ipc::IPCResult RecvInitialize(const uint64_t& aRootLayerTreeId) override { return IPC_FAIL_NO_REASON(this); }
   mozilla::ipc::IPCResult RecvWillClose() override { return IPC_OK(); }
   mozilla::ipc::IPCResult RecvPause() override { return IPC_OK(); }
   mozilla::ipc::IPCResult RecvResume() override { return IPC_OK(); }
   mozilla::ipc::IPCResult RecvForceIsFirstPaint() override { return IPC_OK(); }
-  mozilla::ipc::IPCResult RecvNotifyChildCreated(const LayersId& child, CompositorOptions* aOptions) override;
-  mozilla::ipc::IPCResult RecvMapAndNotifyChildCreated(const LayersId& child, const base::ProcessId& pid, CompositorOptions* aOptions) override;
-  mozilla::ipc::IPCResult RecvNotifyChildRecreated(const LayersId& child, CompositorOptions* aOptions) override { return IPC_FAIL_NO_REASON(this); }
-  mozilla::ipc::IPCResult RecvAdoptChild(const LayersId& child) override { return IPC_FAIL_NO_REASON(this); }
+  mozilla::ipc::IPCResult RecvNotifyChildCreated(const uint64_t& child, CompositorOptions* aOptions) override;
+  mozilla::ipc::IPCResult RecvMapAndNotifyChildCreated(const uint64_t& child, const base::ProcessId& pid, CompositorOptions* aOptions) override;
+  mozilla::ipc::IPCResult RecvNotifyChildRecreated(const uint64_t& child, CompositorOptions* aOptions) override { return IPC_FAIL_NO_REASON(this); }
+  mozilla::ipc::IPCResult RecvAdoptChild(const uint64_t& child) override { return IPC_FAIL_NO_REASON(this); }
   mozilla::ipc::IPCResult RecvMakeSnapshot(const SurfaceDescriptor& aInSnapshot,
                                            const gfx::IntRect& aRect) override
   { return IPC_OK(); }
@@ -58,6 +58,12 @@ public:
   mozilla::ipc::IPCResult RecvStopFrameTimeRecording(const uint32_t& aStartIndex, InfallibleTArray<float>* intervals) override  { return IPC_OK(); }
 
   mozilla::ipc::IPCResult RecvCheckContentOnlyTDR(const uint32_t& sequenceNum, bool* isContentOnlyTDR) override;
+
+  mozilla::ipc::IPCResult RecvClearApproximatelyVisibleRegions(const uint64_t& aLayersId,
+                                                               const uint32_t& aPresShellId) override;
+
+  mozilla::ipc::IPCResult RecvNotifyApproximatelyVisibleRegion(const ScrollableLayerGuid& aGuid,
+                                                               const CSSIntRegion& aRegion) override;
 
   mozilla::ipc::IPCResult RecvAllPluginsCaptured() override { return IPC_OK(); }
 
@@ -76,7 +82,7 @@ public:
 
   PLayerTransactionParent* AllocPLayerTransactionParent(
       const nsTArray<LayersBackend>& aBackendHints,
-      const LayersId& aId) override;
+      const uint64_t& aId) override;
 
   bool DeallocPLayerTransactionParent(PLayerTransactionParent* aLayers) override;
 
@@ -85,20 +91,20 @@ public:
                            bool aHitTestUpdate) override;
   void ScheduleComposite(LayerTransactionParent* aLayerTree) override;
   void NotifyClearCachedResources(LayerTransactionParent* aLayerTree) override;
-  bool SetTestSampleTime(const LayersId& aId,
+  bool SetTestSampleTime(const uint64_t& aId,
                          const TimeStamp& aTime) override;
-  void LeaveTestMode(const LayersId& aId) override;
+  void LeaveTestMode(const uint64_t& aId) override;
   void ApplyAsyncProperties(LayerTransactionParent* aLayerTree) override;
-  void SetTestAsyncScrollOffset(const LayersId& aLayersId,
+  void SetTestAsyncScrollOffset(const uint64_t& aLayersId,
                                 const FrameMetrics::ViewID& aScrollId,
                                 const CSSPoint& aPoint) override;
-  void SetTestAsyncZoom(const LayersId& aLayersId,
+  void SetTestAsyncZoom(const uint64_t& aLayersId,
                         const FrameMetrics::ViewID& aScrollId,
                         const LayerToParentLayerScale& aZoom) override;
-  void FlushApzRepaints(const LayersId& aLayersId) override;
-  void GetAPZTestData(const LayersId& aLayersId,
+  void FlushApzRepaints(const uint64_t& aLayersId) override;
+  void GetAPZTestData(const uint64_t& aLayersId,
                       APZTestData* aOutData) override;
-  void SetConfirmedTargetAPZC(const LayersId& aLayersId,
+  void SetConfirmedTargetAPZC(const uint64_t& aLayersId,
                               const uint64_t& aInputBlockId,
                               const nsTArray<ScrollableLayerGuid>& aTargets) override;
 
@@ -108,10 +114,10 @@ public:
   // Use DidCompositeLocked if you already hold a lock on
   // sIndirectLayerTreesLock; Otherwise use DidComposite, which would request
   // the lock automatically.
-  void DidCompositeLocked(LayersId aId,
+  void DidCompositeLocked(uint64_t aId,
                                   TimeStamp& aCompositeStart,
                                   TimeStamp& aCompositeEnd);
-  void DidComposite(LayersId aId,
+  void DidComposite(uint64_t aId,
                     TimeStamp& aCompositeStart,
                     TimeStamp& aCompositeEnd) override;
 
@@ -119,7 +125,7 @@ public:
                                       const ReadLockDescriptor& aReadLock,
                                       const LayersBackend& aLayersBackend,
                                       const TextureFlags& aFlags,
-                                      const LayersId& aId,
+                                      const uint64_t& aId,
                                       const uint64_t& aSerial,
                                       const wr::MaybeExternalImageId& aExternalImageId) override;
 
@@ -136,10 +142,10 @@ public:
     return false;
   }
 
-  PAPZCTreeManagerParent* AllocPAPZCTreeManagerParent(const LayersId& aLayersId) override;
+  PAPZCTreeManagerParent* AllocPAPZCTreeManagerParent(const uint64_t& aLayersId) override;
   bool DeallocPAPZCTreeManagerParent(PAPZCTreeManagerParent* aActor) override;
 
-  PAPZParent* AllocPAPZParent(const LayersId& aLayersId) override;
+  PAPZParent* AllocPAPZParent(const uint64_t& aLayersId) override;
   bool DeallocPAPZParent(PAPZParent* aActor) override;
 
   void UpdatePaintTime(LayerTransactionParent* aLayerTree, const TimeDuration& aPaintTime) override;
@@ -150,7 +156,7 @@ public:
                                                       wr::IdNamespace* aIdNamespace) override;
   bool DeallocPWebRenderBridgeParent(PWebRenderBridgeParent* aActor) override;
 
-  void ObserveLayerUpdate(LayersId aLayersId, uint64_t aEpoch, bool aActive) override;
+  void ObserveLayerUpdate(uint64_t aLayersId, uint64_t aEpoch, bool aActive) override;
 
   bool IsRemote() const override {
     return true;

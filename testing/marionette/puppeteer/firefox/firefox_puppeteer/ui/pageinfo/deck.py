@@ -190,6 +190,14 @@ class SecurityPanel(PageInfoPanel):
         return self.element.find_element(By.ID, 'security-view-cert')
 
     @property
+    def view_cookies(self):
+        """The DOM element which represents the view cookies button.
+
+        :returns: Reference to the button element.
+        """
+        return self.element.find_element(By.ID, 'security-view-cookies')
+
+    @property
     def view_passwords(self):
         """The DOM element which represents the view passwords button.
 

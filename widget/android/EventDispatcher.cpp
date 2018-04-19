@@ -561,7 +561,7 @@ UnboxData(jni::String::Param aEvent, JSContext* aCx, jni::Object::Param aData,
 
 class JavaCallbackDelegate final : public nsIAndroidEventCallback
 {
-    const java::EventCallback::GlobalRef mCallback;
+    java::EventCallback::GlobalRef mCallback;
 
     virtual ~JavaCallbackDelegate() {}
 
@@ -583,7 +583,7 @@ class JavaCallbackDelegate final : public nsIAndroidEventCallback
     }
 
 public:
-    explicit JavaCallbackDelegate(java::EventCallback::Param aCallback)
+    JavaCallbackDelegate(java::EventCallback::Param aCallback)
         : mCallback(jni::GetGeckoThreadEnv(), aCallback)
     {}
 
@@ -610,7 +610,6 @@ class NativeCallbackDelegateSupport final :
     using Base = CallbackDelegate::Natives<NativeCallbackDelegateSupport>;
 
     const nsCOMPtr<nsIAndroidEventCallback> mCallback;
-    const nsCOMPtr<nsIAndroidEventFinalizer> mFinalizer;
     const nsCOMPtr<nsPIDOMWindowOuter> mWindow;
 
     void Call(jni::Object::Param aData,
@@ -660,19 +659,10 @@ public:
     }
 
     NativeCallbackDelegateSupport(nsIAndroidEventCallback* callback,
-                                  nsIAndroidEventFinalizer* finalizer,
                                   nsPIDOMWindowOuter* domWindow)
         : mCallback(callback)
-        , mFinalizer(finalizer)
         , mWindow(domWindow)
     {}
-
-    ~NativeCallbackDelegateSupport()
-    {
-        if (mFinalizer) {
-            mFinalizer->OnFinalize();
-        }
-    }
 
     void SendSuccess(jni::Object::Param aData)
     {
@@ -684,31 +674,6 @@ public:
         Call(aData, &nsIAndroidEventCallback::OnError);
     }
 };
-
-class FinalizingCallbackDelegate final : public nsIAndroidEventCallback
-{
-    const nsCOMPtr<nsIAndroidEventCallback> mCallback;
-    const nsCOMPtr<nsIAndroidEventFinalizer> mFinalizer;
-
-    virtual ~FinalizingCallbackDelegate()
-    {
-        if (mFinalizer) {
-            mFinalizer->OnFinalize();
-        }
-    }
-
-public:
-    FinalizingCallbackDelegate(nsIAndroidEventCallback* aCallback,
-                               nsIAndroidEventFinalizer* aFinalizer)
-        : mCallback(aCallback)
-        , mFinalizer(aFinalizer)
-    {}
-
-    NS_DECL_ISUPPORTS
-    NS_FORWARD_NSIANDROIDEVENTCALLBACK(mCallback->);
-};
-
-NS_IMPL_ISUPPORTS(FinalizingCallbackDelegate, nsIAndroidEventCallback)
 
 } // namespace detail
 
@@ -755,27 +720,24 @@ EventDispatcher::DispatchOnGecko(ListenersList* list, const nsAString& aEvent,
 }
 
 java::EventDispatcher::NativeCallbackDelegate::LocalRef
-EventDispatcher::WrapCallback(nsIAndroidEventCallback* aCallback,
-                              nsIAndroidEventFinalizer* aFinalizer)
+EventDispatcher::WrapCallback(nsIAndroidEventCallback* aCallback)
 {
-    if (!aCallback) {
-        return java::EventDispatcher::NativeCallbackDelegate::LocalRef(
-                jni::GetGeckoThreadEnv());
-    }
-
     java::EventDispatcher::NativeCallbackDelegate::LocalRef
-            callback = java::EventDispatcher::NativeCallbackDelegate::New();
-    NativeCallbackDelegateSupport::AttachNative(
-            callback,
-            MakeUnique<NativeCallbackDelegateSupport>(
-                    aCallback, aFinalizer, mDOMWindow));
+            callback(jni::GetGeckoThreadEnv());
+
+    if (aCallback) {
+        callback = java::EventDispatcher::NativeCallbackDelegate::New();
+        NativeCallbackDelegateSupport::AttachNative(
+                callback,
+                MakeUnique<NativeCallbackDelegateSupport>(
+                        aCallback, mDOMWindow));
+    }
     return callback;
 }
 
 NS_IMETHODIMP
 EventDispatcher::Dispatch(JS::HandleValue aEvent, JS::HandleValue aData,
-                          nsIAndroidEventCallback* aCallback,
-                          nsIAndroidEventFinalizer* aFinalizer, JSContext* aCx)
+                          nsIAndroidEventCallback* aCallback, JSContext* aCx)
 {
     MOZ_ASSERT(NS_IsMainThread());
 
@@ -793,12 +755,7 @@ EventDispatcher::Dispatch(JS::HandleValue aEvent, JS::HandleValue aData,
 
     ListenersList* list = mListenersMap.Get(event);
     if (list) {
-        if (!aCallback || !aFinalizer) {
-            return DispatchOnGecko(list, event, aData, aCallback);
-        }
-        nsCOMPtr<nsIAndroidEventCallback> callback(
-                new FinalizingCallbackDelegate(aCallback, aFinalizer));
-        return DispatchOnGecko(list, event, aData, callback);
+        return DispatchOnGecko(list, event, aData, aCallback);
     }
 
     if (!mDispatcher) {
@@ -810,8 +767,7 @@ EventDispatcher::Dispatch(JS::HandleValue aEvent, JS::HandleValue aData,
     NS_ENSURE_SUCCESS(rv, JS_IsExceptionPending(aCx) ? NS_OK : rv);
 
     dom::AutoNoJSAPI nojsapi;
-    mDispatcher->DispatchToThreads(event, data,
-                                   WrapCallback(aCallback, aFinalizer));
+    mDispatcher->DispatchToThreads(event, data, WrapCallback(aCallback));
     return NS_OK;
 }
 

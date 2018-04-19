@@ -28,11 +28,11 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/SharedThreadPool.h"
 #include "mozilla/StaticPtr.h"
-#include "mozilla/StaticPrefs.h"
 #include "mozilla/SyncRunnable.h"
 #include "mozilla/TaskQueue.h"
 
 #include "MediaInfo.h"
+#include "MediaPrefs.h"
 #include "H264Converter.h"
 
 #include "AgnosticDecoderModule.h"
@@ -333,7 +333,7 @@ PDMFactory::CreatePDMs()
 {
   RefPtr<PlatformDecoderModule> m;
 
-  if (StaticPrefs::MediaUseBlankDecoder()) {
+  if (MediaPrefs::PDMUseBlankDecoder()) {
     m = CreateBlankDecoderModule();
     StartupPDM(m);
     // The Blank PDM SupportsMimeType reports true for all codecs; the creation
@@ -343,24 +343,23 @@ PDMFactory::CreatePDMs()
   }
 
 #ifdef XP_WIN
-  if (StaticPrefs::MediaWmfEnabled() && !IsWin7AndPre2000Compatible()) {
+  if (MediaPrefs::PDMWMFEnabled() && !IsWin7AndPre2000Compatible()) {
     m = new WMFDecoderModule();
     RefPtr<PlatformDecoderModule> remote = new dom::RemoteDecoderModule(m);
     StartupPDM(remote);
     mWMFFailedToLoad = !StartupPDM(m);
   } else {
-    mWMFFailedToLoad =
-      StaticPrefs::MediaDecoderDoctorWmfDisabledIsFailure();
+    mWMFFailedToLoad = MediaPrefs::DecoderDoctorWMFDisabledIsFailure();
   }
 #endif
 #ifdef MOZ_FFVPX
-  if (StaticPrefs::MediaFfvpxEnabled()) {
+  if (MediaPrefs::PDMFFVPXEnabled()) {
     m = FFVPXRuntimeLinker::CreateDecoderModule();
     StartupPDM(m);
   }
 #endif
 #ifdef MOZ_FFMPEG
-  if (StaticPrefs::MediaFfmpegEnabled()) {
+  if (MediaPrefs::PDMFFmpegEnabled()) {
     m = FFmpegRuntimeLinker::CreateDecoderModule();
     mFFmpegFailedToLoad = !StartupPDM(m);
   } else {
@@ -372,16 +371,16 @@ PDMFactory::CreatePDMs()
   StartupPDM(m);
 #endif
 #ifdef MOZ_WIDGET_ANDROID
-  if (StaticPrefs::MediaAndroidMediaCodecEnabled()) {
+  if(MediaPrefs::PDMAndroidMediaCodecEnabled()){
     m = new AndroidDecoderModule();
-    StartupPDM(m, StaticPrefs::MediaAndroidMediaCodecPreferred());
+    StartupPDM(m, MediaPrefs::PDMAndroidMediaCodecPreferred());
   }
 #endif
 
   m = new AgnosticDecoderModule();
   StartupPDM(m);
 
-  if (StaticPrefs::MediaGmpDecoderEnabled()) {
+  if (MediaPrefs::PDMGMPEnabled()) {
     m = new GMPDecoderModule();
     mGMPPDMFailedToStartup = !StartupPDM(m);
   } else {

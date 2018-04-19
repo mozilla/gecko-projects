@@ -14,6 +14,7 @@
 
 #include "mozilla/GenericSpecifiedValues.h"
 #include "mozilla/ServoBindingTypes.h"
+#include "nsStyleStruct.h"
 
 namespace mozilla {
 
@@ -21,7 +22,7 @@ class ServoSpecifiedValues final : public GenericSpecifiedValues
 {
 public:
   ServoSpecifiedValues(nsIDocument* aDocument, RawServoDeclarationBlock* aDecl)
-    : GenericSpecifiedValues(aDocument)
+    : GenericSpecifiedValues(StyleBackendType::Servo, aDocument, NS_STYLE_INHERIT_MASK)
     , mDecl(aDecl)
   {}
 

@@ -5,9 +5,9 @@
 //! Gecko-specific bits for the styling DOM traversal.
 
 use context::{SharedStyleContext, StyleContext};
-use dom::{TElement, TNode};
+use dom::{TNode, TElement};
 use gecko::wrapper::{GeckoElement, GeckoNode};
-use traversal::{recalc_style_at, DomTraversal, PerLevelTraversalData};
+use traversal::{DomTraversal, PerLevelTraversalData, recalc_style_at};
 
 /// This is the simple struct that Gecko uses to encapsulate a DOM traversal for
 /// styling.
@@ -18,19 +18,19 @@ pub struct RecalcStyleOnly<'a> {
 impl<'a> RecalcStyleOnly<'a> {
     /// Create a `RecalcStyleOnly` traversal from a `SharedStyleContext`.
     pub fn new(shared: SharedStyleContext<'a>) -> Self {
-        RecalcStyleOnly { shared: shared }
+        RecalcStyleOnly {
+            shared: shared,
+        }
     }
 }
 
 impl<'recalc, 'le> DomTraversal<GeckoElement<'le>> for RecalcStyleOnly<'recalc> {
-    fn process_preorder<F>(
-        &self,
-        traversal_data: &PerLevelTraversalData,
-        context: &mut StyleContext<GeckoElement<'le>>,
-        node: GeckoNode<'le>,
-        note_child: F,
-    ) where
-        F: FnMut(GeckoNode<'le>),
+    fn process_preorder<F>(&self,
+                           traversal_data: &PerLevelTraversalData,
+                           context: &mut StyleContext<GeckoElement<'le>>,
+                           node: GeckoNode<'le>,
+                           note_child: F)
+        where F: FnMut(GeckoNode<'le>),
     {
         if let Some(el) = node.as_element() {
             let mut data = unsafe { el.ensure_data() };
@@ -43,9 +43,7 @@ impl<'recalc, 'le> DomTraversal<GeckoElement<'le>> for RecalcStyleOnly<'recalc> 
     }
 
     /// We don't use the post-order traversal for anything.
-    fn needs_postorder_traversal() -> bool {
-        false
-    }
+    fn needs_postorder_traversal() -> bool { false }
 
     fn shared_context(&self) -> &SharedStyleContext {
         &self.shared

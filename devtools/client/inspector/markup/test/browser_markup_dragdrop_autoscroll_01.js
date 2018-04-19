@@ -9,12 +9,12 @@
 
 const TEST_URL = URL_ROOT + "doc_markup_dragdrop_autoscroll_01.html";
 
-add_task(async function() {
+add_task(function* () {
   // Set the toolbox as large as it would get. The toolbox automatically shrinks
   // to not overflow to window.
-  await pushPref("devtools.toolbox.footer.height", 10000);
+  yield pushPref("devtools.toolbox.footer.height", 10000);
 
-  let {inspector} = await openInspectorForURL(TEST_URL);
+  let {inspector} = yield openInspectorForURL(TEST_URL);
   let markup = inspector.markup;
   let viewHeight = markup.doc.documentElement.clientHeight;
 
@@ -22,6 +22,7 @@ add_task(async function() {
   markup.isDragging = true;
 
   info("Simulate a mousemove on the view, at the bottom, and expect scrolling");
+  let onScrolled = waitForScrollStop(markup.doc);
 
   markup._onMouseMove({
     preventDefault: () => {},
@@ -29,10 +30,11 @@ add_task(async function() {
     pageY: viewHeight + markup.doc.defaultView.scrollY
   });
 
-  let bottomScrollPos = await waitForScrollStop(markup.doc);
+  let bottomScrollPos = yield onScrolled;
   ok(bottomScrollPos > 0, "The view was scrolled down");
 
   info("Simulate a mousemove at the top and expect more scrolling");
+  onScrolled = waitForScrollStop(markup.doc);
 
   markup._onMouseMove({
     preventDefault: () => {},
@@ -40,7 +42,7 @@ add_task(async function() {
     pageY: markup.doc.defaultView.scrollY
   });
 
-  let topScrollPos = await waitForScrollStop(markup.doc);
+  let topScrollPos = yield onScrolled;
   ok(topScrollPos < bottomScrollPos, "The view was scrolled up");
   is(topScrollPos, 0, "The view was scrolled up to the top");
 

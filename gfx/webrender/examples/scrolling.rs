@@ -33,7 +33,6 @@ impl Example for App {
         );
         builder.push_stacking_context(
             &info,
-            None,
             ScrollPolicy::Scrollable,
             None,
             TransformStyle::Flat,
@@ -48,7 +47,6 @@ impl Example for App {
             let scrollbox = (0, 0).to(300, 400);
             builder.push_stacking_context(
                 &LayoutPrimitiveInfo::new((10, 10).by(0, 0)),
-                None,
                 ScrollPolicy::Scrollable,
                 None,
                 TransformStyle::Flat,
@@ -165,6 +163,7 @@ impl Example for App {
                 txn.scroll(
                     ScrollLocation::Delta(LayoutVector2D::new(offset.0, offset.1)),
                     self.cursor_position,
+                    ScrollEventPhase::Start,
                 );
             }
             glutin::WindowEvent::CursorMoved { position: (x, y), .. } => {
@@ -180,6 +179,7 @@ impl Example for App {
                 txn.scroll(
                     ScrollLocation::Delta(LayoutVector2D::new(dx, dy)),
                     self.cursor_position,
+                    ScrollEventPhase::Start,
                 );
             }
             glutin::WindowEvent::MouseInput { .. } => {

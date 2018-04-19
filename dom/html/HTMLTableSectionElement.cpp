@@ -165,11 +165,13 @@ void
 HTMLTableSectionElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
                                                GenericSpecifiedValues* aData)
 {
-  // height: value
-  if (!aData->PropertyIsSet(eCSSProperty_height)) {
-    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::height);
-    if (value && value->Type() == nsAttrValue::eInteger)
-      aData->SetPixelValue(eCSSProperty_height, (float)value->GetIntegerValue());
+  if (aData->ShouldComputeStyleStruct(NS_STYLE_INHERIT_BIT(Position))) {
+    // height: value
+    if (!aData->PropertyIsSet(eCSSProperty_height)) {
+      const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::height);
+      if (value && value->Type() == nsAttrValue::eInteger)
+        aData->SetPixelValue(eCSSProperty_height, (float)value->GetIntegerValue());
+    }
   }
   nsGenericHTMLElement::MapDivAlignAttributeInto(aAttributes, aData);
   nsGenericHTMLElement::MapVAlignAttributeInto(aAttributes, aData);

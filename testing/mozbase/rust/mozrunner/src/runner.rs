@@ -137,21 +137,14 @@ impl RunnerProcess for FirefoxProcess {
     }
 
     fn wait(&mut self, timeout: time::Duration) -> io::Result<process::ExitStatus> {
-        let start = time::Instant::now();
-        loop {
-            match self.try_wait() {
-                // child has already exited, reap its exit code
-                Ok(Some(status)) => return Ok(status),
-
-                // child still running and timeout elapsed, kill it
-                Ok(None) if start.elapsed() >= timeout => return self.kill(),
-
-                // child still running, let's give it more time
-                Ok(None) => thread::sleep(time::Duration::from_millis(100)),
-
-                Err(e) => return Err(e),
+        let now = time::Instant::now();
+        while self.running() {
+            if now.elapsed() >= timeout {
+                break;
             }
+            thread::sleep(time::Duration::from_millis(100));
         }
+        self.kill()
     }
 
     fn running(&mut self) -> bool {
@@ -159,7 +152,6 @@ impl RunnerProcess for FirefoxProcess {
     }
 
     fn kill(&mut self) -> io::Result<process::ExitStatus> {
-        debug!("Killing process {}", self.process.id());
         self.process.kill()?;
         self.process.wait()
     }

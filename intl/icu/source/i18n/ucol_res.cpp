@@ -451,7 +451,6 @@ CollationLoader::loadFromData(UErrorCode &errorCode) {
     const CollationCacheEntry *entry = new CollationCacheEntry(validLocale, t.getAlias());
     if(entry == NULL) {
         errorCode = U_MEMORY_ALLOCATION_ERROR;
-        return nullptr;
     } else {
         t.orphan();
     }

@@ -8,10 +8,11 @@
 const { require, DevToolsLoader } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
 const Services = require("Services");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
+const flags = require("devtools/shared/flags");
 
-Services.prefs.setBoolPref("devtools.testing", true);
+flags.testing = true;
 registerCleanupFunction(() => {
-  Services.prefs.clearUserPref("devtools.testing");
+  flags.testing = false;
 });
 
 // Register a console listener, so console messages don't just disappear
@@ -22,7 +23,7 @@ registerCleanupFunction(() => {
 var ALLOW_CONSOLE_ERRORS = false;
 
 var listener = {
-  observe: function(message) {
+  observe: function (message) {
     let string;
     try {
       message.QueryInterface(Ci.nsIScriptError);

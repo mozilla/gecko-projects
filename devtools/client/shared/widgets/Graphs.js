@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
+const { Task } = require("devtools/shared/task");
 const { setNamedTimeout } = require("devtools/client/shared/widgets/view-helpers");
 const { getCurrentZoom } = require("devtools/shared/layout/utils");
 
@@ -41,22 +42,22 @@ const GRAPH_STRIPE_PATTERN_LINE_SPACING = 4; // px
 /**
  * Small data primitives for all graphs.
  */
-this.GraphCursor = function() {
+this.GraphCursor = function () {
   this.x = null;
   this.y = null;
 };
 
-this.GraphArea = function() {
+this.GraphArea = function () {
   this.start = null;
   this.end = null;
 };
 
-this.GraphAreaDragger = function(anchor = new GraphArea()) {
+this.GraphAreaDragger = function (anchor = new GraphArea()) {
   this.origin = null;
   this.anchor = anchor;
 };
 
-this.GraphAreaResizer = function() {
+this.GraphAreaResizer = function () {
   this.margin = null;
 };
 
@@ -90,7 +91,7 @@ this.GraphAreaResizer = function() {
  * @param number sharpness [optional]
  *        Defaults to the current device pixel ratio.
  */
-this.AbstractCanvasGraph = function(parent, name, sharpness) {
+this.AbstractCanvasGraph = function (parent, name, sharpness) {
   EventEmitter.decorate(this);
 
   this._parent = parent;
@@ -178,15 +179,15 @@ AbstractCanvasGraph.prototype = {
   /**
    * Returns a promise resolved once this graph is ready to receive data.
    */
-  ready: function() {
+  ready: function () {
     return this._ready.promise;
   },
 
   /**
    * Destroys this graph.
    */
-  async destroy() {
-    await this.ready();
+  destroy: Task.async(function* () {
+    yield this.ready();
 
     this._topWindow.removeEventListener("mousemove", this._onMouseMove);
     this._topWindow.removeEventListener("mouseup", this._onMouseUp);
@@ -220,7 +221,7 @@ AbstractCanvasGraph.prototype = {
     gCachedStripePattern.clear();
 
     this.emit("destroyed");
-  },
+  }),
 
   /**
    * Rendering options. Subclasses should override these.
@@ -245,7 +246,7 @@ AbstractCanvasGraph.prototype = {
    * Optionally builds and caches a background image for this graph.
    * Inheriting classes may override this method.
    */
-  buildBackgroundImage: function() {
+  buildBackgroundImage: function () {
     return null;
   },
 
@@ -254,7 +255,7 @@ AbstractCanvasGraph.prototype = {
    * in `setData`. The graph image is not rebuilt on each frame, but
    * only when the data source changes.
    */
-  buildGraphImage: function() {
+  buildGraphImage: function () {
     let error = "This method needs to be implemented by inheriting classes.";
     throw new Error(error);
   },
@@ -264,7 +265,7 @@ AbstractCanvasGraph.prototype = {
    * over the data image created via `buildGraphImage`. Inheriting classes
    * may override this method.
    */
-  buildMaskImage: function() {
+  buildMaskImage: function () {
     return null;
   },
 
@@ -281,7 +282,7 @@ AbstractCanvasGraph.prototype = {
    * @param object data
    *        The data source. The actual format is specified by subclasses.
    */
-  setData: function(data) {
+  setData: function (data) {
     this._data = data;
     this._cachedBackgroundImage = this.buildBackgroundImage();
     this._cachedGraphImage = this.buildGraphImage();
@@ -296,10 +297,10 @@ AbstractCanvasGraph.prototype = {
    * @return promise
    *         A promise resolved once the data is set.
    */
-  async setDataWhenReady(data) {
-    await this.ready();
+  setDataWhenReady: Task.async(function* (data) {
+    yield this.ready();
     this.setData(data);
-  },
+  }),
 
   /**
    * Adds a mask to this graph.
@@ -307,7 +308,7 @@ AbstractCanvasGraph.prototype = {
    * @param any mask, options
    *        See `buildMaskImage` in inheriting classes for the required args.
    */
-  setMask: function(mask, ...options) {
+  setMask: function (mask, ...options) {
     this._mask = mask;
     this._maskArgs = [mask, ...options];
     this._cachedMaskImage = this.buildMaskImage.apply(this, this._maskArgs);
@@ -323,7 +324,7 @@ AbstractCanvasGraph.prototype = {
    * @param array regions
    *        A list of { start, end } values.
    */
-  setRegions: function(regions) {
+  setRegions: function (regions) {
     if (!this._cachedGraphImage) {
       throw new Error("Can't highlight regions on a graph with " +
                       "no data displayed.");
@@ -343,7 +344,7 @@ AbstractCanvasGraph.prototype = {
    * Gets whether or not this graph has a data source.
    * @return boolean
    */
-  hasData: function() {
+  hasData: function () {
     return !!this._data;
   },
 
@@ -351,7 +352,7 @@ AbstractCanvasGraph.prototype = {
    * Gets whether or not this graph has any mask applied.
    * @return boolean
    */
-  hasMask: function() {
+  hasMask: function () {
     return !!this._mask;
   },
 
@@ -359,7 +360,7 @@ AbstractCanvasGraph.prototype = {
    * Gets whether or not this graph has any regions.
    * @return boolean
    */
-  hasRegions: function() {
+  hasRegions: function () {
     return !!this._regions;
   },
 
@@ -375,7 +376,7 @@ AbstractCanvasGraph.prototype = {
    * @param object selection
    *        The selection's { start, end } values.
    */
-  setSelection: function(selection) {
+  setSelection: function (selection) {
     if (!selection || selection.start == null || selection.end == null) {
       throw new Error("Invalid selection coordinates");
     }
@@ -395,7 +396,7 @@ AbstractCanvasGraph.prototype = {
    * @return object
    *         The selection's { start, end } values.
    */
-  getSelection: function() {
+  getSelection: function () {
     if (this.hasSelection()) {
       return { start: this._selection.start, end: this._selection.end };
     }
@@ -415,7 +416,7 @@ AbstractCanvasGraph.prototype = {
    *        Invoked when retrieving the numbers in the data source representing
    *        the first and last values, on the X axis.
    */
-  setMappedSelection: function(selection, mapping = {}) {
+  setMappedSelection: function (selection, mapping = {}) {
     if (!this.hasData()) {
       throw new Error("A data source is necessary for retrieving " +
                       "a mapped selection.");
@@ -448,7 +449,7 @@ AbstractCanvasGraph.prototype = {
    * @return object
    *         The mapped selection's { min, max } values.
    */
-  getMappedSelection: function(mapping = {}) {
+  getMappedSelection: function (mapping = {}) {
     if (!this.hasData()) {
       throw new Error("A data source is necessary for retrieving a " +
                       "mapped selection.");
@@ -476,7 +477,7 @@ AbstractCanvasGraph.prototype = {
   /**
    * Removes the selection.
    */
-  dropSelection: function() {
+  dropSelection: function () {
     if (!this.hasSelection() && !this.hasSelectionInProgress()) {
       return;
     }
@@ -490,7 +491,7 @@ AbstractCanvasGraph.prototype = {
    * Gets whether or not this graph has a selection.
    * @return boolean
    */
-  hasSelection: function() {
+  hasSelection: function () {
     return this._selection &&
       this._selection.start != null && this._selection.end != null;
   },
@@ -500,7 +501,7 @@ AbstractCanvasGraph.prototype = {
    * via a click+drag operation.
    * @return boolean
    */
-  hasSelectionInProgress: function() {
+  hasSelectionInProgress: function () {
     return this._selection &&
       this._selection.start != null && this._selection.end == null;
   },
@@ -518,7 +519,7 @@ AbstractCanvasGraph.prototype = {
    * @param object cursor
    *        The cursor's { x, y } position.
    */
-  setCursor: function(cursor) {
+  setCursor: function (cursor) {
     if (!cursor || cursor.x == null || cursor.y == null) {
       throw new Error("Invalid cursor coordinates");
     }
@@ -537,14 +538,14 @@ AbstractCanvasGraph.prototype = {
    * @return object
    *         The cursor's { x, y } values.
    */
-  getCursor: function() {
+  getCursor: function () {
     return { x: this._cursor.x, y: this._cursor.y };
   },
 
   /**
    * Hides the cursor.
    */
-  dropCursor: function() {
+  dropCursor: function () {
     if (!this.hasCursor()) {
       return;
     }
@@ -557,7 +558,7 @@ AbstractCanvasGraph.prototype = {
    * Gets whether or not this graph has a visible cursor.
    * @return boolean
    */
-  hasCursor: function() {
+  hasCursor: function () {
     return this._cursor && this._cursor.x != null;
   },
 
@@ -567,7 +568,7 @@ AbstractCanvasGraph.prototype = {
    * @param object other
    *        The other graph's selection, as { start, end } values.
    */
-  isSelectionDifferent: function(other) {
+  isSelectionDifferent: function (other) {
     if (!other) {
       return true;
     }
@@ -581,7 +582,7 @@ AbstractCanvasGraph.prototype = {
    * @param object other
    *        The other graph's position, as { x, y } values.
    */
-  isCursorDifferent: function(other) {
+  isCursorDifferent: function (other) {
     if (!other) {
       return true;
     }
@@ -596,7 +597,7 @@ AbstractCanvasGraph.prototype = {
    * @return number
    *         The selection width.
    */
-  getSelectionWidth: function() {
+  getSelectionWidth: function () {
     let selection = this.getSelection();
     return Math.abs(selection.start - selection.end);
   },
@@ -608,7 +609,7 @@ AbstractCanvasGraph.prototype = {
    * @return object
    *         The hovered region, as { start, end } values.
    */
-  getHoveredRegion: function() {
+  getHoveredRegion: function () {
     if (!this.hasRegions() || !this.hasCursor()) {
       return null;
     }
@@ -624,7 +625,7 @@ AbstractCanvasGraph.prototype = {
    * @param boolean options.force
    *        Force redrawing everything
    */
-  refresh: function(options = {}) {
+  refresh: function (options = {}) {
     let bounds = this._parent.getBoundingClientRect();
     let newWidth = this.fixedWidth || bounds.width;
     let newHeight = this.fixedHeight || bounds.height;
@@ -679,7 +680,7 @@ AbstractCanvasGraph.prototype = {
    *        A custom width and height for the canvas. Defaults to this graph's
    *        container canvas width and height.
    */
-  _getNamedCanvas: function(name, width = this._width, height = this._height) {
+  _getNamedCanvas: function (name, width = this._width, height = this._height) {
     let cachedRenderTarget = this._renderTargets.get(name);
     if (cachedRenderTarget) {
       let { canvas, ctx } = cachedRenderTarget;
@@ -709,7 +710,7 @@ AbstractCanvasGraph.prototype = {
   /**
    * Animation frame callback, invoked on each tick of the refresh driver.
    */
-  _onAnimationFrame: function() {
+  _onAnimationFrame: function () {
     this._animationId =
       this._window.requestAnimationFrame(this._onAnimationFrame);
     this._drawWidget();
@@ -719,7 +720,7 @@ AbstractCanvasGraph.prototype = {
    * Redraws the widget when necessary. The actual graph is not refreshed
    * every time this function is called, only the cliphead, selection etc.
    */
-  _drawWidget: function() {
+  _drawWidget: function () {
     if (!this._shouldRedraw) {
       return;
     }
@@ -757,7 +758,7 @@ AbstractCanvasGraph.prototype = {
   /**
    * Draws the cliphead, if available and necessary.
    */
-  _drawCliphead: function() {
+  _drawCliphead: function () {
     if (this._isHoveringSelectionContentsOrBoundaries() ||
         this._isHoveringRegion()) {
       return;
@@ -775,7 +776,7 @@ AbstractCanvasGraph.prototype = {
   /**
    * Draws the selection, if available and necessary.
    */
-  _drawSelection: function() {
+  _drawSelection: function () {
     let { start, end } = this.getSelection();
     let input = this._canvas.getAttribute("input");
 
@@ -823,7 +824,7 @@ AbstractCanvasGraph.prototype = {
    * Draws regions into the cached graph image, created via `buildGraphImage`.
    * Called when new regions are set.
    */
-  _bakeRegions: function(regions, destination) {
+  _bakeRegions: function (regions, destination) {
     let ctx = destination.getContext("2d");
 
     let pattern = AbstractCanvasGraph.getStripePattern({
@@ -850,7 +851,7 @@ AbstractCanvasGraph.prototype = {
    * Checks whether the start handle of the selection is hovered.
    * @return boolean
    */
-  _isHoveringStartBoundary: function() {
+  _isHoveringStartBoundary: function () {
     if (!this.hasSelection() || !this.hasCursor()) {
       return false;
     }
@@ -864,7 +865,7 @@ AbstractCanvasGraph.prototype = {
    * Checks whether the end handle of the selection is hovered.
    * @return boolean
    */
-  _isHoveringEndBoundary: function() {
+  _isHoveringEndBoundary: function () {
     if (!this.hasSelection() || !this.hasCursor()) {
       return false;
     }
@@ -878,7 +879,7 @@ AbstractCanvasGraph.prototype = {
    * Checks whether the selection is hovered.
    * @return boolean
    */
-  _isHoveringSelectionContents: function() {
+  _isHoveringSelectionContents: function () {
     if (!this.hasSelection() || !this.hasCursor()) {
       return false;
     }
@@ -892,7 +893,7 @@ AbstractCanvasGraph.prototype = {
    * Checks whether the selection or its handles are hovered.
    * @return boolean
    */
-  _isHoveringSelectionContentsOrBoundaries: function() {
+  _isHoveringSelectionContentsOrBoundaries: function () {
     return this._isHoveringSelectionContents() ||
            this._isHoveringStartBoundary() ||
            this._isHoveringEndBoundary();
@@ -902,7 +903,7 @@ AbstractCanvasGraph.prototype = {
    * Checks whether a region is hovered.
    * @return boolean
    */
-  _isHoveringRegion: function() {
+  _isHoveringRegion: function () {
     return !!this.getHoveredRegion();
   },
 
@@ -910,7 +911,7 @@ AbstractCanvasGraph.prototype = {
    * Given a MouseEvent, make it relative to this._canvas.
    * @return object {mouseX,mouseY}
    */
-  _getRelativeEventCoordinates: function(e) {
+  _getRelativeEventCoordinates: function (e) {
     // For ease of testing, testX and testY can be passed in as the event
     // object.  If so, just return this.
     if ("testX" in e && "testY" in e) {
@@ -962,7 +963,7 @@ AbstractCanvasGraph.prototype = {
   /**
    * Listener for the "mousemove" event on the graph's container.
    */
-  _onMouseMove: function(e) {
+  _onMouseMove: function (e) {
     let resizer = this._selectionResizer;
     let dragger = this._selectionDragger;
 
@@ -1039,7 +1040,7 @@ AbstractCanvasGraph.prototype = {
   /**
    * Listener for the "mousedown" event on the graph's container.
    */
-  _onMouseDown: function(e) {
+  _onMouseDown: function (e) {
     this._isMouseActive = true;
     let {mouseX} = this._getRelativeEventCoordinates(e);
 
@@ -1082,7 +1083,7 @@ AbstractCanvasGraph.prototype = {
   /**
    * Listener for the "mouseup" event on the graph's container.
    */
-  _onMouseUp: function() {
+  _onMouseUp: function () {
     this._isMouseActive = false;
     switch (this._canvas.getAttribute("input")) {
       case "hovering-background":
@@ -1129,7 +1130,7 @@ AbstractCanvasGraph.prototype = {
   /**
    * Listener for the "wheel" event on the graph's container.
    */
-  _onMouseWheel: function(e) {
+  _onMouseWheel: function (e) {
     if (!this.hasSelection()) {
       return;
     }
@@ -1197,7 +1198,7 @@ AbstractCanvasGraph.prototype = {
    * Listener for the "mouseout" event on the graph's container.
    * Clear any active cursors if a drag isn't happening.
    */
-  _onMouseOut: function(e) {
+  _onMouseOut: function (e) {
     if (!this._isMouseActive) {
       this._cursor.x = null;
       this._cursor.y = null;
@@ -1209,7 +1210,7 @@ AbstractCanvasGraph.prototype = {
   /**
    * Listener for the "resize" event on the graph's parent node.
    */
-  _onResize: function() {
+  _onResize: function () {
     if (this.hasData()) {
       // The assumption is that resize events may change the outside world
       // layout in a way that affects this graph's bounding box location
@@ -1234,10 +1235,10 @@ AbstractCanvasGraph.prototype = {
  * @param function callback
  *        Invoked once the content is loaded, with the iframe as an argument.
  */
-AbstractCanvasGraph.createIframe = function(url, parent, callback) {
+AbstractCanvasGraph.createIframe = function (url, parent, callback) {
   let iframe = parent.ownerDocument.createElementNS(HTML_NS, "iframe");
 
-  iframe.addEventListener("DOMContentLoaded", function() {
+  iframe.addEventListener("DOMContentLoaded", function () {
     callback(iframe);
   }, {once: true});
 
@@ -1263,7 +1264,7 @@ AbstractCanvasGraph.createIframe = function(url, parent, callback) {
  * @return nsIDOMCanvasPattern
  *         The custom striped pattern.
  */
-AbstractCanvasGraph.getStripePattern = function(data) {
+AbstractCanvasGraph.getStripePattern = function (data) {
   let { ownerDocument, backgroundColor, stripesColor } = data;
   let id = [backgroundColor, stripesColor].join(",");
 
@@ -1315,12 +1316,12 @@ this.CanvasGraphUtils = {
   /**
    * Merges the animation loop of two graphs.
    */
-  async linkAnimation(graph1, graph2) {
+  linkAnimation: Task.async(function* (graph1, graph2) {
     if (!graph1 || !graph2) {
       return;
     }
-    await graph1.ready();
-    await graph2.ready();
+    yield graph1.ready();
+    yield graph2.ready();
 
     let window = graph1._window;
     window.cancelAnimationFrame(graph1._animationId);
@@ -1333,12 +1334,12 @@ this.CanvasGraphUtils = {
     };
 
     window.requestAnimationFrame(loop);
-  },
+  }),
 
   /**
    * Makes sure selections in one graph are reflected in another.
    */
-  linkSelection: function(graph1, graph2) {
+  linkSelection: function (graph1, graph2) {
     if (!graph1 || !graph2) {
       return;
     }
@@ -1373,7 +1374,7 @@ this.CanvasGraphUtils = {
    * @return object
    *         A promise that is resolved once the worker finishes the task.
    */
-  _performTaskInWorker: function(task, data) {
+  _performTaskInWorker: function (task, data) {
     let worker = this._graphUtilsWorker || new DevToolsWorker(WORKER_URL);
     return worker.performTask(task, data);
   }

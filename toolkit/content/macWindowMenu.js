@@ -21,7 +21,7 @@ function macWindowMenuDidShow() {
       if (win.windowState == window.STATE_MINIMIZED) {
         win.restore();
       }
-      win.focus();
+      win.document.commandDispatcher.focusedWindow.focus();
     });
     frag.appendChild(item);
   }

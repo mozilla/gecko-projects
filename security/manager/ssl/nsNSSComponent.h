@@ -79,10 +79,6 @@ public:
 
   NS_IMETHOD BlockUntilLoadableRootsLoaded() = 0;
   NS_IMETHOD CheckForSmartCardChanges() = 0;
-  // IssuerMatchesMitmCanary succeeds if aCertIssuer matches the canary and
-  // the feature is enabled. It returns an error if the strings don't match,
-  // the canary is not set, or the feature is disabled.
-  NS_IMETHOD IssuerMatchesMitmCanary(const char* aCertIssuer) = 0;
 
   // Main thread only
   NS_IMETHOD HasActiveSmartCards(bool& result) = 0;
@@ -135,7 +131,6 @@ public:
 
   NS_IMETHOD BlockUntilLoadableRootsLoaded() override;
   NS_IMETHOD CheckForSmartCardChanges() override;
-  NS_IMETHOD IssuerMatchesMitmCanary(const char* aCertIssuer) override;
 
   // Main thread only
   NS_IMETHOD HasActiveSmartCards(bool& result) override;
@@ -197,8 +192,6 @@ private:
 #endif
   nsString mContentSigningRootHash;
   RefPtr<mozilla::psm::SharedCertVerifier> mDefaultCertVerifier;
-  nsString mMitmCanaryIssuer;
-  bool mMitmDetecionEnabled;
 #ifdef XP_WIN
   mozilla::UniqueCERTCertificate mFamilySafetyRoot;
   mozilla::UniqueCERTCertList mEnterpriseRoots;
@@ -237,6 +230,9 @@ class nsNSSErrors
 public:
   static const char* getDefaultErrorStringName(PRErrorCode err);
   static const char* getOverrideErrorStringName(PRErrorCode aErrorCode);
+  static nsresult getErrorMessageFromCode(PRErrorCode err,
+                                          nsINSSComponent* component,
+                                          nsString& returnedMessage);
 };
 
 #endif // _nsNSSComponent_h_

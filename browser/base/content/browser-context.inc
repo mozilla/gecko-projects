@@ -446,10 +446,6 @@
                 label="&inspectContextMenu.label;"
                 accesskey="&inspectContextMenu.accesskey;"
                 oncommand="gContextMenu.inspectNode();"/>
-      <menuitem id="context-inspect-a11y"
-                hidden="true"
-                label="&inspectA11YContextMenu.label;"
-                oncommand="gContextMenu.inspectA11Y();"/>
       <menuseparator id="context-media-eme-separator" hidden="true"/>
       <menuitem id="context-media-eme-learnmore"
                 class="menuitem-iconic"

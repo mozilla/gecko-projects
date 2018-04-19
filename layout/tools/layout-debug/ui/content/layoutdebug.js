@@ -113,7 +113,7 @@ function OnLDBLoad()
   if (window.arguments && window.arguments[0])
     gBrowser.loadURI(window.arguments[0]);
   else
-    gBrowser.loadURI("about:blank");
+    gBrowser.goHome();
 
   gDebugger.init(gBrowser.contentWindow);
 

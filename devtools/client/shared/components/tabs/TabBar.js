@@ -11,11 +11,10 @@
 const { Component, createFactory } = require("devtools/client/shared/vendor/react");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
+const Tabs = createFactory(require("devtools/client/shared/components/tabs/Tabs").Tabs);
 
 const Menu = require("devtools/client/framework/menu");
 const MenuItem = require("devtools/client/framework/menu-item");
-
-const Sidebar = createFactory(require("devtools/client/shared/components/Sidebar"));
 
 // Shortcuts
 const { div } = dom;
@@ -32,16 +31,6 @@ class Tabbar extends Component {
       showAllTabsMenu: PropTypes.bool,
       activeTabId: PropTypes.string,
       renderOnlySelected: PropTypes.bool,
-      sidebarToggleButton: PropTypes.shape({
-        // Set to true if collapsed.
-        collapsed: PropTypes.bool.isRequired,
-        // Tooltip text used when the button indicates expanded state.
-        collapsePaneTitle: PropTypes.string.isRequired,
-        // Tooltip text used when the button indicates collapsed state.
-        expandPaneTitle: PropTypes.string.isRequired,
-        // Click callback
-        onClick: PropTypes.func.isRequired,
-      }),
     };
   }
 
@@ -265,11 +254,10 @@ class Tabbar extends Component {
 
     return (
       div({className: "devtools-sidebar-tabs"},
-        Sidebar({
+        Tabs({
           onAllTabsMenuClick: this.onAllTabsMenuClick,
           renderOnlySelected: this.props.renderOnlySelected,
           showAllTabsMenu: this.props.showAllTabsMenu,
-          sidebarToggleButton: this.props.sidebarToggleButton,
           tabActive: this.state.activeTab,
           onAfterChange: this.onTabChanged,
         },

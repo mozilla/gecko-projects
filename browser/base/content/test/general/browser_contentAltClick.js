@@ -39,7 +39,7 @@ async function clean_up() {
   await PlacesUtils.history.clear();
 
   Services.prefs.clearUserPref("browser.altClickSave");
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 }
 
 add_task(async function test_alt_click() {

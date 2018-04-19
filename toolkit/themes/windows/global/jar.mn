@@ -22,7 +22,7 @@ toolkit.jar:
 * skin/classic/global/global.css
   skin/classic/global/listbox.css
   skin/classic/global/netError.css
-* skin/classic/global/numberbox.css
+  skin/classic/global/numberbox.css
 * skin/classic/global/notification.css
   skin/classic/global/printPageSetup.css
   skin/classic/global/printPreview.css
@@ -46,6 +46,7 @@ toolkit.jar:
   skin/classic/global/icons/collapse.png                   (icons/collapse.png)
   skin/classic/global/icons/expand.png                     (icons/expand.png)
   skin/classic/global/icons/folder-item.png                (icons/folder-item.png)
+  skin/classic/global/icons/information-16.png             (icons/information-16.png)
   skin/classic/global/icons/Landscape.png                  (icons/Landscape.png)
   skin/classic/global/icons/Portrait.png                   (icons/Portrait.png)
   skin/classic/global/icons/Print-preview.png              (icons/Print-preview.png)
@@ -58,6 +59,7 @@ toolkit.jar:
   skin/classic/global/icons/windowControls.png             (icons/windowControls.png)
 * skin/classic/global/in-content/common.css                (in-content/common.css)
 * skin/classic/global/in-content/info-pages.css            (in-content/info-pages.css)
+  skin/classic/global/toolbar/spring.png                   (toolbar/spring.png)
   skin/classic/global/tree/twisty.svg                      (tree/twisty.svg)
   skin/classic/global/tree/twisty-preWin10.svg             (tree/twisty-preWin10.svg)
 

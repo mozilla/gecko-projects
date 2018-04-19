@@ -131,19 +131,10 @@ TabListView.prototype = {
     });
   },
 
-  _updateLastSyncTitle(lastModified, itemNode) {
-    let lastSync = new Date(lastModified);
-    let lastSyncTitle = getChromeWindow(this._window).gSync.formatLastSyncDate(lastSync);
-    itemNode.setAttribute("title", lastSyncTitle);
-  },
-
   _renderClient(client) {
     let itemNode = client.tabs.length ?
                     this._createClient(client) :
                     this._createEmptyClient(client);
-
-    itemNode.addEventListener("mouseover", () =>
-      this._updateLastSyncTitle(client.lastModified, itemNode));
 
     this._updateClient(client, itemNode);
 
@@ -163,15 +154,15 @@ TabListView.prototype = {
     return itemNode;
   },
 
-  _createClient() {
+  _createClient(item) {
     return this._doc.importNode(this._clientTemplate.content, true).firstElementChild;
   },
 
-  _createEmptyClient() {
+  _createEmptyClient(item) {
     return this._doc.importNode(this._emptyClientTemplate.content, true).firstElementChild;
   },
 
-  _createTab() {
+  _createTab(item) {
     return this._doc.importNode(this._tabTemplate.content, true).firstElementChild;
   },
 
@@ -220,7 +211,9 @@ TabListView.prototype = {
    */
   _updateClient(item, itemNode) {
     itemNode.setAttribute("id", "item-" + item.id);
-    this._updateLastSyncTitle(item.lastModified, itemNode);
+    let lastSync = new Date(item.lastModified);
+    let lastSyncTitle = getChromeWindow(this._window).gSync.formatLastSyncDate(lastSync);
+    itemNode.setAttribute("title", lastSyncTitle);
     if (item.closed) {
       itemNode.classList.add("closed");
     } else {
@@ -231,10 +224,14 @@ TabListView.prototype = {
     } else {
       itemNode.classList.remove("selected");
     }
+    if (item.isMobile) {
+      itemNode.classList.add("device-image-mobile");
+    } else {
+      itemNode.classList.add("device-image-desktop");
+    }
     if (item.focused) {
       itemNode.focus();
     }
-    itemNode.setAttribute("clientType", item.clientType);
     itemNode.dataset.id = item.id;
     itemNode.querySelector(".item-title").textContent = item.name;
   },

@@ -20,6 +20,7 @@
 #include "mozilla/dom/NodeInfo.h"
 #include "nsIControllers.h"
 #include "nsIDOMElement.h"
+#include "nsIDOMXULElement.h"
 #include "nsIDOMXULMultSelectCntrlEl.h"
 #include "nsIURI.h"
 #include "nsLayoutCID.h"
@@ -27,14 +28,18 @@
 #include "nsGkAtoms.h"
 #include "nsStringFwd.h"
 #include "nsStyledElement.h"
-#include "nsIFrameLoaderOwner.h"
+#include "nsIFrameLoader.h"
+#include "nsFrameLoader.h" // Needed because we return an
+                           // already_AddRefed<nsFrameLoader> where bindings
+                           // want an already_AddRefed<nsIFrameLoader> and hence
+                           // bindings need to know that the former can cast to
+                           // the latter.
 #include "mozilla/dom/DOMRect.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/DOMString.h"
 #include "mozilla/dom/FromParser.h"
 
 class nsIDocument;
-class nsFrameLoader;
 class nsXULPrototypeDocument;
 
 class nsIObjectInputStream;
@@ -334,7 +339,7 @@ ASSERT_NODE_FLAGS_SPACE(ELEMENT_TYPE_SPECIFIC_BITS_OFFSET + 2);
 #undef XUL_ELEMENT_FLAG_BIT
 
 class nsXULElement final : public nsStyledElement,
-                           public nsIDOMElement
+                           public nsIDOMXULElement
 {
 public:
     using Element::Blur;
@@ -345,14 +350,15 @@ public:
     Create(nsXULPrototypeElement* aPrototype, nsIDocument* aDocument,
            bool aIsScriptable, bool aIsRoot, mozilla::dom::Element** aResult);
 
-    NS_IMPL_FROMNODE(nsXULElement, kNameSpaceID_XUL)
+    NS_IMPL_FROMCONTENT(nsXULElement, kNameSpaceID_XUL)
 
     // nsISupports
     NS_DECL_ISUPPORTS_INHERITED
     NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsXULElement, nsStyledElement)
 
     // nsINode
-    void GetEventTargetParent(mozilla::EventChainPreVisitor& aVisitor) override;
+    virtual nsresult GetEventTargetParent(
+                       mozilla::EventChainPreVisitor& aVisitor) override;
     virtual nsresult PreHandleEvent(
                        mozilla::EventChainVisitor& aVisitor) override;
     // nsIContent
@@ -383,14 +389,21 @@ public:
     virtual bool IsNodeOfType(uint32_t aFlags) const override;
     virtual bool IsFocusableInternal(int32_t* aTabIndex, bool aWithMouse) override;
 
+#ifdef MOZ_OLD_STYLE
+    NS_IMETHOD WalkContentStyleRules(nsRuleWalker* aRuleWalker) override;
+#endif
     virtual nsChangeHint GetAttributeChangeHint(const nsAtom* aAttribute,
                                                 int32_t aModType) const override;
     NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const override;
+
+    // nsIDOMXULElement
+    NS_DECL_NSIDOMXULELEMENT
 
     virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
                            bool aPreallocateChildren) const override;
     virtual mozilla::EventStates IntrinsicState() const override;
 
+    nsresult GetFrameLoaderXPCOM(nsIFrameLoader** aFrameLoader);
     void PresetOpenerWindow(mozIDOMWindowProxy* aWindow, ErrorResult& aRv);
 
     virtual void RecompileScriptEventListeners() override;
@@ -450,6 +463,14 @@ public:
     void SetFlex(const nsAString& aValue, mozilla::ErrorResult& rv)
     {
         SetXULAttr(nsGkAtoms::flex, aValue, rv);
+    }
+    void GetFlexGroup(DOMString& aValue) const
+    {
+        GetXULAttr(nsGkAtoms::flexgroup, aValue);
+    }
+    void SetFlexGroup(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::flexgroup, aValue, rv);
     }
     void GetOrdinal(DOMString& aValue) const
     {
@@ -571,6 +592,14 @@ public:
     {
         SetXULAttr(nsGkAtoms::maxheight, aValue, rv);
     }
+    void GetPersist(DOMString& aValue) const
+    {
+        GetXULAttr(nsGkAtoms::persist, aValue);
+    }
+    void SetPersist(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::persist, aValue, rv);
+    }
     void GetLeft(DOMString& aValue) const
     {
         GetXULAttr(nsGkAtoms::left, aValue);
@@ -594,6 +623,14 @@ public:
     void SetTooltipText(const nsAString& aValue, mozilla::ErrorResult& rv)
     {
         SetXULAttr(nsGkAtoms::tooltiptext, aValue, rv);
+    }
+    void GetStatusText(DOMString& aValue) const
+    {
+        GetXULAttr(nsGkAtoms::statustext, aValue);
+    }
+    void SetStatusText(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::statustext, aValue, rv);
     }
     void GetSrc(DOMString& aValue) const
     {
@@ -627,7 +664,7 @@ public:
                                mozilla::ErrorResult& rv);
     // Style() inherited from nsStyledElement
     already_AddRefed<nsFrameLoader> GetFrameLoader();
-    void InternalSetFrameLoader(nsFrameLoader* aNewFrameLoader);
+    void InternalSetFrameLoader(nsIFrameLoader* aNewFrameLoader);
     void SwapFrameLoaders(mozilla::dom::HTMLIFrameElement& aOtherLoaderOwner,
                           mozilla::ErrorResult& rv);
     void SwapFrameLoaders(nsXULElement& aOtherLoaderOwner,
@@ -661,7 +698,7 @@ protected:
 
     nsresult AddPopupListener(nsAtom* aName);
 
-    void LoadSrc();
+    nsresult LoadSrc();
 
     /**
      * The nearest enclosing content node with a binding
@@ -708,6 +745,7 @@ protected:
     nsresult HideWindowChrome(bool aShouldHide);
     void SetChromeMargins(const nsAttrValue* aValue);
     void ResetChromeMargins();
+    void SetTitlebarColor(nscolor aColor, bool aActive);
 
     void SetDrawsInTitlebar(bool aState);
     void SetDrawsTitle(bool aState);

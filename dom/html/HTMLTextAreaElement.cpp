@@ -35,7 +35,7 @@
 #include "nsMappedAttributes.h"
 #include "nsPIDOMWindow.h"
 #include "nsPresContext.h"
-#include "mozilla/PresState.h"
+#include "nsPresState.h"
 #include "nsReadableUtils.h"
 #include "nsStyleConsts.h"
 #include "nsTextEditorState.h"
@@ -450,12 +450,14 @@ void
 HTMLTextAreaElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
                                            GenericSpecifiedValues* aData)
 {
-  // wrap=off
-  if (!aData->PropertyIsSet(eCSSProperty_white_space)) {
-    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::wrap);
-    if (value && value->Type() == nsAttrValue::eString &&
-        value->Equals(nsGkAtoms::OFF, eIgnoreCase)) {
-      aData->SetKeywordValue(eCSSProperty_white_space, StyleWhiteSpace::Pre);
+  if (aData->ShouldComputeStyleStruct(NS_STYLE_INHERIT_BIT(Text))) {
+    // wrap=off
+    if (!aData->PropertyIsSet(eCSSProperty_white_space)) {
+      const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::wrap);
+      if (value && value->Type() == nsAttrValue::eString &&
+          value->Equals(nsGkAtoms::OFF, eIgnoreCase)) {
+        aData->SetKeywordValue(eCSSProperty_white_space, StyleWhiteSpace::Pre);
+      }
     }
   }
 
@@ -511,19 +513,19 @@ HTMLTextAreaElement::IsDisabledForEvents(EventMessage aMessage)
   return IsElementDisabledForEvents(aMessage, formFrame);
 }
 
-void
+nsresult
 HTMLTextAreaElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   aVisitor.mCanHandle = false;
   if (IsDisabledForEvents(aVisitor.mEvent->mMessage)) {
-    return;
+    return NS_OK;
   }
 
   // Don't dispatch a second select event if we are already handling
   // one.
   if (aVisitor.mEvent->mMessage == eFormSelect) {
     if (mHandlingSelect) {
-      return;
+      return NS_OK;
     }
     mHandlingSelect = true;
   }
@@ -546,7 +548,7 @@ HTMLTextAreaElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
     aVisitor.mWantsPreHandleEvent = true;
   }
 
-  nsGenericHTMLFormElementWithState::GetEventTargetParent(aVisitor);
+  return nsGenericHTMLFormElementWithState::GetEventTargetParent(aVisitor);
 }
 
 nsresult
@@ -831,7 +833,7 @@ HTMLTextAreaElement::SaveState()
   nsresult rv = NS_OK;
 
   // Only save if value != defaultValue (bug 62713)
-  PresState *state = nullptr;
+  nsPresState *state = nullptr;
   if (mValueChanged) {
     state = GetPrimaryPresState();
     if (state) {
@@ -848,7 +850,13 @@ HTMLTextAreaElement::SaveState()
         return rv;
       }
 
-      state->contentData() = Move(value);
+      nsCOMPtr<nsISupportsString> pState =
+        do_CreateInstance(NS_SUPPORTS_STRING_CONTRACTID);
+      if (!pState) {
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
+      pState->SetData(value);
+      state->SetStateProperty(pState);
     }
   }
 
@@ -860,25 +868,27 @@ HTMLTextAreaElement::SaveState()
     if (state) {
       // We do not want to save the real disabled state but the disabled
       // attribute.
-      state->disabled() = HasAttr(kNameSpaceID_None, nsGkAtoms::disabled);
-      state->disabledSet() = true;
+      state->SetDisabled(HasAttr(kNameSpaceID_None, nsGkAtoms::disabled));
     }
   }
   return rv;
 }
 
 bool
-HTMLTextAreaElement::RestoreState(PresState* aState)
+HTMLTextAreaElement::RestoreState(nsPresState* aState)
 {
-  const PresContentData& state = aState->contentData();
+  nsCOMPtr<nsISupportsString> state
+    (do_QueryInterface(aState->GetStateProperty()));
 
-  if (state.type() == PresContentData::TnsString) {
+  if (state) {
+    nsAutoString data;
+    state->GetData(data);
     ErrorResult rv;
-    SetValue(state.get_nsString(), rv);
+    SetValue(data, rv);
     ENSURE_SUCCESS(rv, false);
   }
 
-  if (aState->disabledSet() && !aState->disabled()) {
+  if (aState->IsDisabledSet() && !aState->GetDisabled()) {
     SetDisabled(false, IgnoreErrors());
   }
 

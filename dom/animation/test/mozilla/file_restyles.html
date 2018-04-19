@@ -52,9 +52,9 @@ div {
 <script>
 'use strict';
 
-function getDocShellForObservingRestylesForWindow(aWindow) {
+function getDocShellForObservingRestyles() {
   const docShell =
-    SpecialPowers.wrap(aWindow)
+    SpecialPowers.wrap(window)
                  .QueryInterface(SpecialPowers.Ci.nsIInterfaceRequestor)
                  .getInterface(SpecialPowers.Ci.nsIWebNavigation)
                  .QueryInterface(SpecialPowers.Ci.nsIDocShell);
@@ -66,22 +66,16 @@ function getDocShellForObservingRestylesForWindow(aWindow) {
 }
 
 // Returns the animation restyle markers observed during |frameCount| refresh
-// driver ticks in this `window`.  This function is typically used to count the
-// number of restyles that take place as part of the style update that happens
-// on each refresh driver tick, as opposed to synchronous restyles triggered by
-// script.
+// driver ticks.  This function is typically used to count the number of
+// restyles that take place as part of the style update that happens on each
+// refresh driver tick, as opposed to synchronous restyles triggered by script.
 //
 // For the latter observeAnimSyncStyling (below) should be used.
 function observeStyling(frameCount, onFrame) {
-  return observeStylingInTargetWindow(window, frameCount, onFrame);
-}
-
-// As with observeStyling but applied to target window |aWindow|.
-function observeStylingInTargetWindow(aWindow, aFrameCount, aOnFrame) {
-  let docShell = getDocShellForObservingRestylesForWindow(aWindow);
+  let docShell = getDocShellForObservingRestyles();
 
   return new Promise(resolve => {
-    return waitForAnimationFrames(aFrameCount, aOnFrame).then(() => {
+    return waitForAnimationFrames(frameCount, onFrame).then(() => {
       var markers = docShell.popProfileTimelineMarkers();
       docShell.recordProfileTimelineMarkers = false;
       var stylingMarkers = markers.filter((marker, index) => {
@@ -99,7 +93,7 @@ function observeStylingInTargetWindow(aWindow, aFrameCount, aOnFrame) {
 // |funcToMakeRestyleHappen|, which may be expected to trigger a synchronous
 // restyles, and returns any restyle markers produced by calling that function.
 function observeAnimSyncStyling(funcToMakeRestyleHappen) {
-  let docShell = getDocShellForObservingRestylesForWindow(window);
+  let docShell = getDocShellForObservingRestyles();
 
   funcToMakeRestyleHappen();
 
@@ -1645,78 +1639,6 @@ waitForAllPaints(() => {
     }
   );
 
-  add_task(
-    async function throttling_position_absolute_animations_in_collapsed_iframe() {
-      var iframe = document.createElement('iframe');
-      iframe.setAttribute('srcdoc', '<div id="target"></div>');
-      iframe.style.height = '0px';
-      document.documentElement.appendChild(iframe);
-
-      await new Promise(resolve => {
-        iframe.addEventListener('load', () => {
-          resolve();
-        });
-      });
-
-      const target = iframe.contentDocument.getElementById("target");
-      target.style= 'position: absolute; top: 50%; width: 100px; height: 100px';
-
-      var animation = target.animate({ opacity: [0, 1] },
-                                     { duration: 100 * MS_PER_SEC,
-                                       iterations: Infinity });
-      await animation.ready;
-
-      var markers = await observeStylingInTargetWindow(iframe.contentWindow, 5);
-      is(markers.length, 0,
-         'Animation on position:absolute element in collapsed iframe should ' +
-         'be throttled');
-
-      await ensureElementRemoval(iframe);
-    }
-  );
-
-  add_task(
-    async function position_absolute_animations_in_collapsed_element() {
-      var parent = addDiv(null, { style: 'overflow: scroll; height: 0px;' });
-      var target = addDiv(null,
-                          { style: 'animation: background-color 100s infinite;' +
-                                   'position: absolute; top: 50%;' +
-                                   'width: 100px; height: 100px;' });
-      parent.appendChild(target);
-
-      var animation = target.getAnimations()[0];
-      await animation.ready;
-
-      const expectedRestyleCount = tweakExpectedRestyleCount(animation, 5);
-      var markers = await observeStyling(5);
-      is(markers.length, expectedRestyleCount,
-         'Animation on position:absolute element in collapsed element ' +
-         'should not be throttled');
-
-      await ensureElementRemoval(parent);
-    }
-  );
-
-  add_task(
-    async function throttling_position_absolute_animations_in_collapsed_element() {
-      var parent = addDiv(null, { style: 'overflow: scroll; height: 0px;' });
-      var target = addDiv(null,
-                          { style: 'animation: background-color 100s infinite;' +
-                                   'position: absolute; top: 50%;' });
-      parent.appendChild(target);
-
-      var animation = target.getAnimations()[0];
-      await animation.ready;
-
-      var markers = await observeStyling(5);
-      todo_is(markers.length, 0,
-              'Animation on collapsed position:absolute element in collapsed ' +
-              'element should be throttled');
-
-      await ensureElementRemoval(parent);
-    }
-  );
-
   add_task_if_omta_enabled(
     async function no_restyling_for_compositor_animation_on_unrelated_style_change() {
       var div = addDiv(null);
@@ -1807,107 +1729,6 @@ waitForAllPaints(() => {
 
     await ensureElementRemoval(div);
   });
-
-  add_task(
-    async function no_restyling_for_throttled_animation_on_querying_play_state() {
-      var div = addDiv(null, { style: 'animation: opacity 100s' });
-      var animation = div.getAnimations()[0];
-      var sibling = addDiv(null);
-
-      await animation.ready;
-      ok(SpecialPowers.wrap(animation).isRunningOnCompositor);
-
-      var markers = observeAnimSyncStyling(() => {
-        sibling.style.opacity = '0.5';
-        is(animation.playState, 'running',
-           'Animation.playState should be running');
-      });
-      is(markers.length, 0,
-         'Animation.playState should not flush throttled animation in the ' +
-         'case where there are only style changes that don\'t affect the ' +
-         'throttled animation');
-
-      await ensureElementRemoval(div);
-      await ensureElementRemoval(sibling);
-    }
-  );
-
-  add_task(
-    async function restyling_for_throttled_animation_on_querying_play_state() {
-      var div = addDiv(null, { style: 'animation: opacity 100s' });
-      var animation = div.getAnimations()[0];
-
-      await animation.ready;
-      ok(SpecialPowers.wrap(animation).isRunningOnCompositor);
-
-      var markers = observeAnimSyncStyling(() => {
-        div.style.animationPlayState = 'paused';
-        is(animation.playState, 'paused',
-           'Animation.playState should be reflected by pending style');
-      });
-
-      is(markers.length, 1,
-         'Animation.playState should flush throttled animation style that ' +
-         'affects the throttled animation');
-
-      await ensureElementRemoval(div);
-    }
-  );
-
-  add_task(
-    async function no_restyling_for_throttled_transition_on_querying_play_state() {
-      var div = addDiv(null, { style: 'transition: opacity 100s; opacity: 0' });
-      var sibling = addDiv(null);
-
-      getComputedStyle(div).opacity;
-      div.style.opacity = 1;
-
-      var transition = div.getAnimations()[0];
-
-      await transition.ready;
-      ok(SpecialPowers.wrap(transition).isRunningOnCompositor);
-
-      var markers = observeAnimSyncStyling(() => {
-        sibling.style.opacity = '0.5';
-        is(transition.playState, 'running',
-           'Animation.playState should be running');
-      });
-
-      is(markers.length, 0,
-         'Animation.playState should not flush throttled transition in the ' +
-         'case where there are only style changes that don\'t affect the ' +
-         'throttled animation');
-
-      await ensureElementRemoval(div);
-      await ensureElementRemoval(sibling);
-    }
-  );
-
-  add_task(
-    async function restyling_for_throttled_transition_on_querying_play_state() {
-      var div = addDiv(null, { style: 'transition: opacity 100s; opacity: 0' });
-      getComputedStyle(div).opacity;
-      div.style.opacity = '1';
-
-      var transition = div.getAnimations()[0];
-
-      await transition.ready;
-      ok(SpecialPowers.wrap(transition).isRunningOnCompositor);
-
-      var markers = observeAnimSyncStyling(() => {
-        div.style.transitionProperty = 'none';
-        is(transition.playState, 'idle',
-           'Animation.playState should be reflected by pending style change ' +
-           'which cancel the transition');
-      });
-
-      is(markers.length, 1,
-         'Animation.playState should flush throttled transition style that ' +
-         'affects the throttled animation');
-
-      await ensureElementRemoval(div);
-    }
-  );
 });
 
 </script>

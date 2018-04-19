@@ -7,7 +7,6 @@
 #define mozilla_extensions_WebExtensionPolicy_h
 
 #include "mozilla/dom/BindingDeclarations.h"
-#include "mozilla/dom/Nullable.h"
 #include "mozilla/dom/WebExtensionPolicyBinding.h"
 #include "mozilla/extensions/MatchPattern.h"
 
@@ -191,7 +190,7 @@ private:
   RefPtr<MatchPatternSet> mHostPermissions;
   MatchGlobSet mWebAccessiblePaths;
 
-  dom::Nullable<nsTArray<nsString>> mBackgroundScripts;
+  Nullable<nsTArray<nsString>> mBackgroundScripts;
 
   nsTArray<RefPtr<WebExtensionContentScript>> mContentScripts;
 };

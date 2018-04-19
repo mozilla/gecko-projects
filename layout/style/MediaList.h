@@ -12,6 +12,7 @@
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/ServoUtils.h"
+#include "mozilla/StyleBackendType.h"
 
 #include "nsWrapperCache.h"
 
@@ -39,7 +40,11 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(MediaList)
 
-  static already_AddRefed<MediaList> Create(const nsAString& aMedia,
+  /**
+   * Creates a MediaList backed by the given StyleBackendType.
+   */
+  static already_AddRefed<MediaList> Create(StyleBackendType,
+                                            const nsAString& aMedia,
                                             CallerType aCallerType =
                                               CallerType::NonSystem);
 
@@ -51,6 +56,10 @@ public:
   virtual void GetText(nsAString& aMediaText) = 0;
   virtual void SetText(const nsAString& aMediaText) = 0;
   virtual bool Matches(nsPresContext* aPresContext) const = 0;
+
+#ifdef DEBUG
+  virtual bool IsServo() const = 0;
+#endif
 
   void SetStyleSheet(StyleSheet* aSheet);
 

@@ -10,7 +10,6 @@ from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.scriptworker import get_signing_cert_scope_per_platform
 from taskgraph.util.partials import get_balrog_platform_name, get_partials_artifacts
-from taskgraph.util.taskcluster import get_artifact_prefix
 
 import logging
 logger = logging.getLogger(__name__)
@@ -18,10 +17,10 @@ logger = logging.getLogger(__name__)
 transforms = TransformSequence()
 
 
-def generate_upstream_artifacts(job, release_history, platform, locale=None):
-    artifact_prefix = get_artifact_prefix(job)
+def generate_upstream_artifacts(release_history, platform, locale=None):
+    artifact_prefix = 'public/build'
     if locale:
-        artifact_prefix = '{}/{}'.format(artifact_prefix, locale)
+        artifact_prefix = 'public/build/{}'.format(locale)
     else:
         locale = 'en-US'
 
@@ -71,7 +70,7 @@ def make_task_description(config, jobs):
 
         balrog_platform = get_balrog_platform_name(dep_th_platform)
         upstream_artifacts = generate_upstream_artifacts(
-            dep_job, config.params['release_history'], balrog_platform, locale)
+            config.params['release_history'], balrog_platform, locale)
 
         build_platform = dep_job.attributes.get('build_platform')
         is_nightly = dep_job.attributes.get('nightly')

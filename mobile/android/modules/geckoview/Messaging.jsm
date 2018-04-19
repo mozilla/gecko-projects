@@ -6,7 +6,9 @@
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-var EXPORTED_SYMBOLS = ["EventDispatcher"];
+var EXPORTED_SYMBOLS = ["sendMessageToJava", "Messaging", "EventDispatcher"];
+
+ChromeUtils.defineModuleGetter(this, "Task", "resource://gre/modules/Task.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "UUIDGen",
                                    "@mozilla.org/uuid-generator;1",
@@ -15,43 +17,48 @@ XPCOMUtils.defineLazyServiceGetter(this, "UUIDGen",
 const IS_PARENT_PROCESS = (Services.appinfo.processType ==
                            Services.appinfo.PROCESS_TYPE_DEFAULT);
 
+function sendMessageToJava(aMessage, aCallback) {
+  Cu.reportError("sendMessageToJava is deprecated. Use EventDispatcher instead.");
+
+  if (aCallback) {
+    EventDispatcher.instance.sendRequestForResult(aMessage)
+      .then(result => aCallback(result, null),
+            error => aCallback(null, error));
+  } else {
+    EventDispatcher.instance.sendRequest(aMessage);
+  }
+}
+
 function DispatcherDelegate(aDispatcher, aMessageManager) {
   this._dispatcher = aDispatcher;
   this._messageManager = aMessageManager;
-
-  if (!aDispatcher) {
-    // Child process.
-    this._replies = new Map();
-    (aMessageManager || Services.cpmm).addMessageListener(
-        "GeckoView:MessagingReply", this);
-  }
 }
 
 DispatcherDelegate.prototype = {
   /**
    * Register a listener to be notified of event(s).
    *
-   * @param aListener Target listener implementing nsIAndroidEventListener.
-   * @param aEvents   String or array of strings of events to listen to.
+   * @param listener Target listener implementing nsIAndroidEventListener.
+   * @param events   String or array of strings of events to listen to.
    */
-  registerListener: function(aListener, aEvents) {
+  registerListener: function(listener, events) {
     if (!this._dispatcher) {
       throw new Error("Can only listen in parent process");
     }
-    this._dispatcher.registerListener(aListener, aEvents);
+    this._dispatcher.registerListener(listener, events);
   },
 
   /**
    * Unregister a previously-registered listener.
    *
-   * @param aListener Registered listener implementing nsIAndroidEventListener.
-   * @param aEvents   String or array of strings of events to stop listening to.
+   * @param listener Registered listener implementing nsIAndroidEventListener.
+   * @param events   String or array of strings of events to stop listening to.
    */
-  unregisterListener: function(aListener, aEvents) {
+  unregisterListener: function(listener, events) {
     if (!this._dispatcher) {
       throw new Error("Can only listen in parent process");
     }
-    this._dispatcher.unregisterListener(aListener, aEvents);
+    this._dispatcher.unregisterListener(listener, events);
   },
 
   /**
@@ -59,87 +66,148 @@ DispatcherDelegate.prototype = {
    * optional data object and/or a optional callback interface to the
    * listeners.
    *
-   * @param aEvent     Name of event to dispatch.
-   * @param aData      Optional object containing data for the event.
-   * @param aCallback  Optional callback implementing nsIAndroidEventCallback.
-   * @param aFinalizer Optional finalizer implementing nsIAndroidEventFinalizer.
+   * @param event    Name of event to dispatch.
+   * @param data     Optional object containing data for the event.
+   * @param callback Optional callback implementing nsIAndroidEventCallback.
    */
-  dispatch: function(aEvent, aData, aCallback, aFinalizer) {
+  dispatch: function(event, data, callback) {
     if (this._dispatcher) {
-      this._dispatcher.dispatch(aEvent, aData, aCallback, aFinalizer);
+      this._dispatcher.dispatch(event, data, callback);
       return;
     }
 
     let mm = this._messageManager || Services.cpmm;
     let forwardData = {
       global: !this._messageManager,
-      event: aEvent,
-      data: aData,
+      event: event,
+      data: data,
     };
 
-    if (aCallback) {
-      const uuid = UUIDGen.generateUUID().toString();
-      this._replies.set(uuid, {
-        callback: aCallback,
-        finalizer: aFinalizer,
+    if (callback) {
+      forwardData.uuid = UUIDGen.generateUUID().toString();
+      mm.addMessageListener("GeckoView:MessagingReply", function listener(msg) {
+        if (msg.data.uuid === forwardData.uuid) {
+          mm.removeMessageListener(msg.name, listener);
+          if (msg.data.type === "success") {
+            callback.onSuccess(msg.data.response);
+          } else if (msg.data.type === "error") {
+            callback.onError(msg.data.response);
+          } else {
+            throw new Error("invalid reply type");
+          }
+        }
       });
-      forwardData.uuid = uuid;
     }
 
     mm.sendAsyncMessage("GeckoView:Messaging", forwardData);
   },
 
   /**
+   * Implementations of Messaging APIs for backwards compatibility.
+   */
+
+  /**
    * Sends a request to Java.
    *
-   * @param aMsg      Message to send; must be an object with a "type" property
-   * @param aCallback Optional callback implementing nsIAndroidEventCallback.
+   * @param msg Message to send; must be an object with a "type" property
    */
-  sendRequest: function(aMsg, aCallback) {
-    const type = aMsg.type;
-    aMsg.type = undefined;
-    this.dispatch(type, aMsg, aCallback);
+  sendRequest: function(msg, callback) {
+    let type = msg.type;
+    msg.type = undefined;
+    this.dispatch(type, msg, callback);
   },
 
   /**
    * Sends a request to Java, returning a Promise that resolves to the response.
    *
-   * @param aMsg Message to send; must be an object with a "type" property
-   * @return A Promise resolving to the response
+   * @param msg Message to send; must be an object with a "type" property
+   * @returns A Promise resolving to the response
    */
-  sendRequestForResult: function(aMsg) {
+  sendRequestForResult: function(msg) {
     return new Promise((resolve, reject) => {
-      const type = aMsg.type;
-      aMsg.type = undefined;
+      let type = msg.type;
+      msg.type = undefined;
 
-      this.dispatch(type, aMsg, {
+      this.dispatch(type, msg, {
         onSuccess: resolve,
         onError: reject,
       });
     });
   },
 
-  receiveMessage: function(aMsg) {
-    const {uuid, type} = aMsg.data;
-    const reply = this._replies.get(uuid);
-    if (!reply) {
-      return;
+  /**
+   * Add a listener for the given event.
+   *
+   * Only one request listener can be registered for a given event.
+   *
+   * Example usage:
+   *   // aData is data sent from Java with the request. The return value is
+   *   // used to respond to the request. The return type *must* be an instance
+   *   // of Object.
+   *   let listener = function (aData) {
+   *     if (aData == "foo") {
+   *       return { response: "bar" };
+   *     }
+   *     return {};
+   *   };
+   *   EventDispatcher.instance.addListener(listener, "Demo:Request");
+   *
+   * The listener may also be a generator function, useful for performing a
+   * task asynchronously. For example:
+   *   let listener = function* (aData) {
+   *     // Respond with "bar" after 2 seconds.
+   *     yield new Promise(resolve => setTimeout(resolve, 2000));
+   *     return { response: "bar" };
+   *   };
+   *   EventDispatcher.instance.addListener(listener, "Demo:Request");
+   *
+   * @param listener Listener callback taking a single data parameter
+   *                 (see example usage above).
+   * @param event    Event name that this listener should observe.
+   */
+  addListener: function(listener, event) {
+    if (this._requestHandler.listeners[event]) {
+      throw new Error("Error in addListener: A listener already exists for event " + event);
+    }
+    if (typeof listener !== "function") {
+      throw new Error("Error in addListener: Listener must be a function for event " + event);
     }
 
-    if (type === "success") {
-      reply.callback.onSuccess(aMsg.data.response);
-    } else if (type === "error") {
-      reply.callback.onError(aMsg.data.response);
-    } else if (type === "finalize") {
-      if (typeof reply.finalizer === "function") {
-        reply.finalizer();
-      } else if (reply.finalizer) {
-        reply.finalizer.onFinalize();
-      }
-      this._replies.delete(uuid);
-    } else {
-      throw new Error("invalid reply type");
+    this._requestHandler.listeners[event] = listener;
+    this.registerListener(this._requestHandler, event);
+  },
+
+  /**
+   * Removes a listener for a given event.
+   *
+   * @param event The event to stop listening for.
+   */
+  removeListener: function(event) {
+    if (!this._requestHandler.listeners[event]) {
+      throw new Error("Error in removeListener: There is no listener for event " + event);
     }
+
+    this._requestHandler.listeners[event] = undefined;
+    this.unregisterListener(this._requestHandler, event);
+  },
+
+  _requestHandler: {
+    listeners: {},
+
+    onEvent: function(event, data, callback) {
+      let self = this;
+      Task.spawn(function* () {
+        return yield self.listeners[event](data.data);
+      }).then(response => {
+        callback.onSuccess(response);
+      }, e => {
+        Cu.reportError("Error in Messaging handler for " + event + ": " + e);
+        callback.onError({
+          message: e.message || (e && e.toString()),
+          stack: e.stack || Components.stack.formattedStack,
+        });
+      });
+    },
   },
 };
 
@@ -197,19 +265,17 @@ var EventDispatcher = {
       callback = {
         onSuccess: response => reply("success", response),
         onError: error => reply("error", error),
-        onFinalize: () => reply("finalize"),
       };
     }
 
     if (aMsg.data.global) {
-      this.instance.dispatch(aMsg.data.event, aMsg.data.data,
-                             callback, callback);
+      this.instance.dispatch(aMsg.data.event, aMsg.data.data.callback);
       return;
     }
 
     let win = aMsg.target.ownerGlobal;
     let dispatcher = win.WindowEventDispatcher || this.for(win);
-    dispatcher.dispatch(aMsg.data.event, aMsg.data.data, callback, callback);
+    dispatcher.dispatch(aMsg.data.event, aMsg.data.data, callback);
   },
 };
 
@@ -217,3 +283,33 @@ if (IS_PARENT_PROCESS) {
   Services.mm.addMessageListener("GeckoView:Messaging", EventDispatcher);
   Services.ppmm.addMessageListener("GeckoView:Messaging", EventDispatcher);
 }
+
+// For backwards compatibility.
+var Messaging = {};
+
+function _addMessagingGetter(name) {
+  Messaging[name] = function() {
+    Cu.reportError("Messaging." + name + " is deprecated. " +
+                   "Use EventDispatcher object instead.");
+
+    // Try global dispatcher first.
+    let ret = EventDispatcher.instance[name].apply(EventDispatcher.instance, arguments);
+    if (ret) {
+      // For sendRequestForResult, return the global dispatcher promise.
+      return ret;
+    }
+
+    // Now try the window dispatcher.
+    let window = Services.wm.getMostRecentWindow("navigator:browser");
+    let dispatcher = window && window.WindowEventDispatcher;
+    let func = dispatcher && dispatcher[name];
+    if (typeof func === "function") {
+      return func.apply(dispatcher, arguments);
+    }
+  };
+}
+
+_addMessagingGetter("sendRequest");
+_addMessagingGetter("sendRequestForResult");
+_addMessagingGetter("addListener");
+_addMessagingGetter("removeListener");

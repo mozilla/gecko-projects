@@ -9,18 +9,16 @@
 // Misc utils for Linux.
 //===----------------------------------------------------------------------===//
 #include "FuzzerDefs.h"
-#if LIBFUZZER_LINUX || LIBFUZZER_NETBSD || LIBFUZZER_FREEBSD
-#include "FuzzerCommand.h"
+#if LIBFUZZER_LINUX
 
 #include <stdlib.h>
 
 namespace fuzzer {
 
-int ExecuteCommand(const Command &Cmd) {
-  std::string CmdLine = Cmd.toString();
-  return system(CmdLine.c_str());
+int ExecuteCommand(const std::string &Command) {
+  return system(Command.c_str());
 }
 
 } // namespace fuzzer
 
-#endif // LIBFUZZER_LINUX || LIBFUZZER_NETBSD || LIBFUZZER_FREEBSD
+#endif // LIBFUZZER_LINUX

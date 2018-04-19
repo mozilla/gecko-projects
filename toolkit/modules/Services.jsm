@@ -51,6 +51,18 @@ if (AppConstants.MOZ_CRASHREPORTER) {
   });
 }
 
+XPCOMUtils.defineLazyGetter(Services, "mm", () => {
+  return Cc["@mozilla.org/globalmessagemanager;1"]
+           .getService(Ci.nsIMessageBroadcaster)
+           .QueryInterface(Ci.nsIFrameScriptLoader);
+});
+
+XPCOMUtils.defineLazyGetter(Services, "ppmm", () => {
+  return Cc["@mozilla.org/parentprocessmessagemanager;1"]
+           .getService(Ci.nsIMessageBroadcaster)
+           .QueryInterface(Ci.nsIProcessScriptLoader);
+});
+
 XPCOMUtils.defineLazyGetter(Services, "io", () => {
   return Cc["@mozilla.org/network/io-service;1"]
            .getService(Ci.nsIIOService)
@@ -59,6 +71,7 @@ XPCOMUtils.defineLazyGetter(Services, "io", () => {
 
 var initTable = {
   appShell: ["@mozilla.org/appshell/appShellService;1", "nsIAppShellService"],
+  cache: ["@mozilla.org/network/cache-service;1", "nsICacheService"],
   cache2: ["@mozilla.org/netwerk/cache-storage-service;1", "nsICacheStorageService"],
   cpmm: ["@mozilla.org/childprocessmessagemanager;1", "nsIMessageSender"],
   console: ["@mozilla.org/consoleservice;1", "nsIConsoleService"],
@@ -69,10 +82,8 @@ var initTable = {
   intl: ["@mozilla.org/mozintl;1", "mozIMozIntl"],
   locale: ["@mozilla.org/intl/localeservice;1", "mozILocaleService"],
   logins: ["@mozilla.org/login-manager;1", "nsILoginManager"],
-  mm: ["@mozilla.org/globalmessagemanager;1", "nsISupports"],
   obs: ["@mozilla.org/observer-service;1", "nsIObserverService"],
   perms: ["@mozilla.org/permissionmanager;1", "nsIPermissionManager"],
-  ppmm: ["@mozilla.org/parentprocessmessagemanager;1", "nsISupports"],
   prompt: ["@mozilla.org/embedcomp/prompt-service;1", "nsIPromptService"],
   scriptloader: ["@mozilla.org/moz/jssubscript-loader;1", "mozIJSSubScriptLoader"],
   scriptSecurityManager: ["@mozilla.org/scriptsecuritymanager;1", "nsIScriptSecurityManager"],

@@ -8,9 +8,9 @@ import org.json.JSONException;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.RobolectricTestRunner;
+import org.mozilla.gecko.background.testhelpers.TestRunner;
 
-@RunWith(RobolectricTestRunner.class)
+@RunWith(TestRunner.class)
 public class TestDownloadContentBuilder {
     /**
      * Verify that the values passed to the builder are all set on the DownloadContent object.

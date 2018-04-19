@@ -553,8 +553,10 @@ BaselineCompiler::emitStackCheck(bool earlyCheck)
                           &forceCall);
     }
 
+    void* contextAddr = cx->zone()->group()->addressOfOwnerContext();
+    masm.loadPtr(AbsoluteAddress(contextAddr), R0.scratchReg());
     masm.branchPtr(Assembler::BelowOrEqual,
-                   AbsoluteAddress(cx->addressOfJitStackLimit()), R1.scratchReg(),
+                   Address(R0.scratchReg(), offsetof(JSContext, jitStackLimit)), R1.scratchReg(),
                    &skipCall);
 
     if (!earlyCheck && needsEarlyStackCheck())
@@ -700,8 +702,10 @@ BaselineCompiler::emitInterruptCheck()
     frame.syncStack(0);
 
     Label done;
+    void* context = cx->zone()->group()->addressOfOwnerContext();
+    masm.loadPtr(AbsoluteAddress(context), R0.scratchReg());
     masm.branch32(Assembler::Equal,
-                  AbsoluteAddress(cx->addressOfInterrupt()), Imm32(0),
+                  Address(R0.scratchReg(), offsetof(JSContext, interrupt_)), Imm32(0),
                   &done);
 
     prepareVMCall();
@@ -1926,7 +1930,7 @@ BaselineCompiler::emitUnaryArith()
     frame.popRegsAndSync(1);
 
     // Call IC
-    ICUnaryArith_Fallback::Compiler stubCompiler(cx);
+    ICUnaryArith_Fallback::Compiler stubCompiler(cx, ICStubCompiler::Engine::Baseline);
     if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))
         return false;
 

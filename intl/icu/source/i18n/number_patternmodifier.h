@@ -18,8 +18,8 @@ U_NAMESPACE_BEGIN
 
 // Export an explicit template instantiation of the LocalPointer that is used as a
 // data member of ParameterizedModifier.
-// (When building DLLs for Windows this is required.)
-#if U_PF_WINDOWS <= U_PLATFORM && U_PLATFORM <= U_PF_CYGWIN
+// (MSVC requires this, even though it should not be necessary.)
+#if defined (_MSC_VER)
 // Ignore warning 4661 as LocalPointerBase does not use operator== or operator!=
 #pragma warning(suppress: 4661)
 template class U_I18N_API LocalPointerBase<number::impl::ParameterizedModifier>;
@@ -125,13 +125,13 @@ class U_I18N_API MutablePatternModifier
     /**
      * Sets attributes of the current number being processed.
      *
-     * @param signum
-     *            -1 if negative; +1 if positive; or 0 if zero.
+     * @param isNegative
+     *            Whether the number is negative.
      * @param plural
-     *            The plural form of the number, required only if the pattern contains the triple
-     *            currency sign, "¤¤¤" (and as indicated by {@link #needsPlurals()}).
+     *            The plural form of the number, required only if the pattern contains the triple currency sign, "¤¤¤"
+     *            (and as indicated by {@link #needsPlurals()}).
      */
-    void setNumberProperties(int8_t signum, StandardPlural::Form plural);
+    void setNumberProperties(bool isNegative, StandardPlural::Form plural);
 
     /**
      * Returns true if the pattern represented by this MurkyModifier requires a plural keyword in order to localize.
@@ -211,7 +211,7 @@ class U_I18N_API MutablePatternModifier
     const PluralRules *rules;
 
     // Number details (initialized in setNumberProperties)
-    int8_t signum;
+    bool isNegative;
     StandardPlural::Form plural;
 
     // QuantityChain details (initialized in addToChain)

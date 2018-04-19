@@ -2,7 +2,7 @@
 // This code is governed by the BSD license found in the LICENSE file.
 
 /*---
-esid: sec-%typedarray%.prototype.copywithin
+es6id: 22.2.3.5
 description: >
   %TypedArray%.prototype.copyWithin.length is 2.
 info: |
@@ -20,7 +20,6 @@ info: |
     object has the attributes { [[Writable]]: false, [[Enumerable]]: false,
     [[Configurable]]: true }.
 includes: [propertyHelper.js, testTypedArray.js]
-features: [TypedArray]
 ---*/
 
 assert.sameValue(TypedArray.prototype.copyWithin.length, 2);

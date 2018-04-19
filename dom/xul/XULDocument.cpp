@@ -31,6 +31,7 @@
 #include "nsView.h"
 #include "nsViewManager.h"
 #include "nsIContentViewer.h"
+#include "nsIDOMXULElement.h"
 #include "nsIStreamListener.h"
 #include "nsITimer.h"
 #include "nsDocShell.h"
@@ -77,6 +78,7 @@
 #include "nsXULPopupManager.h"
 #include "nsCCUncollectableMarker.h"
 #include "nsURILoader.h"
+#include "mozilla/AddonPathService.h"
 #include "mozilla/BasicEvents.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/NodeInfoInlines.h"
@@ -94,7 +96,6 @@
 #include "xpcpublic.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/StyleSheetInlines.h"
-#include "nsIConsoleService.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -1160,41 +1161,6 @@ XULDocument::Persist(const nsAString& aID,
     aRv = Persist(element, nameSpaceID, tag);
 }
 
-enum class ConversionDirection {
-    InnerToOuter,
-    OuterToInner,
-};
-
-static void
-ConvertWindowSize(nsIXULWindow* aWin,
-                  nsAtom* aAttr,
-                  ConversionDirection aDirection,
-                  nsAString& aInOutString)
-{
-    MOZ_ASSERT(aWin);
-    MOZ_ASSERT(aAttr == nsGkAtoms::width || aAttr == nsGkAtoms::height);
-
-    nsresult rv;
-    int32_t size = aInOutString.ToInteger(&rv);
-    if (NS_FAILED(rv)) {
-        return;
-    }
-
-    int32_t sizeDiff = aAttr == nsGkAtoms::width
-        ? aWin->GetOuterToInnerWidthDifferenceInCSSPixels()
-        : aWin->GetOuterToInnerHeightDifferenceInCSSPixels();
-
-    if (!sizeDiff) {
-        return;
-    }
-
-    int32_t multiplier =
-        aDirection == ConversionDirection::InnerToOuter ? 1 : - 1;
-
-    CopyASCIItoUTF16(nsPrintfCString("%d", size + multiplier * sizeDiff),
-                     aInOutString);
-}
-
 nsresult
 XULDocument::Persist(Element* aElement, int32_t aNameSpaceID,
                      nsAtom* aAttribute)
@@ -1233,21 +1199,9 @@ XULDocument::Persist(Element* aElement, int32_t aNameSpaceID,
 
     if (hasAttr && valuestr.IsEmpty()) {
         return mLocalStore->RemoveValue(uri, id, attrstr);
+    } else {
+        return mLocalStore->SetValue(uri, id, attrstr, valuestr);
     }
-
-    // Make sure we store the <window> attributes as outer window size, see
-    // bug 1444525 & co.
-    if (aElement->IsXULElement(nsGkAtoms::window) &&
-        (aAttribute == nsGkAtoms::width || aAttribute == nsGkAtoms::height)) {
-        if (nsCOMPtr<nsIXULWindow> win = GetXULWindowIfToplevelChrome()) {
-            ConvertWindowSize(win,
-                              aAttribute,
-                              ConversionDirection::InnerToOuter,
-                              valuestr);
-        }
-    }
-
-    return mLocalStore->SetValue(uri, id, attrstr, valuestr);
 }
 
 
@@ -1795,6 +1749,7 @@ XULDocument::ApplyPersistentAttributesInternal()
     return NS_OK;
 }
 
+
 nsresult
 XULDocument::ApplyPersistentAttributesToElements(const nsAString &aID,
                                                  nsCOMArray<Element>& aElements)
@@ -1835,27 +1790,11 @@ XULDocument::ApplyPersistentAttributesToElements(const nsAString &aID,
         }
 
         uint32_t cnt = aElements.Count();
+
         for (int32_t i = int32_t(cnt) - 1; i >= 0; --i) {
             RefPtr<Element> element = aElements.SafeObjectAt(i);
             if (!element) {
                  continue;
-            }
-
-            // Convert attributes from outer size to inner size for top-level
-            // windows, see bug 1444525 & co.
-            if (element->IsXULElement(nsGkAtoms::window) &&
-                (attr == nsGkAtoms::width || attr == nsGkAtoms::height)) {
-                if (nsCOMPtr<nsIXULWindow> win = GetXULWindowIfToplevelChrome()) {
-                    nsAutoString maybeConvertedValue = value;
-                    ConvertWindowSize(win,
-                                      attr,
-                                      ConversionDirection::OuterToInner,
-                                      maybeConvertedValue);
-                    Unused <<
-                        element->SetAttr(kNameSpaceID_None, attr, maybeConvertedValue, true);
-
-                    continue;
-                }
             }
 
             Unused << element->SetAttr(kNameSpaceID_None, attr, value, true);
@@ -2258,31 +2197,6 @@ XULDocument::LoadOverlayInternal(nsIURI* aURI, bool aIsDynamic,
                                  bool* aFailureFromContent)
 {
     nsresult rv;
-
-    // XUL overlays are in the process of being removed. In a Firefox build,
-    // loading an overlay will no longer work and display an error in the
-    // console. In automation, doing so will cause a crash.
-    // However, overlays are allowed in other applications (e.g. Thunderbird)
-    // while they work on removing them. See bug 1448162.
-#ifdef MOZ_BREAK_XUL_OVERLAYS
-    nsCString docSpec;
-    mCurrentPrototype->GetURI()->GetSpec(docSpec);
-    nsCString overlaySpec;
-    aURI->GetSpec(overlaySpec);
-    nsPrintfCString msg("Attempt to load overlay %s into %s\n",
-                        overlaySpec.get(),
-                        docSpec.get());
-    nsCOMPtr<nsIConsoleService> consoleSvc =
-        do_GetService("@mozilla.org/consoleservice;1");
-    if (consoleSvc) {
-        consoleSvc->LogStringMessage(NS_ConvertASCIItoUTF16(msg).get());
-    }
-    printf("%s", msg.get());
-    if (xpc::IsInAutomation()) {
-        MOZ_CRASH("Attempt to load overlay.");
-    }
-    return NS_ERROR_NOT_AVAILABLE;
-#endif
 
     *aShouldReturn = false;
     *aFailureFromContent = false;
@@ -2717,27 +2631,6 @@ XULDocument::ResumeWalk()
     return rv;
 }
 
-already_AddRefed<nsIXULWindow>
-XULDocument::GetXULWindowIfToplevelChrome() const
-{
-    nsCOMPtr<nsIDocShellTreeItem> item = GetDocShell();
-    if (!item) {
-        return nullptr;
-    }
-    nsCOMPtr<nsIDocShellTreeOwner> owner;
-    item->GetTreeOwner(getter_AddRefs(owner));
-    nsCOMPtr<nsIXULWindow> xulWin = do_GetInterface(owner);
-    if (!xulWin) {
-        return nullptr;
-    }
-    nsCOMPtr<nsIDocShell> xulWinShell;
-    xulWin->GetDocShell(getter_AddRefs(xulWinShell));
-    if (!SameCOMIdentity(xulWinShell, item)) {
-        return nullptr;
-    }
-    return xulWin.forget();
-}
-
 nsresult
 XULDocument::DoneWalking()
 {
@@ -2769,20 +2662,29 @@ XULDocument::DoneWalking()
 
         NotifyPossibleTitleChange(false);
 
-        nsContentUtils::DispatchTrustedEvent(
-            this,
-            static_cast<nsIDocument*>(this),
-            NS_LITERAL_STRING("MozBeforeInitialXULLayout"),
-            true,
-            false);
-
         // Before starting layout, check whether we're a toplevel chrome
-        // window.  If we are, setup some state so that we don't have to restyle
-        // the whole tree after StartLayout.
-        if (nsCOMPtr<nsIXULWindow> win = GetXULWindowIfToplevelChrome()) {
-            // We're the chrome document!
-            win->BeforeStartLayout();
+        // window.  If we are, set our chrome flags now, so that we don't have
+        // to restyle the whole frame tree after StartLayout.
+        nsCOMPtr<nsIDocShellTreeItem> item = GetDocShell();
+        if (item) {
+            nsCOMPtr<nsIDocShellTreeOwner> owner;
+            item->GetTreeOwner(getter_AddRefs(owner));
+            nsCOMPtr<nsIXULWindow> xulWin = do_GetInterface(owner);
+            if (xulWin) {
+                nsCOMPtr<nsIDocShell> xulWinShell;
+                xulWin->GetDocShell(getter_AddRefs(xulWinShell));
+                if (SameCOMIdentity(xulWinShell, item)) {
+                    // We're the chrome document!  Apply our chrome flags now.
+                    xulWin->ApplyChromeFlags();
+                }
+            }
         }
+
+        nsContentUtils::DispatchTrustedEvent(this,
+                static_cast<nsIDocument*>(this),
+                NS_LITERAL_STRING("MozBeforeInitialXULLayout"),
+                true,
+                false);
 
         StartLayout();
 
@@ -3244,16 +3146,6 @@ XULDocument::OnScriptCompileComplete(JSScript* aScript, nsresult aStatus)
         *docp = doc->mNextSrcLoadWaiter;
         doc->mNextSrcLoadWaiter = nullptr;
 
-        if (aStatus == NS_BINDING_ABORTED && !scriptProto->HasScriptObject()) {
-            // If the previous doc load was aborted, we want to try loading
-            // again for the next doc. Otherwise, one abort would lead to all
-            // subsequent waiting docs to abort as well.
-            bool block = false;
-            doc->LoadScript(scriptProto, &block);
-            NS_RELEASE(doc);
-            return rv;
-        }
-
         // Execute only if we loaded and compiled successfully, then resume
         if (NS_SUCCEEDED(aStatus) && scriptProto->HasScriptObject()) {
             doc->ExecuteScript(scriptProto);
@@ -3287,8 +3179,12 @@ XULDocument::ExecuteScript(nsXULPrototypeScript *aScript)
     JS::Rooted<JSScript*> scriptObject(cx, aScript->GetScriptObject());
     NS_ENSURE_TRUE(scriptObject, NS_ERROR_UNEXPECTED);
 
-    JS::Rooted<JSObject*> global(cx, JS::CurrentGlobalOrNull(cx));
-    NS_ENSURE_TRUE(xpc::Scriptability::Get(global).Allowed(), NS_OK);
+    JS::Rooted<JSObject*> baseGlobal(cx, JS::CurrentGlobalOrNull(cx));
+    NS_ENSURE_TRUE(xpc::Scriptability::Get(baseGlobal).Allowed(), NS_OK);
+
+    JSAddonId* addonId = mCurrentPrototype ? MapURIToAddonID(mCurrentPrototype->GetURI()) : nullptr;
+    JS::Rooted<JSObject*> global(cx, xpc::GetAddonScope(cx, baseGlobal, addonId));
+    NS_ENSURE_TRUE(global, NS_ERROR_FAILURE);
 
     JS::ExposeObjectToActiveJS(global);
     JSAutoCompartment ac(cx, global);
@@ -3455,7 +3351,7 @@ XULDocument::OverlayForwardReference::Resolve()
             return eResolve_Error;
         }
 
-        rv = XULDocument::InsertElement(root, mOverlay, notify);
+        rv = mDocument->InsertElement(root, mOverlay, notify);
         if (NS_FAILED(rv)) return eResolve_Error;
 
         target = mOverlay;

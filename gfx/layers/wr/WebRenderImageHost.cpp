@@ -179,12 +179,7 @@ WebRenderImageHost::GetAsTextureHostForComposite()
   }
   SetCurrentTextureHost(img->mTextureHost);
 
-  mBias = UpdateBias(
-    mWrBridge->AsyncImageManager()->GetCompositionTime(),
-    mImages[imageIndex].mTimeStamp,
-    uint32_t(imageIndex + 1) < mImages.Length() ?
-      mImages[imageIndex + 1].mTimeStamp : TimeStamp(),
-    mBias);
+  // XXX Add UpdateBias()
 
   return mCurrentTextureHost;
 }

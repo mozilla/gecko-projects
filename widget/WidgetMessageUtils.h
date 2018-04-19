@@ -7,7 +7,6 @@
 
 #include "ipc/IPCMessageUtils.h"
 #include "mozilla/LookAndFeel.h"
-#include "nsIWidget.h"
 
 namespace IPC {
 
@@ -34,10 +33,6 @@ struct ParamTraits<LookAndFeelInt>
     return false;
   }
 };
-
-template<>
-struct ParamTraits<nsTransparencyMode> : public ContiguousEnumSerializerInclusive<nsTransparencyMode, eTransparencyOpaque, eTransparencyBorderlessGlass>
-{ };
 
 template<>
 struct ParamTraits<nsCursor>

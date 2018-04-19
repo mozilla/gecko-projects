@@ -7,11 +7,10 @@
 #include "PendingAnimationTracker.h"
 
 #include "mozilla/dom/AnimationTimeline.h"
-#include "mozilla/dom/Nullable.h"
 #include "nsIFrame.h"
 #include "nsIPresShell.h"
 
-using mozilla::dom::Nullable;
+using namespace mozilla;
 
 namespace mozilla {
 

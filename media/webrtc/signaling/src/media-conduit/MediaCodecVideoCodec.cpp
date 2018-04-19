@@ -4,10 +4,10 @@
 
 #include "CSFLog.h"
 #include "nspr.h"
-#include "mozilla/StaticPrefs.h"
 
 #include "WebrtcMediaCodecVP8VideoCodec.h"
 #include "MediaCodecVideoCodec.h"
+#include "MediaPrefs.h"
 
 namespace mozilla {
 
@@ -20,7 +20,7 @@ static const char* mcvcLogTag ="MediaCodecVideoCodec";
 WebrtcVideoEncoder* MediaCodecVideoCodec::CreateEncoder(CodecType aCodecType) {
   CSFLogDebug(LOGTAG,  "%s ", __FUNCTION__);
   if (aCodecType == CODEC_VP8) {
-    if (StaticPrefs::MediaNavigatorHardwareVp8encodeAccelerationRemoteEnabled()) {
+    if (MediaPrefs::RemoteMediaCodecVP8EncoderEnabled()) {
       return new WebrtcMediaCodecVP8VideoRemoteEncoder();
     } else {
       return new WebrtcMediaCodecVP8VideoEncoder();

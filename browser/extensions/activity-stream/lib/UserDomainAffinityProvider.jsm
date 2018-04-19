@@ -5,8 +5,7 @@
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-ChromeUtils.defineModuleGetter(this, "PlacesUtils",
-  "resource://gre/modules/PlacesUtils.jsm");
+const history = Cc["@mozilla.org/browser/nav-history-service;1"].getService(Ci.nsINavHistoryService);
 
 const DEFAULT_TIME_SEGMENTS = [
   {"id": "hour", "startTime": 3600, "endTime": 0, "weightPosition": 1},
@@ -244,7 +243,7 @@ this.UserDomainAffinityProvider = class UserDomainAffinityProvider {
    */
   queryVisits(ts) {
     const visitCounts = {};
-    const query = PlacesUtils.history.getNewQuery();
+    const query = history.getNewQuery();
     const wwwRegEx = /^www\./;
 
     query.beginTimeReference = query.TIME_RELATIVE_NOW;
@@ -253,11 +252,11 @@ this.UserDomainAffinityProvider = class UserDomainAffinityProvider {
     query.endTimeReference = query.TIME_RELATIVE_NOW;
     query.endTime = (ts.endTime && ts.endTime !== 0) ? -(ts.endTime * 1000 * 1000) : 0;
 
-    const options = PlacesUtils.history.getNewQueryOptions();
+    const options = history.getNewQueryOptions();
     options.sortingMode = options.SORT_BY_VISITCOUNT_DESCENDING;
     options.maxResults = this.maxHistoryQueryResults;
 
-    const {root} = PlacesUtils.history.executeQuery(query, options);
+    const {root} = history.executeQuery(query, options);
     root.containerOpen = true;
     for (let i = 0; i < root.childCount; i++) {
       let node = root.getChild(i);

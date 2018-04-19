@@ -53,8 +53,7 @@ class ComputedProperty extends PureComponent {
         defaultRep: referenceElement,
         mode: MODE.TINY,
         object: translateNodeFrontToGrip(referenceElement),
-        onInspectIconClick: () => setSelectedNode(referenceElement,
-          { reason: "box-model" }),
+        onInspectIconClick: () => setSelectedNode(referenceElement, "box-model"),
         onDOMNodeMouseOver: () => onShowBoxModelHighlighterForNode(referenceElement),
         onDOMNodeMouseOut: () => onHideBoxModelHighlighter(),
       })

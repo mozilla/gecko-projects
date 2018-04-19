@@ -239,13 +239,13 @@ DataTransferItemList::Files(nsIPrincipal* aPrincipal)
   // advanced caching mechanism for the FileList objects will be required.
   RefPtr<FileList> files;
   if (nsContentUtils::IsSystemPrincipal(aPrincipal)) {
-    files = new FileList(mDataTransfer);
+    files = new FileList(static_cast<nsIDOMDataTransfer*>(mDataTransfer));
     GenerateFiles(files, aPrincipal);
     return files.forget();
   }
 
   if (!mFiles) {
-    mFiles = new FileList(mDataTransfer);
+    mFiles = new FileList(static_cast<nsIDOMDataTransfer*>(mDataTransfer));
     mFilesPrincipal = aPrincipal;
     RegenerateFiles();
   }
