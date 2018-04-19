@@ -227,7 +227,7 @@ var ContentPolicyManager = {
   },
 
   receiveMessage(msg) {
-    let browser = msg.target instanceof Ci.nsIDOMXULElement ? msg.target : null;
+    let browser = ChromeUtils.getClassName(msg.target) == "XULElement" ? msg.target : null;
 
     let requestId = `fakeRequest-${++nextFakeRequestId}`;
     for (let id of msg.data.ids) {
@@ -475,7 +475,7 @@ class AuthRequestor {
         } catch (e) {
           Cu.reportError(`webRequest onAuthAvailable failure ${e}`);
         }
-        // At least one addon has responded, so we wont forward to the regular
+        // At least one addon has responded, so we won't forward to the regular
         // prompt handlers.
         wrapper.authPromptForward = null;
         wrapper.authPromptCallback = null;
@@ -506,6 +506,7 @@ HttpObserverManager = {
   redirectInitialized: false,
   activityInitialized: false,
   needTracing: false,
+  hasRedirects: false,
 
   listeners: {
     opening: new Map(),
@@ -586,7 +587,11 @@ HttpObserverManager = {
       Services.obs.removeObserver(this, "http-on-examine-merged-response");
     }
 
-    let needRedirect = this.listeners.onRedirect.size || haveBlocking;
+    // If we have any listeners, we need the channelsink so the channelwrapper is
+    // updated properly. Otherwise events for channels that are redirected will not
+    // happen correctly.  If we have no listeners, shut it down.
+    this.hasRedirects = this.listeners.onRedirect.size > 0;
+    let needRedirect = this.hasRedirects || needExamine || needOpening || needModify;
     if (needRedirect && !this.redirectInitialized) {
       this.redirectInitialized = true;
       ChannelEventSink.register();
@@ -917,7 +922,9 @@ HttpObserverManager = {
 
     // We want originalURI, this will provide a moz-ext rather than jar or file
     // uri on redirects.
-    this.runChannelListener(channel, "onRedirect", {redirectUrl: newChannel.originalURI.spec});
+    if (this.hasRedirects) {
+      this.runChannelListener(channel, "onRedirect", {redirectUrl: newChannel.originalURI.spec});
+    }
     channel.channel = newChannel;
   },
 };

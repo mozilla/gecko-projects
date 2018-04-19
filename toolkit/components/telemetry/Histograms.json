@@ -239,7 +239,7 @@
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["kgupta@mozilla.com"],
     "bug_numbers": [1238040],
-    "expires_in_version": "62",
+    "expires_in_version": "70",
     "kind": "exponential",
     "high": 100000,
     "n_buckets": 50,
@@ -249,7 +249,7 @@
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["kgupta@mozilla.com"],
     "bug_numbers": [1238040],
-    "expires_in_version": "62",
+    "expires_in_version": "70",
     "kind": "exponential",
     "high": 66355200,
     "n_buckets": 50,
@@ -259,7 +259,7 @@
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["kgupta@mozilla.com"],
     "bug_numbers": [1238040],
-    "expires_in_version": "62",
+    "expires_in_version": "70",
     "kind": "exponential",
     "high": 1000000,
     "n_buckets": 50,
@@ -269,7 +269,7 @@
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["kgupta@mozilla.com"],
     "bug_numbers": [1238040],
-    "expires_in_version": "62",
+    "expires_in_version": "70",
     "kind": "exponential",
     "high": 1073741824,
     "n_buckets": 50,
@@ -291,142 +291,10 @@
     "high": 1000,
     "n_buckets": 50
   },
-  "CONTENT_JS_FOREGROUND_TICK_DELAY_TOTAL_MS": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["farre@mozilla.com"],
-    "expires_in_version": "61",
-    "kind": "exponential",
-    "high": 100,
-    "n_buckets": 10,
-    "bug_numbers": [1305153, 1296486],
-    "description": "Time (in ms) that a pending vsync gets delayed by a runnable associated with a TabGroup that is (partially) in the foreground. The time is measured from the vsync event's time stamp to when the runnable finishes execution."
-  },
-  "CONTENT_JS_FOREGROUND_TICK_DELAY_EVENTS_MS": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["farre@mozilla.com"],
-    "expires_in_version": "61",
-    "keyed": true,
-    "kind": "exponential",
-    "high": 100,
-    "n_buckets": 10,
-    "bug_numbers": [1305153, 1296486],
-    "description": "Time (in ms) that a pending vsync gets delayed by a runnable associated with a TabGroup that is (partially) in the foreground. The time is measured from the vsync event's time stamp to when the runnable finishes execution. The histogram is keyed by the label of the runnable, indicating which type of task the runnable is performing."
-  },
-  "CONTENT_JS_BACKGROUND_TICK_DELAY_TOTAL_MS": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["farre@mozilla.com"],
-    "expires_in_version": "61",
-    "kind": "exponential",
-    "high": 100,
-    "n_buckets": 10,
-    "bug_numbers": [1305153, 1296486],
-    "description": "Time (in ms) that a pending vsync gets delayed by a runnable associated with a TabGroup that is completely in the background. The time is measured from the vsync event's time stamp to when the runnable finishes execution."
-  },
-  "CONTENT_JS_BACKGROUND_TICK_DELAY_EVENTS_MS": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["farre@mozilla.com"],
-    "expires_in_version": "61",
-    "keyed": true,
-    "kind": "exponential",
-    "high": 100,
-    "n_buckets": 10,
-    "bug_numbers": [1305153, 1296486],
-    "description" : "Time (in ms) that a pending vsync gets delayed by a runnable associated with a TabGroup that is completely in the background. The time is measured from the vsync event's time stamp to when the runnable finishes execution. The histogram is keyed by the label of the runnable, indicating which type of task the runnable is performing."
-  },
-  "CONTENT_JS_KNOWN_TICK_DELAY_MS": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["farre@mozilla.com"],
-    "expires_in_version": "65",
-    "kind": "exponential",
-    "high": 100,
-    "n_buckets": 10,
-    "bug_numbers": [1305153, 1296486],
-    "description": "Time (in ms) that a pending vsync gets delayed by a runnable associated with a TabGroup when the vsync event's timestamp is before the starting time of the runnable. The time is measured from the vsync event's time stamp to when the runnable finishes execution."
-  },
-  "COMPOSITOR_ANIMATION_DURATION" : {
-    "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "62",
-    "description": "Duration of animations running on the compositor in milliseconds",
-    "kind": "exponential",
-    "high": 20000,
-    "n_buckets": 50,
-    "alert_emails": ["kgupta@mozilla.com"],
-    "bug_numbers": [1339220]
-  },
-  "COMPOSITOR_ANIMATION_MAX_CONTIGUOUS_DROPS_APZ" : {
-    "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "62",
-    "description": "For APZ/scrolling compositor animations, the maximum number of contiguous frame drops encountered",
-    "kind": "exponential",
-    "high": 7200,
-    "n_buckets": 50,
-    "alert_emails": ["kgupta@mozilla.com"],
-    "bug_numbers": [1338347]
-  },
-  "COMPOSITOR_ANIMATION_MAX_CONTIGUOUS_DROPS_CHROME" : {
-    "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "62",
-    "description": "For compositor animations of chrome-process layers, the maximum number of contiguous frame drops encountered",
-    "kind": "exponential",
-    "high": 7200,
-    "n_buckets": 50,
-    "alert_emails": ["kgupta@mozilla.com"],
-    "bug_numbers": [1338347]
-  },
-  "COMPOSITOR_ANIMATION_MAX_CONTIGUOUS_DROPS_CONTENT" : {
-    "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "62",
-    "description": "For compositor animations of content-process layers, the maximum number of contiguous frame drops encountered",
-    "kind": "exponential",
-    "high": 7200,
-    "n_buckets": 50,
-    "alert_emails": ["kgupta@mozilla.com"],
-    "bug_numbers": [1338347]
-  },
-  "COMPOSITOR_ANIMATION_MAX_LAYER_AREA" : {
-    "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "62",
-    "description": "High-watermark of layer area affected during a compositor animation. Units are layer pixels squared.",
-    "kind": "exponential",
-    "high": 8294400,
-    "n_buckets": 50,
-    "alert_emails": ["kgupta@mozilla.com"],
-    "bug_numbers": [1339220]
-  },
-  "COMPOSITOR_ANIMATION_THROUGHPUT_APZ" : {
-    "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "62",
-    "description": "Frame throughput ratio (scaled up to 1000) for APZ/scrolling animations in the compositor.",
-    "kind": "linear",
-    "high": 1500,
-    "n_buckets": 50,
-    "alert_emails": ["kgupta@mozilla.com"],
-    "bug_numbers": [1338347]
-  },
-  "COMPOSITOR_ANIMATION_THROUGHPUT_CHROME" : {
-    "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "62",
-    "description": "Frame throughput ratio (scaled up to 1000) for compositor animations of chrome-process layers.",
-    "kind": "linear",
-    "high": 1500,
-    "n_buckets": 50,
-    "alert_emails": ["kgupta@mozilla.com"],
-    "bug_numbers": [1338347]
-  },
-  "COMPOSITOR_ANIMATION_THROUGHPUT_CONTENT" : {
-    "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "62",
-    "description": "Frame throughput ratio (scaled up to 1000) for compositor animations of content-process layers.",
-    "kind": "linear",
-    "high": 1500,
-    "n_buckets": 50,
-    "alert_emails": ["kgupta@mozilla.com"],
-    "bug_numbers": [1338347]
-  },
   "CONTENT_PROCESS_LAUNCH_TIME_MS" : {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["fgomes@mozilla.com", "mconley@mozilla.com"],
-    "expires_in_version": "57",
+    "expires_in_version": "67",
     "bug_numbers": [1304790],
     "kind": "exponential",
     "high": 64000,
@@ -438,7 +306,7 @@
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["kgupta@mozilla.com"],
     "bug_numbers": [1261373],
-    "expires_in_version": "62",
+    "expires_in_version": "70",
     "description": "Main thread response times for APZ notifications about input events (ms)",
     "kind" : "exponential",
     "high": 60000,
@@ -1038,14 +906,6 @@
     "n_values":  10,
     "description": "Count how often we use different fallbacks when the GPU process crashes: None=0, GPUProcessDecodingDisabled=1, GPUProcessDisabled=2"
   },
-  "JS_DEPRECATED_LANGUAGE_EXTENSIONS_IN_CONTENT": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["jdemooij@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "enumerated",
-    "n_values": 10,
-    "description": "Use of SpiderMonkey's deprecated language extensions in web content: ForEach=0 (obsolete), DestructuringForIn=1 (obsolete), LegacyGenerator=2 (obsolete), ExpressionClosure=3, LetBlock=4 (obsolete), LetExpression=5 (obsolete), NoSuchMethod=6 (obsolete), FlagsArgument=7 (obsolete), RegExpSourceProp=8 (obsolete), RestoredRegExpStatics=9 (obsolete), BlockScopeFunRedecl=10 (obsolete)"
-  },
   "JS_PRIVILEGED_PARSER_COMPILE_LAZY_AFTER_MS": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["dteller@mozilla.com"],
@@ -1086,7 +946,7 @@
     "description": "Resident memory size (KB)"
   },
   "MEMORY_TOTAL": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "alert_emails": ["memshrink-telemetry-alerts@mozilla.com"],
     "bug_numbers": [1198209],
     "expires_in_version": "never",
@@ -1097,7 +957,7 @@
     "description": "Total Memory Across All Processes (KB)"
   },
   "MEMORY_DISTRIBUTION_AMONG_CONTENT": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "alert_emails": ["memshrink-telemetry-alerts@mozilla.com"],
     "bug_numbers": [1344174],
     "expires_in_version": "never",
@@ -2193,29 +2053,29 @@
   },
   "TLS_EARLY_DATA_NEGOTIATED": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
+    "expires_in_version": "66",
     "kind": "enumerated",
     "n_values": 3,
     "description": "Sending TLS early data was possible: 0 - not possible, 1 - possible but not used, 2 - possible and used.",
-    "alert_emails": ["necko@mozilla.com"],
+    "alert_emails": ["necko@mozilla.com", "ddamjanovic@mozilla.com"],
     "bug_numbers": [1296288]
   },
   "TLS_EARLY_DATA_ACCEPTED": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
+    "expires_in_version": "66",
     "kind": "boolean",
     "description": "TLS early data was used and it was accepted (true) or rejected (false) by the remote host.",
-    "alert_emails": ["necko@mozilla.com"],
+    "alert_emails": ["necko@mozilla.com", "ddamjanovic@mozilla.com"],
     "bug_numbers": [1296288]
   },
   "TLS_EARLY_DATA_BYTES_WRITTEN": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
+    "expires_in_version": "66",
     "kind": "exponential",
     "high": 60000,
     "n_buckets": 100,
     "description": "Amount of bytes sent using TLS early data at the start of a TLS connection for a given channel.",
-    "alert_emails": ["necko@mozilla.com"],
+    "alert_emails": ["necko@mozilla.com", "ddamjanovic@mozilla.com"],
     "bug_numbers": [1296288]
   },
   "SSL_HANDSHAKE_VERSION": {
@@ -2629,6 +2489,17 @@
     "n_values": 16,
     "releaseChannelCollection": "opt-out",
     "description": "Channel Disposition: 0=Cancel, 1=Disk, 2=NetOK, 3=NetEarlyFail, 4=NetlateFail, +8 for HTTPS"
+  },
+  "HTTP_CHANNEL_DISPOSITION_UPGRADE" : {
+    "record_in_processes": ["main"],
+    "alert_emails": ["necko@mozilla.com", "seceng-telemetry@mozilla.com", "jkt@mozilla.com"],
+    "bug_numbers": [1440701],
+    "expires_in_version": "70",
+    "kind": "categorical",
+    "keyed": true,
+    "releaseChannelCollection": "opt-out",
+    "description": "Upgrading display content Channel Disposition",
+    "labels": ["cancel", "disk", "netOk", "netEarlyFail", "netLateFail"]
   },
   "HTTP_CONNECTION_ENTRY_CACHE_HIT_1" : {
     "record_in_processes": ["main", "content"],
@@ -3416,6 +3287,14 @@
     "kind": "boolean",
     "description": "DNS check for TRR was blocked by blacklist",
     "bug_numbers": [1434852],
+    "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"]
+  },
+  "DNS_TRR_NS_VERFIFIED": {
+    "record_in_processes": ["main"],
+    "expires_in_version": "never",
+    "kind": "boolean",
+    "description": "TRR managed to verify NS entry",
+    "bug_numbers": [1453825],
     "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"]
   },
   "DNS_LOOKUP_ALGORITHM": {
@@ -5920,16 +5799,6 @@
     "n_buckets": 20,
     "description": "Firefox: Time in ms spent updating UI in response to a tab switch"
   },
-  "FX_TAB_SWITCH_TOTAL_MS": {
-    "record_in_processes": ["main"],
-    "alert_emails": ["mconley@mozilla.com"],
-    "expires_in_version": "57",
-    "kind": "exponential",
-    "high": 1000,
-    "n_buckets": 20,
-    "releaseChannelCollection": "opt-out",
-    "description": "Firefox: Time in ms till a tab switch is complete including the first paint for non-e10s windows"
-  },
   "FX_TAB_SWITCH_TOTAL_E10S_MS": {
     "record_in_processes": ["main"],
     "alert_emails": ["mconley@mozilla.com"],
@@ -5960,6 +5829,16 @@
     "alert_emails": ["mconley@mozilla.com"],
     "releaseChannelCollection": "opt-out",
     "description": "Firefox: If the spinner interstitial displays during tab switching, records the time in ms the graphic is visible. This probe is similar to FX_TAB_SWITCH_SPINNER_VISIBLE_MS, but is for truly degenerate cases."
+  },
+  "FX_TAB_SWITCH_SPINNER_VISIBLE_TRIGGER": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["dothayer@mozilla.com"],
+    "bug_numbers": [1442068],
+    "expires_in_version": "63",
+    "kind": "categorical",
+    "labels": ["none", "preActions", "postActions", "onLoadTimeout", "onLayersReady", "onSizeModeOrOcc", "onEndSwapDocShells"],
+    "releaseChannelCollection": "opt-out",
+    "description": "Diagnostic probe to aid in categorizing tab switch spinners. Records what most recently set the loadTimer to null if a spinner was displayed."
   },
   "FX_TAB_SWITCH_REQUEST_TAB_WARMING_STATE": {
     "record_in_processes": ["main"],
@@ -6393,11 +6272,11 @@
   },
   "FX_PREFERENCES_CATEGORY_OPENED_V2": {
     "record_in_processes": ["main", "content"],
-    "bug_numbers": [1335907, 1425173],
+    "bug_numbers": [1335907, 1425173, 1451006],
     "alert_emails": ["jaws@mozilla.com"],
     "expires_in_version": "66",
     "kind": "categorical",
-    "labels": ["unknown", "searchresults", "general", "applications", "privacy", "sync", "advanced", "search"],
+    "labels": ["unknown", "searchresults", "general", "applications", "privacy", "sync", "advanced", "search", "home"],
     "releaseChannelCollection": "opt-out",
     "description": "Count how often each preference category is opened."
   },
@@ -6418,7 +6297,7 @@
     "expires_in_version": "64",
     "kind": "categorical",
     "labels": ["bookmark", "pocket", "screenshots", "webcompat", "copyURL", "emailLink",
-               "sendToDevice", "other"],
+               "sendToDevice", "other", "addSearchEngine"],
     "description": "Count how many times people add items to the url bar"
   },
   "FX_PAGE_ACTION_REMOVED": {
@@ -6428,7 +6307,7 @@
     "expires_in_version": "64",
     "kind": "categorical",
     "labels": ["bookmark", "pocket", "screenshots", "webcompat", "copyURL", "emailLink",
-               "sendToDevice", "other"],
+               "sendToDevice", "other", "addSearchEngine"],
     "description": "Count how many times people remove items from the url bar"
   },
   "FX_PAGE_ACTION_MANAGED": {
@@ -6438,7 +6317,7 @@
     "expires_in_version": "64",
     "kind": "categorical",
     "labels": ["bookmark", "pocket", "screenshots", "webcompat", "copyURL", "emailLink",
-               "sendToDevice", "other"],
+               "sendToDevice", "other", "addSearchEngine"],
     "description": "Count how many times people manage extensions via their actions in the url bar"
   },
   "FX_PAGE_ACTION_URLBAR_USED": {
@@ -6448,7 +6327,7 @@
     "expires_in_version": "64",
     "kind": "categorical",
     "labels": ["bookmark", "pocket", "screenshots", "webcompat", "copyURL", "emailLink",
-               "sendToDevice", "other"],
+               "sendToDevice", "other", "addSearchEngine"],
     "description": "Count how many times people use items in the url bar"
   },
   "FX_PAGE_ACTION_PANEL_USED": {
@@ -6458,7 +6337,7 @@
     "expires_in_version": "64",
     "kind": "categorical",
     "labels": ["bookmark", "pocket", "screenshots", "webcompat", "copyURL", "emailLink",
-               "sendToDevice", "other"],
+               "sendToDevice", "other", "addSearchEngine"],
     "description": "Count how many times people use items from the main page action button"
   },
   "INPUT_EVENT_RESPONSE_MS": {
@@ -6745,10 +6624,11 @@
       "enterSelection",
       "click",
       "arrowEnterSelection",
-      "tabEnterSelection"
+      "tabEnterSelection",
+      "rightClickEnter"
     ],
     "bug_numbers": [1334615],
-    "description": "The input method the user used to select a result in the urlbar. 'enter' => The user hit the Enter key on the heuristic result at index 0. 'enterSelection' => The user chose a non-heuristic result (in exotic ways) and then hit the Enter key. 'click' => The user clicked a result with the mouse. 'arrowEnterSelection' => The user chose a non-heuristic result using arrow keys and then hit the Enter key. 'tabEnterSelection' => The user chose a non-heuristic result using tab at least once and then hit the Enter key."
+    "description": "The input method the user used to select a result in the urlbar. 'enter' => The user hit the Enter key on the heuristic result at index 0. 'enterSelection' => The user chose a non-heuristic result (in exotic ways) and then hit the Enter key. 'click' => The user clicked a result with the mouse. 'arrowEnterSelection' => The user chose a non-heuristic result using arrow keys and then hit the Enter key. 'tabEnterSelection' => The user chose a non-heuristic result using tab at least once and then hit the Enter key. 'rightClickEnter' => The user chose a non-heuristic result using right click and then hit the Enter key."
   },
   "FX_SEARCHBAR_SELECTED_RESULT_METHOD": {
     "record_in_processes": ["main", "content"],
@@ -7194,13 +7074,6 @@
     "n_buckets": 29,
     "description": "The size (MB) of the ping data submitted to Telemetry exceeding the maximum size"
   },
-  "TELEMETRY_DISCARDED_CONTENT_PINGS_COUNT": {
-    "record_in_processes": ["main"],
-    "alert_emails": ["telemetry-client-dev@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "count",
-    "description": "Count of discarded content payloads."
-  },
   "TELEMETRY_COMPRESS": {
     "record_in_processes": ["main"],
     "alert_emails": ["telemetry-client-dev@mozilla.com"],
@@ -7244,7 +7117,8 @@
       "eRedirect",
       "abort",
       "timeout",
-      "eTooLate"
+      "eTooLate",
+      "eTerminated"
     ],
     "description": "Counts of the different ways sending a Telemetry ping can fail."
   },
@@ -7818,13 +7692,6 @@
     "kind": "enumerated",
     "n_values": 100,
     "description": "Security-related UI events (addons, form submission, TLS certs, Safe Browsing, updates and geolocation). See /security/manager/ssl/nsISecurityUITelemetry.idl for the specific values."
-  },
-  "JS_TELEMETRY_ADDON_EXCEPTIONS" : {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version" : "never",
-    "kind": "count",
-    "keyed" : true,
-    "description" : "Exceptions thrown by add-ons"
   },
   "IPC_TRANSACTION_CANCEL": {
     "record_in_processes": ["main", "content"],
@@ -9290,7 +9157,7 @@
     "alert_emails": ["dev-developer-tools@lists.mozilla.org", "apoirot@mozilla.com"],
     "expires_in_version": "never",
     "kind": "categorical",
-    "labels": ["KeyShortcut", "SystemMenu", "HamburgerMenu", "ContextMenu", "CommandLine"],
+    "labels": ["KeyShortcut", "SystemMenu", "HamburgerMenu", "ContextMenu", "CommandLine", "DeveloperToolbar", "SessionRestore"],
     "releaseChannelCollection": "opt-out",
     "description": "Records how the user is triggering Developer Tools startup."
   },
@@ -9599,6 +9466,39 @@
     "bug_numbers": [1247985],
     "description": "Number of times a custom developer tool has been opened.",
     "releaseChannelCollection": "opt-out"
+  },
+  "DEVTOOLS_ACCESSIBILITY_TIME_ACTIVE_SECONDS": {
+    "record_in_processes": ["main", "content"],
+    "expires_in_version": "65",
+    "kind": "exponential",
+    "high": 86400,
+    "n_buckets": 100,
+    "bug_numbers": [1447302],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "yzenevich@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
+    "description": "How long has the accessibility panel been active (seconds)."
+  },
+  "DEVTOOLS_ACCESSIBILITY_PICKER_TIME_ACTIVE_SECONDS": {
+    "record_in_processes": ["main", "content"],
+    "expires_in_version": "65",
+    "kind": "exponential",
+    "high": 86400,
+    "n_buckets": 100,
+    "bug_numbers": [1447302],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "yzenevich@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
+    "description": "How long has the picker tool in accessibility panel been active (seconds)."
+  },
+  "DEVTOOLS_ACCESSIBILITY_SERVICE_TIME_ACTIVE_SECONDS": {
+    "record_in_processes": ["main", "content"],
+    "expires_in_version": "65",
+    "kind": "exponential",
+    "high": 86400,
+    "n_buckets": 100,
+    "bug_numbers": [1447302],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "yzenevich@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
+    "description": "How long has the platform accessibility been active (seconds) in accessibility panel."
   },
   "DEVTOOLS_TOOLBOX_TIME_ACTIVE_SECONDS": {
     "record_in_processes": ["main", "content"],
@@ -10809,6 +10709,9 @@
   "CERT_VALIDATION_SUCCESS_BY_CA": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
+    "alert_emails": ["jjones@mozilla.com", "seceng-telemetry@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
+    "bug_numbers": [1364159, 1369747, 1441550],
     "kind": "enumerated",
     "n_values": 256,
     "description": "Successful SSL server cert validations by CA (see RootHashes.inc for names of CAs)"
@@ -11231,6 +11134,18 @@
     "expires_in_version": "never",
     "kind": "count",
     "keyed": true,
+    "keys": [
+      "main-crash",
+      "main-hang",
+      "content-crash",
+      "content-hang",
+      "plugin-crash",
+      "plugin-hang",
+      "gmplugin-crash",
+      "gmplugin-hang",
+      "gpu-crash",
+      "gpu-hang"
+    ],
     "releaseChannelCollection": "opt-out",
     "description": "An attempt to submit a crash. Keyed on the CrashManager Crash.type."
   },
@@ -11434,6 +11349,15 @@
     "n_buckets": 100,
     "description": "720p VP9 decode benchmark measurement in frames per second",
     "releaseChannelCollection": "opt-out"
+  },
+  "MEDIA_PLAY_PROMISE_RESOLUTION": {
+    "record_in_processes": ["main", "content"],
+    "bug_numbers": [1453176],
+    "alert_emails": ["cpearce@mozilla.com", "drno@ohlmeier.org"],
+    "expires_in_version": "72",
+    "kind": "categorical",
+    "labels": ["Resolved", "NotAllowedErr", "SrcNotSupportedErr", "PauseAbortErr", "AbortErr", "UnknownErr"],
+    "description": "Records whether promise returned by HTMLMediaElement.play() successfully resolved, or the error code which it was rejected with."
   },
   "MEDIA_CODEC_USED": {
     "record_in_processes": ["main", "content"],
@@ -12860,16 +12784,6 @@
     "bug_numbers": [1296606],
     "kind": "count",
     "description": "Number of named browser profiles for the current user, as reported by the profile service at startup."
-  },
-  "WEB_PERMISSION_CLEARED": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["firefox-dev@mozilla.org"],
-    "bug_numbers": [1286118],
-    "expires_in_version": "55",
-    "kind": "enumerated",
-    "keyed": true,
-    "n_values": 6,
-    "description": "Number of revoke actions on permissions in the control center, keyed by permission id. Values represent the permission type that was revoked. (0=unknown, 1=permanently allowed, 2=permanently blocked, 3=temporarily allowed, 4=temporarily blocked)"
   },
   "TIME_TO_FIRST_CLICK_MS": {
     "record_in_processes": ["main", "content"],

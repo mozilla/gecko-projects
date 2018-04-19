@@ -66,8 +66,8 @@ public:
      * support @font-face src local() )
      */
     virtual gfxFontEntry* LookupLocalFont(const nsAString& aFontName,
-                                          uint16_t aWeight,
-                                          int16_t aStretch,
+                                          FontWeight aWeight,
+                                          uint16_t aStretch,
                                           uint8_t aStyle) override;
 
     /**
@@ -75,8 +75,8 @@ public:
      *
      */
     virtual gfxFontEntry* MakePlatformFont(const nsAString& aFontName,
-                                           uint16_t aWeight,
-                                           int16_t aStretch,
+                                           FontWeight aWeight,
+                                           uint16_t aStretch,
                                            uint8_t aStyle,
                                            const uint8_t* aFontData,
                                            uint32_t aLength) override;
@@ -128,6 +128,8 @@ public:
 #endif // MOZ_X11
 
 protected:
+    bool CheckVariationFontSupport() override;
+
     int8_t mMaxGenericSubstitutions;
 
 private:

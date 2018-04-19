@@ -20,6 +20,7 @@
 #include "nsUnicodeScriptCodes.h"
 #include "nsDataHashtable.h"
 #include "harfbuzz/hb.h"
+#include "mozilla/FontPropertyTypes.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/WeakPtr.h"
@@ -109,6 +110,7 @@ struct gfxFontFeatureInfo {
 
 class gfxFontEntry {
 public:
+    typedef mozilla::FontWeight FontWeight;
     typedef mozilla::gfx::DrawTarget DrawTarget;
     typedef mozilla::unicode::Script Script;
 
@@ -139,8 +141,8 @@ public:
     // returns Name() if nothing better is available.
     virtual nsString RealFaceName();
 
-    uint16_t Weight() const { return mWeight; }
-    int16_t Stretch() const { return mStretch; }
+    FontWeight Weight() const { return mWeight; }
+    uint16_t Stretch() const { return mStretch; }
 
     bool IsUserFont() const { return mIsDataUserFont || mIsLocalUserFont; }
     bool IsLocalUserFont() const { return mIsLocalUserFont; }
@@ -148,7 +150,7 @@ public:
     bool IsItalic() const { return mStyle == NS_FONT_STYLE_ITALIC; }
     bool IsOblique() const { return mStyle == NS_FONT_STYLE_OBLIQUE; }
     bool IsUpright() const { return mStyle == NS_FONT_STYLE_NORMAL; }
-    bool IsBold() const { return mWeight >= 600; } // bold == weights 600 and above
+    bool IsBold() const { return mWeight.IsBold(); } // bold == weights 600 and above
     bool IgnoreGDEF() const { return mIgnoreGDEF; }
     bool IgnoreGSUB() const { return mIgnoreGSUB; }
 
@@ -161,7 +163,7 @@ public:
     bool IsNormalStyle() const
     {
         return IsUpright() &&
-               Weight() == NS_FONT_WEIGHT_NORMAL &&
+               Weight() == FontWeight::Normal() &&
                Stretch() == NS_FONT_STRETCH_NORMAL;
     }
 
@@ -402,8 +404,8 @@ public:
     uint32_t         mDefaultSubSpaceFeatures[(int(Script::NUM_SCRIPT_CODES) + 31) / 32];
     uint32_t         mNonDefaultSubSpaceFeatures[(int(Script::NUM_SCRIPT_CODES) + 31) / 32];
 
-    uint16_t         mWeight;
-    int16_t          mStretch;
+    FontWeight       mWeight;
+    uint16_t         mStretch;
 
     RefPtr<gfxCharacterMap> mCharacterMap;
     uint32_t         mUVSOffset;

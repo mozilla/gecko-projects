@@ -61,7 +61,6 @@
 #include "nsStringStream.h"
 #include "nsISyncStreamListener.h"
 #include "nsITransport.h"
-#include "nsIUnicharStreamLoader.h"
 #include "nsIURIWithPrincipal.h"
 #include "nsIURLParser.h"
 #include "nsIUUIDGenerator.h"
@@ -78,6 +77,8 @@
 #include "nsIRedirectHistoryEntry.h"
 #include "nsICertBlocklist.h"
 #include "nsICertOverrideService.h"
+#include "nsQueryObject.h"
+#include "mozIThirdPartyUtil.h"
 
 #include <limits>
 
@@ -1137,23 +1138,6 @@ NS_NewStreamLoader(nsIStreamLoader        **outStream,
 }
 
 nsresult
-NS_NewUnicharStreamLoader(nsIUnicharStreamLoader        **result,
-                          nsIUnicharStreamLoaderObserver *observer)
-{
-    nsresult rv;
-    nsCOMPtr<nsIUnicharStreamLoader> loader =
-        do_CreateInstance(NS_UNICHARSTREAMLOADER_CONTRACTID, &rv);
-    if (NS_SUCCEEDED(rv)) {
-        rv = loader->Init(observer);
-        if (NS_SUCCEEDED(rv)) {
-            *result = nullptr;
-            loader.swap(*result);
-        }
-    }
-    return rv;
-}
-
-nsresult
 NS_NewSyncStreamListener(nsIStreamListener **result,
                          nsIInputStream    **stream)
 {
@@ -1677,8 +1661,7 @@ private:
         nsresult rv = mTaskQueue->Dispatch(runnable.forget());
         NS_ENSURE_SUCCESS(rv, rv);
 
-        rv = lock.Wait();
-        NS_ENSURE_SUCCESS(rv, rv);
+        lock.Wait();
 
         mCompleted = true;
         return mAsyncResult;
@@ -2177,25 +2160,13 @@ bool NS_IsSameSiteForeign(nsIChannel* aChannel, nsIURI* aHostURI)
     return false;
   }
 
-  bool isForeign = true;
-  nsresult rv = thirdPartyUtil->IsThirdPartyChannel(aChannel, uri, &isForeign);
+  bool isForeign = false;
+  thirdPartyUtil->IsThirdPartyChannel(aChannel, uri, &isForeign);
+
   // if we are dealing with a cross origin request, we can return here
   // because we already know the request is 'foreign'.
-  if (NS_FAILED(rv) || isForeign) {
+  if (isForeign) {
     return true;
-  }
-
-  // for loads of TYPE_SUBDOCUMENT we have to perform an additional test, because
-  // a cross-origin iframe might perform a navigation to a same-origin iframe which
-  // would send same-site cookies. Hence, if the iframe navigation was triggered
-  // by a cross-origin triggeringPrincipal, we treat the load as foreign.
-  if (loadInfo->GetExternalContentPolicyType() == nsIContentPolicy::TYPE_SUBDOCUMENT) {
-    nsCOMPtr<nsIURI> triggeringPrincipalURI;
-    loadInfo->TriggeringPrincipal()->GetURI(getter_AddRefs(triggeringPrincipalURI));
-    rv = thirdPartyUtil->IsThirdPartyChannel(aChannel, triggeringPrincipalURI, &isForeign);
-    if (NS_FAILED(rv) || isForeign) {
-      return true;
-    }
   }
 
   // for the purpose of same-site cookies we have to treat any cross-origin
@@ -2208,9 +2179,9 @@ bool NS_IsSameSiteForeign(nsIChannel* aChannel, nsIURI* aHostURI)
     entry->GetPrincipal(getter_AddRefs(redirectPrincipal));
     if (redirectPrincipal) {
       redirectPrincipal->GetURI(getter_AddRefs(redirectURI));
-      rv = thirdPartyUtil->IsThirdPartyChannel(aChannel, redirectURI, &isForeign);
+      thirdPartyUtil->IsThirdPartyChannel(aChannel, redirectURI, &isForeign);
       // if at any point we encounter a cross-origin redirect we can return.
-      if (NS_FAILED(rv) || isForeign) {
+      if (isForeign) {
         return true;
       }
     }
@@ -3099,7 +3070,8 @@ NS_ShouldSecureUpgrade(nsIURI* aURI,
                               0, // aLineNumber
                               0, // aColumnNumber
                               nsIScriptError::warningFlag, "CSP",
-                              innerWindowId);
+                              innerWindowId,
+                              !!aLoadInfo->GetOriginAttributes().mPrivateBrowsingId);
           Telemetry::AccumulateCategorical(Telemetry::LABELS_HTTP_SCHEME_UPGRADE_TYPE::CSP);
         } else {
           nsCOMPtr<nsIDocument> doc;

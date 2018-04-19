@@ -9,6 +9,7 @@
 #include "nsError.h"
 #include <new>
 #include "nsIContent.h"
+#include "nsIContentInlines.h"
 #include "nsIDocument.h"
 #include "nsINode.h"
 #include "nsPIDOMWindow.h"
@@ -422,7 +423,7 @@ void
 EventTargetChainItem::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   aVisitor.Reset();
-  Unused << mTarget->GetEventTargetParent(aVisitor);
+  mTarget->GetEventTargetParent(aVisitor);
   SetForceContentDispatch(aVisitor.mForceContentDispatch);
   SetWantsWillHandleEvent(aVisitor.mWantsWillHandleEvent);
   SetMayHaveListenerManager(aVisitor.mMayHaveListenerManager);
@@ -745,16 +746,32 @@ EventDispatcher::Dispatch(nsISupports* aTarget,
   }
 
 #ifdef DEBUG
-  if (aEvent->mMessage != eVoidEvent &&
+  if (NS_IsMainThread() &&
+      aEvent->mMessage != eVoidEvent &&
       !nsContentUtils::IsSafeToRunScript()) {
-    nsresult rv = NS_ERROR_FAILURE;
-    if (target->GetContextForEventHandlers(&rv) ||
-        NS_FAILED(rv)) {
-      nsCOMPtr<nsINode> node = do_QueryInterface(target);
-      if (node && nsContentUtils::IsChromeDoc(node->OwnerDoc())) {
-        NS_WARNING("Fix the caller!");
-      } else {
-        NS_ERROR("This is unsafe! Fix the caller!");
+    nsCOMPtr<nsINode> node = do_QueryInterface(target);
+    if (!node) {
+      // If the target is not a node, just go ahead and assert that this is
+      // unsafe.  There really shouldn't be any other event targets in documents
+      // that are not being rendered or scripted.
+      NS_ERROR("This is unsafe! Fix the caller!");
+    } else {
+      // If this is a node, it's possible that this is some sort of DOM tree
+      // that is never accessed by script (for example an SVG image or XBL
+      // binding document or whatnot).  We really only want to warn/assert here
+      // if there might be actual scripted listeners for this event, so restrict
+      // the warnings/asserts to the case when script can or once could touch
+      // this node's document.
+      nsIDocument* doc = node->OwnerDoc();
+      bool hasHadScriptHandlingObject;
+      nsIGlobalObject* global =
+        doc->GetScriptHandlingObject(hasHadScriptHandlingObject);
+      if (global || hasHadScriptHandlingObject) {
+        if (nsContentUtils::IsChromeDoc(doc)) {
+          NS_WARNING("Fix the caller!");
+        } else {
+          NS_ERROR("This is unsafe! Fix the caller!");
+        }
       }
     }
   }

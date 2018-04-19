@@ -145,6 +145,11 @@ locales = [
     path = "devtools/client/locales/l10n.toml"
 
 [[paths]]
+    reference = "devtools/startup/locales/en-US/**"
+    l10n = "{l}devtools/startup/**"
+
+# for Firefox 60 and older and cross-channel
+[[paths]]
     reference = "devtools/shim/locales/en-US/**"
     l10n = "{l}devtools/shim/**"
 

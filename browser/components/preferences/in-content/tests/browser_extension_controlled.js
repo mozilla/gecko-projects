@@ -55,7 +55,6 @@ function waitForMessageChange(element, cb, opts = { attributes: true, attributeF
   return waitForMutation(element, opts, cb);
 }
 
-// eslint-disable-next-line mozilla/no-cpows-in-tests
 function getElement(id, doc = gBrowser.contentDocument) {
   return doc.getElementById(id);
 }
@@ -83,19 +82,23 @@ function waitForMessageContent(messageId, content, doc) {
 }
 
 add_task(async function testExtensionControlledHomepage() {
-  await openPreferencesViaOpenPreferencesAPI("paneGeneral", {leaveOpen: true});
+  await openPreferencesViaOpenPreferencesAPI("paneHome", {leaveOpen: true});
   // eslint-disable-next-line mozilla/no-cpows-in-tests
   let doc = gBrowser.contentDocument;
-  is(gBrowser.currentURI.spec, "about:preferences#general",
-     "#general should be in the URI for about:preferences");
+  is(gBrowser.currentURI.spec, "about:preferences#home",
+     "#home should be in the URI for about:preferences");
   let homepagePref = () => Services.prefs.getCharPref("browser.startup.homepage");
   let originalHomepagePref = homepagePref();
   let extensionHomepage = "https://developer.mozilla.org/";
   let controlledContent = doc.getElementById("browserHomePageExtensionContent");
 
-  // The homepage is set to the default and editable.
+  let homeModeEl = doc.getElementById("homeMode");
+  let customSettingsSection = doc.getElementById("customSettings");
+
+  // The homepage is set to the default and the custom settings section is hidden
   ok(originalHomepagePref != extensionHomepage, "homepage is empty by default");
-  is(doc.getElementById("browserHomePage").disabled, false, "The homepage input is enabled");
+  is(homeModeEl.disabled, false, "The homepage menulist is enabled");
+  is(customSettingsSection.hidden, true, "The custom settings element is hidden");
   is(controlledContent.hidden, true, "The extension controlled row is hidden");
 
   // Install an extension that will set the homepage.
@@ -109,7 +112,7 @@ add_task(async function testExtensionControlledHomepage() {
   is(controlledLabel.textContent, "An extension,  set_homepage, is controlling your home page.",
      "The user is notified that an extension is controlling the homepage");
   is(controlledContent.hidden, false, "The extension controlled row is hidden");
-  is(doc.getElementById("browserHomePage").disabled, true, "The homepage input is disabled");
+  is(homeModeEl.disabled, true, "The homepage input is disabled");
 
   // Disable the extension.
   let enableMessageShown = waitForEnableMessage(controlledContent.id);
@@ -127,7 +130,7 @@ add_task(async function testExtensionControlledHomepage() {
 
   // The homepage elements are reset to their original state.
   is(homepagePref(), originalHomepagePref, "homepage is set back to default");
-  is(doc.getElementById("browserHomePage").disabled, false, "The homepage input is enabled");
+  is(homeModeEl.disabled, false, "The homepage menulist is enabled");
   is(controlledContent.hidden, true, "The extension controlled row is hidden");
 
   // Cleanup the add-on and tab.
@@ -139,15 +142,15 @@ add_task(async function testExtensionControlledHomepage() {
   await waitForMessageShown("browserHomePageExtensionContent");
   // Do the uninstall now that the enable code has been run.
   addon.uninstall();
-  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
 add_task(async function testPrefLockedHomepage() {
-  await openPreferencesViaOpenPreferencesAPI("paneGeneral", {leaveOpen: true});
+  await openPreferencesViaOpenPreferencesAPI("paneHome", {leaveOpen: true});
   // eslint-disable-next-line mozilla/no-cpows-in-tests
   let doc = gBrowser.contentDocument;
-  is(gBrowser.currentURI.spec, "about:preferences#general",
-     "#general should be in the URI for about:preferences");
+  is(gBrowser.currentURI.spec, "about:preferences#home",
+     "#home should be in the URI for about:preferences");
 
   let homePagePref = "browser.startup.homepage";
   let buttonPrefs = [
@@ -155,7 +158,8 @@ add_task(async function testPrefLockedHomepage() {
     "pref.browser.homepage.disable_button.bookmark_page",
     "pref.browser.homepage.disable_button.restore_default",
   ];
-  let homePageInput = doc.getElementById("browserHomePage");
+  let homeModeEl = doc.getElementById("homeMode");
+  let homePageInput = doc.getElementById("homePageUrl");
   let prefs = Services.prefs.getDefaultBranch(null);
   let mutationOpts = {attributes: true, attributeFilter: ["disabled"]};
   let controlledContent = doc.getElementById("browserHomePageExtensionContent");
@@ -164,7 +168,10 @@ add_task(async function testPrefLockedHomepage() {
   let getButton = pref => doc.querySelector(`.homepage-button[preference="${pref}"`);
   let waitForAllMutations = () => Promise.all(
     buttonPrefs.map(pref => waitForMutation(getButton(pref), mutationOpts))
-    .concat([waitForMutation(homePageInput, mutationOpts)]));
+      .concat([
+        waitForMutation(homeModeEl, mutationOpts),
+        waitForMutation(homePageInput, mutationOpts)
+      ]));
   let getHomepage = () => Services.prefs.getCharPref("browser.startup.homepage");
 
   let originalHomepage = getHomepage();
@@ -199,7 +206,8 @@ add_task(async function testPrefLockedHomepage() {
   // Check that everything is still disabled, homepage didn't change.
   is(getHomepage(), extensionHomepage, "The reported homepage is set by the extension");
   is(homePageInput.value, extensionHomepage, "The homepage is set by the extension");
-  is(homePageInput.disabled, true, "Homepage is disabled when set by extension");
+  is(homePageInput.disabled, true, "Homepage custom input is disabled when set by extension");
+  is(homeModeEl.disabled, true, "Homepage menulist is disabled when set by extension");
   buttonPrefs.forEach(pref => {
     is(getButton(pref).disabled, true, `${pref} is disabled when set by extension`);
   });
@@ -207,6 +215,7 @@ add_task(async function testPrefLockedHomepage() {
 
   // Lock all of the prefs, wait for the UI to update.
   let messageHidden = waitForMessageHidden(controlledContent.id);
+
   lockPrefs();
   await messageHidden;
 
@@ -214,6 +223,8 @@ add_task(async function testPrefLockedHomepage() {
   is(getHomepage(), lockedHomepage, "The reported homepage is set by the pref");
   is(homePageInput.value, lockedHomepage, "The homepage is set by the pref");
   is(homePageInput.disabled, true, "The homepage is disabed when the pref is locked");
+  is(homeModeEl.disabled, true, "Homepage menulist is disabled when the pref is locked");
+
   buttonPrefs.forEach(pref => {
     is(getButton(pref).disabled, true, `The ${pref} button is disabled when locked`);
   });
@@ -227,6 +238,7 @@ add_task(async function testPrefLockedHomepage() {
   // Verify that the UI is showing the extension's settings.
   is(homePageInput.value, extensionHomepage, "The homepage is set by the extension");
   is(homePageInput.disabled, true, "Homepage is disabled when set by extension");
+  is(homeModeEl.disabled, true, "Homepage menulist is disabled when set by extension");
   buttonPrefs.forEach(pref => {
     is(getButton(pref).disabled, true, `${pref} is disabled when set by extension`);
   });
@@ -241,6 +253,7 @@ add_task(async function testPrefLockedHomepage() {
   is(getHomepage(), originalHomepage, "The reported homepage is reset to original value");
   is(homePageInput.value, "", "The homepage is empty");
   is(homePageInput.disabled, false, "The homepage is enabled after clearing lock");
+  is(homeModeEl.disabled, false, "Homepage menulist is enabled after clearing lock");
   buttonPrefs.forEach(pref => {
     is(getButton(pref).disabled, false, `The ${pref} button is enabled when unlocked`);
   });
@@ -253,6 +266,7 @@ add_task(async function testPrefLockedHomepage() {
   is(getHomepage(), lockedHomepage, "The reported homepage is set by the pref");
   is(homePageInput.value, lockedHomepage, "The homepage is set by the pref");
   is(homePageInput.disabled, true, "The homepage is disabed when the pref is locked");
+  is(homeModeEl.disabled, true, "Homepage menulist is disabled when prefis locked");
   buttonPrefs.forEach(pref => {
     is(getButton(pref).disabled, true, `The ${pref} button is disabled when locked`);
   });
@@ -265,21 +279,22 @@ add_task(async function testPrefLockedHomepage() {
   is(getHomepage(), originalHomepage, "The homepage is reset to the original value");
   is(homePageInput.value, "", "The homepage is clear after being unlocked");
   is(homePageInput.disabled, false, "The homepage is enabled after clearing lock");
+  is(homeModeEl.disabled, false, "Homepage menulist is enabled after clearing lock");
   buttonPrefs.forEach(pref => {
     is(getButton(pref).disabled, false, `The ${pref} button is enabled when unlocked`);
   });
   is(controlledContent.hidden, true,
      "The extension controlled message is hidden when unlocked with no extension");
 
-  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
 add_task(async function testExtensionControlledNewTab() {
-  await openPreferencesViaOpenPreferencesAPI("paneGeneral", {leaveOpen: true});
+  await openPreferencesViaOpenPreferencesAPI("paneHome", {leaveOpen: true});
   // eslint-disable-next-line mozilla/no-cpows-in-tests
   let doc = gBrowser.contentDocument;
-  is(gBrowser.currentURI.spec, "about:preferences#general",
-     "#general should be in the URI for about:preferences");
+  is(gBrowser.currentURI.spec, "about:preferences#home",
+     "#home should be in the URI for about:preferences");
 
   let controlledContent = doc.getElementById("browserNewTabExtensionContent");
 
@@ -319,14 +334,13 @@ add_task(async function testExtensionControlledNewTab() {
   is(controlledContent.hidden, true, "The extension controlled row is shown");
 
   // Cleanup the tab and add-on.
-  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  BrowserTestUtils.removeTab(gBrowser.selectedTab);
   let addon = await AddonManager.getAddonByID("@set_newtab");
   addon.uninstall();
 });
 
 add_task(async function testExtensionControlledDefaultSearch() {
   await openPreferencesViaOpenPreferencesAPI("paneSearch", {leaveOpen: true});
-  // eslint-disable-next-line mozilla/no-cpows-in-tests
   let doc = gBrowser.contentDocument;
   let extensionId = "@set_default_search";
   let manifest = {
@@ -416,25 +430,25 @@ add_task(async function testExtensionControlledDefaultSearch() {
 
   await originalExtension.unload();
   await updatedExtension.unload();
-  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
 add_task(async function testExtensionControlledHomepageUninstalledAddon() {
   async function checkHomepageEnabled() {
-    await openPreferencesViaOpenPreferencesAPI("paneGeneral", {leaveOpen: true});
+    await openPreferencesViaOpenPreferencesAPI("paneHome", {leaveOpen: true});
     // eslint-disable-next-line mozilla/no-cpows-in-tests
     let doc = gBrowser.contentDocument;
-    is(gBrowser.currentURI.spec, "about:preferences#general",
-      "#general should be in the URI for about:preferences");
+    is(gBrowser.currentURI.spec, "about:preferences#home",
+      "#home should be in the URI for about:preferences");
     let controlledContent = doc.getElementById("browserHomePageExtensionContent");
 
     // The homepage is enabled.
-    let homepageInut = doc.getElementById("browserHomePage");
-    is(homepageInut.disabled, false, "The homepage input is enabled");
-    is(homepageInut.value, "", "The homepage input is empty");
+    let homepageInput = doc.getElementById("homePageUrl");
+    is(homepageInput.disabled, false, "The homepage input is enabled");
+    is(homepageInput.value, "", "The homepage input is empty");
     is(controlledContent.hidden, true, "The extension controlled row is hidden");
 
-    await BrowserTestUtils.removeTab(gBrowser.selectedTab);
+    BrowserTestUtils.removeTab(gBrowser.selectedTab);
   }
 
   await ExtensionSettingsStore.initialize();
@@ -566,7 +580,6 @@ add_task(async function testExtensionControlledTrackingProtection() {
   let uiType = "new";
 
   await openPreferencesViaOpenPreferencesAPI("panePrivacy", {leaveOpen: true});
-  // eslint-disable-next-line mozilla/no-cpows-in-tests
   let doc = gBrowser.contentDocument;
 
   is(gBrowser.currentURI.spec, "about:preferences#privacy",
@@ -619,7 +632,7 @@ add_task(async function testExtensionControlledTrackingProtection() {
 
   await extension.unload();
 
-  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
 add_task(async function testExtensionControlledProxyConfig() {
@@ -745,7 +758,6 @@ add_task(async function testExtensionControlledProxyConfig() {
   }
 
   await openPreferencesViaOpenPreferencesAPI("paneGeneral", {leaveOpen: true});
-  // eslint-disable-next-line mozilla/no-cpows-in-tests
   let mainDoc = gBrowser.contentDocument;
 
   is(gBrowser.currentURI.spec, "about:preferences#general",
@@ -822,5 +834,5 @@ add_task(async function testExtensionControlledProxyConfig() {
 
   await extension.unload();
 
-  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });

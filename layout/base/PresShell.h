@@ -14,7 +14,7 @@
 #include "mozilla/EventForwards.h"
 #include "mozilla/layers/FocusTarget.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/StyleSetHandle.h"
+#include "mozilla/ServoStyleSet.h"
 #include "mozilla/UniquePtr.h"
 #include "nsAutoPtr.h"
 #include "nsContentUtils.h" // For AddScriptBlocker().
@@ -45,6 +45,7 @@ class nsAutoCauseReflowNotifier;
 class AutoPointerEventTargetUpdater;
 
 namespace mozilla {
+class ServoStyleSheet;
 
 namespace dom {
 class Element;
@@ -56,11 +57,6 @@ class EventDispatchingCallback;
 // A set type for tracking visible frames, for use by the visibility code in
 // PresShell. The set contains nsIFrame* pointers.
 typedef nsTHashtable<nsPtrHashKey<nsIFrame>> VisibleFrames;
-
-// A hash table type for tracking visible regions, for use by the visibility
-// code in PresShell. The mapping is from view IDs to regions in the
-// coordinate system of that view's scrolled frame.
-typedef nsClassHashtable<nsUint64HashKey, CSSIntRegion> VisibleRegions;
 
 // This is actually pref-controlled, but we use this value if we fail
 // to get the pref for any reason.
@@ -86,7 +82,8 @@ public:
   static bool AccessibleCaretEnabled(nsIDocShell* aDocShell);
 
   void Init(nsIDocument* aDocument, nsPresContext* aPresContext,
-            nsViewManager* aViewManager, StyleSetHandle aStyleSet);
+            nsViewManager* aViewManager,
+            UniquePtr<ServoStyleSet> aStyleSet);
   void Destroy() override;
 
   void UpdatePreferenceStyles() override;
@@ -128,7 +125,6 @@ public:
   void CancelAllPendingReflows() override;
   void DoFlushPendingNotifications(FlushType aType) override;
   void DoFlushPendingNotifications(ChangesToFlush aType) override;
-  void DestroyFramesForAndRestyle(dom::Element* aElement) override;
 
   /**
    * Post a callback that should be handled after reflow has finished.
@@ -163,9 +159,9 @@ public:
   void UnsuppressPainting() override;
 
   nsresult GetAgentStyleSheets(
-      nsTArray<RefPtr<StyleSheet>>& aSheets) override;
+      nsTArray<RefPtr<ServoStyleSheet>>& aSheets) override;
   nsresult SetAgentStyleSheets(
-      const nsTArray<RefPtr<StyleSheet>>& aSheets) override;
+      const nsTArray<RefPtr<ServoStyleSheet>>& aSheets) override;
 
   nsresult AddOverrideStyleSheet(StyleSheet* aSheet) override;
   nsresult RemoveOverrideStyleSheet(StyleSheet* aSheet) override;
@@ -202,7 +198,7 @@ public:
              uint32_t aFlags) override;
 
   already_AddRefed<SourceSurface>
-  RenderSelection(nsISelection* aSelection,
+  RenderSelection(dom::Selection* aSelection,
                   const LayoutDeviceIntPoint aPoint,
                   LayoutDeviceIntRect* aScreenRect,
                   uint32_t aFlags) override;
@@ -233,10 +229,10 @@ public:
 
   void Paint(nsView* aViewToPaint, const nsRegion& aDirtyRegion,
              uint32_t aFlags) override;
-  nsresult HandleEvent(nsIFrame* aFrame,
-                       WidgetGUIEvent* aEvent,
-                       bool aDontRetargetEvents,
-                       nsEventStatus* aEventStatus) override;
+  MOZ_CAN_RUN_SCRIPT nsresult HandleEvent(nsIFrame* aFrame,
+                                          WidgetGUIEvent* aEvent,
+                                          bool aDontRetargetEvents,
+                                          nsEventStatus* aEventStatus) override;
   nsresult HandleDOMEventWithTarget(nsIContent* aTargetContent,
                                     WidgetEvent* aEvent,
                                     nsEventStatus* aStatus) override;
@@ -248,8 +244,6 @@ public:
   void WillPaintWindow() override;
   void DidPaintWindow() override;
   void ScheduleViewManagerFlush(PaintType aType = PAINT_DEFAULT) override;
-  void DispatchSynthMouseMove(WidgetGUIEvent* aEvent,
-                              bool aFlushOnHoverChange) override;
   void ClearMouseCaptureOnView(nsView* aView) override;
   bool IsVisible() override;
 
@@ -296,9 +290,6 @@ public:
   NS_DECL_NSIDOCUMENTOBSERVER_ENDLOAD
   NS_DECL_NSIDOCUMENTOBSERVER_CONTENTSTATECHANGED
   NS_DECL_NSIDOCUMENTOBSERVER_DOCUMENTSTATESCHANGED
-  NS_DECL_NSIDOCUMENTOBSERVER_STYLESHEETADDED
-  NS_DECL_NSIDOCUMENTOBSERVER_STYLESHEETREMOVED
-  NS_DECL_NSIDOCUMENTOBSERVER_STYLESHEETAPPLICABLESTATECHANGED
 
   // nsIMutationObserver
   NS_DECL_NSIMUTATIONOBSERVER_CHARACTERDATACHANGED
@@ -324,10 +315,9 @@ public:
 #endif
 
 #ifdef DEBUG
-  void ListStyleContexts(FILE *out, int32_t aIndent = 0) override;
+  void ListComputedStyles(FILE *out, int32_t aIndent = 0) override;
 
   void ListStyleSheets(FILE *out, int32_t aIndent = 0) override;
-  void VerifyStyleTree() override;
 #endif
 
   static LazyLogModule gLog;
@@ -515,16 +505,11 @@ private:
   bool mCaretEnabled;
 
 #ifdef DEBUG
-#ifdef MOZ_OLD_STYLE
-  nsStyleSet* CloneStyleSet(nsStyleSet* aSet);
-#endif
-  ServoStyleSet* CloneStyleSet(ServoStyleSet* aSet);
+  UniquePtr<ServoStyleSet> CloneStyleSet(ServoStyleSet* aSet);
   bool VerifyIncrementalReflow();
   bool mInVerifyReflow;
   void ShowEventTargetDebug();
 #endif
-
-  void RecordStyleSheetChange(StyleSheet* aStyleSheet, StyleSheet::ChangeType);
 
   void RemovePreferenceStyles();
 
@@ -539,7 +524,7 @@ private:
   // create a RangePaintInfo for the range aRange containing the
   // display list needed to paint the range to a surface
   UniquePtr<RangePaintInfo>
-  CreateRangePaintInfo(nsIDOMRange* aRange,
+  CreateRangePaintInfo(nsRange* aRange,
                        nsRect& aSurfaceRect,
                        bool aForPrimarySelection);
 
@@ -673,8 +658,8 @@ private:
   already_AddRefed<nsIPresShell> GetParentPresShellForEventHandling();
   nsIContent* GetCurrentEventContent();
   nsIFrame* GetCurrentEventFrame();
-  nsresult RetargetEventToParent(WidgetGUIEvent* aEvent,
-                                 nsEventStatus* aEventStatus);
+  MOZ_CAN_RUN_SCRIPT nsresult
+  RetargetEventToParent(WidgetGUIEvent* aEvent, nsEventStatus* aEventStatus);
   void PushCurrentEventInfo(nsIFrame* aFrame, nsIContent* aContent);
   void PopCurrentEventInfo();
   /**
@@ -750,11 +735,9 @@ private:
   void ClearApproximatelyVisibleFramesList(const Maybe<OnNonvisible>& aNonvisibleAction
                                              = Nothing());
   static void ClearApproximateFrameVisibilityVisited(nsView* aView, bool aClear);
-  static void MarkFramesInListApproximatelyVisible(const nsDisplayList& aList,
-                                                   Maybe<VisibleRegions>& aVisibleRegions);
+  static void MarkFramesInListApproximatelyVisible(const nsDisplayList& aList);
   void MarkFramesInSubtreeApproximatelyVisible(nsIFrame* aFrame,
                                                const nsRect& aRect,
-                                               Maybe<VisibleRegions>& aVisibleRegions,
                                                bool aRemoveOnly = false);
 
   void DecApproximateVisibleCount(VisibleFrames& aFrames,
@@ -867,8 +850,6 @@ private:
   // have been processed.
   bool mShouldUnsuppressPainting : 1;
 
-  bool mResizeEventPending : 1;
-
   bool mApproximateFrameVisibilityVisited : 1;
 
   bool mNextPaintCompressed : 1;
@@ -890,6 +871,14 @@ private:
 
   // Whether we have ever handled a user input event
   bool mHasHandledUserInput : 1;
+
+#ifdef NIGHTLY_BUILD
+  // Whether we should dispatch keypress events even for non-printable keys
+  // for keeping backward compatibility.
+  bool mForceDispatchKeyPressEventsForNonPrintableKeys : 1;
+  // Whether mForceDispatchKeyPressEventsForNonPrintableKeys is initialized.
+  bool mInitializedForceDispatchKeyPressEventsForNonPrintableKeys : 1;
+#endif // #ifdef NIGHTLY_BUILD
 
   static bool sDisableNonTestMouseEvents;
 

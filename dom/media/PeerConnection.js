@@ -68,9 +68,8 @@ class GlobalPCList {
     Services.obs.addObserver(this, "gmp-plugin-crash", true);
     Services.obs.addObserver(this, "PeerConnection:response:allow", true);
     Services.obs.addObserver(this, "PeerConnection:response:deny", true);
-    if (Cc["@mozilla.org/childprocessmessagemanager;1"]) {
-      let mm = Cc["@mozilla.org/childprocessmessagemanager;1"].getService(Ci.nsIMessageListenerManager);
-      mm.addMessageListener("gmp-plugin-crash", this);
+    if (Services.cpmm) {
+      Services.cpmm.addMessageListener("gmp-plugin-crash", this);
     }
   }
 
@@ -205,7 +204,6 @@ class GlobalPCList {
 }
 setupPrototype(GlobalPCList, {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
-                                         Ci.nsIMessageListener,
                                          Ci.nsISupportsWeakReference]),
   classID: PC_MANAGER_CID,
   _xpcom_factory: {
@@ -816,12 +814,12 @@ class RTCPeerConnection {
 
   // Handles offerToReceiveAudio/Video
   _ensureTransceiversForOfferToReceive(options) {
-    if (options.offerToReceiveVideo) {
-      this._ensureOfferToReceive("video");
-    }
-
     if (options.offerToReceiveAudio) {
       this._ensureOfferToReceive("audio");
+    }
+
+    if (options.offerToReceiveVideo) {
+      this._ensureOfferToReceive("video");
     }
 
     this._transceivers
@@ -1064,9 +1062,11 @@ class RTCPeerConnection {
     });
   }
 
-  setIdentityProvider(provider, protocol, username) {
+  setIdentityProvider(provider,
+                      {protocol, usernameHint, peerIdentity} = {}) {
     this._checkClosed();
-    this._localIdp.setIdentityProvider(provider, protocol, username);
+    this._localIdp.setIdentityProvider(provider,
+                                       protocol, usernameHint, peerIdentity);
   }
 
   async _getIdentityAssertion(origin) {
@@ -1915,9 +1915,11 @@ setupPrototype(RTCDTMFSender, {
 });
 
 class RTCRtpSender {
-  constructor(pc, transceiverImpl, transceiver, track, streams) {
-    let dtmf = pc._win.RTCDTMFSender._create(
-        pc._win, new RTCDTMFSender(this));
+  constructor(pc, transceiverImpl, transceiver, track, kind, streams) {
+    let dtmf = null;
+    if (kind == "audio") {
+      dtmf = pc._win.RTCDTMFSender._create(pc._win, new RTCDTMFSender(this));
+    }
 
     Object.assign(this, {
       _pc: pc,
@@ -2225,7 +2227,7 @@ class RTCRtpTransceiver {
         pc._win, new RTCRtpReceiver(pc, transceiverImpl, kind));
     let streams = (init && init.streams) || [];
     let sender = pc._win.RTCRtpSender._create(
-        pc._win, new RTCRtpSender(pc, transceiverImpl, this, sendTrack, streams));
+        pc._win, new RTCRtpSender(pc, transceiverImpl, this, sendTrack, kind, streams));
 
     let direction = (init && init.direction) || "sendrecv";
     Object.assign(this,

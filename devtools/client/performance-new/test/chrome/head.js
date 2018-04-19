@@ -15,11 +15,9 @@ var { require } = BrowserLoader({
 const EventEmitter = require("devtools/shared/event-emitter");
 const { perfDescription } = require("devtools/shared/specs/perf");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
-const flags = require("devtools/shared/flags");
 
-flags.testing = true;
 let EXPECTED_DTU_ASSERT_FAILURE_COUNT = 0;
-SimpleTest.registerCleanupFunction(function () {
+SimpleTest.registerCleanupFunction(function() {
   if (DevToolsUtils.assertionFailureCount !== EXPECTED_DTU_ASSERT_FAILURE_COUNT) {
     ok(false, "Should have had the expected number of DevToolsUtils.assert() failures." +
       "Expected " + EXPECTED_DTU_ASSERT_FAILURE_COUNT +

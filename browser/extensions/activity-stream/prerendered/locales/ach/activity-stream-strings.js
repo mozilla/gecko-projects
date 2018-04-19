@@ -35,7 +35,7 @@ window.gActivityStreamStrings = {
   "prefs_section_rows_option": "{num} row;{num} rows",
   "prefs_search_header": "Yeny me kakube",
   "prefs_topsites_description": "Kakube ma ilimo loyo",
-  "prefs_topstories_description": "Jami me rwom ma lamal ma itwero keng",
+  "prefs_topstories_description2": "Great content from around the web, personalized for you",
   "prefs_topstories_show_sponsored_label": "{provider} Sponsored Stories",
   "prefs_topstories_sponsored_learn_more": "Nong ngec mapol",
   "prefs_highlights_description": "Yer me kakube ma igwoko nyo ilimo",
@@ -89,5 +89,6 @@ window.gActivityStreamStrings = {
   "section_menu_action_add_topsite": "Med Kakube maloyo",
   "section_menu_action_move_up": "Kob Malo",
   "section_menu_action_move_down": "Kob Piny",
-  "section_menu_action_privacy_notice": "Ngec me mung"
+  "section_menu_action_privacy_notice": "Ngec me mung",
+  "prefs_topstories_description": "Jami me rwom ma lamal ma itwero keng"
 };

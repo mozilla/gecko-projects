@@ -11,7 +11,6 @@
 #include "mozilla/RefPtr.h"
 #include "mozilla/RefCounted.h"
 #include "mozilla/UniquePtr.h"
-#include "double-conversion/utils.h" // for DISALLOW_COPY_AND_ASSIGN
 #include "RtpSourceObserver.h"
 #include "CodecConfig.h"
 #include "VideoTypes.h"
@@ -90,7 +89,10 @@ private:
     mCall = std::move(aCall);
   }
 
-  DISALLOW_COPY_AND_ASSIGN(WebRtcCallWrapper);
+  // Don't allow copying/assigning.
+  WebRtcCallWrapper(const WebRtcCallWrapper&) = delete;
+  void operator=(const WebRtcCallWrapper&) = delete;
+
   UniquePtr<webrtc::Call> mCall;
   webrtc::RtcEventLogNullImpl mEventLog;
 };
@@ -381,6 +383,8 @@ public:
    */
   virtual MediaConduitErrorCode AttachRenderer(RefPtr<mozilla::VideoRenderer> aRenderer) = 0;
   virtual void DetachRenderer() = 0;
+
+  virtual void DisableSsrcChanges() = 0;
 
   bool SetRemoteSSRC(unsigned int ssrc) override = 0;
 

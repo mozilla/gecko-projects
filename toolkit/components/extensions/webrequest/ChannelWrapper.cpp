@@ -722,6 +722,8 @@ GetContentPolicyType(uint32_t aType)
     return MozContentPolicyType::Imageset;
   case nsIContentPolicy::TYPE_WEB_MANIFEST:
     return MozContentPolicyType::Web_manifest;
+  case nsIContentPolicy::TYPE_SPECULATIVE:
+    return MozContentPolicyType::Speculative;
   default:
     return MozContentPolicyType::Other;
   }
@@ -985,8 +987,7 @@ ChannelWrapper::FireEvent(const nsAString& aType)
   RefPtr<Event> event = Event::Constructor(this, aType, init);
   event->SetTrusted(true);
 
-  bool defaultPrevented;
-  DispatchEvent(event, &defaultPrevented);
+  DispatchEvent(*event);
 }
 
 void

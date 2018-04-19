@@ -37,7 +37,7 @@ public:
 
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(ContentScrollPos, nsPoint)
 
-  explicit nsTextControlFrame(nsStyleContext* aContext);
+  explicit nsTextControlFrame(ComputedStyle* aStyle);
   virtual ~nsTextControlFrame();
 
   virtual void DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData) override;
@@ -158,8 +158,8 @@ public:
 
 //==== NSISTATEFULFRAME
 
-  NS_IMETHOD SaveState(nsPresState** aState) override;
-  NS_IMETHOD RestoreState(nsPresState* aState) override;
+  UniquePtr<PresState> SaveState() override;
+  NS_IMETHOD RestoreState(PresState* aState) override;
 
 //=== END NSISTATEFULFRAME
 

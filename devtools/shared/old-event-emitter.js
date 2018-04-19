@@ -6,8 +6,8 @@
 
 const Services = require("Services");
 const defer = require("devtools/shared/defer");
-const { describeNthCaller } = require("devtools/shared/platform/stack");
-let loggingEnabled = true;
+const { getNthPathExcluding } = require("devtools/shared/platform/stack");
+let loggingEnabled = false;
 
 if (!isWorker) {
   loggingEnabled = Services.prefs.getBoolPref("devtools.dump.emit");
@@ -18,7 +18,7 @@ if (!isWorker) {
   });
 }
 
-let EventEmitter = this.EventEmitter = function () {};
+let EventEmitter = this.EventEmitter = function() {};
 module.exports = EventEmitter;
 
 /**
@@ -29,7 +29,7 @@ module.exports = EventEmitter;
  *        the objectToDecorate object.
  * @return Object the object given.
  */
-EventEmitter.decorate = function (objectToDecorate) {
+EventEmitter.decorate = function(objectToDecorate) {
   let emitter = new EventEmitter();
   objectToDecorate.on = emitter.on.bind(emitter);
   objectToDecorate.off = emitter.off.bind(emitter);
@@ -150,7 +150,7 @@ EventEmitter.prototype = {
       return;
     }
 
-    let description = describeNthCaller(2);
+    let description = getNthPathExcluding(0, "devtools/shared/old-event-emitter.js");
 
     let argOut = "(";
     if (args.length === 1) {

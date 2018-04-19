@@ -6,7 +6,6 @@
 
 #include "WorkerPrivate.h"
 
-#include "amIAddonManager.h"
 #include "js/MemoryMetrics.h"
 #include "MessageEventRunnable.h"
 #include "mozilla/dom/ClientManager.h"
@@ -61,9 +60,7 @@
 #include "WorkerScope.h"
 #include "WorkerThread.h"
 
-#ifdef DEBUG
 #include "nsThreadManager.h"
-#endif
 
 #ifdef XP_WIN
 #undef PostMessage
@@ -90,6 +87,9 @@ TimeoutsLog()
   return sWorkerTimeoutsLog;
 }
 
+#ifdef LOG
+#undef LOG
+#endif
 #define LOG(log, _args) MOZ_LOG(log, LogLevel::Debug, _args);
 
 namespace mozilla {
@@ -393,8 +393,7 @@ private:
                          EventInit());
     event->SetTrusted(true);
 
-    bool dummy;
-    parentEventTarget->DispatchEvent(event, &dummy);
+    parentEventTarget->DispatchEvent(*event);
     return true;
   }
 };
@@ -423,6 +422,15 @@ private:
     if (NS_WARN_IF(!aWorkerPrivate->EnsureClientSource())) {
       return false;
     }
+
+    // PerformanceStorage & PerformanceCounter both need to be initialized
+    // on the worker thread before being used on main-thread.
+    // Let's be sure that it is created before any
+    // content loading.
+    aWorkerPrivate->EnsurePerformanceStorage();
+#ifndef RELEASE_OR_BETA
+    aWorkerPrivate->EnsurePerformanceCounter();
+#endif
 
     ErrorResult rv;
     workerinternals::LoadMainScript(aWorkerPrivate, mScriptURL, WorkerScript, rv);
@@ -468,6 +476,15 @@ private:
     aWorkerPrivate->SetWorkerScriptExecutedSuccessfully();
     return true;
   }
+
+  void
+  PostRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate, bool aRunResult) override
+  {
+    if (!aRunResult) {
+      aWorkerPrivate->CloseInternal();
+    }
+    WorkerRunnable::PostRun(aCx, aWorkerPrivate, aRunResult);
+  }
 };
 
 class NotifyRunnable final : public WorkerControlRunnable
@@ -512,9 +529,7 @@ private:
   virtual bool
   WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
-    bool ok = aWorkerPrivate->NotifyInternal(aCx, mStatus);
-    MOZ_ASSERT(!JS_IsExceptionPending(aCx));
-    return ok;
+    return aWorkerPrivate->NotifyInternal(mStatus);
   }
 };
 
@@ -1131,12 +1146,10 @@ class WorkerPrivate::MemoryReporter final : public nsIMemoryReporter
 
   SharedMutex mMutex;
   WorkerPrivate* mWorkerPrivate;
-  bool mAlreadyMappedToAddon;
 
 public:
   explicit MemoryReporter(WorkerPrivate* aWorkerPrivate)
-  : mMutex(aWorkerPrivate->mMutex), mWorkerPrivate(aWorkerPrivate),
-    mAlreadyMappedToAddon(false)
+  : mMutex(aWorkerPrivate->mMutex), mWorkerPrivate(aWorkerPrivate)
   {
     aWorkerPrivate->AssertIsOnWorkerThread();
   }
@@ -1234,10 +1247,6 @@ private:
     NS_ASSERTION(mWorkerPrivate, "Disabled more than once!");
     mWorkerPrivate = nullptr;
   }
-
-  // Only call this from the main thread and under mMutex lock.
-  void
-  TryToMapAddon(nsACString &path);
 };
 
 NS_IMPL_ISUPPORTS(WorkerPrivate::MemoryReporter, nsIMemoryReporter)
@@ -1283,8 +1292,6 @@ WorkerPrivate::MemoryReporter::CollectReports(nsIHandleReportCallback* aHandleRe
     }
     path.AppendPrintf(", 0x%p)/", static_cast<void*>(mWorkerPrivate));
 
-    TryToMapAddon(path);
-
     runnable =
       new CollectReportsRunnable(mWorkerPrivate, aHandleReport, aData, aAnonymize, path);
   }
@@ -1294,46 +1301,6 @@ WorkerPrivate::MemoryReporter::CollectReports(nsIHandleReportCallback* aHandleRe
   }
 
   return NS_OK;
-}
-
-void
-WorkerPrivate::MemoryReporter::TryToMapAddon(nsACString &path)
-{
-  AssertIsOnMainThread();
-  mMutex.AssertCurrentThreadOwns();
-
-  if (mAlreadyMappedToAddon || !mWorkerPrivate) {
-    return;
-  }
-
-  nsCOMPtr<nsIURI> scriptURI;
-  if (NS_FAILED(NS_NewURI(getter_AddRefs(scriptURI),
-                          mWorkerPrivate->ScriptURL()))) {
-    return;
-  }
-
-  mAlreadyMappedToAddon = true;
-
-  if (!XRE_IsParentProcess()) {
-    // Only try to access the service from the main process.
-    return;
-  }
-
-  nsAutoCString addonId;
-  bool ok;
-  nsCOMPtr<amIAddonManager> addonManager =
-    do_GetService("@mozilla.org/addons/integration;1");
-
-  if (!addonManager ||
-      NS_FAILED(addonManager->MapURIToAddonID(scriptURI, addonId, &ok)) ||
-      !ok) {
-    return;
-  }
-
-  static const size_t explicitLength = strlen("explicit/");
-  addonId.InsertLiteral("add-ons/", 0);
-  addonId += "/";
-  path.Insert(addonId, explicitLength);
 }
 
 WorkerPrivate::MemoryReporter::CollectReportsRunnable::CollectReportsRunnable(
@@ -2140,8 +2107,7 @@ WorkerPrivate::OfflineStatusChangeEventInternal(bool aIsOffline)
   event->InitEvent(eventType, false, false);
   event->SetTrusted(true);
 
-  bool dummy;
-  globalScope->DispatchEvent(event, &dummy);
+  globalScope->DispatchEvent(*event);
 }
 
 void
@@ -2240,10 +2206,11 @@ WorkerPrivate::BroadcastErrorToSharedWorkers(
 
     event->SetTrusted(true);
 
-    bool defaultActionEnabled;
-    nsresult rv = sharedWorker->DispatchEvent(event, &defaultActionEnabled);
-    if (NS_FAILED(rv)) {
-      ThrowAndReport(window, rv);
+    ErrorResult res;
+    bool defaultActionEnabled =
+      sharedWorker->DispatchEvent(*event, CallerType::System, res);
+    if (res.Failed()) {
+      ThrowAndReport(window, res.StealNSResult());
       continue;
     }
 
@@ -2620,6 +2587,9 @@ WorkerPrivate::WorkerPrivate(WorkerPrivate* aParent,
   , mIsSecureContext(false)
   , mDebuggerRegistered(false)
   , mIsInAutomation(false)
+#ifndef RELEASE_OR_BETA
+  , mPerformanceCounter(nullptr)
+#endif
 {
   MOZ_ASSERT_IF(!IsDedicatedWorker(), NS_IsMainThread());
   mLoadInfo.StealFrom(aLoadInfo);
@@ -3195,13 +3165,18 @@ WorkerPrivate::DoRunLoop(JSContext* aCx)
       currentStatus = mStatus;
     }
 
+    if (currentStatus >= Terminating && previousStatus < Terminating) {
+      if (mScope) {
+        mScope->NoteTerminating();
+      }
+    }
+
     // if all holders are done then we can kill this thread.
     if (currentStatus != Running && !HasActiveHolders()) {
 
       // If we just changed status, we must schedule the current runnables.
       if (previousStatus != Running && currentStatus != Killing) {
-        NotifyInternal(aCx, Killing);
-        MOZ_ASSERT(!JS_IsExceptionPending(aCx));
+        NotifyInternal(Killing);
 
 #ifdef DEBUG
         {
@@ -3340,19 +3315,6 @@ WorkerPrivate::AfterProcessNextEvent()
   MOZ_ASSERT(CycleCollectedJSContext::Get()->RecursionDepth());
 }
 
-void
-WorkerPrivate::MaybeDispatchLoadFailedRunnable()
-{
-  AssertIsOnWorkerThread();
-
-  nsCOMPtr<nsIRunnable> runnable = StealLoadFailedAsyncRunnable();
-  if (!runnable) {
-    return;
-  }
-
-  MOZ_ALWAYS_SUCCEEDS(DispatchToMainThread(runnable.forget()));
-}
-
 nsIEventTarget*
 WorkerPrivate::MainThreadEventTarget()
 {
@@ -3441,6 +3403,16 @@ WorkerPrivate::EnsureClientSource()
   }
 
   return true;
+}
+
+void
+WorkerPrivate::EnsurePerformanceStorage()
+{
+  AssertIsOnWorkerThread();
+
+  if (!mPerformanceStorage) {
+    mPerformanceStorage = PerformanceStorageWorker::Create(this);
+  }
 }
 
 const ClientInfo&
@@ -3620,7 +3592,7 @@ WorkerPrivate::InterruptCallback(JSContext* aCx)
         break;
       }
 
-      WaitForWorkerEvents(PR_MillisecondsToInterval(UINT32_MAX));
+      WaitForWorkerEvents();
     }
   }
 
@@ -3741,13 +3713,13 @@ WorkerPrivate::DisableMemoryReporter()
 }
 
 void
-WorkerPrivate::WaitForWorkerEvents(PRIntervalTime aInterval)
+WorkerPrivate::WaitForWorkerEvents()
 {
   AssertIsOnWorkerThread();
   mMutex.AssertCurrentThreadOwns();
 
   // Wait for a worker event.
-  mCondVar.Wait(aInterval);
+  mCondVar.Wait();
 }
 
 WorkerPrivate::ProcessAllControlRunnablesResult
@@ -3977,10 +3949,9 @@ WorkerPrivate::RemoveHolder(WorkerHolder* aHolder)
 }
 
 void
-WorkerPrivate::NotifyHolders(JSContext* aCx, WorkerStatus aStatus)
+WorkerPrivate::NotifyHolders(WorkerStatus aStatus)
 {
   AssertIsOnWorkerThread();
-  MOZ_ASSERT(!JS_IsExceptionPending(aCx));
 
   NS_ASSERTION(aStatus > Running, "Bad status!");
 
@@ -3994,7 +3965,6 @@ WorkerPrivate::NotifyHolders(JSContext* aCx, WorkerStatus aStatus)
     if (!holder->Notify(aStatus)) {
       NS_WARNING("Failed to notify holder!");
     }
-    MOZ_ASSERT(!JS_IsExceptionPending(aCx));
   }
 
   AutoTArray<WorkerPrivate*, 10> children;
@@ -4168,14 +4138,10 @@ WorkerPrivate::RunCurrentSyncLoop()
 }
 
 bool
-WorkerPrivate::DestroySyncLoop(uint32_t aLoopIndex, nsIThreadInternal* aThread)
+WorkerPrivate::DestroySyncLoop(uint32_t aLoopIndex)
 {
   MOZ_ASSERT(!mSyncLoopStack.IsEmpty());
   MOZ_ASSERT(mSyncLoopStack.Length() - 1 == aLoopIndex);
-
-  if (!aThread) {
-    aThread = mThread;
-  }
 
   // We're about to delete the loop, stash its event target and result.
   SyncLoopInfo* loopInfo = mSyncLoopStack[aLoopIndex];
@@ -4442,7 +4408,7 @@ WorkerPrivate::ReportErrorToDebugger(const nsAString& aFilename,
 }
 
 bool
-WorkerPrivate::NotifyInternal(JSContext* aCx, WorkerStatus aStatus)
+WorkerPrivate::NotifyInternal(WorkerStatus aStatus)
 {
   AssertIsOnWorkerThread();
 
@@ -4492,8 +4458,7 @@ WorkerPrivate::NotifyInternal(JSContext* aCx, WorkerStatus aStatus)
   MOZ_ASSERT(previousStatus != Pending);
 
   // Let all our holders know the new status.
-  NotifyHolders(aCx, aStatus);
-  MOZ_ASSERT(!JS_IsExceptionPending(aCx));
+  NotifyHolders(aStatus);
 
   // If this is the first time our status has changed then we need to clear the
   // main event queue.
@@ -4618,8 +4583,7 @@ WorkerPrivate::SetTimeout(JSContext* aCx,
   // If the worker is trying to call setTimeout/setInterval and the parent
   // thread has initiated the close process then just silently fail.
   if (currentStatus >= Closing) {
-    aRv.Throw(NS_ERROR_FAILURE);
-    return 0;
+    return timerId;
   }
 
   nsAutoPtr<TimeoutInfo> newInfo(new TimeoutInfo());
@@ -5137,10 +5101,7 @@ WorkerPrivate::ConnectMessagePort(JSContext* aCx,
 
   event->SetTrusted(true);
 
-  nsCOMPtr<nsIDOMEvent> domEvent = do_QueryObject(event);
-
-  bool dummy;
-  globalScope->DispatchEvent(domEvent, &dummy);
+  globalScope->DispatchEvent(*event);
 
   return true;
 }
@@ -5212,10 +5173,8 @@ WorkerPrivate::CreateDebuggerGlobalScope(JSContext* aCx)
   return mDebuggerScope;
 }
 
-#ifdef DEBUG
-
-void
-WorkerPrivate::AssertIsOnWorkerThread() const
+bool
+WorkerPrivate::IsOnWorkerThread() const
 {
   // This is much more complicated than it needs to be but we can't use mThread
   // because it must be protected by mMutex and sometimes this method is called
@@ -5232,10 +5191,15 @@ WorkerPrivate::AssertIsOnWorkerThread() const
 
   bool current;
   rv = thread->IsOnCurrentThread(&current);
-  MOZ_ASSERT(NS_SUCCEEDED(rv));
-  MOZ_ASSERT(current, "Wrong thread!");
+  return NS_SUCCEEDED(rv) && current;
 }
 
+#ifdef DEBUG
+void
+WorkerPrivate::AssertIsOnWorkerThread() const
+{
+  MOZ_ASSERT(IsOnWorkerThread());
+}
 #endif // DEBUG
 
 void
@@ -5251,15 +5215,29 @@ WorkerPrivate::DumpCrashInformation(nsACString& aString)
   }
 }
 
+#ifndef RELEASE_OR_BETA
+void
+WorkerPrivate::EnsurePerformanceCounter()
+{
+  AssertIsOnWorkerThread();
+  if (!mPerformanceCounter) {
+    mPerformanceCounter = new PerformanceCounter(NS_ConvertUTF16toUTF8(mWorkerName));
+  }
+}
+
+PerformanceCounter*
+WorkerPrivate::GetPerformanceCounter()
+{
+  MOZ_ASSERT(mPerformanceCounter);
+  return mPerformanceCounter;
+}
+#endif
+
 PerformanceStorage*
 WorkerPrivate::GetPerformanceStorage()
 {
   AssertIsOnMainThread();
-
-  if (!mPerformanceStorage) {
-    mPerformanceStorage = PerformanceStorageWorker::Create(this);
-  }
-
+  MOZ_ASSERT(mPerformanceStorage);
   return mPerformanceStorage;
 }
 

@@ -765,6 +765,19 @@ toolbarbutton[constrain-size="true"][cui-areatype="menu-panel"] > .toolbarbutton
   background-color: hsl(96,65%,75%);
 }
 
+:root[lwt-popup-brighttext] .panel-banner-item:not([disabled]) {
+  background-color: rgba(48,230,11,.1);
+  color: #F9F9FA;
+}
+
+:root[lwt-popup-brighttext] .panel-banner-item:not([disabled]):hover {
+  background-color: rgba(48,230,11,.15);
+}
+
+:root[lwt-popup-brighttext] .panel-banner-item:not([disabled]):active {
+  background-color: rgba(48,230,11,.2);
+}
+
 #customization-palette .toolbarbutton-multiline-text,
 #customization-palette .toolbarbutton-text {
   display: none;
@@ -863,7 +876,7 @@ panelview .toolbarbutton-1,
 .subviewbutton[shortcut]::after {
   content: attr(shortcut);
   float: right;
-  color: GrayText;
+  opacity: 0.5;
 }
 
 .PanelUI-subView .subviewbutton-nav::after {
@@ -1015,7 +1028,7 @@ menuitem.subviewbutton@menuStateHover@,
   background-color: var(--arrowpanel-dimmed);
 }
 
-panelview .toolbarbutton-1:-moz-any(@buttonStateActive@,[checked=true]),
+panelview .toolbarbutton-1@buttonStateActive@,
 toolbarbutton.subviewbutton@buttonStateActive@,
 menu.subviewbutton@menuStateActive@,
 menuitem.subviewbutton@menuStateActive@,
@@ -1156,9 +1169,7 @@ menuitem.panel-subview-footer@menuStateActive@,
 
 toolbarpaletteitem[place="palette"] > .toolbarbutton-1 > .toolbarbutton-menu-dropmarker,
 #bookmarks-menu-button[cui-areatype="menu-panel"] > .toolbarbutton-menu-dropmarker,
-#bookmarks-menu-button[overflowedItem] > .toolbarbutton-menu-dropmarker,
-toolbarpaletteitem[place="palette"] > .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker,
-#bookmarks-menu-button[cui-areatype="menu-panel"] > .toolbarbutton-menubutton-dropmarker {
+#bookmarks-menu-button[overflowedItem] > .toolbarbutton-menu-dropmarker {
   display: none;
 }
 
@@ -1295,10 +1306,6 @@ toolbarpaletteitem[place="menu-panel"] > .subviewbutton-nav::after {
 .subviewbutton > .menu-iconic-left {
   -moz-appearance: none;
   margin-inline-end: 0;
-}
-
-menuitem[checked="true"].subviewbutton > .menu-iconic-left {
-  visibility: hidden;
 }
 
 #PanelUI-panicView > .panel-subview-body,

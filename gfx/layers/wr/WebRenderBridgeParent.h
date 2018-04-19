@@ -59,15 +59,13 @@ public:
 
   wr::PipelineId PipelineId() { return mPipelineId; }
   already_AddRefed<wr::WebRenderAPI> GetWebRenderAPI() { return do_AddRef(mApi); }
-  wr::Epoch WrEpoch() { return wr::NewEpoch(mWrEpoch); }
+  wr::Epoch WrEpoch() const { return mWrEpoch; }
   AsyncImagePipelineManager* AsyncImageManager() { return mAsyncImageManager; }
   CompositorVsyncScheduler* CompositorScheduler() { return mCompositorScheduler.get(); }
 
   mozilla::ipc::IPCResult RecvNewCompositable(const CompositableHandle& aHandle,
                                               const TextureInfo& aInfo) override;
   mozilla::ipc::IPCResult RecvReleaseCompositable(const CompositableHandle& aHandle) override;
-
-  mozilla::ipc::IPCResult RecvInitReadLocks(ReadLockArray&& aReadLocks) override;
 
   mozilla::ipc::IPCResult RecvCreate(const gfx::IntSize& aSize) override;
   mozilla::ipc::IPCResult RecvShutdown() override;
@@ -103,14 +101,6 @@ public:
   mozilla::ipc::IPCResult RecvParentCommands(nsTArray<WebRenderParentCommand>&& commands) override;
   mozilla::ipc::IPCResult RecvGetSnapshot(PTextureParent* aTexture) override;
 
-  mozilla::ipc::IPCResult RecvAddPipelineIdForCompositable(const wr::PipelineId& aPipelineIds,
-                                                           const CompositableHandle& aHandle,
-                                                           const bool& aAsync) override;
-  mozilla::ipc::IPCResult RecvRemovePipelineIdForCompositable(const wr::PipelineId& aPipelineId) override;
-
-  mozilla::ipc::IPCResult RecvAddExternalImageIdForCompositable(const ExternalImageId& aImageId,
-                                                                const CompositableHandle& aHandle) override;
-  mozilla::ipc::IPCResult RecvRemoveExternalImageId(const ExternalImageId& aImageId) override;
   mozilla::ipc::IPCResult RecvSetLayerObserverEpoch(const uint64_t& aLayerObserverEpoch) override;
 
   mozilla::ipc::IPCResult RecvClearCachedResources() override;
@@ -155,7 +145,7 @@ public:
   void SendPendingAsyncMessages() override;
   void SetAboutToSendAsyncMessages() override;
 
-  void HoldPendingTransactionId(uint32_t aWrEpoch,
+  void HoldPendingTransactionId(const wr::Epoch& aWrEpoch,
                                 uint64_t aTransactionId,
                                 const TimeStamp& aTxnStartTime,
                                 const TimeStamp& aFwdTime);
@@ -171,9 +161,6 @@ public:
   {
     return mIdNamespace;
   }
-
-  void UpdateAPZ(bool aUpdateHitTestingTree);
-  const WebRenderScrollData& GetScrollData() const;
 
   void FlushRendering();
   void FlushRenderingAsync();
@@ -200,6 +187,9 @@ private:
   explicit WebRenderBridgeParent(const wr::PipelineId& aPipelineId);
   virtual ~WebRenderBridgeParent();
 
+  void UpdateAPZFocusState(const FocusTarget& aFocus);
+  void UpdateAPZScrollData(const wr::Epoch& aEpoch, WebRenderScrollData&& aData);
+
   bool UpdateResources(const nsTArray<OpUpdateResource>& aResourceUpdates,
                        const nsTArray<RefCountedShmem>& aSmallShmems,
                        const nsTArray<ipc::Shmem>& aLargeShmems,
@@ -207,7 +197,16 @@ private:
   bool AddExternalImage(wr::ExternalImageId aExtId, wr::ImageKey aKey,
                         wr::TransactionBuilder& aResources);
 
-  uint64_t GetLayersId() const;
+  void AddPipelineIdForCompositable(const wr::PipelineId& aPipelineIds,
+                                    const CompositableHandle& aHandle,
+                                    const bool& aAsync);
+  void RemovePipelineIdForCompositable(const wr::PipelineId& aPipelineId);
+
+  void AddExternalImageIdForCompositable(const ExternalImageId& aImageId,
+                                         const CompositableHandle& aHandle);
+  void RemoveExternalImageId(const ExternalImageId& aImageId);
+
+  LayersId GetLayersId() const;
   void ProcessWebRenderParentCommands(const InfallibleTArray<WebRenderParentCommand>& aCommands);
 
   void ClearResources();
@@ -223,16 +222,15 @@ private:
 
   // Have APZ push the async scroll state to WR. Returns true if an APZ
   // animation is in effect and we need to schedule another composition.
-  // If scrollbars need their transforms updated, the provided aTransformArray
-  // is populated with the property update details.
-  bool PushAPZStateToWR(wr::TransactionBuilder& aTxn,
-                        nsTArray<wr::WrTransformProperty>& aTransformArray);
+  // If scrollbars need their transforms updated, the transaction builder
+  // is populated with the property update details via AppendTransformProperties
+  bool PushAPZStateToWR(wr::TransactionBuilder& aTxn);
 
-  uint32_t GetNextWrEpoch();
+  wr::Epoch GetNextWrEpoch();
 
 private:
   struct PendingTransactionId {
-    PendingTransactionId(wr::Epoch aEpoch, uint64_t aId, const TimeStamp& aTxnStartTime, const TimeStamp& aFwdTime)
+    PendingTransactionId(const wr::Epoch& aEpoch, uint64_t aId, const TimeStamp& aTxnStartTime, const TimeStamp& aFwdTime)
       : mEpoch(aEpoch)
       , mId(aId)
       , mTxnStartTime(aTxnStartTime)
@@ -266,16 +264,13 @@ private:
   uint64_t mParentLayerObserverEpoch;
 
   std::queue<PendingTransactionId> mPendingTransactionIds;
-  uint32_t mWrEpoch;
+  wr::Epoch mWrEpoch;
   wr::IdNamespace mIdNamespace;
 
   bool mPaused;
   bool mDestroyed;
   bool mForceRendering;
   bool mReceivedDisplayList;
-
-  // Can only be accessed on the compositor thread.
-  WebRenderScrollData mScrollData;
 };
 
 } // namespace layers

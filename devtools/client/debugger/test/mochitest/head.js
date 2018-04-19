@@ -21,6 +21,7 @@ var ObjectClient = require("devtools/shared/client/object-client");
 var { AddonManager } = ChromeUtils.import("resource://gre/modules/AddonManager.jsm", {});
 var EventEmitter = require("devtools/shared/old-event-emitter");
 var { Toolbox } = require("devtools/client/framework/toolbox");
+var { Task } = require("devtools/shared/task");
 
 const chromeRegistry = Cc["@mozilla.org/chrome/chrome-registry;1"].getService(Ci.nsIChromeRegistry);
 
@@ -773,7 +774,7 @@ function initChromeDebugger(aOnClose) {
   let deferred = promise.defer();
 
   // Wait for the toolbox process to start...
-  BrowserToolboxProcess.init(aOnClose, (aEvent, aProcess) => {
+  BrowserToolboxProcess.init(aOnClose, aProcess => {
     info("Browser toolbox process started successfully.");
 
     prepareDebugger(aProcess);

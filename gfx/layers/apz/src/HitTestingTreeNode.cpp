@@ -10,7 +10,6 @@
 #include "gfxPrefs.h"
 #include "LayersLogging.h"                              // for Stringify
 #include "mozilla/gfx/Point.h"                          // for Point4D
-#include "mozilla/layers/APZThreadUtils.h"              // for AssertOnSamplerThread
 #include "mozilla/layers/APZUtils.h"                    // for CompleteAsyncTransform
 #include "mozilla/layers/AsyncCompositionManager.h"     // for ViewTransform::operator Matrix4x4()
 #include "mozilla/layers/AsyncDragMetrics.h"            // for AsyncDragMetrics
@@ -24,7 +23,7 @@ using gfx::CompositorHitTestInfo;
 
 HitTestingTreeNode::HitTestingTreeNode(AsyncPanZoomController* aApzc,
                                        bool aIsPrimaryHolder,
-                                       uint64_t aLayersId)
+                                       LayersId aLayersId)
   : mApzc(aApzc)
   , mIsPrimaryApzcHolder(aIsPrimaryHolder)
   , mLayersId(aLayersId)
@@ -42,7 +41,7 @@ if (mIsPrimaryApzcHolder) {
 
 void
 HitTestingTreeNode::RecycleWith(AsyncPanZoomController* aApzc,
-                                uint64_t aLayersId)
+                                LayersId aLayersId)
 {
   MOZ_ASSERT(!mIsPrimaryApzcHolder);
   Destroy(); // clear out tree pointers
@@ -53,14 +52,13 @@ HitTestingTreeNode::RecycleWith(AsyncPanZoomController* aApzc,
   // fields.
 }
 
-HitTestingTreeNode::~HitTestingTreeNode()
-{
-}
+HitTestingTreeNode::~HitTestingTreeNode() = default;
 
 void
 HitTestingTreeNode::Destroy()
 {
-  APZThreadUtils::AssertOnSamplerThread();
+  // This runs on the updater thread, it's not worth passing around extra raw
+  // pointers just to assert it.
 
   mPrevSibling = nullptr;
   mLastChild = nullptr;
@@ -73,7 +71,7 @@ HitTestingTreeNode::Destroy()
     mApzc = nullptr;
   }
 
-  mLayersId = 0;
+  mLayersId = LayersId{0};
 }
 
 void
@@ -98,43 +96,39 @@ HitTestingTreeNode::SetLastChild(HitTestingTreeNode* aChild)
 void
 HitTestingTreeNode::SetScrollbarData(FrameMetrics::ViewID aScrollViewId,
                                      const uint64_t& aScrollbarAnimationId,
-                                     const ScrollThumbData& aThumbData,
-                                     const Maybe<ScrollDirection>& aScrollContainerDirection)
+                                     const ScrollbarData& aScrollbarData)
 {
   mScrollViewId = aScrollViewId;
   mScrollbarAnimationId = aScrollbarAnimationId;
-  mScrollThumbData = aThumbData;
-  mScrollbarContainerDirection = aScrollContainerDirection;
+  mScrollbarData = aScrollbarData;
 }
 
 bool
 HitTestingTreeNode::MatchesScrollDragMetrics(const AsyncDragMetrics& aDragMetrics) const
 {
   return IsScrollThumbNode() &&
-         mScrollThumbData.mDirection == aDragMetrics.mDirection &&
+         mScrollbarData.mDirection == aDragMetrics.mDirection &&
          mScrollViewId == aDragMetrics.mViewId;
 }
 
 bool
 HitTestingTreeNode::IsScrollThumbNode() const
 {
-  return mScrollThumbData.mDirection.isSome();
+  return mScrollbarData.mScrollbarLayerType == layers::ScrollbarLayerType::Thumb;
 }
 
 bool
 HitTestingTreeNode::IsScrollbarNode() const
 {
-  return mScrollbarContainerDirection.isSome() || IsScrollThumbNode();
+  return mScrollbarData.mScrollbarLayerType != layers::ScrollbarLayerType::None;
 }
 
 ScrollDirection
 HitTestingTreeNode::GetScrollbarDirection() const
 {
   MOZ_ASSERT(IsScrollbarNode());
-  if (mScrollThumbData.mDirection.isSome()) {
-    return *(mScrollThumbData.mDirection);
-  }
-  return *mScrollbarContainerDirection;
+  MOZ_ASSERT(mScrollbarData.mDirection.isSome());
+  return *mScrollbarData.mDirection;
 }
 
 FrameMetrics::ViewID
@@ -149,10 +143,10 @@ HitTestingTreeNode::GetScrollbarAnimationId() const
   return mScrollbarAnimationId;
 }
 
-const ScrollThumbData&
-HitTestingTreeNode::GetScrollThumbData() const
+const ScrollbarData&
+HitTestingTreeNode::GetScrollbarData() const
 {
-  return mScrollThumbData;
+  return mScrollbarData;
 }
 
 void
@@ -253,7 +247,7 @@ HitTestingTreeNode::IsPrimaryHolder() const
   return mIsPrimaryApzcHolder;
 }
 
-uint64_t
+LayersId
 HitTestingTreeNode::GetLayersId() const
 {
   return mLayersId;
@@ -387,13 +381,13 @@ HitTestingTreeNode::Dump(const char* aPrefix) const
   }
   printf_stderr("%sHitTestingTreeNode (%p) APZC (%p) g=(%s) %s%s%sr=(%s) t=(%s) c=(%s)%s%s\n",
     aPrefix, this, mApzc.get(),
-    mApzc ? Stringify(mApzc->GetGuid()).c_str() : nsPrintfCString("l=0x%" PRIx64, mLayersId).get(),
+    mApzc ? Stringify(mApzc->GetGuid()).c_str() : nsPrintfCString("l=0x%" PRIx64, uint64_t(mLayersId)).get(),
     (mOverride & EventRegionsOverride::ForceDispatchToContent) ? "fdtc " : "",
     (mOverride & EventRegionsOverride::ForceEmptyHitRegion) ? "fehr " : "",
     (mFixedPosTarget != FrameMetrics::NULL_SCROLL_ID) ? nsPrintfCString("fixed=%" PRIu64 " ", mFixedPosTarget).get() : "",
     Stringify(mEventRegions).c_str(), Stringify(mTransform).c_str(),
     mClipRegion ? Stringify(mClipRegion.ref()).c_str() : "none",
-    mScrollbarContainerDirection.isSome() ? " scrollbar" : "",
+    mScrollbarData.mDirection.isSome() ? " scrollbar" : "",
     IsScrollThumbNode() ? " scrollthumb" : "");
   if (mLastChild) {
     mLastChild->Dump(nsPrintfCString("%s  ", aPrefix).get());

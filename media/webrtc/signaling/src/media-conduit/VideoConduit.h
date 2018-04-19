@@ -310,8 +310,14 @@ public:
                            uint64_t* bytesSent) override;
   uint64_t MozVideoLatencyAvg();
 
+  void DisableSsrcChanges() override {
+    mAllowSsrcChange = false;
+  }
+
 private:
-  DISALLOW_COPY_AND_ASSIGN(WebrtcVideoConduit);
+  // Don't allow copying/assigning.
+  WebrtcVideoConduit(const WebrtcVideoConduit&) = delete;
+  void operator=(const WebrtcVideoConduit&) = delete;
 
   /** Shared statistics for receive and transmit video streams
    */
@@ -534,6 +540,10 @@ private:
   VideoEncoderConfigBuilder mEncoderConfig;
 
   webrtc::VideoReceiveStream::Config mRecvStreamConfig;
+
+  // Are SSRC changes without signaling allowed or not
+  bool mAllowSsrcChange;
+  bool mWaitingForInitialSsrc;
 
   // accessed on creation, and when receiving packets
   uint32_t mRecvSSRC; // this can change during a stream!

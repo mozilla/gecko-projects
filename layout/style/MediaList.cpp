@@ -13,9 +13,6 @@
 #include "mozilla/ServoMediaList.h"
 #include "mozilla/StyleSheetInlines.h"
 #include "nsCSSParser.h"
-#ifdef MOZ_OLD_STYLE
-#include "nsMediaList.h"
-#endif
 
 namespace mozilla {
 namespace dom {
@@ -73,24 +70,10 @@ MediaList::DoMediaChange(Func aCallback)
 }
 
 /* static */ already_AddRefed<MediaList>
-MediaList::Create(
-    StyleBackendType aBackendType,
-    const nsAString& aMedia,
-    CallerType aCallerType)
+MediaList::Create(const nsAString& aMedia, CallerType aCallerType)
 {
-  if (aBackendType == StyleBackendType::Servo) {
-    RefPtr<ServoMediaList> mediaList = new ServoMediaList(aMedia, aCallerType);
-    return mediaList.forget();
-  }
-
-#ifdef MOZ_OLD_STYLE
-  nsCSSParser parser;
-  RefPtr<nsMediaList> mediaList = new nsMediaList();
-  parser.ParseMediaList(aMedia, nullptr, 0, mediaList, aCallerType);
+  RefPtr<ServoMediaList> mediaList = new ServoMediaList(aMedia, aCallerType);
   return mediaList.forget();
-#else
-  MOZ_CRASH("old style system disabled");
-#endif
 }
 
 void

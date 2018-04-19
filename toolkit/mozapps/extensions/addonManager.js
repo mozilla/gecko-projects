@@ -70,14 +70,6 @@ amManager.prototype = {
     }
   },
 
-  /**
-   * @see amIAddonManager.idl
-   */
-  mapURIToAddonID(uri, id) {
-    id.value = AddonManager.mapURIToAddonID(uri);
-    return !!id.value;
-  },
-
   installAddonFromWebpage(aMimetype, aBrowser, aInstallingPrincipal,
                                     aUri, aHash, aName, aIcon, aCallback) {
     let retval = true;
@@ -262,8 +254,7 @@ amManager.prototype = {
   },
   QueryInterface: XPCOMUtils.generateQI([Ci.amIAddonManager,
                                          Ci.nsITimerCallback,
-                                         Ci.nsIObserver,
-                                         Ci.nsIMessageListener])
+                                         Ci.nsIObserver])
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([amManager]);

@@ -35,7 +35,7 @@ window.gActivityStreamStrings = {
   "prefs_section_rows_option": "{num} ringlera;{num} ringleras",
   "prefs_search_header": "Busqueda web",
   "prefs_topsites_description": "Los puestos que mas vesitas",
-  "prefs_topstories_description": "Contenius d'alta calidat que no te quiers perder",
+  "prefs_topstories_description2": "Great content from around the web, personalized for you",
   "prefs_topstories_show_sponsored_label": "Articlos patrocinaus per {provider}",
   "prefs_topstories_sponsored_learn_more": "Saber-ne mas",
   "prefs_highlights_description": "Una tría d'os puestos que has alzau u vesitau",
@@ -89,5 +89,6 @@ window.gActivityStreamStrings = {
   "section_menu_action_add_topsite": "Anyadir un puesto popular",
   "section_menu_action_move_up": "Puyar",
   "section_menu_action_move_down": "Baixar",
-  "section_menu_action_privacy_notice": "Nota sobre privacidat"
+  "section_menu_action_privacy_notice": "Nota sobre privacidat",
+  "prefs_topstories_description": "Contenius d'alta calidat que no te quiers perder"
 };

@@ -131,6 +131,8 @@ IsThingPoisoned(T* thing)
         JS_MOVED_TENURED_PATTERN,
         JS_SWEPT_TENURED_PATTERN,
         JS_ALLOCATED_TENURED_PATTERN,
+        JS_FREED_HEAP_PTR_PATTERN,
+        JS_SWEPT_TI_PATTERN,
         JS_SWEPT_CODE_PATTERN
     };
     const int numPoisonBytes = sizeof(poisonBytes) / sizeof(poisonBytes[0]);
@@ -2845,13 +2847,14 @@ TraceBufferedCells(TenuringTracer& mover, Arena* arena, ArenaCellSet* cells)
 }
 
 void
-js::gc::StoreBuffer::traceWholeCells(TenuringTracer& mover)
+js::gc::StoreBuffer::WholeCellBuffer::trace(StoreBuffer* owner, TenuringTracer& mover)
 {
-    for (ArenaCellSet* cells = bufferWholeCell; cells; cells = cells->next) {
-        Arena* arena = cells->arena;
-        MOZ_ASSERT(IsCellPointerValid(arena));
+    MOZ_ASSERT(owner->isEnabled());
 
-        MOZ_ASSERT(arena->bufferedCells() == cells);
+    for (ArenaCellSet* cells = head_; cells; cells = cells->next) {
+        cells->check();
+
+        Arena* arena = cells->arena;
         arena->bufferedCells() = &ArenaCellSet::Empty;
 
         JS::TraceKind kind = MapAllocToTraceKind(arena->getAllocKind());
@@ -2873,7 +2876,7 @@ js::gc::StoreBuffer::traceWholeCells(TenuringTracer& mover)
         }
     }
 
-    bufferWholeCell = nullptr;
+    head_ = nullptr;
 }
 
 void
@@ -3621,7 +3624,7 @@ JS::UnmarkGrayGCThingRecursively(JS::GCCellPtr thing)
     MOZ_ASSERT(!JS::CurrentThreadIsHeapCollecting());
     MOZ_ASSERT(!JS::CurrentThreadIsHeapCycleCollecting());
 
-    JSRuntime* rt = thing.asCell()->runtimeFromActiveCooperatingThread();
+    JSRuntime* rt = thing.asCell()->runtimeFromMainThread();
     gcstats::AutoPhase outerPhase(rt->gc.stats(), gcstats::PhaseKind::BARRIER);
     return UnmarkGrayGCThing(rt, thing);
 }

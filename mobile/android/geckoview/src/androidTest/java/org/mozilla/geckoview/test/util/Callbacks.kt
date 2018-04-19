@@ -10,7 +10,8 @@ class Callbacks private constructor() {
     }
 
     interface All : ContentDelegate, NavigationDelegate, PermissionDelegate, ProgressDelegate,
-                    PromptDelegate, ScrollDelegate, TrackingProtectionDelegate {
+                    PromptDelegate, ScrollDelegate, SelectionActionDelegate,
+                    TrackingProtectionDelegate {
     }
 
     interface ContentDelegate : GeckoSession.ContentDelegate {
@@ -26,7 +27,10 @@ class Callbacks private constructor() {
         override fun onFullScreen(session: GeckoSession, fullScreen: Boolean) {
         }
 
-        override fun onContextMenu(session: GeckoSession, screenX: Int, screenY: Int, uri: String, elementSrc: String) {
+        override fun onContextMenu(session: GeckoSession, screenX: Int, screenY: Int, uri: String, elementType: Int, elementSrc: String) {
+        }
+
+        override fun onExternalResponse(session: GeckoSession, response: GeckoSession.WebResponseInfo) {
         }
     }
 
@@ -40,8 +44,9 @@ class Callbacks private constructor() {
         override fun onCanGoForward(session: GeckoSession, canGoForward: Boolean) {
         }
 
-        override fun onLoadRequest(session: GeckoSession, uri: String, where: Int): Boolean {
-            return false;
+        override fun onLoadRequest(session: GeckoSession, uri: String, where: Int,
+                                   response: GeckoSession.Response<Boolean>) {
+            response.respond(false)
         }
 
         override fun onNewSession(session: GeckoSession, uri: String, response: GeckoSession.Response<GeckoSession>) {
@@ -115,6 +120,14 @@ class Callbacks private constructor() {
 
     interface TrackingProtectionDelegate : GeckoSession.TrackingProtectionDelegate {
         override fun onTrackerBlocked(session: GeckoSession, uri: String, categories: Int) {
+        }
+    }
+
+    interface SelectionActionDelegate : GeckoSession.SelectionActionDelegate {
+        override fun onShowActionRequest(session: GeckoSession, selection: GeckoSession.SelectionActionDelegate.Selection, actions: Array<out String>, response: GeckoSession.Response<String>) {
+        }
+
+        override fun onHideAction(session: GeckoSession, reason: Int) {
         }
     }
 }

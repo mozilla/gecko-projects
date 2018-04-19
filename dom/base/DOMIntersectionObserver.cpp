@@ -10,7 +10,7 @@
 #include "nsIFrame.h"
 #include "nsContentUtils.h"
 #include "nsLayoutUtils.h"
-#include "mozilla/ServoCSSParser.h"
+#include "mozilla/ServoBindings.h"
 
 namespace mozilla {
 namespace dom {
@@ -116,39 +116,14 @@ DOMIntersectionObserver::Constructor(const mozilla::dom::GlobalObject& aGlobal,
 bool
 DOMIntersectionObserver::SetRootMargin(const nsAString& aString)
 {
-  if (mDocument && mDocument->IsStyledByServo()) {
-    return ServoCSSParser::ParseIntersectionObserverRootMargin(aString,
-                                                               &mRootMargin);
-  }
-
-#ifdef MOZ_OLD_STYLE
-  // By not passing a CSS Loader object we make sure we don't parse in quirks
-  // mode so that pixel/percent and unit-less values will be differentiated.
-  nsCSSParser parser(nullptr);
-  nsCSSValue value;
-  if (!parser.ParseMarginString(aString, nullptr, 0, value, true)) {
-    return false;
-  }
-
-  mRootMargin = value.GetRectValue();
-
-  for (auto side : nsCSSRect::sides) {
-    nsCSSValue& value = mRootMargin.*side;
-    if (!(value.IsPixelLengthUnit() || value.IsPercentLengthUnit())) {
-      return false;
-    }
-  }
-
-  return true;
-#else
-  MOZ_CRASH("old style system disabled");
-#endif
+  return Servo_IntersectionObserverRootMargin_Parse(&aString, &mRootMargin);
 }
 
 void
 DOMIntersectionObserver::GetRootMargin(mozilla::dom::DOMString& aRetVal)
 {
-  mRootMargin.AppendToString(eCSSProperty_DOM, aRetVal);
+  nsString& retVal = aRetVal;
+  Servo_IntersectionObserverRootMargin_ToString(&mRootMargin, &retVal);
 }
 
 void
@@ -331,15 +306,7 @@ DOMIntersectionObserver::Update(nsIDocument* aDocument, DOMHighResTimeStamp time
   NS_FOR_CSS_SIDES(side) {
     nscoord basis = side == eSideTop || side == eSideBottom ?
       rootRect.Height() : rootRect.Width();
-    nsCSSValue value = mRootMargin.*nsCSSRect::sides[side];
-    nsStyleCoord coord;
-    if (value.IsPixelLengthUnit()) {
-      coord.SetCoordValue(value.GetPixelLength());
-    } else if (value.IsPercentLengthUnit()) {
-      coord.SetPercentValue(value.GetPercentValue());
-    } else {
-      MOZ_ASSERT_UNREACHABLE("invalid length unit");
-    }
+    nsStyleCoord coord = mRootMargin.Get(side);
     rootMargin.Side(side) = nsLayoutUtils::ComputeCBDependentValue(basis, coord);
   }
 

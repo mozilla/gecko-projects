@@ -5,6 +5,7 @@
 "use strict";
 
 const { AutoRefreshHighlighter } = require("./auto-refresh");
+const { apply } = require("devtools/shared/layout/dom-matrix-2d");
 const {
   CANVAS_SIZE,
   DEFAULT_COLOR,
@@ -31,6 +32,9 @@ const FLEXBOX_LINES_PROPERTIES = {
     lineDash: [12, 10]
   },
   "item": {
+    lineDash: [0, 0]
+  },
+  "alignItems": {
     lineDash: [0, 0]
   }
 };
@@ -319,6 +323,109 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     }
   }
 
+  renderAlignItemLine() {
+    if (!this.currentQuads.content || !this.currentQuads.content[0]) {
+      return;
+    }
+
+    let { devicePixelRatio } = this.win;
+    let lineWidth = getDisplayPixelRatio(this.win);
+    let offset = (lineWidth / 2) % 1;
+    let canvasX = Math.round(this._canvasPosition.x * devicePixelRatio);
+    let canvasY = Math.round(this._canvasPosition.y * devicePixelRatio);
+
+    this.ctx.save();
+    this.ctx.translate(offset - canvasX, offset - canvasY);
+    this.ctx.setLineDash(FLEXBOX_LINES_PROPERTIES.alignItems.lineDash);
+    this.ctx.lineWidth = lineWidth * 3;
+    this.ctx.strokeStyle = DEFAULT_COLOR;
+
+    let { bounds } = this.currentQuads.content[0];
+    let flexLines = this.currentNode.getAsFlexContainer().getLines();
+    let computedStyle = getComputedStyle(this.currentNode);
+    let alignItemsType = computedStyle.getPropertyValue("align-items");
+    let isColumn = computedStyle.getPropertyValue("flex-direction").startsWith("column");
+    let options = { matrix: this.currentMatrix };
+
+    for (let flexLine of flexLines) {
+      let { crossStart, crossSize } = flexLine;
+
+      switch (alignItemsType) {
+        case "baseline":
+        case "first baseline":
+          let { firstBaselineOffset } = flexLine;
+
+          if (firstBaselineOffset < 0) {
+            break;
+          }
+
+          if (isColumn) {
+            drawLine(this.ctx, crossStart + firstBaselineOffset, 0,
+              crossStart + firstBaselineOffset, bounds.height, options);
+          } else {
+            drawLine(this.ctx, 0, crossStart + firstBaselineOffset, bounds.width,
+              crossStart + firstBaselineOffset, options);
+          }
+
+          this.ctx.stroke();
+          break;
+        case "center":
+          if (isColumn) {
+            drawLine(this.ctx, crossStart + crossSize / 2, 0, crossStart + crossSize / 2,
+              bounds.height, options);
+          } else {
+            drawLine(this.ctx, 0, crossStart + crossSize / 2, bounds.width,
+              crossStart + crossSize / 2, options);
+          }
+
+          this.ctx.stroke();
+          break;
+        case "flex-start":
+        case "start":
+          if (isColumn) {
+            drawLine(this.ctx, crossStart, 0, crossStart, bounds.height, options);
+          } else {
+            drawLine(this.ctx, 0, crossStart, bounds.width, crossStart, options);
+          }
+
+          this.ctx.stroke();
+          break;
+        case "flex-end":
+        case "end":
+          if (isColumn) {
+            drawLine(this.ctx, crossStart + crossSize, 0, crossStart + crossSize,
+              bounds.height, options);
+          } else {
+            drawLine(this.ctx, 0, crossStart + crossSize, bounds.width,
+              crossStart + crossSize, options);
+          }
+
+          this.ctx.stroke();
+          break;
+        case "stretch":
+          if (isColumn) {
+            drawLine(this.ctx, crossStart, 0, crossStart, bounds.height, options);
+            this.ctx.stroke();
+            drawLine(this.ctx, crossStart + crossSize, 0, crossStart + crossSize,
+              bounds.height, options);
+            this.ctx.stroke();
+          } else {
+            drawLine(this.ctx, 0, crossStart, bounds.width, crossStart, options);
+            this.ctx.stroke();
+            drawLine(this.ctx, 0, crossStart + crossSize, bounds.width,
+              crossStart + crossSize, options);
+            this.ctx.stroke();
+          }
+
+          break;
+        default:
+          break;
+      }
+    }
+
+    this.ctx.restore();
+  }
+
   renderFlexContainerBorder() {
     if (!this.currentQuads.content || !this.currentQuads.content[0]) {
       return;
@@ -363,6 +470,13 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
 
     let { bounds } = this.currentQuads.content[0];
     drawRect(this.ctx, 0, 0, bounds.width, bounds.height, this.currentMatrix);
+
+    // Find current angle of outer flex element by measuring the angle of two arbitrary
+    // points, then rotate canvas, so the hash pattern stays 45deg to the boundary.
+    let p1 = apply(this.currentMatrix, [0, 0]);
+    let p2 = apply(this.currentMatrix, [1, 0]);
+    let angleRad = Math.atan2(p2[1] - p1[1], p2[0] - p1[0]);
+    this.ctx.rotate(angleRad);
 
     this.ctx.fill();
     this.ctx.stroke();
@@ -582,6 +696,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     this.renderJustifyContent();
     this.renderFlexItems();
     this.renderFlexContainerBorder();
+    this.renderAlignItemLine();
 
     this._showFlexbox();
 

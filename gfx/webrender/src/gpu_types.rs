@@ -2,12 +2,34 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{DevicePoint, LayerToWorldTransform, PremultipliedColorF, WorldToLayerTransform};
+use api::{DevicePoint, LayerToWorldTransform, WorldToLayerTransform};
 use gpu_cache::{GpuCacheAddress, GpuDataRequest};
 use prim_store::EdgeAaSegmentMask;
 use render_task::RenderTaskAddress;
 
 // Contains type that must exactly match the same structures declared in GLSL.
+
+#[derive(Copy, Clone, Debug)]
+#[repr(C)]
+pub struct ZBufferId(i32);
+
+pub struct ZBufferIdGenerator {
+    next: i32,
+}
+
+impl ZBufferIdGenerator {
+    pub fn new() -> ZBufferIdGenerator {
+        ZBufferIdGenerator {
+            next: 0
+        }
+    }
+
+    pub fn next(&mut self) -> ZBufferId {
+        let id = ZBufferId(self.next);
+        self.next += 1;
+        id
+    }
+}
 
 #[derive(Debug, Copy, Clone)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
@@ -16,6 +38,15 @@ use render_task::RenderTaskAddress;
 pub enum RasterizationSpace {
     Local = 0,
     Screen = 1,
+}
+
+#[derive(Debug, Copy, Clone)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+#[repr(C)]
+pub enum BoxShadowStretchMode {
+    Stretch = 0,
+    Simple = 1,
 }
 
 #[repr(i32)]
@@ -66,7 +97,7 @@ pub struct SimplePrimitiveInstance {
     pub clip_task_address: RenderTaskAddress,
     pub clip_chain_rect_index: ClipChainRectIndex,
     pub scroll_id: ClipScrollNodeIndex,
-    pub z_sort_index: i32,
+    pub z: ZBufferId,
 }
 
 impl SimplePrimitiveInstance {
@@ -76,7 +107,7 @@ impl SimplePrimitiveInstance {
         clip_task_address: RenderTaskAddress,
         clip_chain_rect_index: ClipChainRectIndex,
         scroll_id: ClipScrollNodeIndex,
-        z_sort_index: i32,
+        z: ZBufferId,
     ) -> Self {
         SimplePrimitiveInstance {
             specific_prim_address,
@@ -84,7 +115,7 @@ impl SimplePrimitiveInstance {
             clip_task_address,
             clip_chain_rect_index,
             scroll_id,
-            z_sort_index,
+            z,
         }
     }
 
@@ -95,7 +126,7 @@ impl SimplePrimitiveInstance {
                 self.task_address.0 as i32,
                 self.clip_task_address.0 as i32,
                 ((self.clip_chain_rect_index.0 as i32) << 16) | self.scroll_id.0 as i32,
-                self.z_sort_index,
+                self.z.0,
                 data0,
                 data1,
                 data2,
@@ -110,7 +141,7 @@ pub struct CompositePrimitiveInstance {
     pub backdrop_task_address: RenderTaskAddress,
     pub data0: i32,
     pub data1: i32,
-    pub z: i32,
+    pub z: ZBufferId,
     pub data2: i32,
     pub data3: i32,
 }
@@ -122,7 +153,7 @@ impl CompositePrimitiveInstance {
         backdrop_task_address: RenderTaskAddress,
         data0: i32,
         data1: i32,
-        z: i32,
+        z: ZBufferId,
         data2: i32,
         data3: i32,
     ) -> Self {
@@ -146,7 +177,7 @@ impl From<CompositePrimitiveInstance> for PrimitiveInstance {
                 instance.task_address.0 as i32,
                 instance.src_task_address.0 as i32,
                 instance.backdrop_task_address.0 as i32,
-                instance.z,
+                instance.z.0,
                 instance.data0,
                 instance.data1,
                 instance.data2,
@@ -164,7 +195,7 @@ bitflags! {
     }
 }
 
-// TODO(gw): While we are comverting things over, we
+// TODO(gw): While we are converting things over, we
 //           need to have the instance be the same
 //           size as an old PrimitiveInstance. In the
 //           future, we can compress this vertex
@@ -178,7 +209,7 @@ pub struct BrushInstance {
     pub clip_chain_rect_index: ClipChainRectIndex,
     pub scroll_id: ClipScrollNodeIndex,
     pub clip_task_address: RenderTaskAddress,
-    pub z: i32,
+    pub z: ZBufferId,
     pub segment_index: i32,
     pub edge_flags: EdgeAaSegmentMask,
     pub brush_flags: BrushFlags,
@@ -192,7 +223,7 @@ impl From<BrushInstance> for PrimitiveInstance {
                 instance.picture_address.0 as i32 | (instance.clip_task_address.0 as i32) << 16,
                 instance.prim_address.as_int(),
                 ((instance.clip_chain_rect_index.0 as i32) << 16) | instance.scroll_id.0 as i32,
-                instance.z,
+                instance.z.0,
                 instance.segment_index |
                     ((instance.edge_flags.bits() as i32) << 16) |
                     ((instance.brush_flags.bits() as i32) << 24),
@@ -236,15 +267,6 @@ impl ClipScrollNodeData {
 #[repr(C)]
 pub struct ClipChainRectIndex(pub usize);
 
-#[derive(Copy, Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[repr(C)]
-pub enum PictureType {
-    Image = 1,
-    TextShadow = 2,
-}
-
 #[derive(Debug, Copy, Clone)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
@@ -254,7 +276,6 @@ pub struct ImageSource {
     pub p1: DevicePoint,
     pub texture_layer: f32,
     pub user_data: [f32; 3],
-    pub color: PremultipliedColorF,
 }
 
 impl ImageSource {
@@ -271,6 +292,5 @@ impl ImageSource {
             self.user_data[1],
             self.user_data[2],
         ]);
-        request.push(self.color);
     }
 }

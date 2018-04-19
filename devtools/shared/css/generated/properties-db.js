@@ -729,7 +729,8 @@ exports.CSS_PROPERTIES = {
       "column-gap"
     ],
     "supports": [
-      6
+      6,
+      8
     ],
     "values": [
       "calc",
@@ -2081,6 +2082,7 @@ exports.CSS_PROPERTIES = {
       "-moz-min-content",
       "auto",
       "calc",
+      "content",
       "inherit",
       "initial",
       "unset"
@@ -2102,6 +2104,7 @@ exports.CSS_PROPERTIES = {
       "-moz-min-content",
       "auto",
       "calc",
+      "content",
       "inherit",
       "initial",
       "unset"
@@ -3108,7 +3111,6 @@ exports.CSS_PROPERTIES = {
       "stroke-miterlimit",
       "stroke-opacity",
       "stroke-width",
-      "-x-system-font",
       "-moz-tab-size",
       "table-layout",
       "text-align",
@@ -5118,7 +5120,8 @@ exports.CSS_PROPERTIES = {
       "column-gap"
     ],
     "supports": [
-      6
+      6,
+      8
     ],
     "values": [
       "calc",
@@ -5547,6 +5550,7 @@ exports.CSS_PROPERTIES = {
       "-moz-min-content",
       "auto",
       "calc",
+      "content",
       "inherit",
       "initial",
       "unset"
@@ -5568,6 +5572,7 @@ exports.CSS_PROPERTIES = {
       "-moz-min-content",
       "auto",
       "calc",
+      "content",
       "inherit",
       "initial",
       "unset"
@@ -5714,7 +5719,6 @@ exports.CSS_PROPERTIES = {
       "line-height",
       "font-size-adjust",
       "font-stretch",
-      "-x-system-font",
       "font-feature-settings",
       "font-language-override",
       "font-kerning",
@@ -5864,6 +5868,20 @@ exports.CSS_PROPERTIES = {
       "inherit",
       "initial",
       "normal",
+      "unset"
+    ]
+  },
+  "font-optical-sizing": {
+    "isInherited": true,
+    "subproperties": [
+      "font-optical-sizing"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "inherit",
+      "initial",
+      "none",
       "unset"
     ]
   },
@@ -6114,6 +6132,18 @@ exports.CSS_PROPERTIES = {
       "normal",
       "sub",
       "super",
+      "unset"
+    ]
+  },
+  "font-variation-settings": {
+    "isInherited": true,
+    "subproperties": [
+      "font-variation-settings"
+    ],
+    "supports": [],
+    "values": [
+      "inherit",
+      "initial",
       "unset"
     ]
   },

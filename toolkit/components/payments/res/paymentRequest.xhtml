@@ -3,6 +3,9 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 <!DOCTYPE html [
+  <!ENTITY % globalDTD SYSTEM "chrome://global/locale/global.dtd">
+  %globalDTD;
+
   <!ENTITY viewAllItems               "View All Items">
   <!ENTITY paymentSummaryTitle        "Your Payment">
   <!ENTITY shippingAddressLabel       "Shipping Address">
@@ -10,19 +13,28 @@
   <!ENTITY pickupAddressLabel         "Pickup Address">
   <!ENTITY shippingOptionsLabel       "Shipping Options">
   <!ENTITY paymentMethodsLabel        "Payment Method">
+  <!ENTITY basicCard.addLink.label    "Add">
+  <!ENTITY basicCard.editLink.label   "Edit">
   <!ENTITY payerLabel                 "Contact Information">
   <!ENTITY cancelPaymentButton.label   "Cancel">
   <!ENTITY approvePaymentButton.label  "Pay">
   <!ENTITY processingPaymentButton.label "Processing">
   <!ENTITY successPaymentButton.label    "Done">
   <!ENTITY failPaymentButton.label       "Fail">
+  <!ENTITY unknownPaymentButton.label    "Unknown">
   <!ENTITY orderDetailsLabel          "Order Details">
   <!ENTITY orderTotalLabel            "Total">
+  <!ENTITY basicCardPage.error.genericSave    "There was an error saving the payment card.">
+  <!ENTITY basicCardPage.backButton.label     "Back">
+  <!ENTITY basicCardPage.saveButton.label     "Save">
 ]>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'"/>
-  <title></title>
+  <title>&paymentSummaryTitle;</title>
+
+  <!-- chrome: is needed for global.dtd -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' chrome:"/>
+
   <link rel="stylesheet" href="paymentRequest.css"/>
   <link rel="stylesheet" href="components/rich-select.css"/>
   <link rel="stylesheet" href="components/address-option.css"/>
@@ -31,25 +43,11 @@
   <link rel="stylesheet" href="components/payment-details-item.css"/>
   <link rel="stylesheet" href="containers/order-details.css"/>
 
-  <script src="vendor/custom-elements.min.js"></script>
+  <script src="unprivileged-fallbacks.js"></script>
 
-  <script src="PaymentsStore.js"></script>
+  <script src="formautofill/autofillEditForms.js"></script>
 
-  <script src="mixins/ObservedPropertiesMixin.js"></script>
-  <script src="mixins/PaymentStateSubscriberMixin.js"></script>
-
-  <script src="components/currency-amount.js"></script>
-  <script src="containers/order-details.js"></script>
-  <script src="components/payment-details-item.js"></script>
-  <script src="components/rich-select.js"></script>
-  <script src="components/rich-option.js"></script>
-  <script src="components/address-option.js"></script>
-  <script src="components/shipping-option.js"></script>
-  <script src="containers/address-picker.js"></script>
-  <script src="components/basic-card-option.js"></script>
-  <script src="containers/shipping-option-picker.js"></script>
-  <script src="containers/payment-method-picker.js"></script>
-  <script src="containers/payment-dialog.js"></script>
+  <script type="module" src="containers/payment-dialog.js"></script>
 
   <script src="paymentRequest.js"></script>
 
@@ -66,7 +64,7 @@
     </header>
 
     <div id="main-container">
-      <section id="payment-summary">
+      <section id="payment-summary" class="page">
         <h1>&paymentSummaryTitle;</h1>
 
         <section>
@@ -83,7 +81,10 @@
           <shipping-option-picker class="shipping-related"></shipping-option-picker>
 
           <div><label>&paymentMethodsLabel;</label></div>
-          <payment-method-picker selected-state-key="selectedPaymentCard"></payment-method-picker>
+          <payment-method-picker selected-state-key="selectedPaymentCard"
+                                 data-add-link-label="&basicCard.addLink.label;"
+                                 data-edit-link-label="&basicCard.editLink.label;">
+          </payment-method-picker>
 
           <div class="payer-related"><label>&payerLabel;</label></div>
           <address-picker class="payer-related"
@@ -97,6 +98,7 @@
                   data-initial-label="&approvePaymentButton.label;"
                   data-processing-label="&processingPaymentButton.label;"
                   data-fail-label="&failPaymentButton.label;"
+                  data-unknown-label="&unknownPaymentButton.label;"
                   data-success-label="&successPaymentButton.label;"></button>
         </footer>
       </section>
@@ -104,6 +106,13 @@
         <h1>&orderDetailsLabel;</h1>
         <order-details></order-details>
       </section>
+
+      <basic-card-form id="basic-card-page"
+                       class="page"
+                       data-error-generic-save="&basicCardPage.error.genericSave;"
+                       data-back-button-label="&basicCardPage.backButton.label;"
+                       data-save-button-label="&basicCardPage.saveButton.label;"
+                       hidden="hidden"></basic-card-form>
     </div>
 
     <div id="disabled-overlay" hidden="hidden">
@@ -121,11 +130,10 @@
     </div>
   </template>
 </head>
-<body>
+<body dir="&locale.dir;">
   <iframe id="debugging-console"
           hidden="hidden"
-          height="400"
-          src="debugging.html"></iframe>
+          height="400"></iframe>
   <payment-dialog></payment-dialog>
 </body>
 </html>

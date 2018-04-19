@@ -8,6 +8,7 @@
 
 #include "mozilla/Atomics.h"
 #include "mozilla/FloatingPoint.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/Move.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/Unused.h"
@@ -69,6 +70,7 @@
 using namespace js;
 
 using mozilla::ArrayLength;
+using mozilla::Maybe;
 using mozilla::Move;
 
 // If fuzzingSafe is set, remove functionality that could cause problems with
@@ -350,7 +352,7 @@ MinorGC(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     if (args.get(0) == BooleanValue(true))
-        cx->zone()->group()->storeBuffer().setAboutToOverflow(JS::gcreason::FULL_GENERIC_BUFFER);
+        cx->runtime()->gc.storeBuffer().setAboutToOverflow(JS::gcreason::FULL_GENERIC_BUFFER);
 
     cx->minorGC(JS::gcreason::API);
     args.rval().setUndefined();
@@ -578,6 +580,19 @@ WasmSaturatingTruncationSupported(JSContext* cx, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 #ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
     bool isSupported = true;
+#else
+    bool isSupported = false;
+#endif
+    args.rval().setBoolean(isSupported);
+    return true;
+}
+
+static bool
+WasmGcEnabled(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+#ifdef ENABLE_WASM_GC
+    bool isSupported = cx->options().wasmBaseline() && cx->options().wasmGc();
 #else
     bool isSupported = false;
 #endif
@@ -1240,6 +1255,23 @@ GetSavedFrameCount(JSContext* cx, unsigned argc, Value* vp)
 }
 
 static bool
+ClearSavedFrames(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    js::SavedStacks& savedStacks = cx->compartment()->savedStacks();
+    if (savedStacks.initialized())
+        savedStacks.clear();
+
+    for (ActivationIterator iter(cx); !iter.done(); ++iter) {
+        iter->clearLiveSavedFrameCache();
+    }
+
+    args.rval().setUndefined();
+    return true;
+}
+
+static bool
 SaveStack(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -1593,8 +1625,7 @@ static size_t
 CountCompartments(JSContext* cx)
 {
     size_t count = 0;
-    ZoneGroup* group = cx->compartment()->zone()->group();
-    for (auto zone : group->zones())
+    for (auto zone : cx->runtime()->gc.zones())
         count += zone->compartments().length();
     return count;
 }
@@ -2520,7 +2551,8 @@ testingFunc_bailAfter(JSContext* cx, unsigned argc, Value* vp)
     }
 
 #ifdef DEBUG
-    cx->zone()->group()->setIonBailAfter(args[0].toInt32());
+    if (auto* jitRuntime = cx->runtime()->jitRuntime())
+        jitRuntime->setIonBailAfter(args[0].toInt32());
 #endif
 
     args.rval().setUndefined();
@@ -4988,24 +5020,6 @@ SetTimeResolution(JSContext* cx, unsigned argc, Value* vp)
    return true;
 }
 
-static bool
-EnableExpressionClosures(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    JS::ContextOptionsRef(cx).setExpressionClosures(true);
-    args.rval().setUndefined();
-    return true;
-}
-
-static bool
-DisableExpressionClosures(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    JS::ContextOptionsRef(cx).setExpressionClosures(false);
-    args.rval().setUndefined();
-    return true;
-}
-
 JSScript*
 js::TestingFunctionArgumentToScript(JSContext* cx,
                                     HandleValue v,
@@ -5096,35 +5110,50 @@ BaselineCompile(JSContext* cx, unsigned argc, Value* vp)
         forceDebug = ToBoolean(args[1]);
     }
 
-    if (script->hasBaselineScript()) {
-        if (forceDebug && !script->baselineScript()->hasDebugInstrumentation()) {
-            // There isn't an easy way to do this for a script that might be on
-            // stack right now. See js::jit::RecompileOnStackBaselineScriptsForDebugMode.
-            ReportUsageErrorASCII(cx, callee,
-                                  "unsupported case: recompiling script for debug mode");
-            return false;
+    const char* returnedStr = nullptr;
+    do {
+        AutoCompartment ac(cx, script);
+        if (script->hasBaselineScript()) {
+            if (forceDebug && !script->baselineScript()->hasDebugInstrumentation()) {
+                // There isn't an easy way to do this for a script that might be on
+                // stack right now. See js::jit::RecompileOnStackBaselineScriptsForDebugMode.
+                ReportUsageErrorASCII(cx, callee,
+                                      "unsupported case: recompiling script for debug mode");
+                return false;
+            }
+
+            args.rval().setUndefined();
+            return true;
         }
 
-        args.rval().setUndefined();
-        return true;
-    }
+        if (!jit::IsBaselineEnabled(cx)) {
+            returnedStr = "baseline disabled";
+            break;
+        }
+        if (!script->canBaselineCompile()) {
+            returnedStr = "can't compile";
+            break;
+        }
+        if (!cx->compartment()->ensureJitCompartmentExists(cx))
+            return false;
 
-    if (!jit::IsBaselineEnabled(cx))
-        return ReturnStringCopy(cx, args, "baseline disabled");
-    if (!script->canBaselineCompile())
-        return ReturnStringCopy(cx, args, "can't compile");
+        jit::MethodStatus status = jit::BaselineCompile(cx, script, forceDebug);
+        switch (status) {
+          case jit::Method_Error:
+            return false;
+          case jit::Method_CantCompile:
+            returnedStr = "can't compile";
+            break;
+          case jit::Method_Skipped:
+            returnedStr = "skipped";
+            break;
+          case jit::Method_Compiled:
+            args.rval().setUndefined();
+        }
+    } while(false);
 
-    jit::MethodStatus status = jit::BaselineCompile(cx, script, forceDebug);
-    switch (status) {
-      case jit::Method_Error:
-        return false;
-      case jit::Method_CantCompile:
-        return ReturnStringCopy(cx, args, "can't compile");
-      case jit::Method_Skipped:
-        return ReturnStringCopy(cx, args, "skipped");
-      case jit::Method_Compiled:
-        args.rval().setUndefined();
-    }
+    if (returnedStr)
+        return ReturnStringCopy(cx, args, returnedStr);
 
     return true;
 }
@@ -5170,6 +5199,12 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "getSavedFrameCount()",
 "  Return the number of SavedFrame instances stored in this compartment's\n"
 "  SavedStacks cache."),
+
+    JS_FN_HELP("clearSavedFrames", ClearSavedFrames, 0, 0,
+"clearSavedFrames()",
+"  Empty the current compartment's cache of SavedFrame objects, so that\n"
+"  subsequent stack captures allocate fresh objects to represent frames.\n"
+"  Clear the current stack's LiveSavedFrameCaches."),
 
     JS_FN_HELP("saveStack", SaveStack, 0, 0,
 "saveStack([maxDepth [, compartment]])",
@@ -5481,6 +5516,10 @@ gc::ZealModeHelpText),
 "  Returns a boolean indicating whether a given module has finished compiled code for tier2. \n"
 "This will return true early if compilation isn't two-tiered. "),
 
+    JS_FN_HELP("wasmGcEnabled", WasmGcEnabled, 1, 0,
+"wasmGcEnabled(bool)",
+"  Returns a boolean indicating whether the WebAssembly GC support is enabled."),
+
     JS_FN_HELP("isLazyFunction", IsLazyFunction, 1, 0,
 "isLazyFunction(fun)",
 "  True if fun is a lazy JSFunction."),
@@ -5763,14 +5802,6 @@ gc::ZealModeHelpText),
 "setTimeResolution(resolution, jitter)",
 "  Enables time clamping and jittering. Specify a time resolution in\n"
 "  microseconds and whether or not to jitter\n"),
-
-    JS_FN_HELP("enableExpressionClosures", EnableExpressionClosures, 0, 0,
-"enableExpressionClosures()",
-"  Enables the deprecated, non-standard expression closures.\n"),
-
-    JS_FN_HELP("disableExpressionClosures", DisableExpressionClosures, 0, 0,
-"disableExpressionClosures()",
-"  Disables the deprecated, non-standard expression closures.\n"),
 
     JS_FN_HELP("baselineCompile", BaselineCompile, 2, 0,
 "baselineCompile([fun/code], forceDebugInstrumentation=false)",

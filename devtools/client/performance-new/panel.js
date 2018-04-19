@@ -5,8 +5,7 @@
 
 const { PerfFront } = require("devtools/shared/fronts/perf");
 
-loader.lazyRequireGetter(this, "EventEmitter",
-  "devtools/shared/old-event-emitter");
+loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
 
 class PerformancePanel {
   constructor(iframeWindow, toolbox) {
@@ -36,7 +35,7 @@ class PerformancePanel {
 
     this.isReady = true;
     this.emit("ready");
-    this.panelWin.gInit(perfFront);
+    this.panelWin.gInit(this.toolbox, perfFront);
     return this;
   }
 

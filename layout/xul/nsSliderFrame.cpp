@@ -14,7 +14,7 @@
 #include "nsSliderFrame.h"
 
 #include "gfxPrefs.h"
-#include "nsStyleContext.h"
+#include "mozilla/ComputedStyle.h"
 #include "nsPresContext.h"
 #include "nsIContent.h"
 #include "nsCOMPtr.h"
@@ -24,7 +24,6 @@
 #include "nsIPresShell.h"
 #include "nsCSSRendering.h"
 #include "nsIDOMEvent.h"
-#include "nsIDOMMouseEvent.h"
 #include "nsScrollbarButtonFrame.h"
 #include "nsISliderListener.h"
 #include "nsIScrollableFrame.h"
@@ -55,7 +54,7 @@ using mozilla::layers::APZCCallbackHelper;
 using mozilla::layers::AsyncDragMetrics;
 using mozilla::layers::InputAPZContext;
 using mozilla::layers::ScrollDirection;
-using mozilla::layers::ScrollThumbData;
+using mozilla::layers::ScrollbarData;
 
 bool nsSliderFrame::gMiddlePref = false;
 int32_t nsSliderFrame::gSnapMultiplier;
@@ -71,9 +70,9 @@ GetContentOfBox(nsIFrame *aBox)
 }
 
 nsIFrame*
-NS_NewSliderFrame (nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewSliderFrame (nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsSliderFrame(aContext);
+  return new (aPresShell) nsSliderFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSliderFrame)
@@ -82,8 +81,8 @@ NS_QUERYFRAME_HEAD(nsSliderFrame)
   NS_QUERYFRAME_ENTRY(nsSliderFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsBoxFrame)
 
-nsSliderFrame::nsSliderFrame(nsStyleContext* aContext)
-  : nsBoxFrame(aContext, kClassID)
+nsSliderFrame::nsSliderFrame(ComputedStyle* aStyle)
+  : nsBoxFrame(aStyle, kClassID)
   , mRatio(0.0f)
   , mDragStart(0)
   , mThumbStart(0)
@@ -460,14 +459,16 @@ nsSliderFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
       const ActiveScrolledRoot* ownLayerASR = contASRTracker.GetContainerASR();
       aLists.Content()->AppendToTop(
         MakeDisplayItem<nsDisplayOwnLayer>(aBuilder, this, &masterList, ownLayerASR,
-                                           flags, scrollTargetId,
-                                           ScrollThumbData{scrollDirection,
-                                                           GetThumbRatio(),
-                                                           thumbStart,
-                                                           thumbLength,
-                                                           isAsyncDraggable,
-                                                           sliderTrackStart,
-                                                           sliderTrackLength}));
+                                           flags,
+                                           ScrollbarData{scrollDirection,
+                                                         layers::ScrollbarLayerType::Thumb,
+                                                         GetThumbRatio(),
+                                                         thumbStart,
+                                                         thumbLength,
+                                                         isAsyncDraggable,
+                                                         sliderTrackStart,
+                                                         sliderTrackLength,
+                                                         scrollTargetId}));
 
       return;
     }

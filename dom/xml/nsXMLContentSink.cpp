@@ -8,14 +8,11 @@
 #include "nsXMLContentSink.h"
 #include "nsIParser.h"
 #include "nsIDocument.h"
-#include "nsIDOMDocumentType.h"
 #include "nsIContent.h"
 #include "nsIURI.h"
 #include "nsNetUtil.h"
 #include "nsIDocShell.h"
 #include "nsIStyleSheetLinkingElement.h"
-#include "nsIDOMComment.h"
-#include "DocumentType.h"
 #include "nsHTMLParts.h"
 #include "nsCRT.h"
 #include "mozilla/StyleSheetInlines.h"
@@ -45,7 +42,6 @@
 #include "nsIContentPolicy.h"
 #include "nsContentPolicyUtils.h"
 #include "nsError.h"
-#include "nsIDOMProcessingInstruction.h"
 #include "nsNodeUtils.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIHTMLDocument.h"
@@ -55,11 +51,13 @@
 #include "nsTextNode.h"
 #include "mozilla/dom/CDATASection.h"
 #include "mozilla/dom/Comment.h"
+#include "mozilla/dom/DocumentType.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLTemplateElement.h"
 #include "mozilla/dom/ProcessingInstruction.h"
 #include "mozilla/dom/ScriptLoader.h"
 #include "mozilla/dom/txMozillaXSLTProcessor.h"
+#include "mozilla/LoadInfo.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -219,7 +217,7 @@ nsXMLContentSink::MaybePrettyPrint()
 }
 
 static void
-CheckXSLTParamPI(nsIDOMProcessingInstruction* aPi,
+CheckXSLTParamPI(ProcessingInstruction* aPi,
                  nsIDocumentTransformer* aProcessor,
                  nsINode* aSource)
 {
@@ -292,8 +290,7 @@ nsXMLContentSink::DidBuildModel(bool aTerminated)
 
     // Check for xslt-param and xslt-param-namespace PIs
     for (nsIContent* child : mDocumentChildren) {
-      if (child->IsNodeOfType(nsINode::ePROCESSING_INSTRUCTION)) {
-        nsCOMPtr<nsIDOMProcessingInstruction> pi = do_QueryInterface(child);
+      if (auto pi = ProcessingInstruction::FromNode(child)) {
         CheckXSLTParamPI(pi, mXSLTProcessor, source);
       }
       else if (child->IsElement()) {
@@ -742,15 +739,18 @@ nsXMLContentSink::MaybeProcessXSLTLink(
                               nsIScriptSecurityManager::ALLOW_CHROME);
   NS_ENSURE_SUCCESS(rv, NS_OK);
 
+  nsCOMPtr<nsILoadInfo> secCheckLoadInfo =
+    new net::LoadInfo(mDocument->NodePrincipal(), // loading principal
+                      mDocument->NodePrincipal(), // triggering principal
+                      aProcessingInstruction,
+                      nsILoadInfo::SEC_ONLY_FOR_EXPLICIT_CONTENTSEC_CHECK,
+                      nsIContentPolicy::TYPE_XSLT);
+
   // Do content policy check
   int16_t decision = nsIContentPolicy::ACCEPT;
-  rv = NS_CheckContentLoadPolicy(nsIContentPolicy::TYPE_XSLT,
-                                 url,
-                                 mDocument->NodePrincipal(), // loading principal
-                                 mDocument->NodePrincipal(), // triggering principal
-                                 ToSupports(aProcessingInstruction),
+  rv = NS_CheckContentLoadPolicy(url,
+                                 secCheckLoadInfo,
                                  NS_ConvertUTF16toUTF8(aType),
-                                 nullptr,
                                  &decision,
                                  nsContentUtils::GetContentPolicy());
 
@@ -1201,28 +1201,20 @@ nsXMLContentSink::HandleDoctypeDecl(const nsAString & aSubset,
 {
   FlushText();
 
-  nsresult rv = NS_OK;
-
   NS_ASSERTION(mDocument, "Shouldn't get here from a document fragment");
 
   RefPtr<nsAtom> name = NS_Atomize(aName);
   NS_ENSURE_TRUE(name, NS_ERROR_OUT_OF_MEMORY);
 
   // Create a new doctype node
-  nsCOMPtr<nsIDOMDocumentType> docType;
-  rv = NS_NewDOMDocumentType(getter_AddRefs(docType), mNodeInfoManager,
-                             name, aPublicId, aSystemId, aSubset);
-  if (NS_FAILED(rv) || !docType) {
-    return rv;
-  }
+  RefPtr<DocumentType> docType = NS_NewDOMDocumentType(mNodeInfoManager,
+                                                       name, aPublicId,
+                                                       aSystemId, aSubset);
 
   MOZ_ASSERT(!aCatalogData, "Need to add back support for catalog style "
                             "sheets");
 
-  nsCOMPtr<nsIContent> content = do_QueryInterface(docType);
-  NS_ASSERTION(content, "doctype isn't content?");
-
-  mDocumentChildren.AppendElement(content);
+  mDocumentChildren.AppendElement(docType);
   DidAddContent();
   return DidProcessATokenImpl();
 }

@@ -47,14 +47,11 @@
 #include "nsViewManager.h"
 #include "GeckoProfiler.h"
 #include "nsNPAPIPluginInstance.h"
+#include "mozilla/dom/Event.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/WindowBinding.h"
-#ifdef MOZ_OLD_STYLE
-#include "mozilla/GeckoRestyleManager.h"
-#endif
 #include "mozilla/RestyleManager.h"
-#include "mozilla/RestyleManagerInlines.h"
 #include "Layers.h"
 #include "imgIContainer.h"
 #include "mozilla/dom/ScriptSettings.h"
@@ -72,7 +69,6 @@
 #include "mozilla/Unused.h"
 #include "mozilla/TimelineConsumers.h"
 #include "nsAnimationManager.h"
-#include "nsIDOMEvent.h"
 #include "nsDisplayList.h"
 #include "nsTransitionManager.h"
 
@@ -1239,7 +1235,7 @@ TimeStamp
 nsRefreshDriver::MostRecentRefresh() const
 {
   // In case of stylo traversal, we have already activated the refresh driver in
-  // ServoRestyleManager::ProcessPendingRestyles().
+  // RestyleManager::ProcessPendingRestyles().
   if (!ServoStyleSet::IsInServoTraversal()) {
     const_cast<nsRefreshDriver*>(this)->EnsureTimerStarted();
   }
@@ -1601,8 +1597,7 @@ nsRefreshDriver::DispatchPendingEvents()
   // Swap out the current pending events
   nsTArray<PendingEvent> pendingEvents(Move(mPendingEvents));
   for (PendingEvent& event : pendingEvents) {
-    bool dummy;
-    event.mTarget->DispatchEvent(event.mEvent, &dummy);
+    event.mTarget->DispatchEvent(*event.mEvent);
   }
 }
 
@@ -1917,10 +1912,7 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
           // Inform the FontFaceSet that we ticked, so that it can resolve its
           // ready promise if it needs to (though it might still be waiting on
           // a layout flush).
-          nsPresContext* presContext = shell->GetPresContext();
-          if (presContext) {
-            presContext->NotifyFontFaceSetOnRefresh();
-          }
+          shell->NotifyFontFaceSetOnRefresh();
           mNeedToRecomputeVisibility = true;
         }
       }
@@ -1945,10 +1937,7 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
         shell->FlushPendingNotifications(ChangesToFlush(flushType, false));
         // Inform the FontFaceSet that we ticked, so that it can resolve its
         // ready promise if it needs to.
-        nsPresContext* presContext = shell->GetPresContext();
-        if (presContext) {
-          presContext->NotifyFontFaceSetOnRefresh();
-        }
+        shell->NotifyFontFaceSetOnRefresh();
         mNeedToRecomputeVisibility = true;
       }
     }
@@ -2383,7 +2372,7 @@ nsRefreshDriver::RevokeFrameRequestCallbacks(nsIDocument* aDocument)
 }
 
 void
-nsRefreshDriver::ScheduleEventDispatch(nsINode* aTarget, nsIDOMEvent* aEvent)
+nsRefreshDriver::ScheduleEventDispatch(nsINode* aTarget, dom::Event* aEvent)
 {
   mPendingEvents.AppendElement(PendingEvent{aTarget, aEvent});
   // make sure that the timer is running

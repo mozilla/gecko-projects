@@ -485,7 +485,7 @@ IProtocol::AllocShmem(size_t aSize,
     return false;
   }
 
-  *aOutMem = Shmem(Shmem::IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead(), rawmem, id);
+  *aOutMem = Shmem(Shmem::PrivateIPDLCaller(), rawmem, id);
   return true;
 }
 
@@ -500,7 +500,7 @@ IProtocol::AllocUnsafeShmem(size_t aSize,
     return false;
   }
 
-  *aOutMem = Shmem(Shmem::IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead(), rawmem, id);
+  *aOutMem = Shmem(Shmem::PrivateIPDLCaller(), rawmem, id);
   return true;
 }
 
@@ -518,7 +518,7 @@ IProtocol::DeallocShmem(Shmem& aMem)
     return false;
   }
 #endif // DEBUG
-  aMem.forget(Shmem::IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead());
+  aMem.forget(Shmem::PrivateIPDLCaller());
   return ok;
 }
 
@@ -578,8 +578,10 @@ IProtocol::GetActorEventTargetInternal(IProtocol* aActor)
 
 IToplevelProtocol::IToplevelProtocol(ProtocolId aProtoId, Side aSide)
  : IProtocol(aSide),
+   mMonitor("mozilla.ipc.IToplevelProtocol.mMonitor"),
    mProtocolId(aProtoId),
    mOtherPid(mozilla::ipc::kInvalidProcessId),
+   mOtherPidState(ProcessIdState::eUnstarted),
    mLastRouteId(aSide == ParentSide ? kFreedActorId : kNullActorId),
    mLastShmemId(aSide == ParentSide ? kFreedActorId : kNullActorId),
    mEventTargetMutex("ProtocolEventTargetMutex")
@@ -597,13 +599,38 @@ IToplevelProtocol::~IToplevelProtocol()
 base::ProcessId
 IToplevelProtocol::OtherPid() const
 {
+  base::ProcessId pid = OtherPidMaybeInvalid();
+  MOZ_RELEASE_ASSERT(pid != kInvalidProcessId);
+  return pid;
+}
+
+base::ProcessId
+IToplevelProtocol::OtherPidMaybeInvalid() const
+{
+  MonitorAutoLock lock(mMonitor);
+
+  if (mOtherPidState == ProcessIdState::eUnstarted) {
+    // If you're asking for the pid of a process we haven't even tried to
+    // start, you get an invalid pid back immediately.
+    return kInvalidProcessId;
+  }
+
+  while (mOtherPidState < ProcessIdState::eReady) {
+    lock.Wait();
+  }
+  MOZ_RELEASE_ASSERT(mOtherPidState == ProcessIdState::eReady);
+
   return mOtherPid;
 }
 
 void
-IToplevelProtocol::SetOtherProcessId(base::ProcessId aOtherPid)
+IToplevelProtocol::SetOtherProcessId(base::ProcessId aOtherPid,
+                                     ProcessIdState aState)
 {
+  MonitorAutoLock lock(mMonitor);
   mOtherPid = aOtherPid;
+  mOtherPidState = aState;
+  lock.NotifyAll();
 }
 
 bool
@@ -639,6 +666,14 @@ IToplevelProtocol::Open(MessageChannel* aChannel,
 {
   SetOtherProcessId(base::GetCurrentProcId());
   return GetIPCChannel()->Open(aChannel, aEventTarget, aSide);
+}
+
+bool
+IToplevelProtocol::OpenWithAsyncPid(mozilla::ipc::Transport* aTransport,
+                                    MessageLoop* aThread,
+                                    mozilla::ipc::Side aSide)
+{
+  return GetIPCChannel()->Open(aTransport, aThread, aSide);
 }
 
 void
@@ -712,23 +747,34 @@ IToplevelProtocol::CreateSharedMemory(size_t aSize,
                                       Shmem::id_t* aId)
 {
   RefPtr<Shmem::SharedMemory> segment(
-    Shmem::Alloc(Shmem::IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead(), aSize, aType, aUnsafe));
+    Shmem::Alloc(Shmem::PrivateIPDLCaller(), aSize, aType, aUnsafe));
   if (!segment) {
     return nullptr;
   }
   int32_t id = GetSide() == ParentSide ? ++mLastShmemId : --mLastShmemId;
   Shmem shmem(
-    Shmem::IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead(),
+    Shmem::PrivateIPDLCaller(),
     segment.get(),
     id);
+
+  base::ProcessId pid =
+#ifdef ANDROID
+    // We use OtherPidMaybeInvalid() because on Android this method is actually
+    // called on an unconnected protocol, but Android's shared memory
+    // implementation doesn't actually use the PID.
+    OtherPidMaybeInvalid();
+#else
+    OtherPid();
+#endif
+
   Message* descriptor = shmem.ShareTo(
-    Shmem::IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead(), OtherPid(), MSG_ROUTING_CONTROL);
+    Shmem::PrivateIPDLCaller(), pid, MSG_ROUTING_CONTROL);
   if (!descriptor) {
     return nullptr;
   }
   Unused << GetIPCChannel()->Send(descriptor);
 
-  *aId = shmem.Id(Shmem::IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead());
+  *aId = shmem.Id(Shmem::PrivateIPDLCaller());
   Shmem::SharedMemory* rawSegment = segment.get();
   mShmemMap.AddWithID(segment.forget().take(), *aId);
   return rawSegment;
@@ -749,17 +795,17 @@ IToplevelProtocol::IsTrackingSharedMemory(Shmem::SharedMemory* segment)
 bool
 IToplevelProtocol::DestroySharedMemory(Shmem& shmem)
 {
-  Shmem::id_t aId = shmem.Id(Shmem::IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead());
+  Shmem::id_t aId = shmem.Id(Shmem::PrivateIPDLCaller());
   Shmem::SharedMemory* segment = LookupSharedMemory(aId);
   if (!segment) {
     return false;
   }
 
   Message* descriptor = shmem.UnshareFrom(
-    Shmem::IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead(), OtherPid(), MSG_ROUTING_CONTROL);
+    Shmem::PrivateIPDLCaller(), MSG_ROUTING_CONTROL);
 
   mShmemMap.Remove(aId);
-  Shmem::Dealloc(Shmem::IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead(), segment);
+  Shmem::Dealloc(Shmem::PrivateIPDLCaller(), segment);
 
   if (!GetIPCChannel()->CanSend()) {
     delete descriptor;
@@ -773,7 +819,7 @@ void
 IToplevelProtocol::DeallocShmems()
 {
   for (IDMap<SharedMemory*>::const_iterator cit = mShmemMap.begin(); cit != mShmemMap.end(); ++cit) {
-    Shmem::Dealloc(Shmem::IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead(), cit->second);
+    Shmem::Dealloc(Shmem::PrivateIPDLCaller(), cit->second);
   }
   mShmemMap.Clear();
 }
@@ -782,7 +828,7 @@ bool
 IToplevelProtocol::ShmemCreated(const Message& aMsg)
 {
   Shmem::id_t id;
-  RefPtr<Shmem::SharedMemory> rawmem(Shmem::OpenExisting(Shmem::IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead(), aMsg, &id, true));
+  RefPtr<Shmem::SharedMemory> rawmem(Shmem::OpenExisting(Shmem::PrivateIPDLCaller(), aMsg, &id, true));
   if (!rawmem) {
     return false;
   }
@@ -803,7 +849,7 @@ IToplevelProtocol::ShmemDestroyed(const Message& aMsg)
   Shmem::SharedMemory* rawmem = LookupSharedMemory(id);
   if (rawmem) {
     mShmemMap.Remove(id);
-    Shmem::Dealloc(Shmem::IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead(), rawmem);
+    Shmem::Dealloc(Shmem::PrivateIPDLCaller(), rawmem);
   }
   return true;
 }
@@ -885,7 +931,17 @@ IToplevelProtocol::SetEventTargetForActorInternal(IProtocol* aActor,
   aActor->SetId(id);
 
   MutexAutoLock lock(mEventTargetMutex);
-  mEventTargetMap.AddWithID(aEventTarget, id);
+  // FIXME bug 1445121 - sometimes the id is already mapped.
+  // (IDMap debug-asserts that the existing state is as expected.)
+  bool replace = false;
+#ifdef DEBUG
+  replace = mEventTargetMap.Lookup(id) != nullptr;
+#endif
+  if (replace) {
+    mEventTargetMap.ReplaceWithID(aEventTarget, id);
+  } else {
+    mEventTargetMap.AddWithID(aEventTarget, id);
+  }
 }
 
 void

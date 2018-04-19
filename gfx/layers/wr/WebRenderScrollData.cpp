@@ -8,6 +8,7 @@
 
 #include "Layers.h"
 #include "LayersLogging.h"
+#include "mozilla/layers/WebRenderLayerManager.h"
 #include "mozilla/layout/RenderFrameParent.h"
 #include "mozilla/Unused.h"
 #include "nsDisplayList.h"
@@ -41,7 +42,8 @@ void
 WebRenderLayerScrollData::Initialize(WebRenderScrollData& aOwner,
                                      nsDisplayItem* aItem,
                                      int32_t aDescendantCount,
-                                     const ActiveScrolledRoot* aStopAtAsr)
+                                     const ActiveScrolledRoot* aStopAtAsr,
+                                     const Maybe<gfx::Matrix4x4>& aTransform)
 {
   MOZ_ASSERT(aDescendantCount >= 0); // Ensure value is valid
   MOZ_ASSERT(mDescendantCount == -1); // Don't allow re-setting an already set value
@@ -49,6 +51,11 @@ WebRenderLayerScrollData::Initialize(WebRenderScrollData& aOwner,
 
   MOZ_ASSERT(aItem);
   aItem->UpdateScrollData(&aOwner, this);
+  if (aTransform) {
+    // mTransform might have been set by the UpdateScrollData call above, so
+    // we should combine rather than clobber
+    mTransform = *aTransform * mTransform;
+  }
   for (const ActiveScrolledRoot* asr = aItem->GetActiveScrolledRoot();
        asr && asr != aStopAtAsr;
        asr = asr->mParent) {
@@ -113,7 +120,9 @@ WebRenderLayerScrollData::Dump(const WebRenderScrollData& aOwner) const
     Stringify(mVisibleRegion).c_str());
   printf_stderr("  event regions: %s override: 0x%x\n",
     Stringify(mEventRegions).c_str(), mEventRegionsOverride);
-  printf_stderr("  ref layers id: 0x%" PRIx64 "\n", mReferentId.valueOr(0));
+  if (mReferentId) {
+    printf_stderr("  ref layers id: 0x%" PRIx64 "\n", uint64_t(*mReferentId));
+  }
   //printf_stderr("  scroll thumb: %s animation: %" PRIu64 "\n",
   //  Stringify(mScrollThumbData).c_str(), mScrollbarAnimationId);
   printf_stderr("  scroll container: %d target: %" PRIu64 "\n",

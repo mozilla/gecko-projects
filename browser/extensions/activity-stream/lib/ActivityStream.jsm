@@ -11,6 +11,7 @@ ChromeUtils.defineModuleGetter(this, "AppConstants",
 // NB: Eagerly load modules that will be loaded/constructed/initialized in the
 // common case to avoid the overhead of wrapping and detecting lazy loading.
 const {actionCreators: ac, actionTypes: at} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm", {});
+const {AboutPreferences} = ChromeUtils.import("resource://activity-stream/lib/AboutPreferences.jsm", {});
 const {DefaultPrefs} = ChromeUtils.import("resource://activity-stream/lib/ActivityStreamPrefs.jsm", {});
 const {ManualMigration} = ChromeUtils.import("resource://activity-stream/lib/ManualMigration.jsm", {});
 const {NewTabInit} = ChromeUtils.import("resource://activity-stream/lib/NewTabInit.jsm", {});
@@ -25,6 +26,9 @@ const {FaviconFeed} = ChromeUtils.import("resource://activity-stream/lib/Favicon
 const {TopSitesFeed} = ChromeUtils.import("resource://activity-stream/lib/TopSitesFeed.jsm", {});
 const {TopStoriesFeed} = ChromeUtils.import("resource://activity-stream/lib/TopStoriesFeed.jsm", {});
 const {HighlightsFeed} = ChromeUtils.import("resource://activity-stream/lib/HighlightsFeed.jsm", {});
+const {ActivityStreamStorage} = ChromeUtils.import("resource://activity-stream/lib/ActivityStreamStorage.jsm", {});
+const {ThemeFeed} = ChromeUtils.import("resource://activity-stream/lib/ThemeFeed.jsm", {});
+const {MessageCenterFeed} = ChromeUtils.import("resource://activity-stream/lib/MessageCenterFeed.jsm", {});
 
 const DEFAULT_SITES = new Map([
   // This first item is the global list fallback for any unexpected geos
@@ -39,12 +43,6 @@ const DEFAULT_SITES = new Map([
 ]);
 const GEO_PREF = "browser.search.region";
 const REASON_ADDON_UNINSTALL = 6;
-const SPOCS_GEOS = ["US"];
-
-// Determine if spocs should be shown for a geo/locale
-function showSpocs({geo}) {
-  return SPOCS_GEOS.includes(geo);
-}
 
 // Configure default Activity Stream prefs with a plain `value` or a `getValue`
 // that computes a value. A `value_local_dev` is used for development defaults.
@@ -60,16 +58,13 @@ const PREFS_CONFIG = new Map([
       api_key_pref: "extensions.pocket.oAuthConsumerKey",
       // Use the opposite value as what default value the feed would have used
       hidden: !PREFS_CONFIG.get("feeds.section.topstories").getValue(args),
-      provider_description: "pocket_description",
       provider_icon: "pocket",
       provider_name: "Pocket",
       read_more_endpoint: "https://getpocket.com/explore/trending?src=fx_new_tab",
-      stories_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/global-recs?version=3&consumer_key=$apiKey&locale_lang=${args.locale}&feed_variant=${showSpocs(args) ? "default_spocs_on" : "default_spocs_off"}`,
+      stories_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/global-recs?version=3&consumer_key=$apiKey&locale_lang=${args.locale}`,
       stories_referrer: "https://getpocket.com/recommendations",
-      privacy_notice_link: "https://www.mozilla.org/privacy/firefox/#suggest-relevant-content",
-      disclaimer_link: "https://getpocket.com/firefox/new_tab_learn_more",
       topics_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/trending-topics?version=2&consumer_key=$apiKey&locale_lang=${args.locale}`,
-      show_spocs: showSpocs(args),
+      show_spocs: false,
       personalized: true
     })
   }],
@@ -105,14 +100,6 @@ const PREFS_CONFIG = new Map([
     title: "Disable snippets on activity stream",
     value: false
   }],
-  ["showTopSites", {
-    title: "Show the Top Sites section",
-    value: true
-  }],
-  ["collapseTopSites", {
-    title: "Collapse the Top Sites section",
-    value: false
-  }],
   ["topSitesRows", {
     title: "Number of rows of Top Sites to display",
     value: 1
@@ -131,17 +118,9 @@ const PREFS_CONFIG = new Map([
     title: "Telemetry server endpoint",
     value: "https://tiles.services.mozilla.com/v4/links/activity-stream"
   }],
-  ["section.highlights.collapsed", {
-    title: "Collapse the Highlights section",
-    value: false
-  }],
   ["section.highlights.includePocket", {
     title: "Boolean flag that decides whether or not to show saved Pocket stories in highlights.",
     value: true
-  }],
-  ["section.topstories.collapsed", {
-    title: "Collapse the Top Stories section",
-    value: false
   }],
   ["section.topstories.showDisclaimer", {
     title: "Boolean flag that decides whether or not to show the topstories disclaimer.",
@@ -158,11 +137,21 @@ const PREFS_CONFIG = new Map([
   ["sectionOrder", {
     title: "The rendering order for the sections",
     value: "topsites,topstories,highlights"
+  }],
+  ["messageCenterExperimentEnabled", {
+    title: "Is the message center experiment on?",
+    value: false
   }]
 ]);
 
 // Array of each feed's FEEDS_CONFIG factory and values to add to PREFS_CONFIG
 const FEEDS_DATA = [
+  {
+    name: "aboutpreferences",
+    factory: () => new AboutPreferences(),
+    title: "about:preferences rendering",
+    value: true
+  },
   {
     name: "migration",
     factory: () => new ManualMigration(),
@@ -185,6 +174,12 @@ const FEEDS_DATA = [
     name: "prefs",
     factory: () => new PrefsFeed(PREFS_CONFIG),
     title: "Preferences",
+    value: true
+  },
+  {
+    name: "theme",
+    factory: () => new ThemeFeed(),
+    title: "Theme",
     value: true
   },
   {
@@ -242,6 +237,12 @@ const FEEDS_DATA = [
     factory: () => new TopSitesFeed(),
     title: "Queries places and gets metadata for Top Sites section",
     value: true
+  },
+  {
+    name: "messagecenterfeed",
+    factory: () => new MessageCenterFeed(),
+    title: "Queries places and gets metadata for Top Sites section",
+    value: true
   }
 ];
 
@@ -267,12 +268,18 @@ this.ActivityStream = class ActivityStream {
     this.store = new Store();
     this.feeds = FEEDS_CONFIG;
     this._defaultPrefs = new DefaultPrefs(PREFS_CONFIG);
+    this._storage = new ActivityStreamStorage(["sectionPrefs", "snippets"]);
   }
 
   init() {
     try {
       this._updateDynamicPrefs();
       this._defaultPrefs.init();
+
+      // Accessing the db causes the object stores to be created / migrated.
+      // This needs to happen before other instances try to access the db, which
+      // would update only a subset of the stores to the latest version.
+      this._storage.db; // eslint-disable-line no-unused-expressions
 
       // Hook up the store and let all feeds and pages initialize
       this.store.init(this.feeds, ac.BroadcastToContent({

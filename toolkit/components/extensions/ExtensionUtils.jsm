@@ -392,7 +392,7 @@ function getMessageManager(target) {
   if (target.frameLoader) {
     return target.frameLoader.messageManager;
   }
-  return target.QueryInterface(Ci.nsIMessageSender);
+  return target;
 }
 
 function flushJarCache(jarPath) {
@@ -470,12 +470,15 @@ function defineLazyGetter(object, prop, getter) {
 class MessageManagerProxy {
   constructor(target) {
     this.listeners = new DefaultMap(() => new Map());
+    this.closed = false;
 
     if (target instanceof Ci.nsIMessageSender) {
       this.messageManager = target;
     } else {
       this.addListeners(target);
     }
+
+    Services.obs.addObserver(this, "message-manager-close");
   }
 
   /**
@@ -492,6 +495,16 @@ class MessageManagerProxy {
       this.eventTarget = null;
     }
     this.messageManager = null;
+
+    Services.obs.removeObserver(this, "message-manager-close");
+  }
+
+  observe(subject, topic, data) {
+    if (topic === "message-manager-close") {
+      if (subject === this.messageManager) {
+        this.closed = true;
+      }
+    }
   }
 
   /**
@@ -500,7 +513,7 @@ class MessageManagerProxy {
    *
    * @param {nsIMessageSender|MessageManagerProxy|Element} target
    *        The message manager, MessageManagerProxy, or <browser>
-   *        element agaisnt which to match.
+   *        element against which to match.
    * @param {nsIMessageSender} messageManager
    *        The message manager against which to match `target`.
    *
@@ -537,7 +550,7 @@ class MessageManagerProxy {
   }
 
   get isDisconnected() {
-    return !this.messageManager;
+    return this.closed || !this.messageManager;
   }
 
   /**

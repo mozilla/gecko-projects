@@ -119,6 +119,8 @@ public:
                    bool aHidden, uint32_t aVisitCount,
                    uint32_t aTyped, const nsAString& aLastKnownTitle);
 
+  nsresult GetBookmarkURI(int64_t aItemId, nsIURI** _URI);
+
   nsresult ResultNodeForContainer(int64_t aID,
                                   nsNavHistoryQueryOptions* aOptions,
                                   nsNavHistoryResultNode** aNode);
@@ -193,17 +195,6 @@ public:
    *        Details about the change.
    */
   void NotifyItemChanged(const ItemChangeData& aData);
-
-  /**
-   * Recursively builds an array of descendant folders inside a given folder.
-   *
-   * @param aFolderId
-   *        The folder to fetch descendants from.
-   * @param aDescendantFoldersArray
-   *        Output array to put descendant folders id.
-   */
-  nsresult GetDescendantFolders(int64_t aFolderId,
-                                nsTArray<int64_t>& aDescendantFoldersArray);
 
   static const int32_t kGetChildrenIndex_Guid;
   static const int32_t kGetChildrenIndex_Position;
@@ -382,10 +373,6 @@ private:
 
   // Used to enable and disable the observer notifications.
   bool mCanNotify;
-
-  // Tracks whether we are in batch mode.
-  // Note: this is only tracking bookmarks batches, not history ones.
-  bool mBatching;
 };
 
 #endif // nsNavBookmarks_h_

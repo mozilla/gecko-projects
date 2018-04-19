@@ -171,11 +171,6 @@ config = {
             'options': ["--suite=reftest"],
             'tests': ["tests/reftest/tests/layout/reftests/reftest.list"]
         },
-        "reftest-stylo": {
-            "options": ["--suite=reftest",
-                        "--setpref=reftest.compareStyloToGecko=true"],
-            "tests": ["tests/reftest/tests/layout/reftests/reftest.list"],
-        },
     },
     "all_xpcshell_suites": {
         "xpcshell": {
@@ -197,7 +192,8 @@ config = {
         "gtest": []
     },
     "all_jittest_suites": {
-        "jittest": []
+        "jittest": [],
+        "jittest-chunked": []
     },
     "all_mozbase_suites": {
         "mozbase": []

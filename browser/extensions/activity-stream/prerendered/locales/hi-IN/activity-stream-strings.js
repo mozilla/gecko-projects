@@ -35,7 +35,7 @@ window.gActivityStreamStrings = {
   "prefs_section_rows_option": "{num} row;{num} rows",
   "prefs_search_header": "वेब खोज",
   "prefs_topsites_description": "साइटों आप सबसे अधिक यात्रा",
-  "prefs_topstories_description": "उच्च गुणवत्ता की सामग्री आप अंयथा याद कर सकते है",
+  "prefs_topstories_description2": "Great content from around the web, personalized for you",
   "prefs_topstories_show_sponsored_label": "{provider} प्रायोजित कहानियां",
   "prefs_topstories_sponsored_learn_more": "अधिक जानें",
   "prefs_highlights_description": "आपके द्वारा सहेजी गई या विज़िट की गई साइटों का चयन",
@@ -89,5 +89,6 @@ window.gActivityStreamStrings = {
   "section_menu_action_add_topsite": "शीर्ष साइट जोड़ें",
   "section_menu_action_move_up": "ऊपर जाएँ",
   "section_menu_action_move_down": "नीचे जाएँ",
-  "section_menu_action_privacy_notice": "गोपनीयता नीति"
+  "section_menu_action_privacy_notice": "गोपनीयता नीति",
+  "prefs_topstories_description": "उच्च गुणवत्ता की सामग्री आप अंयथा याद कर सकते है"
 };

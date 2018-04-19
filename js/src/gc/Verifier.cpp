@@ -101,7 +101,7 @@ class js::VerifyPreTracer final : public JS::CallbackTracer
     NodeMap nodemap;
 
     explicit VerifyPreTracer(JSRuntime* rt)
-      : JS::CallbackTracer(rt), noggc(TlsContext.get()), number(rt->gc.gcNumber()),
+      : JS::CallbackTracer(rt), noggc(rt->mainContextFromOwnThread()), number(rt->gc.gcNumber()),
         count(0), curnode(nullptr), root(nullptr), edgeptr(nullptr), term(nullptr)
     {}
 
@@ -180,9 +180,8 @@ gc::GCRuntime::startVerifyPreBarriers()
         return;
 
     if (IsIncrementalGCUnsafe(rt) != AbortReason::None ||
-        TlsContext.get()->keepAtoms ||
-        rt->hasHelperThreadZones() ||
-        rt->cooperatingContexts().length() != 1)
+        rt->mainContextFromOwnThread()->keepAtoms ||
+        rt->hasHelperThreadZones())
     {
         return;
     }
@@ -193,7 +192,7 @@ gc::GCRuntime::startVerifyPreBarriers()
     if (!trc)
         return;
 
-    JSContext* cx = TlsContext.get();
+    JSContext* cx = rt->mainContextFromOwnThread();
     AutoPrepareForTracing prep(cx);
 
     {
@@ -334,7 +333,7 @@ gc::GCRuntime::endVerifyPreBarriers()
 
     MOZ_ASSERT(!JS::IsGenerationalGCEnabled(rt));
 
-    AutoPrepareForTracing prep(rt->activeContextFromOwnThread());
+    AutoPrepareForTracing prep(rt->mainContextFromOwnThread());
 
     bool compartmentCreated = false;
 
@@ -358,7 +357,7 @@ gc::GCRuntime::endVerifyPreBarriers()
 
     if (!compartmentCreated &&
         IsIncrementalGCUnsafe(rt) == AbortReason::None &&
-        !TlsContext.get()->keepAtoms &&
+        !rt->mainContextFromOwnThread()->keepAtoms &&
         !rt->hasHelperThreadZones())
     {
         CheckEdgeTracer cetrc(rt);
@@ -419,7 +418,7 @@ gc::GCRuntime::maybeVerifyPreBarriers(bool always)
     if (!hasZealMode(ZealMode::VerifierPre))
         return;
 
-    if (TlsContext.get()->suppressGC)
+    if (rt->mainContextFromOwnThread()->suppressGC)
         return;
 
     if (verifyPreData) {
@@ -536,7 +535,7 @@ HeapCheckTracerBase::onChild(const JS::GCCellPtr& thing)
     else
         zone = cell->asTenured().zone();
 
-    if (zone->group() && zone->group()->usedByHelperThread())
+    if (zone->usedByHelperThread())
         return;
 
     WorkItem item(thing, contextName(), parentIndex);

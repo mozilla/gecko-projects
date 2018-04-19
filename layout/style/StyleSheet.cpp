@@ -6,7 +6,7 @@
 
 #include "mozilla/StyleSheet.h"
 
-#include "nsStyleContextInlines.h"
+#include "mozilla/ComputedStyleInlines.h"
 #include "mozilla/css/GroupRule.h"
 #include "mozilla/dom/CSSImportRule.h"
 #include "mozilla/dom/CSSRuleList.h"
@@ -17,24 +17,19 @@
 #include "mozilla/ServoCSSRuleList.h"
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/ServoStyleSheet.h"
-#include "mozilla/StyleSetHandleInlines.h"
 #include "mozilla/StyleSheetInlines.h"
-#ifdef MOZ_OLD_STYLE
-#include "mozilla/CSSStyleSheet.h"
-#endif
 
 #include "mozAutoDocUpdate.h"
 #include "NullPrincipal.h"
 
 namespace mozilla {
 
-StyleSheet::StyleSheet(StyleBackendType aType, css::SheetParsingMode aParsingMode)
+StyleSheet::StyleSheet(css::SheetParsingMode aParsingMode)
   : mParent(nullptr)
   , mDocument(nullptr)
   , mOwningNode(nullptr)
   , mOwnerRule(nullptr)
   , mParsingMode(aParsingMode)
-  , mType(aType)
   , mDisabled(false)
   , mDirtyFlags(0)
   , mDocumentAssociationMode(NotOwnedByDocument)
@@ -53,7 +48,6 @@ StyleSheet::StyleSheet(const StyleSheet& aCopy,
   , mOwningNode(aOwningNodeToUse)
   , mOwnerRule(aOwnerRuleToUse)
   , mParsingMode(aCopy.mParsingMode)
-  , mType(aCopy.mType)
   , mDisabled(aCopy.mDisabled)
   , mDirtyFlags(aCopy.mDirtyFlags)
   // We only use this constructor during cloning.  It's the cloner's
@@ -83,15 +77,7 @@ StyleSheet::LastRelease()
   MOZ_ASSERT(mInner->mSheets.Contains(this), "Our mInner should include us.");
 
   UnparentChildren();
-  if (IsGecko()) {
-#ifdef MOZ_OLD_STYLE
-    AsGecko()->LastRelease();
-#else
-    MOZ_CRASH("old style system disabled");
-#endif
-  } else {
-    AsServo()->LastRelease();
-  }
+  AsServo()->LastRelease();
 
   mInner->RemoveSheet(this);
   mInner = nullptr;
@@ -212,18 +198,22 @@ StyleSheet::SetComplete()
                "Can't complete a sheet that's already been forced "
                "unique.");
   SheetInfo().mComplete = true;
-  if (mDocument && !mDisabled) {
-    // Let the document know
+  if (!mDisabled) {
+    ApplicableStateChanged(true);
+  }
+}
+
+void
+StyleSheet::ApplicableStateChanged(bool aApplicable)
+{
+  if (mDocument) {
     mDocument->BeginUpdate(UPDATE_STYLE);
-    mDocument->SetStyleSheetApplicableState(this, true);
+    mDocument->SetStyleSheetApplicableState(this, aApplicable);
     mDocument->EndUpdate(UPDATE_STYLE);
   }
 
-  if (mOwningNode && !mDisabled &&
-      mOwningNode->HasFlag(NODE_IS_IN_SHADOW_TREE) &&
-      mOwningNode->IsContent()) {
-    dom::ShadowRoot* shadowRoot = mOwningNode->AsContent()->GetContainingShadow();
-    shadowRoot->StyleSheetChanged();
+  if (dom::ShadowRoot* shadow = GetContainingShadow()) {
+    shadow->StyleSheetApplicableStateChanged(*this, aApplicable);
   }
 }
 
@@ -236,17 +226,14 @@ StyleSheet::SetEnabled(bool aEnabled)
 
   if (IsComplete() && oldDisabled != mDisabled) {
     EnabledStateChanged();
-
-    if (mDocument) {
-      mDocument->SetStyleSheetApplicableState(this, !mDisabled);
-    }
+    ApplicableStateChanged(!mDisabled);
   }
 }
 
 StyleSheetInfo::StyleSheetInfo(CORSMode aCORSMode,
                                ReferrerPolicy aReferrerPolicy,
                                const dom::SRIMetadata& aIntegrity)
-  : mPrincipal(NullPrincipal::Create())
+  : mPrincipal(NullPrincipal::CreateWithoutOriginAttributes())
   , mCORSMode(aCORSMode)
   , mReferrerPolicy(aReferrerPolicy)
   , mIntegrity(aIntegrity)
@@ -372,7 +359,7 @@ StyleSheet::WillDirty()
 }
 
 void
-StyleSheet::AddStyleSet(const StyleSetHandle& aStyleSet)
+StyleSheet::AddStyleSet(ServoStyleSet* aStyleSet)
 {
   NS_ASSERTION(!mStyleSets.Contains(aStyleSet),
                "style set already registered");
@@ -380,7 +367,7 @@ StyleSheet::AddStyleSet(const StyleSetHandle& aStyleSet)
 }
 
 void
-StyleSheet::DropStyleSet(const StyleSetHandle& aStyleSet)
+StyleSheet::DropStyleSet(ServoStyleSet* aStyleSet)
 {
   DebugOnly<bool> found = mStyleSets.RemoveElement(aStyleSet);
   NS_ASSERTION(found, "didn't find style set");
@@ -403,29 +390,15 @@ StyleSheet::EnsureUniqueInner()
   mInner->RemoveSheet(this);
   mInner = clone;
 
-  if (IsGecko()) {
-#ifdef MOZ_OLD_STYLE
-    // Ensure we're using the new rules.
-    //
-    // NOTE: In Servo, all kind of changes that change the set of selectors or
-    // rules we match are covered by the PresShell notifications. In Gecko
-    // that's true too, but this is probably needed because selectors are not
-    // refcounted and can become stale.
-    AsGecko()->ClearRuleCascades();
-#else
-    MOZ_CRASH("old style system disabled");
-#endif
-  } else {
-    // Fixup the child lists and parent links in the Servo sheet. This is done
-    // here instead of in StyleSheetInner::CloneFor, because it's just more
-    // convenient to do so instead.
-    AsServo()->BuildChildListAfterInnerClone();
-  }
+  // Fixup the child lists and parent links in the Servo sheet. This is done
+  // here instead of in StyleSheetInner::CloneFor, because it's just more
+  // convenient to do so instead.
+  AsServo()->BuildChildListAfterInnerClone();
 
   // let our containing style sets know that if we call
   // nsPresContext::EnsureSafeToHandOutCSSRules we will need to restyle the
   // document
-  for (StyleSetHandle& setHandle : mStyleSets) {
+  for (ServoStyleSet* setHandle : mStyleSets) {
     setHandle->SetNeedsRestyleAfterEnsureUniqueInner();
   }
 }
@@ -440,19 +413,8 @@ StyleSheet::AppendAllChildSheets(nsTArray<StyleSheet*>& aArray)
 
 // WebIDL CSSStyleSheet API
 
-#ifdef MOZ_OLD_STYLE
 #define FORWARD_INTERNAL(method_, args_) \
-  if (IsServo()) { \
-    return AsServo()->method_ args_; \
-  } \
-  return AsGecko()->method_ args_;
-#else
-#define FORWARD_INTERNAL(method_, args_) \
-  if (IsServo()) { \
-    return AsServo()->method_ args_; \
-  } \
-  MOZ_CRASH("old style system disabled");
-#endif
+  return AsServo()->method_ args_;
 
 dom::CSSRuleList*
 StyleSheet::GetCssRules(nsIPrincipal& aSubjectPrincipal,
@@ -551,11 +513,24 @@ StyleSheet::DeleteRuleFromGroup(css::GroupRule* aGroup, uint32_t aIndex)
   return NS_OK;
 }
 
-#define NOTIFY_STYLE_SETS(function_, args_) do {          \
+dom::ShadowRoot*
+StyleSheet::GetContainingShadow() const
+{
+  if (!mOwningNode || !mOwningNode->IsContent()) {
+    return nullptr;
+  }
+
+  return mOwningNode->AsContent()->GetContainingShadow();
+}
+
+#define NOTIFY(function_, args_) do {                     \
   StyleSheet* current = this;                             \
   do {                                                    \
-    for (StyleSetHandle handle : current->mStyleSets) {   \
+    for (ServoStyleSet* handle : current->mStyleSets) {   \
       handle->function_ args_;                            \
+    }                                                     \
+    if (auto* shadow = current->GetContainingShadow()) {  \
+      shadow->function_ args_;                            \
     }                                                     \
     current = current->mParent;                           \
   } while (current);                                      \
@@ -566,7 +541,7 @@ StyleSheet::RuleAdded(css::Rule& aRule)
 {
   DidDirty();
   mDirtyFlags |= MODIFIED_RULES;
-  NOTIFY_STYLE_SETS(RuleAdded, (*this, aRule));
+  NOTIFY(RuleAdded, (*AsServo(), aRule));
 
   if (mDocument) {
     mDocument->StyleRuleAdded(this, &aRule);
@@ -578,7 +553,7 @@ StyleSheet::RuleRemoved(css::Rule& aRule)
 {
   DidDirty();
   mDirtyFlags |= MODIFIED_RULES;
-  NOTIFY_STYLE_SETS(RuleRemoved, (*this, aRule));
+  NOTIFY(RuleRemoved, (*AsServo(), aRule));
 
   if (mDocument) {
     mDocument->StyleRuleRemoved(this, &aRule);
@@ -590,12 +565,14 @@ StyleSheet::RuleChanged(css::Rule* aRule)
 {
   DidDirty();
   mDirtyFlags |= MODIFIED_RULES;
-  NOTIFY_STYLE_SETS(RuleChanged, (*this, aRule));
+  NOTIFY(RuleChanged, (*AsServo(), aRule));
 
   if (mDocument) {
     mDocument->StyleRuleChanged(this, aRule);
   }
 }
+
+#undef NOTIFY
 
 nsresult
 StyleSheet::InsertRuleIntoGroup(const nsAString& aRule,
@@ -613,16 +590,8 @@ StyleSheet::InsertRuleIntoGroup(const nsAString& aRule,
 
   WillDirty();
 
-  nsresult result;
-  if (IsGecko()) {
-#ifdef MOZ_OLD_STYLE
-    result = AsGecko()->InsertRuleIntoGroupInternal(aRule, aGroup, aIndex);
-#else
-    MOZ_CRASH("old style system disabled");
-#endif
-  } else {
-    result = AsServo()->InsertRuleIntoGroupInternal(aRule, aGroup, aIndex);
-  }
+  nsresult result =
+    AsServo()->InsertRuleIntoGroupInternal(aRule, aGroup, aIndex);
   NS_ENSURE_SUCCESS(result, result);
   RuleAdded(*aGroup->GetStyleRuleAt(aIndex));
 
@@ -873,7 +842,7 @@ dom::MediaList*
 StyleSheet::Media()
 {
   if (!mMedia) {
-    mMedia = dom::MediaList::Create(mType, nsString());
+    mMedia = dom::MediaList::Create(nsString());
     mMedia->SetStyleSheet(this);
   }
 
@@ -891,7 +860,7 @@ StyleSheet::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 /* static */ bool
 StyleSheet::RuleHasPendingChildSheet(css::Rule* aRule)
 {
-  MOZ_ASSERT(aRule->GetType() == css::Rule::IMPORT_RULE);
+  MOZ_ASSERT(aRule->Type() == dom::CSSRuleBinding::IMPORT_RULE);
   auto rule = static_cast<dom::CSSImportRule*>(aRule);
   if (StyleSheet* childSheet = rule->GetStyleSheet()) {
     return !childSheet->IsComplete();

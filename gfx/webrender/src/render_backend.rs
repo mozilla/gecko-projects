@@ -8,7 +8,7 @@ use api::{BuiltDisplayListIter, SpecificDisplayItem};
 use api::{DeviceIntPoint, DevicePixelScale, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
 use api::{DocumentId, DocumentLayer, ExternalScrollId, FrameMsg, HitTestResult};
 use api::{IdNamespace, LayerPoint, PipelineId, RenderNotifier, SceneMsg, ScrollClamping};
-use api::{ScrollEventPhase, ScrollLocation, ScrollNodeState, TransactionMsg, WorldPoint};
+use api::{ScrollLocation, ScrollNodeState, TransactionMsg, WorldPoint};
 use api::channel::{MsgReceiver, Payload};
 #[cfg(feature = "capture")]
 use api::CaptureBits;
@@ -24,7 +24,7 @@ use hit_test::{HitTest, HitTester};
 use internal_types::{DebugOutput, FastHashMap, FastHashSet, RenderedDocument, ResultMsg};
 use profiler::{BackendProfileCounters, IpcProfileCounters, ResourceProfileCounters};
 use record::ApiRecordingReceiver;
-use renderer::PipelineInfo;
+use renderer::{AsyncPropertySampler, PipelineInfo};
 use resource_cache::ResourceCache;
 #[cfg(feature = "replay")]
 use resource_cache::PlainCacheOwn;
@@ -73,7 +73,7 @@ struct SceneData {
     removed_pipelines: Vec<PipelineId>,
 }
 
-#[derive(Copy, Clone, PartialEq, PartialOrd, Debug, Eq, Ord)]
+#[derive(Copy, Clone, Hash, PartialEq, PartialOrd, Debug, Eq, Ord)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct FrameId(pub u32);
@@ -172,9 +172,18 @@ impl Document {
 
     // TODO: We will probably get rid of this soon and always forward to the scene building thread.
     fn build_scene(&mut self, resource_cache: &mut ResourceCache) {
+        let max_texture_size = resource_cache.max_texture_size();
 
-        if self.view.window_size.width == 0 || self.view.window_size.height == 0 {
-            error!("ERROR: Invalid window dimensions! Please call api.set_window_size()");
+        if self.view.window_size.width == 0 ||
+           self.view.window_size.height == 0 ||
+           self.view.window_size.width > max_texture_size ||
+           self.view.window_size.height > max_texture_size {
+            error!("ERROR: Invalid window dimensions {}x{}. Please call api.set_window_size()",
+                self.view.window_size.width,
+                self.view.window_size.height,
+            );
+
+            return;
         }
 
         let old_builder = self.frame_builder.take().unwrap_or_else(FrameBuilder::empty);
@@ -255,6 +264,7 @@ impl Document {
             frame_ops: transaction_msg.frame_ops,
             render: transaction_msg.generate_frame,
             document_id,
+            current_epochs: self.current.scene.pipeline_epochs.clone(),
         }).unwrap();
     }
 
@@ -291,13 +301,11 @@ impl Document {
     }
 
     pub fn make_rendered_document(&mut self, frame: Frame, removed_pipelines: Vec<PipelineId>) -> RenderedDocument {
-        let nodes_bouncing_back = self.clip_scroll_tree.collect_nodes_bouncing_back();
         RenderedDocument::new(
             PipelineInfo {
                 epochs: self.current.scene.pipeline_epochs.clone(),
                 removed_pipelines,
             },
-            nodes_bouncing_back,
             frame
         )
     }
@@ -312,9 +320,8 @@ impl Document {
         &mut self,
         scroll_location: ScrollLocation,
         cursor: WorldPoint,
-        phase: ScrollEventPhase,
     ) -> bool {
-        self.clip_scroll_tree.scroll(scroll_location, cursor, phase)
+        self.clip_scroll_tree.scroll(scroll_location, cursor)
     }
 
     /// Returns true if the node actually changed position or false otherwise.
@@ -325,10 +332,6 @@ impl Document {
         clamp: ScrollClamping
     ) -> bool {
         self.clip_scroll_tree.scroll_node(origin, id, clamp)
-    }
-
-    pub fn tick_scrolling_bounce_animations(&mut self) {
-        self.clip_scroll_tree.tick_scrolling_bounce_animations();
     }
 
     pub fn get_scroll_node_state(&self) -> Vec<ScrollNodeState> {
@@ -370,6 +373,13 @@ impl DocumentOps {
     fn build() -> Self {
         DocumentOps {
             build: true,
+            ..DocumentOps::nop()
+        }
+    }
+
+    fn render() -> Self {
+        DocumentOps {
+            render: true,
             ..DocumentOps::nop()
         }
     }
@@ -419,6 +429,7 @@ pub struct RenderBackend {
 
     notifier: Box<RenderNotifier>,
     recorder: Option<Box<ApiRecordingReceiver>>,
+    sampler: Option<Box<AsyncPropertySampler + Send>>,
 
     enable_render_on_scroll: bool,
 }
@@ -435,6 +446,7 @@ impl RenderBackend {
         notifier: Box<RenderNotifier>,
         frame_config: FrameBuilderConfig,
         recorder: Option<Box<ApiRecordingReceiver>>,
+        sampler: Option<Box<AsyncPropertySampler + Send>>,
         enable_render_on_scroll: bool,
     ) -> RenderBackend {
         // The namespace_id should start from 1.
@@ -454,6 +466,7 @@ impl RenderBackend {
             documents: FastHashMap::default(),
             notifier,
             recorder,
+            sampler,
             enable_render_on_scroll,
         }
     }
@@ -605,10 +618,10 @@ impl RenderBackend {
                 }
                 DocumentOps::nop()
             }
-            FrameMsg::Scroll(delta, cursor, move_phase) => {
+            FrameMsg::Scroll(delta, cursor) => {
                 profile_scope!("Scroll");
 
-                let should_render = doc.scroll(delta, cursor, move_phase)
+                let should_render = doc.scroll(delta, cursor)
                     && doc.render_on_scroll == Some(true);
 
                 DocumentOps {
@@ -647,20 +660,6 @@ impl RenderBackend {
                     ..DocumentOps::nop()
                 }
             }
-            FrameMsg::TickScrollingBounce => {
-                profile_scope!("TickScrollingBounce");
-
-                doc.tick_scrolling_bounce_animations();
-
-                let should_render = doc.render_on_scroll == Some(true);
-
-                DocumentOps {
-                    scroll: true,
-                    render: should_render,
-                    composite: should_render,
-                    ..DocumentOps::nop()
-                }
-            }
             FrameMsg::GetScrollNodeState(tx) => {
                 profile_scope!("GetScrollNodeState");
                 tx.send(doc.get_scroll_node_state()).unwrap();
@@ -668,7 +667,11 @@ impl RenderBackend {
             }
             FrameMsg::UpdateDynamicProperties(property_bindings) => {
                 doc.dynamic_properties.set_properties(property_bindings);
-                DocumentOps::build()
+                DocumentOps::render()
+            }
+            FrameMsg::AppendDynamicProperties(property_bindings) => {
+                doc.dynamic_properties.add_properties(property_bindings);
+                DocumentOps::render()
             }
         }
     }
@@ -679,8 +682,13 @@ impl RenderBackend {
 
     pub fn run(&mut self, mut profile_counters: BackendProfileCounters) {
         let mut frame_counter: u32 = 0;
+        let mut keep_going = true;
 
-        loop {
+        if let Some(ref sampler) = self.sampler {
+            sampler.register();
+        }
+
+        while keep_going {
             profile_scope!("handle_msg");
 
             while let Ok(msg) = self.scene_rx.try_recv() {
@@ -691,16 +699,19 @@ impl RenderBackend {
                         resource_updates,
                         frame_ops,
                         render,
+                        result_tx,
                     } => {
                         if let Some(doc) = self.documents.get_mut(&document_id) {
                             if let Some(mut built_scene) = built_scene.take() {
                                 doc.new_async_scene_ready(built_scene);
                                 doc.render_on_hittest = true;
                             }
+                            result_tx.send(SceneSwapResult::Complete).unwrap();
                         } else {
                             // The document was removed while we were building it, skip it.
                             // TODO: we might want to just ensure that removed documents are
                             // always forwarded to the scene builder thread to avoid this case.
+                            result_tx.send(SceneSwapResult::Aborted).unwrap();
                             continue;
                         }
 
@@ -724,7 +735,7 @@ impl RenderBackend {
                 }
             }
 
-            let keep_going = match self.api_rx.recv() {
+            keep_going = match self.api_rx.recv() {
                 Ok(msg) => {
                     if let Some(ref mut r) = self.recorder {
                         r.write_msg(frame_counter, &msg);
@@ -733,13 +744,15 @@ impl RenderBackend {
                 }
                 Err(..) => { false }
             };
-
-            if !keep_going {
-                let _ = self.scene_tx.send(SceneBuilderRequest::Stop);
-                self.notifier.shut_down();
-                break;
-            }
         }
+
+        let _ = self.scene_tx.send(SceneBuilderRequest::Stop);
+        self.notifier.shut_down();
+
+        if let Some(ref sampler) = self.sampler {
+            sampler.deregister();
+        }
+
     }
 
     fn process_api_msg(
@@ -750,6 +763,9 @@ impl RenderBackend {
     ) -> bool {
         match msg {
             ApiMsg::WakeUp => {}
+            ApiMsg::WakeSceneBuilder => {
+                self.scene_tx.send(SceneBuilderRequest::WakeUp).unwrap();
+            }
             ApiMsg::UpdateResources(updates) => {
                 self.resource_cache
                     .update_resources(updates, &mut profile_counters.resources);
@@ -915,7 +931,7 @@ impl RenderBackend {
             );
         }
 
-        if transaction_msg.use_scene_builder_thread && !transaction_msg.is_empty() {
+        if transaction_msg.use_scene_builder_thread {
             let doc = self.documents.get_mut(&document_id).unwrap();
             doc.forward_transaction_to_scene_builder(
                 transaction_msg,
@@ -942,20 +958,23 @@ impl RenderBackend {
             doc.render_on_hittest = true;
         }
 
+        // If we have a sampler, get more frame ops from it and add them
+        // to the transaction. This is a hook to allow the WR user code to
+        // fiddle with things after a potentially long scene build, but just
+        // before rendering. This is useful for rendering with the latest
+        // async transforms.
+        if transaction_msg.generate_frame {
+            if let Some(ref sampler) = self.sampler {
+                transaction_msg.frame_ops.append(&mut sampler.sample());
+            }
+        }
+
         for frame_msg in transaction_msg.frame_ops {
             let _timer = profile_counters.total_time.timer();
             op.combine(self.process_frame_msg(document_id, frame_msg));
         }
 
         let doc = self.documents.get_mut(&document_id).unwrap();
-
-        if !doc.can_render() {
-            // TODO: this happens if we are building the first scene asynchronously and
-            // scroll at the same time. we should keep track of the fact that we skipped
-            // composition here and do it as soon as we receive the scene.
-            op.render = false;
-            op.composite = false;
-        }
 
         if transaction_msg.generate_frame {
             if let Some(ref mut ros) = doc.render_on_scroll {
@@ -966,6 +985,14 @@ impl RenderBackend {
                 op.render = true;
                 op.composite = true;
             }
+        }
+
+        if !doc.can_render() {
+            // TODO: this happens if we are building the first scene asynchronously and
+            // scroll at the same time. we should keep track of the fact that we skipped
+            // composition here and do it as soon as we receive the scene.
+            op.render = false;
+            op.composite = false;
         }
 
         debug_assert!(op.render || !op.composite);
@@ -1167,7 +1194,7 @@ impl RenderBackend {
                     &mut profile_counters.resources,
                 );
                 //TODO: write down full `RenderedDocument`?
-                // it has `pipeline_epoch_map` and `layers_bouncing_back`,
+                // it has `pipeline_epoch_map`,
                 // which may capture necessary details for some cases.
                 let file_name = format!("frame-{}-{}", (id.0).0, id.1);
                 config.serialize(&rendered_document.frame, file_name);

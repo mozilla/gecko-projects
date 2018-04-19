@@ -2,32 +2,43 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* global PaymentStateSubscriberMixin */
-
-"use strict";
+import BasicCardOption from "../components/basic-card-option.js";
+import PaymentStateSubscriberMixin from "../mixins/PaymentStateSubscriberMixin.js";
+import RichSelect from "../components/rich-select.js";
 
 /**
  * <payment-method-picker></payment-method-picker>
- * Container around <rich-select> (eventually providing add/edit links) with
+ * Container around add/edit links and <rich-select> with
  * <basic-card-option> listening to savedBasicCards.
  */
 
-class PaymentMethodPicker extends PaymentStateSubscriberMixin(HTMLElement) {
+export default class PaymentMethodPicker extends PaymentStateSubscriberMixin(HTMLElement) {
   constructor() {
     super();
-    this.dropdown = document.createElement("rich-select");
+    this.dropdown = new RichSelect();
     this.dropdown.addEventListener("change", this);
     this.spacerText = document.createTextNode(" ");
     this.securityCodeInput = document.createElement("input");
     this.securityCodeInput.autocomplete = "off";
     this.securityCodeInput.size = 3;
     this.securityCodeInput.addEventListener("change", this);
+    this.addLink = document.createElement("a");
+    this.addLink.href = "javascript:void(0)";
+    this.addLink.textContent = this.dataset.addLinkLabel;
+    this.addLink.addEventListener("click", this);
+    this.editLink = document.createElement("a");
+    this.editLink.href = "javascript:void(0)";
+    this.editLink.textContent = this.dataset.editLinkLabel;
+    this.editLink.addEventListener("click", this);
   }
 
   connectedCallback() {
     this.appendChild(this.dropdown);
     this.appendChild(this.spacerText);
     this.appendChild(this.securityCodeInput);
+    this.appendChild(this.addLink);
+    this.append(" ");
+    this.appendChild(this.editLink);
     super.connectedCallback();
   }
 
@@ -37,11 +48,16 @@ class PaymentMethodPicker extends PaymentStateSubscriberMixin(HTMLElement) {
     for (let [guid, basicCard] of Object.entries(savedBasicCards)) {
       let optionEl = this.dropdown.getOptionByValue(guid);
       if (!optionEl) {
-        optionEl = document.createElement("basic-card-option");
+        optionEl = new BasicCardOption();
         optionEl.value = guid;
       }
-      for (let [key, val] of Object.entries(basicCard)) {
-        optionEl.setAttribute(key, val);
+      for (let key of BasicCardOption.recordAttributes) {
+        let val = basicCard[key];
+        if (val) {
+          optionEl.setAttribute(key, val);
+        } else {
+          optionEl.removeAttribute(key);
+        }
       }
       desiredOptions.push(optionEl);
     }
@@ -74,6 +90,10 @@ class PaymentMethodPicker extends PaymentStateSubscriberMixin(HTMLElement) {
         this.onChange(event);
         break;
       }
+      case "click": {
+        this.onClick(event);
+        break;
+      }
     }
   }
 
@@ -103,6 +123,32 @@ class PaymentMethodPicker extends PaymentStateSubscriberMixin(HTMLElement) {
     }
 
     this.requestStore.setState(stateChange);
+  }
+
+  onClick({target}) {
+    let nextState = {
+      page: {
+        id: "basic-card-page",
+      },
+    };
+
+    switch (target) {
+      case this.addLink: {
+        nextState.page.guid = null;
+        break;
+      }
+      case this.editLink: {
+        let state = this.requestStore.getState();
+        let selectedPaymentCardGUID = state[this.selectedStateKey];
+        nextState.page.guid = selectedPaymentCardGUID;
+        break;
+      }
+      default: {
+        throw new Error("Unexpected onClick");
+      }
+    }
+
+    this.requestStore.setState(nextState);
   }
 }
 

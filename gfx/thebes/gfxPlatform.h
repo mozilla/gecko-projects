@@ -6,6 +6,7 @@
 #ifndef GFX_PLATFORM_H
 #define GFX_PLATFORM_H
 
+#include "mozilla/FontPropertyTypes.h"
 #include "mozilla/Logging.h"
 #include "mozilla/gfx/Types.h"
 #include "nsTArray.h"
@@ -146,10 +147,19 @@ enum class ForcedDeviceResetReason
   COMPOSITOR_UPDATED,
 };
 
+struct BackendPrefsData
+{
+  uint32_t mCanvasBitmask = 0;
+  mozilla::gfx::BackendType mCanvasDefault = mozilla::gfx::BackendType::NONE;
+  uint32_t mContentBitmask = 0;
+  mozilla::gfx::BackendType mContentDefault = mozilla::gfx::BackendType::NONE;
+};
+
 class gfxPlatform {
     friend class SRGBOverrideObserver;
 
 public:
+    typedef mozilla::FontWeight FontWeight;
     typedef mozilla::gfx::Color Color;
     typedef mozilla::gfx::DataSourceSurface DataSourceSurface;
     typedef mozilla::gfx::DrawTarget DrawTarget;
@@ -278,7 +288,7 @@ public:
     /// asking for it, we will examine the commands in the first few seconds
     /// of the canvas usage, and potentially change to accelerated or
     /// non-accelerated canvas.
-    bool AllowOpenGLCanvas();
+    virtual bool AllowOpenGLCanvas();
     virtual void InitializeSkiaCacheLimits();
 
     static bool AsyncPanZoomEnabled();
@@ -290,7 +300,7 @@ public:
     // Get the default content backend that will be used with the default
     // compositor. If the compositor is known when calling this function,
     // GetContentBackendFor() should be called instead.
-    mozilla::gfx::BackendType GetDefaultContentBackend() {
+    mozilla::gfx::BackendType GetDefaultContentBackend() const {
       return mContentBackend;
     }
 
@@ -383,8 +393,8 @@ public:
      * who must either AddRef() or delete.
      */
     virtual gfxFontEntry* LookupLocalFont(const nsAString& aFontName,
-                                          uint16_t aWeight,
-                                          int16_t aStretch,
+                                          FontWeight aWeight,
+                                          uint16_t aStretch,
                                           uint8_t aStyle);
 
     /**
@@ -396,8 +406,8 @@ public:
      * who must either AddRef() or delete.
      */
     virtual gfxFontEntry* MakePlatformFont(const nsAString& aFontName,
-                                           uint16_t aWeight,
-                                           int16_t aStretch,
+                                           FontWeight aWeight,
+                                           uint16_t aStretch,
                                            uint8_t aStyle,
                                            const uint8_t* aFontData,
                                            uint32_t aLength);
@@ -740,14 +750,16 @@ protected:
     // Returns a prioritized list of available compositor backends for acceleration.
     virtual void GetAcceleratedCompositorBackends(nsTArray<mozilla::layers::LayersBackend>& aBackends);
 
+    // Returns preferences of canvas and content backends.
+    virtual BackendPrefsData GetBackendPrefs();
+
     /**
      * Initialise the preferred and fallback canvas backends
      * aBackendBitmask specifies the backends which are acceptable to the caller.
      * The backend used is determined by aBackendBitmask and the order specified
      * by the gfx.canvas.azure.backends pref.
      */
-    void InitBackendPrefs(uint32_t aCanvasBitmask, mozilla::gfx::BackendType aCanvasDefault,
-                          uint32_t aContentBitmask, mozilla::gfx::BackendType aContentDefault);
+    void InitBackendPrefs(BackendPrefsData&& aPrefsData);
 
     /**
      * Content-process only. Requests device preferences from the parent process
@@ -787,6 +799,8 @@ protected:
     static mozilla::gfx::BackendType BackendTypeForName(const nsCString& aName);
 
     virtual bool CanUseHardwareVideoDecoding();
+
+    virtual bool CheckVariationFontSupport() = 0;
 
     int8_t  mAllowDownloadableFonts;
     int8_t  mGraphiteShapingEnabled;

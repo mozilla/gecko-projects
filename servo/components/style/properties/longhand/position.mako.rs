@@ -57,12 +57,14 @@ ${helpers.predefined_type(
 // Flex container properties
 ${helpers.single_keyword("flex-direction", "row row-reverse column column-reverse",
                          spec="https://drafts.csswg.org/css-flexbox/#flex-direction-property",
-                         extra_prefixes="webkit", animation_value_type="discrete",
+                         extra_prefixes="webkit",
+                         animation_value_type="discrete",
                          servo_restyle_damage = "reflow")}
 
 ${helpers.single_keyword("flex-wrap", "nowrap wrap wrap-reverse",
                          spec="https://drafts.csswg.org/css-flexbox/#flex-wrap-property",
-                         extra_prefixes="webkit", animation_value_type="discrete",
+                         extra_prefixes="webkit",
+                         animation_value_type="discrete",
                          servo_restyle_damage = "reflow")}
 
 % if product == "servo":
@@ -174,32 +176,16 @@ ${helpers.predefined_type("order", "Integer", "0",
                           spec="https://drafts.csswg.org/css-flexbox/#order-property",
                           servo_restyle_damage = "reflow")}
 
-% if product == "gecko":
-    // FIXME: Gecko doesn't support content value yet.
-    //
-    // FIXME(emilio): I suspect this property shouldn't allow quirks, and this
-    // was just a mistake, it's kind of justificable to support it given the
-    // spec grammar is just `content | <width>`, but other browsers don't...
-    ${helpers.predefined_type(
-        "flex-basis",
-        "MozLength",
-        "computed::MozLength::auto()",
-        extra_prefixes="webkit",
-        animation_value_type="MozLength",
-        allow_quirks=True,
-        spec="https://drafts.csswg.org/css-flexbox/#flex-basis-property",
-        servo_restyle_damage = "reflow"
-    )}
-% else:
-    // FIXME: This property should be animatable.
-    ${helpers.predefined_type("flex-basis",
-                              "FlexBasis",
-                              "computed::FlexBasis::auto()",
-                              spec="https://drafts.csswg.org/css-flexbox/#flex-basis-property",
-                              extra_prefixes="webkit",
-                              animation_value_type="none",
-                              servo_restyle_damage = "reflow")}
-% endif
+${helpers.predefined_type(
+    "flex-basis",
+    "FlexBasis",
+    "computed::FlexBasis::auto()",
+    spec="https://drafts.csswg.org/css-flexbox/#flex-basis-property",
+    extra_prefixes="webkit",
+    animation_value_type="FlexBasis",
+    servo_restyle_damage = "reflow"
+)}
+
 % for (size, logical) in ALL_SIZES:
     <%
         spec = "https://drafts.csswg.org/css-box/#propdef-%s"
@@ -283,7 +269,7 @@ ${helpers.predefined_type("order", "Integer", "0",
 
 ${helpers.single_keyword("box-sizing",
                          "content-box border-box",
-                         extra_prefixes="moz webkit",
+                         extra_prefixes="moz:layout.css.prefixes.box-sizing webkit",
                          spec="https://drafts.csswg.org/css-ui/#propdef-box-sizing",
                          gecko_enum_prefix="StyleBoxSizing",
                          custom_consts={ "content-box": "Content", "border-box": "Border" },

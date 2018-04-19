@@ -85,7 +85,13 @@ var PaymentTestUtils = {
     createAndShowRequest: ({methodData, details, options}) => {
       const rq = new content.PaymentRequest(methodData, details, options);
       content.rq = rq; // assign it so we can retrieve it later
+
+      const handle = content.QueryInterface(Ci.nsIInterfaceRequestor)
+                            .getInterface(Ci.nsIDOMWindowUtils)
+                            .setHandlingUserInput(true);
       content.showPromise = rq.show();
+
+      handle.destruct();
     },
   },
 
@@ -115,6 +121,26 @@ var PaymentTestUtils = {
         selectedOptionLabel: selectedOption.getAttribute("label"),
         selectedOptionCurrency: currencyAmount.getAttribute("currency"),
         selectedOptionAmount: currencyAmount.getAttribute("amount"),
+      };
+    },
+
+    getShippingAddresses: () => {
+      let doc = content.document;
+      let addressPicker =
+        doc.querySelector("address-picker[selected-state-key='selectedShippingAddress']");
+      let select = addressPicker.querySelector("rich-select");
+      let popupBox = Cu.waiveXrays(select).popupBox;
+      let options = Array.from(popupBox.children).map(option => {
+        return {
+          guid: option.guid,
+          country: option.country,
+          selected: option.selected,
+        };
+      });
+      let selectedOptionIndex = options.findIndex(item => item.selected);
+      return {
+        selectedOptionIndex,
+        options,
       };
     },
 
@@ -164,6 +190,17 @@ var PaymentTestUtils = {
       // Unwaive to access the ChromeOnly `setUserInput` API.
       // setUserInput dispatches changes events.
       Cu.unwaiveXrays(picker.securityCodeInput).setUserInput(securityCode);
+    },
+  },
+
+  DialogContentUtils: {
+    waitForState: async (content, stateCheckFn, msg) => {
+      const {
+        ContentTaskUtils,
+      } = ChromeUtils.import("resource://testing-common/ContentTaskUtils.jsm", {});
+      let {requestStore} = Cu.waiveXrays(content.document.querySelector("payment-dialog"));
+      await ContentTaskUtils.waitForCondition(() => stateCheckFn(requestStore.getState()), msg);
+      return requestStore.getState();
     },
   },
 

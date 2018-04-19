@@ -9,7 +9,6 @@ ChromeUtils.import("resource://gre/modules/TelemetryTimestamps.jsm");
 ChromeUtils.import("resource://gre/modules/TelemetryController.jsm");
 ChromeUtils.import("resource://gre/modules/TelemetryArchive.jsm");
 ChromeUtils.import("resource://gre/modules/TelemetryUtils.jsm");
-ChromeUtils.import("resource://gre/modules/TelemetryLog.jsm");
 ChromeUtils.import("resource://gre/modules/Preferences.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -279,8 +278,6 @@ var PingPicker = {
         pingPicker.classList.add("hidden");
       }
     });
-    document.getElementById("choose-payload")
-            .addEventListener("change", () => displayPingData(gPingData));
     document.getElementById("processes")
             .addEventListener("change", () => displayPingData(gPingData));
     Array.from(document.querySelectorAll(".change-ping")).forEach(el => {
@@ -689,59 +686,6 @@ var EnvironmentData = {
     this.appendColumn(row, "td", value);
     table.appendChild(row);
   },
-  /**
-   * Helper function for appending a column to the data table.
-   *
-   * @param aRowElement Parent row element
-   * @param aColType Column's tag name
-   * @param aColText Column contents
-   */
-  appendColumn(aRowElement, aColType, aColText) {
-    let colElement = document.createElement(aColType);
-    let colTextElement = document.createTextNode(aColText);
-    colElement.appendChild(colTextElement);
-    aRowElement.appendChild(colElement);
-  },
-};
-
-var TelLog = {
-  /**
-   * Renders the telemetry log
-   */
-  render(payload) {
-    let entries = payload.log;
-    const hasData = entries && entries.length > 0;
-    setHasData("telemetry-log-section", hasData);
-    if (!hasData) {
-      return;
-    }
-
-    let table = document.createElement("table");
-
-    let caption = document.createElement("caption");
-    let captionString = bundle.GetStringFromName("telemetryLogTitle");
-    caption.appendChild(document.createTextNode(captionString + "\n"));
-    table.appendChild(caption);
-
-    let headings = document.createElement("tr");
-    this.appendColumn(headings, "th", bundle.GetStringFromName("telemetryLogHeadingId") + "\t");
-    this.appendColumn(headings, "th", bundle.GetStringFromName("telemetryLogHeadingTimestamp") + "\t");
-    this.appendColumn(headings, "th", bundle.GetStringFromName("telemetryLogHeadingData") + "\t");
-    table.appendChild(headings);
-
-    for (let entry of entries) {
-        let row = document.createElement("tr");
-        for (let elem of entry) {
-            this.appendColumn(row, "td", elem + "\t");
-        }
-        table.appendChild(row);
-    }
-
-    let dataDiv = document.getElementById("telemetry-log");
-    removeAllChildNodes(dataDiv);
-    dataDiv.appendChild(table);
-  },
-
   /**
    * Helper function for appending a column to the data table.
    *
@@ -2372,38 +2316,6 @@ function renderProcessList(ping, selectEl) {
   }
 }
 
-function renderPayloadList(ping) {
-  // Rebuild the payload select with options:
-  //   Parent Payload (selected)
-  //   Child Payload 1..ping.payload.childPayloads.length
-  let listEl = document.getElementById("choose-payload");
-  removeAllChildNodes(listEl);
-
-  let option = document.createElement("option");
-  let text = bundle.GetStringFromName("parentPayload");
-  let content = document.createTextNode(text);
-  let payloadIndex = 0;
-  option.appendChild(content);
-  option.setAttribute("value", payloadIndex++);
-  option.selected = true;
-  listEl.appendChild(option);
-
-  if (!ping.payload.childPayloads) {
-    listEl.disabled = true;
-    return;
-  }
-  listEl.disabled = false;
-
-  for (; payloadIndex <= ping.payload.childPayloads.length; ++payloadIndex) {
-    option = document.createElement("option");
-    text = bundle.formatStringFromName("childPayloadN", [payloadIndex], 1);
-    content = document.createTextNode(text);
-    option.appendChild(content);
-    option.setAttribute("value", payloadIndex);
-    listEl.appendChild(option);
-  }
-}
-
 function togglePingSections(isMainPing) {
   // We always show the sections that are "common" to all pings.
   let commonSections = new Set(["heading",
@@ -2442,7 +2354,6 @@ function displayPingData(ping, updatePayloadList = false) {
 function displayRichPingData(ping, updatePayloadList) {
   // Update the payload list and process lists
   if (updatePayloadList) {
-    renderPayloadList(ping);
     renderProcessList(ping, document.getElementById("processes"));
   }
 
@@ -2491,20 +2402,8 @@ function displayRichPingData(ping, updatePayloadList) {
 
   LateWritesSingleton.renderLateWrites(payload.lateWrites);
 
-  // Select payload to render
-  let payloadSelect = document.getElementById("choose-payload");
-  let payloadOption = payloadSelect.selectedOptions.item(0);
-  let payloadIndex = payloadOption.getAttribute("value");
-
-  if (payloadIndex > 0) {
-    payload = ping.payload.childPayloads[payloadIndex - 1];
-  }
-
   // Show chrome hang stacks
   ChromeHangs.render(payload.chromeHangs);
-
-  // Show telemetry log.
-  TelLog.render(payload);
 
   // Show simple measurements
   SimpleMeasurements.render(payload);

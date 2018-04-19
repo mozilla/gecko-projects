@@ -35,7 +35,7 @@ window.gActivityStreamStrings = {
   "prefs_section_rows_option": "{num} жол;{num} жол",
   "prefs_search_header": "Интернеттен іздеу",
   "prefs_topsites_description": "Сіз жиі шолатын сайттар",
-  "prefs_topstories_description": "High-quality content you might otherwise miss",
+  "prefs_topstories_description2": "Great content from around the web, personalized for you",
   "prefs_topstories_show_sponsored_label": "{provider} демеуші мақалалары",
   "prefs_topstories_sponsored_learn_more": "Көбірек білу",
   "prefs_highlights_description": "Сіз сақтаған немесе шолған таңдамалы сайттар",
@@ -90,5 +90,5 @@ window.gActivityStreamStrings = {
   "section_menu_action_move_up": "Жоғары жылжыту",
   "section_menu_action_move_down": "Төмен жылжыту",
   "section_menu_action_privacy_notice": "Жекелік ескертуі",
-  "prefs_topstories_description2": "Бүкіл Интернеттен алынған тамаша контент, талғамыңызға сай таңдалған"
+  "prefs_topstories_description": "Сіз жібере алатын қызықты мақалалар"
 };

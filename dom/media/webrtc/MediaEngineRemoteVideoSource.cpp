@@ -9,6 +9,7 @@
 #include "CamerasChild.h"
 #include "MediaManager.h"
 #include "MediaTrackConstraints.h"
+#include "mozilla/ErrorNames.h"
 #include "mozilla/RefPtr.h"
 #include "nsIPrefService.h"
 #include "VideoFrameUtils.h"
@@ -41,7 +42,6 @@ MediaEngineRemoteVideoSource::MediaEngineRemoteVideoSource(
   , mMutex("MediaEngineRemoteVideoSource::mMutex")
   , mRescalingBufferPool(/* zero_initialize */ false,
                          /* max_number_of_buffers */ 1)
-  , mSettingsUpdatedByFrame(MakeAndAddRef<media::Refcountable<AtomicBool>>())
   , mSettings(MakeAndAddRef<media::Refcountable<MediaTrackSettings>>())
 {
   MOZ_ASSERT(aMediaSource != MediaSourceEnum::Other);
@@ -300,8 +300,6 @@ MediaEngineRemoteVideoSource::Start(const RefPtr<const AllocationHandle>& aHandl
     mState = kStarted;
   }
 
-  mSettingsUpdatedByFrame->mValue = false;
-
   if (camera::GetChildAndCall(&camera::CamerasChild::StartCapture,
                               mCapEngine, mCaptureIndex, mCapability, this)) {
     LOG(("StartCapture failed"));
@@ -312,10 +310,7 @@ MediaEngineRemoteVideoSource::Start(const RefPtr<const AllocationHandle>& aHandl
 
   NS_DispatchToMainThread(NS_NewRunnableFunction(
       "MediaEngineRemoteVideoSource::SetLastCapability",
-      [settings = mSettings,
-       updated = mSettingsUpdatedByFrame,
-       source = mMediaSource,
-       cap = mCapability]() mutable {
+      [settings = mSettings, source = mMediaSource, cap = mCapability]() mutable {
     switch (source) {
       case dom::MediaSourceEnum::Screen:
       case dom::MediaSourceEnum::Window:
@@ -331,10 +326,8 @@ MediaEngineRemoteVideoSource::Start(const RefPtr<const AllocationHandle>& aHandl
         break;
     }
 
-    if (!updated->mValue) {
-      settings->mWidth.Value() = cap.width;
-      settings->mHeight.Value() = cap.height;
-    }
+    settings->mWidth.Value() = cap.width;
+    settings->mHeight.Value() = cap.height;
     settings->mFrameRate.Value() = cap.maxFPS;
   }));
 
@@ -356,6 +349,7 @@ MediaEngineRemoteVideoSource::Stop(const RefPtr<const AllocationHandle>& aHandle
   if (camera::GetChildAndCall(&camera::CamerasChild::StopCapture,
                               mCapEngine, mCaptureIndex)) {
     MOZ_DIAGNOSTIC_ASSERT(false, "Stopping a started capture failed");
+    return NS_ERROR_FAILURE;
   }
 
   {
@@ -389,12 +383,26 @@ MediaEngineRemoteVideoSource::Reconfigure(const RefPtr<AllocationHandle>& aHandl
   if (!ChooseCapability(constraints, aPrefs, aDeviceId, newCapability, kFitness)) {
     *aOutBadConstraint =
       MediaConstraintsHelper::FindBadConstraint(constraints, this, aDeviceId);
-    return NS_ERROR_FAILURE;
+    return NS_ERROR_INVALID_ARG;
   }
   LOG(("ChooseCapability(kFitness) for mTargetCapability (Reconfigure) --"));
 
   if (mCapability == newCapability) {
     return NS_OK;
+  }
+
+  bool started = mState == kStarted;
+  if (started) {
+    // Allocate always returns a null AllocationHandle.
+    // We can safely pass nullptr below.
+    nsresult rv = Stop(nullptr);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      nsAutoCString name;
+      GetErrorName(rv, name);
+      LOG(("Video source %p for video device %d Reconfigure() failed "
+           "unexpectedly in Stop(). rv=%s", this, mCaptureIndex, name.Data()));
+      return NS_ERROR_UNEXPECTED;
+    }
   }
 
   {
@@ -403,17 +411,14 @@ MediaEngineRemoteVideoSource::Reconfigure(const RefPtr<AllocationHandle>& aHandl
     mCapability = newCapability;
   }
 
-  if (mState == kStarted) {
-    // Allocate always returns a null AllocationHandle.
-    // We can safely pass nullptr below.
-    nsresult rv = Stop(nullptr);
+  if (started) {
+    nsresult rv = Start(nullptr);
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    rv = Start(nullptr);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
+      nsAutoCString name;
+      GetErrorName(rv, name);
+      LOG(("Video source %p for video device %d Reconfigure() failed "
+           "unexpectedly in Start(). rv=%s", this, mCaptureIndex, name.Data()));
+      return NS_ERROR_UNEXPECTED;
     }
   }
 
@@ -616,24 +621,23 @@ MediaEngineRemoteVideoSource::DeliverFrame(uint8_t* aBuffer,
             aProps.renderTimeMs()));
 #endif
 
-  if (mImageSize.width != dst_width || mImageSize.height != dst_height) {
-    NS_DispatchToMainThread(NS_NewRunnableFunction(
-        "MediaEngineRemoteVideoSource::FrameSizeChange",
-        [settings = mSettings,
-         updated = mSettingsUpdatedByFrame,
-         dst_width,
-         dst_height]() mutable {
-      settings->mWidth.Value() = dst_width;
-      settings->mHeight.Value() = dst_height;
-      updated->mValue = true;
-    }));
-  }
-
+  bool sizeChanged = false;
   {
     MutexAutoLock lock(mMutex);
     // implicitly releases last image
+    sizeChanged = (!mImage && image) ||
+                  (mImage && image && mImage->GetSize() != image->GetSize());
     mImage = image.forget();
     mImageSize = mImage->GetSize();
+  }
+
+  if (sizeChanged) {
+    NS_DispatchToMainThread(NS_NewRunnableFunction(
+        "MediaEngineRemoteVideoSource::FrameSizeChange",
+        [settings = mSettings, dst_width, dst_height]() mutable {
+      settings->mWidth.Value() = dst_width;
+      settings->mHeight.Value() = dst_height;
+    }));
   }
 
   // We'll push the frame into the MSG on the next Pull. This will avoid

@@ -2207,6 +2207,7 @@ HttpBaseChannel::RedirectTo(nsIURI *targetURI)
   nsAutoCString spec;
   targetURI->GetAsciiSpec(spec);
   LOG(("HttpBaseChannel::RedirectTo [this=%p, uri=%s]", this, spec.get()));
+  LogCallingScriptLocation(this);
 
   // We cannot redirect after OnStartRequest of the listener
   // has been called, since to redirect we have to switch channels
@@ -3225,7 +3226,7 @@ HttpBaseChannel::CloneLoadInfoForRedirect(nsIURI * newURI, uint32_t redirectFlag
   nsContentPolicyType contentPolicyType = mLoadInfo->GetExternalContentPolicyType();
   if (contentPolicyType == nsIContentPolicy::TYPE_DOCUMENT ||
       contentPolicyType == nsIContentPolicy::TYPE_SUBDOCUMENT) {
-    nsCOMPtr<nsIPrincipal> nullPrincipalToInherit = NullPrincipal::Create();
+    nsCOMPtr<nsIPrincipal> nullPrincipalToInherit = NullPrincipal::CreateWithoutOriginAttributes();
     newLoadInfo->SetPrincipalToInherit(nullPrincipalToInherit);
   }
 
@@ -3631,6 +3632,11 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
   // When on the parent process, the channel can't attempt to get it itself.
   // When on the child process, it would be waste to query it again.
   rv = httpChannel->SetTopLevelOuterContentWindowId(mTopLevelOuterContentWindowId);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
+
+  // Not setting this flag would break carrying permissions down to the child process
+  // when the channel is artificially forced to be a main document load.
+  rv = httpChannel->SetIsMainDocumentChannel(mForceMainDocumentChannel);
   MOZ_ASSERT(NS_SUCCEEDED(rv));
 
   // Preserve the loading order

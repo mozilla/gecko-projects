@@ -139,6 +139,12 @@ WorkerGlobalScope::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
   MOZ_CRASH("We should never get here!");
 }
 
+void
+WorkerGlobalScope::NoteTerminating()
+{
+  DisconnectEventTargetObjects();
+}
+
 already_AddRefed<Console>
 WorkerGlobalScope::GetConsole(ErrorResult& aRv)
 {
@@ -635,10 +641,10 @@ DedicatedWorkerGlobalScope::PostMessage(JSContext* aCx,
 }
 
 void
-DedicatedWorkerGlobalScope::Close(JSContext* aCx)
+DedicatedWorkerGlobalScope::Close()
 {
   mWorkerPrivate->AssertIsOnWorkerThread();
-  mWorkerPrivate->CloseInternal(aCx);
+  mWorkerPrivate->CloseInternal();
 }
 
 SharedWorkerGlobalScope::SharedWorkerGlobalScope(WorkerPrivate* aWorkerPrivate,
@@ -663,10 +669,10 @@ SharedWorkerGlobalScope::WrapGlobalObject(JSContext* aCx,
 }
 
 void
-SharedWorkerGlobalScope::Close(JSContext* aCx)
+SharedWorkerGlobalScope::Close()
 {
   mWorkerPrivate->AssertIsOnWorkerThread();
-  mWorkerPrivate->CloseInternal(aCx);
+  mWorkerPrivate->CloseInternal();
 }
 
 NS_IMPL_CYCLE_COLLECTION_INHERITED(ServiceWorkerGlobalScope, WorkerGlobalScope,
@@ -788,18 +794,10 @@ ServiceWorkerGlobalScope::SetOnfetch(mozilla::dom::EventHandlerNonNull* aCallbac
 }
 
 void
-ServiceWorkerGlobalScope::AddEventListener(
-                          const nsAString& aType,
-                          dom::EventListener* aListener,
-                          const dom::AddEventListenerOptionsOrBoolean& aOptions,
-                          const dom::Nullable<bool>& aWantsUntrusted,
-                          ErrorResult& aRv)
+ServiceWorkerGlobalScope::EventListenerAdded(const nsAString& aType)
 {
   MOZ_ASSERT(mWorkerPrivate);
   mWorkerPrivate->AssertIsOnWorkerThread();
-
-  DOMEventTargetHelper::AddEventListener(aType, aListener, aOptions,
-                                         aWantsUntrusted, aRv);
 
   if (!aType.EqualsLiteral("fetch")) {
     return;
@@ -810,9 +808,7 @@ ServiceWorkerGlobalScope::AddEventListener(
     mWorkerPrivate->DispatchToMainThread(r.forget());
   }
 
-  if (!aRv.Failed()) {
-    mWorkerPrivate->SetFetchHandlerWasAdded();
-  }
+  mWorkerPrivate->SetFetchHandlerWasAdded();
 }
 
 namespace {

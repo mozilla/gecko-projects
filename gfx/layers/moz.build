@@ -92,7 +92,9 @@ EXPORTS.mozilla.dom += [
 EXPORTS.mozilla.layers += [
     'AnimationHelper.h',
     'AnimationInfo.h',
+    'apz/public/APZInputBridge.h',
     'apz/public/APZSampler.h',
+    'apz/public/APZUpdater.h',
     'apz/public/CompositorController.h',
     'apz/public/GeckoContentController.h',
     'apz/public/IAPZCTreeManager.h',
@@ -136,10 +138,10 @@ EXPORTS.mozilla.layers += [
     'client/TextureClientRecycleAllocator.h',
     'client/TextureClientSharedSurface.h',
     'client/TiledContentClient.h',
-    'composite/AnimationMetricsTracker.h',
     'composite/AsyncCompositionManager.h',
     'composite/CanvasLayerComposite.h',
     'composite/ColorLayerComposite.h',
+    'composite/CompositorScreenshotGrabber.h',
     'composite/ContainerLayerComposite.h',
     'composite/ContentHost.h',
     'composite/Diagnostics.h',
@@ -166,6 +168,8 @@ EXPORTS.mozilla.layers += [
     'ipc/APZChild.h',
     'ipc/APZCTreeManagerChild.h',
     'ipc/APZCTreeManagerParent.h',
+    'ipc/APZInputBridgeChild.h',
+    'ipc/APZInputBridgeParent.h',
     'ipc/CompositableForwarder.h',
     'ipc/CompositableTransactionParent.h',
     'ipc/CompositorBridgeChild.h',
@@ -218,6 +222,7 @@ EXPORTS.mozilla.layers += [
     'opengl/TextureHostOGL.h',
     'PaintThread.h',
     'PersistentBufferProvider.h',
+    'ProfilerScreenshots.h',
     'RenderTrace.h',
     'RotatedBuffer.h',
     'ShareableCanvasRenderer.h',
@@ -292,9 +297,10 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
 UNIFIED_SOURCES += [
     'AnimationHelper.cpp',
     'AnimationInfo.cpp',
-    'apz/public/IAPZCTreeManager.cpp',
     'apz/src/APZCTreeManager.cpp',
+    'apz/src/APZInputBridge.cpp',
     'apz/src/APZSampler.cpp',
+    'apz/src/APZUpdater.cpp',
     'apz/src/APZUtils.cpp',
     'apz/src/AsyncPanZoomController.cpp',
     'apz/src/AutoscrollAnimation.cpp',
@@ -336,7 +342,6 @@ UNIFIED_SOURCES += [
     'basic/BasicColorLayer.cpp',
     'basic/BasicCompositor.cpp',
     'basic/BasicContainerLayer.cpp',
-    'basic/BasicDisplayItemLayer.cpp',
     'basic/BasicImages.cpp',
     'basic/BasicLayerManager.cpp',
     'basic/BasicLayersImpl.cpp',
@@ -366,11 +371,11 @@ UNIFIED_SOURCES += [
     'client/TextureClientRecycleAllocator.cpp',
     'client/TextureClientSharedSurface.cpp',
     'client/TiledContentClient.cpp',
-    'composite/AnimationMetricsTracker.cpp',
     'composite/AsyncCompositionManager.cpp',
     'composite/CanvasLayerComposite.cpp',
     'composite/ColorLayerComposite.cpp',
     'composite/CompositableHost.cpp',
+    'composite/CompositorScreenshotGrabber.cpp',
     'composite/ContainerLayerComposite.cpp',
     'composite/ContentHost.cpp',
     'composite/Diagnostics.cpp',
@@ -395,6 +400,8 @@ UNIFIED_SOURCES += [
     'ipc/APZChild.cpp',
     'ipc/APZCTreeManagerChild.cpp',
     'ipc/APZCTreeManagerParent.cpp',
+    'ipc/APZInputBridgeChild.cpp',
+    'ipc/APZInputBridgeParent.cpp',
     'ipc/CompositableTransactionParent.cpp',
     'ipc/CompositorBench.cpp',
     'ipc/CompositorBridgeChild.cpp',
@@ -422,11 +429,13 @@ UNIFIED_SOURCES += [
     'ipc/UiCompositorControllerParent.cpp',
     'ipc/VideoBridgeChild.cpp',
     'ipc/VideoBridgeParent.cpp',
+    'Layers.cpp',
     'LayerScope.cpp',
     'LayersHelpers.cpp',
     'LayersLogging.cpp',
     'LayerSorter.cpp',
     'LayersTypes.cpp',
+    'LayerTreeInvalidation.cpp',
     'mlgpu/BufferCache.cpp',
     'mlgpu/CanvasLayerMLGPU.cpp',
     'mlgpu/ContainerLayerMLGPU.cpp',
@@ -451,6 +460,7 @@ UNIFIED_SOURCES += [
     'opengl/TextureClientOGL.cpp',
     'opengl/TextureHostOGL.cpp',
     'PaintThread.cpp',
+    'ProfilerScreenshots.cpp',
     'ReadbackProcessor.cpp',
     'RenderTrace.cpp',
     'RotatedBuffer.cpp',
@@ -480,8 +490,6 @@ UNIFIED_SOURCES += [
 SOURCES += [
     'basic/BasicImageLayer.cpp',
     'ImageContainer.cpp',
-    'Layers.cpp',
-    'LayerTreeInvalidation.cpp',
     'PersistentBufferProvider.cpp',
     'protobuf/LayerScopePacket.pb.cc',
     'wr/WebRenderTextureHost.cpp',
@@ -489,14 +497,6 @@ SOURCES += [
 
 DEFINES['GOOGLE_PROTOBUF_NO_RTTI'] = True
 DEFINES['GOOGLE_PROTOBUF_NO_STATIC_INITIALIZER'] = True
-
-# Workaround compiler bug (Bug 795594)
-if CONFIG['CC_TYPE'] in ('msvc', 'clang-cl') and CONFIG['CPU_ARCH'] == 'x86_64':
-    for src in [
-        'Layers.cpp',
-        'LayerTreeInvalidation.cpp',
-    ]:
-        SOURCES[src].no_pgo = True
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     SOURCES += [
@@ -510,6 +510,7 @@ IPDL_SOURCES += [
     'ipc/LayersSurfaces.ipdlh',
     'ipc/PAPZ.ipdl',
     'ipc/PAPZCTreeManager.ipdl',
+    'ipc/PAPZInputBridge.ipdl',
     'ipc/PCompositorBridge.ipdl',
     'ipc/PCompositorManager.ipdl',
     'ipc/PImageBridge.ipdl',

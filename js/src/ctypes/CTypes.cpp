@@ -9,23 +9,26 @@
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Sprintf.h"
+#include "mozilla/TextUtils.h"
 #include "mozilla/Vector.h"
+#include "mozilla/WrappingOperations.h"
 
-#include <limits>
-#include <math.h>
-#include <stdint.h>
+#if defined(XP_UNIX)
+# include <errno.h>
+#endif
 #if defined(XP_WIN)
 # include <float.h>
 #endif
 #if defined(SOLARIS)
 # include <ieeefp.h>
 #endif
+#include <limits>
+#include <math.h>
+#include <stdint.h>
 #ifdef HAVE_SSIZE_T
 # include <sys/types.h>
 #endif
-#if defined(XP_UNIX)
-# include <errno.h>
-#endif
+#include <type_traits>
 
 #include "jsexn.h"
 #include "jsnum.h"
@@ -44,6 +47,9 @@
 #include "vm/JSObject-inl.h"
 
 using namespace std;
+
+using mozilla::IsAsciiAlpha;
+using mozilla::IsAsciiDigit;
 
 using JS::AutoCheckCannotGC;
 
@@ -277,7 +283,7 @@ namespace PointerType {
   static bool Decrement(JSContext* cx, unsigned argc, Value* vp);
   // The following is not an instance function, since we don't want to expose arbitrary
   // pointer arithmetic at this moment.
-  static bool OffsetBy(JSContext* cx, const CallArgs& args, int offset);
+  static bool OffsetBy(JSContext* cx, const CallArgs& args, int offset, const char* name);
 } // namespace PointerType
 
 namespace ArrayType {
@@ -1985,6 +1991,17 @@ VariadicArgumentTypeError(JSContext* cx, uint32_t index, HandleValue actual)
   return false;
 }
 
+MOZ_MUST_USE JSObject*
+GetThisObject(JSContext* cx, const CallArgs& args, const char* msg)
+{
+  if (!args.thisv().isObject()) {
+    IncompatibleThisProto(cx, msg, args.thisv());
+    return nullptr;
+  }
+
+  return &args.thisv().toObject();
+}
+
 static JSObject*
 InitCTypeClass(JSContext* cx, HandleObject ctypesObj)
 {
@@ -2564,54 +2581,58 @@ JS_STATIC_ASSERT(sizeof(float) == 4);
 JS_STATIC_ASSERT(sizeof(PRFuncPtr) == sizeof(void*));
 JS_STATIC_ASSERT(numeric_limits<double>::is_signed);
 
-// Templated helper to convert FromType to TargetType, for the default case
-// where the trivial POD constructor will do.
-template<class TargetType, class FromType>
-struct ConvertImpl {
-  static MOZ_ALWAYS_INLINE TargetType Convert(FromType d) {
-    return TargetType(d);
+template<typename TargetType,
+         typename FromType,
+         bool FromIsIntegral = std::is_integral<FromType>::value>
+struct ConvertImpl;
+
+template<typename TargetType, typename FromType>
+struct ConvertImpl<TargetType, FromType, false>
+{
+  static MOZ_ALWAYS_INLINE TargetType Convert(FromType input) {
+    return JS::ToSignedOrUnsignedInteger<TargetType>(input);
   }
 };
 
-#ifdef _MSC_VER
-// MSVC can't perform double to unsigned __int64 conversion when the
-// double is greater than 2^63 - 1. Help it along a little.
-template<>
-struct ConvertImpl<uint64_t, double> {
-  static MOZ_ALWAYS_INLINE uint64_t Convert(double d) {
-    return d > 0x7fffffffffffffffui64 ?
-           uint64_t(d - 0x8000000000000000ui64) + 0x8000000000000000ui64 :
-           uint64_t(d);
-  }
-};
-#endif
-
-// C++ doesn't guarantee that exact values are the only ones that will
-// round-trip. In fact, on some platforms, including SPARC, there are pairs of
-// values, a uint64_t and a double, such that neither value is exactly
-// representable in the other type, but they cast to each other.
-#if defined(SPARC) || defined(__powerpc__)
-// Simulate x86 overflow behavior
-template<>
-struct ConvertImpl<uint64_t, double> {
-  static MOZ_ALWAYS_INLINE uint64_t Convert(double d) {
-    return d >= 0xffffffffffffffff ?
-           0x8000000000000000 : uint64_t(d);
+template<typename TargetType>
+struct ConvertUnsignedTargetTo
+{
+  static TargetType
+  convert(typename std::make_unsigned<TargetType>::type input)
+  {
+    return std::is_signed<TargetType>::value ? mozilla::WrapToSigned(input) : input;
   }
 };
 
 template<>
-struct ConvertImpl<int64_t, double> {
-  static MOZ_ALWAYS_INLINE int64_t Convert(double d) {
-    return d >= 0x7fffffffffffffff ?
-           0x8000000000000000 : int64_t(d);
+struct ConvertUnsignedTargetTo<char16_t>
+{
+  static char16_t
+  convert(char16_t input)
+  {
+    // mozilla::WrapToSigned can't be used on char16_t.
+    return input;
   }
 };
-#endif
+
+template<typename TargetType, typename FromType>
+struct ConvertImpl<TargetType, FromType, true>
+{
+  static MOZ_ALWAYS_INLINE TargetType Convert(FromType input) {
+    using UnsignedTargetType = typename std::make_unsigned<TargetType>::type;
+    auto resultUnsigned = static_cast<UnsignedTargetType>(input);
+
+    return ConvertUnsignedTargetTo<TargetType>::convert(resultUnsigned);
+  }
+};
 
 template<class TargetType, class FromType>
 static MOZ_ALWAYS_INLINE TargetType Convert(FromType d)
 {
+  static_assert(std::is_integral<FromType>::value !=
+                std::is_floating_point<FromType>::value,
+                "should only be converting from floating/integral type");
+
   return ConvertImpl<TargetType, FromType>::Convert(d);
 }
 
@@ -2674,8 +2695,8 @@ struct IsExactImpl<TargetType, FromType, true, false> {
 template<class TargetType, class FromType>
 static MOZ_ALWAYS_INLINE bool ConvertExact(FromType i, TargetType* result)
 {
-  // Require that TargetType is integral, to simplify conversion.
-  JS_STATIC_ASSERT(numeric_limits<TargetType>::is_exact);
+  static_assert(std::numeric_limits<TargetType>::is_exact,
+                "TargetType must be exact to simplify conversion");
 
   *result = Convert<TargetType>(i);
 
@@ -2920,17 +2941,18 @@ StringToInteger(JSContext* cx, CharT* cp, size_t length, IntegerType* result,
   IntegerType i = 0;
   while (cp != end) {
     char16_t c = *cp++;
-    if (c >= '0' && c <= '9')
-      c -= '0';
+    uint8_t digit;
+    if (IsAsciiDigit(c))
+      digit = c - '0';
     else if (base == 16 && c >= 'a' && c <= 'f')
-      c = c - 'a' + 10;
+      digit = c - 'a' + 10;
     else if (base == 16 && c >= 'A' && c <= 'F')
-      c = c - 'A' + 10;
+      digit = c - 'A' + 10;
     else
       return false;
 
     IntegerType ii = i;
-    i = ii * base + sign * c;
+    i = ii * base + sign * digit;
     if (i / base != ii) {
       *overflow = true;
       return false;
@@ -3094,9 +3116,11 @@ jsvalToIntegerExplicit(HandleValue val, IntegerType* result)
   JS_STATIC_ASSERT(numeric_limits<IntegerType>::is_exact);
 
   if (val.isDouble()) {
-    // Convert -Inf, Inf, and NaN to 0; otherwise, convert by C-style cast.
+    // Convert using ToInt32-style semantics: non-finite numbers become 0, and
+    // everything else rounds toward zero then maps into |IntegerType| with
+    // wraparound semantics.
     double d = val.toDouble();
-    *result = mozilla::IsFinite(d) ? IntegerType(d) : 0;
+    *result = JS::ToSignedOrUnsignedInteger<IntegerType>(d);
     return true;
   }
   if (val.isObject()) {
@@ -4044,9 +4068,7 @@ BuildTypeName(JSContext* cx, JSObject* typeObj_)
 
   // If prepending the base type name directly would splice two
   // identifiers, insert a space.
-  if (('a' <= result[0] && result[0] <= 'z') ||
-      ('A' <= result[0] && result[0] <= 'Z') ||
-      (result[0] == '_'))
+  if (IsAsciiAlpha(result[0]) || result[0] == '_')
     PrependString(result, " ");
 
   // Stick the base type and derived type parts together.
@@ -4931,7 +4953,7 @@ bool
 CType::CreateArray(JSContext* cx, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
-  RootedObject baseType(cx, JS_THIS_OBJECT(cx, vp));
+  RootedObject baseType(cx, GetThisObject(cx, args, "CType.prototype.array"));
   if (!baseType)
     return false;
   if (!CType::IsCType(baseType)) {
@@ -4962,7 +4984,7 @@ bool
 CType::ToString(JSContext* cx, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
-  RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
+  RootedObject obj(cx, GetThisObject(cx, args, "CType.prototype.toString"));
   if (!obj)
     return false;
   if (!CType::IsCType(obj) && !CType::IsCTypeProto(obj)) {
@@ -4993,7 +5015,7 @@ bool
 CType::ToSource(JSContext* cx, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
-  JSObject* obj = JS_THIS_OBJECT(cx, vp);
+  JSObject* obj = GetThisObject(cx, args, "CType.prototype.toSource");
   if (!obj)
     return false;
   if (!CType::IsCType(obj) && !CType::IsCTypeProto(obj)) {
@@ -5081,7 +5103,7 @@ ABI::ToSource(JSContext* cx, unsigned argc, Value* vp)
     return ArgumentLengthError(cx, "ABI.prototype.toSource", "no", "s");
   }
 
-  JSObject* obj = JS_THIS_OBJECT(cx, vp);
+  JSObject* obj = GetThisObject(cx, args, "ABI.prototype.toSource");
   if (!obj)
     return false;
   if (!ABI::IsABI(obj)) {
@@ -5300,7 +5322,7 @@ bool
 PointerType::IsNull(JSContext* cx, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
-  RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
+  RootedObject obj(cx, GetThisObject(cx, args, "PointerType.prototype.isNull"));
   if (!obj)
     return false;
   if (!CData::IsCDataMaybeUnwrap(&obj)) {
@@ -5321,29 +5343,17 @@ PointerType::IsNull(JSContext* cx, unsigned argc, Value* vp)
 }
 
 bool
-PointerType::OffsetBy(JSContext* cx, const CallArgs& args, int offset)
+PointerType::OffsetBy(JSContext* cx, const CallArgs& args, int offset, const char* name)
 {
-  RootedObject obj(cx, JS_THIS_OBJECT(cx, args.base()));
+  RootedObject obj(cx, GetThisObject(cx, args, name));
   if (!obj)
     return false;
-  if (!CData::IsCDataMaybeUnwrap(&obj)) {
-    if (offset == 1) {
-      return IncompatibleThisProto(cx, "PointerType.prototype.increment",
-                                   args.thisv());
-    }
-    return IncompatibleThisProto(cx, "PointerType.prototype.decrement",
-                                 args.thisv());
-  }
+  if (!CData::IsCDataMaybeUnwrap(&obj))
+    return IncompatibleThisProto(cx, name, args.thisv());
 
   RootedObject typeObj(cx, CData::GetCType(obj));
-  if (CType::GetTypeCode(typeObj) != TYPE_pointer) {
-    if (offset == 1) {
-      return IncompatibleThisType(cx, "PointerType.prototype.increment",
-                                  "non-PointerType CData", args.thisv());
-    }
-    return IncompatibleThisType(cx, "PointerType.prototype.decrement",
-                                "non-PointerType CData", args.thisv());
-  }
+  if (CType::GetTypeCode(typeObj) != TYPE_pointer)
+    return IncompatibleThisType(cx, name, "non-PointerType CData", args.thisv());
 
   RootedObject baseType(cx, PointerType::GetBaseType(typeObj));
   if (!CType::IsSizeDefined(baseType)) {
@@ -5367,14 +5377,14 @@ bool
 PointerType::Increment(JSContext* cx, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
-  return OffsetBy(cx, args, 1);
+  return OffsetBy(cx, args, 1, "PointerType.prototype.increment");
 }
 
 bool
 PointerType::Decrement(JSContext* cx, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
-  return OffsetBy(cx, args, -1);
+  return OffsetBy(cx, args, -1, "PointerType.prototype.decrement");
 }
 
 bool
@@ -5859,7 +5869,7 @@ bool
 ArrayType::AddressOfElement(JSContext* cx, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
-  RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
+  RootedObject obj(cx, GetThisObject(cx, args, "ArrayType.prototype.addressOfElement"));
   if (!obj)
     return false;
   if (!CData::IsCDataMaybeUnwrap(&obj)) {
@@ -6262,7 +6272,7 @@ bool
 StructType::Define(JSContext* cx, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
-  RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
+  RootedObject obj(cx, GetThisObject(cx, args, "StructType.prototype.define"));
   if (!obj)
     return false;
   if (!CType::IsCType(obj)) {
@@ -6554,10 +6564,11 @@ bool
 StructType::AddressOfField(JSContext* cx, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
-  RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
+  RootedObject obj(cx, GetThisObject(cx, args, "StructType.prototype.addressOfField"));
   if (!obj)
     return false;
- if (!CData::IsCDataMaybeUnwrap(&obj)) {
+
+  if (!CData::IsCDataMaybeUnwrap(&obj)) {
     return IncompatibleThisProto(cx, "StructType.prototype.addressOfField",
                                  args.thisv());
   }
@@ -7808,7 +7819,7 @@ CData::Address(JSContext* cx, unsigned argc, Value* vp)
     return ArgumentLengthError(cx, "CData.prototype.address", "no", "s");
   }
 
-  RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
+  RootedObject obj(cx, GetThisObject(cx, args, "CData.prototype.address"));
   if (!obj)
     return false;
   if (!IsCDataMaybeUnwrap(&obj)) {
@@ -7916,7 +7927,7 @@ ReadStringCommon(JSContext* cx, InflateUTF8Method inflateUTF8, unsigned argc,
     return ArgumentLengthError(cx, funName, "no", "s");
   }
 
-  RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
+  RootedObject obj(cx, GetThisObject(cx, args, funName));
   if (!obj) {
     return IncompatibleThisProto(cx, funName, args.thisv());
   }
@@ -8065,7 +8076,7 @@ CData::ToSource(JSContext* cx, unsigned argc, Value* vp)
     return ArgumentLengthError(cx, "CData.prototype.toSource", "no", "s");
   }
 
-  RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
+  RootedObject obj(cx, GetThisObject(cx, args, "CData.prototype.toSource"));
   if (!obj)
     return false;
   if (!CData::IsCDataMaybeUnwrap(&obj) && !CData::IsCDataProto(obj)) {
@@ -8110,7 +8121,7 @@ bool
 CDataFinalizer::Methods::ToSource(JSContext* cx, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
-  RootedObject objThis(cx, JS_THIS_OBJECT(cx, vp));
+  RootedObject objThis(cx, GetThisObject(cx, args, "CDataFinalizer.prototype.toSource"));
   if (!objThis)
     return false;
   if (!CDataFinalizer::IsCDataFinalizer(objThis)) {
@@ -8169,7 +8180,7 @@ bool
 CDataFinalizer::Methods::ToString(JSContext* cx, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
-  JSObject* objThis = JS_THIS_OBJECT(cx, vp);
+  JSObject* objThis = GetThisObject(cx, args, "CDataFinalizer.prototype.toString");
   if (!objThis)
     return false;
   if (!CDataFinalizer::IsCDataFinalizer(objThis)) {
@@ -8489,7 +8500,7 @@ CDataFinalizer::Methods::Forget(JSContext* cx, unsigned argc, Value* vp)
                                "s");
   }
 
-  RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
+  RootedObject obj(cx, GetThisObject(cx, args, "CDataFinalizer.prototype.forget"));
   if (!obj)
     return false;
   if (!CDataFinalizer::IsCDataFinalizer(obj)) {
@@ -8536,7 +8547,7 @@ CDataFinalizer::Methods::Dispose(JSContext* cx, unsigned argc, Value* vp)
                                "s");
   }
 
-  RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
+  RootedObject obj(cx, GetThisObject(cx, args, "CDataFinalizer.prototype.dispose"));
   if (!obj)
     return false;
   if (!CDataFinalizer::IsCDataFinalizer(obj)) {
@@ -8819,7 +8830,7 @@ bool
 Int64::ToString(JSContext* cx, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
-  RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
+  RootedObject obj(cx, GetThisObject(cx, args, "Int64.prototype.toString"));
   if (!obj)
     return false;
   if (!Int64::IsInt64(obj)) {
@@ -8838,7 +8849,7 @@ bool
 Int64::ToSource(JSContext* cx, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
-  RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
+  RootedObject obj(cx, GetThisObject(cx, args, "Int64.prototype.toSource"));
   if (!obj)
     return false;
   if (!Int64::IsInt64(obj)) {
@@ -9003,7 +9014,7 @@ bool
 UInt64::ToString(JSContext* cx, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
-  RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
+  RootedObject obj(cx, GetThisObject(cx, args, "UInt64.prototype.toString"));
   if (!obj)
     return false;
   if (!UInt64::IsUInt64(obj)) {
@@ -9022,7 +9033,7 @@ bool
 UInt64::ToSource(JSContext* cx, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
-  RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
+  RootedObject obj(cx, GetThisObject(cx, args, "UInt64.prototype.toSource"));
   if (!obj)
     return false;
   if (!UInt64::IsUInt64(obj)) {

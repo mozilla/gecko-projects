@@ -102,18 +102,19 @@ function CustomizeMode(aWindow) {
   // toolbar items in browser.xul. This is invisible, and never seen by the
   // user. Then there's the visible palette, which gets populated and displayed
   // to the user when in customizing mode.
-  this.visiblePalette = this.document.getElementById(kPaletteId);
-  this.pongArena = this.document.getElementById("customization-pong-arena");
-  if (Services.prefs.getCharPref("general.skins.selectedSkin") != "classic/1.0") {
-    let lwthemeButton = this.document.getElementById("customization-lwtheme-button");
-    lwthemeButton.setAttribute("hidden", "true");
-  }
-  if (AppConstants.CAN_DRAW_IN_TITLEBAR) {
+  this.visiblePalette = this.$(kPaletteId);
+  this.pongArena = this.$("customization-pong-arena");
+
+  if (this._canDrawInTitlebar()) {
     this._updateTitlebarCheckbox();
     this._updateDragSpaceCheckbox();
     Services.prefs.addObserver(kDrawInTitlebarPref, this);
     Services.prefs.addObserver(kExtraDragSpacePref, this);
+  } else {
+    this.$("customization-titlebar-visibility-checkbox").hidden = true;
+    this.$("customization-extra-drag-space-checkbox").hidden = true;
   }
+
   this.window.addEventListener("unload", this);
 }
 
@@ -142,10 +143,14 @@ CustomizeMode.prototype = {
   },
 
   uninit() {
-    if (AppConstants.CAN_DRAW_IN_TITLEBAR) {
+    if (this._canDrawInTitlebar()) {
       Services.prefs.removeObserver(kDrawInTitlebarPref, this);
       Services.prefs.removeObserver(kExtraDragSpacePref, this);
     }
+  },
+
+  $(id) {
+    return this.document.getElementById(id);
   },
 
   toggle() {
@@ -161,7 +166,7 @@ CustomizeMode.prototype = {
   },
 
   _updateLWThemeButtonIcon() {
-    let lwthemeButton = this.document.getElementById("customization-lwtheme-button");
+    let lwthemeButton = this.$("customization-lwtheme-button");
     let lwthemeIcon = this.document.getAnonymousElementByAttribute(lwthemeButton,
                         "class", "button-icon");
     lwthemeIcon.style.backgroundImage = LightweightThemeManager.currentTheme ?
@@ -214,7 +219,7 @@ CustomizeMode.prototype = {
         w.gCustomizeMode.enter();
       };
       Services.obs.addObserver(obs, "browser-delayed-startup-finished");
-      this.window.openUILinkIn("about:newtab", "window");
+      this.window.openTrustedLinkIn("about:newtab", "window");
       return;
     }
     this._wantToBeInCustomizeMode = true;
@@ -257,7 +262,7 @@ CustomizeMode.prototype = {
 
     // Always disable the reset button at the start of customize mode, it'll be re-enabled
     // if necessary when we finish entering:
-    let resetButton = this.document.getElementById("customization-reset-button");
+    let resetButton = this.$("customization-reset-button");
     resetButton.setAttribute("disabled", "true");
 
     (async () => {
@@ -393,8 +398,8 @@ CustomizeMode.prototype = {
     this.togglePong(false);
 
     // Disable the reset and undo reset buttons while transitioning:
-    let resetButton = this.document.getElementById("customization-reset-button");
-    let undoResetButton = this.document.getElementById("customization-undo-reset-button");
+    let resetButton = this.$("customization-reset-button");
+    let undoResetButton = this.$("customization-undo-reset-button");
     undoResetButton.hidden = resetButton.disabled = true;
 
     this._transitioning = true;
@@ -648,7 +653,7 @@ CustomizeMode.prototype = {
       }
     }
     if (gCosmeticAnimationsEnabled) {
-      let overflowButton = this.document.getElementById("nav-bar-overflow-button");
+      let overflowButton = this.$("nav-bar-overflow-button");
       BrowserUtils.setToolbarButtonHeightProperty(overflowButton).then(() => {
         overflowButton.setAttribute("animate", "true");
         overflowButton.addEventListener("animationend", function onAnimationEnd(event) {
@@ -944,7 +949,7 @@ CustomizeMode.prototype = {
       toolbarItem.setAttribute("command", commandID);
 
       // XXX Bug 309953 - toolbarbuttons aren't in sync with their commands after customizing
-      let command = this.document.getElementById(commandID);
+      let command = this.$(commandID);
       if (command && command.hasAttribute("disabled")) {
         toolbarItem.setAttribute("disabled", command.getAttribute("disabled"));
       }
@@ -1012,7 +1017,7 @@ CustomizeMode.prototype = {
   _addDragHandlers(aTarget) {
     // Allow dropping on the padding of the arrow panel.
     if (aTarget.id == CustomizableUI.AREA_FIXED_OVERFLOW_PANEL) {
-      aTarget = this.document.getElementById("customization-panelHolder");
+      aTarget = this.$("customization-panelHolder");
     }
     aTarget.addEventListener("dragstart", this, true);
     aTarget.addEventListener("dragover", this, true);
@@ -1033,7 +1038,7 @@ CustomizeMode.prototype = {
     // Remove handler from different target if it was added to
     // allow dropping on the padding of the arrow panel.
     if (aTarget.id == CustomizableUI.AREA_FIXED_OVERFLOW_PANEL) {
-      aTarget = this.document.getElementById("customization-panelHolder");
+      aTarget = this.$("customization-panelHolder");
     }
     aTarget.removeEventListener("dragstart", this, true);
     aTarget.removeEventListener("dragover", this, true);
@@ -1080,7 +1085,7 @@ CustomizeMode.prototype = {
   reset() {
     this.resetting = true;
     // Disable the reset button temporarily while resetting:
-    let btn = this.document.getElementById("customization-reset-button");
+    let btn = this.$("customization-reset-button");
     BrowserUITelemetry.countCustomizationEvent("reset");
     btn.disabled = true;
     return (async () => {
@@ -1195,7 +1200,7 @@ CustomizeMode.prototype = {
   },
 
   onWidgetDestroyed(aWidgetId) {
-    let wrapper = this.document.getElementById("wrapper-" + aWidgetId);
+    let wrapper = this.$("wrapper-" + aWidgetId);
     if (wrapper) {
       wrapper.remove();
     }
@@ -1205,7 +1210,7 @@ CustomizeMode.prototype = {
     // If the node was added to an area, we would have gotten an onWidgetAdded notification,
     // plus associated DOM change notifications, so only do stuff for the palette:
     if (!aArea) {
-      let widgetNode = this.document.getElementById(aWidgetId);
+      let widgetNode = this.$(aWidgetId);
       if (widgetNode) {
         this.wrapToolbarItem(widgetNode, "palette");
       } else {
@@ -1239,7 +1244,7 @@ CustomizeMode.prototype = {
   getMoreThemes(aEvent) {
     aEvent.target.parentNode.parentNode.hidePopup();
     let getMoreURL = Services.urlFormatter.formatURLPref("lightweightThemes.getMoreURL");
-    this.window.openUILinkIn(getMoreURL, "tab");
+    this.window.openTrustedLinkIn(getMoreURL, "tab");
   },
 
   updateUIDensity(mode) {
@@ -1457,8 +1462,8 @@ CustomizeMode.prototype = {
   },
 
   _clearLWThemesMenu(panel) {
-    let footer = this.document.getElementById("customization-lwtheme-menu-footer");
-    let recommendedLabel = this.document.getElementById("customization-lwtheme-menu-recommended");
+    let footer = this.$("customization-lwtheme-menu-footer");
+    let recommendedLabel = this.$("customization-lwtheme-menu-recommended");
     for (let element of [footer, recommendedLabel]) {
       while (element.previousSibling &&
              element.previousSibling.localName == "toolbarbutton") {
@@ -1482,7 +1487,7 @@ CustomizeMode.prototype = {
 
   _updateEmptyPaletteNotice() {
     let paletteItems = this.visiblePalette.getElementsByTagName("toolbarpaletteitem");
-    let whimsyButton = this.document.getElementById("whimsy-button");
+    let whimsyButton = this.$("whimsy-button");
 
     if (paletteItems.length == 1 &&
         paletteItems[0].id.includes("wrapper-customizableui-special-spring")) {
@@ -1494,12 +1499,12 @@ CustomizeMode.prototype = {
   },
 
   _updateResetButton() {
-    let btn = this.document.getElementById("customization-reset-button");
+    let btn = this.$("customization-reset-button");
     btn.disabled = CustomizableUI.inDefaultState;
   },
 
   _updateUndoResetButton() {
-    let undoResetButton =  this.document.getElementById("customization-undo-reset-button");
+    let undoResetButton =  this.$("customization-undo-reset-button");
     undoResetButton.hidden = !CustomizableUI.canUndoReset;
   },
 
@@ -1551,7 +1556,7 @@ CustomizeMode.prototype = {
       let originalTarget = aEvent.originalTarget;
       if (this._isUnwantedDragDrop(aEvent) ||
           this.visiblePalette.contains(originalTarget) ||
-          this.document.getElementById("customization-panelHolder").contains(originalTarget)) {
+          this.$("customization-panelHolder").contains(originalTarget)) {
         return;
       }
       // We have a dragover/drop on the palette.
@@ -1561,7 +1566,7 @@ CustomizeMode.prototype = {
         this._onDragDrop(aEvent, this.visiblePalette);
       }
     };
-    let contentContainer = this.document.getElementById("customization-content-container");
+    let contentContainer = this.$("customization-content-container");
     contentContainer.addEventListener("dragover", this.paletteDragHandler, true);
     contentContainer.addEventListener("drop", this.paletteDragHandler, true);
   },
@@ -1570,7 +1575,7 @@ CustomizeMode.prototype = {
     DragPositionManager.stop();
     this._removeDragHandlers(this.visiblePalette);
 
-    let contentContainer = this.document.getElementById("customization-content-container");
+    let contentContainer = this.$("customization-content-container");
     contentContainer.removeEventListener("dragover", this.paletteDragHandler, true);
     contentContainer.removeEventListener("drop", this.paletteDragHandler, true);
     delete this.paletteDragHandler;
@@ -1581,7 +1586,7 @@ CustomizeMode.prototype = {
       case "nsPref:changed":
         this._updateResetButton();
         this._updateUndoResetButton();
-        if (AppConstants.CAN_DRAW_IN_TITLEBAR) {
+        if (this._canDrawInTitlebar()) {
           this._updateTitlebarCheckbox();
           this._updateDragSpaceCheckbox();
         }
@@ -1589,12 +1594,13 @@ CustomizeMode.prototype = {
     }
   },
 
+  _canDrawInTitlebar() {
+    return this.window.TabsInTitlebar.systemSupported;
+  },
+
   _updateTitlebarCheckbox() {
-    if (!AppConstants.CAN_DRAW_IN_TITLEBAR) {
-      return;
-    }
     let drawInTitlebar = Services.prefs.getBoolPref(kDrawInTitlebarPref, true);
-    let checkbox = this.document.getElementById("customization-titlebar-visibility-checkbox");
+    let checkbox = this.$("customization-titlebar-visibility-checkbox");
     // Drawing in the titlebar means 'hiding' the titlebar.
     // We use the attribute rather than a property because if we're not in
     // customize mode the button is hidden and properties don't work.
@@ -1606,18 +1612,14 @@ CustomizeMode.prototype = {
   },
 
   _updateDragSpaceCheckbox() {
-    if (!AppConstants.CAN_DRAW_IN_TITLEBAR) {
-      return;
-    }
-
     let extraDragSpace = Services.prefs.getBoolPref(kExtraDragSpacePref);
     let drawInTitlebar = Services.prefs.getBoolPref(kDrawInTitlebarPref, true);
-    let menuBar = this.document.getElementById("toolbar-menubar");
+    let menuBar = this.$("toolbar-menubar");
     let menuBarEnabled = menuBar
       && AppConstants.platform != "macosx"
       && menuBar.getAttribute("autohide") != "true";
 
-    let checkbox = this.document.getElementById("customization-extra-drag-space-checkbox");
+    let checkbox = this.$("customization-extra-drag-space-checkbox");
     if (extraDragSpace) {
       checkbox.setAttribute("checked", "true");
     } else {
@@ -1632,19 +1634,12 @@ CustomizeMode.prototype = {
   },
 
   toggleTitlebar(aShouldShowTitlebar) {
-    if (!AppConstants.CAN_DRAW_IN_TITLEBAR) {
-      return;
-    }
     // Drawing in the titlebar means not showing the titlebar, hence the negation:
     Services.prefs.setBoolPref(kDrawInTitlebarPref, !aShouldShowTitlebar);
     this._updateDragSpaceCheckbox();
   },
 
   toggleDragSpace(aShouldShowDragSpace) {
-    if (!AppConstants.CAN_DRAW_IN_TITLEBAR) {
-      return;
-    }
-
     Services.prefs.setBoolPref(kExtraDragSpacePref, aShouldShowDragSpace);
   },
 
@@ -2118,7 +2113,7 @@ CustomizeMode.prototype = {
         let makeSpaceImmediately = false;
         if (!gDraggingInToolbars.has(targetArea.id)) {
           gDraggingInToolbars.add(targetArea.id);
-          let draggedWrapper = this.document.getElementById("wrapper-" + aDraggedItemId);
+          let draggedWrapper = this.$("wrapper-" + aDraggedItemId);
           let originArea = this._getCustomizableParent(draggedWrapper);
           makeSpaceImmediately = originArea == targetArea;
         }
@@ -2189,7 +2184,7 @@ CustomizeMode.prototype = {
 
   _setGridDragActive(aDragOverNode, aDraggedItem, aValue) {
     let targetArea = this._getCustomizableParent(aDragOverNode);
-    let draggedWrapper = this.document.getElementById("wrapper-" + aDraggedItem.id);
+    let draggedWrapper = this.$("wrapper-" + aDraggedItem.id);
     let originArea = this._getCustomizableParent(draggedWrapper);
     let positionManager = DragPositionManager.getManagerForArea(targetArea);
     let draggedSize = this._getDragItemSize(aDragOverNode, aDraggedItem);
@@ -2367,13 +2362,13 @@ CustomizeMode.prototype = {
   },
 
   _setupDownloadAutoHideToggle() {
-    this.document.getElementById(kDownloadAutohidePanelId).removeAttribute("hidden");
+    this.$(kDownloadAutohidePanelId).removeAttribute("hidden");
     this.window.addEventListener("click", this._checkForDownloadsClick, true);
   },
 
   _teardownDownloadAutoHideToggle() {
     this.window.removeEventListener("click", this._checkForDownloadsClick, true);
-    this.document.getElementById(kDownloadAutohidePanelId).hidePopup();
+    this.$(kDownloadAutohidePanelId).hidePopup();
   },
 
   _maybeMoveDownloadsButtonToNavBar() {
@@ -2463,7 +2458,7 @@ CustomizeMode.prototype = {
     // It's possible we're toggling for a reason other than hitting
     // the button (we might be exiting, for example), so make sure that
     // the state and checkbox are in sync.
-    let whimsyButton = this.document.getElementById("whimsy-button");
+    let whimsyButton = this.$("whimsy-button");
     whimsyButton.checked = enabled;
 
     if (enabled) {

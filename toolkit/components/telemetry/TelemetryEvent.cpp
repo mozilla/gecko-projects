@@ -25,12 +25,14 @@
 #include "TelemetryCommon.h"
 #include "TelemetryEvent.h"
 #include "TelemetryEventData.h"
+#include "TelemetryScalar.h"
 #include "ipc/TelemetryIPCAccumulator.h"
 
 using mozilla::StaticMutex;
 using mozilla::StaticMutexAutoLock;
 using mozilla::ArrayLength;
 using mozilla::Maybe;
+using mozilla::Move;
 using mozilla::Nothing;
 using mozilla::StaticAutoPtr;
 using mozilla::TimeStamp;
@@ -43,6 +45,7 @@ using mozilla::Telemetry::Common::LogToBrowserConsole;
 using mozilla::Telemetry::Common::CanRecordInProcess;
 using mozilla::Telemetry::Common::GetNameForProcessID;
 using mozilla::Telemetry::Common::IsValidIdentifierString;
+using mozilla::Telemetry::Common::ToJSString;
 using mozilla::Telemetry::EventExtraEntry;
 using mozilla::Telemetry::ChildEventData;
 using mozilla::Telemetry::ProcessID;
@@ -124,7 +127,7 @@ struct EventKey {
 
 struct DynamicEventInfo {
   DynamicEventInfo(const nsACString& category, const nsACString& method,
-                   const nsACString& object, const nsTArray<nsCString>& extra_keys,
+                   const nsACString& object, nsTArray<nsCString>& extra_keys,
                    bool recordOnRelease)
     : category(category)
     , method(method)
@@ -199,37 +202,37 @@ private:
 };
 
 // Implements the methods for EventInfo.
-const nsCString
+const nsDependentCString
 EventInfo::method() const
 {
-  return nsCString(&gEventsStringTable[this->method_offset]);
+  return nsDependentCString(&gEventsStringTable[this->method_offset]);
 }
 
-const nsCString
+const nsDependentCString
 EventInfo::object() const
 {
-  return nsCString(&gEventsStringTable[this->object_offset]);
+  return nsDependentCString(&gEventsStringTable[this->object_offset]);
 }
 
 // Implements the methods for CommonEventInfo.
-const nsCString
+const nsDependentCString
 CommonEventInfo::category() const
 {
-  return nsCString(&gEventsStringTable[this->category_offset]);
+  return nsDependentCString(&gEventsStringTable[this->category_offset]);
 }
 
-const nsCString
+const nsDependentCString
 CommonEventInfo::expiration_version() const
 {
-  return nsCString(&gEventsStringTable[this->expiration_version_offset]);
+  return nsDependentCString(&gEventsStringTable[this->expiration_version_offset]);
 }
 
-const nsCString
+const nsDependentCString
 CommonEventInfo::extra_key(uint32_t index) const
 {
   MOZ_ASSERT(index < this->extra_count);
   uint32_t key_index = gExtraKeysTable[this->extra_index + index];
-  return nsCString(&gEventsStringTable[key_index]);
+  return nsDependentCString(&gEventsStringTable[key_index]);
 }
 
 // Implementation for the EventRecord class.
@@ -378,7 +381,7 @@ CanRecordEvent(const StaticMutexAutoLock& lock, const EventKey& eventKey,
     }
   }
 
-  return gEnabledCategories.GetEntry(GetCategory(lock, eventKey));
+  return true;
 }
 
 bool
@@ -467,14 +470,24 @@ RecordEvent(const StaticMutexAutoLock& lock, ProcessID processType,
     return RecordEventResult::ExpiredEvent;
   }
 
+  // Check whether the extra keys passed are valid.
+  if (!CheckExtraKeysValid(*eventKey, extra)) {
+    return RecordEventResult::InvalidExtraKey;
+  }
+
   // Check whether we can record this event.
   if (!CanRecordEvent(lock, *eventKey, processType)) {
     return RecordEventResult::Ok;
   }
 
-  // Check whether the extra keys passed are valid.
-  if (!CheckExtraKeysValid(*eventKey, extra)) {
-    return RecordEventResult::InvalidExtraKey;
+  // Count the number of times this event has been recorded, even if its
+  // category does not have recording enabled.
+  TelemetryScalar::SummarizeEvent(UniqueEventName(category, method, object),
+                                  processType, eventKey->dynamic);
+
+  // Check whether this event's category has recording enabled
+  if (!gEnabledCategories.GetEntry(GetCategory(lock, *eventKey))) {
+    return RecordEventResult::Ok;
   }
 
   // Add event record.
@@ -576,23 +589,26 @@ SerializeEventsArray(const EventRecordArray& events,
     }
 
     // Add category, method, object.
-    nsCString strings[3];
+    auto addCategoryMethodObjectValues = [&](const nsACString& category,
+                                             const nsACString& method,
+                                             const nsACString& object) -> bool {
+      return items.append(JS::StringValue(ToJSString(cx, category))) &&
+             items.append(JS::StringValue(ToJSString(cx, method))) &&
+             items.append(JS::StringValue(ToJSString(cx, object)));
+    };
+
     const EventKey& eventKey = record.GetEventKey();
     if (!eventKey.dynamic) {
       const EventInfo& info = gEventInfo[eventKey.id];
-      strings[0] = info.common_info.category();
-      strings[1] = info.method();
-      strings[2] = info.object();
+      if (!addCategoryMethodObjectValues(info.common_info.category(),
+                                         info.method(),
+                                         info.object())) {
+        return NS_ERROR_FAILURE;
+      }
     } else if (gDynamicEventInfo) {
       const DynamicEventInfo& info = (*gDynamicEventInfo)[eventKey.id];
-      strings[0] = info.category;
-      strings[1] = info.method;
-      strings[2] = info.object;
-    }
-
-    for (const nsCString& s : strings) {
-      const NS_ConvertUTF8toUTF16 wide(s);
-      if (!items.append(JS::StringValue(JS_NewUCStringCopyN(cx, wide.Data(), wide.Length())))) {
+      if (!addCategoryMethodObjectValues(info.category, info.method,
+                                         info.object)) {
         return NS_ERROR_FAILURE;
       }
     }
@@ -602,8 +618,7 @@ SerializeEventsArray(const EventRecordArray& events,
     // We still need to submit a null value if extra is set, to match the form:
     // [ts, category, method, object, null, extra]
     if (record.Value()) {
-      const NS_ConvertUTF8toUTF16 wide(record.Value().value());
-      if (!items.append(JS::StringValue(JS_NewUCStringCopyN(cx, wide.Data(), wide.Length())))) {
+      if (!items.append(JS::StringValue(ToJSString(cx, record.Value().value())))) {
         return NS_ERROR_FAILURE;
       }
     } else if (!record.Extra().IsEmpty()) {
@@ -623,9 +638,8 @@ SerializeEventsArray(const EventRecordArray& events,
       // Add extra key & value entries.
       const ExtraArray& extra = record.Extra();
       for (uint32_t i = 0; i < extra.Length(); ++i) {
-        const NS_ConvertUTF8toUTF16 wide(extra[i].value);
         JS::Rooted<JS::Value> value(cx);
-        value.setString(JS_NewUCStringCopyN(cx, wide.Data(), wide.Length()));
+        value.setString(ToJSString(cx, extra[i].value));
 
         if (!JS_DefineProperty(cx, obj, extra[i].key.get(), value, JSPROP_ENUMERATE)) {
           return NS_ERROR_FAILURE;
@@ -744,7 +758,7 @@ TelemetryEvent::RecordChildEvents(ProcessID aProcessType,
   MOZ_ASSERT(XRE_IsParentProcess());
   StaticMutexAutoLock locker(gTelemetryEventsMutex);
   for (uint32_t i = 0; i < aEvents.Length(); ++i) {
-    const mozilla::Telemetry::ChildEventData e = aEvents[i];
+    const mozilla::Telemetry::ChildEventData& e = aEvents[i];
 
     // Timestamps from child processes are absolute. We fix them up here to be
     // relative to the main process start time.
@@ -1062,8 +1076,8 @@ TelemetryEvent::RegisterEvents(const nsACString& aCategory,
       for (auto& object : objects) {
         // We defer the actual registration here in case any other event description is invalid.
         // In that case we don't need to roll back any partial registration.
-        DynamicEventInfo info{nsCString(aCategory), method, object,
-                              nsTArray<nsCString>(extra_keys), recordOnRelease};
+        DynamicEventInfo info{aCategory, method, object,
+                              extra_keys, recordOnRelease};
         newEventInfos.AppendElement(info);
         newEventExpired.AppendElement(expired);
       }
@@ -1115,7 +1129,7 @@ TelemetryEvent::CreateSnapshots(uint32_t aDataset, bool aClear, JSContext* cx,
 
       if (events.Length()) {
         const char* processName = GetNameForProcessID(ProcessID(iter.Key()));
-        processEvents.AppendElement(mozilla::MakePair(processName, events));
+        processEvents.AppendElement(mozilla::MakePair(processName, Move(events)));
       }
     }
 

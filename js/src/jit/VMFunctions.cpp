@@ -558,12 +558,6 @@ InterruptCheck(JSContext* cx)
 {
     gc::MaybeVerifyBarriers(cx);
 
-    {
-        JSRuntime* rt = cx->runtime();
-        JitRuntime::AutoPreventBackedgePatching apbp(rt);
-        cx->zone()->group()->jitZoneGroup->patchIonBackedges(cx, JitZoneGroup::BackedgeLoopHeader);
-    }
-
     return CheckForInterrupt(cx);
 }
 
@@ -585,7 +579,7 @@ NewCallObject(JSContext* cx, HandleShape shape, HandleObjectGroup group)
     // the initializing writes. The interpreter, however, may have allocated
     // the call object tenured, so barrier as needed before re-entering.
     if (!IsInsideNursery(obj))
-        cx->zone()->group()->storeBuffer().putWholeCell(obj);
+        cx->runtime()->gc.storeBuffer().putWholeCell(obj);
 
     return obj;
 }
@@ -602,7 +596,7 @@ NewSingletonCallObject(JSContext* cx, HandleShape shape)
     // the call object tenured, so barrier as needed before re-entering.
     MOZ_ASSERT(!IsInsideNursery(obj),
                "singletons are created in the tenured heap");
-    cx->zone()->group()->storeBuffer().putWholeCell(obj);
+    cx->runtime()->gc.storeBuffer().putWholeCell(obj);
 
     return obj;
 }
@@ -822,22 +816,22 @@ DebugPrologue(JSContext* cx, BaselineFrame* frame, jsbytecode* pc, bool* mustRet
     *mustReturn = false;
 
     switch (Debugger::onEnterFrame(cx, frame)) {
-      case JSTRAP_CONTINUE:
+      case ResumeMode::Continue:
         return true;
 
-      case JSTRAP_RETURN:
+      case ResumeMode::Return:
         // The script is going to return immediately, so we have to call the
         // debug epilogue handler as well.
         MOZ_ASSERT(frame->hasReturnValue());
         *mustReturn = true;
         return jit::DebugEpilogue(cx, frame, pc, true);
 
-      case JSTRAP_THROW:
-      case JSTRAP_ERROR:
+      case ResumeMode::Throw:
+      case ResumeMode::Terminate:
         return false;
 
       default:
-        MOZ_CRASH("bad Debugger::onEnterFrame status");
+        MOZ_CRASH("bad Debugger::onEnterFrame resume mode");
     }
 }
 
@@ -1097,32 +1091,32 @@ HandleDebugTrap(JSContext* cx, BaselineFrame* frame, uint8_t* retAddr, bool* mus
     MOZ_ASSERT(script->stepModeEnabled() || script->hasBreakpointsAt(pc));
 
     RootedValue rval(cx);
-    JSTrapStatus status = JSTRAP_CONTINUE;
+    ResumeMode resumeMode = ResumeMode::Continue;
 
     if (script->stepModeEnabled())
-        status = Debugger::onSingleStep(cx, &rval);
+        resumeMode = Debugger::onSingleStep(cx, &rval);
 
-    if (status == JSTRAP_CONTINUE && script->hasBreakpointsAt(pc))
-        status = Debugger::onTrap(cx, &rval);
+    if (resumeMode == ResumeMode::Continue && script->hasBreakpointsAt(pc))
+        resumeMode = Debugger::onTrap(cx, &rval);
 
-    switch (status) {
-      case JSTRAP_CONTINUE:
+    switch (resumeMode) {
+      case ResumeMode::Continue:
         break;
 
-      case JSTRAP_ERROR:
+      case ResumeMode::Terminate:
         return false;
 
-      case JSTRAP_RETURN:
+      case ResumeMode::Return:
         *mustReturn = true;
         frame->setReturnValue(rval);
         return jit::DebugEpilogue(cx, frame, pc, true);
 
-      case JSTRAP_THROW:
+      case ResumeMode::Throw:
         cx->setPendingException(rval);
         return false;
 
       default:
-        MOZ_CRASH("Invalid trap status");
+        MOZ_CRASH("Invalid step/breakpoint resume mode");
     }
 
     return true;
@@ -1134,21 +1128,19 @@ OnDebuggerStatement(JSContext* cx, BaselineFrame* frame, jsbytecode* pc, bool* m
     *mustReturn = false;
 
     switch (Debugger::onDebuggerStatement(cx, frame)) {
-      case JSTRAP_ERROR:
-        return false;
-
-      case JSTRAP_CONTINUE:
+      case ResumeMode::Continue:
         return true;
 
-      case JSTRAP_RETURN:
+      case ResumeMode::Return:
         *mustReturn = true;
         return jit::DebugEpilogue(cx, frame, pc, true);
 
-      case JSTRAP_THROW:
+      case ResumeMode::Throw:
+      case ResumeMode::Terminate:
         return false;
 
       default:
-        MOZ_CRASH("Invalid trap status");
+        MOZ_CRASH("Invalid OnDebuggerStatement resume mode");
     }
 }
 
@@ -1339,7 +1331,7 @@ AssertValidObjectPtr(JSContext* cx, JSObject* obj)
     // bogus object (pointer).
     MOZ_ASSERT(obj->compartment() == cx->compartment());
     MOZ_ASSERT(obj->zoneFromAnyThread() == cx->zone());
-    MOZ_ASSERT(obj->runtimeFromActiveCooperatingThread() == cx->runtime());
+    MOZ_ASSERT(obj->runtimeFromMainThread() == cx->runtime());
 
     MOZ_ASSERT_IF(!obj->hasLazyGroup() && obj->maybeShape(),
                   obj->group()->clasp() == obj->maybeShape()->getObjectClass());

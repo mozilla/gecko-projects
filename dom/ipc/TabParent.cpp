@@ -13,6 +13,7 @@
 #include "nsAccessibilityService.h"
 #endif
 #include "mozilla/BrowserElementParent.h"
+#include "mozilla/dom/ChromeMessageSender.h"
 #include "mozilla/dom/ContentBridgeParent.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/DataTransfer.h"
@@ -135,8 +136,7 @@ NS_IMPL_ISUPPORTS(TabParent,
                   nsITabParent,
                   nsIAuthPromptProvider,
                   nsISecureBrowserUI,
-                  nsISupportsWeakReference,
-                  nsIWebBrowserPersistable)
+                  nsISupportsWeakReference)
 
 TabParent::TabParent(nsIContentParent* aManager,
                      const TabId& aTabId,
@@ -187,30 +187,30 @@ TabParent::~TabParent()
 }
 
 TabParent*
-TabParent::GetTabParentFromLayersId(uint64_t aLayersId)
+TabParent::GetTabParentFromLayersId(layers::LayersId aLayersId)
 {
   if (!sLayerToTabParentTable) {
     return nullptr;
   }
-  return sLayerToTabParentTable->Get(aLayersId);
+  return sLayerToTabParentTable->Get(uint64_t(aLayersId));
 }
 
 void
-TabParent::AddTabParentToTable(uint64_t aLayersId, TabParent* aTabParent)
+TabParent::AddTabParentToTable(layers::LayersId aLayersId, TabParent* aTabParent)
 {
   if (!sLayerToTabParentTable) {
     sLayerToTabParentTable = new LayerToTabParentTable();
   }
-  sLayerToTabParentTable->Put(aLayersId, aTabParent);
+  sLayerToTabParentTable->Put(uint64_t(aLayersId), aTabParent);
 }
 
 void
-TabParent::RemoveTabParentFromTable(uint64_t aLayersId)
+TabParent::RemoveTabParentFromTable(layers::LayersId aLayersId)
 {
   if (!sLayerToTabParentTable) {
     return;
   }
-  sLayerToTabParentTable->Remove(aLayersId);
+  sLayerToTabParentTable->Remove(uint64_t(aLayersId));
   if (sLayerToTabParentTable->Count() == 0) {
     delete sLayerToTabParentTable;
     sLayerToTabParentTable = nullptr;
@@ -459,7 +459,7 @@ TabParent::ActorDestroy(ActorDestroyReason why)
     frameLoader->DestroyComplete();
 
     if (why == AbnormalShutdown && os) {
-      os->NotifyObservers(NS_ISUPPORTS_CAST(nsIFrameLoader*, frameLoader),
+      os->NotifyObservers(ToSupports(frameLoader),
                           "oop-frameloader-crashed", nullptr);
       nsCOMPtr<nsIFrameLoaderOwner> owner = do_QueryInterface(frameElement);
       if (owner) {
@@ -562,7 +562,7 @@ TabParent::RecvDropLinks(nsTArray<nsString>&& aLinks)
     if (loadUsingSystemPrincipal) {
       triggeringPrincipal = nsContentUtils::GetSystemPrincipal();
     } else {
-      triggeringPrincipal = NullPrincipal::Create();
+      triggeringPrincipal = NullPrincipal::CreateWithoutOriginAttributes();
     }
     browser->DropLinks(aLinks.Length(), links.get(), triggeringPrincipal);
   }
@@ -580,8 +580,7 @@ TabParent::RecvEvent(const RemoteDOMEvent& aEvent)
 
   event->SetOwner(target);
 
-  bool dummy;
-  target->DispatchEvent(event, &dummy);
+  target->DispatchEvent(*event->InternalDOMEvent());
   return IPC_OK();
 }
 
@@ -633,7 +632,7 @@ TabParent::InitRenderFrame()
     if (frameLoader) {
       RenderFrameParent* renderFrame = new RenderFrameParent(frameLoader);
       MOZ_ASSERT(renderFrame->IsInitted());
-      uint64_t layersId = renderFrame->GetLayersId();
+      layers::LayersId layersId = renderFrame->GetLayersId();
       AddTabParentToTable(layersId, this);
       if (!SendPRenderFrameConstructor(renderFrame)) {
         return;
@@ -1179,8 +1178,7 @@ TabParent::QueryDropLinksForVerification()
     return false;
   }
 
-  nsCOMPtr<nsIDOMDataTransfer> initialDataTransfer;
-  dragSession->GetDataTransfer(getter_AddRefs(initialDataTransfer));
+  RefPtr<DataTransfer> initialDataTransfer = dragSession->GetDataTransfer();
   if (!initialDataTransfer) {
     NS_WARNING("No initialDataTransfer to query links for verification");
     return false;
@@ -1745,7 +1743,7 @@ TabParent::RecvSetCustomCursor(const nsCString& aCursorData,
                                const uint32_t& aWidth,
                                const uint32_t& aHeight,
                                const uint32_t& aStride,
-                               const uint8_t& aFormat,
+                               const gfx::SurfaceFormat& aFormat,
                                const uint32_t& aHotspotX,
                                const uint32_t& aHotspotY,
                                const bool& aForce)
@@ -1763,7 +1761,7 @@ TabParent::RecvSetCustomCursor(const nsCString& aCursorData,
 
       RefPtr<gfx::DataSourceSurface> customCursor =
           gfx::CreateDataSourceSurfaceFromData(size,
-                                               static_cast<gfx::SurfaceFormat>(aFormat),
+                                               aFormat,
                                                reinterpret_cast<const uint8_t*>(aCursorData.BeginReading()),
                                                aStride);
 
@@ -2332,14 +2330,6 @@ TabParent::GetFrom(nsFrameLoader* aFrameLoader)
 }
 
 /*static*/ TabParent*
-TabParent::GetFrom(nsIFrameLoader* aFrameLoader)
-{
-  if (!aFrameLoader)
-    return nullptr;
-  return GetFrom(static_cast<nsFrameLoader*>(aFrameLoader));
-}
-
-/*static*/ TabParent*
 TabParent::GetFrom(nsITabParent* aTabParent)
 {
   return static_cast<TabParent*>(aTabParent);
@@ -2451,8 +2441,8 @@ TabParent::RecvDefaultProcOfPluginEvent(const WidgetPluginEvent& aEvent)
 }
 
 mozilla::ipc::IPCResult
-TabParent::RecvGetInputContext(int32_t* aIMEEnabled,
-                               int32_t* aIMEOpen)
+TabParent::RecvGetInputContext(IMEState::Enabled* aIMEEnabled,
+                               IMEState::Open* aIMEOpen)
 {
   nsCOMPtr<nsIWidget> widget = GetWidget();
   if (!widget) {
@@ -2462,33 +2452,32 @@ TabParent::RecvGetInputContext(int32_t* aIMEEnabled,
   }
 
   InputContext context = widget->GetInputContext();
-  *aIMEEnabled = static_cast<int32_t>(context.mIMEState.mEnabled);
-  *aIMEOpen = static_cast<int32_t>(context.mIMEState.mOpen);
+  *aIMEEnabled = context.mIMEState.mEnabled;
+  *aIMEOpen = context.mIMEState.mOpen;
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult
-TabParent::RecvSetInputContext(const int32_t& aIMEEnabled,
-                               const int32_t& aIMEOpen,
-                               const nsString& aType,
-                               const nsString& aInputmode,
-                               const nsString& aActionHint,
-                               const bool& aInPrivateBrowsing,
-                               const int32_t& aCause,
-                               const int32_t& aFocusChange)
+TabParent::RecvSetInputContext(
+  const IMEState::Enabled& aIMEEnabled,
+  const IMEState::Open& aIMEOpen,
+  const nsString& aType,
+  const nsString& aInputmode,
+  const nsString& aActionHint,
+  const bool& aInPrivateBrowsing,
+  const InputContextAction::Cause& aCause,
+  const InputContextAction::FocusChange& aFocusChange)
 {
   InputContext context;
-  context.mIMEState.mEnabled = static_cast<IMEState::Enabled>(aIMEEnabled);
-  context.mIMEState.mOpen = static_cast<IMEState::Open>(aIMEOpen);
+  context.mIMEState.mEnabled = aIMEEnabled;
+  context.mIMEState.mOpen = aIMEOpen;
   context.mHTMLInputType.Assign(aType);
   context.mHTMLInputInputmode.Assign(aInputmode);
   context.mActionHint.Assign(aActionHint);
   context.mOrigin = InputContext::ORIGIN_CONTENT;
   context.mInPrivateBrowsing = aInPrivateBrowsing;
 
-  InputContextAction action(
-    static_cast<InputContextAction::Cause>(aCause),
-    static_cast<InputContextAction::FocusChange>(aFocusChange));
+  InputContextAction action(aCause, aFocusChange);
 
   IMEStateManager::SetInputContextForChildProcess(this, context, action);
 
@@ -2574,7 +2563,8 @@ TabParent::ReceiveMessage(const nsString& aMessage,
                             aData,
                             aCpows,
                             aPrincipal,
-                            aRetVal);
+                            aRetVal,
+                            IgnoreErrors());
   }
   return true;
 }
@@ -2635,7 +2625,7 @@ TabParent::AllocPRenderFrameParent()
 
   RenderFrameParent* rfp = new RenderFrameParent(frameLoader);
   if (rfp->IsInitted()) {
-    uint64_t layersId = rfp->GetLayersId();
+    layers::LayersId layersId = rfp->GetLayersId();
     AddTabParentToTable(layersId, this);
   }
   return rfp;
@@ -2669,7 +2659,7 @@ TabParent::SetRenderFrame(PRenderFrameParent* aRFParent)
 
   frameLoader->MaybeShowFrame();
 
-  uint64_t layersId = renderFrame->GetLayersId();
+  layers::LayersId layersId = renderFrame->GetLayersId();
   AddTabParentToTable(layersId, this);
 
   return true;
@@ -2677,7 +2667,7 @@ TabParent::SetRenderFrame(PRenderFrameParent* aRFParent)
 
 bool
 TabParent::GetRenderFrameInfo(TextureFactoryIdentifier* aTextureFactoryIdentifier,
-                              uint64_t* aLayersId)
+                              layers::LayersId* aLayersId)
 {
   RenderFrameParent* rfp = GetRenderFrame();
   if (!rfp) {
@@ -2794,7 +2784,7 @@ TabParent::RecvBrowserFrameOpenWindow(PBrowserParent* aOpener,
 {
   CreatedWindowInfo cwi;
   cwi.rv() = NS_OK;
-  cwi.layersId() = 0;
+  cwi.layersId() = LayersId{0};
   cwi.maxTouchPoints() = 0;
 
   BrowserElementParent::OpenWindowResult opened =
@@ -3075,8 +3065,7 @@ TabParent::LayerTreeUpdate(uint64_t aEpoch, bool aActive)
   }
   event->SetTrusted(true);
   event->WidgetEventPtr()->mFlags.mOnlyChromeDispatch = true;
-  bool dummy;
-  mFrameElement->DispatchEvent(event, &dummy);
+  mFrameElement->DispatchEvent(*event);
 }
 
 mozilla::ipc::IPCResult
@@ -3102,8 +3091,7 @@ TabParent::RecvRemotePaintIsReady()
   event->InitEvent(NS_LITERAL_STRING("MozAfterRemotePaint"), false, false);
   event->SetTrusted(true);
   event->WidgetEventPtr()->mFlags.mOnlyChromeDispatch = true;
-  bool dummy;
-  mFrameElement->DispatchEvent(event, &dummy);
+  mFrameElement->DispatchEvent(*event);
   return IPC_OK();
 }
 
@@ -3307,7 +3295,7 @@ mozilla::ipc::IPCResult
 TabParent::RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
                                  const uint32_t& aAction,
                                  const OptionalShmem& aVisualDnDData,
-                                 const uint32_t& aStride, const uint8_t& aFormat,
+                                 const uint32_t& aStride, const gfx::SurfaceFormat& aFormat,
                                  const LayoutDeviceIntRect& aDragRect,
                                  const nsCString& aPrincipalURISpec)
 {
@@ -3344,7 +3332,7 @@ TabParent::RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
   } else {
     mDnDVisualization =
         gfx::CreateDataSourceSurfaceFromData(gfx::IntSize(aDragRect.width, aDragRect.height),
-                                             static_cast<gfx::SurfaceFormat>(aFormat),
+                                             aFormat,
                                              aVisualDnDData.get_Shmem().get<uint8_t>(),
                                              aStride);
   }
@@ -3447,19 +3435,23 @@ TabParent::AsyncPanZoomEnabled() const
   return widget && widget->AsyncPanZoomEnabled();
 }
 
-NS_IMETHODIMP
+void
 TabParent::StartPersistence(uint64_t aOuterWindowID,
-                            nsIWebBrowserPersistDocumentReceiver* aRecv)
+                            nsIWebBrowserPersistDocumentReceiver* aRecv,
+                            ErrorResult& aRv)
 {
   nsCOMPtr<nsIContentParent> manager = Manager();
   if (!manager->IsContentParent()) {
-    return NS_ERROR_UNEXPECTED;
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return;
   }
   auto* actor = new WebBrowserPersistDocumentParent();
   actor->SetOnReady(aRecv);
-  return manager->AsContentParent()
-    ->SendPWebBrowserPersistDocumentConstructor(actor, this, aOuterWindowID)
-    ? NS_OK : NS_ERROR_FAILURE;
+  bool ok = manager->AsContentParent()
+    ->SendPWebBrowserPersistDocumentConstructor(actor, this, aOuterWindowID);
+  if (!ok) {
+    aRv.Throw(NS_ERROR_FAILURE);
+  }
   // (The actor will be destroyed on constructor failure.)
 }
 
@@ -3475,7 +3467,7 @@ TabParent::StartApzAutoscroll(float aAnchorX, float aAnchorY,
 
   bool success = false;
   if (RenderFrameParent* renderFrame = GetRenderFrame()) {
-    uint64_t layersId = renderFrame->GetLayersId();
+    layers::LayersId layersId = renderFrame->GetLayersId();
     if (nsCOMPtr<nsIWidget> widget = GetWidget()) {
       ScrollableLayerGuid guid{layersId, aPresShellId, aScrollId};
 
@@ -3503,7 +3495,7 @@ TabParent::StopApzAutoscroll(nsViewID aScrollId, uint32_t aPresShellId)
   }
 
   if (RenderFrameParent* renderFrame = GetRenderFrame()) {
-    uint64_t layersId = renderFrame->GetLayersId();
+    layers::LayersId layersId = renderFrame->GetLayersId();
     if (nsCOMPtr<nsIWidget> widget = GetWidget()) {
       ScrollableLayerGuid guid{layersId, aPresShellId, aScrollId};
       widget->StopAsyncAutoscroll(guid);

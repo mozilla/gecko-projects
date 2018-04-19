@@ -16,7 +16,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   AddonRepository: "resource://gre/modules/addons/AddonRepository.jsm",
   AddonSettings: "resource://gre/modules/addons/AddonSettings.jsm",
   AppConstants: "resource://gre/modules/AppConstants.jsm",
-  ChromeManifestParser: "resource://gre/modules/ChromeManifestParser.jsm",
   Extension: "resource://gre/modules/Extension.jsm",
   Langpack: "resource://gre/modules/Extension.jsm",
   LightweightThemeManager: "resource://gre/modules/LightweightThemeManager.jsm",
@@ -35,8 +34,8 @@ XPCOMUtils.defineLazyModuleGetters(this, {
 
   DownloadAddonInstall: "resource://gre/modules/addons/XPIInstall.jsm",
   LocalAddonInstall: "resource://gre/modules/addons/XPIInstall.jsm",
-  StagedAddonInstall: "resource://gre/modules/addons/XPIInstall.jsm",
   UpdateChecker: "resource://gre/modules/addons/XPIInstall.jsm",
+  XPIInstall: "resource://gre/modules/addons/XPIInstall.jsm",
   loadManifestFromFile: "resource://gre/modules/addons/XPIInstall.jsm",
   verifyBundleSignedState: "resource://gre/modules/addons/XPIInstall.jsm",
 });
@@ -45,10 +44,7 @@ const {nsIBlocklistService} = Ci;
 
 XPCOMUtils.defineLazyServiceGetters(this, {
   Blocklist: ["@mozilla.org/extensions/blocklist;1", "nsIBlocklistService"],
-  ChromeRegistry: ["@mozilla.org/chrome/chrome-registry;1", "nsIChromeRegistry"],
-  ResProtocolHandler: ["@mozilla.org/network/protocol;1?name=resource", "nsIResProtocolHandler"],
   AddonPolicyService: ["@mozilla.org/addons/policy-service;1", "nsIAddonPolicyService"],
-  AddonPathService: ["@mozilla.org/addon-path-service;1", "amIAddonPathService"],
   aomStartup: ["@mozilla.org/addons/addon-manager-startup;1", "amIAddonManagerStartup"],
 });
 
@@ -66,9 +62,6 @@ const PREF_XPI_STATE                  = "extensions.xpiState";
 const PREF_BLOCKLIST_ITEM_URL         = "extensions.blocklist.itemURL";
 const PREF_BOOTSTRAP_ADDONS           = "extensions.bootstrappedAddons";
 const PREF_PENDING_OPERATIONS         = "extensions.pendingOperations";
-const PREF_SKIN_SWITCHPENDING         = "extensions.dss.switchPending";
-const PREF_SKIN_TO_SELECT             = "extensions.lastSelectedSkin";
-const PREF_GENERAL_SKINS_SELECTEDSKIN = "general.skins.selectedSkin";
 const PREF_EM_EXTENSION_FORMAT        = "extensions.";
 const PREF_EM_ENABLED_SCOPES          = "extensions.enabledScopes";
 const PREF_EM_STARTUP_SCAN_SCOPES     = "extensions.startupScanScopes";
@@ -89,12 +82,13 @@ const PREF_DISTRO_ADDONS_PERMS        = "extensions.distroAddons.promptForPermis
 const PREF_SYSTEM_ADDON_SET           = "extensions.systemAddonSet";
 const PREF_SYSTEM_ADDON_UPDATE_URL    = "extensions.systemAddon.update.url";
 const PREF_ALLOW_LEGACY               = "extensions.legacy.enabled";
-const PREF_ALLOW_NON_MPC              = "extensions.allow-non-mpc-extensions";
 
 const PREF_EM_MIN_COMPAT_APP_VERSION      = "extensions.minCompatibleAppVersion";
 const PREF_EM_MIN_COMPAT_PLATFORM_VERSION = "extensions.minCompatiblePlatformVersion";
 
 const PREF_EM_LAST_APP_BUILD_ID       = "extensions.lastAppBuildId";
+
+const DEFAULT_SKIN = "classic/1.0";
 
 // Specify a list of valid built-in add-ons to load.
 const BUILT_IN_ADDONS_URI             = "chrome://browser/content/built_in_addons.json";
@@ -115,7 +109,6 @@ const DIR_TRASH                       = "trash";
 
 const FILE_XPI_STATES                 = "addonStartup.json.lz4";
 const FILE_DATABASE                   = "extensions.json";
-const FILE_OLD_CACHE                  = "extensions.cache";
 const FILE_RDF_MANIFEST               = "install.rdf";
 const FILE_WEB_MANIFEST               = "manifest.json";
 const FILE_XPI_ADDONS_LIST            = "extensions.ini";
@@ -151,8 +144,6 @@ const TOOLKIT_ID                      = "toolkit@mozilla.org";
 const XPI_SIGNATURE_CHECK_PERIOD      = 24 * 60 * 60;
 
 XPCOMUtils.defineConstant(this, "DB_SCHEMA", 24);
-
-XPCOMUtils.defineLazyPreferenceGetter(this, "ALLOW_NON_MPC", PREF_ALLOW_NON_MPC);
 
 const NOTIFICATION_TOOLBOX_CONNECTION_CHANGE      = "toolbox-connection-change";
 
@@ -203,7 +194,6 @@ const BOOTSTRAP_REASONS = {
 // Some add-on types that we track internally are presented as other types
 // externally
 const TYPE_ALIASES = {
-  "apiextension": "extension",
   "webextension": "extension",
   "webextension-theme": "theme",
   "webextension-langpack": "locale",
@@ -211,20 +201,16 @@ const TYPE_ALIASES = {
 
 const CHROME_TYPES = new Set([
   "extension",
-  "experiment",
 ]);
 
 const SIGNED_TYPES = new Set([
-  "apiextension",
   "extension",
-  "experiment",
   "webextension",
   "webextension-langpack",
   "webextension-theme",
 ]);
 
 const LEGACY_TYPES = new Set([
-  "apiextension",
   "extension",
   "theme",
 ]);
@@ -232,7 +218,6 @@ const LEGACY_TYPES = new Set([
 const ALL_EXTERNAL_TYPES = new Set([
   "dictionary",
   "extension",
-  "experiment",
   "locale",
   "theme",
 ]);
@@ -261,9 +246,6 @@ const COMPATIBLE_BY_DEFAULT_TYPES = {
   extension: true,
   dictionary: true
 };
-
-const MSG_JAR_FLUSH = "AddonJarFlush";
-const MSG_MESSAGE_MANAGER_CACHES_FLUSH = "AddonMessageManagerCachesFlush";
 
 var gGlobalScope = this;
 
@@ -308,13 +290,14 @@ function loadLazyObjects() {
     SIGNED_TYPES,
     BOOTSTRAP_REASONS,
     DB_SCHEMA,
+    DEFAULT_SKIN,
     AddonInternal,
     XPIProvider,
     XPIStates,
     syncLoadManifestFromFile,
     isUsableAddon,
     recordAddonTelemetry,
-    flushChromeCaches,
+    flushChromeCaches: XPIInstall.flushChromeCaches,
     descriptorToPath,
   });
 
@@ -378,7 +361,9 @@ function getFile(path, base = null) {
  */
 function tryGetMtime(file) {
   try {
-    return file.lastModifiedTime;
+    // Clone the file object so we always get the actual mtime, rather
+    // than whatever value it may have cached.
+    return file.clone().lastModifiedTime;
   } catch (e) {
     return 0;
   }
@@ -510,7 +495,7 @@ function isTheme(type) {
  * @param  aFile
  *         The file or directory to operate on.
  * @param  aPermissions
- *         The permisions to set
+ *         The permissions to set
  */
 function setFilePermissions(aFile, aPermissions) {
   try {
@@ -747,7 +732,7 @@ SafeInstallOperation.prototype = {
     }
 
     while (this._createdDirs.length > 0)
-      recursiveRemove(this._createdDirs.pop());
+      XPIInstall.recursiveRemove(this._createdDirs.pop());
   }
 };
 
@@ -765,10 +750,15 @@ function canRunInSafeMode(aAddon) {
 
   // TODO product should make the call about temporary add-ons running
   // in safe mode. assuming for now that they are.
-  if (aAddon._installLocation.name == KEY_APP_TEMPORARY)
+  let location = aAddon._installLocation || null;
+  if (!location) {
+    return false;
+  }
+
+  if (location.name == KEY_APP_TEMPORARY)
     return true;
 
-  return aAddon._installLocation.isSystem;
+  return location.isSystem;
 }
 
 /**
@@ -802,9 +792,8 @@ function isDisabledLegacy(addon) {
  * @return true if the add-on should not be appDisabled
  */
 function isUsableAddon(aAddon) {
-  // Hack to ensure the default theme is always usable
-  if (aAddon.type == "theme" && aAddon.internalName == XPIProvider.defaultSkin)
-    return true;
+  if (aAddon.type == "theme")
+    return aAddon.internalName == DEFAULT_SKIN;
 
   if (mustSign(aAddon.type) && !aAddon.isCorrectlySigned) {
     logger.warn(`Add-on ${aAddon.id} is not correctly signed.`);
@@ -819,15 +808,10 @@ function isUsableAddon(aAddon) {
     return false;
   }
 
-  // Experiments are installed through an external mechanism that
-  // limits target audience to compatible clients. We trust it knows what
-  // it's doing and skip compatibility checks.
-  //
-  // This decision does forfeit defense in depth. If the experiments system
-  // is ever wrong about targeting an add-on to a specific application
-  // or platform, the client will likely see errors.
-  if (aAddon.type == "experiment")
-    return true;
+  // If we can't read it, it's not usable:
+  if (aAddon.brokenManifest) {
+    return false;
+  }
 
   if (AddonManager.checkUpdateSecurity && !aAddon.providesUpdatesSecurely) {
     logger.warn(`Updates for add-on ${aAddon.id} must be provided over HTTPS.`);
@@ -852,12 +836,6 @@ function isUsableAddon(aAddon) {
 
   if (isDisabledLegacy(aAddon)) {
     logger.warn(`disabling legacy extension ${aAddon.id}`);
-    return false;
-  }
-
-  if (!ALLOW_NON_MPC && aAddon.type == "extension" &&
-      aAddon.multiprocessCompatible !== true) {
-    logger.warn(`disabling ${aAddon.id} since it is not multiprocess compatible`);
     return false;
   }
 
@@ -931,11 +909,11 @@ function getAllAliasesForTypes(aTypes) {
  * A synchronous method for loading an add-on's manifest. This should only ever
  * be used during startup or a sync load of the add-ons DB
  */
-function syncLoadManifestFromFile(aFile, aInstallLocation) {
+function syncLoadManifestFromFile(aFile, aInstallLocation, aOldAddon) {
   let success = undefined;
   let result = null;
 
-  loadManifestFromFile(aFile, aInstallLocation).then(val => {
+  loadManifestFromFile(aFile, aInstallLocation, aOldAddon).then(val => {
     success = true;
     result = val;
   }, val => {
@@ -988,77 +966,6 @@ function buildJarURI(aJarfile, aPath) {
   let uri = Services.io.newFileURI(aJarfile);
   uri = "jar:" + uri.spec + "!/" + aPath;
   return Services.io.newURI(uri);
-}
-
-/**
- * Sends local and remote notifications to flush a JAR file cache entry
- *
- * @param aJarFile
- *        The ZIP/XPI/JAR file as a nsIFile
- */
-function flushJarCache(aJarFile) {
-  Services.obs.notifyObservers(aJarFile, "flush-cache-entry");
-  Services.mm.broadcastAsyncMessage(MSG_JAR_FLUSH, aJarFile.path);
-}
-
-function flushChromeCaches() {
-  // Init this, so it will get the notification.
-  Services.obs.notifyObservers(null, "startupcache-invalidate");
-  // Flush message manager cached scripts
-  Services.obs.notifyObservers(null, "message-manager-flush-caches");
-  // Also dispatch this event to child processes
-  Services.mm.broadcastAsyncMessage(MSG_MESSAGE_MANAGER_CACHES_FLUSH, null);
-}
-
-/**
- * Recursively removes a directory or file fixing permissions when necessary.
- *
- * @param  aFile
- *         The nsIFile to remove
- */
-function recursiveRemove(aFile) {
-  let isDir = null;
-
-  try {
-    isDir = aFile.isDirectory();
-  } catch (e) {
-    // If the file has already gone away then don't worry about it, this can
-    // happen on OSX where the resource fork is automatically moved with the
-    // data fork for the file. See bug 733436.
-    if (e.result == Cr.NS_ERROR_FILE_TARGET_DOES_NOT_EXIST)
-      return;
-    if (e.result == Cr.NS_ERROR_FILE_NOT_FOUND)
-      return;
-
-    throw e;
-  }
-
-  setFilePermissions(aFile, isDir ? FileUtils.PERMS_DIRECTORY
-                                  : FileUtils.PERMS_FILE);
-
-  try {
-    aFile.remove(true);
-    return;
-  } catch (e) {
-    if (!aFile.isDirectory() || aFile.isSymlink()) {
-      logger.error("Failed to remove file " + aFile.path, e);
-      throw e;
-    }
-  }
-
-  // Use a snapshot of the directory contents to avoid possible issues with
-  // iterating over a directory while removing files from it (the YAFFS2
-  // embedded filesystem has this issue, see bug 772238), and to remove
-  // normal files before their resource forks on OSX (see bug 733436).
-  let entries = getDirectoryEntries(aFile, true);
-  entries.forEach(recursiveRemove);
-
-  try {
-    aFile.remove(true);
-  } catch (e) {
-    logger.error("Failed to remove empty directory " + aFile.path, e);
-    throw e;
-  }
 }
 
 /**
@@ -1120,7 +1027,6 @@ const JSON_FIELDS = Object.freeze([
   "changed",
   "dependencies",
   "enabled",
-  "enableShims",
   "file",
   "hasEmbeddedWebExtension",
   "lastModifiedTime",
@@ -1147,7 +1053,6 @@ class XPIState {
     // Set default values.
     this.type = "extension";
     this.bootstrapped = false;
-    this.enableShims = false;
 
     for (let prop of JSON_FIELDS) {
       if (prop in saved) {
@@ -1158,10 +1063,6 @@ class XPIState {
     if (saved.currentModifiedTime && saved.currentModifiedTime != this.lastModifiedTime) {
       this.lastModifiedTime = saved.currentModifiedTime;
       this.changed = true;
-    }
-
-    if (this.enabled) {
-      XPIProvider._addURIMapping(id, this.file);
     }
   }
 
@@ -1185,13 +1086,11 @@ class XPIState {
       path: descriptorToPath(saved.d, location.dir),
       lastModifiedTime: saved.mt || saved.st,
       version: saved.v,
-      enableShims: false,
     };
 
     if (bootstrapped) {
       data.bootstrapped = true;
       data.enabled = true;
-      data.enableShims = !bootstrapped.multiprocessCompatible;
       data.path = descriptorToPath(bootstrapped.descriptor, location.dir);
 
       for (let field of BOOTSTRAPPED_FIELDS) {
@@ -1210,9 +1109,6 @@ class XPIState {
   }
   get active() {
     return this.enabled;
-  }
-  get multiprocessCompatible() {
-    return !this.enableShims;
   }
 
 
@@ -1256,9 +1152,6 @@ class XPIState {
     };
     if (this.type != "extension") {
       json.type = this.type;
-    }
-    if (this.enableShims) {
-      json.enableShims = true;
     }
     if (this.bootstrapped) {
       json.bootstrapped = true;
@@ -1313,15 +1206,16 @@ class XPIState {
     // themes require the default theme's chrome to be registered even
     // though we report it as disabled for UI purposes.
     if (aDBAddon.type == "theme") {
-      this.enabled = aDBAddon.internalName == XPIProvider.selectedSkin;
+      this.enabled = aDBAddon.internalName == DEFAULT_SKIN;
     } else {
       this.enabled = aDBAddon.visible && !aDBAddon.disabled;
     }
 
     this.version = aDBAddon.version;
     this.type = aDBAddon.type;
-    this.enableShims = this.type == "extension" && !aDBAddon.multiprocessCompatible;
-    this.startupData = aDBAddon.startupData;
+    if (aDBAddon.startupData) {
+      this.startupData = aDBAddon.startupData;
+    }
 
     this.bootstrapped = !!aDBAddon.bootstrap;
     if (this.bootstrapped) {
@@ -1359,6 +1253,8 @@ class XPIStateLocation extends Map {
 
     this.name = name;
     this.path = path || saved.path || null;
+    this.staged = saved.staged || {};
+    this.changed = saved.changed || false;
     this.dir = this.path && new nsIFile(this.path);
 
     for (let [id, data] of Object.entries(saved.addons || {})) {
@@ -1373,7 +1269,10 @@ class XPIStateLocation extends Map {
    * data, to be saved to addonStartup.json.
    */
   toJSON() {
-    let json = { addons: {} };
+    let json = {
+      addons: {},
+      staged: this.staged,
+    };
 
     if (this.path) {
       json.path = this.path;
@@ -1384,11 +1283,16 @@ class XPIStateLocation extends Map {
     }
 
     for (let [id, addon] of this.entries()) {
-      if (addon.type != "experiment") {
-        json.addons[id] = addon;
-      }
+      json.addons[id] = addon;
     }
     return json;
+  }
+
+  get hasStaged() {
+    for (let key in this.staged) {
+      return true;
+    }
+    return false;
   }
 
   _addState(addonId, saved) {
@@ -1425,6 +1329,42 @@ class XPIStateLocation extends Map {
     let xpiState = this._addState(addonId, {enabled: false, file: file.clone()});
     xpiState.getModTime(xpiState.file, addonId);
     return xpiState;
+  }
+
+  /**
+   * Adds metadata for a staged install which should be performed after
+   * the next restart.
+   *
+   * @param {string} addonId
+   *        The ID of the staged install. The leaf name of the XPI
+   *        within the location's staging directory must correspond to
+   *        this ID.
+   * @param {object} metadata
+   *        The JSON metadata of the parsed install, to be used during
+   *        the next startup.
+   */
+  stageAddon(addonId, metadata) {
+    this.staged[addonId] = metadata;
+    XPIStates.save();
+  }
+
+  /**
+   * Removes staged install metadata for the given add-on ID.
+   *
+   * @param {string} addonId
+   *        The ID of the staged install.
+   */
+  unstageAddon(addonId) {
+    if (addonId in this.staged) {
+      delete this.staged[addonId];
+      XPIStates.save();
+    }
+  }
+
+  * getStagedAddons() {
+    for (let [id, metadata] of Object.entries(this.staged)) {
+      yield [id, metadata];
+    }
   }
 
   /**
@@ -1752,7 +1692,7 @@ var XPIStates = {
   toJSON() {
     let data = {};
     for (let [key, loc] of this.db.entries()) {
-      if (key != TemporaryInstallLocation.name && loc.size) {
+      if (key != TemporaryInstallLocation.name && (loc.size || loc.hasStaged)) {
         data[key] = loc;
       }
     }
@@ -1801,14 +1741,6 @@ var XPIProvider = {
   installLocationsByName: null,
   // An array of currently active AddonInstalls
   installs: null,
-  // The default skin for the application
-  defaultSkin: "classic/1.0",
-  // The current skin used by the application
-  currentSkin: null,
-  // The selected skin to be used by the application when it is restarted. This
-  // will be the same as currentSkin when it is the skin to be used when the
-  // application is restarted
-  selectedSkin: null,
   // The value of the minCompatibleAppVersion preference
   minCompatibleAppVersion: null,
   // The value of the minCompatiblePlatformVersion preference
@@ -1826,8 +1758,6 @@ var XPIProvider = {
   runPhase: XPI_STARTING,
   // Per-addon telemetry information
   _telemetryDetails: {},
-  // A Map from an add-on install to its ID
-  _addonFileMap: new Map(),
   // Have we started shutting down bootstrap add-ons?
   _closing: false,
 
@@ -1932,80 +1862,6 @@ var XPIProvider = {
       } catch (e) {
         logger.warn("Cancel failed", e);
       }
-    }
-  },
-
-  /**
-   * Adds or updates a URI mapping for an Addon.id.
-   *
-   * Mappings should not be removed at any point. This is so that the mappings
-   * will be still valid after an add-on gets disabled or uninstalled, as
-   * consumers may still have URIs of (leaked) resources they want to map.
-   */
-  _addURIMapping(aID, aFile) {
-    logger.info("Mapping " + aID + " to " + aFile.path);
-    this._addonFileMap.set(aID, aFile.path);
-
-    AddonPathService.insertPath(aFile.path, aID);
-  },
-
-  /**
-   * Resolve a URI back to physical file.
-   *
-   * Of course, this works only for URIs pointing to local resources.
-   *
-   * @param  aURI
-   *         URI to resolve
-   * @return
-   *         resolved nsIFileURL
-   */
-  _resolveURIToFile(aURI) {
-    switch (aURI.scheme) {
-      case "jar":
-      case "file":
-        if (aURI instanceof Ci.nsIJARURI) {
-          return this._resolveURIToFile(aURI.JARFile);
-        }
-        return aURI;
-
-      case "chrome":
-        aURI = ChromeRegistry.convertChromeURL(aURI);
-        return this._resolveURIToFile(aURI);
-
-      case "resource":
-        aURI = Services.io.newURI(ResProtocolHandler.resolveURI(aURI));
-        return this._resolveURIToFile(aURI);
-
-      case "view-source":
-        aURI = Services.io.newURI(aURI.pathQueryRef);
-        return this._resolveURIToFile(aURI);
-
-      case "about":
-        if (aURI.spec == "about:blank") {
-          // Do not attempt to map about:blank
-          return null;
-        }
-
-        let chan;
-        try {
-          chan = NetUtil.newChannel({
-            uri: aURI,
-            loadUsingSystemPrincipal: true
-          });
-        } catch (ex) {
-          return null;
-        }
-        // Avoid looping
-        if (chan.URI.equals(aURI)) {
-          return null;
-        }
-        // We want to clone the channel URI to avoid accidentially keeping
-        // unnecessary references to the channel or implementation details
-        // around.
-        return this._resolveURIToFile(chan.URI.clone());
-
-      default:
-        return null;
     }
   },
 
@@ -2163,14 +2019,6 @@ var XPIProvider = {
         }
       }
 
-      let defaultPrefs = Services.prefs.getDefaultBranch("");
-      this.defaultSkin = defaultPrefs.getStringPref(PREF_GENERAL_SKINS_SELECTEDSKIN,
-                                                    "classic/1.0");
-      this.currentSkin = Services.prefs.getStringPref(PREF_GENERAL_SKINS_SELECTEDSKIN,
-                                                      this.defaultSkin);
-      this.selectedSkin = this.currentSkin;
-      this.applyThemeChange();
-
       this.minCompatibleAppVersion = Services.prefs.getStringPref(PREF_EM_MIN_COMPAT_APP_VERSION,
                                                                   null);
       this.minCompatiblePlatformVersion = Services.prefs.getStringPref(PREF_EM_MIN_COMPAT_PLATFORM_VERSION,
@@ -2182,16 +2030,12 @@ var XPIProvider = {
         Services.prefs.addObserver(PREF_XPI_SIGNATURES_REQUIRED, this);
       Services.prefs.addObserver(PREF_LANGPACK_SIGNATURES, this);
       Services.prefs.addObserver(PREF_ALLOW_LEGACY, this);
-      Services.prefs.addObserver(PREF_ALLOW_NON_MPC, this);
       Services.obs.addObserver(this, NOTIFICATION_FLUSH_PERMISSIONS);
       Services.obs.addObserver(this, NOTIFICATION_TOOLBOX_CONNECTION_CHANGE);
 
 
       let flushCaches = this.checkForChanges(aAppChanged, aOldAppVersion,
                                              aOldPlatformVersion);
-
-      // Changes to installed extensions may have changed which theme is selected
-      this.applyThemeChange();
 
       AddonManagerPrivate.markProviderSafe(this);
 
@@ -2218,7 +2062,7 @@ var XPIProvider = {
       if (AppConstants.MOZ_CRASHREPORTER) {
         // Annotate the crash report with relevant add-on information.
         try {
-          Services.appinfo.annotateCrashReport("Theme", this.currentSkin);
+          Services.appinfo.annotateCrashReport("Theme", DEFAULT_SKIN);
         } catch (e) { }
         try {
           Services.appinfo.annotateCrashReport("EMCheckCompatibility",
@@ -2368,6 +2212,12 @@ var XPIProvider = {
     this.activeAddons.clear();
     this.allAppGlobal = true;
 
+    for (let install of this.installs) {
+      if (install.onShutdown()) {
+        install.onShutdown();
+      }
+    }
+
     // If there are pending operations then we must update the list of active
     // add-ons
     if (Services.prefs.getBoolPref(PREF_PENDING_OPERATIONS, false)) {
@@ -2389,7 +2239,6 @@ var XPIProvider = {
 
     // This is needed to allow xpcshell tests to simulate a restart
     this.extensionsActive = false;
-    this._addonFileMap.clear();
 
     await XPIDatabase.shutdown();
   },
@@ -2428,27 +2277,6 @@ var XPIProvider = {
         }
       }
     }
-  },
-
-  /**
-   * Applies any pending theme change to the preferences.
-   */
-  applyThemeChange() {
-    if (!Services.prefs.getBoolPref(PREF_SKIN_SWITCHPENDING, false))
-      return;
-
-    // Tell the Chrome Registry which Skin to select
-    try {
-      this.selectedSkin = Services.prefs.getCharPref(PREF_SKIN_TO_SELECT);
-      Services.prefs.setCharPref(PREF_GENERAL_SKINS_SELECTEDSKIN,
-                                 this.selectedSkin);
-      Services.prefs.clearUserPref(PREF_SKIN_TO_SELECT);
-      logger.debug("Changed skin to " + this.selectedSkin);
-      this.currentSkin = this.selectedSkin;
-    } catch (e) {
-      logger.error("Error applying theme change", e);
-    }
-    Services.prefs.clearUserPref(PREF_SKIN_SWITCHPENDING);
   },
 
   /**
@@ -2817,149 +2645,46 @@ var XPIProvider = {
         continue;
       }
 
-      let stagingDir = location.getStagingDir();
+      let state = XPIStates.getLocation(location.name);
 
-      try {
-        if (!stagingDir || !stagingDir.exists() || !stagingDir.isDirectory())
-          continue;
-      } catch (e) {
-        logger.warn("Failed to find staging directory", e);
-        continue;
-      }
+      let cleanNames = [];
+      for (let [id, metadata] of state.getStagedAddons()) {
+        state.unstageAddon(id);
 
-      let seenFiles = [];
-      // Use a snapshot of the directory contents to avoid possible issues with
-      // iterating over a directory while removing files from it (the YAFFS2
-      // embedded filesystem has this issue, see bug 772238), and to remove
-      // normal files before their resource forks on OSX (see bug 733436).
-      let stagingDirEntries = getDirectoryEntries(stagingDir, true);
-      for (let stageDirEntry of stagingDirEntries) {
-        let id = stageDirEntry.leafName;
-
-        let isDir;
-        try {
-          isDir = stageDirEntry.isDirectory();
-        } catch (e) {
-          if (e.result != Cr.NS_ERROR_FILE_TARGET_DOES_NOT_EXIST)
-            throw e;
-          // If the file has already gone away then don't worry about it, this
-          // can happen on OSX where the resource fork is automatically moved
-          // with the data fork for the file. See bug 733436.
-          continue;
-        }
-
-        if (!isDir) {
-          if (id.substring(id.length - 4).toLowerCase() == ".xpi") {
-            id = id.substring(0, id.length - 4);
-          } else {
-            if (id.substring(id.length - 5).toLowerCase() != ".json") {
-              logger.warn("Ignoring file: " + stageDirEntry.path);
-              seenFiles.push(stageDirEntry.leafName);
-            }
-            continue;
-          }
-        }
+        let source = getFile(`${id}.xpi`, location.getStagingDir());
 
         // Check that the directory's name is a valid ID.
-        if (!gIDTest.test(id)) {
-          logger.warn("Ignoring directory whose name is not a valid add-on ID: " +
-               stageDirEntry.path);
-          seenFiles.push(stageDirEntry.leafName);
+        if (!gIDTest.test(id) || !source.exists() || !source.isFile()) {
+          logger.warn("Ignoring invalid staging directory entry: ${id}", {id});
+          cleanNames.push(source.leafName);
           continue;
         }
 
         changed = true;
-
-        if (isDir) {
-          // Check if the directory contains an install manifest.
-          let manifest = getManifestFileForDir(stageDirEntry);
-
-          // If the install manifest doesn't exist uninstall this add-on in this
-          // install location.
-          if (!manifest) {
-            logger.debug("Processing uninstall of " + id + " in " + location.name);
-
-            try {
-              let addonFile = location.getLocationForID(id);
-              let addonToUninstall = syncLoadManifestFromFile(addonFile, location);
-              if (addonToUninstall.bootstrap) {
-                this.callBootstrapMethod(addonToUninstall, addonToUninstall._sourceBundle,
-                                         "uninstall", BOOTSTRAP_REASONS.ADDON_UNINSTALL);
-              }
-            } catch (e) {
-              logger.warn("Failed to call uninstall for " + id, e);
-            }
-
-            try {
-              location.uninstallAddon(id);
-              XPIStates.removeAddon(location.name, id);
-              seenFiles.push(stageDirEntry.leafName);
-            } catch (e) {
-              logger.error("Failed to uninstall add-on " + id + " in " + location.name, e);
-            }
-            // The file check later will spot the removal and cleanup the database
-            continue;
-          }
-        }
-
         aManifests[location.name][id] = null;
-        let existingAddonID = id;
 
-        let jsonfile = getFile(`${id}.json`, stagingDir);
-        // Assume this was a foreign install if there is no cached metadata file
-        let foreignInstall = !jsonfile.exists();
         let addon;
-
         try {
-          addon = syncLoadManifestFromFile(stageDirEntry, location);
+          addon = syncLoadManifestFromFile(source, location);
         } catch (e) {
-          logger.error("Unable to read add-on manifest from " + stageDirEntry.path, e);
-          // This add-on can't be installed so just remove it now
-          seenFiles.push(stageDirEntry.leafName);
-          seenFiles.push(jsonfile.leafName);
+          logger.error(`Unable to read add-on manifest from ${source.path}`, e);
+          cleanNames.push(source.leafName);
           continue;
         }
 
         if (mustSign(addon.type) &&
             addon.signedState <= AddonManager.SIGNEDSTATE_MISSING) {
-          logger.warn("Refusing to install staged add-on " + id + " with signed state " + addon.signedState);
-          seenFiles.push(stageDirEntry.leafName);
-          seenFiles.push(jsonfile.leafName);
+          logger.warn(`Refusing to install staged add-on ${id} with signed state ${addon.signedState}`);
+          cleanNames.push(source.leafName);
           continue;
         }
 
-        // Check for a cached metadata for this add-on, it may contain updated
-        // compatibility information
-        if (!foreignInstall) {
-          logger.debug("Found updated metadata for " + id + " in " + location.name);
-          let fis = Cc["@mozilla.org/network/file-input-stream;1"].
-                       createInstance(Ci.nsIFileInputStream);
-          try {
-            fis.init(jsonfile, -1, 0, 0);
-
-            let bytes = NetUtil.readInputStream(fis, jsonfile.fileSize);
-            let metadata = JSON.parse(gTextDecoder.decode(bytes));
-            addon.importMetadata(metadata);
-
-            // Pass this through to addMetadata so it knows this add-on was
-            // likely installed through the UI
-            aManifests[location.name][id] = addon;
-          } catch (e) {
-            // If some data can't be recovered from the cached metadata then it
-            // is unlikely to be a problem big enough to justify throwing away
-            // the install, just log an error and continue
-            logger.error("Unable to read metadata from " + jsonfile.path, e);
-          } finally {
-            fis.close();
-          }
-        }
-        seenFiles.push(jsonfile.leafName);
-
-        existingAddonID = addon.existingAddonID || id;
+        addon.importMetadata(metadata);
+        aManifests[location.name][id] = addon;
 
         var oldBootstrap = null;
-        logger.debug("Processing install of " + id + " in " + location.name);
-        let existingAddon = XPIStates.findAddon(existingAddonID);
+        logger.debug(`Processing install of ${id} in ${location.name}`);
+        let existingAddon = XPIStates.findAddon(id);
         if (existingAddon && existingAddon.bootstrapped) {
           try {
             var file = existingAddon.file;
@@ -2975,27 +2700,22 @@ var XPIProvider = {
               this.callBootstrapMethod(existingAddon,
                                        file, "uninstall", uninstallReason,
                                        { newVersion });
-              this.unloadBootstrapScope(existingAddonID);
-              flushChromeCaches();
+              this.unloadBootstrapScope(id);
+              XPIInstall.flushChromeCaches();
             }
           } catch (e) {
+            Cu.reportError(e);
           }
         }
 
         try {
           addon._sourceBundle = location.installAddon({
-            id,
-            source: stageDirEntry,
-            existingAddonID
+            id, source, existingAddonID: id,
           });
           XPIStates.addAddon(addon);
         } catch (e) {
           logger.error("Failed to install staged add-on " + id + " in " + location.name,
                 e);
-          // Re-create the staged install
-          new StagedAddonInstall(location, stageDirEntry, addon);
-          // Make sure not to delete the cached manifest json file
-          seenFiles.pop();
 
           delete aManifests[location.name][id];
 
@@ -3004,15 +2724,16 @@ var XPIProvider = {
             this.callBootstrapMethod(oldBootstrap, existingAddon, "install",
                                      BOOTSTRAP_REASONS.ADDON_INSTALL);
           }
-          continue;
         }
       }
 
       try {
-        location.cleanStagingDir(seenFiles);
+        if (cleanNames.length) {
+          location.cleanStagingDir(cleanNames);
+        }
       } catch (e) {
         // Non-critical, just saves some perf on startup if we clean this up.
-        logger.debug("Error cleaning staging dir " + stagingDir.path, e);
+        logger.debug("Error cleaning staging dir", e);
       }
     }
     return changed;
@@ -3292,26 +3013,6 @@ var XPIProvider = {
         }
       }
 
-      if (aAppChanged) {
-        // When upgrading the app and using a custom skin make sure it is still
-        // compatible otherwise switch back the default
-        if (this.currentSkin != this.defaultSkin) {
-          let oldSkin = XPIDatabase.getVisibleAddonForInternalName(this.currentSkin);
-          if (!oldSkin || oldSkin.disabled)
-            this.enableDefaultTheme();
-        }
-
-        // When upgrading remove the old extensions cache to force older
-        // versions to rescan the entire list of extensions
-        let oldCache = FileUtils.getFile(KEY_PROFILEDIR, [FILE_OLD_CACHE], true);
-        try {
-          if (oldCache.exists())
-            oldCache.remove(true);
-        } catch (e) {
-          logger.warn("Unable to remove old extension cache " + oldCache.path, e);
-        }
-      }
-
       if (Services.appinfo.inSafeMode) {
         aomStartup.initializeExtensions(this.getSafeModeExtensions());
         logger.debug("Initialized safe mode add-ons");
@@ -3556,7 +3257,7 @@ var XPIProvider = {
    */
   async installAddonFromLocation(aFile, aInstallLocation, aInstallAction) {
     if (aFile.exists() && aFile.isFile()) {
-      flushJarCache(aFile);
+      XPIInstall.flushJarCache(aFile);
     }
     let addon = await loadManifestFromFile(aFile, aInstallLocation);
 
@@ -3626,7 +3327,7 @@ var XPIProvider = {
                                    "uninstall", uninstallReason, extraParams);
         }
         this.unloadBootstrapScope(existingAddonID);
-        flushChromeCaches();
+        XPIInstall.flushChromeCaches();
       }
     } else {
       addon.installDate = Date.now();
@@ -3634,7 +3335,6 @@ var XPIProvider = {
 
     let file = addon._sourceBundle;
 
-    XPIProvider._addURIMapping(addon.id, file);
     let method = callUpdate ? "update" : "install";
     XPIProvider.callBootstrapMethod(addon, file, method, installReason, extraParams);
     addon.state = AddonManager.STATE_INSTALLED;
@@ -3665,6 +3365,23 @@ var XPIProvider = {
       AddonManagerPrivate.notifyAddonChanged(addon.id, addon.type, false);
 
     return addon.wrapper;
+  },
+
+  /**
+   * Sets startupData for the given addon.  The provided data will be stored
+   * in addonsStartup.json so it is available early during browser startup.
+   * Note that this file is read synchronously at startup, so startupData
+   * should be used with care.
+   *
+   * @param {string} aID
+   *         The id of the addon to save startup data for.
+   * @param {any} aData
+   *        The data to store.  Must be JSON serializable.
+   */
+  setStartupData(aID, aData) {
+    let state = XPIStates.findAddon(aID);
+    state.startupData = aData;
+    XPIStates.save();
   },
 
   /**
@@ -3746,12 +3463,9 @@ var XPIProvider = {
     if (this.isDBLoaded) {
       return new Promise(resolve => {
         this.getAddonsByTypes(aTypes, addons => {
-          // The thing with experiments is an ugly hack but we want
-          // Experiments.jsm to use this interface instead of getAddonsByTypes.
-          // They'll go away at some point and we can forget this ever happened.
-          resolve({addons: addons.filter(addon => addon.isActive ||
-                                       (addon.type == "experiment" && !addon.appDisabled)),
-                   fullData: true
+          resolve({
+            addons: addons.filter(addon => addon.isActive),
+            fullData: true,
           });
         });
       });
@@ -3781,7 +3495,6 @@ var XPIProvider = {
         scope,
         isSystem,
         isWebExtension: isWebExtension(addon),
-        multiprocessCompatible: addon.multiprocessCompatible,
       });
     }
 
@@ -3846,24 +3559,6 @@ var XPIProvider = {
   },
 
   /**
-   * Synchronously map a URI to the corresponding Addon ID.
-   *
-   * Mappable URIs are limited to in-application resources belonging to the
-   * add-on, such as Javascript compartments, XUL windows, XBL bindings, etc.
-   * but do not include URIs from meta data, such as the add-on homepage.
-   *
-   * @param  aURI
-   *         nsIURI to map or null
-   * @return string containing the Addon ID
-   * @see    AddonManager.mapURIToAddonID
-   * @see    amIAddonManager.mapURIToAddonID
-   */
-  mapURIToAddonID(aURI) {
-    // Returns `null` instead of empty string if the URI can't be mapped.
-    return AddonPathService.mapURIToAddonId(aURI) || null;
-  },
-
-  /**
    * Called when a new add-on has been enabled when only one add-on of that type
    * can be enabled.
    *
@@ -3871,64 +3566,20 @@ var XPIProvider = {
    *         The ID of the newly enabled add-on
    * @param  aType
    *         The type of the newly enabled add-on
-   * @param  aPendingRestart
-   *         true if the newly enabled add-on will only become enabled after a
-   *         restart
    */
-  addonChanged(aId, aType, aPendingRestart) {
+  addonChanged(aId, aType) {
     // We only care about themes in this provider
     if (!isTheme(aType))
       return;
 
-    if (!aId) {
-      // Fallback to the default theme when no theme was enabled
-      this.enableDefaultTheme();
-      return;
-    }
-
-    // Look for the previously enabled theme and find the internalName of the
-    // currently selected theme
-    let previousTheme = null;
-    let newSkin = this.defaultSkin;
     let addons = XPIDatabase.getAddonsByType("theme", "webextension-theme");
     for (let theme of addons) {
-      if (!theme.visible)
-        return;
-      let isChangedAddon = (theme.id == aId);
-      if (isWebExtension(theme.type)) {
-        if (!isChangedAddon)
-          this.updateAddonDisabledState(theme, true, undefined, aPendingRestart);
-      } else if (isChangedAddon) {
-        newSkin = theme.internalName;
-      } else if (!theme.userDisabled && !theme.pendingUninstall) {
-        previousTheme = theme;
-      }
+      if (isWebExtension(theme.type) && theme.visible && theme.id != aId)
+        this.updateAddonDisabledState(theme, true, undefined);
     }
 
-    if (aPendingRestart) {
-      Services.prefs.setBoolPref(PREF_SKIN_SWITCHPENDING, true);
-      Services.prefs.setCharPref(PREF_SKIN_TO_SELECT, newSkin);
-    } else if (newSkin == this.currentSkin) {
-      try {
-        Services.prefs.clearUserPref(PREF_SKIN_SWITCHPENDING);
-      } catch (e) { }
-      try {
-        Services.prefs.clearUserPref(PREF_SKIN_TO_SELECT);
-      } catch (e) { }
-    } else {
-      Services.prefs.setCharPref(PREF_GENERAL_SKINS_SELECTEDSKIN, newSkin);
-      this.currentSkin = newSkin;
-    }
-    this.selectedSkin = newSkin;
-
-    // Flush the preferences to disk so they don't get out of sync with the
-    // database
-    Services.prefs.savePrefFile(null);
-
-    // Mark the previous theme as disabled. This won't cause recursion since
-    // only enabled calls notifyAddonChanged.
-    if (previousTheme)
-      this.updateAddonDisabledState(previousTheme, true, undefined, aPendingRestart);
+    let defaultTheme = XPIDatabase.getVisibleAddonForInternalName(DEFAULT_SKIN);
+    this.updateAddonDisabledState(defaultTheme, aId && aId != defaultTheme.id);
   },
 
   /**
@@ -3975,33 +3626,6 @@ var XPIProvider = {
     });
   },
 
-  /**
-   * When the previously selected theme is removed this method will be called
-   * to enable the default theme.
-   */
-  enableDefaultTheme() {
-    logger.debug("Activating default theme");
-    let addon = XPIDatabase.getVisibleAddonForInternalName(this.defaultSkin);
-    if (addon) {
-      if (addon.userDisabled) {
-        this.updateAddonDisabledState(addon, false);
-      } else if (!this.extensionsActive) {
-        // During startup we may end up trying to enable the default theme when
-        // the database thinks it is already enabled (see f.e. bug 638847). In
-        // this case just force the theme preferences to be correct
-        Services.prefs.setCharPref(PREF_GENERAL_SKINS_SELECTEDSKIN,
-                                   addon.internalName);
-        this.currentSkin = this.selectedSkin = addon.internalName;
-        Services.prefs.clearUserPref(PREF_SKIN_TO_SELECT);
-        Services.prefs.clearUserPref(PREF_SKIN_SWITCHPENDING);
-      } else {
-        logger.warn("Attempting to activate an already active default theme");
-      }
-    } else {
-      logger.warn("Unable to activate the default theme");
-    }
-  },
-
   onDebugConnectionChange({what, connection}) {
     if (what != "opened")
       return;
@@ -4043,161 +3667,10 @@ var XPIProvider = {
       case PREF_XPI_SIGNATURES_REQUIRED:
       case PREF_LANGPACK_SIGNATURES:
       case PREF_ALLOW_LEGACY:
-      case PREF_ALLOW_NON_MPC:
         this.updateAddonAppDisabledStates();
         break;
       }
     }
-  },
-
-  /**
-   * Tests whether enabling an add-on will require a restart.
-   *
-   * @param  aAddon
-   *         The add-on to test
-   * @return true if the operation requires a restart
-   */
-  enableRequiresRestart(aAddon) {
-    // If the platform couldn't have activated extensions then we can make
-    // changes without any restart.
-    if (!this.extensionsActive)
-      return false;
-
-    // If the application is in safe mode then any change can be made without
-    // restarting
-    if (Services.appinfo.inSafeMode)
-      return false;
-
-    // Anything that is active is already enabled
-    if (aAddon.active)
-      return false;
-
-    if (isTheme(aAddon.type)) {
-      if (isWebExtension(aAddon.type)) {
-        // Enabling a WebExtension type theme requires a restart ONLY when the
-        // theme-to-be-disabled requires a restart.
-        let theme = XPIDatabase.getVisibleAddonForInternalName(this.currentSkin);
-        return !theme || this.disableRequiresRestart(theme);
-      }
-
-      // If the theme is already the theme in use then no restart is necessary.
-      // This covers the case where the default theme is in use but a
-      // lightweight theme is considered active.
-      return aAddon.internalName != this.currentSkin;
-    }
-
-    return !aAddon.bootstrap;
-  },
-
-  /**
-   * Tests whether disabling an add-on will require a restart.
-   *
-   * @param  aAddon
-   *         The add-on to test
-   * @return true if the operation requires a restart
-   */
-  disableRequiresRestart(aAddon) {
-    // If the platform couldn't have activated up extensions then we can make
-    // changes without any restart.
-    if (!this.extensionsActive)
-      return false;
-
-    // If the application is in safe mode then any change can be made without
-    // restarting
-    if (Services.appinfo.inSafeMode)
-      return false;
-
-    // Anything that isn't active is already disabled
-    if (!aAddon.active)
-      return false;
-
-    if (aAddon.type == "theme") {
-      // Non-default themes always require a restart to disable since it will
-      // be switching from one theme to another or to the default theme and a
-      // lightweight theme.
-      if (aAddon.internalName != this.defaultSkin)
-        return true;
-
-      // The default theme requires a restart to disable if we are in the
-      // process of switching to a different theme. Note that this makes the
-      // disabled flag of operationsRequiringRestart incorrect for the default
-      // theme (it will be false most of the time). Bug 520124 would be required
-      // to fix it. For the UI this isn't a problem since we never try to
-      // disable or uninstall the default theme.
-      return this.selectedSkin != this.currentSkin;
-    }
-
-    return !aAddon.bootstrap;
-  },
-
-  /**
-   * Tests whether installing an add-on will require a restart.
-   *
-   * @param  aAddon
-   *         The add-on to test
-   * @return true if the operation requires a restart
-   */
-  installRequiresRestart(aAddon) {
-    // If the platform couldn't have activated up extensions then we can make
-    // changes without any restart.
-    if (!this.extensionsActive)
-      return false;
-
-    // If the application is in safe mode then any change can be made without
-    // restarting
-    if (Services.appinfo.inSafeMode)
-      return false;
-
-    // Add-ons that are already installed don't require a restart to install.
-    // This wouldn't normally be called for an already installed add-on (except
-    // for forming the operationsRequiringRestart flags) so is really here as
-    // a safety measure.
-    if (aAddon.inDatabase)
-      return false;
-
-    // If we have an AddonInstall for this add-on then we can see if there is
-    // an existing installed add-on with the same ID
-    if ("_install" in aAddon && aAddon._install) {
-      // If there is an existing installed add-on and uninstalling it would
-      // require a restart then installing the update will also require a
-      // restart
-      let existingAddon = aAddon._install.existingAddon;
-      if (existingAddon && this.uninstallRequiresRestart(existingAddon))
-        return true;
-    }
-
-    // If the add-on is not going to be active after installation then it
-    // doesn't require a restart to install.
-    if (aAddon.disabled)
-      return false;
-
-    // Themes will require a restart (even if dynamic switching is enabled due
-    // to some caching issues) and non-bootstrapped add-ons will require a
-    // restart
-    return aAddon.type == "theme" || !aAddon.bootstrap;
-  },
-
-  /**
-   * Tests whether uninstalling an add-on will require a restart.
-   *
-   * @param  aAddon
-   *         The add-on to test
-   * @return true if the operation requires a restart
-   */
-  uninstallRequiresRestart(aAddon) {
-    // If the platform couldn't have activated up extensions then we can make
-    // changes without any restart.
-    if (!this.extensionsActive)
-      return false;
-
-    // If the application is in safe mode then any change can be made without
-    // restarting
-    if (Services.appinfo.inSafeMode)
-      return false;
-
-    // If the add-on can be disabled without a restart then it can also be
-    // uninstalled without a restart
-    return this.disableRequiresRestart(aAddon);
   },
 
   /**
@@ -4214,8 +3687,6 @@ var XPIProvider = {
    *         The add-on's version
    * @param  aType
    *         The type for the add-on
-   * @param  aMultiprocessCompatible
-   *         Boolean indicating whether the add-on is compatible with electrolysis.
    * @param  aRunInSafeMode
    *         Boolean indicating whether the add-on can run in safe mode.
    * @param  aDependencies
@@ -4224,9 +3695,8 @@ var XPIProvider = {
    *         Boolean indicating whether the add-on has an embedded webextension.
    * @return a JavaScript scope
    */
-  loadBootstrapScope(aId, aFile, aVersion, aType,
-                               aMultiprocessCompatible, aRunInSafeMode,
-                               aDependencies, hasEmbeddedWebExtension) {
+  loadBootstrapScope(aId, aFile, aVersion, aType, aRunInSafeMode, aDependencies,
+                     hasEmbeddedWebExtension) {
     this.activeAddons.set(aId, {
       bootstrapScope: null,
       // a Symbol passed to this add-on, which it can use to identify itself
@@ -4243,9 +3713,6 @@ var XPIProvider = {
 
     let principal = Cc["@mozilla.org/systemprincipal;1"].
                     createInstance(Ci.nsIPrincipal);
-    if (!aMultiprocessCompatible) {
-      Cu.allowCPOWsInAddon(aId, true);
-    }
 
     if (!aFile.exists()) {
       activeAddon.bootstrapScope =
@@ -4265,8 +3732,6 @@ var XPIProvider = {
       let uri = getURIForResourceInFile(aFile, "bootstrap.js").spec;
       if (aType == "dictionary")
         uri = "resource://gre/modules/addons/SpellCheckDictionaryBootstrap.js";
-      else if (aType == "apiextension")
-        uri = "resource://gre/modules/addons/APIExtensionBootstrap.js";
 
       activeAddon.bootstrapScope =
         new Cu.Sandbox(principal, { sandboxName: uri,
@@ -4307,8 +3772,6 @@ var XPIProvider = {
    *         The add-on's ID
    */
   unloadBootstrapScope(aId) {
-    Cu.allowCPOWsInAddon(aId, false);
-
     this.activeAddons.delete(aId);
     this.addAddonsToCrashReporter();
 
@@ -4353,7 +3816,6 @@ var XPIProvider = {
       let activeAddon = this.activeAddons.get(aAddon.id);
       if (!activeAddon) {
         this.loadBootstrapScope(aAddon.id, aFile, aAddon.version, aAddon.type,
-                                aAddon.multiprocessCompatible || false,
                                 runInSafeMode, aAddon.dependencies,
                                 aAddon.hasEmbeddedWebExtension || false);
         activeAddon = this.activeAddons.get(aAddon.id);
@@ -4453,13 +3915,6 @@ var XPIProvider = {
       if (CHROME_TYPES.has(aAddon.type) && aMethod == "shutdown" && aReason != BOOTSTRAP_REASONS.APP_SHUTDOWN) {
         logger.debug("Removing manifest for " + aFile.path);
         Components.manager.removeBootstrappedManifestLocation(aFile);
-
-        let manifest = getURIForResourceInFile(aFile, "chrome.manifest");
-        for (let line of ChromeManifestParser.parseSync(manifest)) {
-          if (line.type == "resource") {
-            ResProtocolHandler.setSubstitution(line.args[0], null);
-          }
-        }
       }
       this.setTelemetry(aAddon.id, aMethod + "_MS", new Date() - timeStart);
     }
@@ -4478,16 +3933,13 @@ var XPIProvider = {
    * @param  aSoftDisabled
    *         Value for the softDisabled property. If undefined the value will
    *         not change. If true this will force userDisabled to be true
-   * @param  aPendingRestart
-   *         If the addon is updated whilst the disabled state of another non-
-   *         restartless addon is also set, we need to carry that forward.
    * @return a tri-state indicating the action taken for the add-on:
    *           - undefined: The add-on did not change state
    *           - true: The add-on because disabled
    *           - false: The add-on became enabled
    * @throws if addon is not a DBAddonInternal
    */
-  updateAddonDisabledState(aAddon, aUserDisabled, aSoftDisabled, aPendingRestart = false) {
+  updateAddonDisabledState(aAddon, aUserDisabled, aSoftDisabled) {
     if (!(aAddon.inDatabase))
       throw new Error("Can only update addon states for installed addons.");
     if (aUserDisabled !== undefined && aSoftDisabled !== undefined) {
@@ -4559,38 +4011,32 @@ var XPIProvider = {
       AddonManagerPrivate.callAddonListeners("onOperationCancelled", wrapper);
     } else {
       if (isDisabled) {
-        var needsRestart = aPendingRestart || this.disableRequiresRestart(aAddon);
-        AddonManagerPrivate.callAddonListeners("onDisabling", wrapper,
-                                               needsRestart);
+        AddonManagerPrivate.callAddonListeners("onDisabling", wrapper, false);
       } else {
-        needsRestart = this.enableRequiresRestart(aAddon);
-        AddonManagerPrivate.callAddonListeners("onEnabling", wrapper,
-                                               needsRestart);
+        AddonManagerPrivate.callAddonListeners("onEnabling", wrapper, false);
       }
 
-      if (!needsRestart) {
-        XPIDatabase.updateAddonActive(aAddon, !isDisabled);
+      XPIDatabase.updateAddonActive(aAddon, !isDisabled);
 
-        if (isDisabled) {
-          if (aAddon.bootstrap && this.activeAddons.has(aAddon.id)) {
-            this.callBootstrapMethod(aAddon, aAddon._sourceBundle, "shutdown",
-                                     BOOTSTRAP_REASONS.ADDON_DISABLE);
-            this.unloadBootstrapScope(aAddon.id);
-          }
-          AddonManagerPrivate.callAddonListeners("onDisabled", wrapper);
-        } else {
-          if (aAddon.bootstrap) {
-            this.callBootstrapMethod(aAddon, aAddon._sourceBundle, "startup",
-                                     BOOTSTRAP_REASONS.ADDON_ENABLE);
-          }
-          AddonManagerPrivate.callAddonListeners("onEnabled", wrapper);
+      if (isDisabled) {
+        if (aAddon.bootstrap && this.activeAddons.has(aAddon.id)) {
+          this.callBootstrapMethod(aAddon, aAddon._sourceBundle, "shutdown",
+                                   BOOTSTRAP_REASONS.ADDON_DISABLE);
+          this.unloadBootstrapScope(aAddon.id);
         }
+        AddonManagerPrivate.callAddonListeners("onDisabled", wrapper);
+      } else {
+        if (aAddon.bootstrap) {
+          this.callBootstrapMethod(aAddon, aAddon._sourceBundle, "startup",
+                                   BOOTSTRAP_REASONS.ADDON_ENABLE);
+        }
+        AddonManagerPrivate.callAddonListeners("onEnabled", wrapper);
       }
     }
 
     // Notify any other providers that a new theme has been enabled
     if (isTheme(aAddon.type) && !isDisabled) {
-      AddonManagerPrivate.notifyAddonChanged(aAddon.id, aAddon.type, needsRestart);
+      AddonManagerPrivate.notifyAddonChanged(aAddon.id, aAddon.type);
 
       if (xpiState) {
         xpiState.syncWithDB(aAddon);
@@ -4608,9 +4054,9 @@ var XPIProvider = {
    * @param  aAddon
    *         The DBAddonInternal to uninstall
    * @param  aForcePending
-   *         Force this addon into the pending uninstall state, even if
-   *         it isn't marked as requiring a restart (used e.g. while the
-   *         add-on manager is open and offering an "undo" button)
+   *         Force this addon into the pending uninstall state (used
+   *         e.g. while the add-on manager is open and offering an
+   *         "undo" button)
    * @throws if the addon cannot be uninstalled because it is in an install
    *         location that does not allow it
    */
@@ -4622,14 +4068,7 @@ var XPIProvider = {
       throw new Error("Cannot uninstall addon " + aAddon.id
           + " from locked install location " + aAddon._installLocation.name);
 
-    // Inactive add-ons don't require a restart to uninstall
-    let requiresRestart = this.uninstallRequiresRestart(aAddon);
-
-    // if makePending is true, we don't actually apply the uninstall,
-    // we just mark the addon as having a pending uninstall
-    let makePending = aForcePending || requiresRestart;
-
-    if (makePending && aAddon.pendingUninstall)
+    if (aForcePending && aAddon.pendingUninstall)
       throw new Error("Add-on is already marked to be uninstalled");
 
     aAddon._hasResourceCache.clear();
@@ -4641,7 +4080,7 @@ var XPIProvider = {
 
     let wasPending = aAddon.pendingUninstall;
 
-    if (makePending) {
+    if (aForcePending) {
       // We create an empty directory in the staging directory to indicate
       // that an uninstall is necessary on next startup. Temporary add-ons are
       // automatically uninstalled on shutdown anyway so there is no need to
@@ -4673,12 +4112,8 @@ var XPIProvider = {
 
     // If the add-on wasn't already pending uninstall then notify listeners.
     if (!wasPending) {
-      // Passing makePending as the requiresRestart parameter is a little
-      // strange as in some cases this operation can complete without a restart
-      // so really this is now saying that the uninstall isn't going to happen
-      // immediately but will happen later.
       AddonManagerPrivate.callAddonListeners("onUninstalling", wrapper,
-                                             makePending);
+                                             !!aForcePending);
     }
 
     let reason = BOOTSTRAP_REASONS.ADDON_UNINSTALL;
@@ -4690,7 +4125,7 @@ var XPIProvider = {
       callUpdate = isWebExtension(aAddon.type) && isWebExtension(existingAddon.type);
     }
 
-    if (!makePending) {
+    if (!aForcePending) {
       if (aAddon.bootstrap) {
         if (aAddon.active) {
           this.callBootstrapMethod(aAddon, aAddon._sourceBundle, "shutdown",
@@ -4703,7 +4138,7 @@ var XPIProvider = {
         }
         XPIStates.disableAddon(aAddon.id);
         this.unloadBootstrapScope(aAddon.id);
-        flushChromeCaches();
+        XPIInstall.flushChromeCaches();
       }
       aAddon._installLocation.uninstallAddon(aAddon.id);
       XPIDatabase.removeAddonMetadata(aAddon);
@@ -4717,7 +4152,7 @@ var XPIProvider = {
           let wrappedAddon = existing.wrapper;
           AddonManagerPrivate.callAddonListeners("onInstalling", wrappedAddon, false);
 
-          if (!existing.disabled && !XPIProvider.enableRequiresRestart(existing)) {
+          if (!existing.disabled) {
             XPIDatabase.updateAddonActive(existing, true);
           }
 
@@ -4734,12 +4169,10 @@ var XPIProvider = {
             }
           }
 
-          // We always send onInstalled even if a restart is required to enable
-          // the revealed add-on
           AddonManagerPrivate.callAddonListeners("onInstalled", wrappedAddon);
         });
       }
-    } else if (aAddon.bootstrap && aAddon.active && !this.disableRequiresRestart(aAddon)) {
+    } else if (aAddon.bootstrap && aAddon.active) {
       this.callBootstrapMethod(aAddon, aAddon._sourceBundle, "shutdown", reason);
       XPIStates.disableAddon(aAddon.id);
       this.unloadBootstrapScope(aAddon.id);
@@ -4748,7 +4181,7 @@ var XPIProvider = {
 
     // Notify any other providers that a new theme has been enabled
     if (isTheme(aAddon.type) && aAddon.active)
-      AddonManagerPrivate.notifyAddonChanged(null, aAddon.type, requiresRestart);
+      AddonManagerPrivate.notifyAddonChanged(null, aAddon.type);
   },
 
   /**
@@ -4782,7 +4215,7 @@ var XPIProvider = {
     let wrapper = aAddon.wrapper;
     AddonManagerPrivate.callAddonListeners("onOperationCancelled", wrapper);
 
-    if (aAddon.bootstrap && !aAddon.disabled && !this.enableRequiresRestart(aAddon)) {
+    if (aAddon.bootstrap && !aAddon.disabled) {
       this.callBootstrapMethod(aAddon, aAddon._sourceBundle, "startup",
                                BOOTSTRAP_REASONS.ADDON_INSTALL);
       XPIDatabase.updateAddonActive(aAddon, true);
@@ -4913,8 +4346,7 @@ AddonInternal.prototype = {
   },
 
   get providesUpdatesSecurely() {
-    return !!(this.updateKey || !this.updateURL ||
-              this.updateURL.substring(0, 6) == "https:");
+    return !this.updateURL || this.updateURL.startsWith("https:");
   },
 
   get isCorrectlySigned() {
@@ -5061,7 +4493,7 @@ AddonInternal.prototype = {
     return app;
   },
 
-  findBlocklistEntry() {
+  async findBlocklistEntry() {
     let staticItem = findMatchingStaticBlocklistItem(this);
     if (staticItem) {
       let url = Services.urlFormatter.formatURLPref(PREF_BLOCKLIST_ITEM_URL);
@@ -5074,7 +4506,7 @@ AddonInternal.prototype = {
     return Blocklist.getAddonBlocklistEntry(this.wrapper);
   },
 
-  updateBlocklistState(options = {}) {
+  async updateBlocklistState(options = {}) {
     let {applySoftBlock = true, oldAddon = null, updateDatabase = true} = options;
 
     if (oldAddon) {
@@ -5084,7 +4516,7 @@ AddonInternal.prototype = {
     }
     let oldState = this.blocklistState;
 
-    let entry = this.findBlocklistEntry();
+    let entry = await this.findBlocklistEntry();
     let newState = entry ? entry.state : Blocklist.STATE_NOT_BLOCKED;
 
     this.blocklistState = newState;
@@ -5130,25 +4562,7 @@ AddonInternal.prototype = {
         }
       }
     }
-    if (aUpdate.multiprocessCompatible !== undefined)
-      this.multiprocessCompatible = aUpdate.multiprocessCompatible;
     this.appDisabled = !isUsableAddon(this);
-  },
-
-  /**
-   * getDataDirectory tries to execute the callback with two arguments:
-   * 1) the path of the data directory within the profile,
-   * 2) any exception generated from trying to build it.
-   */
-  getDataDirectory(callback) {
-    let parentPath = OS.Path.join(OS.Constants.Path.profileDir, "extension-data");
-    let dirPath = OS.Path.join(parentPath, this.id);
-
-    (async function() {
-      await OS.File.makeDir(parentPath, {ignoreExisting: true});
-      await OS.File.makeDir(dirPath, {ignoreExisting: true});
-    })().then(() => callback(dirPath, null),
-            e => callback(dirPath, e));
   },
 
   /**
@@ -5231,12 +4645,10 @@ AddonInternal.prototype = {
     // Add-ons that are in locked install locations, or are pending uninstall
     // cannot be upgraded or uninstalled
     if (!this._installLocation.locked && !this.pendingUninstall) {
-      // Experiments cannot be upgraded.
       // System add-on upgrades are triggered through a different mechanism (see updateSystemAddons())
       let isSystem = this._installLocation.isSystem;
       // Add-ons that are installed by a file link cannot be upgraded.
-      if (this.type != "experiment" &&
-          !this._installLocation.isLinkedAddon(this.id) && !isSystem) {
+      if (!this._installLocation.isLinkedAddon(this.id) && !isSystem) {
         permissions |= AddonManager.PERM_CAN_UPGRADE;
       }
 
@@ -5285,10 +4697,6 @@ AddonWrapper.prototype = {
 
   get isWebExtension() {
     return isWebExtension(addonFor(this).type);
-  },
-
-  get isAPIExtension() {
-    return addonFor(this).type == "apiextension";
   },
 
   get temporarilyInstalled() {
@@ -5381,7 +4789,7 @@ AddonWrapper.prototype = {
     }
 
     let canUseIconURLs = this.isActive ||
-      (addon.type == "theme" && addon.internalName == XPIProvider.defaultSkin);
+      (addon.type == "theme" && addon.internalName == DEFAULT_SKIN);
     if (canUseIconURLs && addon.iconURL) {
       icons[32] = addon.iconURL;
       icons[48] = addon.iconURL;
@@ -5417,11 +4825,6 @@ AddonWrapper.prototype = {
   },
   set applyBackgroundUpdates(val) {
     let addon = addonFor(this);
-    if (this.type == "experiment") {
-      logger.warn("Setting applyBackgroundUpdates on an experiment is not supported.");
-      return addon.applyBackgroundUpdates;
-    }
-
     if (val != AddonManager.AUTOUPDATE_DEFAULT &&
         val != AddonManager.AUTOUPDATE_DISABLE &&
         val != AddonManager.AUTOUPDATE_ENABLE) {
@@ -5502,18 +4905,7 @@ AddonWrapper.prototype = {
   },
 
   get operationsRequiringRestart() {
-    let addon = addonFor(this);
-    let ops = 0;
-    if (XPIProvider.installRequiresRestart(addon))
-      ops |= AddonManager.OP_NEEDS_RESTART_INSTALL;
-    if (XPIProvider.uninstallRequiresRestart(addon))
-      ops |= AddonManager.OP_NEEDS_RESTART_UNINSTALL;
-    if (XPIProvider.enableRequiresRestart(addon))
-      ops |= AddonManager.OP_NEEDS_RESTART_ENABLE;
-    if (XPIProvider.disableRequiresRestart(addon))
-      ops |= AddonManager.OP_NEEDS_RESTART_DISABLE;
-
-    return ops;
+    return 0;
   },
 
   get isDebuggable() {
@@ -5545,7 +4937,7 @@ AddonWrapper.prototype = {
   },
 
   updateBlocklistState(applySoftBlock = true) {
-    addonFor(this).updateBlocklistState({applySoftBlock});
+    return addonFor(this).updateBlocklistState({applySoftBlock});
   },
 
   get userDisabled() {
@@ -5561,9 +4953,11 @@ AddonWrapper.prototype = {
     if (addon.inDatabase) {
       let theme = isTheme(addon.type);
       if (theme && val) {
-        if (addon.internalName == XPIProvider.defaultSkin)
+        if (addon.internalName == DEFAULT_SKIN)
           throw new Error("Cannot disable the default theme");
-        XPIProvider.enableDefaultTheme();
+
+        let defaultTheme = XPIDatabase.getVisibleAddonForInternalName(DEFAULT_SKIN);
+        XPIProvider.updateAddonDisabledState(defaultTheme, false);
       }
       if (!(theme && val) || isWebExtension(addon.type)) {
         // hidden and system add-ons should not be user disasbled,
@@ -5591,9 +4985,8 @@ AddonWrapper.prototype = {
     if (addon.inDatabase) {
       // When softDisabling a theme just enable the active theme
       if (isTheme(addon.type) && val && !addon.userDisabled) {
-        if (addon.internalName == XPIProvider.defaultSkin)
+        if (addon.internalName == DEFAULT_SKIN)
           throw new Error("Cannot disable the default theme");
-        XPIProvider.enableDefaultTheme();
         if (isWebExtension(addon.type))
           XPIProvider.updateAddonDisabledState(addon, undefined, val);
       } else {
@@ -5646,14 +5039,6 @@ AddonWrapper.prototype = {
   },
 
   findUpdates(aListener, aReason, aAppVersion, aPlatformVersion) {
-    // Short-circuit updates for experiments because updates are handled
-    // through the Experiments Manager.
-    if (this.type == "experiment") {
-      AddonManagerPrivate.callNoUpdateListeners(this, aListener, aReason,
-                                                aAppVersion, aPlatformVersion);
-      return;
-    }
-
     new UpdateChecker(addonFor(this), aListener, aReason, aAppVersion, aPlatformVersion);
   },
 
@@ -5777,8 +5162,7 @@ function defineAddonWrapperProperty(name, getter) {
  "providesUpdatesSecurely", "blocklistState", "blocklistURL", "appDisabled",
  "softDisabled", "skinnable", "size", "foreignInstall",
  "strictCompatibility", "updateURL", "dependencies",
- "getDataDirectory", "multiprocessCompatible", "signedState", "mpcOptedOut",
- "isCorrectlySigned"].forEach(function(aProp) {
+ "signedState", "isCorrectlySigned"].forEach(function(aProp) {
    defineAddonWrapperProperty(aProp, function() {
      let addon = addonFor(this);
      return (aProp in addon) ? addon[aProp] : undefined;
@@ -6041,7 +5425,6 @@ class DirectoryInstallLocation {
       }
 
       this._IDToFileMap[id] = entry;
-      XPIProvider._addURIMapping(id, entry);
     }
   }
 
@@ -6171,7 +5554,7 @@ class MutableDirectoryInstallLocation extends DirectoryInstallLocation {
 
     for (let name of aLeafNames) {
       let file = getFile(name, dir);
-      recursiveRemove(file);
+      XPIInstall.recursiveRemove(file);
     }
 
     if (this._stagingDirLock > 0)
@@ -6207,7 +5590,7 @@ class MutableDirectoryInstallLocation extends DirectoryInstallLocation {
     let trashDirExists = trashDir.exists();
     try {
       if (trashDirExists)
-        recursiveRemove(trashDir);
+        XPIInstall.recursiveRemove(trashDir);
       trashDirExists = false;
     } catch (e) {
       logger.warn("Failed to remove trash directory", e);
@@ -6250,7 +5633,7 @@ class MutableDirectoryInstallLocation extends DirectoryInstallLocation {
 
       file = getFile(`${aId}.xpi`, this._directory);
       if (file.exists()) {
-        flushJarCache(file);
+        XPIInstall.flushJarCache(file);
         transaction.moveUnder(file, trashDir);
       }
     };
@@ -6290,7 +5673,7 @@ class MutableDirectoryInstallLocation extends DirectoryInstallLocation {
         transaction.copy(source, this._directory);
       } else if (action == "move") {
         if (source.isFile())
-          flushJarCache(source);
+          XPIInstall.flushJarCache(source);
 
         transaction.moveUnder(source, this._directory);
       }
@@ -6299,7 +5682,7 @@ class MutableDirectoryInstallLocation extends DirectoryInstallLocation {
       // It isn't ideal if this cleanup fails but it isn't worth rolling back
       // the install because of it.
       try {
-        recursiveRemove(trashDir);
+        XPIInstall.recursiveRemove(trashDir);
       } catch (e) {
         logger.warn("Failed to remove trash directory when installing " + id, e);
       }
@@ -6309,7 +5692,7 @@ class MutableDirectoryInstallLocation extends DirectoryInstallLocation {
 
     if (action == "proxy") {
       // When permanently installing sideloaded addon, we just put a proxy file
-      // refering to the addon sources
+      // referring to the addon sources
       newFile.append(id);
 
       writeStringToFile(newFile, source.path);
@@ -6323,7 +5706,6 @@ class MutableDirectoryInstallLocation extends DirectoryInstallLocation {
       logger.warn("failed to set lastModifiedTime on " + newFile.path, e);
     }
     this._IDToFileMap[id] = newFile;
-    XPIProvider._addURIMapping(id, newFile);
 
     if (existingAddonID && existingAddonID != id &&
         existingAddonID in this._IDToFileMap) {
@@ -6364,7 +5746,7 @@ class MutableDirectoryInstallLocation extends DirectoryInstallLocation {
 
     if (file.leafName != aId) {
       logger.debug("uninstallAddon: flushing jar cache " + file.path + " for addon " + aId);
-      flushJarCache(file);
+      XPIInstall.flushJarCache(file);
     }
 
     let transaction = new SafeInstallOperation();
@@ -6375,7 +5757,7 @@ class MutableDirectoryInstallLocation extends DirectoryInstallLocation {
       // It isn't ideal if this cleanup fails, but it is probably better than
       // rolling back the uninstall at this point
       try {
-        recursiveRemove(trashDir);
+        XPIInstall.recursiveRemove(trashDir);
       } catch (e) {
         logger.warn("Failed to remove trash directory when uninstalling " + aId, e);
       }
@@ -6425,7 +5807,6 @@ class BuiltInInstallLocation extends DirectoryInstallLocation {
       }
 
       this._IDToFileMap[id] = file;
-      XPIProvider._addURIMapping(id, file);
     }
   }
 }
@@ -6561,16 +5942,6 @@ class SystemAddonInstallLocation extends MutableDirectoryInstallLocation {
   isValidAddon(aAddon) {
     if (aAddon.appDisabled) {
       logger.warn(`System add-on ${aAddon.id} isn't compatible with the application.`);
-      return false;
-    }
-
-    if (!aAddon.bootstrap) {
-      logger.warn(`System add-on ${aAddon.id} isn't restartless.`);
-      return false;
-    }
-
-    if (!aAddon.multiprocessCompatible) {
-      logger.warn(`System add-on ${aAddon.id} isn't multiprocess compatible.`);
       return false;
     }
 
@@ -6827,7 +6198,7 @@ class SystemAddonInstallLocation extends MutableDirectoryInstallLocation {
     let trashDirExists = trashDir.exists();
     try {
       if (trashDirExists)
-        recursiveRemove(trashDir);
+        XPIInstall.recursiveRemove(trashDir);
       trashDirExists = false;
     } catch (e) {
       logger.warn("Failed to remove trash directory", e);
@@ -6855,7 +6226,7 @@ class SystemAddonInstallLocation extends MutableDirectoryInstallLocation {
     // temporary directory
     try {
       if (source.isFile()) {
-        flushJarCache(source);
+        XPIInstall.flushJarCache(source);
       }
 
       transaction.moveUnder(source, this._directory);
@@ -6863,7 +6234,7 @@ class SystemAddonInstallLocation extends MutableDirectoryInstallLocation {
       // It isn't ideal if this cleanup fails but it isn't worth rolling back
       // the install because of it.
       try {
-        recursiveRemove(trashDir);
+        XPIInstall.recursiveRemove(trashDir);
       } catch (e) {
         logger.warn("Failed to remove trash directory when installing " + id, e);
       }
@@ -6877,7 +6248,6 @@ class SystemAddonInstallLocation extends MutableDirectoryInstallLocation {
       logger.warn("failed to set lastModifiedTime on " + newFile.path, e);
     }
     this._IDToFileMap[id] = newFile;
-    XPIProvider._addURIMapping(id, newFile);
 
     return newFile;
   }
@@ -6978,7 +6348,6 @@ class WinRegInstallLocation extends DirectoryInstallLocation {
       }
 
       this._IDToFileMap[id] = file;
-      XPIProvider._addURIMapping(id, file);
     }
   }
 
@@ -7034,18 +6403,5 @@ var addonTypes = [
                                     AddonManager.VIEW_TYPE_LIST, 8000,
                                     AddonManager.TYPE_UI_HIDE_EMPTY | AddonManager.TYPE_SUPPORTS_UNDO_RESTARTLESS_UNINSTALL),
 ];
-
-// We only register experiments support if the application supports them.
-// Ideally, we would install an observer to watch the pref. Installing
-// an observer for this pref is not necessary here and may be buggy with
-// regards to registering this XPIProvider twice.
-if (Services.prefs.getBoolPref("experiments.supported", false)) {
-  addonTypes.push(
-    new AddonManagerPrivate.AddonType("experiment",
-                                      URI_EXTENSION_STRINGS,
-                                      "type.experiment.name",
-                                      AddonManager.VIEW_TYPE_LIST, 11000,
-                                      AddonManager.TYPE_UI_HIDE_EMPTY | AddonManager.TYPE_SUPPORTS_UNDO_RESTARTLESS_UNINSTALL));
-}
 
 AddonManagerPrivate.registerProvider(XPIProvider, addonTypes);

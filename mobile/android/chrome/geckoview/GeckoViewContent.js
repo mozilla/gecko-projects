@@ -10,17 +10,9 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   Services: "resource://gre/modules/Services.jsm",
 });
 
-XPCOMUtils.defineLazyGetter(this, "dump", () =>
-    ChromeUtils.import("resource://gre/modules/AndroidLog.jsm",
-                       {}).AndroidLog.d.bind(null, "ViewContent"));
-
-function debug(aMsg) {
-  // dump(aMsg);
-}
-
 class GeckoViewContent extends GeckoViewContentModule {
-  register() {
-    debug("register");
+  onEnable() {
+    debug `onEnable`;
 
     addEventListener("DOMTitleChanged", this, false);
     addEventListener("DOMWindowFocus", this, false);
@@ -39,8 +31,8 @@ class GeckoViewContent extends GeckoViewContentModule {
                                            this);
   }
 
-  unregister() {
-    debug("unregister");
+  onDisable() {
+    debug `onDisable`;
 
     removeEventListener("DOMTitleChanged", this);
     removeEventListener("DOMWindowFocus", this);
@@ -60,7 +52,7 @@ class GeckoViewContent extends GeckoViewContentModule {
   }
 
   receiveMessage(aMsg) {
-    debug("receiveMessage " + aMsg.name);
+    debug `receiveMessage: ${aMsg.name}`;
 
     switch (aMsg.name) {
       case "GeckoView:DOMFullscreenEntered":
@@ -125,7 +117,7 @@ class GeckoViewContent extends GeckoViewContentModule {
   }
 
   handleEvent(aEvent) {
-    debug("handleEvent " + aEvent.type);
+    debug `handleEvent: ${aEvent.type}`;
 
     switch (aEvent.type) {
       case "contextmenu":
@@ -136,19 +128,21 @@ class GeckoViewContent extends GeckoViewContentModule {
           return node && node.href;
         }
 
-        let node = aEvent.target;
-        let hrefNode = nearestParentHref(node);
-        let isImageNode = (ChromeUtils.getClassName(node) === "HTMLImageElement");
-        let isMediaNode = (ChromeUtils.getClassName(node) === "HTMLVideoElement" ||
-                           ChromeUtils.getClassName(node) === "HTMLAudioElement");
+        const node = aEvent.target;
+        const hrefNode = nearestParentHref(node);
+        const elementType = ChromeUtils.getClassName(node);
+        const isImage = elementType === "HTMLImageElement";
+        const isMedia = elementType === "HTMLVideoElement" ||
+                        elementType === "HTMLAudioElement";
 
-        if (hrefNode || isImageNode || isMediaNode) {
+        if (hrefNode || isImage || isMedia) {
           this.eventDispatcher.sendRequest({
             type: "GeckoView:ContextMenu",
             screenX: aEvent.screenX,
             screenY: aEvent.screenY,
             uri: hrefNode,
-            elementSrc: isImageNode || isMediaNode
+            elementType,
+            elementSrc: (isImage || isMedia)
                         ? node.currentSrc || node.src
                         : null
           });
@@ -195,4 +189,5 @@ class GeckoViewContent extends GeckoViewContentModule {
   }
 }
 
-var contentListener = new GeckoViewContent("GeckoViewContent", this);
+let {debug, warn} = GeckoViewContent.initLogging("GeckoViewContent");
+let module = GeckoViewContent.create(this);
