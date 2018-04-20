@@ -7,6 +7,8 @@ Transform the partner repack task into an actual task description.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import itertools
+
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import resolve_keyed_by
 from taskgraph.util.scriptworker import get_release_config
@@ -45,6 +47,11 @@ def make_label(config, tasks):
 @transforms.add
 def add_command_arguments(config, tasks):
     release_config = get_release_config(config)
+    all_locales = set()
+    for partner_class in config.params['release_partner_config'].values():
+        for partner in partner_class.values():
+            for sub_partner in partner.values():
+                all_locales.update(sub_partner.get('locales', []))
     for task in tasks:
         # add the MOZHARNESS_OPTIONS, eg version=61.0, build-number=1, platform=win64
         task['run']['options'] = [
@@ -52,6 +59,8 @@ def add_command_arguments(config, tasks):
             'build-number={}'.format(release_config['build_number']),
             'platform={}'.format(task['attributes']['build_platform'].split('-')[0]),
         ]
+        for locale in all_locales:
+            task['run']['options'].append('limit-locale={}'.format(locale))
 
         # The upstream taskIds are stored a special environment variable, because we want to use
         # task-reference's to resolve dependencies, but the string handling of MOZHARNESS_OPTIONS
