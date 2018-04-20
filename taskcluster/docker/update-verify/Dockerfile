@@ -62,3 +62,5 @@ ENV           LC_ALL        en_US.UTF-8
 
 # Set a default command useful for debugging
 CMD ["/bin/bash", "--login"]
+
+# dummy change to trigger a docker image rebuild
