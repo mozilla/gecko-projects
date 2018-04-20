@@ -7,8 +7,6 @@ Transform the partner repack task into an actual task description.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-import itertools
-
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import resolve_keyed_by
 from taskgraph.util.scriptworker import get_release_config
