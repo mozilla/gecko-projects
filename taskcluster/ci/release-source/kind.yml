@@ -16,8 +16,6 @@ transforms:
    - taskgraph.transforms.job:transforms
    - taskgraph.transforms.task:transforms
 
-jobs-from:
-   - source.yml
 
 job-defaults:
    shipping-phase: promote
@@ -40,8 +38,23 @@ job-defaults:
       tooltool-downloads: public
       need-xvfb: false
    run-on-projects: []
-   toolchains:
-      - linux64-clang
-      - linux64-gcc
-      - linux64-rust
-      - linux64-sccache
+   optimization: {}
+
+jobs:
+    linux64-source/opt:
+        description: "Firefox source builder"
+        treeherder:
+            platform: firefox-release/opt
+        shipping-product: firefox
+
+    linux64-fennec-source/opt:
+        description: "Fennec source builder"
+        treeherder:
+            platform: fennec-release/opt
+        shipping-product: fennec
+
+    linux64-devedition-source/opt:
+        description: "Devedition source builder"
+        treeherder:
+            platform: devedition-release/opt
+        shipping-product: devedition
