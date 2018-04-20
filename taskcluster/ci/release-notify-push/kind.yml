@@ -37,7 +37,6 @@ job-defaults:
                mozilla-beta: ["release-signoff@mozilla.org"]
                mozilla-release: ["release-signoff@mozilla.org"]
                try: ["{task_def[metadata][owner]}"]
-               maple: ["release+tcstaging@mozilla.com"]
                default: []
    routes:
       - index.releases.v1.{branch}.{revision}.{product}.{underscore_version}.build{build_number}.email-{channel}
