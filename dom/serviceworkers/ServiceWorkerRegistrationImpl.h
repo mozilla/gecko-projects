@@ -19,6 +19,7 @@ namespace dom {
 class Promise;
 class PushManager;
 class ServiceWorker;
+class WeakWorkerRef;
 
 ////////////////////////////////////////////////////
 // Main Thread implementation
@@ -88,7 +89,7 @@ private:
   void
   RegistrationRemovedInternal();
 
-  RefPtr<ServiceWorkerRegistration> mOuter;
+  ServiceWorkerRegistration* mOuter;
   const nsString mScope;
   bool mListeningForEvents;
 };
@@ -99,13 +100,13 @@ private:
 class WorkerListener;
 
 class ServiceWorkerRegistrationWorkerThread final : public ServiceWorkerRegistration::Inner
-                                                  , public WorkerHolder
 {
+  friend class WorkerListener;
+
 public:
   NS_INLINE_DECL_REFCOUNTING(ServiceWorkerRegistrationWorkerThread, override)
 
-  ServiceWorkerRegistrationWorkerThread(WorkerPrivate* aWorkerPrivate,
-                                        const ServiceWorkerRegistrationDescriptor& aDescriptor);
+  explicit ServiceWorkerRegistrationWorkerThread(const ServiceWorkerRegistrationDescriptor& aDescriptor);
 
   void
   RegistrationRemoved();
@@ -136,10 +137,6 @@ public:
   already_AddRefed<PushManager>
   GetPushManager(JSContext* aCx, ErrorResult& aRv) override;
 
-  // WorkerHolder
-  bool
-  Notify(WorkerStatus aStatus) override;
-
   void
   UpdateFound();
 
@@ -152,15 +149,14 @@ private:
   void
   ReleaseListener();
 
-  // Store a strong reference to the outer binding object.  This will create
-  // a ref-cycle.  We must hold it alive in case any events need to be fired
-  // on it.  The cycle is broken when the global becomes detached or the
-  // registration is removed in the ServiceWorkerManager.
-  RefPtr<ServiceWorkerRegistration> mOuter;
+  // This can be called only by WorkerListener.
+  WorkerPrivate*
+  GetWorkerPrivate(const MutexAutoLock& aProofOfLock);
 
-  WorkerPrivate* mWorkerPrivate;
+  ServiceWorkerRegistration* mOuter;
   const nsString mScope;
   RefPtr<WorkerListener> mListener;
+  RefPtr<WeakWorkerRef> mWorkerRef;
 };
 
 } // dom namespace

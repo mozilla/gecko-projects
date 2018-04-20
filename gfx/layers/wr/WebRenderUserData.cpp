@@ -6,6 +6,7 @@
 
 #include "WebRenderUserData.h"
 
+#include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/layers/ImageClient.h"
 #include "mozilla/layers/WebRenderBridgeChild.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
@@ -22,17 +23,12 @@ namespace layers {
 /* static */ bool
 WebRenderUserData::SupportsAsyncUpdate(nsIFrame* aFrame)
 {
-  if (!aFrame ||
-      !aFrame->HasProperty(nsIFrame::WebRenderUserDataProperty())) {
+  if (!aFrame) {
     return false;
   }
-  RefPtr<WebRenderUserData> data;
-  nsIFrame::WebRenderUserDataTable* userDataTable =
-    aFrame->GetProperty(nsIFrame::WebRenderUserDataProperty());
-
-  userDataTable->Get(static_cast<uint32_t>(DisplayItemType::TYPE_VIDEO), getter_AddRefs(data));
-  if (data && data->AsImageData()) {
-    return data->AsImageData()->IsAsync();
+  RefPtr<WebRenderImageData> data = GetWebRenderUserData<WebRenderImageData>(aFrame, static_cast<uint32_t>(DisplayItemType::TYPE_VIDEO));
+  if (data) {
+    return data->IsAsync();
   }
 
   return false;
@@ -49,12 +45,6 @@ WebRenderUserData::WebRenderUserData(WebRenderLayerManager* aWRManager, nsDispla
 
 WebRenderUserData::~WebRenderUserData()
 {
-}
-
-bool
-WebRenderUserData::IsDataValid(WebRenderLayerManager* aManager)
-{
-  return aManager == mWRManager;
 }
 
 void
@@ -241,7 +231,7 @@ WebRenderImageData::CreateAsyncImageWebRenderCommands(mozilla::wr::DisplayListBu
   // context need to be done manually and pushed over to the parent side,
   // where it will be done when we build the display list for the iframe.
   // That happens in AsyncImagePipelineManager.
-  wr::LayoutRect r = aSc.ToRelativeLayoutRect(aBounds);
+  wr::LayoutRect r = wr::ToRoundedLayoutRect(aBounds);
   aBuilder.PushIFrame(r, aIsBackfaceVisible, mPipelineId.ref());
 
   WrBridge()->AddWebRenderParentCommand(OpUpdateAsyncImagePipeline(mPipelineId.value(),
@@ -365,6 +355,16 @@ WebRenderCanvasData::CreateCanvasRenderer()
   mCanvasRenderer = MakeUnique<WebRenderCanvasRendererAsync>(mWRManager);
   return mCanvasRenderer.get();
 }
+
+void
+DestroyWebRenderUserDataTable(WebRenderUserDataTable* aTable)
+{
+  for (auto iter = aTable->Iter(); !iter.Done(); iter.Next()) {
+    iter.UserData()->RemoveFromTable();
+  }
+  delete aTable;
+}
+
 
 } // namespace layers
 } // namespace mozilla

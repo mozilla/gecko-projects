@@ -161,6 +161,7 @@ InterceptStreamListener::Cleanup()
 HttpChannelChild::HttpChannelChild()
   : HttpAsyncAborter<HttpChannelChild>(this)
   , NeckoTargetHolder(nullptr)
+  , mCacheKey(0)
   , mSynthesizedStreamLength(0)
   , mIsFromCache(false)
   , mCacheEntryAvailable(false)
@@ -226,7 +227,6 @@ HttpChannelChild::ReleaseMainThreadOnlyReferences()
   }
 
   nsTArray<nsCOMPtr<nsISupports>> arrayToRelease;
-  arrayToRelease.AppendElement(mCacheKey.forget());
   arrayToRelease.AppendElement(mRedirectChannelChild.forget());
 
   // To solve multiple inheritence of nsISupports in InterceptStreamListener
@@ -652,20 +652,7 @@ HttpChannelChild::OnStartRequest(const nsresult& channelStatus,
 
   AutoEventEnqueuer ensureSerialDispatch(mEventQ);
 
-  nsresult rv;
-  nsCOMPtr<nsISupportsPRUint32> container =
-    do_CreateInstance(NS_SUPPORTS_PRUINT32_CONTRACTID, &rv);
-  if (NS_FAILED(rv)) {
-    Cancel(rv);
-    return;
-  }
-
-  rv = container->SetData(cacheKey);
-  if (NS_FAILED(rv)) {
-    Cancel(rv);
-    return;
-  }
-  mCacheKey = container;
+  mCacheKey = cacheKey;
 
   // replace our request headers with what actually got sent in the parent
   mRequestHead.SetHeaders(requestHeaders);
@@ -2356,6 +2343,8 @@ HttpChannelChild::Cancel(nsresult status)
 {
   LOG(("HttpChannelChild::Cancel [this=%p, status=%" PRIx32 "]\n",
        this, static_cast<uint32_t>(status)));
+  LogCallingScriptLocation(this);
+
   MOZ_ASSERT(NS_IsMainThread());
 
   if (!mCanceled) {
@@ -2467,18 +2456,7 @@ HttpChannelChild::AsyncOpen(nsIStreamListener *listener, nsISupports *aContext)
              "security flags in loadInfo but asyncOpen2() not called");
 
   LOG(("HttpChannelChild::AsyncOpen [this=%p uri=%s]\n", this, mSpec.get()));
-
-  if (LOG4_ENABLED()) {
-    JSContext* cx = nsContentUtils::GetCurrentJSContext();
-    if (cx) {
-      nsAutoCString fileNameString;
-      uint32_t line = 0, col = 0;
-      if (nsJSUtils::GetCallingLocation(cx, fileNameString, &line, &col)) {
-        LOG(("HttpChannelChild %p source script=%s:%u:%u",
-             this, fileNameString.get(), line, col));
-      }
-    }
-  }
+  LogCallingScriptLocation(this);
 
 #ifdef DEBUG
   AssertPrivateBrowsingId();
@@ -2744,19 +2722,7 @@ HttpChannelChild::ContinueAsyncOpen()
   openArgs.tlsFlags() = mTlsFlags;
   openArgs.initialRwin() = mInitialRwin;
 
-  uint32_t cacheKey = 0;
-  if (mCacheKey) {
-    nsCOMPtr<nsISupportsPRUint32> container = do_QueryInterface(mCacheKey);
-    if (!container) {
-      return NS_ERROR_ILLEGAL_VALUE;
-    }
-
-    nsresult rv = container->GetData(&cacheKey);
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-  }
-  openArgs.cacheKey() = cacheKey;
+  openArgs.cacheKey() = mCacheKey;
 
   openArgs.blockAuthPrompt() = mBlockAuthPrompt;
 
@@ -3057,17 +3023,17 @@ HttpChannelChild::GetCacheEntryId(uint64_t *aCacheEntryId)
 }
 
 NS_IMETHODIMP
-HttpChannelChild::GetCacheKey(nsISupports **cacheKey)
+HttpChannelChild::GetCacheKey(uint32_t *cacheKey)
 {
   if (mSynthesizedCacheInfo) {
     return mSynthesizedCacheInfo->GetCacheKey(cacheKey);
   }
 
-  NS_IF_ADDREF(*cacheKey = mCacheKey);
+  *cacheKey = mCacheKey;
   return NS_OK;
 }
 NS_IMETHODIMP
-HttpChannelChild::SetCacheKey(nsISupports *cacheKey)
+HttpChannelChild::SetCacheKey(uint32_t cacheKey)
 {
   if (mSynthesizedCacheInfo) {
     return mSynthesizedCacheInfo->SetCacheKey(cacheKey);
@@ -3987,7 +3953,9 @@ HttpChannelChild::LogBlockedCORSRequest(const nsAString & aMessage)
 {
   if (mLoadInfo) {
     uint64_t innerWindowID = mLoadInfo->GetInnerWindowID();
-    nsCORSListenerProxy::LogBlockedCORSRequest(innerWindowID, aMessage);
+    bool privateBrowsing = !!mLoadInfo->GetOriginAttributes().mPrivateBrowsingId;
+    nsCORSListenerProxy::LogBlockedCORSRequest(innerWindowID, privateBrowsing,
+                                               aMessage);
   }
   return NS_OK;
 }

@@ -23,7 +23,6 @@ DIRS += ['xbl-marquee']
 TEST_DIRS += ['test']
 
 EXPORTS += [
-    '!nsStyleStructList.h',
     'AnimationCommon.h',
     'CounterStyleManager.h',
     'nsAnimationManager.h',
@@ -31,9 +30,7 @@ EXPORTS += [
     'nsCSSAnonBoxes.h',
     'nsCSSAnonBoxList.h',
     'nsCSSCounterDescList.h',
-    'nsCSSCounterStyleRule.h',
     'nsCSSFontDescList.h',
-    'nsCSSFontFaceRule.h',
     'nsCSSKeywordList.h',
     'nsCSSKeywords.h',
     'nsCSSParser.h',
@@ -41,10 +38,7 @@ EXPORTS += [
     'nsCSSPropertyID.h',
     'nsCSSPropertyIDSet.h',
     'nsCSSPropList.h',
-    'nsCSSPropLogicalGroupList.h',
     'nsCSSProps.h',
-    'nsCSSPseudoClasses.h',
-    'nsCSSPseudoClassList.h',
     'nsCSSPseudoElementList.h',
     'nsCSSPseudoElements.h',
     'nsCSSScanner.h',
@@ -56,36 +50,24 @@ EXPORTS += [
     'nsICSSLoaderObserver.h',
     'nsLayoutStylesheetCache.h',
     'nsMediaFeatures.h',
-    'nsRuleProcessorData.h',
     'nsStyleAutoArray.h',
     'nsStyleConsts.h',
-    'nsStyleContext.h',
-    'nsStyleContextInlines.h',
     'nsStyleCoord.h',
     'nsStyleStruct.h',
     'nsStyleStructFwd.h',
     'nsStyleStructInlines.h',
+    'nsStyleStructList.h',
     'nsStyleTransformMatrix.h',
     'nsStyleUtil.h',
     'nsTimingFunction.h',
 ]
 
-if CONFIG['MOZ_OLD_STYLE']:
-    EXPORTS += [
-        'nsCSSRuleProcessor.h',
-        'nsIStyleRule.h',
-        'nsIStyleRuleProcessor.h',
-        'nsMediaList.h',
-        'nsRuleData.h',
-        'nsRuleNode.h',
-        'nsRuleWalker.h',
-        'nsStyleSet.h',
-    ]
-
 EXPORTS.mozilla += [
     'AnimationCollection.h',
     'BindingStyleRule.h',
     'CachedInheritingStyles.h',
+    'ComputedStyle.h',
+    'ComputedStyleInlines.h',
     'CSSEnabledState.h',
     'DeclarationBlock.h',
     'DeclarationBlockInlines.h',
@@ -96,17 +78,18 @@ EXPORTS.mozilla += [
     'MediaFeatureChange.h',
     'PostTraversalTask.h',
     'PreloadedStyleSheet.h',
-    'RuleNodeCacheConditions.h',
     'ServoArcTypeList.h',
     'ServoBindingList.h',
     'ServoBindings.h',
     'ServoBindingTypes.h',
+    'ServoCounterStyleRule.h',
     'ServoCSSParser.h',
     'ServoCSSRuleList.h',
     'ServoDeclarationBlock.h',
     'ServoDocumentRule.h',
     'ServoElementSnapshot.h',
     'ServoElementSnapshotTable.h',
+    'ServoFontFaceRule.h',
     'ServoFontFeatureValuesRule.h',
     'ServoImportRule.h',
     'ServoKeyframeRule.h',
@@ -115,39 +98,23 @@ EXPORTS.mozilla += [
     'ServoMediaRule.h',
     'ServoNamespaceRule.h',
     'ServoPageRule.h',
-    'ServoPropPrefList.h',
     'ServoSpecifiedValues.h',
-    'ServoStyleContext.h',
-    'ServoStyleContextInlines.h',
     'ServoStyleRule.h',
     'ServoStyleSet.h',
+    'ServoStyleSetInlines.h',
     'ServoStyleSheet.h',
     'ServoSupportsRule.h',
+    'ServoTraversalStatistics.h',
     'ServoTypes.h',
     'ServoUtils.h',
     'SheetType.h',
     'StyleAnimationValue.h',
-    'StyleBackendType.h',
     'StyleComplexColor.h',
-    'StylePrefs.h',
-    'StyleSetHandle.h',
-    'StyleSetHandleInlines.h',
     'StyleSheet.h',
     'StyleSheetInfo.h',
     'StyleSheetInlines.h',
     'URLExtraData.h',
 ]
-
-if CONFIG['MOZ_OLD_STYLE']:
-    EXPORTS.mozilla += [
-        'CSSStyleSheet.h',
-        'CSSVariableDeclarations.h',
-        'CSSVariableResolver.h',
-        'CSSVariableValues.h',
-        'GeckoStyleContext.h',
-        'IncrementalClearCOMRuleArray.h',
-        'RuleProcessorCache.h',
-    ]
 
 EXPORTS.mozilla.dom += [
     'CSS.h',
@@ -182,18 +149,11 @@ EXPORTS.mozilla.css += [
     'URLMatchingFunction.h',
 ]
 
-if CONFIG['MOZ_OLD_STYLE']:
-    EXPORTS.mozilla.css += [
-        'Declaration.h',
-        'ImportRule.h',
-        'NameSpaceRule.h',
-        'StyleRule.h',
-    ]
-
 UNIFIED_SOURCES += [
     'AnimationCollection.cpp',
     'BindingStyleRule.cpp',
     'CachedInheritingStyles.cpp',
+    'ComputedStyle.cpp',
     'CounterStyleManager.cpp',
     'CSS.cpp',
     'CSSFontFeatureValuesRule.cpp',
@@ -219,12 +179,8 @@ UNIFIED_SOURCES += [
     'MediaQueryList.cpp',
     'nsAnimationManager.cpp',
     'nsComputedDOMStyle.cpp',
-    'nsCSSAnonBoxes.cpp',
-    'nsCSSCounterStyleRule.cpp',
-    'nsCSSFontFaceRule.cpp',
     'nsCSSKeywords.cpp',
     'nsCSSProps.cpp',
-    'nsCSSPseudoClasses.cpp',
     'nsCSSScanner.cpp',
     'nsCSSValue.cpp',
     'nsDOMCSSAttrDeclaration.cpp',
@@ -239,7 +195,6 @@ UNIFIED_SOURCES += [
     'nsICSSDeclaration.cpp',
     'nsMediaFeatures.cpp',
     'nsROCSSPrimitiveValue.cpp',
-    'nsStyleContext.cpp',
     'nsStyleCoord.cpp',
     'nsStyleStruct.cpp',
     'nsStyleTransformMatrix.cpp',
@@ -249,11 +204,13 @@ UNIFIED_SOURCES += [
     'PreloadedStyleSheet.cpp',
     'Rule.cpp',
     'ServoBindings.cpp',
+    'ServoCounterStyleRule.cpp',
     'ServoCSSParser.cpp',
     'ServoCSSRuleList.cpp',
     'ServoDeclarationBlock.cpp',
     'ServoDocumentRule.cpp',
     'ServoElementSnapshot.cpp',
+    'ServoFontFaceRule.cpp',
     'ServoFontFeatureValuesRule.cpp',
     'ServoImportRule.cpp',
     'ServoKeyframeRule.cpp',
@@ -263,49 +220,28 @@ UNIFIED_SOURCES += [
     'ServoNamespaceRule.cpp',
     'ServoPageRule.cpp',
     'ServoSpecifiedValues.cpp',
-    'ServoStyleContext.cpp',
     'ServoStyleRule.cpp',
     'ServoStyleSet.cpp',
     'ServoStyleSheet.cpp',
     'ServoSupportsRule.cpp',
     'StreamLoader.cpp',
     'StyleAnimationValue.cpp',
-    'StylePrefs.cpp',
     'StyleSheet.cpp',
     'URLExtraData.cpp',
 ]
 
-if CONFIG['MOZ_OLD_STYLE']:
-    UNIFIED_SOURCES += [
-        'CSSStyleSheet.cpp',
-        'CSSVariableDeclarations.cpp',
-        'CSSVariableResolver.cpp',
-        'CSSVariableValues.cpp',
-        'Declaration.cpp',
-        'GeckoStyleContext.cpp',
-        'IncrementalClearCOMRuleArray.cpp',
-        'nsCSSDataBlock.cpp',
-        'nsCSSParser.cpp',
-        'nsCSSRuleProcessor.cpp',
-        'nsCSSRules.cpp',
-        'nsMediaList.cpp',
-        'nsNthIndexCache.cpp',
-        'nsRuleData.cpp',
-        'nsRuleNode.cpp',
-        'nsStyleSet.cpp',
-        'RuleNodeCacheConditions.cpp',
-        'RuleProcessorCache.cpp',
-        'StyleRule.cpp',
-    ]
-
 SOURCES += [
-    # Both nsCSSPseudoElements.cpp and nsCSSPseudoClasses.cpp defined a
-    # 'mozPlaceholder' static atom.
+    'nsCSSAnonBoxes.cpp',
     'nsCSSPseudoElements.cpp',
     # nsLayoutStylesheetCache.cpp uses nsExceptionHandler.h, which includes
     # windows.h.
     'nsLayoutStylesheetCache.cpp',
 ]
+if CONFIG['CC_TYPE'] == 'msvc':
+    # Needed for gCSSAnonBoxAtoms.
+    SOURCES['nsCSSAnonBoxes.cpp'].flags += ['-Zc:externConstexpr']
+    # Needed for gCSSPseudoElementAtoms.
+    SOURCES['nsCSSPseudoElements.cpp'].flags += ['-Zc:externConstexpr']
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
@@ -337,13 +273,6 @@ CONTENT_ACCESSIBLE_FILES += [
     'TopLevelImageDocument.css',
     'TopLevelVideoDocument.css',
 ]
-
-GENERATED_FILES += [
-    'nsStyleStructList.h',
-]
-
-style_struct_list = GENERATED_FILES['nsStyleStructList.h']
-style_struct_list.script = 'generate-stylestructlist.py'
 
 if CONFIG['COMPILE_ENVIRONMENT']:
     GENERATED_FILES += [

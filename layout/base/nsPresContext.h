@@ -43,11 +43,9 @@
 #include "nsThreadUtils.h"
 #include "ScrollbarStyles.h"
 #include "nsIMessageManager.h"
-#include "mozilla/RestyleLogging.h"
 #include "Units.h"
 #include "prenv.h"
 #include "mozilla/StaticPresData.h"
-#include "mozilla/StyleBackendType.h"
 
 class nsBidi;
 class nsIPrintSettings;
@@ -160,7 +158,7 @@ public:
    * Set and detach presentation shell that this context is bound to.
    * A presentation context may only be bound to a single shell.
    */
-  void AttachShell(nsIPresShell* aShell, mozilla::StyleBackendType aBackendType);
+  void AttachShell(nsIPresShell* aShell);
   void DetachShell();
 
 
@@ -224,7 +222,8 @@ public:
       return mDocument;
   }
 
-  mozilla::StyleSetHandle StyleSet() const { return GetPresShell()->StyleSet(); }
+  mozilla::ServoStyleSet* StyleSet() const
+    { return GetPresShell()->StyleSet(); }
 
   bool HasPendingMediaQueryUpdates() const
   {
@@ -240,15 +239,15 @@ public:
   }
 
   mozilla::EffectCompositor* EffectCompositor() { return mEffectCompositor; }
-  nsTransitionManager* TransitionManager() { return mTransitionManager; }
-  nsAnimationManager* AnimationManager() { return mAnimationManager; }
-  const nsAnimationManager* AnimationManager() const { return mAnimationManager; }
+  nsTransitionManager* TransitionManager() { return mTransitionManager.get(); }
+  nsAnimationManager* AnimationManager() { return mAnimationManager.get(); }
+  const nsAnimationManager* AnimationManager() const { return mAnimationManager.get(); }
 
   nsRefreshDriver* RefreshDriver() { return mRefreshDriver; }
 
   mozilla::RestyleManager* RestyleManager() {
     MOZ_ASSERT(mRestyleManager);
-    return mRestyleManager;
+    return mRestyleManager.get();
   }
 
   mozilla::CounterStyleManager* CounterStyleManager() const {
@@ -1065,12 +1064,6 @@ public:
   bool HasPendingRestyleOrReflow();
 
   /**
-   * Informs the document's FontFaceSet that the refresh driver ticked,
-   * flushing style and layout.
-   */
-  void NotifyFontFaceSetOnRefresh();
-
-  /**
    * Notify the prescontext that the presshell is about to reflow a reflow root.
    * The single argument indicates whether this reflow should be interruptible.
    * If aInterruptible is false then CheckForInterrupt and HasPendingInterrupt
@@ -1265,14 +1258,6 @@ public:
    */
   bool MayHavePaintEventListenerInSubDocument();
 
-#ifdef RESTYLE_LOGGING
-  // Controls for whether debug information about restyling in this
-  // document should be output.
-  bool RestyleLoggingEnabled() const { return mRestyleLoggingEnabled; }
-  void StartRestyleLogging() { mRestyleLoggingEnabled = true; }
-  void StopRestyleLogging() { mRestyleLoggingEnabled = false; }
-#endif
-
   void InvalidatePaintedLayers();
 
 protected:
@@ -1313,9 +1298,9 @@ protected:
   RefPtr<nsRefreshDriver> mRefreshDriver;
   RefPtr<mozilla::AnimationEventDispatcher> mAnimationEventDispatcher;
   RefPtr<mozilla::EffectCompositor> mEffectCompositor;
-  RefPtr<nsTransitionManager> mTransitionManager;
-  RefPtr<nsAnimationManager> mAnimationManager;
-  RefPtr<mozilla::RestyleManager> mRestyleManager;
+  mozilla::UniquePtr<nsTransitionManager> mTransitionManager;
+  mozilla::UniquePtr<nsAnimationManager> mAnimationManager;
+  mozilla::UniquePtr<mozilla::RestyleManager> mRestyleManager;
   RefPtr<mozilla::CounterStyleManager> mCounterStyleManager;
   nsAtom* MOZ_UNSAFE_REF("always a static atom") mMedium; // initialized by subclass ctors
   RefPtr<nsAtom> mMediaEmulated;
@@ -1509,11 +1494,6 @@ protected:
 
   // Has NotifyNonBlankPaint been called on this PresContext?
   unsigned              mHadNonBlankPaint : 1;
-
-#ifdef RESTYLE_LOGGING
-  // Should we output debug information about restyling for this document?
-  unsigned mRestyleLoggingEnabled : 1;
-#endif
 
 #ifdef DEBUG
   unsigned mInitialized : 1;

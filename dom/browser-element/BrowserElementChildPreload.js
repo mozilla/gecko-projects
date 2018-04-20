@@ -139,8 +139,10 @@ BrowserElementChild.prototype = {
 
     let webNavigation = docShell.QueryInterface(Ci.nsIWebNavigation);
     if (!webNavigation.sessionHistory) {
-      webNavigation.sessionHistory = Cc["@mozilla.org/browser/shistory;1"]
-                                       .createInstance(Ci.nsISHistory);
+      // XXX(nika): I don't think this code should ever be hit? We should run
+      // TabChild::Init before we run this code which will perform this setup
+      // for us.
+      docShell.initSessionHistory();
     }
 
     // This is necessary to get security web progress notifications.
@@ -881,7 +883,7 @@ BrowserElementChild.prototype = {
       // one we return the form's method and action uri.
       let parent = elem.parentNode;
       while (parent) {
-        if (parent instanceof Ci.nsIDOMHTMLFormElement &&
+        if (ChromeUtils.getClassName(parent) === "HTMLFormElement" &&
             parent.hasAttribute("action")) {
           let actionHref = docShell.QueryInterface(Ci.nsIWebNavigation)
                                    .currentURI
@@ -919,7 +921,7 @@ BrowserElementChild.prototype = {
 
     try {
       if (history && history.count) {
-        history.PurgeHistory(history.count);
+        history.legacySHistory.PurgeHistory(history.count);
       }
     } catch(e) {}
 

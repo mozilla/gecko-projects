@@ -37,12 +37,7 @@ GeckoViewStartup.prototype = {
   observe: function(aSubject, aTopic, aData) {
     switch (aTopic) {
       case "app-startup": {
-        this.setResourceSubstitutions();
-
         // Parent and content process.
-        Services.obs.addObserver(this, "chrome-document-global-created");
-        Services.obs.addObserver(this, "content-document-global-created");
-
         GeckoViewUtils.addLazyGetter(this, "GeckoViewPermission", {
           service: "@mozilla.org/content-permission/prompt;1",
           observers: [
@@ -52,11 +47,12 @@ GeckoViewStartup.prototype = {
           ],
         });
 
-        if (Services.appinfo.processType != Services.appinfo.PROCESS_TYPE_DEFAULT) {
-          // Content process only.
-          GeckoViewUtils.addLazyGetter(this, "GeckoViewPrompt", {
-            service: "@mozilla.org/prompter;1",
-          });
+        if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_DEFAULT) {
+          // Parent process only.
+          this.setResourceSubstitutions();
+
+          Services.mm.loadFrameScript(
+              "chrome://geckoview/content/GeckoViewPromptContent.js", true);
         }
         break;
       }
@@ -72,31 +68,6 @@ GeckoViewStartup.prototype = {
             "ContentPrefs:AddObserverForName",
             "ContentPrefs:RemoveObserverForName",
           ],
-        });
-
-        GeckoViewUtils.addLazyGetter(this, "GeckoViewPrompt", {
-          service: "@mozilla.org/prompter;1",
-          mm: [
-            "GeckoView:Prompt",
-          ],
-        });
-        break;
-      }
-
-      case "chrome-document-global-created":
-      case "content-document-global-created": {
-        let win = GeckoViewUtils.getChromeWindow(aSubject);
-        if (win !== aSubject) {
-          // Only attach to top-level windows.
-          return;
-        }
-
-        GeckoViewUtils.addLazyEventListener(win, ["click", "contextmenu"], {
-          handler: _ => this.GeckoViewPrompt,
-          options: {
-            capture: false,
-            mozSystemGroup: true,
-          },
         });
         break;
       }

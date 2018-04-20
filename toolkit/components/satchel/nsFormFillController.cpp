@@ -14,6 +14,7 @@
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/KeyboardEvent.h"
 #include "mozilla/dom/KeyboardEventBinding.h"
+#include "mozilla/dom/MouseEvent.h"
 #include "mozilla/dom/PageTransitionEvent.h"
 #include "mozilla/Logging.h"
 #include "nsIFormAutoComplete.h"
@@ -34,7 +35,6 @@
 #include "nsIPresShell.h"
 #include "nsRect.h"
 #include "nsILoginManager.h"
-#include "nsIDOMMouseEvent.h"
 #include "mozilla/ModuleUtils.h"
 #include "nsToolkitCompsCID.h"
 #include "nsEmbedCID.h"
@@ -310,7 +310,7 @@ nsFormFillController::MarkAsLoginManagerField(nsIDOMHTMLInputElement *aInput)
     nsCOMPtr<nsIContent> focusedContent = fm->GetFocusedContent();
     if (focusedContent == node) {
       if (!mFocusedInput) {
-        MaybeStartControllingInput(HTMLInputElement::FromContent(node));
+        MaybeStartControllingInput(HTMLInputElement::FromNode(node));
       }
     }
   }
@@ -349,7 +349,7 @@ nsFormFillController::MarkAsAutofillField(nsIDOMHTMLInputElement *aInput)
   if (fm) {
     nsCOMPtr<nsIContent> focusedContent = fm->GetFocusedContent();
     if (focusedContent == node) {
-      MaybeStartControllingInput(HTMLInputElement::FromContent(node));
+      MaybeStartControllingInput(HTMLInputElement::FromNode(node));
     }
   }
 
@@ -663,8 +663,8 @@ nsFormFillController::OnTextEntered(nsIDOMEvent* aEvent,
   // code.
   event->SetTrusted(true);
 
-  bool defaultActionEnabled;
-  mFocusedInput->DispatchEvent(event, &defaultActionEnabled);
+  bool defaultActionEnabled =
+    mFocusedInput->DispatchEvent(*event, CallerType::System, IgnoreErrors());
   *aPrevent = !defaultActionEnabled;
   return NS_OK;
 }
@@ -1032,7 +1032,7 @@ nsFormFillController::Focus(nsIDOMEvent* aEvent)
 {
   nsCOMPtr<nsIContent> input = do_QueryInterface(
     aEvent->InternalDOMEvent()->GetTarget());
-  MaybeStartControllingInput(HTMLInputElement::FromContentOrNull(input));
+  MaybeStartControllingInput(HTMLInputElement::FromNodeOrNull(input));
 
   // Bail if we didn't start controlling the input.
   if (!mFocusedInput) {
@@ -1179,7 +1179,7 @@ nsFormFillController::KeyPress(nsIDOMEvent* aEvent)
 nsresult
 nsFormFillController::MouseDown(nsIDOMEvent* aEvent)
 {
-  nsCOMPtr<nsIDOMMouseEvent> mouseEvent(do_QueryInterface(aEvent));
+  MouseEvent* mouseEvent = aEvent->InternalDOMEvent()->AsMouseEvent();
   if (!mouseEvent) {
     return NS_ERROR_FAILURE;
   }
@@ -1190,8 +1190,7 @@ nsFormFillController::MouseDown(nsIDOMEvent* aEvent)
     return NS_OK;
   }
 
-  int16_t button;
-  mouseEvent->GetButton(&button);
+  int16_t button = mouseEvent->Button();
 
   // In case of a right click we set a timestamp that
   // will be checked in Focus() to avoid showing

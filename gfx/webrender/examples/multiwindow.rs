@@ -86,7 +86,6 @@ impl Window {
         let device_pixel_ratio = window.hidpi_factor();
 
         let opts = webrender::RendererOptions {
-            debug: true,
             device_pixel_ratio,
             clear_color: Some(clear_color),
             ..webrender::RendererOptions::default()
@@ -181,6 +180,7 @@ impl Window {
         let info = LayoutPrimitiveInfo::new(bounds);
         builder.push_stacking_context(
             &info,
+            None,
             ScrollPolicy::Scrollable,
             None,
             TransformStyle::Flat,

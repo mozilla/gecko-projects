@@ -1,4 +1,4 @@
-FROM ubuntu:xenial
+FROM ubuntu:17.10
 
 RUN apt-get -q update \
     && apt-get install --yes -q \

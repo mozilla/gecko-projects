@@ -24,7 +24,6 @@
 class nsIContent;
 class nsIDocShellTreeItem;
 class nsPIDOMWindowOuter;
-class nsIMessageBroadcaster;
 
 namespace mozilla {
 namespace dom {
@@ -179,12 +178,6 @@ protected:
   void EnsureCurrentWidgetFocused();
 
   /**
-   * Iterate over the children of the message broadcaster and notify them
-   * of the activation change.
-   */
-  void ActivateOrDeactivateChildren(nsIMessageBroadcaster* aManager, bool aActive);
-
-  /**
    * Activate or deactivate the window and send the activate/deactivate events.
    */
   void ActivateOrDeactivate(nsPIDOMWindowOuter* aWindow, bool aActive);
@@ -274,6 +267,8 @@ protected:
    *
    * If aAdjustWidget is false, don't change the widget focus state.
    */
+  // MOZ_CAN_RUN_SCRIPT_BOUNDARY for now, until we annotate callers.
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   bool Blur(nsPIDOMWindowOuter* aWindowToClear,
             nsPIDOMWindowOuter* aAncestorWindowToFocus,
             bool aIsLeavingDocument,

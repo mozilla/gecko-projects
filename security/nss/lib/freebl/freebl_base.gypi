@@ -59,7 +59,8 @@
     'sha_fast.c',
     'shvfy.c',
     'sysrand.c',
-    'tlsprfalg.c'
+    'tlsprfalg.c',
+    'verified/FStar.c',
   ],
   'conditions': [
     [ 'OS=="linux" or OS=="android"', {
@@ -122,6 +123,11 @@
             'intel-gcm-x86-masm.asm',
           ],
         }],
+        [ 'cc_use_gnu_ld==1', {
+          # mingw
+          'sources': [
+          ],
+        }],
         [ 'cc_is_clang!=1', {
           # MSVC
           'sources': [
@@ -135,7 +141,6 @@
         # All intel and 64-bit ARM architectures get the 64 bit version.
         'ecl/curve25519_64.c',
         'verified/Hacl_Curve25519.c',
-        'verified/FStar.c',
       ],
     }, {
       'sources': [
@@ -167,7 +172,7 @@
                 }, {
                   # !Windows & !x64 & !arm64 & !aarch64
                   'sources': [
-                    'poly1305.c',
+                    'verified/Hacl_Poly1305_32.c',
                   ],
                 }],
               ],
@@ -176,7 +181,7 @@
         }, {
           # Windows
           'sources': [
-            'poly1305.c',
+            'verified/Hacl_Poly1305_32.c',
           ],
         }],
       ],

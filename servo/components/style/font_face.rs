@@ -11,11 +11,11 @@
 #[cfg(feature = "gecko")]
 use computed_values::{font_stretch, font_style, font_weight};
 use cssparser::{AtRuleParser, DeclarationListParser, DeclarationParser, Parser};
-use cssparser::{SourceLocation, CowRcStr};
+use cssparser::{CowRcStr, SourceLocation};
+#[cfg(feature = "gecko")]
+use cssparser::UnicodeRange;
 use error_reporting::{ContextualParseError, ParseErrorReporter};
-#[cfg(feature = "gecko")] use gecko_bindings::structs::CSSFontFaceDescriptors;
-#[cfg(feature = "gecko")] use cssparser::UnicodeRange;
-use parser::{ParserContext, ParserErrorContext, Parse};
+use parser::{Parse, ParserContext, ParserErrorContext};
 #[cfg(feature = "gecko")]
 use properties::longhands::font_language_override;
 use selectors::parser::SelectorParseErrorKind;
@@ -24,6 +24,7 @@ use std::fmt::{self, Write};
 use str::CssStringWriter;
 use style_traits::{Comma, CssWriter, OneOrMoreSeparated, ParseError};
 use style_traits::{StyleParseErrorKind, ToCss};
+use style_traits::values::SequenceWriter;
 use values::computed::font::FamilyName;
 #[cfg(feature = "gecko")]
 use values::specified::font::{SpecifiedFontFeatureSettings, SpecifiedFontVariationSettings};
@@ -49,13 +50,32 @@ impl OneOrMoreSeparated for Source {
 ///
 /// <https://drafts.csswg.org/css-fonts/#src-desc>
 #[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
-#[derive(Clone, Debug, Eq, PartialEq, ToCss)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UrlSource {
     /// The specified url.
     pub url: SpecifiedUrl,
     /// The format hints specified with the `format()` function.
-    #[css(skip)]
     pub format_hints: Vec<String>,
+}
+
+impl ToCss for UrlSource {
+    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
+    where
+        W: fmt::Write,
+    {
+        self.url.to_css(dest)?;
+        if !self.format_hints.is_empty() {
+            dest.write_str(" format(")?;
+            {
+                let mut writer = SequenceWriter::new(dest, ", ");
+                for hint in self.format_hints.iter() {
+                    writer.item(hint)?;
+                }
+            }
+            dest.write_char(')')?;
+        }
+        Ok(())
+    }
 }
 
 /// A font-display value for a @font-face rule.
@@ -63,8 +83,7 @@ pub struct UrlSource {
 /// on whether and when it is downloaded and ready to use.
 #[allow(missing_docs)]
 #[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
-#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, Parse, PartialEq)]
-#[derive(ToComputedValue, ToCss)]
+#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, Parse, PartialEq, ToComputedValue, ToCss)]
 pub enum FontDisplay {
     Auto,
     Block,
@@ -88,8 +107,10 @@ pub enum FontWeight {
 
 #[cfg(feature = "gecko")]
 impl Parse for FontWeight {
-    fn parse<'i, 't>(_: &ParserContext, input: &mut Parser<'i, 't>)
-        -> Result<FontWeight, ParseError<'i>> {
+    fn parse<'i, 't>(
+        _: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<FontWeight, ParseError<'i>> {
         let result = input.try(|input| {
             let ident = input.expect_ident().map_err(|_| ())?;
             match_ignore_ascii_case! { &ident,
@@ -109,12 +130,14 @@ impl Parse for FontWeight {
 /// Parse the block inside a `@font-face` rule.
 ///
 /// Note that the prelude parsing code lives in the `stylesheets` module.
-pub fn parse_font_face_block<R>(context: &ParserContext,
-                                error_context: &ParserErrorContext<R>,
-                                input: &mut Parser,
-                                location: SourceLocation)
-                                -> FontFaceRuleData
-    where R: ParseErrorReporter
+pub fn parse_font_face_block<R>(
+    context: &ParserContext,
+    error_context: &ParserErrorContext<R>,
+    input: &mut Parser,
+    location: SourceLocation,
+) -> FontFaceRuleData
+where
+    R: ParseErrorReporter,
 {
     let mut rule = FontFaceRuleData::empty(location);
     {
@@ -150,19 +173,27 @@ impl<'a> FontFace<'a> {
     /// sources which don't list any format hint, or the ones which list at
     /// least "truetype" or "opentype".
     pub fn effective_sources(&self) -> EffectiveSources {
-        EffectiveSources(self.sources().iter().rev().filter(|source| {
-            if let Source::Url(ref url_source) = **source {
-                let hints = &url_source.format_hints;
-                // We support only opentype fonts and truetype is an alias for
-                // that format. Sources without format hints need to be
-                // downloaded in case we support them.
-                hints.is_empty() || hints.iter().any(|hint| {
-                    hint == "truetype" || hint == "opentype" || hint == "woff"
+        EffectiveSources(
+            self.sources()
+                .iter()
+                .rev()
+                .filter(|source| {
+                    if let Source::Url(ref url_source) = **source {
+                        let hints = &url_source.format_hints;
+                        // We support only opentype fonts and truetype is an alias for
+                        // that format. Sources without format hints need to be
+                        // downloaded in case we support them.
+                        hints.is_empty() ||
+                            hints.iter().any(|hint| {
+                                hint == "truetype" || hint == "opentype" || hint == "woff"
+                            })
+                    } else {
+                        true
+                    }
                 })
-            } else {
-                true
-            }
-        }).cloned().collect())
+                .cloned()
+                .collect(),
+        )
     }
 }
 
@@ -192,22 +223,28 @@ impl<'a, 'b, 'i> AtRuleParser<'i> for FontFaceRuleParser<'a, 'b> {
 }
 
 impl Parse for Source {
-    fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
-                     -> Result<Source, ParseError<'i>> {
-        if input.try(|input| input.expect_function_matching("local")).is_ok() {
-            return input.parse_nested_block(|input| {
-                FamilyName::parse(context, input)
-            }).map(Source::Local)
+    fn parse<'i, 't>(
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<Source, ParseError<'i>> {
+        if input
+            .try(|input| input.expect_function_matching("local"))
+            .is_ok()
+        {
+            return input
+                .parse_nested_block(|input| FamilyName::parse(context, input))
+                .map(Source::Local);
         }
 
         let url = SpecifiedUrl::parse(context, input)?;
 
         // Parsing optional format()
-        let format_hints = if input.try(|input| input.expect_function_matching("format")).is_ok() {
+        let format_hints = if input
+            .try(|input| input.expect_function_matching("format"))
+            .is_ok()
+        {
             input.parse_nested_block(|input| {
-                input.parse_comma_separated(|input| {
-                    Ok(input.expect_string()?.as_ref().to_owned())
-                })
+                input.parse_comma_separated(|input| Ok(input.expect_string()?.as_ref().to_owned()))
             })?
         } else {
             vec![]
@@ -224,16 +261,18 @@ macro_rules! is_descriptor_enabled {
     ("font-display") => {
         unsafe {
             use gecko_bindings::structs::mozilla;
-            mozilla::StylePrefs_sFontDisplayEnabled
+            mozilla::StaticPrefs_sVarCache_layout_css_font_display_enabled
         }
     };
     ("font-variation-settings") => {
         unsafe {
             use gecko_bindings::structs::mozilla;
-            mozilla::StylePrefs_sFontVariationsEnabled
+            mozilla::StaticPrefs_sVarCache_layout_css_font_variations_enabled
         }
     };
-    ($name: tt) => { true }
+    ($name:tt) => {
+        true
+    };
 }
 
 macro_rules! font_face_descriptors_common {
@@ -254,7 +293,8 @@ macro_rules! font_face_descriptors_common {
         }
 
         impl FontFaceRuleData {
-            fn empty(location: SourceLocation) -> Self {
+            /// Create an empty font-face rule
+            pub fn empty(location: SourceLocation) -> Self {
                 FontFaceRuleData {
                     $(
                         $ident: None,
@@ -263,24 +303,8 @@ macro_rules! font_face_descriptors_common {
                 }
             }
 
-            /// Convert to Gecko types
-            #[cfg(feature = "gecko")]
-            pub fn set_descriptors(self, descriptors: &mut CSSFontFaceDescriptors) {
-                $(
-                    if let Some(value) = self.$ident {
-                        descriptors.$gecko_ident.set_from(value)
-                    }
-                )*
-                // Leave unset descriptors to eCSSUnit_Null,
-                // FontFaceSet::FindOrCreateUserFontEntryFromFontFace does the defaulting
-                // to initial values.
-            }
-        }
-
-        impl ToCssWithGuard for FontFaceRuleData {
-            // Serialization of FontFaceRule is not specced.
-            fn to_css(&self, _guard: &SharedRwLockReadGuard, dest: &mut CssStringWriter) -> fmt::Result {
-                dest.write_str("@font-face {\n")?;
+            /// Serialization of declarations in the FontFaceRule
+            pub fn decl_to_css(&self, dest: &mut CssStringWriter) -> fmt::Result {
                 $(
                     if let Some(ref value) = self.$ident {
                         dest.write_str(concat!("  ", $name, ": "))?;
@@ -288,7 +312,7 @@ macro_rules! font_face_descriptors_common {
                         dest.write_str(";\n")?;
                     }
                 )*
-                dest.write_str("}")
+                Ok(())
             }
         }
 
@@ -314,6 +338,15 @@ macro_rules! font_face_descriptors_common {
                 Ok(())
             }
         }
+    }
+}
+
+impl ToCssWithGuard for FontFaceRuleData {
+    // Serialization of FontFaceRule is not specced.
+    fn to_css(&self, _guard: &SharedRwLockReadGuard, dest: &mut CssStringWriter) -> fmt::Result {
+        dest.write_str("@font-face {\n")?;
+        self.decl_to_css(dest)?;
+        dest.write_str("}")
     }
 }
 

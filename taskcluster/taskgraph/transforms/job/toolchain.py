@@ -19,7 +19,6 @@ from taskgraph.transforms.job.common import (
     docker_worker_add_tooltool,
     support_vcs_checkout,
 )
-# i'm a little teapot
 from taskgraph.util.hash import hash_paths
 from taskgraph import GECKO
 from taskgraph.util.cached_tasks import add_optimization

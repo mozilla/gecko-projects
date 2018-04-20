@@ -30,10 +30,9 @@
 #include "nsIDOMElement.h"
 #include "Link.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/MouseEvent.h"
 #include "mozilla/dom/SVGTitleElement.h"
 #include "nsIDOMEvent.h"
-#include "nsIDOMFileList.h"
-#include "nsIDOMMouseEvent.h"
 #include "nsIFormControl.h"
 #include "nsIImageLoadingContent.h"
 #include "nsIWebNavigation.h"
@@ -54,10 +53,10 @@
 #include "nsPresContext.h"
 #include "nsViewManager.h"
 #include "nsView.h"
-#include "nsIDOMDragEvent.h"
 #include "nsIConstraintValidation.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/EventListenerManager.h"
+#include "mozilla/dom/DragEvent.h"
 #include "mozilla/dom/Event.h" // for nsIDOMEvent::InternalDOMEvent()
 #include "mozilla/dom/File.h" // for input type=file
 #include "mozilla/dom/FileList.h" // for input type=file
@@ -928,12 +927,13 @@ nsDocShellTreeOwner::RemoveChromeListeners()
 NS_IMETHODIMP
 nsDocShellTreeOwner::HandleEvent(nsIDOMEvent* aEvent)
 {
-  nsCOMPtr<nsIDOMDragEvent> dragEvent = do_QueryInterface(aEvent);
-  NS_ENSURE_TRUE(dragEvent, NS_ERROR_INVALID_ARG);
+  DragEvent* dragEvent =
+    aEvent ? aEvent->InternalDOMEvent()->AsDragEvent() : nullptr;
+  if (NS_WARN_IF(!dragEvent)) {
+    return NS_ERROR_INVALID_ARG;
+  }
 
-  bool defaultPrevented;
-  aEvent->GetDefaultPrevented(&defaultPrevented);
-  if (defaultPrevented) {
+  if (dragEvent->DefaultPrevented()) {
     return NS_OK;
   }
 
@@ -1133,22 +1133,16 @@ NS_IMETHODIMP
 ChromeTooltipListener::RemoveTooltipListener()
 {
   if (mEventTarget) {
-    nsresult rv = NS_OK;
 #ifndef XP_WIN
-    rv = mEventTarget->RemoveSystemEventListener(NS_LITERAL_STRING("keydown"),
-                                                 this, false);
-    NS_ENSURE_SUCCESS(rv, rv);
+    mEventTarget->RemoveSystemEventListener(NS_LITERAL_STRING("keydown"),
+                                            this, false);
 #endif
-    rv = mEventTarget->RemoveSystemEventListener(NS_LITERAL_STRING("mousedown"),
-                                                 this, false);
-    NS_ENSURE_SUCCESS(rv, rv);
-    rv = mEventTarget->RemoveSystemEventListener(NS_LITERAL_STRING("mouseout"),
-                                                 this, false);
-    NS_ENSURE_SUCCESS(rv, rv);
-    rv = mEventTarget->RemoveSystemEventListener(NS_LITERAL_STRING("mousemove"),
-                                                 this, false);
-    NS_ENSURE_SUCCESS(rv, rv);
-
+    mEventTarget->RemoveSystemEventListener(NS_LITERAL_STRING("mousedown"),
+                                            this, false);
+    mEventTarget->RemoveSystemEventListener(NS_LITERAL_STRING("mouseout"),
+                                            this, false);
+    mEventTarget->RemoveSystemEventListener(NS_LITERAL_STRING("mousemove"),
+                                            this, false);
     mTooltipListenerInstalled = false;
   }
 
@@ -1187,7 +1181,7 @@ ChromeTooltipListener::HandleEvent(nsIDOMEvent* aEvent)
 nsresult
 ChromeTooltipListener::MouseMove(nsIDOMEvent* aMouseEvent)
 {
-  nsCOMPtr<nsIDOMMouseEvent> mouseEvent(do_QueryInterface(aMouseEvent));
+  MouseEvent* mouseEvent = aMouseEvent->InternalDOMEvent()->AsMouseEvent();
   if (!mouseEvent) {
     return NS_OK;
   }
@@ -1196,9 +1190,8 @@ ChromeTooltipListener::MouseMove(nsIDOMEvent* aMouseEvent)
   // within the timer callback. On win32, we'll get a MouseMove event even when
   // a popup goes away -- even when the mouse doesn't change position! To get
   // around this, we make sure the mouse has really moved before proceeding.
-  int32_t newMouseX, newMouseY;
-  mouseEvent->GetClientX(&newMouseX);
-  mouseEvent->GetClientY(&newMouseY);
+  int32_t newMouseX = mouseEvent->ClientX();
+  int32_t newMouseY = mouseEvent->ClientY();
   if (mMouseClientX == newMouseX && mMouseClientY == newMouseY) {
     return NS_OK;
   }
@@ -1212,8 +1205,8 @@ ChromeTooltipListener::MouseMove(nsIDOMEvent* aMouseEvent)
 
   mMouseClientX = newMouseX;
   mMouseClientY = newMouseY;
-  mouseEvent->GetScreenX(&mMouseScreenX);
-  mouseEvent->GetScreenY(&mMouseScreenY);
+  mMouseScreenX = mouseEvent->ScreenX(CallerType::System);
+  mMouseScreenY = mouseEvent->ScreenY(CallerType::System);
 
   if (mTooltipTimer) {
     mTooltipTimer->Cancel();

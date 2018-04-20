@@ -7,6 +7,7 @@
 #include "vm/HelperThreads.h"
 
 #include "mozilla/Maybe.h"
+#include "mozilla/ScopeExit.h"
 #include "mozilla/Unused.h"
 
 #include "builtin/Promise.h"
@@ -208,7 +209,7 @@ FinishOffThreadIonCompile(jit::IonBuilder* builder, const AutoLockHelperThreadSt
     AutoEnterOOMUnsafeRegion oomUnsafe;
     if (!HelperThreadState().ionFinishedList(lock).append(builder))
         oomUnsafe.crash("FinishOffThreadIonCompile");
-    builder->script()->zoneFromAnyThread()->group()->numFinishedBuilders++;
+    builder->script()->runtimeFromAnyThread()->jitRuntime()->numFinishedBuildersRef(lock)++;
 }
 
 static JSRuntime*
@@ -216,9 +217,9 @@ GetSelectorRuntime(const CompilationSelector& selector)
 {
     struct Matcher
     {
-        JSRuntime* match(JSScript* script)    { return script->runtimeFromActiveCooperatingThread(); }
-        JSRuntime* match(JSCompartment* comp) { return comp->runtimeFromActiveCooperatingThread(); }
-        JSRuntime* match(Zone* zone)          { return zone->runtimeFromActiveCooperatingThread(); }
+        JSRuntime* match(JSScript* script)    { return script->runtimeFromMainThread(); }
+        JSRuntime* match(JSCompartment* comp) { return comp->runtimeFromMainThread(); }
+        JSRuntime* match(Zone* zone)          { return zone->runtimeFromMainThread(); }
         JSRuntime* match(ZonesInState zbs)    { return zbs.runtime; }
         JSRuntime* match(JSRuntime* runtime)  { return runtime; }
         JSRuntime* match(AllCompilations all) { return nullptr; }
@@ -308,8 +309,9 @@ CancelOffThreadIonCompileLocked(const CompilationSelector& selector, bool discar
     for (size_t i = 0; i < finished.length(); i++) {
         jit::IonBuilder* builder = finished[i];
         if (IonBuilderMatches(selector, builder)) {
-            builder->script()->zoneFromAnyThread()->group()->numFinishedBuilders--;
-            jit::FinishOffThreadBuilder(builder->script()->runtimeFromAnyThread(), builder, lock);
+            JSRuntime* rt = builder->script()->runtimeFromAnyThread();
+            rt->jitRuntime()->numFinishedBuildersRef(lock)--;
+            jit::FinishOffThreadBuilder(rt, builder, lock);
             HelperThreadState().remove(finished, &i);
         }
     }
@@ -318,14 +320,12 @@ CancelOffThreadIonCompileLocked(const CompilationSelector& selector, bool discar
     if (discardLazyLinkList) {
         MOZ_ASSERT(!selector.is<AllCompilations>());
         JSRuntime* runtime = GetSelectorRuntime(selector);
-        for (ZoneGroupsIter group(runtime); !group.done(); group.next()) {
-            jit::IonBuilder* builder = group->ionLazyLinkList().getFirst();
-            while (builder) {
-                jit::IonBuilder* next = builder->getNext();
-                if (IonBuilderMatches(selector, builder))
-                    jit::FinishOffThreadBuilder(runtime, builder, lock);
-                builder = next;
-            }
+        jit::IonBuilder* builder = runtime->jitRuntime()->ionLazyLinkList(runtime).getFirst();
+        while (builder) {
+            jit::IonBuilder* next = builder->getNext();
+            if (IonBuilderMatches(selector, builder))
+                jit::FinishOffThreadBuilder(runtime, builder, lock);
+            builder = next;
         }
     }
 }
@@ -368,7 +368,8 @@ js::HasOffThreadIonCompile(JSCompartment* comp)
             return true;
     }
 
-    jit::IonBuilder* builder = comp->zone()->group()->ionLazyLinkList().getFirst();
+    JSRuntime* rt = comp->runtimeFromMainThread();
+    jit::IonBuilder* builder = rt->jitRuntime()->ionLazyLinkList(rt).getFirst();
     while (builder) {
         if (builder->script()->compartment() == comp)
             return true;
@@ -515,9 +516,9 @@ ScriptDecodeTask::parse(JSContext* cx)
 
     XDROffThreadDecoder decoder(cx, alloc, &options, /* sourceObjectOut = */ &sourceObject.get(),
                                 range);
-    decoder.codeScript(&resultScript);
-    MOZ_ASSERT(bool(resultScript) == (decoder.resultCode() == JS::TranscodeResult_Ok));
-    if (decoder.resultCode() == JS::TranscodeResult_Ok) {
+    XDRResult res = decoder.codeScript(&resultScript);
+    MOZ_ASSERT(bool(resultScript) == res.isOk());
+    if (res.isOk()) {
         scripts.infallibleAppend(resultScript);
         if (sourceObject)
             sourceObjects.infallibleAppend(sourceObject);
@@ -548,10 +549,10 @@ MultiScriptsDecodeTask::parse(JSContext* cx)
         Rooted<ScriptSourceObject*> sourceObject(cx);
 
         XDROffThreadDecoder decoder(cx, alloc, &opts, &sourceObject.get(), source.range);
-        decoder.codeScript(&resultScript);
-        MOZ_ASSERT(bool(resultScript) == (decoder.resultCode() == JS::TranscodeResult_Ok));
+        XDRResult res = decoder.codeScript(&resultScript);
+        MOZ_ASSERT(bool(resultScript) == res.isOk());
 
-        if (decoder.resultCode() != JS::TranscodeResult_Ok)
+        if (res.isErr())
             break;
         MOZ_ASSERT(resultScript);
         scripts.infallibleAppend(resultScript);
@@ -673,22 +674,22 @@ EnsureParserCreatedClasses(JSContext* cx, ParseTaskKind kind)
 
 class MOZ_RAII AutoSetCreatedForHelperThread
 {
-    ZoneGroup* group;
+    Zone* zone;
 
   public:
     explicit AutoSetCreatedForHelperThread(JSObject* global)
-      : group(global->zone()->group())
+      : zone(global->zone())
     {
-        group->setCreatedForHelperThread();
+        zone->setCreatedForHelperThread();
     }
 
     void forget() {
-        group = nullptr;
+        zone = nullptr;
     }
 
     ~AutoSetCreatedForHelperThread() {
-        if (group)
-            group->clearUsedByHelperThread();
+        if (zone)
+            zone->clearUsedByHelperThread();
     }
 };
 
@@ -704,7 +705,7 @@ CreateGlobalForOffThreadParse(JSContext* cx, const gc::AutoSuppressGC& nogc)
 
     creationOptions.setInvisibleToDebugger(true)
                    .setMergeable(true)
-                   .setNewZoneInNewZoneGroup();
+                   .setNewZone();
 
     // Don't falsely inherit the host's global trace hook.
     creationOptions.setTrace(nullptr);
@@ -756,10 +757,10 @@ StartOffThreadParseTask(JSContext* cx, ParseTask* task, const ReadOnlyCompileOpt
     if (!global)
         return false;
 
-    // Mark the global's zone group as created for a helper thread. This
-    // prevents it from being collected until clearUsedByHelperThread() is
-    // called after parsing is complete. If this function exits due to error
-    // this state is cleared automatically.
+    // Mark the global's zone as created for a helper thread. This prevents it
+    // from being collected until clearUsedByHelperThread() is called after
+    // parsing is complete. If this function exits due to error this state is
+    // cleared automatically.
     AutoSetCreatedForHelperThread createdForHelper(global);
 
     if (!task->init(cx, options, global))
@@ -869,6 +870,15 @@ js::EnqueuePendingParseTasksAfterGC(JSRuntime* rt)
 
     HelperThreadState().notifyAll(GlobalHelperThreadState::PRODUCER, lock);
 }
+
+#ifdef DEBUG
+bool
+js::CurrentThreadIsParseThread()
+{
+    JSContext* cx = TlsContext.get();
+    return cx->helperThread() && cx->helperThread()->parseTask();
+}
+#endif
 
 static const uint32_t kDefaultHelperStackSize = 2048 * 1024;
 static const uint32_t kDefaultHelperStackQuota = 1800 * 1024;
@@ -1436,7 +1446,7 @@ TimeSince(TimeStamp prev)
 }
 
 void
-js::GCParallelTask::runFromActiveCooperatingThread(JSRuntime* rt)
+js::GCParallelTask::runFromMainThread(JSRuntime* rt)
 {
     MOZ_ASSERT(state == NotStarted);
     MOZ_ASSERT(js::CurrentThreadCanAccessRuntime(rt));
@@ -1489,7 +1499,6 @@ HelperThread::handleGCParallelWorkload(AutoLockHelperThreadState& locked)
     currentTask.emplace(HelperThreadState().gcParallelWorklist(locked).popCopy());
     gcParallelTask()->runFromHelperThread(locked);
     currentTask.reset();
-    HelperThreadState().notifyAll(GlobalHelperThreadState::CONSUMER, locked);
 }
 
 static void
@@ -1497,7 +1506,7 @@ LeaveParseTaskZone(JSRuntime* rt, ParseTask* task)
 {
     // Mark the zone as no longer in use by a helper thread, and available
     // to be collected by the GC.
-    rt->clearUsedByHelperThread(task->parseGlobal->zone());
+    rt->clearUsedByHelperThread(task->parseGlobal->zoneFromAnyThread());
 }
 
 ParseTask*
@@ -1829,19 +1838,16 @@ HelperThread::handleIonWorkload(AutoLockHelperThreadState& locked)
 
     FinishOffThreadIonCompile(builder, locked);
 
-    // Ping any thread currently operating on the compiled script's zone group
-    // so that the compiled code can be incorporated at the next interrupt
-    // callback. Don't interrupt Ion code for this, as this incorporation can
-    // be delayed indefinitely without affecting performance as long as the
-    // active thread is actually executing Ion code.
+    // Ping the main thread so that the compiled code can be incorporated at the
+    // next interrupt callback. Don't interrupt Ion code for this, as this
+    // incorporation can be delayed indefinitely without affecting performance
+    // as long as the main thread is actually executing Ion code.
     //
     // This must happen before the current task is reset. DestroyContext
     // cancels in progress Ion compilations before destroying its target
     // context, and after we reset the current task we are no longer considered
     // to be Ion compiling.
-    JSContext* target = builder->script()->zoneFromAnyThread()->group()->ownerContext().context();
-    if (target)
-        target->requestInterrupt(JSContext::RequestInterruptCanWait);
+    rt->mainContextFromAnyThread()->requestInterrupt(JSContext::RequestInterruptCanWait);
 
     currentTask.reset();
 
@@ -1920,6 +1926,13 @@ HelperThread::handleParseWorkload(AutoLockHelperThreadState& locked)
         AutoSetContextRuntime ascr(task->parseGlobal->runtimeFromAnyThread());
 
         JSContext* cx = TlsContext.get();
+
+        Zone* zone = task->parseGlobal->zoneFromAnyThread();
+        zone->setHelperThreadOwnerContext(cx);
+        auto resetOwnerContext = mozilla::MakeScopeExit([&] {
+            zone->setHelperThreadOwnerContext(nullptr);
+        });
+
         AutoCompartment ac(cx, task->parseGlobal);
 
         task->parse(cx);
@@ -2082,14 +2095,6 @@ js::StartOffThreadPromiseHelperTask(PromiseHelperTask* task)
 void
 GlobalHelperThreadState::trace(JSTracer* trc, gc::AutoTraceSession& session)
 {
-    // There's an assertion that requires the exclusive access lock when tracing
-    // atoms (see AtomIsPinnedInRuntime). Due to mutex ordering requirements we
-    // need to take that lock before the helper thread lock, if we don't have it
-    // already.
-    Maybe<AutoLockForExclusiveAccess> exclusiveLock;
-    if (!session.maybeLock.isSome())
-        exclusiveLock.emplace(trc->runtime());
-
     AutoLockHelperThreadState lock;
     for (auto builder : ionWorklist(lock))
         builder->trace(trc);
@@ -2103,8 +2108,9 @@ GlobalHelperThreadState::trace(JSTracer* trc, gc::AutoTraceSession& session)
         }
     }
 
-    for (ZoneGroupsIter group(trc->runtime()); !group.done(); group.next()) {
-        jit::IonBuilder* builder = group->ionLazyLinkList().getFirst();
+    JSRuntime* rt = trc->runtime();
+    if (auto* jitRuntime = rt->jitRuntime()) {
+        jit::IonBuilder* builder = jitRuntime->ionLazyLinkList(rt).getFirst();
         while (builder) {
             builder->trace(trc);
             builder = builder->getNext();
@@ -2218,7 +2224,7 @@ HelperThread::threadLoop()
     JSContext cx(nullptr, JS::ContextOptions());
     {
         AutoEnterOOMUnsafeRegion oomUnsafe;
-        if (!cx.init(ContextKind::Background))
+        if (!cx.init(ContextKind::HelperThread))
             oomUnsafe.crash("HelperThread cx.init()");
     }
     cx.setHelperThread(this);

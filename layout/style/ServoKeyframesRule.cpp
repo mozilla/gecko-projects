@@ -158,10 +158,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 ServoKeyframesRule::ServoKeyframesRule(RefPtr<RawServoKeyframesRule> aRawRule,
                                        uint32_t aLine, uint32_t aColumn)
-  // Although this class inherits from GroupRule, we don't want to use
-  // it at all, so it is fine to call the constructor for Gecko. We can
-  // make CSSKeyframesRule inherit from Rule directly once we can get
-  // rid of nsCSSKeyframeRule.
   : dom::CSSKeyframesRule(aLine, aColumn)
   , mRawRule(Move(aRawRule))
 {
@@ -199,16 +195,6 @@ ServoKeyframesRule::IsCCLeaf() const
 {
   // If we don't have rule list constructed, we are a leaf.
   return Rule::IsCCLeaf() && !mKeyframeList;
-}
-
-/* virtual */ already_AddRefed<css::Rule>
-ServoKeyframesRule::Clone() const
-{
-  // Rule::Clone is only used when CSSStyleSheetInner is cloned in
-  // preparation of being mutated. However, ServoStyleSheet never clones
-  // anything, so this method should never be called.
-  MOZ_ASSERT_UNREACHABLE("Shouldn't be cloning ServoKeyframesRule");
-  return nullptr;
 }
 
 #ifdef DEBUG
@@ -347,7 +333,6 @@ ServoKeyframesRule::FindRule(const nsAString& aKey)
 ServoKeyframesRule::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
   size_t n = aMallocSizeOf(this);
-  n += GroupRule::SizeOfExcludingThis(aMallocSizeOf);
   if (mKeyframeList) {
     n += mKeyframeList->SizeOfIncludingThis(aMallocSizeOf);
   }

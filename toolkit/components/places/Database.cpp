@@ -108,6 +108,8 @@
 #define LMANNO_SITEURI "livemark/siteURI"
 
 #define MOBILE_ROOT_GUID "mobile______"
+// This is no longer used & obsolete except for during migration.
+// Note: it may still be found in older places databases.
 #define MOBILE_ROOT_ANNO "mobile/bookmarksRoot"
 
 // We use a fixed title for the mobile root to avoid marking the database as
@@ -986,6 +988,13 @@ Database::SetupDatabaseConnection(nsCOMPtr<mozIStorageService>& aStorage)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
+  // Using immediate transactions allows the main connection to retry writes
+  // that fail with `SQLITE_BUSY` because a cloned connection has locked the
+  // database for writing.
+  nsresult rv = mMainConn->SetDefaultTransactionType(
+    mozIStorageConnection::TRANSACTION_IMMEDIATE);
+  NS_ENSURE_SUCCESS(rv, rv);
+
   // WARNING: any statement executed before setting the journal mode must be
   // finalized, since SQLite doesn't allow changing the journal mode if there
   // is any outstanding statement.
@@ -994,7 +1003,7 @@ Database::SetupDatabaseConnection(nsCOMPtr<mozIStorageService>& aStorage)
     // Get the page size.  This may be different than the default if the
     // database file already existed with a different page size.
     nsCOMPtr<mozIStorageStatement> statement;
-    nsresult rv = mMainConn->CreateStatement(NS_LITERAL_CSTRING(
+    rv = mMainConn->CreateStatement(NS_LITERAL_CSTRING(
       MOZ_STORAGE_UNIQUIFY_QUERY_STR "PRAGMA page_size"
     ), getter_AddRefs(statement));
     NS_ENSURE_SUCCESS(rv, rv);
@@ -1006,7 +1015,7 @@ Database::SetupDatabaseConnection(nsCOMPtr<mozIStorageService>& aStorage)
   }
 
   // Ensure that temp tables are held in memory, not on disk.
-  nsresult rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+  rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
     MOZ_STORAGE_UNIQUIFY_QUERY_STR "PRAGMA temp_store = MEMORY")
   );
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1221,6 +1230,28 @@ Database::InitSchema(bool* aDatabaseMigrated)
 
       // Firefox 60 uses schema version 43.
 
+      if (currentSchemaVersion < 44) {
+        rv = MigrateV44Up();
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
+
+      if (currentSchemaVersion < 45) {
+        rv = MigrateV45Up();
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
+
+      if (currentSchemaVersion < 46) {
+        rv = MigrateV46Up();
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
+
+      if (currentSchemaVersion < 47) {
+        rv = MigrateV47Up();
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
+
+      // Firefox 61 uses schema version 47.
+
       // Schema Upgrades must add migration code here.
       // >>> IMPORTANT! <<<
       // NEVER MIX UP SYNC AND ASYNC EXECUTION IN MIGRATORS, YOU MAY LOCK THE
@@ -1302,6 +1333,10 @@ Database::InitSchema(bool* aDatabaseMigrated)
     rv = mMainConn->ExecuteSimpleSQL(CREATE_MOZ_ITEMS_ANNOS);
     NS_ENSURE_SUCCESS(rv, rv);
     rv = mMainConn->ExecuteSimpleSQL(CREATE_IDX_MOZ_ITEMSANNOS_PLACEATTRIBUTE);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    // moz_meta.
+    rv = mMainConn->ExecuteSimpleSQL(CREATE_MOZ_META);
     NS_ENSURE_SUCCESS(rv, rv);
 
     // Initialize the bookmark roots in the new DB.
@@ -1419,6 +1454,8 @@ Database::InitFunctions()
   rv = StoreLastInsertedIdFunction::create(mMainConn);
   NS_ENSURE_SUCCESS(rv, rv);
   rv = HashFunction::create(mMainConn);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = GetQueryParamFunction::create(mMainConn);
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
@@ -1936,6 +1973,207 @@ Database::MigrateV43Up() {
 }
 
 nsresult
+Database::MigrateV44Up() {
+  // We need to remove any non-builtin roots and their descendants.
+
+  // Install a temp trigger to clean up linked tables when the main
+  // bookmarks are deleted.
+  nsresult rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "CREATE TEMP TRIGGER moz_migrate_bookmarks_trigger "
+    "AFTER DELETE ON moz_bookmarks FOR EACH ROW "
+    "BEGIN "
+      // Insert tombstones.
+      "INSERT OR IGNORE INTO moz_bookmarks_deleted (guid, dateRemoved) "
+        "VALUES (OLD.guid, strftime('%s', 'now', 'localtime', 'utc') * 1000); "
+      // Remove old annotations for the bookmarks.
+      "DELETE FROM moz_items_annos "
+        "WHERE item_id = OLD.id; "
+      // Decrease the foreign_count in moz_places.
+      "UPDATE moz_places "
+        "SET foreign_count = foreign_count - 1 "
+        "WHERE id = OLD.fk; "
+    "END "
+  ));
+  if (NS_FAILED(rv)) return rv;
+
+  // This trigger listens for moz_places deletes, and updates moz_annos and
+  // moz_keywords accordingly.
+  rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "CREATE TEMP TRIGGER moz_migrate_annos_trigger "
+    "AFTER UPDATE ON moz_places FOR EACH ROW "
+    // Only remove from moz_places if we don't have any remaining keywords pointing to
+    // this place, and it hasn't been visited. Note: orphan keywords are tidied up below.
+    "WHEN NEW.visit_count = 0 AND "
+      " NEW.foreign_count = (SELECT COUNT(*) FROM moz_keywords WHERE place_id = NEW.id) "
+    "BEGIN "
+      // No more references to the place, so we can delete the place itself.
+      "DELETE FROM moz_places "
+        "WHERE id = NEW.id; "
+      // Delete annotations relating to the place.
+      "DELETE FROM moz_annos "
+        "WHERE place_id = NEW.id; "
+      // Delete keywords relating to the place.
+      "DELETE FROM moz_keywords "
+        "WHERE place_id = NEW.id; "
+    "END "
+  ));
+  if (NS_FAILED(rv)) return rv;
+
+  // Listens to moz_keyword deletions, to ensure moz_places gets the
+  // foreign_count updated corrrectly.
+  rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "CREATE TEMP TRIGGER moz_migrate_keyword_trigger "
+    "AFTER DELETE ON moz_keywords FOR EACH ROW "
+    "BEGIN "
+      // If we remove a keyword, then reduce the foreign_count.
+      "UPDATE moz_places "
+        "SET foreign_count = foreign_count - 1 "
+          "WHERE id = OLD.place_id; "
+    "END "
+  ));
+  if (NS_FAILED(rv)) return rv;
+
+  // First of all, find the non-builtin roots.
+  nsCOMPtr<mozIStorageStatement> deleteStmt;
+  rv = mMainConn->CreateStatement(NS_LITERAL_CSTRING(
+    "WITH RECURSIVE "
+    "itemsToRemove(id, guid) AS ( "
+      "SELECT b.id, b.guid FROM moz_bookmarks b "
+      "JOIN moz_bookmarks p ON b.parent = p.id "
+      "WHERE p.guid = 'root________' AND "
+        "b.guid NOT IN ('menu________', 'toolbar_____', 'tags________', 'unfiled_____', 'mobile______') "
+      "UNION ALL "
+      "SELECT b.id, b.guid FROM moz_bookmarks b "
+      "JOIN itemsToRemove d ON d.id = b.parent "
+    ") "
+    "DELETE FROM moz_bookmarks "
+      "WHERE id IN (SELECT id FROM itemsToRemove) "
+  ), getter_AddRefs(deleteStmt));
+  if (NS_FAILED(rv)) return rv;
+
+  rv = deleteStmt->Execute();
+  if (NS_FAILED(rv)) return rv;
+
+  // Before we remove the triggers, check for keywords attached to places which
+  // no longer have a bookmark to them. We do this before removing the triggers,
+  // so that we can make use of the keyword trigger to update the counts in
+  // moz_places.
+  rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "DELETE FROM moz_keywords WHERE place_id IN ( "
+      "SELECT h.id FROM moz_keywords k "
+      "JOIN moz_places h ON h.id = k.place_id "
+      "GROUP BY place_id HAVING h.foreign_count = count(*) "
+    ")"
+  ));
+  if (NS_FAILED(rv)) return rv;
+
+  // Now remove the temp triggers.
+  rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "DROP TRIGGER moz_migrate_bookmarks_trigger "
+  ));
+  if (NS_FAILED(rv)) return rv;
+  rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "DROP TRIGGER moz_migrate_annos_trigger "
+  ));
+  if (NS_FAILED(rv)) return rv;
+  rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "DROP TRIGGER moz_migrate_keyword_trigger "
+  ));
+  if (NS_FAILED(rv)) return rv;
+
+  // Cleanup any orphan annotation attributes.
+  rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "DELETE FROM moz_anno_attributes WHERE id IN ( "
+      "SELECT id FROM moz_anno_attributes n "
+      "EXCEPT "
+      "SELECT DISTINCT anno_attribute_id FROM moz_annos "
+      "EXCEPT "
+      "SELECT DISTINCT anno_attribute_id FROM moz_items_annos "
+    ")"
+  ));
+  if (NS_FAILED(rv)) return rv;
+
+  return NS_OK;
+}
+
+nsresult
+Database::MigrateV45Up() {
+  nsCOMPtr<mozIStorageStatement> metaTableStmt;
+  nsresult rv = mMainConn->CreateStatement(NS_LITERAL_CSTRING(
+    "SELECT 1 FROM moz_meta"
+  ), getter_AddRefs(metaTableStmt));
+  if (NS_FAILED(rv)) {
+    rv = mMainConn->ExecuteSimpleSQL(CREATE_MOZ_META);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+  return NS_OK;
+}
+
+nsresult
+Database::MigrateV46Up() {
+  // Convert the existing queries. For simplicity we assume the user didn't
+  // edit these queries, and just do a 1:1 conversion.
+  nsresult rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "UPDATE moz_places "
+      "SET url = IFNULL('place:tag=' || ( "
+        "SELECT title FROM moz_bookmarks "
+        "WHERE id = CAST(get_query_param(substr(url, 7), 'folder') AS INT) "
+      "), url) "
+    "WHERE url_hash BETWEEN hash('place', 'prefix_lo') AND "
+                           "hash('place', 'prefix_hi') "
+      "AND url LIKE '%type=7%' "
+      "AND EXISTS(SELECT 1 FROM moz_bookmarks "
+          "WHERE id = CAST(get_query_param(substr(url, 7), 'folder') AS INT)) "
+  ));
+
+  // Recalculate hashes for all tag queries.
+  rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "UPDATE moz_places SET url_hash = hash(url) "
+    "WHERE url_hash BETWEEN hash('place', 'prefix_lo') AND "
+                           "hash('place', 'prefix_hi') "
+      "AND url LIKE '%tag=%' "
+  ));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // Update Sync fields for all tag queries.
+  rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "UPDATE moz_bookmarks SET syncChangeCounter = syncChangeCounter + 1 "
+    "WHERE fk IN ( "
+      "SELECT id FROM moz_places "
+      "WHERE url_hash BETWEEN hash('place', 'prefix_lo') AND "
+                             "hash('place', 'prefix_hi') "
+        "AND url LIKE '%tag=%' "
+    ") "
+  ));
+  NS_ENSURE_SUCCESS(rv, rv);
+  return NS_OK;
+}
+
+nsresult
+Database::MigrateV47Up() {
+  // v46 may have mistakenly set some url to NULL, we must fix those.
+  // Since the original url was an invalid query, we replace NULLs with an
+  // empty query.
+  nsresult rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "UPDATE moz_places "
+    "SET url = 'place:excludeItems=1', url_hash = hash('place:excludeItems=1') "
+    "WHERE url ISNULL "
+  ));
+  NS_ENSURE_SUCCESS(rv, rv);
+  // Update Sync fields for these queries.
+  rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "UPDATE moz_bookmarks SET syncChangeCounter = syncChangeCounter + 1 "
+    "WHERE fk IN ( "
+      "SELECT id FROM moz_places "
+      "WHERE url_hash = hash('place:excludeItems=1') "
+        "AND url = 'place:excludeItems=1' "
+    ") "
+  ));
+  NS_ENSURE_SUCCESS(rv, rv);
+  return NS_OK;
+}
+
+nsresult
 Database::GetItemsWithAnno(const nsACString& aAnnoName, int32_t aItemType,
                            nsTArray<int64_t>& aItemIds)
 {
@@ -2057,55 +2295,6 @@ Database::CreateMobileRoot()
   rv = findIdStmt->GetInt64(0, &rootId);
   if (NS_FAILED(rv)) return -1;
 
-  // Set the mobile bookmarks anno on the new root, so that Sync code on an
-  // older channel can still find it in case of a downgrade. This can be
-  // removed in bug 1306445.
-  nsCOMPtr<mozIStorageStatement> addAnnoNameStmt;
-  rv = mMainConn->CreateStatement(NS_LITERAL_CSTRING(
-    "INSERT OR IGNORE INTO moz_anno_attributes (name) VALUES (:anno_name)"
-  ), getter_AddRefs(addAnnoNameStmt));
-  if (NS_FAILED(rv)) return -1;
-  mozStorageStatementScoper addAnnoNameScoper(addAnnoNameStmt);
-
-  rv = addAnnoNameStmt->BindUTF8StringByName(
-    NS_LITERAL_CSTRING("anno_name"), NS_LITERAL_CSTRING(MOBILE_ROOT_ANNO));
-  if (NS_FAILED(rv)) return -1;
-  rv = addAnnoNameStmt->Execute();
-  if (NS_FAILED(rv)) return -1;
-
-  nsCOMPtr<mozIStorageStatement> addAnnoStmt;
-  rv = mMainConn->CreateStatement(NS_LITERAL_CSTRING(
-    "INSERT OR IGNORE INTO moz_items_annos "
-      "(id, item_id, anno_attribute_id, content, flags, "
-       "expiration, type, dateAdded, lastModified) "
-    "SELECT "
-      "(SELECT a.id FROM moz_items_annos a "
-       "WHERE a.anno_attribute_id = n.id AND "
-             "a.item_id = :root_id), "
-      ":root_id, n.id, 1, 0, :expiration, :type, :timestamp, :timestamp "
-    "FROM moz_anno_attributes n WHERE name = :anno_name"
-  ), getter_AddRefs(addAnnoStmt));
-  if (NS_FAILED(rv)) return -1;
-  mozStorageStatementScoper addAnnoScoper(addAnnoStmt);
-
-  rv = addAnnoStmt->BindInt64ByName(NS_LITERAL_CSTRING("root_id"), rootId);
-  if (NS_FAILED(rv)) return -1;
-  rv = addAnnoStmt->BindUTF8StringByName(
-    NS_LITERAL_CSTRING("anno_name"), NS_LITERAL_CSTRING(MOBILE_ROOT_ANNO));
-  if (NS_FAILED(rv)) return -1;
-  rv = addAnnoStmt->BindInt32ByName(NS_LITERAL_CSTRING("expiration"),
-                                    nsIAnnotationService::EXPIRE_NEVER);
-  if (NS_FAILED(rv)) return -1;
-  rv = addAnnoStmt->BindInt32ByName(NS_LITERAL_CSTRING("type"),
-                                    nsIAnnotationService::TYPE_INT32);
-  if (NS_FAILED(rv)) return -1;
-  rv = addAnnoStmt->BindInt32ByName(NS_LITERAL_CSTRING("timestamp"),
-                                    RoundedPRNow());
-  if (NS_FAILED(rv)) return -1;
-
-  rv = addAnnoStmt->Execute();
-  if (NS_FAILED(rv)) return -1;
-
   return rootId;
 }
 
@@ -2181,6 +2370,15 @@ Database::Shutdown()
     rv = stmt->ExecuteStep(&hasResult);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
     MOZ_ASSERT(!hasResult, "Found a duplicate url!");
+
+    // Sanity check NULL urls
+    rv = mMainConn->CreateStatement(NS_LITERAL_CSTRING(
+      "SELECT 1 FROM moz_places WHERE url ISNULL "
+    ), getter_AddRefs(stmt));
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+    rv = stmt->ExecuteStep(&hasResult);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+    MOZ_ASSERT(!hasResult, "Found a NULL url!");
   }
 #endif
 

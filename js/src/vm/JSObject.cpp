@@ -18,13 +18,13 @@
 #include <string.h>
 
 #include "jsapi.h"
-#include "jsarray.h"
 #include "jsexn.h"
 #include "jsfriendapi.h"
 #include "jsnum.h"
 #include "jstypes.h"
 #include "jsutil.h"
 
+#include "builtin/Array.h"
 #include "builtin/Eval.h"
 #include "builtin/Object.h"
 #include "builtin/String.h"
@@ -52,8 +52,7 @@
 #include "vm/Shape.h"
 #include "vm/TypedArrayObject.h"
 
-#include "jsboolinlines.h"
-
+#include "builtin/Boolean-inl.h"
 #include "builtin/TypedObject-inl.h"
 #include "gc/Marking-inl.h"
 #include "vm/ArrayObject-inl.h"
@@ -272,6 +271,9 @@ js::Throw(JSContext* cx, jsid id, unsigned errorNumber, const char* details)
 
 
 /*** PropertyDescriptor operations and DefineProperties ******************************************/
+
+static const char js_getter_str[] = "getter";
+static const char js_setter_str[] = "setter";
 
 static Result<>
 CheckCallable(JSContext* cx, JSObject* obj, const char* fieldName)
@@ -514,7 +516,7 @@ js::SetIntegrityLevel(JSContext* cx, HandleObject obj, IntegrityLevel level)
         }
 
         MOZ_ASSERT(nobj->lastProperty()->slotSpan() == last->slotSpan());
-        JS_ALWAYS_TRUE(nobj->setLastProperty(cx, last));
+        MOZ_ALWAYS_TRUE(nobj->setLastProperty(cx, last));
 
         // Ordinarily ArraySetLength handles this, but we're going behind its back
         // right now, so we must do this manually.
@@ -996,7 +998,7 @@ CreateThisForFunctionWithGroup(JSContext* cx, HandleObjectGroup group,
 
     if (newKind == SingletonObject) {
         Rooted<TaggedProto> protoRoot(cx, group->proto());
-        return NewObjectWithGivenTaggedProto(cx, &PlainObject::class_, protoRoot, allocKind, newKind);
+        return NewObjectWithGivenTaggedProto<PlainObject>(cx, protoRoot, allocKind, newKind);
     }
     return NewObjectWithGroup<PlainObject>(cx, group, allocKind, newKind);
 }
@@ -1398,7 +1400,7 @@ JS_InitializePropertiesFromCompatibleNativeObject(JSContext* cx,
 }
 
 template<XDRMode mode>
-bool
+XDRResult
 js::XDRObjectLiteral(XDRState<mode>* xdr, MutableHandleObject obj)
 {
     /* NB: Keep this in sync with DeepCloneObjectLiteral. */
@@ -1416,8 +1418,7 @@ js::XDRObjectLiteral(XDRState<mode>* xdr, MutableHandleObject obj)
             isArray = obj->is<ArrayObject>() ? 1 : 0;
         }
 
-        if (!xdr->codeUint32(&isArray))
-            return false;
+        MOZ_TRY(xdr->codeUint32(&isArray));
     }
 
     RootedValue tmpValue(cx), tmpIdValue(cx);
@@ -1428,29 +1429,26 @@ js::XDRObjectLiteral(XDRState<mode>* xdr, MutableHandleObject obj)
         if (mode == XDR_ENCODE) {
             RootedArrayObject arr(cx, &obj->as<ArrayObject>());
             if (!GetScriptArrayObjectElements(arr, &values))
-                return false;
+                return xdr->fail(JS::TranscodeResult_Throw);
         }
 
         uint32_t initialized;
         if (mode == XDR_ENCODE)
             initialized = values.length();
-        if (!xdr->codeUint32(&initialized))
-            return false;
+        MOZ_TRY(xdr->codeUint32(&initialized));
         if (mode == XDR_DECODE && !values.appendN(MagicValue(JS_ELEMENTS_HOLE), initialized))
-            return false;
+            return xdr->fail(JS::TranscodeResult_Throw);
 
         // Recursively copy dense elements.
-        for (unsigned i = 0; i < initialized; i++) {
-            if (!xdr->codeConstValue(values[i]))
-                return false;
-        }
+        for (unsigned i = 0; i < initialized; i++)
+            MOZ_TRY(XDRScriptConst(xdr, values[i]));
 
         uint32_t copyOnWrite;
-        if (mode == XDR_ENCODE)
+        if (mode == XDR_ENCODE) {
             copyOnWrite = obj->is<ArrayObject>() &&
                           obj->as<ArrayObject>().denseElementsAreCopyOnWrite();
-        if (!xdr->codeUint32(&copyOnWrite))
-            return false;
+        }
+        MOZ_TRY(xdr->codeUint32(&copyOnWrite));
 
         if (mode == XDR_DECODE) {
             ObjectGroup::NewArrayKind arrayKind = copyOnWrite
@@ -1459,23 +1457,22 @@ js::XDRObjectLiteral(XDRState<mode>* xdr, MutableHandleObject obj)
             obj.set(ObjectGroup::newArrayObject(cx, values.begin(), values.length(),
                                                 TenuredObject, arrayKind));
             if (!obj)
-                return false;
+                return xdr->fail(JS::TranscodeResult_Throw);
         }
 
-        return true;
+        return Ok();
     }
 
     // Code the properties in the object.
     Rooted<IdValueVector> properties(cx, IdValueVector(cx));
     if (mode == XDR_ENCODE && !GetScriptPlainObjectProperties(obj, &properties))
-        return false;
+        return xdr->fail(JS::TranscodeResult_Throw);
 
     uint32_t nproperties = properties.length();
-    if (!xdr->codeUint32(&nproperties))
-        return false;
+    MOZ_TRY(xdr->codeUint32(&nproperties));
 
     if (mode == XDR_DECODE && !properties.appendN(IdValuePair(), nproperties))
-        return false;
+        return xdr->fail(JS::TranscodeResult_Throw);
 
     for (size_t i = 0; i < nproperties; i++) {
         if (mode == XDR_ENCODE) {
@@ -1483,12 +1480,12 @@ js::XDRObjectLiteral(XDRState<mode>* xdr, MutableHandleObject obj)
             tmpValue = properties[i].get().value;
         }
 
-        if (!xdr->codeConstValue(&tmpIdValue) || !xdr->codeConstValue(&tmpValue))
-            return false;
+        MOZ_TRY(XDRScriptConst(xdr, &tmpIdValue));
+        MOZ_TRY(XDRScriptConst(xdr, &tmpValue));
 
         if (mode == XDR_DECODE) {
             if (!ValueToId<CanGC>(cx, tmpIdValue, &tmpId))
-                return false;
+                return xdr->fail(JS::TranscodeResult_Throw);
             properties[i].get().id = tmpId;
             properties[i].get().value = tmpValue;
         }
@@ -1498,23 +1495,22 @@ js::XDRObjectLiteral(XDRState<mode>* xdr, MutableHandleObject obj)
     uint32_t isSingleton;
     if (mode == XDR_ENCODE)
         isSingleton = obj->isSingleton() ? 1 : 0;
-    if (!xdr->codeUint32(&isSingleton))
-        return false;
+    MOZ_TRY(xdr->codeUint32(&isSingleton));
 
     if (mode == XDR_DECODE) {
         NewObjectKind newKind = isSingleton ? SingletonObject : TenuredObject;
         obj.set(ObjectGroup::newPlainObject(cx, properties.begin(), properties.length(), newKind));
         if (!obj)
-            return false;
+            return xdr->fail(JS::TranscodeResult_Throw);
     }
 
-    return true;
+    return Ok();
 }
 
-template bool
+template XDRResult
 js::XDRObjectLiteral(XDRState<XDR_ENCODE>* xdr, MutableHandleObject obj);
 
-template bool
+template XDRResult
 js::XDRObjectLiteral(XDRState<XDR_DECODE>* xdr, MutableHandleObject obj);
 
 /* static */ bool
@@ -1565,13 +1561,13 @@ JSObject::fixDictionaryShapeAfterSwap()
 }
 
 static MOZ_MUST_USE bool
-CopyProxyValuesBeforeSwap(ProxyObject* proxy, Vector<Value>& values)
+CopyProxyValuesBeforeSwap(JSContext* cx, ProxyObject* proxy, Vector<Value>& values)
 {
     MOZ_ASSERT(values.empty());
 
     // Remove the GCPtrValues we're about to swap from the store buffer, to
     // ensure we don't trace bogus values.
-    StoreBuffer& sb = proxy->zone()->group()->storeBuffer();
+    StoreBuffer& sb = cx->runtime()->gc.storeBuffer();
 
     // Reserve space for the private slot and the reserved slots.
     if (!values.reserve(1 + proxy->numReservedSlots()))
@@ -1642,8 +1638,8 @@ JSObject::swap(JSContext* cx, HandleObject a, HandleObject b)
      * nursery pointers in either object.
      */
     MOZ_ASSERT(!IsInsideNursery(a) && !IsInsideNursery(b));
-    cx->zone()->group()->storeBuffer().putWholeCell(a);
-    cx->zone()->group()->storeBuffer().putWholeCell(b);
+    cx->runtime()->gc.storeBuffer().putWholeCell(a);
+    cx->runtime()->gc.storeBuffer().putWholeCell(b);
 
     unsigned r = NotifyGCPreSwap(a, b);
 
@@ -1729,11 +1725,11 @@ JSObject::swap(JSContext* cx, HandleObject a, HandleObject b)
         ProxyObject* proxyB = b->is<ProxyObject>() ? &b->as<ProxyObject>() : nullptr;
 
         if (aIsProxyWithInlineValues) {
-            if (!CopyProxyValuesBeforeSwap(proxyA, avals))
+            if (!CopyProxyValuesBeforeSwap(cx, proxyA, avals))
                 oomUnsafe.crash("CopyProxyValuesBeforeSwap");
         }
         if (bIsProxyWithInlineValues) {
-            if (!CopyProxyValuesBeforeSwap(proxyB, bvals))
+            if (!CopyProxyValuesBeforeSwap(cx, proxyB, bvals))
                 oomUnsafe.crash("CopyProxyValuesBeforeSwap");
         }
 
@@ -1822,7 +1818,7 @@ DefineConstructorAndPrototype(JSContext* cx, HandleObject obj, JSProtoKey key, H
                               Native constructor, unsigned nargs,
                               const JSPropertySpec* ps, const JSFunctionSpec* fs,
                               const JSPropertySpec* static_ps, const JSFunctionSpec* static_fs,
-                              NativeObject** ctorp, AllocKind ctorKind)
+                              NativeObject** ctorp)
 {
     /*
      * Create a prototype object for this class.
@@ -1878,7 +1874,7 @@ DefineConstructorAndPrototype(JSContext* cx, HandleObject obj, JSProtoKey key, H
 
         ctor = proto;
     } else {
-        RootedFunction fun(cx, NewNativeConstructor(cx, constructor, nargs, atom, ctorKind));
+        RootedFunction fun(cx, NewNativeConstructor(cx, constructor, nargs, atom));
         if (!fun)
             goto bad;
 
@@ -1943,7 +1939,7 @@ js::InitClass(JSContext* cx, HandleObject obj, HandleObject protoProto_,
               const Class* clasp, Native constructor, unsigned nargs,
               const JSPropertySpec* ps, const JSFunctionSpec* fs,
               const JSPropertySpec* static_ps, const JSFunctionSpec* static_fs,
-              NativeObject** ctorp, AllocKind ctorKind)
+              NativeObject** ctorp)
 {
     RootedObject protoProto(cx, protoProto_);
 
@@ -1968,7 +1964,7 @@ js::InitClass(JSContext* cx, HandleObject obj, HandleObject protoProto_,
     }
 
     return DefineConstructorAndPrototype(cx, obj, key, atom, protoProto, clasp, constructor, nargs,
-                                         ps, fs, static_ps, static_fs, ctorp, ctorKind);
+                                         ps, fs, static_ps, static_fs, ctorp);
 }
 
 void
@@ -3892,7 +3888,7 @@ JSObject::sizeOfIncludingThisInNursery() const
 
     MOZ_ASSERT(!isTenured());
 
-    const Nursery& nursery = zone()->group()->nursery();
+    const Nursery& nursery = runtimeFromMainThread()->gc.nursery();
     size_t size = Arena::thingSize(allocKindForTenure(nursery));
 
     if (is<NativeObject>()) {
@@ -4073,9 +4069,9 @@ MOZ_MUST_USE JSObject*
 js::SpeciesConstructor(JSContext* cx, HandleObject obj, JSProtoKey ctorKey,
                        bool (*isDefaultSpecies)(JSContext*, JSFunction*))
 {
-    if (!GlobalObject::ensureConstructor(cx, cx->global(), ctorKey))
+    RootedObject defaultCtor(cx, GlobalObject::getOrCreateConstructor(cx, ctorKey));
+    if (!defaultCtor)
         return nullptr;
-    RootedObject defaultCtor(cx, &cx->global()->getConstructor(ctorKey).toObject());
     return SpeciesConstructor(cx, obj, defaultCtor, isDefaultSpecies);
 }
 

@@ -1010,27 +1010,13 @@ ComputeBinary(ParseNodeKind kind, double left, double right)
         return left * right;
 
     if (kind == ParseNodeKind::Mod)
-        return right == 0 ? GenericNaN() : js_fmod(left, right);
+        return NumberMod(left, right);
 
     if (kind == ParseNodeKind::Ursh)
         return ToUint32(left) >> (ToUint32(right) & 31);
 
-    if (kind == ParseNodeKind::Div) {
-        if (right == 0) {
-#if defined(XP_WIN)
-            /* XXX MSVC miscompiles such that (NaN == 0) */
-            if (IsNaN(right))
-                return GenericNaN();
-#endif
-            if (left == 0 || IsNaN(left))
-                return GenericNaN();
-            if (IsNegative(left) != IsNegative(right))
-                return NegativeInfinity<double>();
-            return PositiveInfinity<double>();
-        }
-
-        return left / right;
-    }
+    if (kind == ParseNodeKind::Div)
+        return NumberDiv(left, right);
 
     MOZ_ASSERT(kind == ParseNodeKind::Lsh || kind == ParseNodeKind::Rsh);
 
@@ -1295,9 +1281,11 @@ FoldElement(JSContext* cx, ParseNode** nodePtr, PerHandlerParser<FullParseHandle
             // Optimization 2: We have something like expr[3.14]. The number
             // isn't an array index, so it converts to a string ("3.14"),
             // enabling optimization 3 below.
-            JSAtom* atom = ToAtom<NoGC>(cx, DoubleValue(number));
-            if (!atom)
+            JSAtom* atom = NumberToAtom(cx, number);
+            if (!atom) {
+                cx->recoverFromOutOfMemory();
                 return false;
+            }
             name = atom->asPropertyName();
         }
     }

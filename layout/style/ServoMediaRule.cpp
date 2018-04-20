@@ -49,28 +49,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(ServoMediaRule, CSSMediaRule)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMediaList)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
-/* virtual */ already_AddRefed<css::Rule>
-ServoMediaRule::Clone() const
-{
-  // Rule::Clone is only used when CSSStyleSheetInner is cloned in
-  // preparation of being mutated. However, ServoStyleSheet never clones
-  // anything, so this method should never be called.
-  MOZ_ASSERT_UNREACHABLE("Shouldn't be cloning ServoMediaRule");
-  return nullptr;
-}
-
-#ifdef MOZ_OLD_STYLE
-/* virtual */ bool
-ServoMediaRule::UseForPresentation(nsPresContext* aPresContext,
-                                   nsMediaQueryResultCacheKey& aKey)
-{
-  // GroupRule::UseForPresentation is only used in nsCSSRuleProcessor,
-  // so this should never be called.
-  MOZ_ASSERT_UNREACHABLE("Shouldn't be calling UseForPresentation");
-  return false;
-}
-#endif
-
 /* virtual */ void
 ServoMediaRule::SetStyleSheet(StyleSheet* aSheet)
 {

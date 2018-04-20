@@ -23,7 +23,6 @@
 #include "nsICommandManager.h"
 #include "nsIDocShell.h"
 #include "nsIDocument.h"
-#include "nsIDOMCharacterData.h"
 #include "nsIDOMDocument.h"
 #include "nsPIDOMWindow.h"
 #include "nsIEditingSession.h"
@@ -448,6 +447,7 @@ DocAccessible::Shutdown()
       parentDocument->RemoveChildDocument(this);
 
     mParent->RemoveChild(this);
+    MOZ_ASSERT(!mParent, "Parent has to be null!");
   }
 
   // Walk the array backwards because child documents remove themselves from the

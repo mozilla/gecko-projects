@@ -24,12 +24,12 @@
 #include "nsExpirationTracker.h"
 #include "TextOverflow.h"
 #include "ScrollVelocityQueue.h"
+#include "mozilla/PresState.h"
 
 class nsPresContext;
 class nsIPresShell;
 class nsIContent;
 class nsAtom;
-class nsPresState;
 class nsIScrollPositionListener;
 
 namespace mozilla {
@@ -297,8 +297,8 @@ public:
   nsSize GetLineScrollAmount() const;
   nsSize GetPageScrollAmount() const;
 
-  nsPresState* SaveState() const;
-  void RestoreState(nsPresState* aState);
+  mozilla::UniquePtr<mozilla::PresState> SaveState() const;
+  void RestoreState(mozilla::PresState* aState);
 
   nsIFrame* GetScrolledFrame() const { return mScrolledFrame; }
   nsIFrame* GetScrollbarBox(bool aVertical) const {
@@ -714,7 +714,7 @@ public:
   typedef mozilla::CSSIntPoint CSSIntPoint;
   typedef mozilla::ScrollReflowInput ScrollReflowInput;
   friend nsHTMLScrollFrame* NS_NewHTMLScrollFrame(nsIPresShell* aPresShell,
-                                                  nsStyleContext* aContext,
+                                                  ComputedStyle* aStyle,
                                                   bool aIsRoot);
 
   NS_DECL_QUERYFRAME
@@ -1004,12 +1004,10 @@ public:
   }
 
   // nsIStatefulFrame
-  NS_IMETHOD SaveState(nsPresState** aState) override {
-    NS_ENSURE_ARG_POINTER(aState);
-    *aState = mHelper.SaveState();
-    return NS_OK;
+  mozilla::UniquePtr<mozilla::PresState> SaveState() override {
+    return mHelper.SaveState();
   }
-  NS_IMETHOD RestoreState(nsPresState* aState) override {
+  NS_IMETHOD RestoreState(mozilla::PresState* aState) override {
     NS_ENSURE_ARG_POINTER(aState);
     mHelper.RestoreState(aState);
     return NS_OK;
@@ -1103,11 +1101,11 @@ public:
 #endif
 
 protected:
-  nsHTMLScrollFrame(nsStyleContext* aContext, bool aIsRoot)
-    : nsHTMLScrollFrame(aContext, kClassID, aIsRoot)
+  nsHTMLScrollFrame(ComputedStyle* aStyle, bool aIsRoot)
+    : nsHTMLScrollFrame(aStyle, kClassID, aIsRoot)
   {}
 
-  nsHTMLScrollFrame(nsStyleContext* aContext,
+  nsHTMLScrollFrame(ComputedStyle* aStyle,
                     nsIFrame::ClassID aID,
                     bool aIsRoot);
   void SetSuppressScrollbarUpdate(bool aSuppress) {
@@ -1158,7 +1156,7 @@ public:
   NS_DECL_FRAMEARENA_HELPERS(nsXULScrollFrame)
 
   friend nsXULScrollFrame* NS_NewXULScrollFrame(nsIPresShell* aPresShell,
-                                                nsStyleContext* aContext,
+                                                ComputedStyle* aStyle,
                                                 bool aIsRoot,
                                                 bool aClipAllDescendants);
 
@@ -1431,12 +1429,10 @@ public:
   }
 
   // nsIStatefulFrame
-  NS_IMETHOD SaveState(nsPresState** aState) override {
-    NS_ENSURE_ARG_POINTER(aState);
-    *aState = mHelper.SaveState();
-    return NS_OK;
+  mozilla::UniquePtr<mozilla::PresState> SaveState() override {
+    return mHelper.SaveState();
   }
-  NS_IMETHOD RestoreState(nsPresState* aState) override {
+  NS_IMETHOD RestoreState(mozilla::PresState* aState) override {
     NS_ENSURE_ARG_POINTER(aState);
     mHelper.RestoreState(aState);
     return NS_OK;
@@ -1552,7 +1548,7 @@ public:
 #endif
 
 protected:
-  nsXULScrollFrame(nsStyleContext* aContext, bool aIsRoot,
+  nsXULScrollFrame(ComputedStyle* aStyle, bool aIsRoot,
                    bool aClipAllDescendants);
 
   void ClampAndSetBounds(nsBoxLayoutState& aState,

@@ -28,6 +28,7 @@
 #include "nsStyleConsts.h"
 #include "nsStyleLinkElement.h"
 #include "nsUnicharUtils.h"
+#include "nsWindowSizes.h"
 
 #define LINK_ELEMENT_FLAG_BIT(n_) \
   NODE_FLAG_BIT(ELEMENT_TYPE_SPECIFIC_BITS_OFFSET + (n_))
@@ -349,10 +350,10 @@ HTMLLinkElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
                                             aOldValue, aSubjectPrincipal, aNotify);
 }
 
-nsresult
+void
 HTMLLinkElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
-  return GetEventTargetParentForAnchors(aVisitor);
+  GetEventTargetParentForAnchors(aVisitor);
 }
 
 nsresult
@@ -433,13 +434,11 @@ void
 HTMLLinkElement::GetStyleSheetInfo(nsAString& aTitle,
                                    nsAString& aType,
                                    nsAString& aMedia,
-                                   bool* aIsScoped,
                                    bool* aIsAlternate)
 {
   aTitle.Truncate();
   aType.Truncate();
   aMedia.Truncate();
-  *aIsScoped = false;
   *aIsAlternate = false;
 
   nsAutoString rel;

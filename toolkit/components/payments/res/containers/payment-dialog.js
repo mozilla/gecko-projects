@@ -2,15 +2,25 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* global PaymentStateSubscriberMixin, paymentRequest */
+import "../vendor/custom-elements.min.js";
 
-"use strict";
+import PaymentStateSubscriberMixin from "../mixins/PaymentStateSubscriberMixin.js";
+
+import "../components/currency-amount.js";
+import "./address-picker.js";
+import "./basic-card-form.js";
+import "./order-details.js";
+import "./payment-method-picker.js";
+import "./shipping-option-picker.js";
+
+/* global paymentRequest */
+/* import-globals-from ../unprivileged-fallbacks.js */
 
 /**
  * <payment-dialog></payment-dialog>
  */
 
-class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
+export default class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
   constructor() {
     super();
     this._template = document.getElementById("payment-dialog-template");
@@ -30,7 +40,9 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
     this._viewAllButton = contents.querySelector("#view-all");
     this._viewAllButton.addEventListener("click", this);
 
+    this._mainContainer = contents.getElementById("main-container");
     this._orderDetailsOverlay = contents.querySelector("#order-details-overlay");
+
     this._shippingTypeLabel = contents.querySelector("#shipping-type-label");
     this._shippingRelatedEls = contents.querySelectorAll(".shipping-related");
     this._payerRelatedEls = contents.querySelectorAll(".payer-related");
@@ -104,11 +116,13 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
    * @param {object} state - See `PaymentsStore.setState`
    */
   setStateFromParent(state) {
+    let oldSavedAddresses = this.requestStore.getState().savedAddresses;
     this.requestStore.setState(state);
 
     // Check if any foreign-key constraints were invalidated.
     state = this.requestStore.getState();
     let {
+      request: {paymentOptions: {requestShipping: requestShipping}},
       savedAddresses,
       savedBasicCards,
       selectedPayerAddress,
@@ -117,12 +131,30 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
       selectedShippingOption,
     } = state;
     let shippingOptions = state.request.paymentDetails.shippingOptions;
+    let shippingAddress = selectedShippingAddress && savedAddresses[selectedShippingAddress];
+    let oldShippingAddress = selectedShippingAddress &&
+                             oldSavedAddresses[selectedShippingAddress];
 
     // Ensure `selectedShippingAddress` never refers to a deleted address and refers
-    // to an address if one exists.
-    if (!savedAddresses[selectedShippingAddress]) {
+    // to an address if one exists. We also compare address timestamps to handle changes
+    // made outside the payments UI.
+    if (shippingAddress) {
+      // invalidate the cached value if the address was modified
+      if (oldShippingAddress &&
+          shippingAddress.guid == oldShippingAddress.guid &&
+          shippingAddress.timeLastModified != oldShippingAddress.timeLastModified) {
+        delete this._cachedState.selectedShippingAddress;
+      }
+    } else {
+      // assign selectedShippingAddress as value if it is undefined,
+      // or if the address it pointed to was removed from storage
+      let defaultShippingAddress = null;
+      if (requestShipping) {
+        defaultShippingAddress = Object.keys(savedAddresses)[0];
+        log.debug("selecting the default shipping address");
+      }
       this.requestStore.setState({
-        selectedShippingAddress: Object.keys(savedAddresses)[0] || null,
+        selectedShippingAddress: defaultShippingAddress || null,
       });
     }
 
@@ -155,7 +187,6 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
       });
     }
 
-
     // Ensure `selectedPayerAddress` never refers to a deleted address and refers
     // to an address if one exists.
     if (!savedAddresses[selectedPayerAddress]) {
@@ -172,6 +203,7 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
       case "processing":
       case "success":
       case "fail":
+      case "unknown":
         break;
       default:
         throw new Error("Invalid completionState");
@@ -244,6 +276,10 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
       this._shippingTypeLabel.dataset[shippingType + "AddressLabel"];
 
     this._renderPayButton(state);
+
+    for (let page of this._mainContainer.querySelectorAll(":scope > .page")) {
+      page.hidden = state.page.id != page.id;
+    }
 
     let {
       changesPrevented,

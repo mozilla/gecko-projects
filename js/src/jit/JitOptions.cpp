@@ -187,10 +187,6 @@ DefaultJitOptions::DefaultJitOptions()
     // pc-relative jump and call instructions.
     SET_DEFAULT(jumpThreshold, UINT32_MAX);
 
-    // Whether the (ARM) simulators should always interrupt before executing any
-    // instruction.
-    SET_DEFAULT(simulatorAlwaysInterrupt, false);
-
     // Branch pruning heuristic is based on a scoring system, which is look at
     // different metrics and provide a score. The score is computed as a
     // projection where each factor defines the weight of each metric. Then this
@@ -262,10 +258,6 @@ DefaultJitOptions::DefaultJitOptions()
     // faster than Ion code so use scaled thresholds (see also bug 1320374).
     SET_DEFAULT(wasmBatchBaselineThreshold, 10000);
     SET_DEFAULT(wasmBatchIonThreshold, 1100);
-
-    // Determines whether we suppress using signal handlers
-    // for interrupting jit-ed code. This is used only for testing.
-    SET_DEFAULT(ionInterruptWithoutSignals, false);
 }
 
 bool

@@ -1,6 +1,12 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
+async function getCountOfBookmarkRows(db) {
+  let queryRows = await db.execute("SELECT COUNT(*) FROM moz_bookmarks");
+  Assert.equal(queryRows.length, 1);
+  return queryRows[0].getResultByIndex(0);
+}
+
 add_task(async function test_missing_children() {
   let buf = await openMirror("missing_childen");
 
@@ -9,7 +15,7 @@ add_task(async function test_missing_children() {
 
   info("Make remote changes: A > ([B] C [D E])");
   {
-    await buf.store(shuffle([{
+    await storeRecords(buf, shuffle([{
       id: "menu",
       type: "folder",
       children: ["bookmarkBBBB", "bookmarkCCCC", "bookmarkDDDD",
@@ -48,7 +54,7 @@ add_task(async function test_missing_children() {
 
   info("Add (B E) to remote");
   {
-    await buf.store(shuffle([{
+    await storeRecords(buf, shuffle([{
       id: "bookmarkBBBB",
       type: "bookmark",
       title: "B",
@@ -99,7 +105,7 @@ add_task(async function test_missing_children() {
 
   info("Add D to remote");
   {
-    await buf.store([{
+    await storeRecords(buf, [{
       id: "bookmarkDDDD",
       type: "bookmark",
       title: "D",
@@ -163,7 +169,7 @@ add_task(async function test_new_orphan_without_local_parent() {
   // reuploading. When the partial uploader returns and uploads A, we'll
   // move the bookmarks to the correct folder.
   info("Make remote changes: [A] > (B C D)");
-  await buf.store(shuffle([{
+  await storeRecords(buf, shuffle([{
     id: "bookmarkBBBB",
     type: "bookmark",
     title: "B (remote)",
@@ -220,7 +226,7 @@ add_task(async function test_new_orphan_without_local_parent() {
   // A is an orphan because we don't have E locally, but we should move
   // (B C D) into A.
   info("Add [E] > A to remote");
-  await buf.store([{
+  await storeRecords(buf, [{
     id: "folderAAAAAA",
     type: "folder",
     title: "A",
@@ -271,7 +277,7 @@ add_task(async function test_new_orphan_without_local_parent() {
   }, "Should move (D C B) into A");
 
   info("Add E to remote");
-  await buf.store([{
+  await storeRecords(buf, [{
     id: "folderEEEEEE",
     type: "folder",
     title: "E",
@@ -329,7 +335,7 @@ add_task(async function test_new_orphan_without_local_parent() {
   }, "Should move A into E");
 
   info("Add Menu > E to remote");
-  await buf.store([{
+  await storeRecords(buf, [{
     id: "menu",
     type: "folder",
     children: ["folderEEEEEE"],
@@ -444,7 +450,7 @@ add_task(async function test_move_into_orphaned() {
       }],
     }],
   });
-  await buf.store([{
+  await storeRecords(buf, [{
     id: "menu",
     type: "folder",
     children: ["bookmarkAAAA", "bookmarkBBBB", "folderCCCCCC"],
@@ -492,7 +498,7 @@ add_task(async function test_move_into_orphaned() {
 
   // G doesn't exist on the server.
   info("Make remote changes: ([G] > A (C > (D H E))), (C > H)");
-  await buf.store(shuffle([{
+  await storeRecords(buf, shuffle([{
     id: "bookmarkAAAA",
     type: "bookmark",
     title: "A",
@@ -621,7 +627,7 @@ add_task(async function test_new_orphan_with_local_parent() {
       }],
     }],
   });
-  await buf.store(shuffle([{
+  await storeRecords(buf, shuffle([{
     id: "menu",
     type: "folder",
     children: ["folderAAAAAA"],
@@ -647,7 +653,7 @@ add_task(async function test_new_orphan_with_local_parent() {
   // exists locally, so we can move B and C into the correct folder, but not
   // the correct positions.
   info("Set up remote with orphans: [A] > (C D)");
-  await buf.store([{
+  await storeRecords(buf, [{
     id: "bookmarkDDDD",
     type: "bookmark",
     title: "D (remote)",
@@ -732,7 +738,7 @@ add_task(async function test_new_orphan_with_local_parent() {
 
   // The partial uploader returns and uploads A.
   info("Add A to remote");
-  await buf.store([{
+  await storeRecords(buf, [{
     id: "folderAAAAAA",
     type: "folder",
     title: "A",
@@ -788,12 +794,188 @@ add_task(async function test_new_orphan_with_local_parent() {
 });
 
 add_task(async function test_tombstone_as_child() {
-  // TODO (Bug 1433180): Add a folder that mentions a tombstone in its
-  // `children`.
+  await PlacesTestUtils.markBookmarksAsSynced();
+
+  let buf = await openMirror("tombstone_as_child");
+  // Setup the mirror such that an incoming folder references a tombstone
+  // as a child.
+  await storeRecords(buf, shuffle([{
+    id: "menu",
+    type: "folder",
+    children: ["folderAAAAAA"],
+  }, {
+    id: "folderAAAAAA",
+    type: "folder",
+    title: "A",
+    children: ["bookmarkAAAA", "bookmarkTTTT", "bookmarkBBBB"],
+  }, {
+    id: "bookmarkAAAA",
+    type: "bookmark",
+    title: "Bookmark A",
+    bmkUri: "http://example.com/a",
+  }, {
+    id: "bookmarkBBBB",
+    type: "bookmark",
+    title: "Bookmark B",
+    bmkUri: "http://example.com/b",
+  }, {
+    id: "bookmarkTTTT",
+    deleted: true,
+  }]), { needsMerge: true });
+
+  let changesToUpload = await buf.apply();
+  let idsToUpload = inspectChangeRecords(changesToUpload);
+  deepEqual(idsToUpload.deleted, [], "no new tombstones were created.");
+  // Note that we do not attempt to re-upload the folder with the correct
+  // list of children - but we might take some action in the future around
+  // this.
+  deepEqual(idsToUpload.updated, [], "parent is not re-uploaded");
+
+  await assertLocalTree(PlacesUtils.bookmarks.rootGuid, {
+    guid: PlacesUtils.bookmarks.rootGuid,
+    type: PlacesUtils.bookmarks.TYPE_FOLDER,
+    index: 0,
+    title: "",
+    children: [{
+      guid: PlacesUtils.bookmarks.menuGuid,
+      type: PlacesUtils.bookmarks.TYPE_FOLDER,
+      index: 0,
+      title: BookmarksMenuTitle,
+      children: [{
+        guid: "folderAAAAAA",
+        type: PlacesUtils.bookmarks.TYPE_FOLDER,
+        index: 0,
+        title: "A",
+        children: [{
+          guid: "bookmarkAAAA",
+          type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
+          url: "http://example.com/a",
+          index: 0,
+          title: "Bookmark A",
+        }, {
+          // Note that this was the 3rd child specified on the server record,
+          // but we we've correctly moved it back to being the second after
+          // ignoring the tombstone.
+          guid: "bookmarkBBBB",
+          type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
+          url: "http://example.com/b",
+          index: 1,
+          title: "Bookmark B",
+        }],
+      }],
+    }, {
+      guid: PlacesUtils.bookmarks.toolbarGuid,
+      type: PlacesUtils.bookmarks.TYPE_FOLDER,
+      index: 1,
+      title: BookmarksToolbarTitle,
+    }, {
+      guid: PlacesUtils.bookmarks.unfiledGuid,
+      type: PlacesUtils.bookmarks.TYPE_FOLDER,
+      index: 3,
+      title: UnfiledBookmarksTitle,
+    }, {
+      guid: PlacesUtils.bookmarks.mobileGuid,
+      type: PlacesUtils.bookmarks.TYPE_FOLDER,
+      index: 4,
+      title: MobileBookmarksTitle,
+    }],
+  }, "Should have ignored tombstone record");
+  await buf.finalize();
+  await PlacesUtils.bookmarks.eraseEverything();
+  await PlacesSyncUtils.bookmarks.reset();
 });
 
+// See what happens when a left-pane root and a left-pane query are on the server
 add_task(async function test_left_pane_root() {
-  // TODO (Bug 1433182): Add a left pane root to the mirror.
+  let buf = await openMirror("lpr");
+
+  let initialTree = await fetchLocalTree(PlacesUtils.bookmarks.rootGuid);
+
+  // This test is expected to not touch bookmarks at all, and if it did
+  // happen to create a new item that's not under our syncable roots, then
+  // just checking the result of fetchLocalTree wouldn't pick that up - so
+  // as an additional safety check, count how many bookmark rows exist.
+  let numRows = await getCountOfBookmarkRows(buf.db);
+
+  // Add a left pane root, a left-pane query and a left-pane folder to the
+  // mirror, all correctly parented.
+  // Because we can determine this is a complete tree that's outside our
+  // syncable trees, we expect none of them to be applied.
+  await storeRecords(buf, shuffle([{
+    id: "folderLEFTPR",
+    type: "folder",
+    parentid: "places",
+    title: "",
+    children: ["folderLEFTPQ", "folderLEFTPF"],
+  }, {
+    id: "folderLEFTPQ",
+    type: "query",
+    parentid: "folderLEFTPR",
+    title: "Some query",
+    bmkUri: "place:folder=SOMETHING",
+  }, {
+    id: "folderLEFTPF",
+    type: "folder",
+    parentid: "folderLEFTPR",
+    title: "All Bookmarks",
+    children: ["folderLEFTPC"],
+  }, {
+    id: "folderLEFTPC",
+    type: "query",
+    parentid: "folderLEFTPF",
+    title: "A query under 'All Bookmarks'",
+    bmkUri: "place:folder=SOMETHING_ELSE",
+  }], { needsMerge: true }));
+
+  await buf.apply();
+
+  // should have ignored everything.
+  await assertLocalTree(PlacesUtils.bookmarks.rootGuid, initialTree);
+
+  // and a check we didn't write *any* items to the places database, even
+  // outside of our user roots.
+  Assert.equal(await getCountOfBookmarkRows(buf.db), numRows);
+
+  await buf.finalize();
+  await PlacesUtils.bookmarks.eraseEverything();
+  await PlacesSyncUtils.bookmarks.reset();
+});
+
+// See what happens when a left-pane query (without the left-pane root) is on
+// the server
+add_task(async function test_left_pane_query() {
+  let buf = await openMirror("lpq");
+
+  let initialTree = await fetchLocalTree(PlacesUtils.bookmarks.rootGuid);
+
+  // This test is expected to not touch bookmarks at all, and if it did
+  // happen to create a new item that's not under our syncable roots, then
+  // just checking the result of fetchLocalTree wouldn't pick that up - so
+  // as an additional safety check, count how many bookmark rows exist.
+  let numRows = await getCountOfBookmarkRows(buf.db);
+
+  // Add the left pane root and left-pane folders to the mirror, correctly parented.
+  // We should not apply it because we made a policy decision to not apply
+  // orphaned queries (bug 1433182)
+  await storeRecords(buf, [{
+    id: "folderLEFTPQ",
+    type: "query",
+    parentid: "folderLEFTPR",
+    title: "Some query",
+    bmkUri: "place:folder=SOMETHING",
+  }], { needsMerge: true });
+
+  await buf.apply();
+
+  // should have ignored everything.
+  await assertLocalTree(PlacesUtils.bookmarks.rootGuid, initialTree);
+
+  // and further check we didn't apply it as mis-rooted.
+  Assert.equal(await getCountOfBookmarkRows(buf.db), numRows);
+
+  await buf.finalize();
+  await PlacesUtils.bookmarks.eraseEverything();
+  await PlacesSyncUtils.bookmarks.reset();
 });
 
 add_task(async function test_partial_cycle() {
@@ -818,7 +1000,7 @@ add_task(async function test_partial_cycle() {
       }],
     }],
   });
-  await buf.store(shuffle([{
+  await storeRecords(buf, shuffle([{
     id: "menu",
     type: "folder",
     children: ["folderAAAAAA"],
@@ -844,7 +1026,7 @@ add_task(async function test_partial_cycle() {
   // a record for the menu. B is still a child of A locally. Since we ignore the
   // `parentid`, we'll move (B A) into unfiled.
   info("Make remote changes: A > C");
-  await buf.store([{
+  await storeRecords(buf, [{
     id: "folderAAAAAA",
     type: "folder",
     title: "A (remote)",
@@ -927,7 +1109,7 @@ add_task(async function test_complete_cycle() {
   // subtree because there's nothing linking it back to the rest of the
   // tree.
   info("Make remote changes: Menu > A > B > C > A");
-  await buf.store([{
+  await storeRecords(buf, [{
     id: "menu",
     type: "folder",
     children: ["folderAAAAAA"],

@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/FontPropertyTypes.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/intl/OSPreferences.h"
 
@@ -219,12 +220,12 @@ gfxDWriteFontFamily::FindStyleVariations(FontInfoData *aFontInfoData)
 
         if (LOG_FONTLIST_ENABLED()) {
             LOG_FONTLIST(("(fontlist) added (%s) to family (%s)"
-                 " with style: %s weight: %d stretch: %d psname: %s fullname: %s",
+                 " with style: %s weight: %g stretch: %d psname: %s fullname: %s",
                  NS_ConvertUTF16toUTF8(fe->Name()).get(),
                  NS_ConvertUTF16toUTF8(Name()).get(),
                  (fe->IsItalic()) ?
                   "italic" : (fe->IsOblique() ? "oblique" : "normal"),
-                 fe->Weight(), fe->Stretch(),
+                 fe->Weight().ToFloat(), fe->Stretch(),
                  NS_ConvertUTF16toUTF8(psname).get(),
                  NS_ConvertUTF16toUTF8(fullname).get()));
         }
@@ -956,8 +957,8 @@ gfxDWriteFontList::GetDefaultFontForPlatform(const gfxFontStyle *aStyle)
 
 gfxFontEntry *
 gfxDWriteFontList::LookupLocalFont(const nsAString& aFontName,
-                                   uint16_t aWeight,
-                                   int16_t aStretch,
+                                   FontWeight aWeight,
+                                   uint16_t aStretch,
                                    uint8_t aStyle)
 {
     gfxFontEntry *lookup;
@@ -980,8 +981,8 @@ gfxDWriteFontList::LookupLocalFont(const nsAString& aFontName,
 
 gfxFontEntry *
 gfxDWriteFontList::MakePlatformFont(const nsAString& aFontName,
-                                    uint16_t aWeight,
-                                    int16_t aStretch,
+                                    FontWeight aWeight,
+                                    uint16_t aStretch,
                                     uint8_t aStyle,
                                     const uint8_t* aFontData,
                                     uint32_t aLength)
@@ -1151,12 +1152,12 @@ gfxDWriteFontList::InitFontListForPlatform()
                 if (LOG_FONTLIST_ENABLED()) {
                     gfxFontEntry *fe = faces[i];
                     LOG_FONTLIST(("(fontlist) moved (%s) to family (%s)"
-                         " with style: %s weight: %d stretch: %d",
+                         " with style: %s weight: %g stretch: %d",
                          NS_ConvertUTF16toUTF8(fe->Name()).get(),
                          NS_ConvertUTF16toUTF8(gillSansMTFamily->Name()).get(),
                          (fe->IsItalic()) ?
                           "italic" : (fe->IsOblique() ? "oblique" : "normal"),
-                         fe->Weight(), fe->Stretch()));
+                         fe->Weight().ToFloat(), fe->Stretch()));
                 }
             }
 
@@ -1449,6 +1450,12 @@ gfxDWriteFontList::AddSizeOfExcludingThis(MallocSizeOf aMallocSizeOf,
                                           FontListSizes* aSizes) const
 {
     gfxPlatformFontList::AddSizeOfExcludingThis(aMallocSizeOf, aSizes);
+
+    // We are a singleton, so include the font loader singleton's memory.
+    MOZ_ASSERT(static_cast<const gfxPlatformFontList*>(this) == gfxPlatformFontList::PlatformFontList());
+    gfxDWriteFontFileLoader* loader =
+      static_cast<gfxDWriteFontFileLoader*>(gfxDWriteFontFileLoader::Instance());
+    aSizes->mLoaderSize += loader->SizeOfIncludingThis(aMallocSizeOf);
 
     aSizes->mFontListSize +=
         SizeOfFontFamilyTableExcludingThis(mFontSubstitutes, aMallocSizeOf);

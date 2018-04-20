@@ -656,6 +656,19 @@ class AutoClearTypeInferenceStateOnOOM
     }
 };
 
+// Assert no sweeping of TI data (ObjectGroup::sweep, JSScript::maybeSweepTypes)
+// happens in this scope.
+class MOZ_RAII AutoAssertNoTISweeping
+{
+    TypeZone& zone_;
+    bool prev_;
+    JS::AutoCheckCannotGC nogc_;
+
+  public:
+    explicit AutoAssertNoTISweeping(TypeZone& zone);
+    ~AutoAssertNoTISweeping();
+};
+
 /* Superclass common to stack and heap type sets. */
 class ConstraintTypeSet : public TypeSet
 {
@@ -690,7 +703,7 @@ class ConstraintTypeSet : public TypeSet
 #endif
     }
 
-    TypeConstraint* constraintList() const {
+    TypeConstraint* constraintList(const AutoAssertNoTISweeping&) const {
         checkMagic();
         if (constraintList_)
             constraintList_->checkMagic();
@@ -1102,93 +1115,50 @@ inline bool isInlinableCall(jsbytecode* pc);
 bool
 ClassCanHaveExtraProperties(const Class* clasp);
 
-/*
- * Information about the result of the compilation of a script.  This structure
- * stored in the TypeCompartment is indexed by the RecompileInfo. This
- * indirection enables the invalidation of all constraints related to the same
- * compilation.
- */
-class CompilerOutput
+// Each IonScript has a unique compilation id. This is used to sweep/ignore
+// constraints for IonScripts that have been invalidated/destroyed.
+class IonCompilationId
 {
-    // If this compilation has not been invalidated, the associated script and
-    // kind of compilation being performed.
-    JSScript* script_;
-
-    // Whether this compilation is about to be invalidated.
-    bool pendingInvalidation_ : 1;
-
-    // During sweeping, the list of compiler outputs is compacted and invalidated
-    // outputs are removed. This gives the new index for a valid compiler output.
-    uint32_t sweepIndex_ : 31;
+    // Use two 32-bit integers instead of uint64_t to avoid 8-byte alignment on
+    // some 32-bit platforms.
+    uint32_t idLo_;
+    uint32_t idHi_;
 
   public:
-    static const uint32_t INVALID_SWEEP_INDEX = static_cast<uint32_t>(1 << 31) - 1;
-
-    CompilerOutput()
-      : script_(nullptr),
-        pendingInvalidation_(false), sweepIndex_(INVALID_SWEEP_INDEX)
+    explicit IonCompilationId(uint64_t id)
+      : idLo_(id & UINT32_MAX),
+        idHi_(id >> 32)
     {}
-
-    explicit CompilerOutput(JSScript* script)
-      : script_(script),
-        pendingInvalidation_(false), sweepIndex_(INVALID_SWEEP_INDEX)
-    {}
-
-    JSScript* script() const { return script_; }
-
-    inline jit::IonScript* ion() const;
-
-    bool isValid() const {
-        return script_ != nullptr;
+    bool operator==(const IonCompilationId& other) const {
+        return idLo_ == other.idLo_ && idHi_ == other.idHi_;
     }
-    void invalidate() {
-        script_ = nullptr;
-    }
-
-    void setPendingInvalidation() {
-        pendingInvalidation_ = true;
-    }
-    bool pendingInvalidation() {
-        return pendingInvalidation_;
-    }
-
-    void setSweepIndex(uint32_t index) {
-        if (index >= INVALID_SWEEP_INDEX)
-            MOZ_CRASH();
-        sweepIndex_ = index;
-    }
-    uint32_t sweepIndex() {
-        MOZ_ASSERT(sweepIndex_ != INVALID_SWEEP_INDEX);
-        return sweepIndex_;
+    bool operator!=(const IonCompilationId& other) const {
+        return !operator==(other);
     }
 };
 
 class RecompileInfo
 {
-    // Index in the TypeZone's compilerOutputs or sweepCompilerOutputs arrays,
-    // depending on the generation value.
-    uint32_t outputIndex : 31;
-
-    // If out of sync with the TypeZone's generation, this index is for the
-    // zone's sweepCompilerOutputs rather than compilerOutputs.
-    uint32_t generation : 1;
+    JSScript* script_;
+    IonCompilationId id_;
 
   public:
-    RecompileInfo(uint32_t outputIndex, uint32_t generation)
-      : outputIndex(outputIndex), generation(generation)
+    RecompileInfo(JSScript* script, IonCompilationId id)
+      : script_(script),
+        id_(id)
     {}
 
-    RecompileInfo()
-      : outputIndex(JS_BITMASK(31)), generation(0)
-    {}
-
-    bool operator==(const RecompileInfo& other) const {
-        return outputIndex == other.outputIndex && generation == other.generation;
+    JSScript* script() const {
+        return script_;
     }
 
-    CompilerOutput* compilerOutput(TypeZone& types) const;
-    CompilerOutput* compilerOutput(JSContext* cx) const;
-    bool shouldSweep(TypeZone& types);
+    inline jit::IonScript* maybeIonScriptToInvalidate(const TypeZone& zone) const;
+
+    inline bool shouldSweep(const TypeZone& zone);
+
+    bool operator==(const RecompileInfo& other) const {
+        return script_== other.script_ && id_ == other.id_;
+    }
 };
 
 // The RecompileInfoVector has a MinInlineCapacity of one so that invalidating a
@@ -1315,12 +1285,11 @@ FillBytecodeTypeMap(JSScript* script, uint32_t* bytecodeMap);
 
 class RecompileInfo;
 
-// Allocate a CompilerOutput for a finished compilation and generate the type
-// constraints for the compilation. Sets |isValidOut| based on whether the type
-// constraints still hold.
+// Generate the type constraints for the compilation. Sets |isValidOut| based on
+// whether the type constraints still hold.
 bool
 FinishCompilation(JSContext* cx, HandleScript script, CompilerConstraintList* constraints,
-                  RecompileInfo* precompileInfo, bool* isValidOut);
+                  IonCompilationId compilationId, bool* isValidOut);
 
 // Update the actual types in any scripts queried by constraints with any
 // speculative types added during the definite properties analysis.
@@ -1382,41 +1351,34 @@ class TypeZone
 
     /* Pool for type information in this zone. */
     static const size_t TYPE_LIFO_ALLOC_PRIMARY_CHUNK_SIZE = 8 * 1024;
-    ZoneGroupData<LifoAlloc> typeLifoAlloc_;
+    ZoneData<LifoAlloc> typeLifoAlloc_;
+
+    // Under CodeGenerator::link, the id of the current compilation.
+    ZoneData<mozilla::Maybe<IonCompilationId>> currentCompilationId_;
 
     TypeZone(const TypeZone&) = delete;
     void operator=(const TypeZone&) = delete;
 
   public:
     // Current generation for sweeping.
-    ZoneGroupOrGCTaskOrIonCompileData<uint32_t> generation;
-
-    /*
-     * All Ion compilations that have occured in this zone, for indexing via
-     * RecompileInfo. This includes both valid and invalid compilations, though
-     * invalidated compilations are swept on GC.
-     */
-    typedef Vector<CompilerOutput, 4, SystemAllocPolicy> CompilerOutputVector;
-    ZoneGroupData<CompilerOutputVector*> compilerOutputs;
+    ZoneOrGCTaskOrIonCompileData<uint32_t> generation;
 
     // During incremental sweeping, allocator holding the old type information
     // for the zone.
-    ZoneGroupData<LifoAlloc> sweepTypeLifoAlloc;
-
-    // During incremental sweeping, the old compiler outputs for use by
-    // recompile indexes with a stale generation.
-    ZoneGroupData<CompilerOutputVector*> sweepCompilerOutputs;
+    ZoneData<LifoAlloc> sweepTypeLifoAlloc;
 
     // During incremental sweeping, whether to try to destroy all type
     // information attached to scripts.
-    ZoneGroupData<bool> sweepReleaseTypes;
+    ZoneData<bool> sweepReleaseTypes;
 
-    ZoneGroupData<bool> sweepingTypes;
+    ZoneData<bool> sweepingTypes;
 
-    ZoneGroupData<bool> keepTypeScripts;
+    ZoneData<bool> keepTypeScripts;
+
+    ZoneData<bool> assertNoTISweeping;
 
     // The topmost AutoEnterAnalysis on the stack, if there is one.
-    ZoneGroupData<AutoEnterAnalysis*> activeAnalysis;
+    ZoneData<AutoEnterAnalysis*> activeAnalysis;
 
     explicit TypeZone(JS::Zone* zone);
     ~TypeZone();
@@ -1430,7 +1392,7 @@ class TypeZone
         return typeLifoAlloc_.ref();
     }
 
-    void beginSweep(bool releaseTypes, AutoClearTypeInferenceStateOnOOM& oom);
+    void beginSweep(bool releaseTypes);
     void endSweep(JSRuntime* rt);
     void clearAllNewScriptsOnOOM();
 
@@ -1443,6 +1405,13 @@ class TypeZone
     void setSweepingTypes(bool sweeping) {
         MOZ_RELEASE_ASSERT(sweepingTypes != sweeping);
         sweepingTypes = sweeping;
+    }
+
+    mozilla::Maybe<IonCompilationId> currentCompilationId() const {
+        return currentCompilationId_.ref();
+    }
+    mozilla::Maybe<IonCompilationId>& currentCompilationIdRef() {
+        return currentCompilationId_.ref();
     }
 };
 

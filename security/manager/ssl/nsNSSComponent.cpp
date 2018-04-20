@@ -58,6 +58,11 @@
 #include "sslproto.h"
 #include "prmem.h"
 
+#if defined(XP_LINUX) && !defined(ANDROID)
+#include <linux/magic.h>
+#include <sys/vfs.h>
+#endif
+
 #ifdef XP_WIN
 #include "mozilla/WindowsVersion.h"
 #include "nsILocalFileWin.h"
@@ -129,6 +134,7 @@ bool EnsureNSSInitializedChromeOrContent()
   }
 
   mozilla::psm::DisableMD5();
+  mozilla::pkix::RegisterErrorTable();
   initialized = true;
   return true;
 }
@@ -1102,10 +1108,7 @@ nsNSSComponent::BlockUntilLoadableRootsLoaded()
 {
   MonitorAutoLock rootsLoadedLock(mLoadableRootsLoadedMonitor);
   while (!mLoadableRootsLoaded) {
-    nsresult rv = rootsLoadedLock.Wait();
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
+    rootsLoadedLock.Wait();
   }
   MOZ_ASSERT(mLoadableRootsLoaded);
 
@@ -1753,6 +1756,56 @@ nsNSSComponent::setEnabledTLSVersions()
   return NS_OK;
 }
 
+#if defined(XP_WIN) || (defined(XP_LINUX) && !defined(ANDROID))
+// If the profile directory is on a networked drive, we want to set the
+// environment variable NSS_SDB_USE_CACHE to yes (as long as it hasn't been set
+// before).
+static void
+SetNSSDatabaseCacheModeAsAppropriate()
+{
+  nsCOMPtr<nsIFile> profileFile;
+  nsresult rv = NS_GetSpecialDirectory(NS_APP_USER_PROFILE_50_DIR,
+                                       getter_AddRefs(profileFile));
+  if (NS_FAILED(rv)) {
+    // We're probably running without a profile directory, so this is
+    // irrelevant.
+    return;
+  }
+
+  static const char sNSS_SDB_USE_CACHE[] = "NSS_SDB_USE_CACHE";
+  static const char sNSS_SDB_USE_CACHE_WITH_VALUE[] = "NSS_SDB_USE_CACHE=yes";
+  auto profilePath = profileFile->NativePath();
+
+#if defined(XP_LINUX) && !defined(ANDROID)
+  struct statfs statfs_s;
+  if (statfs(profilePath.get(), &statfs_s) == 0 &&
+      statfs_s.f_type == NFS_SUPER_MAGIC &&
+      !PR_GetEnv(sNSS_SDB_USE_CACHE)) {
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+            ("profile is remote (and NSS_SDB_USE_CACHE wasn't set): "
+             "setting NSS_SDB_USE_CACHE"));
+    PR_SetEnv(sNSS_SDB_USE_CACHE_WITH_VALUE);
+  } else {
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("not setting NSS_SDB_USE_CACHE"));
+  }
+#endif // defined(XP_LINUX) && !defined(ANDROID)
+
+#ifdef XP_WIN
+  wchar_t volPath[MAX_PATH];
+  if (::GetVolumePathNameW(profilePath.get(), volPath, MAX_PATH) &&
+      ::GetDriveTypeW(volPath) == DRIVE_REMOTE &&
+      !PR_GetEnv(sNSS_SDB_USE_CACHE)) {
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+            ("profile is remote (and NSS_SDB_USE_CACHE wasn't set): "
+             "setting NSS_SDB_USE_CACHE"));
+    PR_SetEnv(sNSS_SDB_USE_CACHE_WITH_VALUE);
+  } else {
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("not setting NSS_SDB_USE_CACHE"));
+  }
+#endif // XP_WIN
+}
+#endif // defined(XP_WIN) || (defined(XP_LINUX) && !defined(ANDROID))
+
 static nsresult
 GetNSSProfilePath(nsAutoCString& aProfilePath)
 {
@@ -2013,6 +2066,10 @@ nsNSSComponent::InitializeNSS()
     return NS_ERROR_NOT_AVAILABLE;
   }
 
+#if defined(XP_WIN) || (defined(XP_LINUX) && !defined(ANDROID))
+  SetNSSDatabaseCacheModeAsAppropriate();
+#endif
+
   bool nocertdb = Preferences::GetBool("security.nocertdb", false);
   bool inSafeMode = true;
   nsCOMPtr<nsIXULRuntime> runtime(do_GetService("@mozilla.org/xre/runtime;1"));
@@ -2140,6 +2197,12 @@ nsNSSComponent::InitializeNSS()
     mContentSigningRootHash.Truncate();
     Preferences::GetString("security.content.signature.root_hash",
                            mContentSigningRootHash);
+
+    mMitmCanaryIssuer.Truncate();
+    Preferences::GetString("security.pki.mitm_canary_issuer",
+                           mMitmCanaryIssuer);
+    mMitmDetecionEnabled =
+      Preferences::GetBool("security.pki.mitm_canary_issuer.enabled", true);
 
     mNSSInitialized = true;
   }
@@ -2307,6 +2370,16 @@ nsNSSComponent::Observe(nsISupports* aSubject, const char* aTopic,
                              mContentSigningRootHash);
     } else if (prefName.Equals(kEnterpriseRootModePref)) {
       MaybeImportEnterpriseRoots();
+    } else if (prefName.EqualsLiteral("security.pki.mitm_canary_issuer")) {
+      MutexAutoLock lock(mMutex);
+      mMitmCanaryIssuer.Truncate();
+      Preferences::GetString("security.pki.mitm_canary_issuer",
+                             mMitmCanaryIssuer);
+    } else if (prefName.EqualsLiteral(
+                 "security.pki.mitm_canary_issuer.enabled")) {
+      MutexAutoLock lock(mMutex);
+      mMitmDetecionEnabled =
+        Preferences::GetBool("security.pki.mitm_canary_issuer.enabled", true);
     } else {
       clearSessionCache = false;
     }
@@ -2433,6 +2506,20 @@ nsNSSComponent::IsCertContentSigningRoot(CERTCertificate* cert, bool& result)
 
   result = mContentSigningRootHash.Equals(certHash);
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsNSSComponent::IssuerMatchesMitmCanary(const char* aCertIssuer)
+{
+  MutexAutoLock lock(mMutex);
+  if (mMitmDetecionEnabled && !mMitmCanaryIssuer.IsEmpty()) {
+    nsString certIssuer = NS_ConvertUTF8toUTF16(aCertIssuer);
+    if (mMitmCanaryIssuer.Equals(certIssuer)) {
+      return NS_OK;
+    }
+  }
+
+  return NS_ERROR_FAILURE;
 }
 
 SharedCertVerifier::~SharedCertVerifier() { }

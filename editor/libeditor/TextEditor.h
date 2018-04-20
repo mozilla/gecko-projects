@@ -16,10 +16,7 @@
 #include "nscore.h"
 
 class nsIContent;
-class nsIDOMDocument;
-class nsIDOMElement;
 class nsIDOMEvent;
-class nsIDOMNode;
 class nsIDocumentEncoder;
 class nsIOutputStream;
 class nsISelectionController;
@@ -32,6 +29,7 @@ class HTMLEditRules;
 enum class EditAction : int32_t;
 
 namespace dom {
+class DragEvent;
 class Selection;
 } // namespace dom
 
@@ -86,8 +84,10 @@ public:
 
   NS_IMETHOD SetDocumentCharacterSet(const nsACString& characterSet) override;
 
-  NS_IMETHOD Undo(uint32_t aCount) override;
-  NS_IMETHOD Redo(uint32_t aCount) override;
+  // If there are some good name to create non-virtual Undo()/Redo() methods,
+  // we should create them and those methods should just run them.
+  NS_IMETHOD Undo(uint32_t aCount) final;
+  NS_IMETHOD Redo(uint32_t aCount) final;
 
   NS_IMETHOD Cut() override;
   NS_IMETHOD CanCut(bool* aCanCut) override;
@@ -142,18 +142,18 @@ public:
   NS_IMETHOD TypedText(const nsAString& aString, ETypingAction aAction);
 
   nsresult InsertTextAt(const nsAString& aStringToInsert,
-                        nsIDOMNode* aDestinationNode,
+                        nsINode* aDestinationNode,
                         int32_t aDestOffset,
                         bool aDoDeleteSelection);
 
   virtual nsresult InsertFromDataTransfer(dom::DataTransfer* aDataTransfer,
                                           int32_t aIndex,
-                                          nsIDOMDocument* aSourceDoc,
-                                          nsIDOMNode* aDestinationNode,
+                                          nsIDocument* aSourceDoc,
+                                          nsINode* aDestinationNode,
                                           int32_t aDestOffset,
                                           bool aDoDeleteSelection) override;
 
-  virtual nsresult InsertFromDrop(nsIDOMEvent* aDropEvent) override;
+  virtual nsresult InsertFromDrop(dom::DragEvent* aDropEvent) override;
 
   /**
    * Extends the selection for given deletion operation
@@ -168,7 +168,7 @@ public:
    * principals match, or we are in a editor context where this doesn't matter.
    * Otherwise, the data must be sanitized first.
    */
-  bool IsSafeToInsertData(nsIDOMDocument* aSourceDoc);
+  bool IsSafeToInsertData(nsIDocument* aSourceDoc);
 
   static void GetDefaultEditorPrefs(int32_t& aNewLineHandling,
                                     int32_t& aCaretStyle);
@@ -213,8 +213,10 @@ protected:
    * @return                The new <br> node.  If failed to create new <br>
    *                        node, returns nullptr.
    */
-  already_AddRefed<Element> CreateBR(const EditorRawDOMPoint& aPointToInsert,
-                                     EDirection aSelect = eNone);
+  template<typename PT, typename CT>
+  already_AddRefed<Element>
+  CreateBR(const EditorDOMPointBase<PT, CT>& aPointToInsert,
+           EDirection aSelect = eNone);
 
   /**
    * CreateBRImpl() creates a <br> element and inserts it before aPointToInsert.
@@ -233,9 +235,10 @@ protected:
    * @return                    The new <br> node.  If failed to create new
    *                            <br> node, returns nullptr.
    */
+  template<typename PT, typename CT>
   already_AddRefed<Element>
   CreateBRImpl(Selection& aSelection,
-               const EditorRawDOMPoint& aPointToInsert,
+               const EditorDOMPointBase<PT, CT>& aPointToInsert,
                EDirection aSelect);
 
   /**
@@ -243,10 +246,7 @@ protected:
    * (drag&drop or clipboard).
    */
   NS_IMETHOD PrepareTransferable(nsITransferable** transferable);
-  nsresult InsertTextFromTransferable(nsITransferable* transferable,
-                                      nsIDOMNode* aDestinationNode,
-                                      int32_t aDestOffset,
-                                      bool aDoDeleteSelection);
+  nsresult InsertTextFromTransferable(nsITransferable* transferable);
 
   /**
    * Shared outputstring; returns whether selection is collapsed and resulting

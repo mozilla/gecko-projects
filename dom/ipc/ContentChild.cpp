@@ -24,6 +24,7 @@
 #include "mozilla/docshell/OfflineCacheUpdateChild.h"
 #include "mozilla/dom/ClientManager.h"
 #include "mozilla/dom/ClientOpenWindowOpActors.h"
+#include "mozilla/dom/ChildProcessMessageManager.h"
 #include "mozilla/dom/ContentBridgeChild.h"
 #include "mozilla/dom/ContentBridgeParent.h"
 #include "mozilla/dom/DOMPrefs.h"
@@ -43,6 +44,8 @@
 #include "mozilla/dom/TabGroup.h"
 #include "mozilla/dom/nsIContentChild.h"
 #include "mozilla/dom/URLClassifierChild.h"
+#include "mozilla/dom/WorkerDebugger.h"
+#include "mozilla/dom/WorkerDebuggerManager.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/Logging.h"
 #include "mozilla/psm/PSMContentListener.h"
@@ -66,6 +69,9 @@
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/net/CookieServiceChild.h"
 #include "mozilla/net/CaptivePortalService.h"
+#ifndef RELEASE_OR_BETA
+#include "mozilla/PerformanceUtils.h"
+#endif
 #include "mozilla/plugins/PluginInstanceParent.h"
 #include "mozilla/plugins/PluginModuleParent.h"
 #include "mozilla/widget/ScreenManager.h"
@@ -78,6 +84,8 @@
 #include "imgLoader.h"
 #include "GMPServiceChild.h"
 #include "NullPrincipal.h"
+#include "nsISimpleEnumerator.h"
+#include "nsIWorkerDebuggerManager.h"
 
 #if !defined(XP_WIN)
 #include "mozilla/Omnijar.h"
@@ -433,6 +441,7 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage)
     nsAutoString msg, sourceName, sourceLine;
     nsCString category;
     uint32_t lineNum, colNum, flags;
+    bool fromPrivateWindow;
 
     nsresult rv = scriptError->GetErrorMessage(msg);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -451,6 +460,8 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage)
     rv = scriptError->GetColumnNumber(&colNum);
     NS_ENSURE_SUCCESS(rv, rv);
     rv = scriptError->GetFlags(&flags);
+    NS_ENSURE_SUCCESS(rv, rv);
+    rv = scriptError->GetIsFromPrivateWindow(&fromPrivateWindow);
     NS_ENSURE_SUCCESS(rv, rv);
 
     {
@@ -479,14 +490,15 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage)
 
         mChild->SendScriptErrorWithStack(msg, sourceName, sourceLine,
                                          lineNum, colNum, flags, category,
-                                         cloned);
+                                         fromPrivateWindow, cloned);
         return NS_OK;
       }
     }
 
 
     mChild->SendScriptError(msg, sourceName, sourceLine,
-                            lineNum, colNum, flags, category);
+                            lineNum, colNum, flags, category,
+                            fromPrivateWindow);
     return NS_OK;
   }
 
@@ -756,7 +768,7 @@ GetCreateWindowParams(mozIDOMWindowProxy* aParent,
   *aFullZoom = 1.0f;
   auto* opener = nsPIDOMWindowOuter::From(aParent);
   if (!opener) {
-    nsCOMPtr<nsIPrincipal> nullPrincipal = NullPrincipal::Create();
+    nsCOMPtr<nsIPrincipal> nullPrincipal = NullPrincipal::CreateWithoutOriginAttributes();
     NS_ADDREF(*aTriggeringPrincipal = nullPrincipal);
     return NS_OK;
   }
@@ -954,7 +966,7 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
     nsTArray<FrameScriptInfo> frameScripts(info.frameScripts());
     nsCString urlToLoad = info.urlToLoad();
     TextureFactoryIdentifier textureFactoryIdentifier = info.textureFactoryIdentifier();
-    uint64_t layersId = info.layersId();
+    layers::LayersId layersId = info.layersId();
     CompositorOptions compositorOptions = info.compositorOptions();
     uint32_t maxTouchPoints = info.maxTouchPoints();
     DimensionInfo dimensionInfo = info.dimensions();
@@ -983,7 +995,7 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
       return;
     }
 
-    if (layersId == 0) { // if renderFrame is invalid.
+    if (!layersId.IsValid()) { // if renderFrame is invalid.
       renderFrame = nullptr;
     }
 
@@ -1181,8 +1193,6 @@ void
 ContentChild::InitXPCOM(const XPCOMInitData& aXPCOMInit,
                         const mozilla::dom::ipc::StructuredCloneData& aInitialData)
 {
-  Preferences::SetLatePreferences(&aXPCOMInit.prefs());
-
   // Do this as early as possible to get the parent process to initialize the
   // background thread since we'll likely need database information very soon.
   BackgroundChild::Startup();
@@ -1370,6 +1380,20 @@ ContentChild::GetResultForRenderingInitFailure(base::ProcessId aOtherPid)
 }
 
 mozilla::ipc::IPCResult
+ContentChild::RecvRequestPerformanceMetrics()
+{
+#ifndef RELEASE_OR_BETA
+  nsTArray<PerformanceInfo> info;
+  CollectPerformanceInfo(info);
+  SendAddPerformanceMetrics(info);
+  return IPC_OK();
+#endif
+#ifdef RELEASE_OR_BETA
+  return IPC_OK();
+#endif
+}
+
+mozilla::ipc::IPCResult
 ContentChild::RecvInitRendering(Endpoint<PCompositorManagerChild>&& aCompositor,
                                 Endpoint<PImageBridgeChild>&& aImageBridge,
                                 Endpoint<PVRManagerChild>&& aVRBridge,
@@ -1413,7 +1437,7 @@ ContentChild::RecvReinitRendering(Endpoint<PCompositorManagerChild>&& aComposito
 
   // Zap all the old layer managers we have lying around.
   for (const auto& tabChild : tabs) {
-    if (tabChild->LayersId()) {
+    if (tabChild->GetLayersId().IsValid()) {
       tabChild->InvalidateLayers();
     }
   }
@@ -1435,7 +1459,7 @@ ContentChild::RecvReinitRendering(Endpoint<PCompositorManagerChild>&& aComposito
 
   // Establish new PLayerTransactions.
   for (const auto& tabChild : tabs) {
-    if (tabChild->LayersId()) {
+    if (tabChild->GetLayersId().IsValid()) {
       tabChild->ReinitRendering();
     }
   }
@@ -1460,7 +1484,7 @@ ContentChild::RecvReinitRenderingForDeviceReset()
 
   nsTArray<RefPtr<TabChild>> tabs = TabChild::GetAll();
   for (const auto& tabChild : tabs) {
-    if (tabChild->LayersId()) {
+    if (tabChild->GetLayersId().IsValid()) {
       tabChild->ReinitRenderingForDeviceReset();
     }
   }
@@ -2504,23 +2528,21 @@ ContentChild::RecvAsyncMessage(const nsString& aMsg,
   if (cpm) {
     StructuredCloneData data;
     ipc::UnpackClonedMessageDataForChild(aData, data);
-    cpm->ReceiveMessage(static_cast<nsIContentFrameMessageManager*>(cpm.get()),
-                        nullptr, aMsg, false, &data, &cpows, aPrincipal,
-                        nullptr);
+    cpm->ReceiveMessage(cpm, nullptr, aMsg, false, &data, &cpows, aPrincipal, nullptr,
+                        IgnoreErrors());
   }
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult
-ContentChild::RecvGeolocationUpdate(const GeoPosition& somewhere)
+ContentChild::RecvGeolocationUpdate(nsIDOMGeoPosition* aPosition)
 {
   nsCOMPtr<nsIGeolocationUpdate> gs =
     do_GetService("@mozilla.org/geolocation/service;1");
   if (!gs) {
     return IPC_OK();
   }
-  nsCOMPtr<nsIDOMGeoPosition> position = somewhere;
-  gs->Update(position);
+  gs->Update(aPosition);
   return IPC_OK();
 }
 

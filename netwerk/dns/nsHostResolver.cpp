@@ -300,6 +300,7 @@ nsHostRecord::ResolveComplete()
 
     switch(mResolverMode) {
     case MODE_NATIVEONLY:
+    case MODE_TRROFF:
         AccumulateCategorical(Telemetry::LABELS_DNS_LOOKUP_ALGORITHM::nativeOnly);
         break;
     case MODE_PARALLEL:
@@ -530,8 +531,8 @@ nsHostResolver::nsHostResolver(uint32_t maxCacheEntries,
 {
     mCreationTime = PR_Now();
 
-    mLongIdleTimeout  = PR_SecondsToInterval(LongIdleTimeoutSeconds);
-    mShortIdleTimeout = PR_SecondsToInterval(ShortIdleTimeoutSeconds);
+    mLongIdleTimeout  = TimeDuration::FromSeconds(LongIdleTimeoutSeconds);
+    mShortIdleTimeout = TimeDuration::FromSeconds(ShortIdleTimeoutSeconds);
 }
 
 nsHostResolver::~nsHostResolver() = default;
@@ -889,7 +890,9 @@ nsHostResolver::ResolveHost(const char             *host,
                                     if (!rec->addr_info) {
                                         rec->addr_info = new AddrInfo(
                                             unspecRec->addr_info->mHostName,
-                                            unspecRec->addr_info->mCanonicalName);
+                                            unspecRec->addr_info->mCanonicalName,
+                                            unspecRec->addr_info->IsTRR()
+                                          );
                                         rec->CopyExpirationTimesAndFlagsFrom(unspecRec);
                                     }
                                     rec->addr_info->AddAddress(
@@ -1134,6 +1137,9 @@ nsHostResolver::TrrLookup(nsHostRecord *aRec, TRR *pushedTRR)
     bool madeQuery = false;
     do {
         sendAgain = false;
+        if ((TRRTYPE_AAAA == rectype) && gTRRService && gTRRService->DisableIPv6()) {
+            break;
+        }
         LOG(("TRR Resolve %s type %d\n", rec->host.get(), (int)rectype));
         RefPtr<TRR> trr;
         MutexAutoLock trrlock(rec->mTrrLock);
@@ -1262,12 +1268,12 @@ nsHostResolver::NameLookup(nsHostRecord *rec)
         mode = MODE_NATIVEONLY;
     }
 
-    if (mode != MODE_NATIVEONLY) {
+    if (!TRR_DISABLED(mode)) {
         rv = TrrLookup(rec);
     }
 
     if ((mode == MODE_PARALLEL) ||
-        (mode == MODE_NATIVEONLY) ||
+        TRR_DISABLED(mode) ||
         (mode == MODE_SHADOW) ||
         ((mode == MODE_TRRFIRST) && NS_FAILED(rv))) {
         rv = NativeLookup(rec);
@@ -1308,12 +1314,13 @@ bool
 nsHostResolver::GetHostToLookup(nsHostRecord **result)
 {
     bool timedOut = false;
-    PRIntervalTime epoch, now, timeout;
+    TimeDuration timeout;
+    TimeStamp epoch, now;
 
     MutexAutoLock lock(mLock);
 
     timeout = (mNumIdleThreads >= HighThreadThreshold) ? mShortIdleTimeout : mLongIdleTimeout;
-    epoch = PR_IntervalNow();
+    epoch = TimeStamp::Now();
 
     while (!mShutdown) {
         // remove next record from Q; hand over owning reference. Check high, then med, then low
@@ -1358,15 +1365,16 @@ nsHostResolver::GetHostToLookup(nsHostRecord **result)
         mIdleThreadCV.Wait(timeout);
         mNumIdleThreads--;
 
-        now = PR_IntervalNow();
+        now = TimeStamp::Now();
 
-        if ((PRIntervalTime)(now - epoch) >= timeout)
+        if (now - epoch >= timeout) {
             timedOut = true;
-        else {
-            // It is possible that PR_WaitCondVar() was interrupted and returned early,
-            // in which case we will loop back and re-enter it. In that case we want to
-            // do so with the new timeout reduced to reflect time already spent waiting.
-            timeout -= (PRIntervalTime)(now - epoch);
+        } else {
+            // It is possible that CondVar::Wait() was interrupted and returned
+            // early, in which case we will loop back and re-enter it. In that
+            // case we want to do so with the new timeout reduced to reflect
+            // time already spent waiting.
+            timeout -= now - epoch;
             epoch = now;
         }
     }
@@ -1431,6 +1439,10 @@ different_rrset(AddrInfo *rrset1, AddrInfo *rrset2)
     LOG(("different_rrset %s\n", rrset1->mHostName));
     nsTArray<NetAddr> orderedSet1;
     nsTArray<NetAddr> orderedSet2;
+
+    if (rrset1->IsTRR() != rrset2->IsTRR()) {
+        return true;
+    }
 
     for (NetAddrElement *element = rrset1->mAddresses.getFirst();
          element; element = element->getNext()) {
@@ -1517,12 +1529,8 @@ nsHostResolver::CompleteLookup(nsHostRecord* rec, nsresult status, AddrInfo* aNe
         }
 
         if (NS_SUCCEEDED(status)) {
-            if (rec->mTRRSuccess == 0) { // first one
-                rec->mTrrDuration = TimeStamp::Now() - rec->mTrrStart;
-            }
             rec->mTRRSuccess++;
         }
-
         if (TRROutstanding()) {
             if (NS_FAILED(status)) {
                 return LOOKUP_OK; // wait for outstanding
@@ -1576,6 +1584,12 @@ nsHostResolver::CompleteLookup(nsHostRecord* rec, nsresult status, AddrInfo* aNe
             }
             // continue
         }
+
+        if (NS_SUCCEEDED(status) && (rec->mTRRSuccess == 1)) {
+            // store the duration on first (used) TRR response
+            rec->mTrrDuration = TimeStamp::Now() - rec->mTrrStart;
+        }
+
     } else { // native resolve completed
         if (rec->usingAnyThread) {
             mActiveAnyThreadCount--;
@@ -1856,6 +1870,17 @@ nsHostResolver::ThreadFunc(void *arg)
     resolver->mThreadCount--;
     resolver = nullptr;
     LOG(("DNS lookup thread - queue empty, thread finished.\n"));
+}
+
+void
+nsHostResolver::SetCacheLimits(uint32_t aMaxCacheEntries,
+                               uint32_t aDefaultCacheEntryLifetime,
+                               uint32_t aDefaultGracePeriod)
+{
+    MutexAutoLock lock(mLock);
+    mMaxCacheEntries = aMaxCacheEntries;
+    mDefaultCacheLifetime = aDefaultCacheEntryLifetime;
+    mDefaultGracePeriod = aDefaultGracePeriod;
 }
 
 nsresult

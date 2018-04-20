@@ -137,7 +137,7 @@ class ExtensionStreamGetter : public RefCounted<ExtensionStreamGetter>
     bool mIsJarChannel;
 };
 
-class ExtensionJARFileOpener : public nsISupports
+class ExtensionJARFileOpener final : public nsISupports
 {
 public:
   ExtensionJARFileOpener(nsIFile* aFile,
@@ -239,7 +239,7 @@ ExtensionStreamGetter::GetAsync(nsIStreamListener* aListener,
   gNeckoChild->SendGetExtensionStream(uri)->Then(
     mMainThreadEventTarget,
     __func__,
-    [self] (const nsCOMPtr<nsIInputStream>& stream) {
+    [self] (const RefPtr<nsIInputStream>& stream) {
       self->OnStream(do_AddRef(stream));
     },
     [self] (const mozilla::ipc::ResponseRejectReason) {

@@ -1759,7 +1759,7 @@ class MOZ_STACK_CLASS ModuleValidator
         arrayViews_(cx),
         atomicsPresent_(false),
         simdPresent_(false),
-        env_(CompileMode::Once, Tier::Ion, DebugEnabled::False,
+        env_(CompileMode::Once, Tier::Ion, DebugEnabled::False, HasGcTypes::False,
              cx->compartment()->creationOptions().getSharedMemoryAndAtomicsEnabled()
                ? Shareable::True
                : Shareable::False,
@@ -1948,8 +1948,11 @@ class MOZ_STACK_CLASS ModuleValidator
         MOZ_ASSERT(type == Type::canonicalize(Type::lit(lit)));
 
         uint32_t index = env_.globals.length();
-        if (!env_.globals.emplaceBack(type.canonicalToValType(), !isConst, index))
+        if (!env_.globals.emplaceBack(type.canonicalToValType(), !isConst, index,
+                                      ModuleKind::AsmJS))
+        {
             return false;
+        }
 
         Global::Which which = isConst ? Global::ConstantLiteral : Global::Variable;
         Global* global = validationLifo_.new_<Global>(which);
@@ -1976,7 +1979,7 @@ class MOZ_STACK_CLASS ModuleValidator
 
         uint32_t index = env_.globals.length();
         ValType valType = type.canonicalToValType();
-        if (!env_.globals.emplaceBack(valType, !isConst, index))
+        if (!env_.globals.emplaceBack(valType, !isConst, index, ModuleKind::AsmJS))
             return false;
 
         Global::Which which = isConst ? Global::ConstantImport : Global::Variable;
@@ -2447,7 +2450,7 @@ class MOZ_STACK_CLASS ModuleValidator
         asmJSMetadata_->srcLength = endBeforeCurly - asmJSMetadata_->srcStart;
 
         TokenPos pos;
-        JS_ALWAYS_TRUE(tokenStream().peekTokenPos(&pos, TokenStreamShared::Operand));
+        MOZ_ALWAYS_TRUE(tokenStream().peekTokenPos(&pos, TokenStreamShared::Operand));
         uint32_t endAfterCurly = pos.end;
         asmJSMetadata_->srcLengthWithRightBrace = endAfterCurly - asmJSMetadata_->srcStart;
 
@@ -2660,7 +2663,7 @@ ExtractSimdValue(ModuleValidator& m, ParseNode* pn)
     MOZ_ASSERT(IsSimdLiteral(m, pn));
 
     SimdType type = SimdType::Count;
-    JS_ALWAYS_TRUE(IsSimdTuple(m, pn, &type));
+    MOZ_ALWAYS_TRUE(IsSimdTuple(m, pn, &type));
     MOZ_ASSERT(CallArgListLength(pn) == GetSimdLanes(type));
 
     ParseNode* arg = CallArgList(pn);
@@ -2671,7 +2674,7 @@ ExtractSimdValue(ModuleValidator& m, ParseNode* pn)
         int8_t val[16];
         for (size_t i = 0; i < 16; i++, arg = NextNode(arg)) {
             uint32_t u32;
-            JS_ALWAYS_TRUE(IsLiteralInt(m, arg, &u32));
+            MOZ_ALWAYS_TRUE(IsLiteralInt(m, arg, &u32));
             val[i] = int8_t(u32);
         }
         MOZ_ASSERT(arg == nullptr);
@@ -2684,7 +2687,7 @@ ExtractSimdValue(ModuleValidator& m, ParseNode* pn)
         int16_t val[8];
         for (size_t i = 0; i < 8; i++, arg = NextNode(arg)) {
             uint32_t u32;
-            JS_ALWAYS_TRUE(IsLiteralInt(m, arg, &u32));
+            MOZ_ALWAYS_TRUE(IsLiteralInt(m, arg, &u32));
             val[i] = int16_t(u32);
         }
         MOZ_ASSERT(arg == nullptr);
@@ -2697,7 +2700,7 @@ ExtractSimdValue(ModuleValidator& m, ParseNode* pn)
         int32_t val[4];
         for (size_t i = 0; i < 4; i++, arg = NextNode(arg)) {
             uint32_t u32;
-            JS_ALWAYS_TRUE(IsLiteralInt(m, arg, &u32));
+            MOZ_ALWAYS_TRUE(IsLiteralInt(m, arg, &u32));
             val[i] = int32_t(u32);
         }
         MOZ_ASSERT(arg == nullptr);
@@ -2717,7 +2720,7 @@ ExtractSimdValue(ModuleValidator& m, ParseNode* pn)
         int8_t val[16];
         for (size_t i = 0; i < 16; i++, arg = NextNode(arg)) {
             uint32_t u32;
-            JS_ALWAYS_TRUE(IsLiteralInt(m, arg, &u32));
+            MOZ_ALWAYS_TRUE(IsLiteralInt(m, arg, &u32));
             val[i] = u32 ? -1 : 0;
         }
         MOZ_ASSERT(arg == nullptr);
@@ -2728,7 +2731,7 @@ ExtractSimdValue(ModuleValidator& m, ParseNode* pn)
         int16_t val[8];
         for (size_t i = 0; i < 8; i++, arg = NextNode(arg)) {
             uint32_t u32;
-            JS_ALWAYS_TRUE(IsLiteralInt(m, arg, &u32));
+            MOZ_ALWAYS_TRUE(IsLiteralInt(m, arg, &u32));
             val[i] = u32 ? -1 : 0;
         }
         MOZ_ASSERT(arg == nullptr);
@@ -2739,7 +2742,7 @@ ExtractSimdValue(ModuleValidator& m, ParseNode* pn)
         int32_t val[4];
         for (size_t i = 0; i < 4; i++, arg = NextNode(arg)) {
             uint32_t u32;
-            JS_ALWAYS_TRUE(IsLiteralInt(m, arg, &u32));
+            MOZ_ALWAYS_TRUE(IsLiteralInt(m, arg, &u32));
             val[i] = u32 ? -1 : 0;
         }
         MOZ_ASSERT(arg == nullptr);
@@ -3101,7 +3104,7 @@ class MOZ_STACK_CLASS FunctionValidator
                breakableStack_.append(blockDepth_++);
     }
     bool popBreakableBlock() {
-        JS_ALWAYS_TRUE(breakableStack_.popCopy() == --blockDepth_);
+        MOZ_ALWAYS_TRUE(breakableStack_.popCopy() == --blockDepth_);
         return encoder().writeOp(Op::End);
     }
 
@@ -3131,7 +3134,7 @@ class MOZ_STACK_CLASS FunctionValidator
                continuableStack_.append(blockDepth_++);
     }
     bool popContinuableBlock() {
-        JS_ALWAYS_TRUE(continuableStack_.popCopy() == --blockDepth_);
+        MOZ_ALWAYS_TRUE(continuableStack_.popCopy() == --blockDepth_);
         return encoder().writeOp(Op::End);
     }
 
@@ -3144,8 +3147,8 @@ class MOZ_STACK_CLASS FunctionValidator
                continuableStack_.append(blockDepth_++);
     }
     bool popLoop() {
-        JS_ALWAYS_TRUE(continuableStack_.popCopy() == --blockDepth_);
-        JS_ALWAYS_TRUE(breakableStack_.popCopy() == --blockDepth_);
+        MOZ_ALWAYS_TRUE(continuableStack_.popCopy() == --blockDepth_);
+        MOZ_ALWAYS_TRUE(breakableStack_.popCopy() == --blockDepth_);
         return encoder().writeOp(Op::End) &&
                encoder().writeOp(Op::End);
     }
@@ -3342,10 +3345,10 @@ CheckModuleLevelName(ModuleValidator& m, ParseNode* usepn, PropertyName* name)
 static bool
 CheckFunctionHead(ModuleValidator& m, ParseNode* fn)
 {
+    MOZ_ASSERT(!fn->pn_funbox->hasExprBody());
+
     if (fn->pn_funbox->hasRest())
         return m.fail(fn, "rest args not allowed");
-    if (fn->pn_funbox->isExprBody())
-        return m.fail(fn, "expression closures not allowed");
     if (fn->pn_funbox->hasDestructuringArgs)
         return m.fail(fn, "destructuring args not allowed");
     return true;
@@ -7204,14 +7207,16 @@ ParseFunction(ModuleValidator& m, ParseNode** fnOut, unsigned* line)
                                                     FunctionAsyncKind::SyncFunction);
     if (!funbox)
         return false;
-    funbox->initWithEnclosingParseContext(outerpc, frontend::Statement);
+    funbox->initWithEnclosingParseContext(outerpc, FunctionSyntaxKind::Statement);
 
     Directives newDirectives = directives;
     SourceParseContext funpc(&m.parser(), funbox, &newDirectives);
     if (!funpc.init())
         return false;
 
-    if (!m.parser().functionFormalParametersAndBody(InAllowed, YieldIsName, &fn, Statement)) {
+    if (!m.parser().functionFormalParametersAndBody(InAllowed, YieldIsName, &fn,
+                                                    FunctionSyntaxKind::Statement))
+    {
         if (anyChars.hadError() || directives == newDirectives)
             return false;
 
@@ -7719,6 +7724,9 @@ ValidateGlobalVariable(JSContext* cx, const AsmJSGlobal& global, HandleValue imp
             *val = Val(simdConstant.asInt32x4());
             return true;
           }
+          case ValType::AnyRef: {
+            MOZ_CRASH("not available in asm.js");
+          }
         }
       }
     }
@@ -7840,7 +7848,7 @@ static bool
 ValidateSimdOperation(JSContext* cx, const AsmJSGlobal& global, HandleValue globalVal)
 {
     RootedValue v(cx);
-    JS_ALWAYS_TRUE(ValidateSimdType(cx, global, globalVal, &v));
+    MOZ_ALWAYS_TRUE(ValidateSimdType(cx, global, globalVal, &v));
 
     if (!GetDataProperty(cx, v, global.field(), &v))
         return false;
@@ -8166,8 +8174,10 @@ TryInstantiate(JSContext* cx, CallArgs args, Module& module, const AsmJSMetadata
     if (!GetImports(cx, metadata, globalVal, importVal, &funcs, &valImports))
         return false;
 
+    Rooted<WasmGlobalObjectVector> globalObjs(cx);
+
     RootedWasmTableObject table(cx);
-    if (!module.instantiate(cx, funcs, table, memory, valImports, nullptr, instanceObj))
+    if (!module.instantiate(cx, funcs, table, memory, valImports, globalObjs.get(), nullptr, instanceObj))
         return false;
 
     exportObj.set(&instanceObj->exportsObj());

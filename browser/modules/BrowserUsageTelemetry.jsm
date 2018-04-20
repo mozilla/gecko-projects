@@ -83,6 +83,7 @@ const URLBAR_SELECTED_RESULT_METHODS = {
   click: 2,
   arrowEnterSelection: 3,
   tabEnterSelection: 4,
+  rightClickEnter: 5,
 };
 
 
@@ -550,8 +551,10 @@ let BrowserUsageTelemetry = {
   _recordUrlOrSearchbarSelectedResultMethod(event, highlightedIndex, histogramID, userSelectionBehavior) {
     let histogram = Services.telemetry.getHistogramById(histogramID);
     // command events are from the one-off context menu.  Treat them as clicks.
-    let isClick = event instanceof Ci.nsIDOMMouseEvent ||
-                  (event && event.type == "command");
+    // Note that we don't care about MouseEvent subclasses here, since
+    // those are not clicks.
+    let isClick = event && (ChromeUtils.getClassName(event) == "MouseEvent" ||
+                            event.type == "command");
     let category;
     if (isClick) {
       category = "click";
@@ -562,6 +565,10 @@ let BrowserUsageTelemetry = {
         break;
       case "arrow":
         category = "arrowEnterSelection";
+        break;
+      case "rightClick":
+        // Selected by right mouse button.
+        category = "rightClickEnter";
         break;
       default:
         category = "enterSelection";

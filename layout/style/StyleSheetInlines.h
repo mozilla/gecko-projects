@@ -9,9 +9,6 @@
 
 #include "mozilla/StyleSheetInfo.h"
 #include "mozilla/ServoStyleSheet.h"
-#ifdef MOZ_OLD_STYLE
-#include "mozilla/CSSStyleSheet.h"
-#endif
 #include "nsINode.h"
 
 namespace mozilla {
@@ -135,6 +132,12 @@ bool
 StyleSheet::HasUniqueInner() const
 {
   return mInner->mSheets.Length() == 1;
+}
+
+void
+StyleSheet::AssertHasUniqueInner() const
+{
+  MOZ_ASSERT(HasUniqueInner());
 }
 
 }

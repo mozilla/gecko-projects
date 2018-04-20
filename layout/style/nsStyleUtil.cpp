@@ -623,8 +623,8 @@ nsStyleUtil::AppendSerializedFontSrc(const nsCSSValue& aValue,
 
     if (sources[i].GetUnit() == eCSSUnit_URL) {
       aResult.AppendLiteral("url(");
-      nsDependentString url(sources[i].GetOriginalURLValue());
-      nsStyleUtil::AppendEscapedCSSString(url, aResult);
+      nsDependentCSubstring url(sources[i].GetURLStructValue()->GetString());
+      nsStyleUtil::AppendEscapedCSSString(NS_ConvertUTF8toUTF16(url), aResult);
       aResult.Append(')');
     } else if (sources[i].GetUnit() == eCSSUnit_Local_Font) {
       aResult.AppendLiteral("local(");
@@ -744,7 +744,7 @@ nsStyleUtil::ColorComponentToFloat(uint8_t aAlpha)
 nsStyleUtil::IsSignificantChild(nsIContent* aChild,
                                 bool aWhitespaceIsSignificant)
 {
-  bool isText = aChild->IsNodeOfType(nsINode::eTEXT);
+  bool isText = aChild->IsText();
 
   if (!isText && !aChild->IsNodeOfType(nsINode::eCOMMENT) &&
       !aChild->IsNodeOfType(nsINode::ePROCESSING_INSTRUCTION)) {
@@ -760,7 +760,7 @@ nsStyleUtil::IsSignificantChild(nsIContent* aChild,
 nsStyleUtil::ThreadSafeIsSignificantChild(const nsIContent* aChild,
                                           bool aWhitespaceIsSignificant)
 {
-  bool isText = aChild->IsNodeOfType(nsINode::eTEXT);
+  bool isText = aChild->IsText();
 
   if (!isText && !aChild->IsNodeOfType(nsINode::eCOMMENT) &&
       !aChild->IsNodeOfType(nsINode::ePROCESSING_INSTRUCTION)) {

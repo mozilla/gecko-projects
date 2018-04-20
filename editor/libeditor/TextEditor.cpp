@@ -36,8 +36,6 @@
 #include "nsIClipboard.h"
 #include "nsIContent.h"
 #include "nsIContentIterator.h"
-#include "nsIDOMDocument.h"
-#include "nsIDOMElement.h"
 #include "nsIDOMEventTarget.h"
 #include "nsIDOMNode.h"
 #include "nsIDocumentEncoder.h"
@@ -63,6 +61,13 @@ class nsISupports;
 namespace mozilla {
 
 using namespace dom;
+
+template already_AddRefed<Element>
+TextEditor::CreateBR(const EditorDOMPoint& aPointToInsert,
+                     EDirection aSelect);
+template already_AddRefed<Element>
+TextEditor::CreateBR(const EditorRawDOMPoint& aPointToInsert,
+                     EDirection aSelect);
 
 TextEditor::TextEditor()
   : mWrapColumn(0)
@@ -206,8 +211,8 @@ TextEditor::EndEditorInit()
   }
   // Throw away the old transaction manager if this is not the first time that
   // we're initializing the editor.
-  EnableUndo(false);
-  EnableUndo(true);
+  ClearUndoRedo();
+  EnableUndoRedo();
   return NS_OK;
 }
 
@@ -409,8 +414,9 @@ TextEditor::TypedText(const nsAString& aString, ETypingAction aAction)
   }
 }
 
+template<typename PT, typename CT>
 already_AddRefed<Element>
-TextEditor::CreateBR(const EditorRawDOMPoint& aPointToInsert,
+TextEditor::CreateBR(const EditorDOMPointBase<PT, CT>& aPointToInsert,
                      EDirection aSelect /* = eNone */)
 {
   RefPtr<Selection> selection = GetSelection();
@@ -421,9 +427,10 @@ TextEditor::CreateBR(const EditorRawDOMPoint& aPointToInsert,
   return CreateBRImpl(*selection, aPointToInsert, aSelect);
 }
 
+template<typename PT, typename CT>
 already_AddRefed<Element>
 TextEditor::CreateBRImpl(Selection& aSelection,
-                         const EditorRawDOMPoint& aPointToInsert,
+                         const EditorDOMPointBase<PT, CT>& aPointToInsert,
                          EDirection aSelect)
 {
   if (NS_WARN_IF(!aPointToInsert.IsSet())) {
@@ -463,7 +470,7 @@ TextEditor::CreateBRImpl(Selection& aSelection,
       pointInContainer.Set(aPointToInsert.GetContainer());
     }
     // Create a <br> node.
-    newBRElement = CreateNode(nsGkAtoms::br, pointInContainer.AsRaw());
+    newBRElement = CreateNode(nsGkAtoms::br, pointInContainer);
     if (NS_WARN_IF(!newBRElement)) {
       return nullptr;
     }
@@ -1126,25 +1133,50 @@ TextEditor::SetNewlineHandling(int32_t aNewlineHandling)
 NS_IMETHODIMP
 TextEditor::Undo(uint32_t aCount)
 {
-  // Protect the edit rules object from dying
+  // If we don't have transaction in the undo stack, we shouldn't notify
+  // anybody of trying to undo since it's not useful notification but we
+  // need to pay some runtime cost.
+  if (!CanUndo()) {
+    return NS_OK;
+  }
+
+  // If there is composition, we shouldn't allow to undo with committing
+  // composition since Chrome doesn't allow it and it doesn't make sense
+  // because committing composition causes one transaction and Undo(1)
+  // undoes the committing composition.
+  if (GetComposition()) {
+    return NS_OK;
+  }
+
+  // Protect the edit rules object from dying.
   RefPtr<TextEditRules> rules(mRules);
 
   AutoUpdateViewBatch beginViewBatching(this);
 
-  CommitComposition();
-
   NotifyEditorObservers(eNotifyEditorObserversOfBefore);
+  if (NS_WARN_IF(!CanUndo()) || NS_WARN_IF(Destroyed())) {
+    return NS_ERROR_FAILURE;
+  }
 
-  AutoRules beginRulesSniffing(this, EditAction::undo, nsIEditor::eNone);
+  nsresult rv;
+  {
+    AutoRules beginRulesSniffing(this, EditAction::undo, nsIEditor::eNone);
 
-  RulesInfo ruleInfo(EditAction::undo);
-  RefPtr<Selection> selection = GetSelection();
-  bool cancel, handled;
-  nsresult rv = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
-
-  if (!cancel && NS_SUCCEEDED(rv)) {
-    rv = EditorBase::Undo(aCount);
-    rv = rules->DidDoAction(selection, &ruleInfo, rv);
+    RulesInfo ruleInfo(EditAction::undo);
+    RefPtr<Selection> selection = GetSelection();
+    bool cancel, handled;
+    rv = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
+    if (!cancel && NS_SUCCEEDED(rv)) {
+      RefPtr<TransactionManager> transactionManager(mTransactionManager);
+      for (uint32_t i = 0; i < aCount; ++i) {
+        rv = transactionManager->Undo();
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          break;
+        }
+        DoAfterUndoTransaction();
+      }
+      rv = rules->DidDoAction(selection, &ruleInfo, rv);
+    }
   }
 
   NotifyEditorObservers(eNotifyEditorObserversOfEnd);
@@ -1154,25 +1186,50 @@ TextEditor::Undo(uint32_t aCount)
 NS_IMETHODIMP
 TextEditor::Redo(uint32_t aCount)
 {
-  // Protect the edit rules object from dying
+  // If we don't have transaction in the redo stack, we shouldn't notify
+  // anybody of trying to redo since it's not useful notification but we
+  // need to pay some runtime cost.
+  if (!CanRedo()) {
+    return NS_OK;
+  }
+
+  // If there is composition, we shouldn't allow to redo with committing
+  // composition since Chrome doesn't allow it and it doesn't make sense
+  // because committing composition causes removing all transactions from
+  // the redo queue.  So, it becomes impossible to redo anything.
+  if (GetComposition()) {
+    return NS_OK;
+  }
+
+  // Protect the edit rules object from dying.
   RefPtr<TextEditRules> rules(mRules);
 
   AutoUpdateViewBatch beginViewBatching(this);
 
-  CommitComposition();
-
   NotifyEditorObservers(eNotifyEditorObserversOfBefore);
+  if (NS_WARN_IF(!CanRedo()) || NS_WARN_IF(Destroyed())) {
+    return NS_ERROR_FAILURE;
+  }
 
-  AutoRules beginRulesSniffing(this, EditAction::redo, nsIEditor::eNone);
+  nsresult rv;
+  {
+    AutoRules beginRulesSniffing(this, EditAction::redo, nsIEditor::eNone);
 
-  RulesInfo ruleInfo(EditAction::redo);
-  RefPtr<Selection> selection = GetSelection();
-  bool cancel, handled;
-  nsresult rv = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
-
-  if (!cancel && NS_SUCCEEDED(rv)) {
-    rv = EditorBase::Redo(aCount);
-    rv = rules->DidDoAction(selection, &ruleInfo, rv);
+    RulesInfo ruleInfo(EditAction::redo);
+    RefPtr<Selection> selection = GetSelection();
+    bool cancel, handled;
+    rv = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
+    if (!cancel && NS_SUCCEEDED(rv)) {
+      RefPtr<TransactionManager> transactionManager(mTransactionManager);
+      for (uint32_t i = 0; i < aCount; ++i) {
+        nsresult rv = transactionManager->Redo();
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          break;
+        }
+        DoAfterRedoTransaction();
+      }
+      rv = rules->DidDoAction(selection, &ruleInfo, rv);
+    }
   }
 
   NotifyEditorObservers(eNotifyEditorObserversOfEnd);
@@ -1653,8 +1710,10 @@ TextEditor::SelectEntireDocument(Selection* aSelection)
   // is doc empty?
   if (rules->DocumentIsEmpty()) {
     // get root node
-    nsCOMPtr<nsIDOMElement> rootElement = do_QueryInterface(GetRoot());
-    NS_ENSURE_TRUE(rootElement, NS_ERROR_FAILURE);
+    Element* rootElement = GetRoot();
+    if (NS_WARN_IF(!rootElement)) {
+      return NS_ERROR_FAILURE;
+    }
 
     // if it's empty don't select entire doc - that would select the bogus node
     return aSelection->Collapse(rootElement, 0);

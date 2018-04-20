@@ -786,7 +786,7 @@ function checkActiveGMPlugin(data) {
 
 function checkAddonsSection(data, expectBrokenAddons, partialAddonsRecords) {
   const EXPECTED_FIELDS = [
-    "activeAddons", "theme", "activePlugins", "activeGMPlugins", "activeExperiment",
+    "activeAddons", "theme", "activePlugins", "activeGMPlugins",
     "persona",
   ];
 
@@ -818,13 +818,6 @@ function checkAddonsSection(data, expectBrokenAddons, partialAddonsRecords) {
   let activeGMPlugins = data.addons.activeGMPlugins;
   for (let gmPlugin in activeGMPlugins) {
     checkActiveGMPlugin(activeGMPlugins[gmPlugin]);
-  }
-
-  // Check the active Experiment
-  let experiment = data.addons.activeExperiment;
-  if (Object.keys(experiment).length !== 0) {
-    Assert.ok(checkString(experiment.id));
-    Assert.ok(checkString(experiment.branch));
   }
 
   // Check persona
@@ -863,7 +856,6 @@ function checkEnvironmentData(data, options = {}) {
   checkPartnerSection(data, isInitial);
   checkSystemSection(data);
   checkAddonsSection(data, expectBrokenAddons);
-  checkExperimentsSection(data);
 }
 
 add_task(async function setup() {
@@ -905,9 +897,6 @@ add_task(async function setup() {
   gDataRoot = gHttpRoot + "data/";
   gHttpServer.registerDirectory("/data/", do_get_cwd());
   registerCleanupFunction(() => gHttpServer.stop(() => {}));
-
-  // Allow non-multiprocessCompatible extensions
-  Preferences.set("extensions.allow-non-mpc-extensions", true);
 
   // Create the attribution data file, so that settings.attribution will exist.
   // The attribution functionality only exists in Firefox.

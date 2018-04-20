@@ -3,6 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include <inttypes.h>
+
 #include "GeckoProfiler.h"
 #include "ProfilerBacktrace.h"
 #include "ProfilerMarkerPayload.h"
@@ -129,6 +131,20 @@ VsyncMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
 }
 
 void
+ScreenshotPayload::StreamPayload(SpliceableJSONWriter& aWriter,
+                                  const TimeStamp& aProcessStartTime,
+                                  UniqueStacks& aUniqueStacks)
+{
+  aUniqueStacks.mUniqueStrings->WriteProperty(aWriter, "url", mScreenshotDataURL.get());
+
+  char hexWindowID[32];
+  SprintfLiteral(hexWindowID, "0x%" PRIXPTR, mWindowIdentifier);
+  aWriter.StringProperty("windowID", hexWindowID);
+  aWriter.DoubleProperty("windowWidth", mWindowSize.width);
+  aWriter.DoubleProperty("windowHeight", mWindowSize.height);
+}
+
+void
 GCSliceMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
                                     const TimeStamp& aProcessStartTime,
                                     UniqueStacks& aUniqueStacks)
@@ -176,4 +192,18 @@ HangMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
                                  UniqueStacks& aUniqueStacks)
 {
   StreamCommonProps("BHR-detected hang", aWriter, aProcessStartTime, aUniqueStacks);
+}
+
+void
+StyleMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
+                                  const TimeStamp& aProcessStartTime,
+                                  UniqueStacks& aUniqueStacks)
+{
+  StreamCommonProps("Styles", aWriter, aProcessStartTime, aUniqueStacks);
+  aWriter.StringProperty("category", "Paint");
+  aWriter.IntProperty("elementsTraversed", mStats.mElementsTraversed);
+  aWriter.IntProperty("elementsStyled", mStats.mElementsStyled);
+  aWriter.IntProperty("elementsMatched", mStats.mElementsMatched);
+  aWriter.IntProperty("stylesShared", mStats.mStylesShared);
+  aWriter.IntProperty("stylesReused", mStats.mStylesReused);
 }

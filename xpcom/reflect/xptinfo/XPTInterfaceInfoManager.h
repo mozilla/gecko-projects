@@ -17,8 +17,7 @@
 
 template<typename T> class nsCOMArray;
 class nsIMemoryReporter;
-struct XPTHeader;
-struct XPTInterfaceDirectoryEntry;
+struct XPTInterfaceDescriptor;
 class xptiInterfaceEntry;
 class xptiInterfaceInfo;
 class xptiTypelibGuts;
@@ -40,8 +39,6 @@ public:
 
     void GetScriptableInterfaces(nsCOMArray<nsIInterfaceInfo>& aInterfaces);
 
-    void RegisterBuffer(char *buf, uint32_t length);
-
     static Mutex& GetResolveLock()
     {
         return GetSingleton()->mResolveLock;
@@ -57,10 +54,8 @@ private:
 
     void InitMemoryReporter();
 
-    void RegisterXPTHeader(const XPTHeader* aHeader);
-
     // idx is the index of this interface in the XPTHeader
-    void VerifyAndAddEntryIfNew(const XPTInterfaceDirectoryEntry* iface,
+    void VerifyAndAddEntryIfNew(const XPTInterfaceDescriptor* iface,
                                 uint16_t idx,
                                 xptiTypelibGuts* typelib);
 
@@ -72,29 +67,8 @@ private:
         xptiWorkingSet();
         ~xptiWorkingSet();
 
-        bool IsValid() const;
-
         void InvalidateInterfaceInfos();
-        void ClearHashTables();
 
-        // utility methods...
-
-        enum {NOT_FOUND = 0xffffffff};
-
-        // Directory stuff...
-
-        uint32_t GetDirectoryCount();
-        nsresult GetCloneOfDirectoryAt(uint32_t i, nsIFile** dir);
-        nsresult GetDirectoryAt(uint32_t i, nsIFile** dir);
-        bool     FindDirectory(nsIFile* dir, uint32_t* index);
-        bool     FindDirectoryOfFile(nsIFile* file, uint32_t* index);
-        bool     DirectoryAtMatchesPersistentDescriptor(uint32_t i, const char* desc);
-
-    private:
-        uint32_t        mFileCount;
-        uint32_t        mMaxFileCount;
-
-    public:
         // XXX make these private with accessors
         // mTableMonitor must be held across:
         //  * any read from or write to mIIDTable or mNameTable

@@ -104,7 +104,7 @@ const rootSpec = protocol.generateActorSpec({
 });
 
 var RootActor = protocol.ActorClassWithSpec(rootSpec, {
-  initialize: function (conn) {
+  initialize: function(conn) {
     protocol.Actor.prototype.initialize.call(this, conn);
     // Root actor owns itself.
     this.manage(this);
@@ -113,35 +113,35 @@ var RootActor = protocol.ActorClassWithSpec(rootSpec, {
 
   sayHello: simpleHello,
 
-  simpleReturn: function () {
+  simpleReturn: function() {
     return 1;
   },
 
-  promiseReturn: function () {
+  promiseReturn: function() {
     return Promise.resolve(1);
   },
 
-  simpleArgs: function (a, b) {
+  simpleArgs: function(a, b) {
     return { firstResponse: a + 1, secondResponse: b + 1 };
   },
 
-  nestedArgs: function (a, b, c) {
+  nestedArgs: function(a, b, c) {
     return { a: a, b: b, c: c };
   },
 
-  optionArgs: function (options) {
+  optionArgs: function(options) {
     return { option1: options.option1, option2: options.option2 };
   },
 
-  optionalArgs: function (a, b = 200) {
+  optionalArgs: function(a, b = 200) {
     return b;
   },
 
-  arrayArgs: function (a) {
+  arrayArgs: function(a) {
     return a;
   },
 
-  nestedArrayArgs: function (a) {
+  nestedArrayArgs: function(a) {
     return a;
   },
 
@@ -149,25 +149,25 @@ var RootActor = protocol.ActorClassWithSpec(rootSpec, {
    * Test that the 'type' part of the request packet works
    * correctly when the type isn't the same as the method name
    */
-  renamedEcho: function (a) {
+  renamedEcho: function(a) {
     if (this.conn.currentPacket.type != "echo") {
       return "goodbye";
     }
     return a;
   },
 
-  testOneWay: function (a) {
+  testOneWay: function(a) {
     // Emit to show that we got this message, because there won't be a response.
     EventEmitter.emit(this, "oneway", a);
   },
 
-  emitFalsyOptions: function () {
+  emitFalsyOptions: function() {
     EventEmitter.emit(this, "falsyOptions", { zero: 0, farce: false });
   }
 });
 
 var RootFront = protocol.FrontClassWithSpec(rootSpec, {
-  initialize: function (client) {
+  initialize: function(client) {
     this.actorID = "root";
     protocol.Front.prototype.initialize.call(this, client);
     // Root owns itself.
@@ -181,20 +181,23 @@ function run_test() {
   });
   DebuggerServer.init();
 
-  check_except(() => {
-    let badActor = ActorClassWithSpec({}, {
-      missing: preEvent("missing-event", function () {
+  Assert.throws(() => {
+    let badActor = protocol.ActorClassWithSpec({}, {
+      missing: protocol.preEvent("missing-event", function() {
       })
     });
     void badActor;
-  });
+  }, /Actor specification must have a typeName member/);
 
   protocol.types.getType("array:array:array:number");
   protocol.types.getType("array:array:array:number");
 
-  check_except(() => protocol.types.getType("unknown"));
-  check_except(() => protocol.types.getType("array:unknown"));
-  check_except(() => protocol.types.getType("unknown:number"));
+  Assert.throws(() => protocol.types.getType("unknown"),
+    /Unknown type:/, "Should throw for unknown type");
+  Assert.throws(() => protocol.types.getType("array:unknown"),
+    /Unknown type:/, "Should throw for unknown type");
+  Assert.throws(() => protocol.types.getType("unknown:number"),
+    /Unknown collection type:/, "Should throw for unknown collection type");
   let trace = connectPipeTracing();
   let client = new DebuggerClient(trace);
   let rootClient;
@@ -218,10 +221,9 @@ function run_test() {
       trace.expectReceive({"value": 1, "from": "<actorid>"});
       Assert.equal(ret, 1);
     }).then(() => {
-      // Missing argument should throw an exception
-      check_except(() => {
-        rootClient.simpleArgs(5);
-      });
+      Assert.throws(() => rootClient.simpleArgs(5),
+        /undefined passed where a value is required/,
+        "Should throw if simpleArgs is missing an argument.");
 
       return rootClient.simpleArgs(5, 10);
     }).then(ret => {

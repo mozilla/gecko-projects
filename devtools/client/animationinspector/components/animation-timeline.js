@@ -6,7 +6,6 @@
 
 "use strict";
 
-const { Task } = require("devtools/shared/task");
 const EventEmitter = require("devtools/shared/event-emitter");
 const {
   createNode,
@@ -67,7 +66,7 @@ function AnimationsTimeline(inspector, serverTraits) {
 exports.AnimationsTimeline = AnimationsTimeline;
 
 AnimationsTimeline.prototype = {
-  init: function (containerEl) {
+  init: function(containerEl) {
     this.win = containerEl.ownerDocument.defaultView;
     this.rootWrapperEl = containerEl;
 
@@ -79,7 +78,7 @@ AnimationsTimeline.prototype = {
       this.onWindowResize);
   },
 
-  setupSplitBox: function () {
+  setupSplitBox: function() {
     const browserRequire = this.win.BrowserLoader({
       window: this.win,
       useOnlyShared: true
@@ -111,7 +110,7 @@ AnimationsTimeline.prototype = {
     this.animationRootEl = this.rootWrapperEl.querySelector(".animation-root");
   },
 
-  setupAnimationTimeline: function () {
+  setupAnimationTimeline: function() {
     const animationTimelineEl = this.rootWrapperEl.querySelector(".animation-timeline");
 
     let scrubberContainer = createNode({
@@ -174,7 +173,7 @@ AnimationsTimeline.prototype = {
     });
   },
 
-  setupAnimationDetail: function () {
+  setupAnimationDetail: function() {
     const animationDetailEl = this.rootWrapperEl.querySelector(".animation-detail");
 
     const animationDetailHeaderEl = createNode({
@@ -229,7 +228,7 @@ AnimationsTimeline.prototype = {
     this.details.init(this.animatedPropertiesEl);
   },
 
-  destroy: function () {
+  destroy: function() {
     this.stopAnimatingScrubber();
     this.unrender();
     this.details.destroy();
@@ -268,7 +267,7 @@ AnimationsTimeline.prototype = {
   /**
    * Destroy all sub-components that have been created and stored on this instance.
    */
-  destroyAllSubComponents: function () {
+  destroyAllSubComponents: function() {
     for (let actorID in this.componentsMap) {
       this.destroySubComponents(actorID);
     }
@@ -278,7 +277,7 @@ AnimationsTimeline.prototype = {
    * Destroy sub-components which related to given actor id.
    * @param {String} actor id
    */
-  destroySubComponents: function (actorID) {
+  destroySubComponents: function(actorID) {
     const components = this.componentsMap[actorID];
     components.timeBlock.destroy();
     components.targetNode.destroy();
@@ -288,7 +287,7 @@ AnimationsTimeline.prototype = {
     delete this.componentsMap[actorID];
   },
 
-  unrender: function () {
+  unrender: function() {
     for (let animation of this.animations) {
       animation.off("changed", this.onAnimationStateChanged);
     }
@@ -300,7 +299,7 @@ AnimationsTimeline.prototype = {
     this.details.unrender();
   },
 
-  onWindowResize: function () {
+  onWindowResize: function() {
     // Don't do anything if the root element has a width of 0
     if (this.rootWrapperEl.offsetWidth === 0) {
       return;
@@ -315,7 +314,7 @@ AnimationsTimeline.prototype = {
     }, TIMELINE_BACKGROUND_RESIZE_DEBOUNCE_TIMER);
   },
 
-  onAnimationSelected: Task.async(function* (animation) {
+  async onAnimationSelected(animation) {
     let index = this.animations.indexOf(animation);
     if (index === -1) {
       return;
@@ -354,17 +353,17 @@ AnimationsTimeline.prototype = {
     // Don't render if the detail displays same animation already.
     if (animation !== this.details.animation) {
       this.selectedAnimation = animation;
-      yield this.details.render(animation, this.componentsMap[animation.actorID].tracks);
+      await this.details.render(animation, this.componentsMap[animation.actorID].tracks);
       this.animationAnimationNameEl.textContent = getFormattedAnimationTitle(animation);
     }
     this.onTimelineDataChanged({ time: this.currentTime || 0 });
     this.emit("animation-selected", animation);
-  }),
+  },
 
   /**
    * When move the scrubber to the corresponding position
    */
-  onScrubberMouseDown: function (e) {
+  onScrubberMouseDown: function(e) {
     this.moveScrubberTo(e.pageX);
     this.win.addEventListener("mouseup", this.onScrubberMouseUp);
     this.win.addEventListener("mouseout", this.onScrubberMouseOut);
@@ -374,11 +373,11 @@ AnimationsTimeline.prototype = {
     e.preventDefault();
   },
 
-  onScrubberMouseUp: function () {
+  onScrubberMouseUp: function() {
     this.cancelTimeHeaderDragging();
   },
 
-  onScrubberMouseOut: function (e) {
+  onScrubberMouseOut: function(e) {
     // Check that mouseout happened on the window itself, and if yes, cancel
     // the dragging.
     if (!this.win.document.contains(e.relatedTarget)) {
@@ -386,17 +385,17 @@ AnimationsTimeline.prototype = {
     }
   },
 
-  cancelTimeHeaderDragging: function () {
+  cancelTimeHeaderDragging: function() {
     this.win.removeEventListener("mouseup", this.onScrubberMouseUp);
     this.win.removeEventListener("mouseout", this.onScrubberMouseOut);
     this.win.removeEventListener("mousemove", this.onScrubberMouseMove);
   },
 
-  onScrubberMouseMove: function (e) {
+  onScrubberMouseMove: function(e) {
     this.moveScrubberTo(e.pageX);
   },
 
-  moveScrubberTo: function (pageX, noOffset) {
+  moveScrubberTo: function(pageX, noOffset) {
     this.stopAnimatingScrubber();
 
     // The offset needs to be in % and relative to the timeline's area (so we
@@ -423,7 +422,7 @@ AnimationsTimeline.prototype = {
     });
   },
 
-  getCompositorStatusClassName: function (state) {
+  getCompositorStatusClassName: function(state) {
     let className = state.isRunningOnCompositor
                     ? " fast-track"
                     : "";
@@ -438,7 +437,7 @@ AnimationsTimeline.prototype = {
     return className;
   },
 
-  render: Task.async(function* (animations, documentCurrentTime) {
+  async render(animations, documentCurrentTime) {
     this.animations = animations;
 
     // Destroy components which are no longer existed in given animations.
@@ -472,7 +471,7 @@ AnimationsTimeline.prototype = {
     for (let animation of this.animations) {
       animation.on("changed", this.onAnimationStateChanged);
 
-      const tracks = yield this.getTracks(animation);
+      const tracks = await this.getTracks(animation);
       // If we're destroyed by now, just give up.
       if (this.isDestroyed) {
         return;
@@ -510,20 +509,20 @@ AnimationsTimeline.prototype = {
     if (this.animations.length === 1) {
       // Display animation's detail if there is only one animation,
       // even if the detail pane is closing.
-      yield this.onAnimationSelected(this.animations[0]);
+      await this.onAnimationSelected(this.animations[0]);
     } else if (this.animationRootEl.classList.contains("animation-detail-visible") &&
                this.animations.includes(this.selectedAnimation)) {
       // animation's detail displays in case of the previously displayed animation is
       // included in timeline list and the detail pane is not closing.
-      yield this.onAnimationSelected(this.selectedAnimation);
+      await this.onAnimationSelected(this.selectedAnimation);
     } else {
       // Otherwise, close detail pane.
       this.onDetailCloseButtonClick();
     }
     this.emit("animation-timeline-rendering-completed");
-  }),
+  },
 
-  updateAnimation: function (animation, tracks, existentComponents) {
+  updateAnimation: function(animation, tracks, existentComponents) {
     // If keyframes (tracks) and effect timing (state) are not changed, we update the
     // view box only.
     // As an exception, if iterationCount reprensents Infinity, we need to re-render
@@ -546,7 +545,7 @@ AnimationsTimeline.prototype = {
     }
   },
 
-  renderAnimation: function (animation, tracks, animationEl) {
+  renderAnimation: function(animation, tracks, animationEl) {
     animationEl.setAttribute("class",
                              "animation " + animation.state.type +
                              this.getCompositorStatusClassName(animation.state));
@@ -583,20 +582,20 @@ AnimationsTimeline.prototype = {
     };
   },
 
-  isAtLeastOneAnimationPlaying: function () {
+  isAtLeastOneAnimationPlaying: function() {
     return this.animations.some(({state}) => state.playState === "running");
   },
 
-  wasRewound: function () {
+  wasRewound: function() {
     return !this.isAtLeastOneAnimationPlaying() &&
            this.animations.every(({state}) => state.currentTime === 0);
   },
 
-  hasInfiniteAnimations: function () {
+  hasInfiniteAnimations: function() {
     return this.animations.some(({state}) => !state.iterationCount);
   },
 
-  startAnimatingScrubber: function (time) {
+  startAnimatingScrubber: function(time) {
     let isOutOfBounds = time < TimeScale.minStartTime ||
                         time > TimeScale.maxEndTime;
     let isAllPaused = !this.isAtLeastOneAnimationPlaying();
@@ -638,20 +637,20 @@ AnimationsTimeline.prototype = {
     });
   },
 
-  stopAnimatingScrubber: function () {
+  stopAnimatingScrubber: function() {
     if (this.rafID) {
       this.win.cancelAnimationFrame(this.rafID);
       this.rafID = null;
     }
   },
 
-  onAnimationStateChanged: function () {
+  onAnimationStateChanged: function() {
     // For now, simply re-render the component. The animation front's state has
     // already been updated.
     this.render(this.animations);
   },
 
-  drawHeaderAndBackground: function () {
+  drawHeaderAndBackground: function() {
     let width = this.timeHeaderEl.offsetWidth;
     let animationDuration = TimeScale.maxEndTime - TimeScale.minStartTime;
     let minTimeInterval = TIME_GRADUATION_MIN_SPACING *
@@ -692,14 +691,14 @@ AnimationsTimeline.prototype = {
     }
   },
 
-  onTimelineDataChanged: function ({ time }) {
+  onTimelineDataChanged: function({ time }) {
     this.currentTime = time;
     const indicateTime =
       TimeScale.minStartTime === Infinity ? 0 : this.currentTime + TimeScale.minStartTime;
     this.details.indicateProgress(indicateTime);
   },
 
-  onDetailCloseButtonClick: function (e) {
+  onDetailCloseButtonClick: function(e) {
     if (!this.animationRootEl.classList.contains("animation-detail-visible")) {
       return;
     }
@@ -713,7 +712,7 @@ AnimationsTimeline.prototype = {
    * @return {Object} A list of tracks, one per animated property, each
    * with a list of keyframes
    */
-  getTracks: Task.async(function* (animation) {
+  async getTracks(animation) {
     let tracks = {};
 
     /*
@@ -732,7 +731,7 @@ AnimationsTimeline.prototype = {
     if (this.serverTraits.hasGetProperties) {
       let properties = [];
       try {
-        properties = yield animation.getProperties();
+        properties = await animation.getProperties();
       } catch (e) {
         // Expected if we've already been destroyed in the meantime.
         if (!this.isDestroyed) {
@@ -754,7 +753,7 @@ AnimationsTimeline.prototype = {
     } else {
       let frames = [];
       try {
-        frames = yield animation.getFrames();
+        frames = await animation.getFrames();
       } catch (e) {
         // Expected if we've already been destroyed in the meantime.
         if (!this.isDestroyed) {
@@ -786,7 +785,7 @@ AnimationsTimeline.prototype = {
     }
 
     return tracks;
-  })
+  }
 };
 
 /**

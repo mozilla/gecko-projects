@@ -16,6 +16,7 @@
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/Swizzle.h"
 #include "mozilla/Mutex.h"
+#include "mozilla/ScopeExit.h"
 #include "ImageBitmapColorUtils.h"
 #include "ImageBitmapUtils.h"
 #include "ImageUtils.h"
@@ -792,6 +793,11 @@ ImageBitmap::TransferAsImage()
 UniquePtr<ImageBitmapCloneData>
 ImageBitmap::ToCloneData() const
 {
+  if (!mData) {
+    // A closed image cannot be cloned.
+    return nullptr;
+  }
+
   UniquePtr<ImageBitmapCloneData> result(new ImageBitmapCloneData());
   result->mPictureRect = mPictureRect;
   result->mAlphaType = mAlphaType;
@@ -1647,9 +1653,13 @@ protected:
   {
     ErrorResult error;
 
+    auto rejectByDefault =
+      MakeScopeExit([this, &error]() {
+        this->mPromise->MaybeReject(error);
+      });
+
     if (!mImageBitmap->mDataWrapper) {
-      error.ThrowWithCustomCleanup(NS_ERROR_NOT_AVAILABLE);
-      mPromise->MaybeReject(error);
+      error.Throw(NS_ERROR_NOT_AVAILABLE);
       return;
     }
 
@@ -1662,14 +1672,12 @@ protected:
     } else if (JS_IsArrayBufferViewObject(mBuffer)) {
       js::GetArrayBufferViewLengthAndData(mBuffer, &bufferLength, &isSharedMemory, &bufferData);
     } else {
-      error.ThrowWithCustomCleanup(NS_ERROR_NOT_IMPLEMENTED);
-      mPromise->MaybeReject(error);
+      error.Throw(NS_ERROR_NOT_IMPLEMENTED);
       return;
     }
 
     if (NS_WARN_IF(!bufferData) || NS_WARN_IF(!bufferLength)) {
-      error.ThrowWithCustomCleanup(NS_ERROR_NOT_AVAILABLE);
-      mPromise->MaybeReject(error);
+      error.Throw(NS_ERROR_NOT_AVAILABLE);
       return;
     }
 
@@ -1678,8 +1686,7 @@ protected:
       mImageBitmap->MappedDataLength(mFormat, error);
 
     if (((int32_t)bufferLength - mOffset) < neededBufferLength) {
-      error.ThrowWithCustomCleanup(NS_ERROR_DOM_INDEX_SIZE_ERR);
-      mPromise->MaybeReject(error);
+      error.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
       return;
     }
 
@@ -1692,10 +1699,10 @@ protected:
                                               error);
 
     if (NS_WARN_IF(!layout)) {
-      mPromise->MaybeReject(error);
       return;
     }
 
+    rejectByDefault.release();
     mPromise->MaybeResolve(*layout);
   }
 

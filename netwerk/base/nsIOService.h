@@ -38,7 +38,6 @@ class nsINetworkLinkService;
 class nsIPrefBranch;
 class nsIProtocolProxyService2;
 class nsIProxyInfo;
-class nsPIDNSService;
 class nsPISocketTransportService;
 
 namespace mozilla {
@@ -95,6 +94,8 @@ public:
 
     static bool IsDataURIUniqueOpaqueOrigin();
     static bool BlockToplevelDataUriNavigations();
+
+    static bool BlockFTPSubresources();
 
     // Used to count the total number of HTTP requests made
     void IncrementRequestNumber() { mTotalRequests++; }
@@ -181,7 +182,6 @@ private:
     mozilla::Atomic<bool, mozilla::Relaxed> mHttpHandlerAlreadyShutingDown;
 
     nsCOMPtr<nsPISocketTransportService> mSocketTransportService;
-    nsCOMPtr<nsPIDNSService>             mDNSService;
     nsCOMPtr<nsICaptivePortalService>    mCaptivePortalService;
     nsCOMPtr<nsINetworkLinkService>      mNetworkLinkService;
     bool                                 mNetworkLinkServiceInitialized;
@@ -198,6 +198,8 @@ private:
 
     static bool                          sIsDataURIUniqueOpaqueOrigin;
     static bool                          sBlockToplevelDataUriNavigations;
+
+    static bool                          sBlockFTPSubresources;
 
     uint32_t mTotalRequests;
     uint32_t mCacheWon;

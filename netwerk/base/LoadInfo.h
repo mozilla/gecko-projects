@@ -94,6 +94,7 @@ public:
   void SetIsPreflight();
   void SetUpgradeInsecureRequests();
   void SetBrowserUpgradeInsecureRequests();
+  void SetBrowserWouldUpgradeInsecureRequests();
 
 private:
   // private constructor that is only allowed to be called from within
@@ -114,11 +115,13 @@ private:
            LoadTainting aTainting,
            bool aUpgradeInsecureRequests,
            bool aBrowserUpgradeInsecureRequests,
+           bool aBrowserWouldUpgradeInsecureRequests,
            bool aVerifySignedContent,
            bool aEnforceSRI,
            bool aAllowDocumentToBeAgnosticToCSP,
            bool aForceAllowDataURI,
            bool aAllowInsecureRedirectToDataURI,
+           bool aSkipContentPolicyCheckForWebRequest,
            bool aForceInheritPrincipalDropped,
            uint64_t aInnerWindowID,
            uint64_t aOuterWindowID,
@@ -181,11 +184,13 @@ private:
   LoadTainting                     mTainting;
   bool                             mUpgradeInsecureRequests;
   bool                             mBrowserUpgradeInsecureRequests;
+  bool                             mBrowserWouldUpgradeInsecureRequests;
   bool                             mVerifySignedContent;
   bool                             mEnforceSRI;
   bool                             mAllowDocumentToBeAgnosticToCSP;
   bool                             mForceAllowDataURI;
   bool                             mAllowInsecureRedirectToDataURI;
+  bool                             mSkipContentPolicyCheckForWebRequest;
   bool                             mOriginalFrameSrcLoad;
   bool                             mForceInheritPrincipalDropped;
   uint64_t                         mInnerWindowID;

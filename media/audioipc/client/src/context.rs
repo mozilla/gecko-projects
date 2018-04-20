@@ -3,14 +3,14 @@
 // This program is made available under an ISC-style license.  See the
 // accompanying file LICENSE for details
 
-use ClientStream;
+use {ClientStream, CPUPOOL_INIT_PARAMS, G_SERVER_FD};
 use assert_not_in_callback;
 use audioipc::{messages, ClientMessage, ServerMessage};
 use audioipc::{core, rpc};
 use audioipc::codec::LengthDelimitedCodec;
 use audioipc::fd_passing::{framed_with_fds, FramedWithFds};
-use cubeb_backend::{ffi, ChannelLayout, Context, ContextOps, DeviceCollectionRef, DeviceId,
-                    DeviceType, Error, Ops, Result, Stream, StreamParams, StreamParamsRef};
+use cubeb_backend::{ffi, Context, ContextOps, DeviceCollectionRef, DeviceId, DeviceType, Error,
+                    Ops, Result, Stream, StreamParams, StreamParamsRef};
 use futures::Future;
 use futures_cpupool::{self, CpuPool};
 use libc;
@@ -69,7 +69,7 @@ impl ClientContext {
 // TODO: encapsulate connect, etc inside audioipc.
 fn open_server_stream() -> Result<net::UnixStream> {
     unsafe {
-        if let Some(fd) = super::G_SERVER_FD {
+        if let Some(fd) = G_SERVER_FD {
             return Ok(net::UnixStream::from_raw_fd(fd));
         }
 
@@ -113,9 +113,14 @@ impl ContextOps for ClientContext {
 
         let rpc = t!(rx_rpc.recv());
 
-        let cpupool = futures_cpupool::Builder::new()
-            .name_prefix("AudioIPC")
-            .create();
+        let cpupool = CPUPOOL_INIT_PARAMS.with(|p| {
+            let params = p.replace(None).unwrap();
+            futures_cpupool::Builder::new()
+                .name_prefix("AudioIPC")
+                .pool_size(params.pool_size)
+                .stack_size(params.stack_size)
+                .create()
+        });
 
         let ctx = Box::new(ClientContext {
             _ops: &CLIENT_OPS as *const _,
@@ -145,15 +150,6 @@ impl ContextOps for ClientContext {
     fn preferred_sample_rate(&mut self) -> Result<u32> {
         assert_not_in_callback();
         send_recv!(self.rpc(), ContextGetPreferredSampleRate => ContextPreferredSampleRate())
-    }
-
-    fn preferred_channel_layout(&mut self) -> Result<ChannelLayout> {
-        assert_not_in_callback();
-        send_recv!(self.rpc(),
-                   ContextGetPreferredChannelLayout => ContextPreferredChannelLayout())
-            .map(|l| {
-            ChannelLayout::from(l)
-        })
     }
 
     fn enumerate_devices(
@@ -265,7 +261,7 @@ impl Drop for ClientContext {
         debug!("ClientContext drop...");
         let _ = send_recv!(self.rpc(), ClientDisconnect => ClientDisconnected);
         unsafe {
-            if super::G_SERVER_FD.is_some() {
+            if G_SERVER_FD.is_some() {
                 libc::close(super::G_SERVER_FD.take().unwrap());
             }
         }

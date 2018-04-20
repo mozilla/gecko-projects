@@ -53,6 +53,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/HTMLSlotElement.h"
+#include "mozilla/dom/Text.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
@@ -2434,12 +2435,12 @@ nsFocusManager::MoveCaretToFocus(nsIPresShell* aPresShell, nsIContent* aContent)
   nsCOMPtr<nsIDocument> doc = aPresShell->GetDocument();
   if (doc) {
     RefPtr<nsFrameSelection> frameSelection = aPresShell->FrameSelection();
-    nsCOMPtr<nsISelection> domSelection =
+    RefPtr<Selection> domSelection =
       frameSelection->GetSelection(SelectionType::eNormal);
     if (domSelection) {
       // First clear the selection. This way, if there is no currently focused
       // content, the selection will just be cleared.
-      domSelection->RemoveAllRanges();
+      domSelection->RemoveAllRanges(IgnoreErrors());
       if (aContent) {
         ErrorResult rv;
         RefPtr<nsRange> newRange = doc->CreateRange(rv);
@@ -2460,7 +2461,7 @@ nsFocusManager::MoveCaretToFocus(nsIPresShell* aPresShell, nsIContent* aContent)
           newRange->SetStartBefore(*aContent, IgnoreErrors());
           newRange->SetEndBefore(*aContent, IgnoreErrors());
         }
-        domSelection->AddRange(newRange);
+        domSelection->AddRange(*newRange, IgnoreErrors());
         domSelection->CollapseToStart();
       }
     }
@@ -2530,30 +2531,26 @@ nsFocusManager::GetSelectionLocation(nsIDocument* aDocument,
                                      nsIContent **aEndContent)
 {
   *aStartContent = *aEndContent = nullptr;
-  nsresult rv = NS_ERROR_FAILURE;
-
   nsPresContext* presContext = aPresShell->GetPresContext();
   NS_ASSERTION(presContext, "mPresContent is null!!");
 
   RefPtr<nsFrameSelection> frameSelection = aPresShell->FrameSelection();
 
-  nsCOMPtr<nsISelection> domSelection;
+  RefPtr<Selection> domSelection;
   if (frameSelection) {
     domSelection = frameSelection->GetSelection(SelectionType::eNormal);
   }
 
-  nsCOMPtr<nsIDOMNode> startNode, endNode;
   bool isCollapsed = false;
   nsCOMPtr<nsIContent> startContent, endContent;
   uint32_t startOffset = 0;
   if (domSelection) {
-    domSelection->GetIsCollapsed(&isCollapsed);
-    nsCOMPtr<nsIDOMRange> domRange;
-    rv = domSelection->GetRangeAt(0, getter_AddRefs(domRange));
+    isCollapsed = domSelection->IsCollapsed();
+    RefPtr<nsRange> domRange = domSelection->GetRangeAt(0);
     if (domRange) {
-      domRange->GetStartContainer(getter_AddRefs(startNode));
-      domRange->GetEndContainer(getter_AddRefs(endNode));
-      domRange->GetStartOffset(&startOffset);
+      nsCOMPtr<nsINode> startNode = domRange->GetStartContainer();
+      nsCOMPtr<nsINode> endNode = domRange->GetEndContainer();
+      startOffset = domRange->StartOffset();
 
       nsIContent *childContent = nullptr;
 
@@ -2567,8 +2564,7 @@ nsFocusManager::GetSelectionLocation(nsIDocument* aDocument,
 
       endContent = do_QueryInterface(endNode);
       if (endContent && endContent->IsElement()) {
-        uint32_t endOffset = 0;
-        domRange->GetEndOffset(&endOffset);
+        uint32_t endOffset = domRange->EndOffset();
         childContent = endContent->GetChildAt_Deprecated(endOffset);
         if (childContent) {
           endContent = childContent;
@@ -2577,7 +2573,7 @@ nsFocusManager::GetSelectionLocation(nsIDocument* aDocument,
     }
   }
   else {
-    rv = NS_ERROR_INVALID_ARG;
+    return NS_ERROR_INVALID_ARG;
   }
 
   nsIFrame *startFrame = nullptr;
@@ -2591,7 +2587,7 @@ nsFocusManager::GetSelectionLocation(nsIDocument* aDocument,
 
       if (startContent->NodeType() == nsINode::TEXT_NODE) {
         nsAutoString nodeValue;
-        startContent->AppendTextTo(nodeValue);
+        startContent->GetAsText()->AppendTextTo(nodeValue);
 
         bool isFormControl =
           startContent->IsNodeOfType(nsINode::eHTML_FORM_CONTROL);
@@ -2656,7 +2652,7 @@ nsFocusManager::GetSelectionLocation(nsIDocument* aDocument,
   NS_IF_ADDREF(*aStartContent);
   NS_IF_ADDREF(*aEndContent);
 
-  return rv;
+  return NS_OK;
 }
 
 nsresult
