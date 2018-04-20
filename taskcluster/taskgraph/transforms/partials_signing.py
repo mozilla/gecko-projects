@@ -82,7 +82,7 @@ def make_task_description(config, jobs):
             'label': label,
             'description': "{} Partials".format(
                 dep_job.task["metadata"]["description"]),
-            'worker-type': 'scriptworker-prov-v1/signing-linux-v1',
+            'worker-type': 'scriptworker-prov-v1/depsigning',
             'worker': {'implementation': 'scriptworker-signing',
                            'upstream-artifacts': upstream_artifacts,
                            'max-run-time': 3600},
