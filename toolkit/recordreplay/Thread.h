@@ -34,13 +34,13 @@ namespace recordreplay {
 // While rewinding, the same Thread structure exists for each recorded thread.
 // Several additional changes are needed to facilitate rewinding and IPC:
 //
-// 1. All recorded threads are spawned early during the process' execution,
-//    before any snapshot has been taken. These threads idle until the process
-//    calls the system's thread creation API, and then they run with the start
-//    routine the process provided. After the start routine finishes they idle
-//    indefinitely, potentially running new start routines if their thread ID
-//    is reused. This allows the process to rewind itself without needing to
-//    spawn or destroy any threads.
+// 1. All recorded threads are spawned early on, before any checkpoint has been
+//    reached. These threads idle until the process calls the system's thread
+//    creation API, and then they run with the start routine the process
+//    provided. After the start routine finishes they idle indefinitely,
+//    potentially running new start routines if their thread ID is reused. This
+//    allows the process to rewind itself without needing to spawn or destroy
+//    any threads.
 //
 // 2. Some additional number of threads are spawned for use by the IPC and
 //    memory snapshot mechanisms. These have associated Thread
@@ -51,14 +51,14 @@ namespace recordreplay {
 //    WaitForIdleThreads. For most recorded threads this happens when the
 //    thread attempts to take a recorded lock and blocks in Lock::Wait.
 //    The only exception is for JS helper threads, which never take recorded
-//    locks. For these threads, NotifyUnrecordedWait and MaybeWaitForSnapshot
-//    must be used to enter this state.
+//    locks. For these threads, NotifyUnrecordedWait and
+//    MaybeWaitForCheckpointSave must be used to enter this state.
 //
 // 4. Once all recorded threads are idle, the main thread is able to record
 //    memory snapshots and thread stacks for later rewinding. Additional
 //    threads created for #2 above do not idle and do not have their state
 //    included in snapshots, but they are designed to avoid interfering with
-//    the main thread while it is taking or restoring a snapshot.
+//    the main thread while it is taking or restoring a checkpoint.
 
 // The ID used by the process main thread.
 static const size_t MainThreadId = 1;
@@ -68,7 +68,7 @@ static const size_t MaxRecordedThreadId = 70;
 
 // The maximum number of threads which are not recorded but need a Thread so
 // that they can participate in e.g. Wait/Notify calls.
-static const size_t MaxNumNonRecordedThreads = 24;
+static const size_t MaxNumNonRecordedThreads = 12;
 
 static const size_t MaxThreadId = MaxRecordedThreadId + MaxNumNonRecordedThreads;
 
@@ -103,11 +103,6 @@ private:
   // Whether to capture stack information for events while recording. This is
   // only used by the associated thread.
   size_t mCaptureEventStacks;
-
-  // If record/replay callbacks might execute, this is filled in. Jumping here
-  // while replaying will process any remaining callbacks without invoking any
-  // of the intervening system code. See Callback.h.
-  jmp_buf* mEventCallbackJump;
 
   // Start routine and argument which the thread is currently executing. This
   // is cleared after the routine finishes and another start routine may be
@@ -163,10 +158,6 @@ private:
   std::function<void()> mUnrecordedWaitCallback;
   bool mUnrecordedWaitNotified;
 
-  // Any weak pointers associated with this thread which need to be fixed up
-  // due to the process just having rewound to a point when it was recording.
-  InfallibleVector<const void*> mPendingWeakPointerFixups;
-
 public:
 ///////////////////////////////////////////////////////////////////////////////
 // Public Routines
@@ -194,16 +185,6 @@ public:
   }
   bool PassThroughEvents() {
     return mPassThroughEvents;
-  }
-
-  // Access the buffer for setjmp/longjmps related to callback processing.
-  void SetEventCallbackJump(jmp_buf* aJump) {
-    MOZ_RELEASE_ASSERT(!!mEventCallbackJump != !!aJump);
-    mEventCallbackJump = aJump;
-  }
-  jmp_buf* EventCallbackJump() {
-    MOZ_RELEASE_ASSERT(mEventCallbackJump);
-    return mEventCallbackJump;
   }
 
   // Access the counter for whether events are disallowed in this thread.
@@ -283,12 +264,6 @@ public:
   // Wait until this thread finishes executing its start routine.
   void Join();
 
-  // Note a weak pointer that needs to be fixed on this thread after it
-  // restores its stack during a recording rewind.
-  void AddPendingWeakPointerFixup(const void* aPtr) {
-    mPendingWeakPointerFixups.append(aPtr);
-  }
-
 ///////////////////////////////////////////////////////////////////////////////
 // Thread Coordination
 ///////////////////////////////////////////////////////////////////////////////
@@ -335,36 +310,15 @@ public:
   // Wake up one or all threads waiting on a cvar.
   static void SignalCvar(void* aCvar, bool aBroadcast);
 
-  // Perform initialization related to off thread call events.
-  static void InitializeOffThreadCallEvents();
-
-  // Synchronously execute a callback on another thread, allowing snapshots to
-  // be taken/restored while doing so.
-  static void ExecuteCallEventOffThread(const std::function<void()>& aCallback, bool* aCompleted);
-
-  // Note a buffer used by an off thread call event. This is called twice for
-  // each buffer, before and after the call itself. The first time an untracked
-  // buffer is created for this one, and the second time the untracked buffer's
-  // contents are copied to this one.
-  static void NoteOffThreadCallEventBuffer(void* aBuf, size_t aSize, bool aFirst);
-
-  // Get any untracked buffer associated with an off thread call event.
-  static void* MaybeUntrackedOffThreadCallEventBuffer(void* aBuf);
-
-  // Mark a region where an off thread call event is being performed. Between
-  // these calls the current thread may not write to tracked memory.
-  static void StartOffThreadCallEvent();
-  static void EndOffThreadCallEvent();
-
   // See RecordReplay.h.
   void NotifyUnrecordedWait(const std::function<void()>& aCallback);
-  static void MaybeWaitForSnapshot();
+  static void MaybeWaitForCheckpointSave();
 
-  // Wait for all other threads to enter the idle state necessary for recording
-  // or restoring a snapshot. This may only be called on the main thread.
+  // Wait for all other threads to enter the idle state necessary for saving
+  // or restoring a checkpoint. This may only be called on the main thread.
   static void WaitForIdleThreads();
 
-  // After rewinding to an earlier snapshot, the main thread will call this to
+  // After rewinding to an earlier checkpoint, the main thread will call this to
   // ensure that each thread has woken up and restored its own stack contents.
   // The main thread does not itself write to the stacks of other threads.
   static void WaitForIdleThreadsToRestoreTheirStacks();
@@ -377,11 +331,11 @@ public:
   // own stack and the stacks of all other threads. The return value is true if
   // the stacks were just saved, or false if they were just restored due to a
   // rewind from a later point of execution.
-  static bool SaveAllThreads(size_t aSnapshot);
+  static bool SaveAllThreads(const CheckpointId& aCheckpoint);
 
-  // Restore the saved stacks for a snapshot and rewind state to that point.
+  // Restore the saved stacks for a checkpoint and rewind state to that point.
   // This function does not return.
-  static void RestoreAllThreads(size_t aSnapshot);
+  static void RestoreAllThreads(const CheckpointId& aCheckpoint);
 };
 
 // This uses a stack pointer instead of TLS to make sure events are passed

@@ -15,7 +15,7 @@ namespace recordreplay {
 #define THREAD_STACK_TOP_SIZE 2048
 #define THREAD_STACK_TOP_SIZE_STR "2048"
 
-// Information about a thread's state, for use in saving or restoring snapshots.
+// Information about a thread's state, for use in saving or restoring checkpoints.
 // The contents of this structure are in preserved memory.
 struct ThreadState {
   // Whether this thread should update its state when no longer idle. This is
@@ -47,7 +47,7 @@ struct ThreadState {
 
 // For each non-main thread, whether that thread should update its stack and
 // state when it is no longer idle. This also stores restore info for the
-// main thread, which immediately updates its state when restoring snapshots.
+// main thread, which immediately updates its state when restoring checkpoints.
 static ThreadState* gThreadState;
 
 void

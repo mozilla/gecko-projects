@@ -90,15 +90,15 @@ extern char* gInitializationFailureMessage;
 #define INCLUDE_RECORD_REPLAY_ASSERTIONS 1
 //#endif
 
-// Save a complete recording up to the current point to aFilename.
-void SaveRecording(const char* aFilename);
+// Flush any new recording data to disk.
+void FlushRecording();
 
-// Tidy up state before we transition a recording process to a replaying
-// process and rewind.
-void PrepareForFirstRecordingRewind();
+// Called when any thread hits the end of its event stream.
+void HitEndOfRecording();
 
-// Fix up state after rewinding to the current point of execution.
-void FixupAfterRewind();
+// Called when the main thread hits the latest recording endpoint it knows
+// about.
+bool HitRecordingEndpoint();
 
 // Print some text to stderr, bypassing the recording.
 void Print(const char* aFormat, ...);
@@ -115,8 +115,8 @@ enum class Directive
   // Irrevocably crash if CrashSoon has ever been used on the process.
   MaybeCrash = 2,
 
-  // Always take temporary snapshots when stepping around in the debugger.
-  AlwaysTakeTemporarySnapshots = 3,
+  // Always save temporary checkpoints when stepping around in the debugger.
+  AlwaysSaveTemporaryCheckpoints = 3,
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -169,6 +169,35 @@ TestEnv(const char* env)
   return value && value[0];
 }
 
+// Check for membership in a vector.
+template <typename Vector, typename Entry>
+inline bool
+VectorContains(const Vector& aVector, const Entry& aEntry)
+{
+  for (const Entry& existing : aVector) {
+    if (existing == aEntry) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Add or remove a unique entry to an unsorted vector.
+template <typename Vector, typename Entry>
+inline void
+VectorAddOrRemoveEntry(Vector& aVector, const Entry& aEntry, bool aAdding)
+{
+  for (Entry& existing : aVector) {
+    if (existing == aEntry) {
+      MOZ_RELEASE_ASSERT(!aAdding);
+      aVector.erase(&existing);
+      return;
+    }
+  }
+  MOZ_RELEASE_ASSERT(aAdding);
+  aVector.append(aEntry);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Profiling
 ///////////////////////////////////////////////////////////////////////////////
@@ -211,7 +240,7 @@ namespace UntrackedMemoryKind {
   // Memory used for thread snapshots.
   static const AllocatedMemoryKind ThreadSnapshot = 4;
 
-  // Memory used by various parts of the snapshot system.
+  // Memory used by various parts of the memory snapshot system.
   static const AllocatedMemoryKind TrackedRegions = 5;
   static const AllocatedMemoryKind FreeRegions = 6;
   static const AllocatedMemoryKind DirtyPageSet = 7;

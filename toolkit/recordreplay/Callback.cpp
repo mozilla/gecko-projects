@@ -40,15 +40,15 @@ RegisterCallbackData(void* aData)
 }
 
 void
-BeginCallback(size_t aCallbackId, jmp_buf** aJump)
+BeginCallback(size_t aCallbackId)
 {
   MOZ_RELEASE_ASSERT(IsRecording());
   MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
+
   Thread* thread = Thread::Current();
-
-  *aJump = thread->EventCallbackJump();
-  thread->SetEventCallbackJump(nullptr);
-
+  if (thread->IsMainThread()) {
+    child::EndIdleTime();
+  }
   thread->SetPassThrough(false);
 
   thread->Events().RecordOrReplayThreadEvent(ThreadEvent::ExecuteCallback);
@@ -56,19 +56,17 @@ BeginCallback(size_t aCallbackId, jmp_buf** aJump)
 }
 
 void
-EndCallback(jmp_buf** aJump)
+EndCallback()
 {
+  MOZ_RELEASE_ASSERT(IsRecording());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
   MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
+
   Thread* thread = Thread::Current();
-
-  thread->SetEventCallbackJump(*aJump);
-  thread->SetPassThrough(true);
-
-  if (IsReplaying()) {
-    longjmp(**aJump, 0);
-    Unreachable();
+  if (thread->IsMainThread()) {
+    child::BeginIdleTime();
   }
+  thread->SetPassThrough(true);
 }
 
 void
@@ -109,36 +107,23 @@ RemoveCallbackData(void* aData)
 void
 PassThroughThreadEventsAllowCallbacks(const std::function<void()>& aFn)
 {
+  MOZ_RELEASE_ASSERT(IsRecordingOrReplaying());
   MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
 
   Thread* thread = Thread::Current();
 
-  jmp_buf jump;
-  thread->SetEventCallbackJump(&jump);
-
-  thread->SetPassThrough(true);
-
-  // We will longjmp to this point if we initially recorded, took a snapshot
-  // while inside a Gecko callback, and then rewound to that snapshot. In this
-  // case we will end up taking both the IsRecording() and IsReplaying()
-  // branches below, and in the latter case will execute all remaining
-  // callbacks which occurred while recording under aFn().
-  (void) setjmp(jump);
-
-  thread->SetPassThrough(false);
-
   if (IsRecording()) {
+    if (thread->IsMainThread()) {
+      child::BeginIdleTime();
+    }
     thread->SetPassThrough(true);
     aFn();
+    if (thread->IsMainThread()) {
+      child::EndIdleTime();
+    }
     thread->SetPassThrough(false);
     thread->Events().RecordOrReplayThreadEvent(ThreadEvent::CallbacksFinished);
-  }
-
-  thread->SetEventCallbackJump(nullptr);
-
-  // During replay, replay all callbacks that executed while recording until a
-  // CallbackFinished event occurs.
-  if (IsReplaying()) {
+  } else {
     while (true) {
       ThreadEvent ev = (ThreadEvent) thread->Events().ReadScalar();
       if (ev != ThreadEvent::ExecuteCallback) {

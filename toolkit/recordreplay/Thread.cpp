@@ -31,8 +31,9 @@ Thread::Current()
 {
   MOZ_ASSERT(IsRecordingOrReplaying());
   Thread* thread = gTlsThreadKey.get();
-  if (!thread) {
-    NoteCurrentSystemThread();
+  if (!thread && IsReplaying()) {
+    // Disable system threads when replaying.
+    WaitForeverNoIdle();
   }
   return thread;
 }
@@ -194,9 +195,6 @@ Thread::ThreadMain(void* aArgument)
   Unreachable();
 }
 
-static void
-SpawnCallEventHelperThreads();
-
 /* static */ void
 Thread::SpawnAllThreads()
 {
@@ -212,8 +210,6 @@ Thread::SpawnAllThreads()
   for (size_t i = MainThreadId + 1; i <= MaxRecordedThreadId; i++) {
     SpawnThread(GetById(i));
   }
-
-  SpawnCallEventHelperThreads();
 }
 
 // The number of non-recorded threads that have been spawned.
@@ -222,7 +218,7 @@ static Atomic<size_t, SequentiallyConsistent, Behavior::DontPreserve> gNumNonRec
 /* static */ Thread*
 Thread::SpawnNonRecordedThread(Callback aStart, void* aArgument)
 {
-  if (gInitializationFailureMessage) {
+  if (IsMiddleman() || gInitializationFailureMessage) {
     DirectSpawnThread(aStart, aArgument);
     return nullptr;
   }
@@ -420,29 +416,6 @@ static Atomic<bool, SequentiallyConsistent, Behavior::DontPreserve> gThreadsShou
 // Whether all threads are considered to be idle.
 static Atomic<bool, SequentiallyConsistent, Behavior::DontPreserve> gThreadsAreIdle;
 
-// The number of call events which are currently executing and permitted to
-// write to tracked memory, including from non-recorded call event helper
-// threads.
-static Atomic<size_t, SequentiallyConsistent, Behavior::DontPreserve> gNumActiveCallEvents;
-
-static void
-AddActiveCallEvent()
-{
-  MOZ_RELEASE_ASSERT(!gThreadsAreIdle);
-  ++gNumActiveCallEvents;
-}
-
-static void
-ReleaseActiveCallEvent()
-{
-  // The main thread may be blocked under WaitForIdleThreads if there are
-  // active call events.
-  MOZ_RELEASE_ASSERT(gNumActiveCallEvents);
-  if (--gNumActiveCallEvents == 0 && gThreadsShouldIdle) {
-    Thread::Notify(MainThreadId);
-  }
-}
-
 /* static */ void
 Thread::WaitForIdleThreads()
 {
@@ -457,7 +430,7 @@ Thread::WaitForIdleThreads()
     GetById(i)->mUnrecordedWaitNotified = false;
   }
   while (true) {
-    bool done = !gNumActiveCallEvents;
+    bool done = true;
     for (size_t i = MainThreadId + 1; i <= MaxRecordedThreadId; i++) {
       Thread* thread = GetById(i);
       if (!thread->mIdle) {
@@ -479,7 +452,7 @@ Thread::WaitForIdleThreads()
           // Releasing the global lock means that we need to start over
           // checking whether there are any idle threads. By marking this
           // thread as having been notified we have made progress, however.
-          done = !gNumActiveCallEvents;
+          done = true;
           i = MainThreadId;
         }
       }
@@ -499,18 +472,11 @@ Thread::ResumeIdleThreads()
 {
   MOZ_RELEASE_ASSERT(CurrentIsMainThread());
 
-  {
-    MonitorAutoLock lock(*gMonitor);
+  MOZ_RELEASE_ASSERT(gThreadsAreIdle);
+  gThreadsAreIdle = false;
 
-    MOZ_RELEASE_ASSERT(gThreadsAreIdle);
-    gThreadsAreIdle = false;
-
-    MOZ_RELEASE_ASSERT(gThreadsShouldIdle);
-    gThreadsShouldIdle = false;
-
-    // Helper threads might be waiting under EndOffThreadCallEvent.
-    gMonitor->NotifyAll();
-  }
+  MOZ_RELEASE_ASSERT(gThreadsShouldIdle);
+  gThreadsShouldIdle = false;
 
   for (size_t i = MainThreadId + 1; i <= MaxRecordedThreadId; i++) {
     Notify(i);
@@ -540,7 +506,7 @@ Thread::NotifyUnrecordedWait(const std::function<void()>& aCallback)
 }
 
 /* static */ void
-Thread::MaybeWaitForSnapshot()
+Thread::MaybeWaitForCheckpointSave()
 {
   MonitorAutoLock lock(*gMonitor);
   while (gThreadsShouldIdle) {
@@ -558,9 +524,9 @@ RecordReplayInterface_NotifyUnrecordedWait(const std::function<void()>& aCallbac
 }
 
 MOZ_EXPORT void
-RecordReplayInterface_MaybeWaitForSnapshot()
+RecordReplayInterface_MaybeWaitForCheckpointSave()
 {
-  Thread::MaybeWaitForSnapshot();
+  Thread::MaybeWaitForCheckpointSave();
 }
 
 } // extern "C"
@@ -594,14 +560,8 @@ Thread::Wait()
   thread->SetPassThrough(true);
   int stackSeparator = 0;
   if (!SaveThreadState(thread->Id(), &stackSeparator)) {
-    // We just restored a snapshot, fixup any weak pointers and notify the main
-    // thread since it is waiting for all threads to restore their stacks.
-    for (const void* ptr : thread->mPendingWeakPointerFixups) {
-      thread->SetPassThrough(false);
-      FixupOffThreadWeakPointerAfterRecordingRewind(ptr);
-      thread->SetPassThrough(true);
-    }
-    thread->mPendingWeakPointerFixups.clear();
+    // We just restored a checkpoint, notify the main thread since it is waiting
+    // for all threads to restore their stacks.
     Notify(MainThreadId);
   }
 
@@ -630,10 +590,6 @@ Thread::Wait()
 /* static */ void
 Thread::WaitForever()
 {
-  if (CurrentIsMainThread()) {
-    TakeSnapshot(/* aFinal = */ true);
-  }
-
   while (true) {
     Wait();
   }
@@ -743,8 +699,17 @@ Thread::SignalCvar(void* aCvar, bool aBroadcast)
   }
 }
 
+template <typename CharBuffer>
+static void
+SnapshotStackFilename(const CheckpointId& aCheckpoint, CharBuffer& aFilename)
+{
+  size_t nchars = SprintfLiteral(aFilename, "%s_%d_%d", gSnapshotStackPrefix,
+                                 (int) aCheckpoint.mNormal, (int) aCheckpoint.mTemporary);
+  MOZ_RELEASE_ASSERT(nchars < sizeof(aFilename));
+}
+
 /* static */ bool
-Thread::SaveAllThreads(size_t aSnapshot)
+Thread::SaveAllThreads(const CheckpointId& aCheckpoint)
 {
   MOZ_RELEASE_ASSERT(CurrentIsMainThread());
 
@@ -762,8 +727,11 @@ Thread::SaveAllThreads(size_t aSnapshot)
     return false;
   }
 
+  char filename[1024];
+  SnapshotStackFilename(aCheckpoint, filename);
+
   UntrackedFile file;
-  file.Open(gSnapshotStackPrefix, aSnapshot, UntrackedFile::WRITE);
+  file.Open(filename, UntrackedFile::WRITE);
 
   UntrackedStream* stream = file.OpenStream(StreamName::Main, 0);
 
@@ -776,15 +744,18 @@ Thread::SaveAllThreads(size_t aSnapshot)
 }
 
 /* static */ void
-Thread::RestoreAllThreads(size_t aSnapshot)
+Thread::RestoreAllThreads(const CheckpointId& aCheckpoint)
 {
   MOZ_RELEASE_ASSERT(CurrentIsMainThread());
 
   BeginPassThroughThreadEvents();
   SetMemoryChangesAllowed(false);
 
+  char filename[1024];
+  SnapshotStackFilename(aCheckpoint, filename);
+
   UntrackedFile file;
-  file.Open(gSnapshotStackPrefix, aSnapshot, UntrackedFile::READ);
+  file.Open(filename, UntrackedFile::READ);
 
   UntrackedStream* stream = file.OpenStream(StreamName::Main, 0);
 
@@ -814,238 +785,6 @@ Thread::WaitForIdleThreadsToRestoreTheirStacks()
       break;
     }
     WaitNoIdle();
-  }
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// Off Thread Call Events
-///////////////////////////////////////////////////////////////////////////////
-
-// While recording, threads may call APIs that block indefinitely. We want the
-// main thread to be able to take snapshots and rewind the process while these
-// threads are blocked, so need mechanisms to allow the thread to enter its
-// special idle state. Locks and condition variables are emulated so that they
-// are considered idle while blocked, but other APIs need different handling.
-//
-// Call event helper threads are non-recorded threads that can take over work
-// from a recorded thread, calling the blocking API themselves so that the
-// recorded thread can enter its idle state.
-//
-// The main difficulty here is ensuring the helper thread doesn't interfere
-// with the snapshot/rewind mechanism by writing to memory it shouldn't. The
-// blocking API can return at any time, leading to heap writes through
-// pointers that are probably invalid after rewinding.
-//
-// To avoid these problems, we maintain a core invariant. Calls to
-// Add/ReleaseActiveCallEvent define an execution region where call event
-// helper threads are allowed to write to tracked memory. Whenever there is
-// an active call event the main thread will not consider recorded threads to
-// be idle.
-
-static const size_t CallEventHelperThreadCount = 12;
-
-struct CallEventHelperThreadInfo
-{
-  size_t mHelperThreadId;
-  std::function<void()> mCallback;
-  Atomic<size_t, SequentiallyConsistent, Behavior::DontPreserve> mRequestorThreadId;
-};
-
-static CallEventHelperThreadInfo* gCallEventHelperThreads;
-
-static void
-CallEventHelperThreadMain(void* aArgument)
-{
-  CallEventHelperThreadInfo& info = gCallEventHelperThreads[(size_t) aArgument];
-  info.mHelperThreadId = Thread::Current()->Id();
-
-  while (true) {
-    while (!info.mRequestorThreadId) {
-      Thread::WaitNoIdle();
-    }
-
-    info.mCallback();
-
-    size_t id = info.mRequestorThreadId;
-    info.mCallback = std::function<void()>();
-    info.mRequestorThreadId = 0;
-
-    Thread::Notify(id);
-
-    // Release the active call event added by ExecuteCallEventOffThread.
-    ReleaseActiveCallEvent();
-  }
-}
-
-static void
-SpawnCallEventHelperThreads()
-{
-  gCallEventHelperThreads = new CallEventHelperThreadInfo[CallEventHelperThreadCount];
-  PodZero(gCallEventHelperThreads, CallEventHelperThreadCount);
-
-  for (size_t i = 0; i < CallEventHelperThreadCount; i++) {
-    Thread::SpawnNonRecordedThread(CallEventHelperThreadMain, (void*) i);
-  }
-}
-
-/* static */ void
-Thread::ExecuteCallEventOffThread(const std::function<void()>& aCallback, bool* aCompleted)
-{
-  MOZ_RELEASE_ASSERT(IsRecording());
-  MOZ_RELEASE_ASSERT(!gThreadsAreIdle);
-
-  // Allow call event helper threads to write to tracked memory. This will be
-  // released by the helper thread after the callback finishes.
-  AddActiveCallEvent();
-
-  Thread* thread = Current();
-
-  CallEventHelperThreadInfo* info = nullptr;
-  {
-    MonitorAutoLock lock(*gMonitor);
-
-    for (size_t i = 0; i < CallEventHelperThreadCount; i++) {
-      if (!gCallEventHelperThreads[i].mRequestorThreadId) {
-        info = &gCallEventHelperThreads[i];
-        break;
-      }
-    }
-
-    MOZ_RELEASE_ASSERT(info);
-
-    info->mCallback = aCallback;
-    info->mRequestorThreadId = thread->Id();
-  }
-
-  Notify(info->mHelperThreadId);
-
-  thread->SetPassThrough(false);
-  while (IsRecording() && !*aCompleted) {
-    Wait();
-  }
-  thread->SetPassThrough(true);
-}
-
-// Information about an output buffer in use by an off thread call event.
-struct OffThreadCallEventBuffer
-{
-  // Address of the original output buffer supplied by the caller.
-  void* mOriginal;
-
-  // Copy of the output buffer located in untracked memory.
-  void* mUntracked;
-
-  // Size of the buffer.
-  size_t mSize;
-
-  OffThreadCallEventBuffer(void* aOriginal, void* aUntracked, size_t aSize)
-    : mOriginal(aOriginal), mUntracked(aUntracked), mSize(aSize)
-  {}
-};
-
-struct OffThreadCallEventInfo {
-  InfallibleVector<OffThreadCallEventBuffer, 4, AllocPolicy<UntrackedMemoryKind::Generic>> mBuffers;
-  SpinLock mLock;
-};
-static OffThreadCallEventInfo* gOffThreadCallEventInfo;
-
-/* static */ void
-Thread::InitializeOffThreadCallEvents()
-{
-  // Off thread call event data is allocated in untracked memory to avoid
-  // deadlocks when the dirty memory handler accesses it.
-  gOffThreadCallEventInfo = (OffThreadCallEventInfo*)
-    AllocateMemory(sizeof(OffThreadCallEventInfo), UntrackedMemoryKind::Generic);
-}
-
-/* static */ void
-Thread::NoteOffThreadCallEventBuffer(void* aBuf, size_t aSize, bool aFirst)
-{
-  // This method is called twice for each output buffer used by an off thread
-  // call event. During the first call the buffer is replaced with a fresh
-  // region of untracked memory. During the second call the contents of the
-  // untracked region are copied to the target output buffer.
-  MOZ_RELEASE_ASSERT(gNumActiveCallEvents);
-
-  if (!aSize) {
-    return;
-  }
-
-  void* untracked = nullptr;
-  if (aFirst) {
-    untracked = AllocateMemory(aSize, UntrackedMemoryKind::Generic);
-    memcpy(untracked, aBuf, aSize);
-  }
-
-  Maybe<AutoSpinLock> lock;
-  lock.emplace(gOffThreadCallEventInfo->mLock);
-
-  if (aFirst) {
-    for (OffThreadCallEventBuffer& info : gOffThreadCallEventInfo->mBuffers) {
-      MOZ_RELEASE_ASSERT(info.mOriginal != aBuf);
-    }
-    gOffThreadCallEventInfo->mBuffers.emplaceBack(aBuf, untracked, aSize);
-  } else {
-    for (OffThreadCallEventBuffer& info : gOffThreadCallEventInfo->mBuffers) {
-      if (info.mOriginal == aBuf) {
-        MOZ_RELEASE_ASSERT(aSize == info.mSize);
-        OffThreadCallEventBuffer copy = info;
-        gOffThreadCallEventInfo->mBuffers.erase(&info);
-        lock.reset();
-
-        memcpy(copy.mOriginal, copy.mUntracked, aSize);
-        DeallocateMemory(copy.mUntracked, aSize, UntrackedMemoryKind::Generic);
-        return;
-      }
-    }
-    MOZ_CRASH();
-  }
-}
-
-/* static */ void*
-Thread::MaybeUntrackedOffThreadCallEventBuffer(void* aBuf)
-{
-  if (!gOffThreadCallEventInfo) {
-    return aBuf;
-  }
-  AutoSpinLock lock(gOffThreadCallEventInfo->mLock);
-  for (const OffThreadCallEventBuffer& info : gOffThreadCallEventInfo->mBuffers) {
-    if (info.mOriginal == aBuf) {
-      MOZ_RELEASE_ASSERT(!Thread::Current()->IsRecordedThread());
-      return info.mUntracked;
-    }
-  }
-  return aBuf;
-}
-
-/* static */ void
-Thread::StartOffThreadCallEvent()
-{
-  // By releasing the call event the main thread will be allowed to take
-  // snapshots or rewind to an earlier snapshot. The call event cannot touch
-  MOZ_RELEASE_ASSERT(IsRecording());
-  MOZ_RELEASE_ASSERT(!gThreadsAreIdle);
-  ReleaseActiveCallEvent();
-}
-
-/* static */ void
-Thread::EndOffThreadCallEvent()
-{
-  {
-    MonitorAutoLock lock(*gMonitor);
-
-    // Wait if recorded threads are supposed to be idle.
-    while (gThreadsShouldIdle) {
-      gMonitor->Wait();
-    }
-
-    AddActiveCallEvent();
-  }
-
-  // Stop execution in this thread if we are no longer recording.
-  if (IsReplaying()) {
-    ReleaseActiveCallEvent();
-    WaitForeverNoIdle();
   }
 }
 

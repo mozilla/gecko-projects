@@ -15,8 +15,8 @@ namespace recordreplay {
 
 // Memory Snapshots Overview.
 //
-// As described in ProcessRewind.h, some subset of the snapshots which are
-// reached during execution are recorded, so that their state can be restored
+// As described in ProcessRewind.h, some subset of the checkpoints which are
+// reached during execution are saved, so that their state can be restored
 // later. Memory snapshots are used to save and restore the contents of all
 // heap memory: everything except thread stacks (see ThreadSnapshot.h for
 // saving and restoring these) and untracked memory (which is not saved or
@@ -26,8 +26,8 @@ namespace recordreplay {
 // next one. See MemorySnapshot.cpp for how diffs are represented and computed.
 //
 // Rewinding must restore the exact contents of heap memory that existed when
-// the target snapshot was reached. Because of this, memory that is allocated
-// at a point when a snapshot is taken will never actually be returned to the
+// the target checkpoint was reached. Because of this, memory that is allocated
+// at a point when a checkpoint is saved will never actually be returned to the
 // system. We instead keep a set of free blocks that are unused at the current
 // point of execution and are available to satisfy new allocations.
 
@@ -46,34 +46,28 @@ void* AllocateMemoryTryAddress(void* aAddress, size_t aSize, AllocatedMemoryKind
 // kind of memory allocation that was performed.
 void RegisterAllocatedMemory(void* aBaseAddress, size_t aSize, AllocatedMemoryKind aKind);
 
-// Return whether system threads should be suspended and unable to run.
-bool SystemThreadsShouldBeSuspended();
-
-// Make sure we know about the current thread, which was created by the system
-// and does not participate in the recording.
-void NoteCurrentSystemThread();
-
-// Return whether an address belongs to the stack of a known system thread.
-bool IsSystemThreadStackAddress(void* aAddress);
-
 // Initialize the memory snapshots system.
 void InitializeMemorySnapshots();
 
-// Take the first heap memory snapshot. The ID of this snapshot is zero.
+// Take the first heap memory snapshot.
 void TakeFirstMemorySnapshot();
 
-// Take a differential heap memory snapshot compared to the last one. The ID of
-// this snapshot is that of the active recorded snapshot.
+// Take a differential heap memory snapshot compared to the last one,
+// associated with the last saved checkpoint.
 void TakeDiffMemorySnapshot();
 
-// Restore all heap memory to its state when the active recorded snapshot
-// (GetActiveRecordedSnapshot) was reached.
-void RestoreMemoryToActiveSnapshot();
+// Restore all heap memory to its state when the most recent checkpoint was
+// saved. This requires no checkpoints to have been saved after this one.
+void RestoreMemoryToLastSavedCheckpoint();
 
-// Restore all heap memory to its state when the most recent recorded diff
-// snapshot (GetLastRecordedDiffSnapshot) was reached. This requires that no
-// tracked heap memory has been changed since the active recorded snapshot.
-void RestoreMemoryToLastRecordedDiffSnapshot();
+// Restore all heap memory to its state at a checkpoint where a complete diff
+// was saved vs. the following saved checkpoint. This requires that no
+// tracked heap memory has been changed since the last saved checkpoint.
+void RestoreMemoryToLastSavedDiffCheckpoint();
+
+// Erase all information from the last diff snapshot taken, so that tracked
+// heap memory changes are with respect to the previous checkpoint.
+void EraseLastSavedDiffMemorySnapshot();
 
 // Set whether to allow changes to tracked heap memory at this point. If such
 // changes occur when they are not allowed then the process will crash.
@@ -92,11 +86,6 @@ void UnrecoverableSnapshotFailure();
 // After rewinding, mark all memory that has been allocated since the snapshot
 // was taken as free.
 void FixupFreeRegionsAfterRewind();
-
-// When converting a recording process into a replaying process for rewinding,
-// set or get the file handle to use for reading from the recording.
-void PrepareMemoryForFirstRecordingRewind(FileHandle aReplayFd);
-FileHandle GetReplayFileAfterRecordingRewind();
 
 // Set whether to allow intentionally crashing in this process via the
 // RecordReplayDirective method.

@@ -71,9 +71,8 @@ public:
   // Initialize locking state.
   static void InitializeLocks();
 
-  // Prepare for replaying after rewinding to a point which was originally
-  // recorded.
-  static void FixupAfterRecordingRewind();
+  // Note that new data has been read into a lock's acquires stream.
+  static void LockAquiresUpdated(size_t aLockId);
 };
 
 } // namespace recordreplay

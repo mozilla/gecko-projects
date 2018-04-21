@@ -15,17 +15,6 @@ namespace recordreplay {
 // Initialize weak pointer state.
 void InitializeWeakPointers();
 
-// At the end of recording, write out data on which weak pointer accesses
-// succeeded.
-void WriteWeakPointers(File* aFile);
-
-// At the beginning of replaying, or when rewinding to a point that was
-// originally recorded, read back the data written by WriteWeakPointers.
-void ReadWeakPointers();
-
-void FixupWeakPointersAfterRecordingRewind();
-void FixupOffThreadWeakPointerAfterRecordingRewind(const void* aPtr);
-
 } // namespace recordreplay
 } // namespace mozilla
 

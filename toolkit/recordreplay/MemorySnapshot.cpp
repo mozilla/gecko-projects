@@ -30,16 +30,18 @@ namespace recordreplay {
 ///////////////////////////////////////////////////////////////////////////////
 // Memory Snapshots Overview.
 //
-// Snapshots are periodically recorded, storing on disk enough information
-// for the process to restore the contents of all allocated memory as it moves
-// between snapshots. There are two components to a snapshot:
+// Checkpoints are periodically saved, storing on disk enough information
+// for the process to restore the contents of all tracked memory as it
+// rewinds to earlier checkpoitns. There are two components to a saved
+// checkpoint:
 //
 // - Stack contents for each thread are completely saved on disk at each
-//   snapshot. This is handled by ThreadSnapshot.cpp
+//   saved checkpoint. This is handled by ThreadSnapshot.cpp
 //
-// - Heap and static memory contents (tracked memory) are saved on disk as
-//   the contents of pages modified before the next snapshot. This is handled
-//   here.
+// - Heap and static memory contents (tracked memory) are saved on disk or in
+//   memory as the contents of pages modified before either the the next saved
+//   checkpoint or the current execution point (if this is the last saved
+//   checkpoint). This is handled here.
 //
 // Heap memory is only tracked when allocated with TrackedMemoryKind.
 //
@@ -50,35 +52,35 @@ namespace recordreplay {
 // without fork (i.e. Windows). The following example shows how snapshots are
 // generated:
 //
-// #1 Take Snapshot A. The initial snapshot tabulates all allocated heap/static
+// #1 Save Checkpoint A. The initial snapshot tabulates all allocated tracked
 //    memory in the process, and write-protects all of it.
 //
 // #2 Write pages P0 and P1. Writing to the pages trips the fault handler. The
 //    handler creates copies of the initial contents of P0 and P1 (P0a and P1a)
 //    and unprotects the pages.
 //
-// #3 Take Snapshot B. P0a and P1a, along with any other pages modified between
-//    snapshots A and B, become associated with snapshot A. They may be kept in
+// #3 Save Checkpoint B. P0a and P1a, along with any other pages modified
+//    between A and B, become associated with checkpoint A. They may be kept in
 //    memory, or compressed and written out to disk by a snapshot thread
 //    (see below). All modified pages are reprotected.
 //
 // #4 Write pages P1 and P2. Again, writing to the pages trips the fault
 //    handler and copies P1b and P2b are created and the pages are unprotected.
 //
-// #5 Take Snapshot C. P1b and P2b become associated with snapshot B, and the
+// #5 Save Checkpoint C. P1b and P2b become associated with snapshot B, and the
 //    modified pages are reprotected.
 //
-// If we were to then rewind from snapshot C to snapshot A, we would read and
-// restore P1b/P2b, followed by P0a/P1a. All data associated with snapshots A
-// and later is discarded (we can only rewind; we cannot jump forward in time).
+// If we were to then rewind from C to A, we would read and restore P1b/P2b,
+// followed by P0a/P1a. All data associated with checkpoints A and later is
+// discarded (we can only rewind; we cannot jump forward in time).
 ///////////////////////////////////////////////////////////////////////////////
 
 ///////////////////////////////////////////////////////////////////////////////
 // Snapshot Threads Overview.
 //
 // After step #3 above, the main thread has created a diff snapshot with the
-// copies of the original contents of pages modified between that snapshot and
-// the following one. These page copies are initially all in memory. It is the
+// copies of the original contents of pages modified between two saved
+// checkpoints. These page copies are initially all in memory. It is the
 // responsibility of the snapshot threads to do the following:
 //
 // 1. When memory pressure gets high (determined by exhausting a preallocated
@@ -86,12 +88,12 @@ namespace recordreplay {
 //    write out snapshot diffs to disk (oldest first) and frees the in memory
 //    copy that was made.
 //
-// 2. When rewinding to the last recorded snapshot, snapshot threads are used to
+// 2. When rewinding to the last saved checkpoint, snapshot threads are used to
 //    restore the original contents of pages, either by using in memory copies
 //    or by reading pages back from disk.
 //
 // There are a fixed number of snapshot threads that are spawned when the
-// initial snapshot is taken. Threads are each responsible for distinct sets of
+// first checkpoint is saved. Threads are each responsible for distinct sets of
 // heap memory pages (see AddDirtyPageToWorklist), avoiding synchronization
 // issues between different snapshot threads.
 ///////////////////////////////////////////////////////////////////////////////
@@ -137,12 +139,12 @@ struct AllocatedMemoryRegion {
   };
 };
 
-// Information about a page which was modified between two snapshots.
+// Information about a page which was modified between two saved checkpoints.
 struct DirtyPage {
   // Base address of the page.
   uint8_t* mBase;
 
-  // Copy of the page at the first snapshot, nullptr if the copy is not loaded.
+  // Copy of the page at the first checkpoint, nullptr if the copy is not loaded.
   // Written by the dirty memory handler via HandleDirtyMemoryFault if this is
   // in the active page set, otherwise accessed by snapshot threads.
   uint8_t* mOriginal;
@@ -168,10 +170,10 @@ struct DirtyPage {
 typedef SplayTree<DirtyPage, DirtyPage::AddressSort,
                   AllocPolicy<UntrackedMemoryKind::SortedDirtyPageSet>, 4> SortedDirtyPageSet;
 
-// A set of dirty pages associated with some snapshot.
+// A set of dirty pages associated with some checkpoint.
 struct DirtyPageSet {
-  // Snapshot associated with this set.
-  size_t mSnapshot;
+  // Checkpoint associated with this set.
+  CheckpointId mCheckpoint;
 
   // All dirty pages in the set. Pages may be added or destroyed by the main
   // thread when all other threads are idle, by the dirty memory handler when
@@ -179,8 +181,8 @@ struct DirtyPageSet {
   // which owns this set.
   InfallibleVector<DirtyPage, 256, AllocPolicy<UntrackedMemoryKind::DirtyPageSet>> mPages;
 
-  explicit DirtyPageSet(size_t aSnapshot)
-    : mSnapshot(aSnapshot)
+  explicit DirtyPageSet(const CheckpointId& aCheckpoint)
+    : mCheckpoint(aCheckpoint)
   {}
 };
 
@@ -192,9 +194,9 @@ struct SnapshotThreadWorklist {
   // Record/replay ID of the thread.
   size_t mThreadId;
 
-  // Sets of pages in the thread's worklist. Each set is for a different
-  // snapshot diff, with the oldest snapshots first. As the thread writes diffs
-  // out to disk, the earliest entries in this vector are erased.
+  // Sets of pages in the thread's worklist. Each set is for a different diff,
+  // with the oldest checkpoints first. As the thread writes diffs out to disk,
+  // the earliest entries in this vector are erased.
   InfallibleVector<DirtyPageSet, 256, AllocPolicy<UntrackedMemoryKind::Generic>> mSets;
 };
 
@@ -304,11 +306,7 @@ struct MemoryInfo {
   // Whether new dirty pages or allocated regions are allowed.
   bool mMemoryChangesAllowed;
 
-  // If the process was originally recording and later started rewinding and
-  // replaying, this stores the recording file handle to read from.
-  FileHandle mReplayFd;
-
-  // Untracked memory regions allocated before the first snapshot. This is only
+  // Untracked memory regions allocated before the first checkpoint. This is only
   // accessed on the main thread, and is not a vector because of reentrancy
   // issues.
   static const size_t MaxInitialUntrackedRegions = 256;
@@ -324,15 +322,10 @@ struct MemoryInfo {
     mTrackedRegionsByAllocationOrder;
   SpinLock mTrackedRegionsLock;
 
-  // Memory regions that *might* indicate the stacks of system threads. These
-  // might also be the stacks for dead threads, or for recorded threads.
-  InfallibleVector<AllocatedMemoryRegion, 512, AllocPolicy<UntrackedMemoryKind::Generic>>
-    mSystemThreadStacks;
-  SpinLock mSystemThreadStacksLock;
-
-  // Pages from |trackedRegions| modified since the active snapshot. Accessed
-  // by any thread (usually the dirty memory handler) when memory changes are
-  // allowed, and by the main thread when memory changes are not allowed.
+  // Pages from |trackedRegions| modified since the last saved checkpoint.
+  // Accessed by any thread (usually the dirty memory handler) when memory
+  // changes are allowed, and by the main thread when memory changes are not
+  // allowed.
   SortedDirtyPageSet mActiveDirty;
   SpinLock mActiveDirtyLock;
 
@@ -342,8 +335,8 @@ struct MemoryInfo {
   // Worklists for each snapshot thread.
   SnapshotThreadWorklist mSnapshotWorklists[NumSnapshotThreads];
 
-  // Whether snapshot threads should update memory to that at the last recorded
-  // diff snapshot.
+  // Whether snapshot threads should update memory to that when the last saved
+  // diff was started.
   SnapshotThreadCondition mSnapshotThreadsShouldRestore;
 
   // Whether snapshot threads should idle.
@@ -439,12 +432,6 @@ CountdownThreadMain(void*)
 
 #endif // WANT_COUNTDOWN_THREAD
 
-FileHandle
-GetReplayFileAfterRecordingRewind()
-{
-  return gMemoryInfo->mReplayFd;
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // Profiling
 ///////////////////////////////////////////////////////////////////////////////
@@ -507,8 +494,8 @@ RecordReplayInterface_InternalRecordReplayDirective(long aDirective)
     }
     gMemoryInfo->mCrashSoon = false;
     break;
-  case Directive::AlwaysTakeTemporarySnapshots:
-    JS::replay::hooks.alwaysTakeTemporarySnapshots();
+  case Directive::AlwaysSaveTemporaryCheckpoints:
+    JS::replay::hooks.alwaysSaveTemporaryCheckpoints();
     break;
   default:
     MOZ_CRASH("Unknown directive");
@@ -516,22 +503,6 @@ RecordReplayInterface_InternalRecordReplayDirective(long aDirective)
 }
 
 } // extern "C"
-
-///////////////////////////////////////////////////////////////////////////////
-// Preserving Memory Writability
-///////////////////////////////////////////////////////////////////////////////
-
-void
-NotifyDirtyMemory(void* aAddress, size_t aSize)
-{
-  // Use 'volatile' to make sure that this loop isn't optimized away.
-  volatile char* address = (volatile char*) aAddress;
-
-  for (size_t i = 0; i < aSize; i++) {
-    char c = address[i];
-    address[i] = c;
-  }
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 // Snapshot Thread Conditions
@@ -596,7 +567,7 @@ SnapshotThreadCondition::WaitUntilNoLongerActive()
 static const size_t SnapshotPageMaxMB = 300;
 static const size_t SnapshotPageMaxCount = SnapshotPageMaxMB * 1024 * 1024 / PageSize;
 
-// Lower limit at which to stop writing snapshots to disk.
+// Lower limit at which to stop writing snapshot pages to disk.
 static const size_t SnapshotPageMinMB = 280;
 static const size_t SnapshotPageMinCount = SnapshotPageMinMB * 1024 * 1024 / PageSize;
 
@@ -678,9 +649,6 @@ MemoryZero(void* aDst, size_t aSize)
 static bool
 IsTrackedAddress(void* aAddress, bool* aExecutable)
 {
-  if (IsSystemThreadStackAddress(aAddress)) {
-    return false;
-  }
   AutoSpinLock lock(gMemoryInfo->mTrackedRegionsLock);
   Maybe<AllocatedMemoryRegion> region =
     gMemoryInfo->mTrackedRegions.lookupClosestLessOrEqual(aAddress);
@@ -691,14 +659,6 @@ IsTrackedAddress(void* aAddress, bool* aExecutable)
     return true;
   }
   return false;
-}
-
-static void
-NewDirtyPage(uint8_t* aBase, bool aExecutable, SortedDirtyPageSet& aNewDirtyPages)
-{
-  uint8_t* original = AllocatePageCopy();
-  MemoryMove(original, aBase, PageSize);
-  aNewDirtyPages.insert(aBase, DirtyPage(aBase, original, aExecutable));
 }
 
 bool
@@ -724,7 +684,7 @@ HandleDirtyMemoryFault(uint8_t* aAddress)
   AutoSpinLock lock(gMemoryInfo->mActiveDirtyLock);
 
   // Check to see if this is already an active dirty page. Once a page has been
-  // marked as dirty it will be accessible until the next snapshot is taken,
+  // marked as dirty it will be accessible until the next checkpoint is saved,
   // but it's possible for multiple threads to access the same protected memory
   // before we have a chance to unprotect it, in which case we'll end up here
   // multiple times for the page.
@@ -740,7 +700,9 @@ HandleDirtyMemoryFault(uint8_t* aAddress)
 
   // Copy the page's original contents into the active dirty set, and unprotect
   // it so that execution can proceed.
-  NewDirtyPage(aAddress, executable, gMemoryInfo->mActiveDirty);
+  uint8_t* original = AllocatePageCopy();
+  MemoryMove(original, aAddress, PageSize);
+  gMemoryInfo->mActiveDirty.insert(aAddress, DirtyPage(aAddress, original, executable));
   DirectUnprotectMemory(aAddress, PageSize, executable);
   return true;
 }
@@ -763,7 +725,7 @@ UnrecoverableSnapshotFailure()
 static void
 AddInitialUntrackedMemoryRegion(uint8_t* aBase, size_t aSize)
 {
-  MOZ_RELEASE_ASSERT(!HasTakenSnapshot());
+  MOZ_RELEASE_ASSERT(!HasSavedCheckpoint());
 
   if (gInitializationFailureMessage) {
     return;
@@ -795,7 +757,7 @@ AddInitialUntrackedMemoryRegion(uint8_t* aBase, size_t aSize)
 static void
 RemoveInitialUntrackedRegion(uint8_t* aBase, size_t aSize)
 {
-  MOZ_RELEASE_ASSERT(!HasTakenSnapshot());
+  MOZ_RELEASE_ASSERT(!HasSavedCheckpoint());
   AutoSpinLock lock(gMemoryInfo->mInitialUntrackedRegionsLock);
 
   for (AllocatedMemoryRegion& region : gMemoryInfo->mInitialUntrackedRegions) {
@@ -816,11 +778,6 @@ MarkThreadStacksAsUntracked()
   for (size_t i = MainThreadId; i <= MaxThreadId; i++) {
     Thread* thread = Thread::GetById(i);
     AddInitialUntrackedMemoryRegion(thread->StackBase(), thread->StackSize());
-  }
-
-  AutoSpinLock lock(gMemoryInfo->mSystemThreadStacksLock);
-  for (auto stack : gMemoryInfo->mSystemThreadStacks) {
-    AddInitialUntrackedMemoryRegion(stack.mBase, stack.mSize);
   }
 }
 
@@ -966,7 +923,7 @@ ProcessAllInitialMemoryRegions()
 static FreeRegionSet gFreeRegions(TrackedMemoryKind);
 
 // The size of gMemoryInfo->mTrackedRegionsByAllocationOrder we expect to see
-// at the point of the last snapshot.
+// at the point of the last saved checkpoint.
 static size_t gNumTrackedRegions;
 
 static void
@@ -979,7 +936,7 @@ UpdateNumTrackedRegionsForSnapshot()
 void
 FixupFreeRegionsAfterRewind()
 {
-  // All memory that has been allocated since the associated snapshot was
+  // All memory that has been allocated since the associated checkpoint was
   // reached is now free, and may be reused for new allocations.
   size_t newTrackedRegions = gMemoryInfo->mTrackedRegionsByAllocationOrder.length();
   for (size_t i = gNumTrackedRegions; i < newTrackedRegions; i++) {
@@ -1113,8 +1070,6 @@ FreeRegionSet::Intersects(void* aAddress, size_t aSize)
 // Memory Management
 ///////////////////////////////////////////////////////////////////////////////
 
-static void EnsureMemoryDoesNotOverlapSystemThreadStack(void* aAddress, size_t aSize);
-
 void
 RegisterAllocatedMemory(void* aBaseAddress, size_t aSize, AllocatedMemoryKind aKind)
 {
@@ -1123,12 +1078,11 @@ RegisterAllocatedMemory(void* aBaseAddress, size_t aSize, AllocatedMemoryKind aK
 
   uint8_t* aAddress = reinterpret_cast<uint8_t*>(aBaseAddress);
 
-  EnsureMemoryDoesNotOverlapSystemThreadStack(aAddress, aSize);
   if (aKind != TrackedMemoryKind) {
-    if (!HasTakenSnapshot()) {
+    if (!HasSavedCheckpoint()) {
       AddInitialUntrackedMemoryRegion(aAddress, aSize);
     }
-  } else if (HasTakenSnapshot()) {
+  } else if (HasSavedCheckpoint()) {
     EnsureMemoryChangesAllowed();
     DirectWriteProtectMemory(aAddress, aSize, true);
     AddTrackedRegion(aAddress, aSize, true);
@@ -1141,7 +1095,7 @@ CheckFixedMemory(void* aAddress, size_t aSize)
   MOZ_RELEASE_ASSERT(aAddress == PageBase(aAddress));
   MOZ_RELEASE_ASSERT(aSize == RoundupSizeToPageBoundary(aSize));
 
-  if (!HasTakenSnapshot()) {
+  if (!HasSavedCheckpoint()) {
     return;
   }
 
@@ -1173,7 +1127,7 @@ RestoreWritableFixedMemory(void* aAddress, size_t aSize)
   MOZ_RELEASE_ASSERT(aAddress == PageBase(aAddress));
   MOZ_RELEASE_ASSERT(aSize == RoundupSizeToPageBoundary(aSize));
 
-  if (!HasTakenSnapshot()) {
+  if (!HasSavedCheckpoint()) {
     return;
   }
 
@@ -1196,7 +1150,7 @@ AllocateMemoryTryAddress(void* aAddress, size_t aSize, AllocatedMemoryKind aKind
     gMemoryInfo->mMemoryBalance[aKind] += aSize;
   }
 
-  if (HasTakenSnapshot()) {
+  if (HasSavedCheckpoint()) {
     if (void* res = FreeRegionSet::Get(aKind).Extract(aAddress, aSize)) {
       return res;
     }
@@ -1212,7 +1166,7 @@ extern "C" {
 MOZ_EXPORT void*
 RecordReplayInterface_AllocateMemory(size_t aSize, AllocatedMemoryKind aKind)
 {
-  if (!IsRecordingOrReplaying()) {
+  if (!CanSaveCheckpoints()) {
     return DirectAllocateMemory(nullptr, aSize);
   }
   return AllocateMemoryTryAddress(nullptr, aSize, aKind);
@@ -1234,9 +1188,9 @@ RecordReplayInterface_DeallocateMemory(void* aAddress, size_t aSize, AllocatedMe
     gMemoryInfo->mMemoryBalance[aKind] -= aSize;
   }
 
-  // Memory is returned to the system before taking the first snapshot.
-  if (!HasTakenSnapshot()) {
-    if (IsRecordingOrReplaying() && aKind != TrackedMemoryKind) {
+  // Memory is returned to the system before saving the first checkpoint.
+  if (!HasSavedCheckpoint()) {
+    if (CanSaveCheckpoints() && aKind != TrackedMemoryKind) {
       RemoveInitialUntrackedRegion((uint8_t*) aAddress, aSize);
     }
     DirectDeallocateMemory(aAddress, aSize);
@@ -1259,119 +1213,6 @@ RecordReplayInterface_DeallocateMemory(void* aAddress, size_t aSize, AllocatedMe
 }
 
 } // extern "C"
-
-///////////////////////////////////////////////////////////////////////////////
-// System Threads
-///////////////////////////////////////////////////////////////////////////////
-
-static void
-EnsureMemoryDoesNotOverlapSystemThreadStack(void* aAddress, size_t aSize)
-{
-  if (!gMemoryInfo) {
-    return;
-  }
-  AutoSpinLock lock(gMemoryInfo->mSystemThreadStacksLock);
-  bool found;
-  do {
-    found = false;
-    for (auto& stack : gMemoryInfo->mSystemThreadStacks) {
-      if (MemoryIntersects(stack.mBase, stack.mSize, (uint8_t*)aAddress, aSize)) {
-        gMemoryInfo->mSystemThreadStacks.erase(&stack);
-        found = true;
-        break;
-      }
-    }
-  } while (found);
-}
-
-bool
-SystemThreadsShouldBeSuspended()
-{
-  return IsReplaying() || (gMemoryInfo && gMemoryInfo->mReplayFd);
-}
-
-void
-NoteCurrentSystemThread()
-{
-  // If system threads are not supposed to be running then suspend this thread
-  // and prevent future activity by it.
-  if (SystemThreadsShouldBeSuspended()) {
-    Thread::WaitForeverNoIdle();
-    Unreachable();
-  }
-
-  if (!gMemoryInfo) {
-    return;
-  }
-
-  uint8_t* sp = (uint8_t*) &sp;
-
-  {
-    AutoSpinLock lock(gMemoryInfo->mSystemThreadStacksLock);
-
-    // FIXME this is sloppy, a thread could have died and a new one reallocated
-    // with overlapping but non-identical bounds.
-    for (auto stack : gMemoryInfo->mSystemThreadStacks) {
-      if (MemoryContains(stack.mBase, stack.mSize, sp)) {
-        return;
-      }
-    }
-
-    // Place a dummy entry so we don't keep recursing.
-    gMemoryInfo->mSystemThreadStacks.emplaceBack(PageBase(sp), PageSize, true);
-  }
-
-  mach_vm_size_t nbytes;
-  mach_vm_address_t addr = (mach_vm_address_t) &nbytes;
-
-  vm_region_basic_info_64 info;
-  mach_msg_type_number_t info_count = sizeof(vm_region_basic_info_64);
-  mach_port_t some_port;
-  kern_return_t rv = mach_vm_region(mach_task_self(), &addr, &nbytes, VM_REGION_BASIC_INFO,
-                                    (vm_region_info_t) &info, &info_count, &some_port);
-  MOZ_RELEASE_ASSERT(rv == KERN_SUCCESS);
-
-  // Update the entry added earlier with the actual stack bounds.
-  {
-    AutoSpinLock lock(gMemoryInfo->mSystemThreadStacksLock);
-    for (AllocatedMemoryRegion& stack : gMemoryInfo->mSystemThreadStacks) {
-      if (MemoryContains(stack.mBase, stack.mSize, sp)) {
-        stack.mBase = (uint8_t*) addr;
-        stack.mSize = nbytes;
-      }
-    }
-  }
-}
-
-bool
-IsSystemThreadStackAddress(void* aAddress)
-{
-  AutoSpinLock lock(gMemoryInfo->mSystemThreadStacksLock);
-  for (auto stack : gMemoryInfo->mSystemThreadStacks) {
-    if (MemoryContains(stack.mBase, stack.mSize, aAddress)) {
-      return Thread::GetByStackPointer(aAddress) == nullptr;
-    }
-  }
-  return false;
-}
-
-void
-PrepareMemoryForFirstRecordingRewind(FileHandle aReplayFd)
-{
-  MOZ_RELEASE_ASSERT(IsRecording());
-  MOZ_RELEASE_ASSERT(aReplayFd);
-
-  AutoSpinLock lock(gMemoryInfo->mSystemThreadStacksLock);
-  gMemoryInfo->mReplayFd = aReplayFd;
-  for (auto stack : gMemoryInfo->mSystemThreadStacks) {
-    if (Thread::GetByStackPointer(stack.mBase) == nullptr) {
-      // There is no guarantee the system thread still exists, so ignore any
-      // failures if the stack memory is no longer mapped.
-      DirectWriteProtectMemory(stack.mBase, stack.mSize, /* aExecutable = */ false,
-                               /* aIgnoreFailures = */ true);
-    }
-  }
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 // Snapshot Threads
@@ -1402,12 +1243,23 @@ SnapshotThreadReadDirtyPageIndex(UntrackedStream& aStream, DirtyPageSet* aSet)
   }
 }
 
+template <typename CharBuffer>
+static void
+MemorySnapshotFilename(const CheckpointId& aCheckpoint, size_t aThreadIndex,
+                       CharBuffer& aFilename)
+{
+  size_t nchars = SprintfLiteral(aFilename, "%s_%d_%d_%d", gSnapshotMemoryPrefix,
+                                 (int) aCheckpoint.mNormal, (int) aCheckpoint.mTemporary,
+                                 (int) aThreadIndex);
+  MOZ_RELEASE_ASSERT(nchars < sizeof(aFilename));
+}
+
 // While on a snapshot thread, restore the contents of all pages belonging to
 // this thread which were modified since the last recorded diff snapshot.
 static void
 SnapshotThreadRestoreLastDiffSnapshot(SnapshotThreadWorklist* aWorklist)
 {
-  size_t snapshot = GetLastRecordedDiffSnapshot();
+  CheckpointId checkpoint = GetLastSavedCheckpoint();
 
   UntrackedFile file;
   UntrackedStream* stream = nullptr;
@@ -1422,10 +1274,11 @@ SnapshotThreadRestoreLastDiffSnapshot(SnapshotThreadWorklist* aWorklist)
                  (!aWorklist->mSets.back().mPages.empty() &&
                   !aWorklist->mSets.back().mPages[0].mOriginal);
 
-  DirtyPageSet fileSet(snapshot);
+  DirtyPageSet fileSet(checkpoint);
   if (useFile) {
-    size_t fileIndex = snapshot * NumSnapshotThreads + aWorklist->mThreadIndex;
-    file.Open(gSnapshotMemoryPrefix, fileIndex, UntrackedFile::READ);
+    char filename[1024];
+    MemorySnapshotFilename(checkpoint, aWorklist->mThreadIndex, filename);
+    file.Open(filename, UntrackedFile::READ);
     stream = file.OpenStream(StreamName::Main, 0);
     SnapshotThreadReadDirtyPageIndex(*stream, &fileSet);
   }
@@ -1433,7 +1286,7 @@ SnapshotThreadRestoreLastDiffSnapshot(SnapshotThreadWorklist* aWorklist)
   // Use the set that is still in memory if available, as some of its pages
   // might still be in memory as well.
   DirtyPageSet& set = aWorklist->mSets.empty() ? fileSet : aWorklist->mSets.back();
-  MOZ_RELEASE_ASSERT(set.mSnapshot == snapshot);
+  MOZ_RELEASE_ASSERT(set.mCheckpoint == checkpoint);
 
   size_t index = 0;
 
@@ -1479,8 +1332,8 @@ SnapshotThreadMain(void* aArgument)
   UntrackedStream* stream = nullptr;
 
   while (true) {
-    // If the main thread is waiting for us to restore the most recent diff
-    // snapshot, then do so and notify the main thread we finished.
+    // If the main thread is waiting for us to restore the most recent diff,
+    // then do so and notify the main thread we finished.
     if (gMemoryInfo->mSnapshotThreadsShouldRestore.IsActive()) {
       if (worklist->mSets.length() == 1 && activeIndex) {
         // We have partially written out the pages in the last snapshot. Close
@@ -1520,8 +1373,9 @@ SnapshotThreadMain(void* aArgument)
 
     // Open a file for the snapshot if this is the first page being processed.
     if (activeIndex == 0) {
-      size_t fileIndex = set->mSnapshot * NumSnapshotThreads + threadIndex;
-      file.Open(gSnapshotMemoryPrefix, fileIndex, UntrackedFile::WRITE);
+      char filename[1024];
+      MemorySnapshotFilename(set->mCheckpoint, threadIndex, filename);
+      file.Open(filename, UntrackedFile::WRITE);
       stream = file.OpenStream(StreamName::Main, 0);
       SnapshotThreadWriteDirtyPageIndex(*stream, set);
     }
@@ -1584,7 +1438,7 @@ AddDirtyPageToWorklist(uint8_t* aAddress, uint8_t* aOriginal, bool aExecutable)
     SnapshotThreadWorklist* worklist = &gMemoryInfo->mSnapshotWorklists[pageIndex];
     MOZ_RELEASE_ASSERT(!worklist->mSets.empty());
     DirtyPageSet& set = worklist->mSets.back();
-    MOZ_RELEASE_ASSERT(set.mSnapshot == GetActiveRecordedSnapshot());
+    MOZ_RELEASE_ASSERT(set.mCheckpoint == GetLastSavedCheckpoint());
     set.mPages.emplaceBack(aAddress, aOriginal, aExecutable);
   }
 }
@@ -1607,7 +1461,7 @@ InitializeMemorySnapshots()
   // at a later time when heap writes are not allowed.
   {
     File file;
-    file.Open(gSnapshotMemoryPrefix, 0, File::WRITE);
+    file.Open(gSnapshotMemoryPrefix, File::WRITE);
     file.OpenStream(StreamName::Main, 0)->WriteScalar(0);
   }
 }
@@ -1660,7 +1514,7 @@ TakeDiffMemorySnapshot()
   // Add a DirtyPageSet to each snapshot thread's worklist for this snapshot.
   for (size_t i = 0; i < NumSnapshotThreads; i++) {
     SnapshotThreadWorklist* worklist = &gMemoryInfo->mSnapshotWorklists[i];
-    worklist->mSets.emplaceBack(GetActiveRecordedSnapshot());
+    worklist->mSets.emplaceBack(GetLastSavedCheckpoint());
   }
 
   // Distribute remaining active dirty pages to the snapshot thread worklists.
@@ -1678,14 +1532,14 @@ TakeDiffMemorySnapshot()
 }
 
 void
-RestoreMemoryToActiveSnapshot()
+RestoreMemoryToLastSavedCheckpoint()
 {
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
 
   SetMemoryChangesAllowed(false);
 
-  // Restore all dirty regions that have been modified since the last snapshot
-  // was recorded/restored.
+  // Restore all dirty regions that have been modified since the last
+  // checkpoint was saved/restored.
   for (SortedDirtyPageSet::Iter iter = gMemoryInfo->mActiveDirty.begin(); !iter.done(); ++iter) {
     MemoryMove(iter.ref().mBase, iter.ref().mOriginal, PageSize);
     FreePageCopy(iter.ref().mOriginal);
@@ -1697,7 +1551,7 @@ RestoreMemoryToActiveSnapshot()
 }
 
 void
-RestoreMemoryToLastRecordedDiffSnapshot()
+RestoreMemoryToLastSavedDiffCheckpoint()
 {
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
   MOZ_RELEASE_ASSERT(gMemoryInfo->mActiveDirty.empty());

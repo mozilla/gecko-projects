@@ -25,28 +25,22 @@
 namespace mozilla {
 namespace recordreplay {
 
-// Information about the current snapshot state. The contents of this structure
+// Information about the current rewinding state. The contents of this structure
 // are in untracked memory.
 struct RewindInfo {
-  // Whether the first snapshot has been encountered.
-  bool mTakenSnapshot;
+  // The most recent checkpoint which was encountered.
+  CheckpointId mLastCheckpoint;
 
-  // The most recent snapshot which was encountered.
-  size_t mLastSnapshot;
+  // Whether to send paint messages.
+  bool mSendPaints;
 
-  // The last snapshot in the execution, zero if it has not been encountered.
-  size_t mFinalSnapshot;
+  // Checkpoints which have been saved. This includes only entries from
+  // mShouldSaveCheckpoints, plus all temporary checkpoints.
+  InfallibleVector<CheckpointId, 1024, AllocPolicy<UntrackedMemoryKind::Generic>> mSavedCheckpoints;
 
-  // The snapshot which will become the next recorded snapshot, unless
-  // RestoreSnapshotAndResume is called first.
-  size_t mActiveRecordedSnapshot;
-
-  // Snapshots which have actually been recorded.
-  InfallibleVector<size_t, 1024, AllocPolicy<UntrackedMemoryKind::Generic>> mRecordedSnapshots;
-
-  // Any snapshot which we are trying to rewind back to but did not record when
-  // we encountered it earlier, zero if not set.
-  size_t mRestoreTargetSnapshot;
+  // Unsorted list of checkpoints which the middleman has instructed us to
+  // save. All those equal to or prior to mLastCheckpoint will have been saved.
+  InfallibleVector<size_t, 1024, AllocPolicy<UntrackedMemoryKind::Generic>> mShouldSaveCheckpoints;
 };
 
 static RewindInfo* gRewindInfo;
@@ -68,180 +62,131 @@ InitializeRewindState()
   gMainThreadCallbackMonitor = new Monitor();
 }
 
-static bool gAllowRecordingSnapshots;
-
-void
-SetRecordSnapshots(bool aAllowed)
+static bool
+CheckpointPrecedes(const CheckpointId& aFirst, const CheckpointId& aSecond)
 {
-  gAllowRecordingSnapshots = aAllowed;
+  return aFirst.mNormal < aSecond.mNormal || aFirst.mTemporary < aSecond.mTemporary;
 }
 
 extern "C" {
 
 MOZ_EXPORT void
-RecordReplayInterface_RestoreSnapshotAndResume(size_t aSnapshot)
+RecordReplayInterface_RestoreCheckpointAndResume(const CheckpointId& aCheckpoint)
 {
+  MOZ_RELEASE_ASSERT(IsReplaying());
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
-  MOZ_RELEASE_ASSERT(aSnapshot <= gRewindInfo->mLastSnapshot);
+  MOZ_RELEASE_ASSERT(aCheckpoint == gRewindInfo->mLastCheckpoint ||
+                     CheckpointPrecedes(aCheckpoint, gRewindInfo->mLastCheckpoint));
 
   // Make sure we don't lose pending main thread callbacks due to rewinding.
   MOZ_RELEASE_ASSERT(gMainThreadCallbacks.empty());
 
   Thread::WaitForIdleThreads();
 
-  if (IsRecording()) {
-    PrepareForFirstRecordingRewind();
-  }
-
-  // This is a structural assert. If we are recording and snapshots are only
-  // enabled while replaying, then we will bust on this assert and the
-  // middleman will start up a replaying process to recover this state and
-  // then rewind.
-  MOZ_RELEASE_ASSERT(gAllowRecordingSnapshots);
-
   double start = CurrentTime();
 
-  // Rewind heap memory to the last recorded point which is at or before the
-  // target snapshot.
-  size_t newSnapshot = gRewindInfo->mActiveRecordedSnapshot;
-  RestoreMemoryToActiveSnapshot();
-  while (newSnapshot > aSnapshot) {
-    newSnapshot = gRewindInfo->mRecordedSnapshots.back();
-    RestoreMemoryToLastRecordedDiffSnapshot();
-    gRewindInfo->mRecordedSnapshots.popBack();
+  // Rewind heap memory to the target checkpoint, which must have been saved.
+  CheckpointId newCheckpoint = gRewindInfo->mSavedCheckpoints.back();
+  RestoreMemoryToLastSavedCheckpoint();
+  while (CheckpointPrecedes(aCheckpoint, newCheckpoint)) {
+    gRewindInfo->mSavedCheckpoints.popBack();
+    RestoreMemoryToLastSavedDiffCheckpoint();
+    newCheckpoint = gRewindInfo->mSavedCheckpoints.back();
   }
+  MOZ_RELEASE_ASSERT(newCheckpoint == aCheckpoint);
 
-  FixupAfterRewind();
-
-  // If we are going back further than was asked for, we will need to visit
-  // interim snapshots on our way to the target one.
-  if (newSnapshot != aSnapshot) {
-    MOZ_RELEASE_ASSERT(!gRewindInfo->mRestoreTargetSnapshot);
-    gRewindInfo->mRestoreTargetSnapshot = aSnapshot;
-  }
+  FixupFreeRegionsAfterRewind();
 
   double end = CurrentTime();
-  PrintSpew("Restore #%d -> #%d %.2fs\n",
-            (int) gRewindInfo->mLastSnapshot, (int) newSnapshot,
+  PrintSpew("Restore #%d:%d -> #%d:%d %.2fs\n",
+            (int) gRewindInfo->mLastCheckpoint.mNormal,
+            (int) gRewindInfo->mLastCheckpoint.mTemporary,
+            (int) newCheckpoint.mNormal,
+            (int) newCheckpoint.mTemporary,
             (end - start) / 1000000.0);
 
-  // Finally, let threads restore themselves to their stacks at the snapshot
+  // Finally, let threads restore themselves to their stacks at the checkpoint
   // we are rewinding to.
-  Thread::RestoreAllThreads(newSnapshot);
+  Thread::RestoreAllThreads(newCheckpoint);
   Unreachable();
 }
 
-static BeforeSnapshotHook gBeforeSnapshotHook;
-static AfterSnapshotHook gAfterSnapshotHook;
+static BeforeCheckpointHook gBeforeCheckpointHook;
+static AfterCheckpointHook gAfterCheckpointHook;
 
 MOZ_EXPORT void
-RecordReplayInterface_SetSnapshotHooks(BeforeSnapshotHook aBeforeSnapshot,
-                                       AfterSnapshotHook aAfterSnapshot)
+RecordReplayInterface_SetCheckpointHooks(BeforeCheckpointHook aBeforeCheckpoint,
+                                         AfterCheckpointHook aAfterCheckpoint)
 {
-  gBeforeSnapshotHook = aBeforeSnapshot;
-  gAfterSnapshotHook = aAfterSnapshot;
+  gBeforeCheckpointHook = aBeforeCheckpoint;
+  gAfterCheckpointHook = aAfterCheckpoint;
 }
 
 } // extern "C"
 
-// Whether we have recorded a temporary snapshot.
-static bool gHasTemporarySnapshot;
-
-bool
-HasTemporarySnapshot()
-{
-  return gHasTemporarySnapshot;
-}
-
-static double gLastRecordedSnapshot;
-
-static double SecondsBetweenSnapshots = 3.0;
-
-static bool
-ShouldRecordSnapshot(size_t aSnapshot)
-{
-  if (!gAllowRecordingSnapshots) {
-    return false;
-  }
-
-  // The first snapshot and temporary snapshots are always recorded.
-  if (!aSnapshot || gHasTemporarySnapshot) {
-    return true;
-  }
-
-  // All interim snapshots are recorded (in case we do more rewinding immediately).
-  if (gRewindInfo->mRestoreTargetSnapshot) {
-    return true;
-  }
-
-  double elapsed = CurrentTime() - gLastRecordedSnapshot;
-  if (elapsed / 1000000.0 >= SecondsBetweenSnapshots) {
-    return true;
-  }
-
-  return false;
-}
-
-// Take a snapshot, which we might or might not record.
 void
-TakeSnapshot(bool aFinal, bool aTemporary)
+SetSaveCheckpoint(size_t aCheckpoint, bool aSave)
+{
+  MOZ_RELEASE_ASSERT(aCheckpoint > gRewindInfo->mLastCheckpoint.mNormal);
+  VectorAddOrRemoveEntry(gRewindInfo->mShouldSaveCheckpoints, aCheckpoint, aSave);
+}
+
+extern "C" {
+
+// Mark a checkpoint, which we might or might not save.
+MOZ_EXPORT bool
+RecordReplayInterface_NewCheckpoint(bool aTemporary)
 {
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
-  MOZ_RELEASE_ASSERT(!aFinal || !aTemporary);
   MOZ_RELEASE_ASSERT(IsReplaying() || !aTemporary);
 
-  gBeforeSnapshotHook();
+  gBeforeCheckpointHook();
 
-  // Get the ID of the new snapshot.
-  size_t snapshot = gRewindInfo->mTakenSnapshot ? gRewindInfo->mLastSnapshot + 1 : 0;
-  if (aFinal && !gHasTemporarySnapshot) {
-    MOZ_RELEASE_ASSERT(!gRewindInfo->mFinalSnapshot || gRewindInfo->mFinalSnapshot == snapshot);
-    gRewindInfo->mFinalSnapshot = snapshot;
-  } else if (aTemporary) {
-    gHasTemporarySnapshot = true;
+  // Get the ID of the new checkpoint.
+  CheckpointId checkpoint = gRewindInfo->mLastCheckpoint;
+  if (aTemporary) {
+    checkpoint.mTemporary++;
+  } else {
+    checkpoint.mNormal++;
+    checkpoint.mTemporary = 0;
   }
 
-  if (!gAllowRecordingSnapshots) {
-    // Setup the dirty memory handler even if we aren't taking snapshots, for
-    // reporting crashes to the middleman.
-    AutoPassThroughThreadEvents pt;
-    SetupDirtyMemoryHandler();
-  }
+  // Save all checkpoints the middleman tells us to, and temporary checkpoints
+  // (which the middleman never knows about).
+  bool save = aTemporary
+           || VectorContains(gRewindInfo->mShouldSaveCheckpoints, checkpoint.mNormal);
+  bool reachedCheckpoint = true;
 
-  bool justTookSnapshot = true;
-
-  if (ShouldRecordSnapshot(snapshot)) {
-    gLastRecordedSnapshot = CurrentTime();
-
+  if (save) {
     Thread::WaitForIdleThreads();
 
-    PrintSpew("Starting snapshot...\n");
+    PrintSpew("Starting checkpoint...\n");
 
     double start = CurrentTime();
 
-    // Record either the first or a subsequent diff snapshot.
-    if (!gRewindInfo->mTakenSnapshot) {
+    // Record either the first or a subsequent diff memory snapshot.
+    if (gRewindInfo->mSavedCheckpoints.empty()) {
       TakeFirstMemorySnapshot();
-      gRewindInfo->mTakenSnapshot = true;
     } else {
-      gRewindInfo->mRecordedSnapshots.emplaceBack(gRewindInfo->mActiveRecordedSnapshot);
       TakeDiffMemorySnapshot();
     }
+    gRewindInfo->mSavedCheckpoints.emplaceBack(checkpoint);
 
     double end = CurrentTime();
 
-    // Save all thread stacks for the snapshot. If we rewind here from a later
-    // point of execution then this will return false.
-    if (Thread::SaveAllThreads(snapshot)) {
-      PrintSpew("Took snapshot #%d%s %.2fs\n", (int) snapshot,
-                aTemporary ? " (temporary)" : "", (end - start) / 1000000.0);
+    // Save all thread stacks for the checkpoint. If we rewind here from a
+    // later point of execution then this will return false.
+    if (Thread::SaveAllThreads(checkpoint)) {
+      PrintSpew("Saved checkpoint #%d:%d %.2fs\n",
+                (int) checkpoint.mNormal, (int) checkpoint.mTemporary,
+                (end - start) / 1000000.0);
     } else {
-      PrintSpew("Restored snapshot #%d%s\n", (int) snapshot,
-                aTemporary ? " (temporary)" : "");
+      PrintSpew("Restored checkpoint #%d:%d\n",
+                (int) checkpoint.mNormal, (int) checkpoint.mTemporary);
 
-      justTookSnapshot = false;
+      reachedCheckpoint = false;
 
       // After restoring, make sure all threads have updated their stacks
       // before letting any of them resume execution. Threads might have
@@ -249,46 +194,22 @@ TakeSnapshot(bool aFinal, bool aTemporary)
       Thread::WaitForIdleThreadsToRestoreTheirStacks();
     }
 
-    if (gRewindInfo->mRestoreTargetSnapshot && gRewindInfo->mRestoreTargetSnapshot == snapshot) {
-      gRewindInfo->mRestoreTargetSnapshot = 0;
-    }
-
-    gRewindInfo->mActiveRecordedSnapshot = gRewindInfo->mLastSnapshot = snapshot;
     Thread::ResumeIdleThreads();
-  } else {
-    MOZ_RELEASE_ASSERT(!gRewindInfo->mRestoreTargetSnapshot);
-    MOZ_RELEASE_ASSERT(!aTemporary);
-    gRewindInfo->mTakenSnapshot = true;
-    gRewindInfo->mLastSnapshot = snapshot;
   }
 
-  if (aFinal) {
-    for (size_t i = 0; i < 50; i++) {
-      PrintSpew("!!!!! REPLAY FINISHED\n");
-    }
-  }
-
-  bool final = snapshot && snapshot == gRewindInfo->mFinalSnapshot;
-  bool interim = !!gRewindInfo->mRestoreTargetSnapshot;
-  MOZ_RELEASE_ASSERT(!interim || snapshot < gRewindInfo->mRestoreTargetSnapshot);
+  gRewindInfo->mLastCheckpoint = checkpoint;
 
   AutoDisallowThreadEvents disallow;
 
   dom::AutoJSAPI jsapi;
   jsapi.Init();
-  gAfterSnapshotHook(snapshot, final, interim);
+  gAfterCheckpointHook(checkpoint);
 
-  // Taking snapshots after a temporary one is allowed, but we shouldn't be
-  // executing past the point of the next normal snapshot point. We might get
-  // to such normal snapshots after having taken temporary snapshots, but the
-  // AfterSnapshot hook should rewind in such cases.
-  MOZ_RELEASE_ASSERT(!gHasTemporarySnapshot || aTemporary);
+  return reachedCheckpoint;
 }
 
 static bool gRecordingDiverged;
 static bool gUnhandledDivergeAllowed;
-
-extern "C" {
 
 MOZ_EXPORT void
 RecordReplayInterface_DivergeFromRecording()
@@ -313,9 +234,9 @@ RecordReplayInterface_DisallowUnhandledDivergeFromRecording()
 }
 
 MFBT_API void
-RecordReplayInterface_TakeTemporarySnapshot()
+RecordReplayInterface_SaveTemporaryCheckpoint()
 {
-  TakeSnapshot(/* aFinal = */ false, /* aTemporary = */ true);
+  NewCheckpoint(/* aTemporary = */ true);
 }
 
 } // extern "C"
@@ -326,35 +247,29 @@ EnsureNotDivergedFromRecording()
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
   if (HasDivergedFromRecording()) {
     MOZ_RELEASE_ASSERT(gUnhandledDivergeAllowed);
-    PrintSpew("Unhandled recording divergence, restoring snapshot...\n");
-    RestoreSnapshotAndResume(gRewindInfo->mActiveRecordedSnapshot);
+    PrintSpew("Unhandled recording divergence, restoring checkpoint...\n");
+    RestoreCheckpointAndResume(gRewindInfo->mSavedCheckpoints.back());
     Unreachable();
   }
 }
 
 bool
-HasTakenSnapshot()
+CanSaveCheckpoints()
 {
-  return gRewindInfo && gRewindInfo->mTakenSnapshot && gAllowRecordingSnapshots;
+  return IsReplaying();
 }
 
 bool
-LastSnapshotIsInterim()
+HasSavedCheckpoint()
 {
-  return gRewindInfo && gRewindInfo->mRestoreTargetSnapshot;
+  return gRewindInfo && !gRewindInfo->mSavedCheckpoints.empty();
 }
 
-size_t
-GetLastRecordedDiffSnapshot()
+CheckpointId
+GetLastSavedCheckpoint()
 {
-  MOZ_RELEASE_ASSERT(gRewindInfo->mRecordedSnapshots.length());
-  return gRewindInfo->mRecordedSnapshots.back();
-}
-
-size_t
-GetActiveRecordedSnapshot()
-{
-  return gRewindInfo->mActiveRecordedSnapshot;
+  MOZ_RELEASE_ASSERT(!gRewindInfo->mSavedCheckpoints.empty());
+  return gRewindInfo->mSavedCheckpoints.back();
 }
 
 static bool gMainThreadShouldPause = false;
@@ -365,11 +280,11 @@ MainThreadShouldPause()
   return gMainThreadShouldPause;
 }
 
-// Whether there is a MaybePauseMainThread frame on the stack.
+// Whether there is a PauseMainThreadAndServiceCallbacks frame on the stack.
 static bool gMainThreadIsPaused = false;
 
 void
-MaybePauseMainThread()
+PauseMainThreadAndServiceCallbacks()
 {
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
@@ -396,12 +311,12 @@ MaybePauseMainThread()
     gMainThreadCallbackMonitor->Wait();
   }
 
-  // As for RestoreSnapshotAndResume, we shouldn't resume the main thread while
+  // As for RestoreCheckpointAndResume, we shouldn't resume the main thread while
   // it still has callbacks to execute.
   MOZ_RELEASE_ASSERT(gMainThreadCallbacks.empty());
 
   // If we diverge from the recording the only way we can get back to resuming
-  // normal execution is to rewind to a snapshot prior to the divergence.
+  // normal execution is to rewind to a checkpoint prior to the divergence.
   MOZ_RELEASE_ASSERT(!gRecordingDiverged);
 
   gMainThreadIsPaused = false;
@@ -418,7 +333,7 @@ PauseMainThreadAndInvokeCallback(const std::function<void()>& aCallback)
   }
 
   if (Thread::CurrentIsMainThread()) {
-    MaybePauseMainThread();
+    PauseMainThreadAndServiceCallbacks();
   }
 }
 
@@ -433,6 +348,18 @@ RecordReplayInterface_ResumeExecution()
 }
 
 } // extern "C"
+
+void
+SetSendPaints(bool aSendPaints)
+{
+  gRewindInfo->mSendPaints = aSendPaints;
+}
+
+bool
+ShouldSendPaints()
+{
+  return gRewindInfo->mSendPaints;
+}
 
 } // namespace recordreplay
 } // namespace mozilla

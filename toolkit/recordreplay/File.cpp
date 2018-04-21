@@ -25,8 +25,6 @@ StreamTemplate<Kind>::ReadBytes(void* aData, size_t aSize)
 {
   MOZ_RELEASE_ASSERT(mFile->OpenForReading());
 
-  MaybeFixupAfterRecordingRewind();
-
   size_t totalRead = 0;
 
   while (true) {
@@ -50,12 +48,10 @@ StreamTemplate<Kind>::ReadBytes(void* aData, size_t aSize)
     MOZ_RELEASE_ASSERT(mBufferPos == mBufferLength);
 
     // If we try to read off the end of a stream then we must have hit the end
-    // of the replay for this thread. Wait indefinitely in case we rewind.
-    if (mChunkIndex == mChunks.length()) {
+    // of the replay for this thread.
+    while (mChunkIndex == mChunks.length()) {
       MOZ_RELEASE_ASSERT(mName == StreamName::Event || mName == StreamName::Assert);
-      MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
-      Thread::WaitForever();
-      Unreachable();
+      HitEndOfRecording();
     }
 
     const StreamChunkLocation& chunk = mChunks[mChunkIndex++];
@@ -86,7 +82,6 @@ StreamTemplate<Kind>::AtEnd()
 {
   MOZ_RELEASE_ASSERT(mFile->OpenForReading());
 
-  MaybeFixupAfterRecordingRewind();
   return mBufferPos == mBufferLength && mChunkIndex == mChunks.length();
 }
 
@@ -95,6 +90,9 @@ void
 StreamTemplate<Kind>::WriteBytes(const void* aData, size_t aSize)
 {
   MOZ_RELEASE_ASSERT(mFile->OpenForWriting());
+
+  // Prevent the entire file from being flushed while we write this data.
+  AutoReadSpinLock streamLock(mFile->mStreamLock);
 
   while (true) {
     // Fill up the data buffer first.
@@ -116,7 +114,7 @@ StreamTemplate<Kind>::WriteBytes(const void* aData, size_t aSize)
       continue;
     }
 
-    Flush();
+    Flush(/* aTakeLock = */ true);
   }
 }
 
@@ -197,7 +195,7 @@ StreamTemplate<Kind>::EnsureMemory(char** aBuf, size_t* aSize,
 
 template <AllocatedMemoryKind Kind>
 void
-StreamTemplate<Kind>::Flush()
+StreamTemplate<Kind>::Flush(bool aTakeLock)
 {
   MOZ_RELEASE_ASSERT(mFile && mFile->OpenForWriting());
 
@@ -214,7 +212,7 @@ StreamTemplate<Kind>::Flush()
   MOZ_RELEASE_ASSERT(compressedSize != 0);
   MOZ_RELEASE_ASSERT((size_t)compressedSize <= bound);
 
-  StreamChunkLocation chunk = mFile->WriteChunk(mBallast, compressedSize, mBufferPos);
+  StreamChunkLocation chunk = mFile->WriteChunk(mBallast, compressedSize, mBufferPos, aTakeLock);
   mChunks.append(chunk);
   MOZ_ALWAYS_TRUE(++mChunkIndex == mChunks.length());
 
@@ -228,29 +226,6 @@ StreamTemplate<Kind>::BallastMaxSize()
   return Compression::LZ4::maxCompressedSize(BUFFER_MAX);
 }
 
-template <AllocatedMemoryKind Kind>
-void
-StreamTemplate<Kind>::MaybeFixupAfterRecordingRewind()
-{
-  MOZ_RELEASE_ASSERT(mFile->OpenForReading());
-
-  if (!mNeedsFixupAfterRecordingRewind) {
-    return;
-  }
-  mNeedsFixupAfterRecordingRewind = false;
-
-  // Remember where we are in the current chunk.
-  size_t pos = mBufferPos;
-
-  // Reset state so that we are at the start of the chunk.
-  mStreamPos -= mBufferPos;
-  mBufferPos = 0;
-  mBufferLength = 0;
-
-  // Advance to the position we were in earlier.
-  ReadBytes(nullptr, pos);
-}
-
 template class StreamTemplate<TrackedMemoryKind>;
 template class StreamTemplate<UntrackedMemoryKind::File>;
 
@@ -258,83 +233,38 @@ template class StreamTemplate<UntrackedMemoryKind::File>;
 // FileTemplate
 ///////////////////////////////////////////////////////////////////////////////
 
-// We expect to find this at the start of every generated file.
+// We expect to find this at every index in a file.
 static const uint64_t MagicValue = 0xd3e7f5fa + 0;
 
-struct FileHeader
+// Information in a file index about a chunk.
+struct FileIndexChunk
 {
-  uint32_t mMagic;
-  uint32_t mIndexLength;
-  uint64_t mIndexOffset;
+  uint32_t /* StreamName */ mName;
+  uint32_t mNameIndex;
+  StreamChunkLocation mChunk;
+
+  FileIndexChunk(StreamName aName, uint32_t aNameIndex, const StreamChunkLocation& aChunk)
+    : mName((uint32_t) aName), mNameIndex(aNameIndex), mChunk(aChunk)
+  {}
 };
 
-template <AllocatedMemoryKind Kind>
-template <typename T>
-/* static */ bool
-FileTemplate<Kind>::ReadForIndex(char** aBuf, char* aLimit, T* aRes)
+// Index of chunks in a file. There is an index at the start of the file
+// (which is always empty) and at various places within the file itself.
+struct FileIndex
 {
-  if (*aBuf + sizeof(T) > aLimit) {
-    return false;
-  }
-  memcpy(aRes, *aBuf, sizeof(T));
-  (*aBuf) += sizeof(T);
-  return true;
-}
+  // This should match MagicValue.
+  uint32_t mMagic;
 
-template <AllocatedMemoryKind Kind>
-template <typename T>
-/* static */ void
-FileTemplate<Kind>::WriteForIndex(IndexBuffer& aBuf, const T& aSrc)
-{
-  aBuf.append((const char*) &aSrc, sizeof(T));
-}
+  // How many FileIndexChunk instances follow this structure.
+  uint32_t mNumChunks;
 
-template <AllocatedMemoryKind Kind>
-bool
-FileTemplate<Kind>::ReadStreamFromIndex(char** aBuf, char* aLimit)
-{
-  StreamName name;
-  uint32_t nameIndex;
-  if (!ReadForIndex<StreamName>(aBuf, aLimit, &name) ||
-      !ReadForIndex<uint32_t>(aBuf, aLimit, &nameIndex)) {
-    return false;
-  }
+  // The location of the next index in the file, or zero.
+  uint64_t mNextIndexOffset;
 
-  StreamTemplate<Kind>* stream = OpenStream(name, nameIndex);
-
-  uint32_t numChunks;
-  if (!ReadForIndex<uint32_t>(aBuf, aLimit, &numChunks)) {
-    return false;
-  }
-  MOZ_RELEASE_ASSERT(numChunks >= stream->mChunks.length());
-
-  for (size_t i = 0; i < numChunks; i++) {
-    StreamChunkLocation chunk;
-    if (!ReadForIndex<StreamChunkLocation>(aBuf, aLimit, &chunk)) {
-      return false;
-    }
-    if (i < stream->mChunks.length()) {
-      MOZ_RELEASE_ASSERT(chunk == stream->mChunks[i]);
-    } else {
-      stream->mChunks.append(chunk);
-    }
-  }
-
-  return true;
-}
-
-template <AllocatedMemoryKind Kind>
-/* static */ void
-FileTemplate<Kind>::WriteStreamToIndex(IndexBuffer& aBuf, const StreamTemplate<Kind>& aStream)
-{
-  WriteForIndex<StreamName>(aBuf, aStream.mName);
-  WriteForIndex<uint32_t>(aBuf, aStream.mNameIndex);
-
-  WriteForIndex<uint32_t>(aBuf, aStream.mChunks.length());
-  for (auto chunk : aStream.mChunks) {
-    WriteForIndex<StreamChunkLocation>(aBuf, chunk);
-  }
-}
+  FileIndex(uint32_t aNumChunks)
+    : mMagic(MagicValue), mNumChunks(aNumChunks), mNextIndexOffset(0)
+  {}
+};
 
 template <AllocatedMemoryKind Kind>
 void
@@ -347,33 +277,34 @@ FileTemplate<Kind>::SetFilename(const char* aFilename)
 
 template <AllocatedMemoryKind Kind>
 bool
-FileTemplate<Kind>::Open(const char* aName, size_t aIndex, Mode aMode)
+FileTemplate<Kind>::Open(const char* aName, Mode aMode)
 {
   MOZ_RELEASE_ASSERT(!mFd);
   MOZ_RELEASE_ASSERT(aName);
 
-  if (aIndex == (size_t) -1) {
-    SetFilename(aName);
-  } else {
-    char filename[1024];
-    size_t nchars = SprintfLiteral(filename, "%s_%d", aName, (int) aIndex);
-    MOZ_RELEASE_ASSERT(nchars < sizeof(filename));
-    SetFilename(filename);
-  }
+  SetFilename(aName);
 
   mMode = aMode;
   mFd = DirectOpenFile(mFilename, mMode == WRITE);
 
   if (OpenForWriting()) {
-    // Write a dummy header at the start of the file.
-    FileHeader header;
-    PodZero(&header);
-    DirectWrite(mFd, &header, sizeof(header));
-    mWriteOffset += sizeof(header);
+    // Write an empty index at the start of the file.
+    FileIndex index(0);
+    DirectWrite(mFd, &index, sizeof(index));
+    mWriteOffset += sizeof(index);
     return true;
   }
 
-  return ReadIndex();
+  // Read in every index in the file.
+  ReadIndexResult result;
+  do {
+    result = ReadNextIndex(nullptr);
+    if (result == ReadIndexResult::InvalidFile) {
+      return false;
+    }
+  } while (result == ReadIndexResult::FoundIndex);
+
+  return true;
 }
 
 template <AllocatedMemoryKind Kind>
@@ -385,21 +316,7 @@ FileTemplate<Kind>::Close()
   }
 
   if (OpenForWriting()) {
-    size_t numStreams = 0;
-    ForEachStream([&](StreamTemplate<Kind>* aStream) { aStream->Flush(); numStreams++; });
-
-    IndexBuffer buffer;
-    WriteForIndex<uint32_t>(buffer, numStreams);
-    ForEachStream([&](StreamTemplate<Kind>* aStream) { WriteStreamToIndex(buffer, *aStream); });
-
-    DirectWrite(mFd, buffer.begin(), buffer.length());
-    DirectSeekFile(mFd, 0);
-
-    FileHeader header;
-    header.mMagic = MagicValue;
-    header.mIndexLength = buffer.length();
-    header.mIndexOffset = mWriteOffset;
-    DirectWrite(mFd, &header, sizeof(header));
+    Flush();
   }
 
   DirectCloseFile(mFd);
@@ -409,119 +326,109 @@ FileTemplate<Kind>::Close()
 }
 
 template <AllocatedMemoryKind Kind>
-bool
-FileTemplate<Kind>::ReadIndex()
+typename FileTemplate<Kind>::ReadIndexResult
+FileTemplate<Kind>::ReadNextIndex(InfallibleVector<StreamTemplate<Kind>*>* aUpdatedStreams)
 {
-  MOZ_RELEASE_ASSERT(OpenForReading());
+  // Unlike in the Flush() case, we don't have to worry about other threads
+  // attempting to read data from streams in this file while we are reading
+  // the new index.
+  MOZ_ASSERT(OpenForReading());
 
-  FileHeader header;
-  DirectSeekFile(mFd, 0);
-  DirectRead(mFd, &header, sizeof(header));
-  if (header.mMagic != MagicValue) {
-    return false;
+  // Read in the last index to see if there is another one.
+  DirectSeekFile(mFd, mLastIndexOffset + offsetof(FileIndex, mNextIndexOffset));
+  uint64_t nextIndexOffset;
+  if (DirectRead(mFd, &nextIndexOffset, sizeof(nextIndexOffset)) != sizeof(nextIndexOffset)) {
+    return ReadIndexResult::InvalidFile;
+  }
+  if (!nextIndexOffset) {
+    return ReadIndexResult::EndOfFile;
   }
 
-  char* indexBuffer = AllocateMemory(header.mIndexLength);
-  DirectSeekFile(mFd, header.mIndexOffset);
-  if (DirectRead(mFd, indexBuffer, header.mIndexLength) != header.mIndexLength) {
-    return false;
+  mLastIndexOffset = nextIndexOffset;
+
+  FileIndex index(0);
+  DirectSeekFile(mFd, nextIndexOffset);
+  if (DirectRead(mFd, &index, sizeof(index)) != sizeof(index)) {
+    return ReadIndexResult::InvalidFile;
+  }
+  if (index.mMagic != MagicValue) {
+    return ReadIndexResult::InvalidFile;
   }
 
-  char* limit = indexBuffer + header.mIndexLength;
-  uint32_t numStreams;
-  if (!ReadForIndex<uint32_t>(&indexBuffer, limit, &numStreams)) {
-    return false;
+  MOZ_RELEASE_ASSERT(index.mNumChunks);
+
+  size_t indexBytes = index.mNumChunks * sizeof(FileIndexChunk);
+  FileIndexChunk* chunks = (FileIndexChunk*) AllocateMemory(indexBytes);
+  if (DirectRead(mFd, chunks, indexBytes) != indexBytes) {
+    return ReadIndexResult::InvalidFile;
   }
-  for (size_t i = 0; i < numStreams; i++) {
-    if (!ReadStreamFromIndex(&indexBuffer, limit)) {
-      return false;
+  for (size_t i = 0; i < index.mNumChunks; i++) {
+    const FileIndexChunk& indexChunk = chunks[i];
+    StreamTemplate<Kind>* stream =
+      OpenStream((StreamName) indexChunk.mName, indexChunk.mNameIndex);
+    stream->mChunks.append(indexChunk.mChunk);
+    if (aUpdatedStreams) {
+      aUpdatedStreams->append(stream);
     }
   }
-  if (indexBuffer != limit) {
+  DeallocateMemory(chunks, indexBytes);
+
+  return ReadIndexResult::FoundIndex;
+}
+
+template <AllocatedMemoryKind Kind>
+bool
+FileTemplate<Kind>::Flush()
+{
+  MOZ_ASSERT(OpenForWriting());
+  AutoSpinLock lock(mLock);
+
+  InfallibleVector<FileIndexChunk, 0, AllocPolicy<Kind>> newChunks;
+  for (auto& vector : mStreams) {
+    for (StreamTemplate<Kind>* stream : vector) {
+      if (stream) {
+        stream->Flush(/* aTakeLock = */ false);
+        for (size_t i = stream->mFlushedChunks; i < stream->mChunkIndex; i++) {
+          newChunks.emplaceBack(stream->mName, stream->mNameIndex, stream->mChunks[i]);
+        }
+        stream->mFlushedChunks = stream->mChunkIndex;
+      }
+    }
+  }
+
+  if (newChunks.empty()) {
     return false;
   }
+
+  // Write the new index information at the end of the file.
+  uint64_t indexOffset = mWriteOffset;
+  size_t indexBytes = newChunks.length() * sizeof(FileIndexChunk);
+  FileIndex index(newChunks.length());
+  DirectWrite(mFd, &index, sizeof(index));
+  DirectWrite(mFd, newChunks.begin(), indexBytes);
+  mWriteOffset += sizeof(index) + indexBytes;
+
+  // Update the next index offset for the last index written.
+  MOZ_RELEASE_ASSERT(sizeof(index.mNextIndexOffset) == sizeof(indexOffset));
+  DirectSeekFile(mFd, mLastIndexOffset + offsetof(FileIndex, mNextIndexOffset));
+  DirectWrite(mFd, &indexOffset, sizeof(indexOffset));
+  DirectSeekFile(mFd, mWriteOffset);
+
+  mLastIndexOffset = indexOffset;
 
   return true;
 }
 
 template <AllocatedMemoryKind Kind>
-void
-FileTemplate<Kind>::CloneFrom(const FileTemplate<Kind>& aOther)
-{
-  MOZ_RELEASE_ASSERT(OpenForWriting());
-  for (auto& vector : mStreams) {
-    MOZ_RELEASE_ASSERT(vector.empty());
-  }
-
-  InfallibleVector<char> buffer;
-
-  FileHandle readFd = DirectOpenFile(aOther.mFilename, false);
-
-  aOther.ForEachStream([&](StreamTemplate<Kind>* aOtherStream) {
-      StreamTemplate<Kind>* stream = OpenStream(aOtherStream->mName, aOtherStream->mNameIndex);
-
-      for (auto otherChunk : aOtherStream->mChunks) {
-        if (otherChunk.mCompressedSize > buffer.length()) {
-          buffer.appendN(0, otherChunk.mCompressedSize - buffer.length());
-        }
-
-        DirectSeekFile(readFd, otherChunk.mOffset);
-        size_t res = DirectRead(readFd, buffer.begin(), otherChunk.mCompressedSize);
-        if (res != otherChunk.mCompressedSize) {
-          MOZ_CRASH();
-        }
-
-        StreamChunkLocation newChunk =
-          WriteChunk(buffer.begin(), otherChunk.mCompressedSize, otherChunk.mDecompressedSize);
-        stream->mChunks.append(newChunk);
-        MOZ_ALWAYS_TRUE(++stream->mChunkIndex == stream->mChunks.length());
-      }
-
-      if (aOther.OpenForWriting()) {
-        stream->WriteBytes(aOtherStream->mBuffer, aOtherStream->mBufferPos);
-        stream->mStreamPos = aOtherStream->mStreamPos;
-      }
-    });
-
-  DirectCloseFile(readFd);
-}
-
-template <AllocatedMemoryKind Kind>
-void
-FileTemplate<Kind>::FixupAfterRecordingRewind(FileHandle aFd)
-{
-  MOZ_RELEASE_ASSERT(OpenForWriting());
-
-  ForEachStream([&](StreamTemplate<Kind>* aStream) {
-      aStream->mNeedsFixupAfterRecordingRewind = true;
-    });
-
-  mFd = aFd;
-  mMode = READ;
-  mWriteOffset = 0;
-
-  ReadIndex();
-}
-
-template <AllocatedMemoryKind Kind>
-void
-FileTemplate<Kind>::ForEachStream(const std::function<void(StreamTemplate<Kind>*)>& aCallback) const
-{
-  for (auto& vector : mStreams) {
-    for (auto stream : vector) {
-      if (stream) {
-        aCallback(stream);
-      }
-    }
-  }
-}
-
-template <AllocatedMemoryKind Kind>
 StreamChunkLocation
 FileTemplate<Kind>::WriteChunk(const char* aStart,
-                               size_t aCompressedSize, size_t aDecompressedSize)
+                               size_t aCompressedSize, size_t aDecompressedSize,
+                               bool aTakeLock)
 {
-  AutoSpinLock lock(mLock);
+  Maybe<AutoSpinLock> lock;
+  if (aTakeLock) {
+    lock.emplace(mLock);
+  }
 
   StreamChunkLocation chunk;
   chunk.mOffset = mWriteOffset;
@@ -575,7 +482,7 @@ FileTemplate<Kind>::AllocateMemory(size_t aSize)
 
 template <AllocatedMemoryKind Kind>
 void
-FileTemplate<Kind>::DeallocateMemory(char* aBuf, size_t aSize)
+FileTemplate<Kind>::DeallocateMemory(void* aBuf, size_t aSize)
 {
   recordreplay::DeallocateMemory(aBuf, aSize, Kind);
 }
@@ -591,14 +498,14 @@ InitializeFiles(const char* aTempFile)
   // execution.
   {
     File file;
-    file.Open(aTempFile, (size_t) -1, File::WRITE);
+    file.Open(aTempFile, File::WRITE);
     Stream* stream = file.OpenStream(StreamName::Main, 0);
     uint32_t token = 0xDEADBEEF;
     stream->WriteBytes(&token, sizeof(uint32_t));
   }
   {
     File file;
-    file.Open(aTempFile, (size_t) -1, File::READ);
+    file.Open(aTempFile, File::READ);
     Stream* stream = file.OpenStream(StreamName::Main, 0);
     uint32_t token;
     stream->ReadBytes(&token, sizeof(uint32_t));

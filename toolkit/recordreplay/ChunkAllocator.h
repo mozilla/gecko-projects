@@ -22,12 +22,15 @@ namespace recordreplay {
 template <typename T>
 class ChunkAllocator
 {
+  struct Chunk;
+  typedef Atomic<Chunk*, SequentiallyConsistent, Behavior::DontPreserve> ChunkPointer;
+
   // A page sized block holding a next pointer and an array of as many things
   // as possible.
   struct Chunk
   {
     uint8_t mStorage[PageSize - sizeof(Chunk*)];
-    Chunk* mNext;
+    ChunkPointer mNext;
     Chunk() { PodZero(this); }
 
     static size_t MaxThings() {
@@ -40,11 +43,11 @@ class ChunkAllocator
     }
   };
 
-  Chunk* mFirstChunk;
-  size_t mCapacity;
+  ChunkPointer mFirstChunk;
+  Atomic<size_t, SequentiallyConsistent, Behavior::DontPreserve> mCapacity;
   SpinLock mLock;
 
-  void EnsureChunk(Chunk** aChunk) {
+  void EnsureChunk(ChunkPointer* aChunk) {
     if (!*aChunk) {
       *aChunk = new Chunk();
       mCapacity += Chunk::MaxThings();
@@ -65,6 +68,12 @@ public:
     return chunk->GetThing(aId);
   }
 
+  // Get an existing entry from the allocator, or null. This may return an etry
+  // that has not been created yet.
+  inline T* MaybeGet(size_t aId) {
+    return (aId < mCapacity) ? Get(aId) : nullptr;
+  }
+
   // Create a new entry with the specified ID. This must not be called on IDs
   // that have already been used with this allocator.
   inline T* Create(size_t aId) {
@@ -74,14 +83,16 @@ public:
     }
 
     AutoSpinLock lock(mLock);
-    Chunk** pchunk = &mFirstChunk;
+    ChunkPointer* pchunk = &mFirstChunk;
     while (aId >= Chunk::MaxThings()) {
       aId -= Chunk::MaxThings();
       EnsureChunk(pchunk);
-      pchunk = &(*pchunk)->mNext;
+      Chunk* chunk = *pchunk;
+      pchunk = &chunk->mNext;
     }
     EnsureChunk(pchunk);
-    T* res = (*pchunk)->GetThing(aId);
+    Chunk* chunk = *pchunk;
+    T* res = chunk->GetThing(aId);
     return new(res) T();
   }
 };

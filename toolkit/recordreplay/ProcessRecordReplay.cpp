@@ -37,32 +37,11 @@ BusyWait()
 // Basic interface
 ///////////////////////////////////////////////////////////////////////////////
 
-// Any reason the recording has been invalidated.
-static const char* gRecordingInvalidReason;
-
 File* gRecordingFile;
 const char* gSnapshotMemoryPrefix;
 const char* gSnapshotStackPrefix;
 
 char* gInitializationFailureMessage;
-
-static void
-WriteRecordingMetadata(File* aFile)
-{
-#ifdef WIN32
-  Stream& metadata = *aFile->OpenStream(StreamName::Main, 0);
-  WriteLoadedLibraries(metadata);
-#endif
-}
-
-static void
-ReadRecordingMetadata()
-{
-#ifdef WIN32
-  Stream& metadata = *gRecordingFile->OpenStream(StreamName::Main, 0);
-  ReadLoadedLibraries(metadata);
-#endif
-}
 
 static void DumpRecordingAssertions();
 
@@ -112,11 +91,6 @@ RecordReplayInterface_Initialize()
     return;
   }
 
-  char* tempFile = mktemp(strdup("/tmp/RecordingXXXXXX"));
-  if (!strcmp(recordingFile, "*")) {
-    recordingFile = tempFile;
-  }
-
   gSnapshotMemoryPrefix = mktemp(strdup("/tmp/SnapshotMemoryXXXXXX"));
   gSnapshotStackPrefix = mktemp(strdup("/tmp/SnapshotStackXXXXXX"));
 
@@ -124,8 +98,8 @@ RecordReplayInterface_Initialize()
   InitializeBacktraces();
 
   gRecordingFile = new File();
-  if (!gRecordingFile->Open(recordingFile, (size_t) -1, IsRecording() ? File::WRITE : File::READ)) {
-    gInitializationFailureMessage = strdup("Recording file is invalid/corrupt");
+  if (!gRecordingFile->Open(recordingFile, IsRecording() ? File::WRITE : File::READ)) {
+    gInitializationFailureMessage = strdup("Bad recording file");
     return;
   }
 
@@ -134,7 +108,7 @@ RecordReplayInterface_Initialize()
     return;
   }
 
-  InitializeFiles(tempFile);
+  InitializeFiles(gSnapshotMemoryPrefix);
 
   Thread::InitializeThreads();
 
@@ -152,13 +126,7 @@ RecordReplayInterface_Initialize()
   InitializeWeakPointers();
   InitializeMemorySnapshots();
   Thread::SpawnAllThreads();
-  Thread::InitializeOffThreadCallEvents();
   InitializeCountdownThread();
-
-  if (IsReplaying()) {
-    ReadRecordingMetadata();
-    ReadWeakPointers();
-  }
 
   thread->SetPassThrough(false);
 
@@ -210,95 +178,117 @@ MOZ_EXPORT void
 RecordReplayInterface_InternalInvalidateRecording(const char* aWhy)
 {
   if (IsRecording()) {
-    if (!gRecordingInvalidReason) {
-      gRecordingInvalidReason = aWhy;
-    }
-    return;
+    child::ReportFatalError("Recording invalidated: %s", aWhy);
+  } else {
+    child::ReportFatalError("Recording invalidated while replaying: %s", aWhy);
   }
-
-  child::ReportFatalError("Recording invalidated while replaying: %s", aWhy);
   Unreachable();
 }
 
 } // extern "C"
 
-static void
-CheckForInvalidRecording()
-{
-  if (gRecordingInvalidReason) {
-    child::ReportFatalError("Recording is unusable: %s", gRecordingInvalidReason);
-    Unreachable();
-  }
-}
-
 void
-SaveRecording(const char* aFilename)
-{
-  MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
-
-  Thread::WaitForIdleThreads();
-
-  CheckForInvalidRecording();
-
-  {
-    File file;
-    file.Open(aFilename, (size_t) -1, File::WRITE);
-    file.CloneFrom(*gRecordingFile);
-    WriteWeakPointers(&file);
-    WriteRecordingMetadata(&file);
-  }
-
-  child::NotifySavedRecording(aFilename);
-
-  Thread::ResumeIdleThreads();
-}
-
-void
-PrepareForFirstRecordingRewind()
+FlushRecording()
 {
   MOZ_RELEASE_ASSERT(IsRecording());
-
-  // Note: this must be called while other threads are idle.
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
 
-  CheckForInvalidRecording();
+  // Save the endpoint of the recording.
+  JS::replay::ExecutionPoint<JS::replay::Hooks::TrackedAllocPolicy> endpoint;
+  JS::replay::hooks.getRecordingEndpoint(&endpoint);
+  Stream* endpointStream = gRecordingFile->OpenStream(StreamName::Main, 0);
+  endpointStream->WriteScalar(endpoint.checkpoint.mNormal);
+  endpointStream->WriteScalar(endpoint.positions.length());
+  endpointStream->WriteBytes(endpoint.positions.begin(),
+                             endpoint.positions.length() * sizeof(JS::replay::ExecutionPosition));
 
-  char* filename = strdup(gRecordingFile->Filename());
-  FileHandle fd = DirectOpenFile(filename, /* aWriting = */ false);
+  gRecordingFile->PreventStreamWrites();
 
-  // Finish up the recording file.
-  WriteWeakPointers(gRecordingFile);
-  WriteRecordingMetadata(gRecordingFile);
-  gRecordingFile->Close();
+  gRecordingFile->Flush();
 
-  child::NotifySavedRecording(filename);
-  free(filename);
+  child::NotifyFlushedRecording();
 
-  PrepareMemoryForFirstRecordingRewind(fd);
+  gRecordingFile->AllowStreamWrites();
+}
 
-  // We are about to rewind, so there is nothing else to do.
+// Try to load another recording index, returning whether one was found.
+static bool
+LoadNextRecordingIndex()
+{
+  Thread::WaitForIdleThreads();
+
+  InfallibleVector<Stream*> updatedStreams;
+  File::ReadIndexResult result = gRecordingFile->ReadNextIndex(&updatedStreams);
+  if (result == File::ReadIndexResult::InvalidFile) {
+    MOZ_CRASH("Bad recording file");
+  }
+
+  bool found = result == File::ReadIndexResult::FoundIndex;
+  if (found) {
+    for (Stream* stream : updatedStreams) {
+      if (stream->Name() == StreamName::Lock) {
+        Lock::LockAquiresUpdated(stream->NameIndex());
+      }
+    }
+  }
+
+  Thread::ResumeIdleThreads();
+  return found;
+}
+
+bool
+HitRecordingEndpoint()
+{
+  MOZ_RELEASE_ASSERT(IsReplaying());
+  MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
+
+  // The debugger will call this method in a loop, so we don't have to do
+  // anything fancy to try to get the most up to date endpoint. As long as we
+  // can make some progress in attempting to find a later endpoint, we can
+  // return control to the debugger.
+
+  // Check if there is a new endpoint in the endpoint data stream.
+  Stream* endpointStream = gRecordingFile->OpenStream(StreamName::Main, 0);
+  if (!endpointStream->AtEnd()) {
+    JS::replay::ExecutionPoint<JS::replay::Hooks::TrackedAllocPolicy> endpoint;
+    endpoint.checkpoint = CheckpointId(endpointStream->ReadScalar());
+    size_t numPositions = endpointStream->ReadScalar();
+    for (size_t i = 0; i < numPositions; i++) {
+      JS::replay::ExecutionPosition pos;
+      endpointStream->ReadBytes(&pos, sizeof(pos));
+      if (!endpoint.positions.append(pos)) {
+        MOZ_CRASH("OOM");
+      }
+    }
+    JS::replay::hooks.setRecordingEndpoint(endpoint);
+    return true;
+  }
+
+  // Check if there is more data in the recording.
+  if (LoadNextRecordingIndex()) {
+    return true;
+  }
+
+  // OK, we hit the most up to date endpoint in the recording.
+  return false;
 }
 
 void
-FixupAfterRewind()
+HitEndOfRecording()
 {
-  if (!IsRecording()) {
-    FixupFreeRegionsAfterRewind();
-    return;
+  MOZ_RELEASE_ASSERT(IsReplaying());
+  MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
+
+  if (Thread::CurrentIsMainThread()) {
+    // Load more data from the recording. The debugger is not allowed to let us
+    // go past the recording endpoint, so there should be more data.
+    bool found = LoadNextRecordingIndex();
+    MOZ_RELEASE_ASSERT(found);
+  } else {
+    // Non-main threads may wait until more recording data is loaded by the
+    // main thread.
+    Thread::Wait();
   }
-
-  FileHandle fd = GetReplayFileAfterRecordingRewind();
-  if (!fd) {
-    return;
-  }
-
-  gIsRecording = false;
-  gIsReplaying = true;
-
-  FixupFreeRegionsAfterRewind();
-  gRecordingFile->FixupAfterRecordingRewind(fd);
-  Lock::FixupAfterRecordingRewind();
-  FixupWeakPointersAfterRecordingRewind();
 }
 
 void Print(const char* aFormat, ...)
@@ -322,7 +312,8 @@ PrintSpew(const char* aFormat, ...)
   char buf[2048];
   VsprintfLiteral(buf, aFormat, ap);
   va_end(ap);
-  DirectPrint(buf);
+  AutoEnsurePassThroughThreadEvents pt; // For getpid().
+  Print("Spew[%d]: %s", getpid(), buf);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -394,7 +385,7 @@ RecordReplayInterface_InternalRecordReplayAssert(const char* aFormat, va_list aA
     return;
   }
 
-  MOZ_ASSERT(!AreThreadEventsDisallowed());
+  MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
   Thread* thread = Thread::Current();
 
   // Record an assertion string consisting of the name of the assertion and

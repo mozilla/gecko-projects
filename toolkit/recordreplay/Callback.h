@@ -10,7 +10,6 @@
 #include "mozilla/GuardObjects.h"
 
 #include <functional>
-#include <setjmp.h>
 
 namespace mozilla {
 namespace recordreplay {
@@ -84,8 +83,8 @@ void PassThroughThreadEventsAllowCallbacks(const std::function<void()>& aFn);
 // callback and record the callback as having executed. This stops passing
 // through thread events so that behaviors in the Gecko callback are
 // recorded/replayed.
-void BeginCallback(size_t aCallbackId, jmp_buf** aJump);
-void EndCallback(jmp_buf** aJump);
+void BeginCallback(size_t aCallbackId);
+void EndCallback();
 
 // During replay, invoke a callback with the specified id. This is platform
 // specific and is defined in the various ProcessRedirect*.cpp files.

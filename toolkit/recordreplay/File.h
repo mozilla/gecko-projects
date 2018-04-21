@@ -51,7 +51,6 @@ enum class StreamName
   Lock,
   Event,
   Assert,
-  WeakPointer,
   Count
 };
 
@@ -101,9 +100,9 @@ class StreamTemplate
   // writing, this equals mChunks.length().
   size_t mChunkIndex;
 
-  // Flag set if the file is open for reading, but the stream is setup as if
-  // for writing.
-  bool mNeedsFixupAfterRecordingRewind;
+  // When writing, the number of chunks in this stream when the file was last
+  // flushed.
+  size_t mFlushedChunks;
 
   StreamTemplate(FileTemplate<Kind>* aFile, StreamName aName, size_t aNameIndex)
     : mFile(aFile)
@@ -117,7 +116,7 @@ class StreamTemplate
     , mBallast(nullptr)
     , mBallastSize(0)
     , mChunkIndex(0)
-    , mNeedsFixupAfterRecordingRewind(false)
+    , mFlushedChunks(0)
   {}
 
   ~StreamTemplate() {
@@ -130,6 +129,9 @@ class StreamTemplate
   }
 
 public:
+  StreamName Name() const { return mName; }
+  size_t NameIndex() const { return mNameIndex; }
+
   void ReadBytes(void* aData, size_t aSize);
   void WriteBytes(const void* aData, size_t aSize);
   size_t ReadScalar();
@@ -182,11 +184,9 @@ private:
 
   void EnsureMemory(char** aBuf, size_t* aSize, size_t aNeededSize, size_t aMaxSize,
                     ShouldCopy aCopy);
-  void Flush();
+  void Flush(bool aTakeLock);
 
   static size_t BallastMaxSize();
-
-  void MaybeFixupAfterRecordingRewind();
 };
 
 typedef StreamTemplate<TrackedMemoryKind> Stream;
@@ -216,6 +216,9 @@ private:
   // When writing, the current offset into the file.
   uint64_t mWriteOffset;
 
+  // The offset of the last index read or written to the file.
+  uint64_t mLastIndexOffset;
+
   // All streams in this file, indexed by stream name and name index.
   typedef InfallibleVector<StreamTemplate<Kind>*, 1, AllocPolicy<Kind>> StreamVector;
   StreamVector mStreams[(size_t) StreamName::Count];
@@ -223,26 +226,29 @@ private:
   // Lock protecting access to this file.
   SpinLock mLock;
 
+  // When writing, lock for synchronizing file flushes (writer) with other
+  // threads writing to streams in this file (readers).
+  ReadWriteSpinLock mStreamLock;
+
   void Clear() {
     mFilename = nullptr;
     mFd = 0;
     mMode = READ;
     mWriteOffset = 0;
+    mLastIndexOffset = 0;
     for (auto& vector : mStreams) {
       vector.clear();
     }
     PodZero(&mLock);
+    PodZero(&mStreamLock);
   }
 
 public:
   FileTemplate() { Clear(); }
   ~FileTemplate() { Close(); }
 
-  bool Open(const char* aFilename, size_t aIndex, Mode aMode);
+  bool Open(const char* aFilename, Mode aMode);
   void Close();
-
-  void CloneFrom(const FileTemplate<Kind>& aOther);
-  void FixupAfterRecordingRewind(FileHandle aFd);
 
   bool OpenForWriting() const { return mFd && mMode == WRITE; }
   bool OpenForReading() const { return mFd && mMode == READ; }
@@ -251,30 +257,35 @@ public:
 
   const char* Filename() { return mFilename; }
 
+  // Prevent/allow other threads to write to streams in this file.
+  void PreventStreamWrites() { mStreamLock.Lock(/* aRead = */ false); }
+  void AllowStreamWrites() { mStreamLock.Unlock(/* aRead = */ false); }
+
+  // Flush any changes since the last Flush() call to disk, returning whether
+  // there were such changes.
+  bool Flush();
+
+  enum class ReadIndexResult {
+    InvalidFile,
+    EndOfFile,
+    FoundIndex
+  };
+
+  // Read any data added to the file by a Flush() call. aUpdatedStreams is
+  // optional and filled in with streams whose contents have changed, and may
+  // have duplicates.
+  ReadIndexResult ReadNextIndex(InfallibleVector<StreamTemplate<Kind>*>* aUpdatedStreams);
+
 private:
   void SetFilename(const char* aFilename);
 
-  void ForEachStream(const std::function<void(StreamTemplate<Kind>*)>& aCallback) const;
-
-  bool ReadIndex();
-
   StreamChunkLocation WriteChunk(const char* aStart,
-                                 size_t aCompressedSize, size_t aDecompressedSize);
+                                 size_t aCompressedSize, size_t aDecompressedSize,
+                                 bool aTakeLock);
   void ReadChunk(char* aDest, const StreamChunkLocation& aChunk);
 
-  using IndexBuffer = InfallibleVector<char, 4096, AllocPolicy<Kind>>;
-
-  template <typename T>
-  static bool ReadForIndex(char** aBuf, char* aLimit, T* aRes);
-
-  template <typename T>
-  static void WriteForIndex(IndexBuffer& aBuf, const T& aSrc);
-
-  bool ReadStreamFromIndex(char** aBuf, char* aLimit);
-  static void WriteStreamToIndex(IndexBuffer& aBuf, const StreamTemplate<Kind>& aStream);
-
   char* AllocateMemory(size_t aSize);
-  void DeallocateMemory(char* aBuf, size_t aSize);
+  void DeallocateMemory(void* aBuf, size_t aSize);
 };
 
 typedef FileTemplate<TrackedMemoryKind> File;

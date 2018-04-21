@@ -19,37 +19,35 @@ namespace recordreplay {
 // rewind its state to an earlier point of execution.
 
 ///////////////////////////////////////////////////////////////////////////////
-// Snapshots Overview.
+// Checkpoints Overview.
 //
-// Snapshots are taken periodically by the main thread of a replaying process.
-// Snapshots must be taken at consistent points between different executions of
-// the replay. Currently they are taken after XPCOM initialization and every
-// time compositor updates are performed. Each snapshot has an ID, which
-// monotonically increases during the execution. Snapshots form a basis for
-// identifying a particular point in execution, and in allowing the process to
-// rewind itself.
+// Checkpoints are reached periodically by the main thread of a recording or
+// replaying process. Checkpoints must be reached at consistent points between
+// different executions of the recording. Currently they are taken after XPCOM
+// initialization and every time compositor updates are performed. Each
+// checkpoint has an ID, which monotonically increases during the execution.
+// Checkpoints form a basis for identifying a particular point in execution,
+// and in allowing the process to rewind itself.
 //
-// A subset of snapshots are recorded: the contents of each thread's stack is
-// saved, along with enough information to restore the contents of heap memory
-// at the snapshot. The first snapshot is always recorded, and later snapshots
-// can be rewound to, even if they weren't recorded, by rewinding to the
-// closest earlier snapshot and then running forward from there.
+// A subset of checkpoints are saved: the contents of each thread's stack is
+// copied, along with enough information to restore the contents of heap memory
+// at the checkpoint.
 //
-// Recorded snapshots are in part represented as diffs vs the following
-// recorded snapshot. This requires some different handling for the most recent
-// recorded snapshot (whose diff has not been computed) and earlier recorded
-// snapshots. See MemorySnapshot.h and Thread.h for more on how recorded
-// snapshots are represented.
+// Saved checkpoints are in part represented as diffs vs the following
+// saved checkpoint. This requires some different handling for the most recent
+// saved checkpoint (whose diff has not been computed) and earlier saved
+// checkpoints. See MemorySnapshot.h and Thread.h for more on how saved
+// checkpoints are represented.
 ///////////////////////////////////////////////////////////////////////////////
 
 ///////////////////////////////////////////////////////////////////////////////
 // Controlling a Replaying Process.
 //
 // 1. While performing the replay, execution proceeds until the main thread
-//    hits either a breakpoint or a snapshot point.
+//    hits either a breakpoint or a checkpoint.
 //
 // 2. The main thread then calls a hook (JS::replay::hooks.hitBreakpointReplay
-//    or gAfterSnapshotHook), which may decide to pause the main thread and
+//    or gAfterCheckpointHook), which may decide to pause the main thread and
 //    give it a callback to invoke using PauseMainThreadAndInvokeCallback.
 //
 // 3. Now that the main thread is paused, the replay message loop thread
@@ -57,10 +55,9 @@ namespace recordreplay {
 //    PauseMainThreadAndInvokeCallback.
 //
 // 4. These callbacks can inspect the paused state, diverge from the recording
-//    by calling TakeSnapshotAndDivergeFromRecording, and eventually can
-//    unpause the main thread and allow execution to resume by calling
-//    ResumeExecution (if TakeSnapshotAndDivergeFromRecording was not called)
-//    or RestoreSnapshotAndResume.
+//    by calling DivergeFromRecording, and eventually can unpause the main
+//    thread and allow execution to resume by calling ResumeExecution
+//    (if DivergeFromRecording was not called) or RestoreCheckpointAndResume.
 ///////////////////////////////////////////////////////////////////////////////
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -76,28 +73,20 @@ namespace recordreplay {
 // passed through, but other events that require interacting with the system
 // will trigger an unhandled divergence from the recording via
 // EnsureNotDivergedFromRecording, causing the process to rewind to the most
-// recent snapshot. The debugger will recognize this rewind and play back in a
-// way that restores the state when DivergeFromRecording() was called, but
-// without performing the later operation that triggered the rewind.
+// recent saved checkpoint. The debugger will recognize this rewind and play
+// back in a way that restores the state when DivergeFromRecording() was
+// called, but without performing the later operation that triggered the
+// rewind.
 ///////////////////////////////////////////////////////////////////////////////
 
 // Initialize state needed for rewinding.
 void InitializeRewindState();
 
-// Set whether this process should record any of its snapshots.
-void SetRecordSnapshots(bool aAllowed);
-
-// Mark a snapshot point. Non-temporary snapshots always occur at the same
-// point of execution. The rewind mechanism is not required to actually record
-// this snapshot.
-void TakeSnapshot(bool aFinal, bool aTemporary = false);
-
-// Return whether we are rewinding and the last snapshot was before the point
-// where we are trying to rewind to.
-bool LastSnapshotIsInterim();
+// Set whether this process should save a particular checkpoint.
+void SetSaveCheckpoint(size_t aCheckpoint, bool aSave);
 
 // Invoke a callback on the main thread, and pause it until ResumeExecution or
-// RestoreSnapshotAndResume are called. When the main thread is not paused,
+// RestoreCheckpointAndResume are called. When the main thread is not paused,
 // this must be called on the main thread itself. When the main thread is
 // already paused, this may be called from any thread.
 void PauseMainThreadAndInvokeCallback(const std::function<void()>& aCallback);
@@ -106,27 +95,27 @@ void PauseMainThreadAndInvokeCallback(const std::function<void()>& aCallback);
 // mean it is paused, but it will pause at the earliest opportunity.
 bool MainThreadShouldPause();
 
-// If necessary, pause the current main thread and service any callbacks until
-// the thread no longer needs to pause.
-void MaybePauseMainThread();
+// Pause the current main thread and service any callbacks until the thread no
+// longer needs to pause.
+void PauseMainThreadAndServiceCallbacks();
 
-// Return whether any snapshots have been taken.
-bool HasTakenSnapshot();
+// Return whether this process can save checkpoints.
+bool CanSaveCheckpoints();
 
-// Get the ID of the most recent recorded snapshot. The diff between this and
-// the following recorded snapshot has not been computed yet.
-size_t GetActiveRecordedSnapshot();
+// Return whether any checkpoints have been saved.
+bool HasSavedCheckpoint();
 
-// Get the ID of the last snapshot which was recorded and had its diff versus
-// the following recorded snapshot computed.
-size_t GetLastRecordedDiffSnapshot();
-
-// Whether the last snapshot is a temporary one.
-bool HasTemporarySnapshot();
+// Get the ID of the most recent saved checkpoint.
+CheckpointId GetLastSavedCheckpoint();
 
 // Make sure that execution has not diverged from the recording after a call to
-// TakeSnapshotAndDivergeFromRecording, by rewinding to that snapshot if so.
+// DivergeFromRecording, by rewinding to the last saved checkpoint if so.
 void EnsureNotDivergedFromRecording();
+
+// Access the flag for whether paints should be sent while playing forward or
+// after rewinding.
+void SetSendPaints(bool aSendPaints);
+bool ShouldSendPaints();
 
 } // namespace recordreplay
 } // namespace mozilla

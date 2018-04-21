@@ -312,6 +312,7 @@ namespace recordreplay {
   MACRO(CTFontCopyGraphicsFont)                 \
   MACRO(CTFontCopyFontDescriptor)               \
   MACRO(CTFontCopyTable)                        \
+  MACRO(CTFontCopyVariationAxes)                \
   MACRO(CTFontCreatePathForGlyph)               \
   MACRO(CTFontCreateWithFontDescriptor)         \
   MACRO(CTFontCreateWithGraphicsFont)           \
@@ -407,7 +408,7 @@ CFRunLoopPerformCallBackWrapper(void* aInfo)
 
   // Make sure we service any callbacks that have been posted for the main
   // thread whenever the main thread's message loop has any activity.
-  MaybePauseMainThread();
+  PauseMainThreadAndServiceCallbacks();
 }
 
 static size_t
@@ -471,8 +472,6 @@ ReplayInvokeCallback(size_t aCallbackId)
 static ssize_t
 RR_recv(int aSockFd, void* aBuf, size_t aLength, int aFlags)
 {
-  NotifyDirtyMemory(aBuf, aLength);
-
   RecordReplayFunction(recv, ssize_t, aSockFd, aBuf, aLength, aFlags);
   events.CheckInput(aLength);
   if (!RecordOrReplayHadErrorNegative(rrf)) {
@@ -493,11 +492,6 @@ RR_recvmsg(int aSockFd, struct msghdr* aMsg, int aFlags)
     for (int i = 0; i < aMsg->msg_iovlen; i++) {
       initialLengths[i + 2] = aMsg->msg_iov[i].iov_len;
     }
-  }
-
-  NotifyDirtyMemory(aMsg->msg_control, aMsg->msg_controllen);
-  for (int i = 0; i < aMsg->msg_iovlen; i++) {
-    NotifyDirtyMemory(aMsg->msg_iov[i].iov_base, aMsg->msg_iov[i].iov_len);
   }
 
   RecordReplayFunction(recvmsg, ssize_t, aSockFd, aMsg, aFlags);
@@ -545,14 +539,8 @@ RR_kevent(int aKq, const struct kevent* aChanges, int aChangeCount,
           struct kevent* aEvents, int aEventCount,
           const struct timespec* aTimeout)
 {
-  NotifyDirtyMemory(aEvents, aEventCount * sizeof(struct kevent));
-
-  RecordReplayBlockingFunction(kevent, ssize_t, [=](bool aFirst) {
-      Thread::NoteOffThreadCallEventBuffer(aEvents, aEventCount * sizeof(struct kevent), aFirst);
-    },
-    aKq, aChanges, aChangeCount,
-    Thread::MaybeUntrackedOffThreadCallEventBuffer(aEvents),
-    aEventCount, aTimeout);
+  RecordReplayFunction(kevent, ssize_t,
+                       aKq, aChanges, aChangeCount, aEvents, aEventCount, aTimeout);
   if (!RecordOrReplayHadErrorNegative(rrf)) {
     // Copy the kevents verbatim. Note that kevent has an opaque pointer field
     // |udata| whose value could potentially vary between recording and replay.
@@ -589,7 +577,7 @@ RR_madvise(void* aAddress, size_t aSize, int aFlags)
 static ssize_t
 RR_mprotect(void* aAddress, size_t aSize, int aFlags)
 {
-  if (!HasTakenSnapshot()) {
+  if (!HasSavedCheckpoint()) {
     return OriginalCall(mprotect, int, aAddress, aSize, aFlags);
   }
   return 0;
@@ -610,7 +598,7 @@ RR_mmap(void* aAddress, size_t aSize, int aProt, int aFlags, int aFd, off_t aOff
     // Get an anonymous mapping for the result.
     if (aFlags & MAP_FIXED) {
       // For fixed allocations, make sure this memory region is mapped and zero.
-      if (!HasTakenSnapshot()) {
+      if (!HasSavedCheckpoint()) {
         // Make sure this memory region is writable.
         OriginalCall(mprotect, int, aAddress, aSize, PROT_READ | PROT_WRITE | PROT_EXEC);
       }
@@ -622,10 +610,10 @@ RR_mmap(void* aAddress, size_t aSize, int aProt, int aFlags, int aFd, off_t aOff
     }
   } else {
     // We have to call mmap itself, which can change memory protection flags
-    // for memory that is already allocated. If we haven't taken a snapshot
-    // then this is no problem, but after taking a snapshot we have to make
+    // for memory that is already allocated. If we haven't saved a checkpoint
+    // then this is no problem, but after saving a checkpoint we have to make
     // sure that protection flags are what we expect them to be.
-    int newProt = HasTakenSnapshot() ? (PROT_READ | PROT_EXEC) : aProt;
+    int newProt = HasSavedCheckpoint() ? (PROT_READ | PROT_EXEC) : aProt;
     memory = OriginalCall(mmap, void*, aAddress, aSize, newProt, aFlags, aFd, aOffset);
 
     if (aFlags & MAP_FIXED) {
@@ -657,11 +645,7 @@ RR_munmap(void* aAddress, size_t aSize)
 static ssize_t
 RR_read(int aFd, void* aBuf, size_t aCount)
 {
-  NotifyDirtyMemory(aBuf, aCount);
-
-  RecordReplayBlockingFunction(read, ssize_t, [=](bool aFirst) {
-      Thread::NoteOffThreadCallEventBuffer(aBuf, aCount, aFirst);
-    }, aFd, Thread::MaybeUntrackedOffThreadCallEventBuffer(aBuf), aCount);
+  RecordReplayFunction(read, ssize_t, aFd, aBuf, aCount);
   if (!RecordOrReplayHadErrorNegative(rrf)) {
     events.CheckInput(aCount);
     MOZ_RELEASE_ASSERT((size_t)rval <= aCount);
@@ -673,7 +657,6 @@ RR_read(int aFd, void* aBuf, size_t aCount)
 static ssize_t
 RR___read_nocancel(int aFd, void* aBuf, size_t aCount)
 {
-  NotifyDirtyMemory(aBuf, aCount);
   RecordReplayFunction(__read_nocancel, ssize_t, aFd, aBuf, aCount);
   if (!RecordOrReplayHadErrorNegative(rrf)) {
     events.CheckInput(aCount);
@@ -686,7 +669,6 @@ RR___read_nocancel(int aFd, void* aBuf, size_t aCount)
 static ssize_t
 RR_pread(int aFd, void* aBuf, size_t aCount, size_t aOffset)
 {
-  NotifyDirtyMemory(aBuf, aCount);
   RecordReplayFunction(pread, ssize_t, aFd, aBuf, aCount, aOffset);
   if (!RecordOrReplayHadErrorNegative(rrf)) {
     events.CheckInput(aCount);
@@ -798,10 +780,8 @@ RR_fcntl(int aFd, int aCmd, size_t aArg)
   case F_GETFD:
   case F_SETFD:
   case F_NOCACHE:
-    break;
   case F_SETLK:
   case F_SETLKW:
-    NotifyDirtyMemory((void*) aArg, sizeof(struct flock));
     break;
   default:
     MOZ_CRASH();
@@ -979,9 +959,8 @@ RR___disable_threadsignal(int a0)
   // threads which will run forever. Unfortunately, GCD might have already
   // spawned threads before we were able to install our redirections, so use a
   // fallback here to keep these threads from terminating.
-  if (SystemThreadsShouldBeSuspended()) {
+  if (IsReplaying()) {
     Thread::WaitForeverNoIdle();
-    Unreachable();
   }
   return OriginalCall(__disable_threadsignal, ssize_t, a0);
 }
@@ -1024,22 +1003,7 @@ static ssize_t
 RR___select(int aFdCount, fd_set* aReadFds, fd_set* aWriteFds,
             fd_set* aExceptFds, timeval* aTimeout)
 {
-  NotifyDirtyMemory(aReadFds, sizeof(fd_set));
-  NotifyDirtyMemory(aWriteFds, sizeof(fd_set));
-  NotifyDirtyMemory(aExceptFds, sizeof(fd_set));
-  NotifyDirtyMemory(aTimeout, aTimeout ? sizeof(timeval) : 0);
-
-  RecordReplayBlockingFunction(__select, ssize_t, [=](bool aFirst) {
-      Thread::NoteOffThreadCallEventBuffer(aReadFds, sizeof(fd_set), aFirst);
-      Thread::NoteOffThreadCallEventBuffer(aWriteFds, sizeof(fd_set), aFirst);
-      Thread::NoteOffThreadCallEventBuffer(aExceptFds, sizeof(fd_set), aFirst);
-      Thread::NoteOffThreadCallEventBuffer(aTimeout, aTimeout ? sizeof(timeval) : 0, aFirst);
-    },
-    aFdCount,
-    Thread::MaybeUntrackedOffThreadCallEventBuffer(aReadFds),
-    Thread::MaybeUntrackedOffThreadCallEventBuffer(aWriteFds),
-    Thread::MaybeUntrackedOffThreadCallEventBuffer(aExceptFds),
-    Thread::MaybeUntrackedOffThreadCallEventBuffer(aTimeout));
+  RecordReplayFunction(__select, ssize_t, aFdCount, aReadFds, aWriteFds, aExceptFds, aTimeout);
   if (!RecordOrReplayHadErrorNegative(rrf)) {
     events.RecordOrReplayBytes(aReadFds, sizeof(fd_set));
     events.RecordOrReplayBytes(aWriteFds, sizeof(fd_set));
@@ -1106,9 +1070,8 @@ RR_start_wqthread(size_t a0, size_t a1, size_t a2, size_t a3, size_t a4, size_t 
 {
   // Suspend this thread if system threads should not be running. We are too
   // early in initialization of this thread to do anything else.
-  if (SystemThreadsShouldBeSuspended()) {
+  if (IsReplaying()) {
     Thread::WaitForeverNoIdle();
-    Unreachable();
   }
 
   OriginalCall(start_wqthread, void, a0, a1, a2, a3, a4, a5, a6, a7);
@@ -1417,13 +1380,8 @@ RR_mach_msg(mach_msg_header_t* aMsg, mach_msg_option_t aOption, mach_msg_size_t 
             mach_msg_size_t aReceiveLimit, mach_port_t aReceiveName, mach_msg_timeout_t aTimeout,
             mach_port_t aNotify)
 {
-  NotifyDirtyMemory(aMsg, aReceiveLimit);
-
-  RecordReplayBlockingFunction(mach_msg, mach_msg_return_t, [&](bool aFirst) {
-      Thread::NoteOffThreadCallEventBuffer(aMsg, aReceiveLimit, aFirst);
-    },
-    Thread::MaybeUntrackedOffThreadCallEventBuffer(aMsg),
-    aOption, aSendSize, aReceiveLimit, aReceiveName, aTimeout, aNotify);
+  RecordReplayFunction(mach_msg, mach_msg_return_t,
+                       aMsg, aOption, aSendSize, aReceiveLimit, aReceiveName, aTimeout, aNotify);
   AutoOrderedAtomicAccess(); // mach_msg may be used for inter-thread synchronization.
   events.RecordOrReplayValue(&rval);
   events.CheckInput(aReceiveLimit);
@@ -1485,7 +1443,7 @@ static kern_return_t
 RR_mach_vm_protect(vm_map_t aTarget, mach_vm_address_t aAddress, mach_vm_size_t aSize,
                    boolean_t aSetMaximum, vm_prot_t aNewProtection)
 {
-  if (!HasTakenSnapshot()) {
+  if (!HasSavedCheckpoint()) {
     return OriginalCall(mach_vm_protect, kern_return_t,
                         aTarget, aAddress, aSize, aSetMaximum, aNewProtection);
   }
@@ -1496,7 +1454,7 @@ static kern_return_t
 RR_vm_purgable_control(vm_map_t aTarget, mach_vm_address_t aAddress,
                        vm_purgable_t aControl, int* aState)
 {
-  // Never allow purging of volatile memory, to simplify snapshots.
+  // Never allow purging of volatile memory, to simplify memory snapshots.
   *aState = VM_PURGABLE_NONVOLATILE;
   return KERN_SUCCESS;
 }
@@ -2228,6 +2186,7 @@ RRFunction1(CGSSetDebugOptions)
 RRFunction1(CTFontCopyFontDescriptor)
 RRFunction2(CTFontCopyGraphicsFont)
 RRFunction3(CTFontCopyTable)
+RRFunction1(CTFontCopyVariationAxes)
 RRFunction3(CTFontCreatePathForGlyph)
 RRFunctionTypes3(CTFontCreateWithFontDescriptor, CTFontRef,
                  CTFontDescriptorRef, CGFloat, CGAffineTransform*)
@@ -2644,7 +2603,9 @@ DirectPrint(const char* aString)
 size_t
 DirectRead(FileHandle aFd, void* aData, size_t aSize)
 {
-  NotifyDirtyMemory(aData, aSize);
+  // Clear the memory in case it is write protected by the memory snapshot
+  // mechanism.
+  memset(aData, 0, aSize);
   ssize_t rv = HANDLE_EINTR(OriginalCall(read, int, aFd, aData, aSize));
   MOZ_RELEASE_ASSERT(rv >= 0);
   return (size_t) rv;
@@ -2680,7 +2641,7 @@ CurrentTime()
 void
 DirectSpawnThread(void (*aFunction)(void*), void* aArgument)
 {
-  MOZ_RELEASE_ASSERT(AreThreadEventsPassedThrough());
+  MOZ_RELEASE_ASSERT(IsMiddleman() || AreThreadEventsPassedThrough());
 
   pthread_attr_t attr;
   int rv = pthread_attr_init(&attr);

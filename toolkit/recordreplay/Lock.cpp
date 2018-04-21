@@ -37,10 +37,12 @@ struct LockAcquires
   // protected by the lock itself, though reads may occur on other threads.
   Atomic<size_t, SequentiallyConsistent, Behavior::DontPreserve> mNextOwner;
 
+  static const size_t NoNextOwner = 0;
+
   void ReadAndNotifyNextOwner(Thread* aCurrentThread) {
     MOZ_RELEASE_ASSERT(IsReplaying());
     if (mAcquires->AtEnd()) {
-      mNextOwner = (size_t) -1;
+      mNextOwner = NoNextOwner;
     } else {
       mNextOwner = mAcquires->ReadScalar();
       if (mNextOwner != aCurrentThread->Id()) {
@@ -251,12 +253,11 @@ Lock::InitializeLocks()
 }
 
 /* static */ void
-Lock::FixupAfterRecordingRewind()
+Lock::LockAquiresUpdated(size_t aLockId)
 {
-  Thread* thread = Thread::Current();
-  for (size_t id = gAtomicLockId; id < gNumLocks; id++) {
-    LockAcquires* acquires = gLockAcquires.Get(id);
-    acquires->ReadAndNotifyNextOwner(thread);
+  LockAcquires* acquires = gLockAcquires.MaybeGet(aLockId);
+  if (acquires && acquires->mAcquires && acquires->mNextOwner == LockAcquires::NoNextOwner) {
+    acquires->ReadAndNotifyNextOwner(Thread::Current());
   }
 }
 

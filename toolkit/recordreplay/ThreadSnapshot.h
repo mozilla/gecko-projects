@@ -15,10 +15,10 @@ namespace recordreplay {
 // Thread Snapshots Overview.
 //
 // The functions below are used when a thread saves or restores its stack and
-// register state for a snapshot. The steps taken in saving and restoring a
+// register state at a checkpoint. The steps taken in saving and restoring a
 // thread snapshot are as follows:
 //
-// 1. Before idling (non-main threads) or before taking a snapshot (main
+// 1. Before idling (non-main threads) or before reaching a checkpoint (main
 //    thread), the thread calls SaveThreadState. This saves the register state
 //    for the thread as well as a portion of the top of the stack, and after
 //    saving the state it returns true.

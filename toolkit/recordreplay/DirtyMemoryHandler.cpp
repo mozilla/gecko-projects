@@ -70,11 +70,6 @@ DirtyMemoryExceptionHandlerThread(void*)
       uint8_t* faultingAddress = (uint8_t*) request.body.code[1];
       if (HandleDirtyMemoryFault(faultingAddress)) {
         replyCode = KERN_SUCCESS;
-      } else if (IsSystemThreadStackAddress(faultingAddress)) {
-        // If we fault on a system thread's stack address then system threads
-        // have been disabled. Ignore this message, so that the thread stays
-        // suspended indefinitely.
-        continue;
       } else {
         child::ReportFatalError("HandleDirtyMemoryFault failed %p %s", faultingAddress,
                                 gMozCrashReason ? gMozCrashReason : "");

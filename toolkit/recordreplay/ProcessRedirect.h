@@ -281,37 +281,6 @@ struct AutoRecordReplayFunction : AutoRecordReplayFunctionVoid
 #define RecordReplayFunctionVoid(aName, ...)                    \
   RecordReplayFunctionVoidABI(aName, DEFAULTABI, ##__VA_ARGS__)
 
-// Record/replay a function that may block and should execute on a helper
-// thread, allowing snapshots to be taken/restored while it is occurring.
-// Because the function call may still be executing when the process rewinds,
-// it may not write to tracked memory. The aInterCall method is called before
-// and after the function, at a time when such writes are allowed, and allows
-// output parameters to be placed in untracked memory.
-#define RecordReplayBlockingFunction(aName, aReturnType, aInterCall, ...) \
-  AutoRecordReplayFunction<aReturnType> rrf(CallEvent_ ##aName, #aName); \
-  if (!rrf.mThread) {                                                   \
-    return OriginalCallABI(aName, aReturnType, DEFAULTABI, ##__VA_ARGS__); \
-  }                                                                     \
-  if (IsRecording()) {                                                  \
-    bool completed = false;                                             \
-    ErrorType error;                                                    \
-    Thread::ExecuteCallEventOffThread([&]() {                           \
-        aInterCall(true);                                               \
-        Thread::StartOffThreadCallEvent();                              \
-        ErrorType rv = OriginalCallABI(aName, aReturnType, DEFAULTABI, ##__VA_ARGS__); \
-        Thread::EndOffThreadCallEvent();                                \
-        aInterCall(false);                                              \
-        rrf.mRval = rv;                                                 \
-        error = SaveError();                                            \
-        completed = true;                                               \
-      }, &completed);                                                   \
-    RestoreError(error);                                                \
-  }                                                                     \
-  rrf.StartRecordReplay();                                              \
-  Stream& events = rrf.mThread->Events();                               \
-  (void) events;                                                        \
-  aReturnType& rval = rrf.mRval
-
 // The following macros are used for functions that do not record an error and
 // take or return values of specified types.
 //
@@ -733,30 +702,25 @@ struct CallbackWrapperData
 template <typename FunctionType>
 struct AutoRecordReplayCallback
 {
-  // Whether we were recording at entry to the callback, which may be different
-  // from whether we are still recording at the end of the callback.
-  bool mRecording;
-
   FunctionType mFunction;
-  jmp_buf* mOldJump;
 
   AutoRecordReplayCallback(void** aDataArgument, size_t aCallbackId)
-    : mRecording(IsRecording()), mFunction(nullptr), mOldJump(nullptr)
+    : mFunction(nullptr)
   {
     MOZ_ASSERT(IsRecordingOrReplaying());
-    if (mRecording) {
+    if (IsRecording()) {
       CallbackWrapperData* wrapperData = (CallbackWrapperData*) *aDataArgument;
       mFunction = (FunctionType) wrapperData->mFunction;
       *aDataArgument = wrapperData->mData;
-      BeginCallback(aCallbackId, &mOldJump);
+      BeginCallback(aCallbackId);
     }
     SaveOrRestoreCallbackData((void**)&mFunction);
     SaveOrRestoreCallbackData(aDataArgument);
   }
 
   ~AutoRecordReplayCallback() {
-    if (mRecording) {
-      EndCallback(&mOldJump);
+    if (IsRecording()) {
+      EndCallback();
     }
   }
 };
@@ -794,11 +758,6 @@ RecordOrReplayHadErrorNegative(AutoRecordReplayFunction<T>& aRrf)
   }
   return false;
 }
-
-// Mark memory which will be written by system calls. Rather than faulting and
-// activating the dirty memory exception handler, such system calls will just
-// return an error if the memory is not writable.
-void NotifyDirtyMemory(void* aAddress, size_t aSize);
 
 extern Atomic<size_t, SequentiallyConsistent, Behavior::DontPreserve> gMemoryLeakBytes;
 
