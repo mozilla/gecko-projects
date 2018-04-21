@@ -43,6 +43,10 @@ nsWrapperCache::SetWrapperJSObject(JSObject* aWrapper)
   if (aWrapper && !JS::ObjectIsTenured(aWrapper)) {
     CycleCollectedJSRuntime::Get()->NurseryWrapperAdded(this);
   }
+
+  if (mozilla::recordreplay::IsReplaying()) {
+    mozilla::recordreplay::SetWeakPointerJSRoot(this, aWrapper);
+  }
 }
 
 void

@@ -87,11 +87,7 @@ static_assert(sizeof(void*) == 4, "Only support 32-bit and 64-bit");
  *
  * When recording or replaying an execution, wrapper caches are instrumented so
  * that they behave consistently even if the GC executes at different points
- * and collects different objects. Using the record/replay weak pointer
- * mechanism, during recording we keep track of which reads from the cache are
- * successful. During replay, the wrapped object is rooted until the last point
- * where a non-null read occurred while recording, and it is then immediately
- * removed from the cache and unrooted.
+ * and collects different objects.
  */
 
 class nsWrapperCache
@@ -105,28 +101,13 @@ public:
 #ifdef BOOL_FLAGS_ON_WRAPPER_CACHE
     , mBoolFlags(0)
 #endif
-  {
-    mozilla::recordreplay::RegisterThing(this);
-    if (mozilla::recordreplay::IsRecordingOrReplaying()) {
-      // Register this weak pointer, specifying a callback which will be
-      // invoked while replaying. This callback manages the wrapped object so
-      // that it is rooted until the last point where a non-null read occurred
-      // while recording, and is then immediately removed from the cache and
-      // unrooted.
-      mozilla::recordreplay::RegisterWeakPointer(this, [&](bool aSuccess) {
-          if (aSuccess) {
-            MOZ_RELEASE_ASSERT(mWrapper);
-            mozilla::recordreplay::SetWeakPointerJSRoot(this, mWrapper);
-          } else {
-            mWrapper = nullptr;
-            mozilla::recordreplay::SetWeakPointerJSRoot(this, nullptr);
-          }
-        });
-    }
-  }
+  {}
   ~nsWrapperCache()
   {
-    mozilla::recordreplay::UnregisterWeakPointer(this);
+    // Clear any JS root associated with this cache while replaying.
+    if (mozilla::recordreplay::IsReplaying()) {
+      mozilla::recordreplay::SetWeakPointerJSRoot(this, nullptr);
+    }
     MOZ_ASSERT(!PreservingWrapper(),
                "Destroying cache with a preserved wrapper!");
   }
@@ -164,17 +145,24 @@ public:
    */
   JSObject* GetWrapperMaybeDead() const
   {
-    JSObject* res = mWrapper;
-
     // Keep track of accesses on the cache when recording or replaying an
     // execution. Accesses during a GC (when thread events are disallowed)
     // fetch the underlying object without making sure the returned value
     // is consistent between recording and replay.
-    if (!mozilla::recordreplay::AreThreadEventsDisallowed()) {
-      mozilla::recordreplay::WeakPointerAccess(this, !!res);
+    if (mozilla::recordreplay::IsRecordingOrReplaying() &&
+        !mozilla::recordreplay::AreThreadEventsDisallowed() &&
+        !mozilla::recordreplay::HasDivergedFromRecording()) {
+      bool success = mozilla::recordreplay::RecordReplayValue(!!mWrapper);
+      if (mozilla::recordreplay::IsReplaying()) {
+        if (success) {
+          MOZ_RELEASE_ASSERT(mWrapper);
+        } else {
+          const_cast<nsWrapperCache*>(this)->ClearWrapper();
+        }
+      }
     }
 
-    return res;
+    return mWrapper;
   }
 
 #ifdef DEBUG
@@ -192,12 +180,6 @@ public:
                "Object has not provided the hook to update the wrapper if it is moved");
 
     SetWrapperJSObject(aWrapper);
-
-    // Treat wrapper sets as successful accesses while recording or replaying.
-    // This ensures that while replaying the callback we supplied to
-    // RegisterWeakPointer will be immediately invoked and the wrapper will be
-    // rooted or cleared, depending on whether the next access succeeds.
-    mozilla::recordreplay::WeakPointerAccess(this, true);
   }
 
   /**
@@ -206,8 +188,6 @@ public:
   void ClearWrapper()
   {
     MOZ_ASSERT(!PreservingWrapper(), "Clearing a preserved wrapper!");
-    MOZ_ASSERT(!mozilla::recordreplay::IsReplaying() || !mWrapper,
-               "Wrapper should have been cleared already while replaying");
     SetWrapperJSObject(nullptr);
   }
 

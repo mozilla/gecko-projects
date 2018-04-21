@@ -21,8 +21,7 @@ nsWrapperCache::GetWrapperPreserveColor() const
     const_cast<nsWrapperCache*>(this)->ClearWrapper();
     return nullptr;
   }
-  MOZ_ASSERT(obj == mWrapper ||
-             (!mWrapper && mozilla::recordreplay::IsReplaying()));
+  MOZ_ASSERT(obj == mWrapper);
   return obj;
 }
 
