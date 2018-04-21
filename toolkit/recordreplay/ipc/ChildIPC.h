@@ -59,11 +59,15 @@ void WaitForPaintToComplete();
 
 already_AddRefed<gfx::DrawTarget> DrawTargetForRemoteDrawing(LayoutDeviceIntSize aSize);
 
-// Notify the middleman that a recording was saved.
-void NotifySavedRecording(const char* aFilename);
+// Notify the middleman that the recording was flushed.
+void NotifyFlushedRecording();
 
 // Report a fatal error to the middleman process.
 void ReportFatalError(const char* aFormat, ...);
+
+// Mark a time span when the main thread is idle.
+void BeginIdleTime();
+void EndIdleTime();
 
 } // namespace child
 } // namespace recordreplay
