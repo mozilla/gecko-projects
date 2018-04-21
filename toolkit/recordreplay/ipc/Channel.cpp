@@ -13,50 +13,14 @@
 
 namespace mozilla {
 namespace recordreplay {
-namespace channel {
 
 static void
-GetSocketAddress(struct sockaddr_un* addr, base::ProcessId aMiddlemanPid)
+GetSocketAddress(struct sockaddr_un* addr, base::ProcessId aMiddlemanPid, size_t aId)
 {
   addr->sun_family = AF_UNIX;
-  int n = snprintf(addr->sun_path, sizeof(addr->sun_path), "/tmp/WebReplay_%d", aMiddlemanPid);
-  if (n < 0 || n >= (int) sizeof(addr->sun_path)) {
-    MOZ_CRASH();
-  }
+  int n = snprintf(addr->sun_path, sizeof(addr->sun_path), "/tmp/WebReplay_%d_%d", aMiddlemanPid, (int) aId);
+  MOZ_RELEASE_ASSERT(n >= 0 && n < (int) sizeof(addr->sun_path));
   addr->sun_len = SUN_LEN(addr);
-}
-
-// Descriptor used to accept connections on the parent side.
-static int gConnectionFd;
-
-// Descriptor used to communicate with the other side.
-static int gChannelFd;
-
-static PRLock* gLock;
-
-void
-InitParent()
-{
-  MOZ_ASSERT(IsMiddleman());
-
-  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-  if (fd < 0) {
-    MOZ_CRASH();
-  }
-
-  struct sockaddr_un addr;
-  GetSocketAddress(&addr, base::GetCurrentProcId());
-
-  if (bind(fd, (sockaddr*) &addr, SUN_LEN(&addr)) < 0) {
-    MOZ_CRASH();
-  }
-
-  if (listen(fd, 1) < 0) {
-    MOZ_CRASH();
-  }
-
-  gConnectionFd = fd;
-  gLock = PR_NewLock();
 }
 
 struct HelloMessage
@@ -64,72 +28,109 @@ struct HelloMessage
   int32_t mMagic;
 };
 
-static const int32_t MagicValue = 0x914522b9 + 0;
-
-void
-ConnectParent()
+Channel::Channel(size_t aId, const MessageHandler& aHandler)
+  : mId(aId)
+  , mHandler(aHandler)
+  , mInitialized(false)
+  , mConnectionFd(0)
+  , mFd(0)
+  , mMessageBytes(0)
 {
-  MOZ_ASSERT(IsMiddleman());
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
-  struct sockaddr_un addr;
-  socklen_t len = sizeof(addr);
-  gChannelFd = accept(gConnectionFd, (sockaddr*) &addr, &len);
-  if (gChannelFd < 0) {
-    MOZ_CRASH();
+  if (IsRecordingOrReplaying()) {
+    MOZ_ASSERT(IsRecordingOrReplaying());
+    MOZ_ASSERT(AreThreadEventsPassedThrough());
+
+    mFd = socket(AF_UNIX, SOCK_STREAM, 0);
+    MOZ_RELEASE_ASSERT(mFd > 0);
+
+    struct sockaddr_un addr;
+    GetSocketAddress(&addr, child::MiddlemanProcessId(), mId);
+
+    int rv = connect(mFd, (sockaddr*) &addr, SUN_LEN(&addr));
+    MOZ_RELEASE_ASSERT(rv >= 0);
+  } else {
+    MOZ_RELEASE_ASSERT(IsMiddleman());
+
+    mConnectionFd = socket(AF_UNIX, SOCK_STREAM, 0);
+    MOZ_RELEASE_ASSERT(mConnectionFd > 0);
+
+    struct sockaddr_un addr;
+    GetSocketAddress(&addr, base::GetCurrentProcId(), mId);
+
+    int rv = bind(mConnectionFd, (sockaddr*) &addr, SUN_LEN(&addr));
+    MOZ_RELEASE_ASSERT(rv >= 0);
+
+    rv = listen(mConnectionFd, 1);
+    MOZ_RELEASE_ASSERT(rv >= 0);
   }
 
-  HelloMessage msg;
-  msg.mMagic = MagicValue;
+  Thread::SpawnNonRecordedThread(ThreadMain, this);
+}
 
-  if (send(gChannelFd, &msg, sizeof(msg), 0) != sizeof(msg)) {
-    MOZ_CRASH();
+/* static */ void
+Channel::ThreadMain(void* aChannelArg)
+{
+  Channel* channel = (Channel*) aChannelArg;
+
+  static const int32_t MagicValue = 0x914522b9;
+
+  if (IsRecordingOrReplaying()) {
+    HelloMessage msg;
+
+    int rv = recv(channel->mFd, &msg, sizeof(msg), MSG_WAITALL);
+    MOZ_RELEASE_ASSERT(rv == sizeof(msg));
+    MOZ_RELEASE_ASSERT(msg.mMagic == MagicValue);
+  } else {
+    MOZ_RELEASE_ASSERT(IsMiddleman());
+
+    struct sockaddr_un addr;
+    socklen_t len = sizeof(addr);
+    channel->mFd = accept(channel->mConnectionFd, (sockaddr*) &addr, &len);
+    MOZ_RELEASE_ASSERT(channel->mFd > 0);
+
+    HelloMessage msg;
+    msg.mMagic = MagicValue;
+
+    int rv = send(channel->mFd, &msg, sizeof(msg), 0);
+    MOZ_RELEASE_ASSERT(rv == sizeof(msg));
+  }
+
+  {
+    MonitorAutoLock lock(channel->mMonitor);
+    channel->mInitialized = true;
+    channel->mMonitor.Notify();
+  }
+
+  while (true) {
+    Message* msg = channel->WaitForMessage();
+    if (!msg) {
+      break;
+    }
+    channel->mHandler(msg);
   }
 }
 
 void
-InitAndConnectChild(base::ProcessId aMiddlemanPid)
+Channel::SendMessage(const Message& aMsg)
 {
-  MOZ_ASSERT(IsRecordingOrReplaying());
-  MOZ_ASSERT(AreThreadEventsPassedThrough());
+  MOZ_RELEASE_ASSERT(NS_IsMainThread() || aMsg.mType == MessageType::FatalError);
 
-  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-  if (fd < 0) {
-    MOZ_CRASH();
+  // Block until the channel is initialized.
+  if (!mInitialized) {
+    MonitorAutoLock lock(mMonitor);
+    while (!mInitialized) {
+      mMonitor.Wait();
+    }
   }
 
-  struct sockaddr_un addr;
-  GetSocketAddress(&addr, aMiddlemanPid);
-
-  if (connect(fd, (sockaddr*) &addr, SUN_LEN(&addr)) < 0) {
-    MOZ_CRASH();
-  }
-
-  gChannelFd = fd;
-
-  HelloMessage msg;
-
-  if (recv(gChannelFd, &msg, sizeof(msg), MSG_WAITALL) != sizeof(msg)) {
-    MOZ_CRASH();
-  }
-
-  MOZ_RELEASE_ASSERT(msg.mMagic == MagicValue);
-
-  gLock = PR_NewLock();
-}
-
-void
-SendMessage(const Message& aMsg, bool aTakeLock)
-{
-  if (aTakeLock) {
-    PR_Lock(gLock);
-  }
-
-  PrintMessage("SEND_MSG", aMsg);
+  PrintMessage("SendMsg", aMsg);
 
   const char* ptr = (const char*) &aMsg;
   size_t nbytes = aMsg.mSize;
   while (nbytes) {
-    int rv = send(gChannelFd, ptr, nbytes, 0);
+    int rv = send(mFd, ptr, nbytes, 0);
     if (rv < 0) {
       MOZ_RELEASE_ASSERT(errno == EINTR);
     } else {
@@ -138,78 +139,57 @@ SendMessage(const Message& aMsg, bool aTakeLock)
       nbytes -= rv;
     }
   }
-
-  if (aTakeLock) {
-    PR_Unlock(gLock);
-  }
-}
-
-// Buffer for message data received from the other side of the channel.
-static StaticInfallibleVector<char, 0, AllocPolicy<UntrackedMemoryKind::Generic>> gMessageBuffer;
-
-// The number of bytes of data already in the message buffer.
-static size_t gMessageBytes;
-
-static inline size_t
-NeededMessageSize()
-{
-  if (gMessageBytes >= sizeof(Message)) {
-    Message* msg = (Message*) gMessageBuffer.begin();
-    return msg->mSize;
-  }
-  return sizeof(Message);
-}
-
-static size_t gNumAllowedDisconnects;
-
-void
-AllowDisconnect()
-{
-  gNumAllowedDisconnects++;
 }
 
 Message*
-WaitForMessage()
+Channel::WaitForMessage()
 {
-  if (!gMessageBuffer.length())
-    gMessageBuffer.appendN(0, 1048576);
-
-  while (gMessageBytes < NeededMessageSize()) {
-    // Make sure the buffer is large enough for the entire incoming message.
-    if (NeededMessageSize() > gMessageBuffer.length()) {
-      gMessageBuffer.appendN(0, NeededMessageSize() - gMessageBuffer.length());
-    }
-
-    ssize_t nbytes = recv(gChannelFd, &gMessageBuffer[gMessageBytes],
-                          gMessageBuffer.length() - gMessageBytes, 0);
-    if (nbytes < 0) {
-      if (errno == EAGAIN) {
-        continue;
-      }
-      MOZ_CRASH();
-    } else if (nbytes == 0) {
-      // The other side of the connection has shut down.
-      PrintSpew("Channel disconnected.\n");
-      if (gNumAllowedDisconnects) {
-        gNumAllowedDisconnects--;
-      } else {
-        _exit(0);
-      }
-    }
-
-    gMessageBytes += nbytes;
+  if (!mMessageBuffer.length()) {
+    mMessageBuffer.appendN(0, 1048576);
   }
 
-  Message* res = ((Message*)gMessageBuffer.begin())->Clone();
+  size_t messageSize = 0;
+  while (true) {
+    if (mMessageBytes >= sizeof(Message)) {
+      Message* msg = (Message*) mMessageBuffer.begin();
+      messageSize = msg->mSize;
+      if (mMessageBytes >= messageSize) {
+        break;
+      }
+    }
+
+    // Make sure the buffer is large enough for the entire incoming message.
+    if (messageSize > mMessageBuffer.length()) {
+      mMessageBuffer.appendN(0, messageSize - mMessageBuffer.length());
+    }
+
+    ssize_t nbytes = recv(mFd, &mMessageBuffer[mMessageBytes],
+                          mMessageBuffer.length() - mMessageBytes, 0);
+    if (nbytes < 0) {
+      MOZ_RELEASE_ASSERT(errno == EAGAIN);
+      continue;
+    } else if (nbytes == 0) {
+      // The other side of the channel has shut down.
+      if (IsMiddleman()) {
+        return nullptr;
+      }
+      PrintSpew("Channel disconnected, exiting...\n");
+      _exit(0);
+    }
+
+    mMessageBytes += nbytes;
+  }
+
+  Message* res = ((Message*)mMessageBuffer.begin())->Clone();
 
   // Remove the message we just received from the incoming buffer.
-  size_t remaining = gMessageBytes - NeededMessageSize();
+  size_t remaining = mMessageBytes - messageSize;
   if (remaining) {
-    memmove(gMessageBuffer.begin(), &gMessageBuffer[NeededMessageSize()], remaining);
+    memmove(mMessageBuffer.begin(), &mMessageBuffer[messageSize], remaining);
   }
-  gMessageBytes = remaining;
+  mMessageBytes = remaining;
 
-  PrintMessage("RECV_MSG", *res);
+  PrintMessage("RecvMsg", *res);
   return res;
 }
 
@@ -225,38 +205,40 @@ WideCharString(const char16_t* aBuffer, size_t aBufferSize)
 }
 
 void
-PrintMessage(const char* aPrefix, const Message& aMsg)
+Channel::PrintMessage(const char* aPrefix, const Message& aMsg)
 {
   AutoEnsurePassThroughThreadEvents pt;
   char* data = nullptr;
   switch (aMsg.mType) {
   case MessageType::Paint: {
-    const PaintMessage& nmsg = *(const PaintMessage*)&aMsg;
+    const PaintMessage& nmsg = (const PaintMessage&) aMsg;
     data = new char[32];
     snprintf(data, 32, "%d", (int) HashBytes(nmsg.Buffer(), nmsg.BufferSize()));
     break;
   }
-  case MessageType::HitSnapshot: {
-    const HitSnapshotMessage& nmsg = *(const HitSnapshotMessage*)&aMsg;
+  case MessageType::HitCheckpoint: {
+    const HitCheckpointMessage& nmsg = (const HitCheckpointMessage&) aMsg;
     data = new char[128];
-    snprintf(data, 128, "Id %d, Final %d, Interim %d",
-             (int) nmsg.mSnapshotId, nmsg.mFinal, nmsg.mInterim);
+    snprintf(data, 128, "Id %d", (int) nmsg.mCheckpointId);
     break;
   }
   case MessageType::HitBreakpoint: {
-    const HitBreakpointMessage& nmsg = *(const HitBreakpointMessage*)&aMsg;
-    data = new char[128];
-    snprintf(data, 128, "Id %d", (int) nmsg.mBreakpointId);
+    const HitBreakpointMessage& nmsg = (const HitBreakpointMessage&) aMsg;
+    data = new char[nmsg.NumBreakpoints() * 32];
+    int pos = 0;
+    for (size_t i = 0; i < nmsg.NumBreakpoints(); i++) {
+      pos += snprintf(data + pos, 32, "Id %d", nmsg.Breakpoints()[i]);
+    }
     break;
   }
   case MessageType::Resume: {
-    const ResumeMessage& nmsg = *(const ResumeMessage*)&aMsg;
+    const ResumeMessage& nmsg = (const ResumeMessage&) aMsg;
     data = new char[128];
-    snprintf(data, 128, "Forward %d, HitOtherBreakpoints %d", nmsg.mForward, nmsg.mHitOtherBreakpoints);
+    snprintf(data, 128, "Forward %d", nmsg.mForward);
     break;
   }
   case MessageType::SetBreakpoint: {
-    const SetBreakpointMessage& nmsg = *(const SetBreakpointMessage*)&aMsg;
+    const SetBreakpointMessage& nmsg = (const SetBreakpointMessage&) aMsg;
     data = new char[128];
     snprintf(data, 128, "Id %d, Kind %s, Script %d, Offset %d, Frame %d",
              (int) nmsg.mId, nmsg.mPosition.kindString(), (int) nmsg.mPosition.script,
@@ -264,22 +246,34 @@ PrintMessage(const char* aPrefix, const Message& aMsg)
     break;
   }
   case MessageType::DebuggerRequest: {
-    const DebuggerRequestMessage& nmsg = *(const DebuggerRequestMessage*)&aMsg;
+    const DebuggerRequestMessage& nmsg = (const DebuggerRequestMessage&) aMsg;
     data = WideCharString(nmsg.Buffer(), nmsg.BufferSize());
     break;
   }
   case MessageType::DebuggerResponse: {
-    const DebuggerResponseMessage& nmsg = *(const DebuggerResponseMessage*)&aMsg;
+    const DebuggerResponseMessage& nmsg = (const DebuggerResponseMessage&) aMsg;
     data = WideCharString(nmsg.Buffer(), nmsg.BufferSize());
+    break;
+  }
+  case MessageType::SetSendPaints: {
+    const SetSendPaintsMessage& nmsg = (const SetSendPaintsMessage&) aMsg;
+    data = new char[32];
+    snprintf(data, 32, "%d", nmsg.mSendPaints);
+    break;
+  }
+  case MessageType::SetSaveCheckpoint: {
+    const SetSaveCheckpointMessage& nmsg = (const SetSaveCheckpointMessage&) aMsg;
+    data = new char[128];
+    snprintf(data, 128, "Id %d, Save %d", (int) nmsg.mCheckpoint, nmsg.mSave);
     break;
   }
   default:
     break;
   }
-  PrintSpew("%s %d %s %s\n", aPrefix, getpid(), aMsg.TypeString(), data ? data : "");
+  const char* kind = IsMiddleman() ? "Middleman" : (IsRecording() ? "Recording" : "Replaying");
+  PrintSpew("%s%s:%d %s %s\n", kind, aPrefix, (int) mId, aMsg.TypeString(), data ? data : "");
   delete[] data;
 }
 
-} // namespace channel
 } // namespace recordreplay
 } // namespace mozilla
