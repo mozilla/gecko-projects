@@ -2248,7 +2248,7 @@ HelperThread::threadLoop()
                 // helper thread state lock.
                 {
                     AutoUnlockHelperThreadState unlock(lock);
-                    mozilla::recordreplay::MaybeWaitForSnapshot();
+                    mozilla::recordreplay::MaybeWaitForCheckpointSave();
                 }
                 mozilla::recordreplay::NotifyUnrecordedWait(WakeupAll);
             }
