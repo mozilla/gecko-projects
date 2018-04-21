@@ -20,12 +20,12 @@ namespace recordreplay {
 namespace parent {
 
 // The middleman process is a content process that manages communication with
-// the replaying process. It performs IPC with the chrome process in the normal
-// fashion for a content process, using the normal IPDL protocols.
-// Communication with a recording or replaying process is done via a special
-// IPC channel (see Channel.h), and communication with a recording process can
-// additionally be done via IPDL messages, usually by forwarding them from the
-// UI process.
+// one or more child recording or replaying processes. It performs IPC with the
+// chrome process in the normal fashion for a content process, using the normal
+// IPDL protocols. Communication with a recording or replaying process is done
+// via a special IPC channel (see Channel.h), and communication with a
+// recording process can additionally be done via IPDL messages, usually by
+// forwarding them from the UI process.
 
 ///////////////////////////////////////////////////////////////////////////////
 // Public API
@@ -37,9 +37,8 @@ void SaveRecording(const nsCString& aFilename);
 // Get the message channel used to communicate with the UI process.
 ipc::MessageChannel* ChannelToUIProcess();
 
-void
-Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChildID,
-           dom::ContentChild* aContentChild);
+void Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChildID,
+                dom::ContentChild* aContentChild);
 
 // Note the contents of the prefs shmem for use by the child process.
 void NotePrefsShmemContents(char* aPrefs, size_t aPrefsLen);
