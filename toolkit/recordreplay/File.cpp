@@ -261,7 +261,7 @@ struct FileIndex
   // The location of the next index in the file, or zero.
   uint64_t mNextIndexOffset;
 
-  FileIndex(uint32_t aNumChunks)
+  explicit FileIndex(uint32_t aNumChunks)
     : mMagic(MagicValue), mNumChunks(aNumChunks), mNextIndexOffset(0)
   {}
 };

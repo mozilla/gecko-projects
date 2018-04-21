@@ -365,7 +365,7 @@ ChildProcess::LaunchSubprocess()
   extraArgs.push_back("-recordReplayChannelID");
 
   char buf[20];
-  snprintf(buf, sizeof(buf), "%d", (int) GetId());
+  SprintfLiteral(buf, "%d", (int) GetId());
   extraArgs.push_back(buf);
 
   ipc::GeckoChildProcessHost::RecordReplayKind recordReplayKind =
