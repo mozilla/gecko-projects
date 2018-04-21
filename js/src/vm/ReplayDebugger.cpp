@@ -14,6 +14,8 @@
 using namespace js;
 using mozilla::Maybe;
 
+#define TRY(op) do { if (!(op)) MOZ_CRASH(#op); } while (false)
+
 extern JS_FRIEND_API(void) JS_StackDump();
 
 // Memory management overview.
@@ -90,7 +92,7 @@ ReplayDebugger::resumeBackward()
 {
     for (ReplayDebugger* dbg : gReplayDebuggers)
         dbg->invalidateAfterUnpause();
-    JS::replay::hooks.resumeMiddleman(/* forward = */ false, /* hitOtherBreakpoints = */ false);
+    JS::replay::hooks.resumeMiddleman(/* forward = */ false);
 }
 
 void
@@ -98,7 +100,7 @@ ReplayDebugger::resumeForward()
 {
     for (ReplayDebugger* dbg : gReplayDebuggers)
         dbg->invalidateAfterUnpause();
-    JS::replay::hooks.resumeMiddleman(/* forward = */ true, /* hitOtherBreakpoints = */ false);
+    JS::replay::hooks.resumeMiddleman(/* forward = */ true);
 }
 
 void
@@ -1678,12 +1680,10 @@ GetSuccessorsOrPredecessors(const ScriptStructure& structure,
                             jsbytecode* pc, bool successors, PcVector& list)
 {
     if (successors) {
-        if (!GetSuccessorBytecodes(pc, list))
-            MOZ_CRASH();
+        TRY(GetSuccessorBytecodes(pc, list));
     } else {
         jsbytecode* end = structure.code + structure.codeLength;
-        if (!GetPredecessorBytecodes(structure.code, end, pc, list))
-            MOZ_CRASH();
+        TRY(GetPredecessorBytecodes(structure.code, end, pc, list));
     }
 }
 
@@ -1694,8 +1694,7 @@ PcVectorAppendNoDuplicate(PcVector& list, jsbytecode* pc)
         if (list[i] == pc)
             return;
     }
-    if (!list.append(pc))
-        MOZ_CRASH();
+    TRY(list.append(pc));
 }
 
 enum OpcodeSearchKind {
@@ -1727,7 +1726,7 @@ BytecodeMatchesSearch(const ScriptStructure& structure,
         return false;
       }
     }
-    MOZ_CRASH();
+    MOZ_CRASH("Bad OpcodeSearchKind");
 }
 
 static void
@@ -2023,7 +2022,7 @@ ReplayDebugger::hitBreakpoint(JSContext* cx, Breakpoint* breakpoint)
             return false;
         break;
       default:
-        MOZ_CRASH();
+        MOZ_CRASH("Bad breakpoint kind");
     }
     return true;
 }
@@ -2173,7 +2172,7 @@ ScriptSourceId(ScriptSourceObject* sso)
         if (sso == gDebuggerScriptSources[i])
             return i;
     }
-    MOZ_CRASH();
+    MOZ_CRASH("Unknown script source");
 }
 
 // All objects for which IDs have been generated during the current pause.
@@ -2374,7 +2373,7 @@ JS::AddContentParseDataForRecordReplay(const void* token, const void* buffer, si
             return;
         }
     }
-    MOZ_CRASH();
+    MOZ_CRASH("Unknown content parse token");
 }
 
 JS_PUBLIC_API(void)
@@ -2390,7 +2389,7 @@ JS::EndContentParseForRecordReplay(const void* token)
             return;
         }
     }
-    MOZ_CRASH();
+    MOZ_CRASH("Unknown content parse token");
 }
 
 static void
@@ -2999,10 +2998,9 @@ Respond_popFrameResult(ReplayDebugger::Activity& a, HandleObject request)
 
     bool throwing;
     RootedValue result(a.cx);
-    if (ReplayDebugger::GetPoppedFrameResult(&throwing, &result)) {
-        a.defineProperty(response, "throwing", throwing);
-        a.defineProperty(response, "result", ConvertValueToJSON(a, result));
-    }
+    ReplayDebugger::GetPoppedFrameResult(&throwing, &result);
+    a.defineProperty(response, "throwing", throwing);
+    a.defineProperty(response, "result", ConvertValueToJSON(a, result));
     return response;
 }
 
@@ -3035,17 +3033,14 @@ ReplayDebugger::ProcessRequest(const char16_t* requestBuffer, size_t requestLeng
     AutoCompartment ac(cx, *gHookGlobal);
 
     RootedValue requestValue(cx);
-    if (!JS_ParseJSON(cx, requestBuffer, requestLength, &requestValue))
-        MOZ_CRASH();
+    TRY(JS_ParseJSON(cx, requestBuffer, requestLength, &requestValue));
 
-    if (!requestValue.isObject())
-        MOZ_CRASH();
+    MOZ_RELEASE_ASSERT(requestValue.isObject());
     RootedObject request(cx, &requestValue.toObject());
 
     ReplayDebugger::Activity a(cx);
     HandleString kind = a.getNonNullStringProperty(request, "kind");
-    if (cx->isExceptionPending())
-        MOZ_CRASH();
+    MOZ_RELEASE_ASSERT(!cx->isExceptionPending());
 
     RootedObject response(cx);
 
@@ -3061,15 +3056,14 @@ FOR_EACH_REQUEST(HANDLE_REQUEST)
 
     if (cx->isExceptionPending()) {
         RootedValue exception(cx);
-        if (!cx->getPendingException(&exception))
-            MOZ_CRASH();
+        TRY(cx->getPendingException(&exception));
         cx->clearPendingException();
         response = a.newObject();
         a.defineProperty(response, "exception", ConvertValueToJSON(a, exception));
-        if (!a.success())
-            MOZ_CRASH();
+        MOZ_RELEASE_ASSERT(a.success());
     }
 
-    if (!ToJSONMaybeSafely(cx, response, FillCharBufferCallback, responseBuffer))
-        MOZ_CRASH();
+    TRY(ToJSONMaybeSafely(cx, response, FillCharBufferCallback, responseBuffer));
 }
+
+#undef TRY

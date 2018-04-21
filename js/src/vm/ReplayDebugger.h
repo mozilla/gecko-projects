@@ -16,10 +16,10 @@
 // protocol.
 //
 // The debugger in the replayed process has a tenuous existence. Whenever a
-// memory snapshot is taken or a GC is performed it is destroyed, and it is
-// reconstructed afterwards according to messages sent from the middleman
-// debugger. Note that the middleman may have multiple debuggers, but all their
-// messages will be sent to the same replay debugger.
+// checkpoint is reached it is destroyed, and it is reconstructed afterwards
+// according to messages sent from the middleman debugger. Note that the
+// middleman may have multiple debuggers, but all their messages will be sent
+// to the same replay debugger.
 //
 // ReplayDebugger manages the relationship between these debuggers.
 
@@ -209,8 +209,8 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
     static bool MaybeDivergeFromRecording();
 
     // While paused after popping a frame, indicate whether the frame threw and
-    // the returned/thrown value. Returns false if not at the exit to a frame.
-    static bool GetPoppedFrameResult(bool* throwing, MutableHandleValue result);
+    // the returned/thrown value.
+    static void GetPoppedFrameResult(bool* throwing, MutableHandleValue result);
 
     // Convert between scripts and script IDs.
     static JSScript* IdScript(size_t id);

@@ -18,7 +18,8 @@ namespace replay {
 
 typedef mozilla::Vector<char16_t> CharBuffer;
 
-// Identification for a position during JS execution in the replaying process.
+// Identification for an execution position --- anyplace a breakpoint can be
+// created --- during JS execution in a child process.
 struct ExecutionPosition
 {
     enum Kind {
@@ -75,40 +76,88 @@ struct ExecutionPosition
     }
 };
 
+// Identification for a particular point in the JS execution of a process.
+template <typename AllocPolicy>
+struct ExecutionPoint
+{
+    // Most recent checkpoint prior to the execution point.
+    mozilla::recordreplay::CheckpointId checkpoint;
+
+    // When starting at |checkpoint|, the positions to reach, in sequence,
+    // before arriving at the execution point.
+    mozilla::Vector<ExecutionPosition, 4, AllocPolicy> positions;
+
+    ExecutionPoint()
+    {}
+
+    ExecutionPoint(ExecutionPoint&& o)
+      : checkpoint(o.checkpoint), positions(Move(o.positions))
+    {}
+
+    void clear() {
+        checkpoint = mozilla::recordreplay::CheckpointId();
+        positions.clear();
+    }
+
+    template <typename OtherAllocPolicy>
+    bool copyFrom(const ExecutionPoint<OtherAllocPolicy>& o) {
+        checkpoint = o.checkpoint;
+        positions.clear();
+        return positions.append(o.positions.begin(), o.positions.length());
+    }
+
+    // A prefix of an ExecutionPoint is the number of positions which have been
+    // consumed so far.
+    typedef size_t Prefix;
+};
+
 // These hooks are used for transmitting messages between a ReplayDebugger in
-// a middleman process and corresponding state in the replaying process.
+// a middleman process and corresponding state in a child process.
 struct Hooks
 {
-    // Send a JSON message to or from the replayed process.
+    // Send a JSON message to or from the child process.
     void (*debugRequestMiddleman)(const CharBuffer& buffer, CharBuffer* response);
     void (*debugRequestReplay)(CharBuffer* buffer);
     void (*debugResponseReplay)(const CharBuffer& buffer);
 
-    // Set or clear a breakpoint in the replayed process.
+    // Set or clear a breakpoint in the child process.
     void (*setBreakpointMiddleman)(size_t id, const ExecutionPosition& pos);
     void (*setBreakpointReplay)(size_t id, const ExecutionPosition& pos);
 
-    // Allow the replayed process to resume execution.
-    void (*resumeMiddleman)(bool forward, bool hitOtherBreakpoint);
-    void (*resumeReplay)(bool forward, bool hitOtherBreakpoints);
+    // Allow the child process to resume execution.
+    void (*resumeMiddleman)(bool forward);
+    void (*resumeReplay)(bool forward);
     void (*pauseMiddleman)();
 
-    // Notify the middleman about a breakpoint that was hit.
-    void (*hitBreakpointReplay)(size_t id, bool recoveringFromDivergence);
+    // Notify the middleman about breakpoints (or intra-checkpoint endpoints)
+    // that were hit.
+    void (*hitBreakpointReplay)(const uint32_t* breakpoints, size_t numBreakpoints);
     bool (*hitBreakpointMiddleman)(JSContext* cx, size_t id);
 
-    // Notify the middleman about a snapshot that was hit.
-    void (*hitSnapshotReplay)(size_t id, bool final, bool interim);
+    // Notify the middleman about a checkpoint that was hit.
+    void (*hitCheckpointReplay)(size_t id);
+
+    // Direct the child process to rewind to a specific checkpoint.
+    void (*restoreCheckpointReplay)(size_t id);
 
     // Return whether the middleman is able to rewind the replayed process.
     bool (*canRewindMiddleman)();
 
-    // Finish recovering from an unhandled divergence at a breakpoint, and send
-    // a response to the middleman for the last request.
+    // After recovering from an unhandled recording divergence, enter the
+    // correct pause state for being at a breakpoint and then send a response
+    // to the middleman for the last request.
+    void (*pauseAndRespondAfterRecoveringFromDivergence)();
     void (*respondAfterRecoveringFromDivergence)();
 
-    // Notify the debugger that it should always take temporary snapshots.
-    void (*alwaysTakeTemporarySnapshots)();
+    typedef mozilla::recordreplay::AllocPolicy<mozilla::recordreplay::TrackedMemoryKind>
+        TrackedAllocPolicy;
+    void (*getRecordingEndpoint)(ExecutionPoint<TrackedAllocPolicy>* endpoint);
+    void (*setRecordingEndpoint)(const ExecutionPoint<TrackedAllocPolicy>& endpoint);
+    bool (*hitCurrentRecordingEndpointReplay)();
+    void (*hitLastRecordingEndpointReplay)();
+
+    // Notify the debugger that it should always save temporary checkpoints.
+    void (*alwaysSaveTemporaryCheckpoints)();
 };
 
 extern Hooks hooks;
