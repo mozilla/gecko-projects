@@ -1162,8 +1162,7 @@ pref("devtools.commands.dir", "");
 // Enable recording/replaying executions.
 #if defined(NIGHTLY_BUILD)
 pref("devtools.recordreplay.enabled", true);
-pref("devtools.recordreplay.enableRecordRewinding", true);
-pref("devtools.recordreplay.enableReplayRewinding", true);
+pref("devtools.recordreplay.enableRewinding", true);
 #endif
 
 // view source
