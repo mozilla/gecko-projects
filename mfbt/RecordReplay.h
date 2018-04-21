@@ -202,57 +202,8 @@ static inline void DestroyPLDHashTableCallbacks(const PLDHashTableOps* aOps);
 static inline void MovePLDHashTableContents(const PLDHashTableOps* aFirstOps,
                                             const PLDHashTableOps* aSecondOps);
 
-// API for managing accesses to weak pointers which might be cleared during JS
-// garbage collections (which might occur at different points and collect
-// different objects between recording and replay).
-//
-// When recording or replaying, WeakPointerAccess should be called for each
-// read of the weak pointer, indicating whether the read produced a value.
-// When replaying, the callback supplied to RegisterWeakPointer may be called
-// to indicate whether the next read succeeds or not, per the calls to
-// WeakPointerAccess in the original recording.
-//
-// The callback is invoked after each call to WeakPointerAccess, and any time
-// we rewind to a point that was originally recording and are about to begin
-// replaying from there.
-//
-// SetWeakPointerJSRoot is a convenience method that sets or clears a JS root
-// for the weak pointer, so that the GC cannot collect the JS object until
-// after its last successful read.
-//
-// Below is an example of how this API can be used.
-//
-// struct WeakHolder {
-//   JSObject* mObject; // Weak pointer, cleared if collected by a GC.
-//   WeakHolder() { RegisterWeakPointer(this, [&](bool aSuccess) {
-//       if (aSuccess) {
-//         // Prevent mObject from being collected by the GC.
-//         MOZ_ASSERT(mObject);
-//         SetWeakPointerJSRoot(this, mObject);
-//       } else {
-//         // Clear mObject and allow it to be collected by the GC.
-//         SetWeakPointerJSRoot(this, nullptr);
-//         mObject = nullptr;
-//       }
-//     });
-//   }
-//   ~WeakHolder() { UnregisterWeakPointer(this); }
-//
-//   void Set(JSObject* aObject) {
-//     mObject = aObject;
-//     WeakPointerAccess(this, !!mObject);
-//   }
-//
-//   JSObject* Get() {
-//     JSObject* res = mObject;
-//     // While replaying, this may invoke the callback and clear mObject.
-//     WeakPointerAccess(this, !!res);
-//     return res;
-//   }
-// };
-static inline void RegisterWeakPointer(const void* aPtr, const std::function<void(bool)>& aCallback);
-static inline void UnregisterWeakPointer(const void* aPtr);
-static inline void WeakPointerAccess(const void* aPtr, bool aSuccess);
+// Associate an arbitrary pointer with a JS object root while replaying. This
+// is useful for replaying the behavior of weak pointers.
 MFBT_API void SetWeakPointerJSRoot(const void* aPtr, /*JSObject*/void* aJSObj);
 
 // API for ensuring that a function executes at a consistent point when
@@ -306,15 +257,13 @@ MFBT_API void ExecuteTriggers();
 static inline bool HasDivergedFromRecording();
 
 // API for handling unrecorded waits. During replay, periodically all threads
-// must enter a specific idle state so that snapshots may be taken or restored
-// for rewinding. For threads which block on recorded resources --- they wait
-// on a recorded lock (one which was created when events were not passed
-// through) or an associated cvar --- this is taken care of automatically.
+// must enter a specific idle state so that checkpoints may be saved or
+// restored for rewinding. For threads which block on recorded resources
+// --- they wait on a recorded lock (one which was created when events were not
+// passed through) or an associated cvar --- this is handled automatically.
 //
-// Other threads, which include any thread that is replay specific and certain
-// others (like JS helper threads, which only block on unrecorded resources)
-// must call NotifyUnrecordedWait before blocking for a potentially
-// indefinite time on an unrecorded resource.
+// Threads which block indefinitely on unrecorded resources must call
+// NotifyUnrecordedWait first.
 //
 // The callback passed to NotifyUnrecordedWait will be invoked at most once
 // by the main thread whenever the main thread is waiting for other threads to
@@ -322,9 +271,10 @@ static inline bool HasDivergedFromRecording();
 // main thread is already waiting for other threads to become idle.
 //
 // The callback should poke the thread so that it is no longer blocked on the
-// resource. The thread must call MaybeWaitForSnapshot before blocking again.
+// resource. The thread must call MaybeWaitForCheckpointSave before blocking
+// again.
 MFBT_API void NotifyUnrecordedWait(const std::function<void()>& aCallback);
-MFBT_API void MaybeWaitForSnapshot();
+MFBT_API void MaybeWaitForCheckpointSave();
 
 // API for debugging inconsistent behavior between recording and replay.
 // By calling Assert or AssertBytes a thread event will be inserted and any
@@ -362,57 +312,79 @@ enum class Behavior {
 // Debugger API
 ///////////////////////////////////////////////////////////////////////////////
 
-// These functions are for use by the debugger in a replaying process.
+// These functions are for use by the debugger in a child process.
+
+// Special IDs for normal checkpoints.
+static const size_t InvalidCheckpointId = 0;
+static const size_t FirstCheckpointId = 1;
+
+// The ID of a checkpoint in a child process. Checkpoints are either normal or
+// temporary. Normal checkpoints occur at the same point in the recording and
+// all replays, while temporary checkpoints are not used while recording and
+// may be at different points in different replays.
+struct CheckpointId
+{
+  // ID of the most recent normal checkpoint, which are numbered in sequence
+  // starting at FirstCheckpointId.
+  size_t mNormal;
+
+  // How many temporary checkpoints have been generated since the most recent
+  // normal checkpoint, zero if this represents the normal checkpoint itself.
+  size_t mTemporary;
+
+  explicit CheckpointId(size_t aNormal = InvalidCheckpointId, size_t aTemporary = 0)
+    : mNormal(aNormal), mTemporary(aTemporary)
+  {}
+
+  inline bool operator ==(const CheckpointId& o) const {
+    return mNormal == o.mNormal && mTemporary == o.mTemporary;
+  }
+
+  inline bool operator !=(const CheckpointId& o) const {
+    return mNormal != o.mNormal || mTemporary != o.mTemporary;
+  }
+};
 
 // Signature for the hook called when running forward, immediately before
-// hitting a snapshot.
-typedef void (*BeforeSnapshotHook)();
+// hitting a normal or temporary checkpoint.
+typedef void (*BeforeCheckpointHook)();
 
-// Signature for the hook called immediately after hitting a snapshot, either
-// when running forward or after rewinding.
-//
-// - aSnapshot is the ID of this snapshot, and uniquely represents this point
-//   of execution.
-//
-// - aFinal is whether the replay has reached the end of the recording, and is
-//   always false when recording.
-//
-// - aInterim is whether the snapshot is an interim one. If the middleman asked
-//   us to rewind to snapshot N, but we did not record N but rather an earlier
-//   snapshot M, then we reach N by rewinding to M and then playing forward
-//   to N. Snapshots in the range [M, N-1] are interim.
-typedef void (*AfterSnapshotHook)(size_t aSnapshot, bool aFinal, bool aInterim);
+// Signature for the hook called immediately after hitting a normal or
+// temporary checkpoint, either when running forward or after rewinding.
+typedef void (*AfterCheckpointHook)(const CheckpointId& aCheckpoint);
 
-// Set hooks to call when encountering snapshots.
-MFBT_API void SetSnapshotHooks(BeforeSnapshotHook aBeforeSnapshot,
-                               AfterSnapshotHook aAfterSnapshot);
+// Set hooks to call when encountering checkpoints.
+MFBT_API void SetCheckpointHooks(BeforeCheckpointHook aBeforeCheckpoint,
+                                 AfterCheckpointHook aAfterCheckpoint);
 
-// When paused at a breakpoint or at a snapshot, unpause and proceed with
+// When paused at a breakpoint or at a checkpoint, unpause and proceed with
 // execution.
 MFBT_API void ResumeExecution();
 
-// When paused at a breakpoint or at a snapshot, restore an earlier snapshot
-// and resume execution.
-MFBT_API void RestoreSnapshotAndResume(size_t aId);
+// When paused at a breakpoint or at a checkpoint, restore a checkpoint that
+// was saved earlier and resume execution.
+MFBT_API void RestoreCheckpointAndResume(const CheckpointId& aCheckpoint);
 
 // Allow execution after this point to diverge from the recording. Execution
-// will remain diverged until an earlier snapshot is restored.
+// will remain diverged until an earlier checkpoint is restored.
 //
 // If an unhandled divergence occurs (see the 'Recording Divergence' comment
-// in ProcessRewind.h) then the process rewinds to the most recent snapshot.
+// in ProcessRewind.h) then the process rewinds to the most recent saved
+// checkpoint.
 MFBT_API void DivergeFromRecording();
 
-// After a call to TakeSnapshotAndDivergeFromRecording, this may be called to
-// prevent future unhandled divergence from causing the snapshot to be
-// restored (the process will immediately crash instead). This state lasts
-// until a new call to TakeSnapshotAndDivergeFromRecording, or to an explicit
-// restore of an earlier snapshot.
+// After a call to DivergeFromRecording(), this may be called to prevent future
+// unhandled divergence from causing earlier checkpoints to be restored
+// (the process will immediately crash instead). This state lasts until a new
+// call to DivergeFromRecording, or to an explicit restore of an earlier
+// checkpoint.
 MFBT_API void DisallowUnhandledDivergeFromRecording();
 
-// Take a temporary snapshot: one whose ID does not universally represent a
-// particular point of execution. Note that when this snapshot is restored
-// control flow will resume after this call.
-MFBT_API void TakeTemporarySnapshot();
+// Note a checkpoint at the current execution position. This checkpoint will be
+// saved if either (a) it is temporary, or (b) the middleman has instructed
+// this process to save this normal checkpoint. This method returns true if the
+// checkpoint was just saved, and false if it was just restored.
+MFBT_API bool NewCheckpoint(bool aTemporary);
 
 ///////////////////////////////////////////////////////////////////////////////
 // Allocation policies
@@ -420,10 +392,10 @@ MFBT_API void TakeTemporarySnapshot();
 
 // Type describing what kind of memory to allocate/deallocate by APIs below.
 // TrackedMemoryKind is reserved for memory that is saved and restored when
-// taking or restoring snapshots. All other values refer to memory that is
-// untracked, and ignored by the snapshot mechanism. Different values may be
-// used to distinguish different classes of memory for diagnosing leaks and
-// reporting memory usage.
+// saving or restoring checkpoints. All other values refer to memory that is
+// untracked, and whose contents are preserved when restoring checkpoints.
+// Different values may be used to distinguish different classes of memory for
+// diagnosing leaks and reporting memory usage.
 typedef size_t AllocatedMemoryKind;
 static const AllocatedMemoryKind TrackedMemoryKind = 0;
 

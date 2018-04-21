@@ -32,7 +32,8 @@ namespace recordreplay {
         (const PLDHashTableOps* aOps), (aOps))                  \
   Macro(AllocateMemory, void*, (size_t aSize, AllocatedMemoryKind aKind), (aSize, aKind)) \
   Macro(InternalThingIndex, size_t, (void* aThing), (aThing))   \
-  Macro(InternalVirtualThingName, const char*, (void* aThing), (aThing))
+  Macro(InternalVirtualThingName, const char*, (void* aThing), (aThing)) \
+  Macro(NewCheckpoint, bool, (bool aTemporary), (aTemporary))
 
 #define FOR_EACH_INTERFACE_VOID(Macro)                          \
   Macro(InternalBeginOrderedAtomicAccess, (), ())               \
@@ -46,30 +47,23 @@ namespace recordreplay {
   Macro(InternalRecordReplayBytes,                              \
         (void* aData, size_t aSize), (aData, aSize))            \
   Macro(DisallowUnhandledDivergeFromRecording, (), ())          \
-  Macro(TakeTemporarySnapshot, (), ())                          \
   Macro(NotifyUnrecordedWait,                                   \
         (const std::function<void()>& aCallback), (aCallback))  \
-  Macro(MaybeWaitForSnapshot, (), ())                           \
+  Macro(MaybeWaitForCheckpointSave, (), ())                     \
   Macro(InternalInvalidateRecording, (const char* aWhy), (aWhy)) \
   Macro(InternalDestroyPLDHashTableCallbacks,                   \
         (const PLDHashTableOps* aOps), (aOps))                  \
   Macro(InternalMovePLDHashTableContents,                       \
         (const PLDHashTableOps* aFirstOps, const PLDHashTableOps* aSecondOps), \
         (aFirstOps, aSecondOps))                                \
-  Macro(SetSnapshotHooks,                                       \
-        (BeforeSnapshotHook aBefore, AfterSnapshotHook aAfter), \
+  Macro(SetCheckpointHooks,                                     \
+        (BeforeCheckpointHook aBefore, AfterCheckpointHook aAfter), \
         (aBefore, aAfter))                                      \
   Macro(ResumeExecution, (), ())                                \
-  Macro(RestoreSnapshotAndResume, (size_t aId), (aId))          \
+  Macro(RestoreCheckpointAndResume, (const CheckpointId& aId), (aId)) \
   Macro(DivergeFromRecording, (), ())                           \
   Macro(DeallocateMemory,                                       \
         (void* aAddress, size_t aSize, AllocatedMemoryKind aKind), (aAddress, aSize, aKind)) \
-  Macro(InternalRegisterWeakPointer,                            \
-        (const void* aPtr, const std::function<void(bool)>& aCallback), (aPtr, aCallback)) \
-  Macro(InternalUnregisterWeakPointer,                          \
-        (const void* aPtr), (aPtr))                             \
-  Macro(InternalWeakPointerAccess,                              \
-        (const void* aPtr, bool aSuccess), (aPtr, aSuccess))    \
   Macro(SetWeakPointerJSRoot,                                   \
         (const void* aPtr, void* aJSObj), (aPtr, aJSObj))       \
   Macro(RegisterTrigger,                                        \
