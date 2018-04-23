@@ -5,7 +5,7 @@
 from __future__ import absolute_import, print_function, unicode_literals
 
 from .util.schema import validate_schema, Schema
-from voluptuous import Required
+from voluptuous import Required, Optional
 
 graph_config_schema = Schema({
     # The trust-domain for this graph.
@@ -30,6 +30,12 @@ graph_config_schema = Schema({
         # all"
         Required('ridealong-builds', default={}): {basestring: [basestring]},
     },
+        Required('flavors'): {basestring: {
+            Required('product'): basestring,
+            Required('target-tasks-method'): basestring,
+            Optional('release-type'): basestring,
+            Optional('rebuild-kinds'): [basestring],
+        }},
     Required('scriptworker'): {
         # Prefix to add to scopes controlling scriptworkers
         Required('scope-prefix'): basestring,
