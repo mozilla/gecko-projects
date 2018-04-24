@@ -41,19 +41,19 @@ job-defaults:
    optimization: {}
 
 jobs:
-    linux64-source/opt:
+    firefox-release/opt:
         description: "Firefox source builder"
         treeherder:
             platform: firefox-release/opt
         shipping-product: firefox
 
-    linux64-fennec-source/opt:
+    fennec-release/opt:
         description: "Fennec source builder"
         treeherder:
             platform: fennec-release/opt
         shipping-product: fennec
 
-    linux64-devedition-source/opt:
+    devedition-release/opt:
         description: "Devedition source builder"
         treeherder:
             platform: devedition-release/opt
