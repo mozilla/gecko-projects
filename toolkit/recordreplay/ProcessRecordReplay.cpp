@@ -47,6 +47,9 @@ static void DumpRecordingAssertions();
 
 bool gInitialized;
 
+// Current process ID.
+static int gPid;
+
 // Whether to spew record/replay messages to stderr.
 static bool gSpewEnabled;
 
@@ -80,6 +83,7 @@ RecordReplayInterface_Initialize()
     BusyWait();
   }
 
+  gPid = getpid();
   if (TestEnv("RECORD_REPLAY_SPEW")) {
     gSpewEnabled = true;
   }
@@ -291,30 +295,25 @@ HitEndOfRecording()
   }
 }
 
-void Print(const char* aFormat, ...)
+extern "C" {
+
+MOZ_EXPORT bool
+RecordReplayInterface_SpewEnabled()
 {
-  va_list ap;
-  va_start(ap, aFormat);
-  char buf[2048];
-  VsprintfLiteral(buf, aFormat, ap);
-  va_end(ap);
-  DirectPrint(buf);
+  return gSpewEnabled;
 }
 
-void
-PrintSpew(const char* aFormat, ...)
+MOZ_EXPORT void
+RecordReplayInterface_InternalPrint(const char* aFormat, va_list aArgs)
 {
-  if (!gSpewEnabled) {
-    return;
-  }
-  va_list ap;
-  va_start(ap, aFormat);
-  char buf[2048];
-  VsprintfLiteral(buf, aFormat, ap);
-  va_end(ap);
-  AutoEnsurePassThroughThreadEvents pt; // For getpid().
-  Print("Spew[%d]: %s", getpid(), buf);
+  char buf1[2048];
+  VsprintfLiteral(buf1, aFormat, aArgs);
+  char buf2[2048];
+  SprintfLiteral(buf2, "Spew[%d]: %s", gPid, buf1);
+  DirectPrint(buf2);
 }
+
+} // extern "C"
 
 ///////////////////////////////////////////////////////////////////////////////
 // Record/Replay Assertions

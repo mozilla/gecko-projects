@@ -33,7 +33,8 @@ namespace recordreplay {
   Macro(AllocateMemory, void*, (size_t aSize, AllocatedMemoryKind aKind), (aSize, aKind)) \
   Macro(InternalThingIndex, size_t, (void* aThing), (aThing))   \
   Macro(InternalVirtualThingName, const char*, (void* aThing), (aThing)) \
-  Macro(NewCheckpoint, bool, (bool aTemporary), (aTemporary))
+  Macro(NewCheckpoint, bool, (bool aTemporary), (aTemporary))   \
+  Macro(SpewEnabled, bool, (), ())
 
 #define FOR_EACH_INTERFACE_VOID(Macro)                          \
   Macro(InternalBeginOrderedAtomicAccess, (), ())               \
@@ -78,7 +79,8 @@ namespace recordreplay {
         (const void* aData, size_t aSize), (aData, aSize))      \
   Macro(InternalRegisterThing, (void* aThing), (aThing))        \
   Macro(InternalUnregisterThing, (void* aThing), (aThing))      \
-  Macro(InternalRecordReplayDirective, (long aDirective), (aDirective))
+  Macro(InternalRecordReplayDirective, (long aDirective), (aDirective)) \
+  Macro(InternalPrint, (const char* aFormat, va_list aArgs), (aFormat, aArgs))
 
 #define DECLARE_SYMBOL(aName, aReturnType, aFormals, _) \
   static aReturnType (*gPtr ##aName) aFormals;

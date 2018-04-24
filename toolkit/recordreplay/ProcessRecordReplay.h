@@ -234,7 +234,7 @@ void DumpTimers();
 
 // Different kinds of untracked memory used in the system.
 namespace UntrackedMemoryKind {
-  // Note: 0 is TrackedMemoryKind, 1 is used by the replay debugger.
+  // Note: 0 is TrackedMemoryKind, 1 is DebuggerAllocatedMemoryKind.
   static const AllocatedMemoryKind Generic = 2;
 
   // Memory used by untracked files.

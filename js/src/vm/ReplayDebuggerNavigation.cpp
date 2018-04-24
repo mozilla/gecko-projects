@@ -10,8 +10,6 @@
 
 #include "vm/Debugger-inl.h"
 
-#include <unistd.h>
-
 using namespace js;
 using namespace mozilla::recordreplay;
 using mozilla::Maybe;
@@ -42,23 +40,6 @@ PersistentRootedObject* ReplayDebugger::gHookGlobal;
 static bool gPopFrameThrowing;
 static PersistentRootedValue* gPopFrameResult;
 
-static bool gSpewEnabled;
-
-static void
-PrintSpew(const char* aFormat, ...)
-{
-  if (!gSpewEnabled) {
-    return;
-  }
-  va_list ap;
-  va_start(ap, aFormat);
-  char buf[2048];
-  VsprintfLiteral(buf, aFormat, ap);
-  va_end(ap);
-  AutoEnsurePassThroughThreadEvents pt; // For getpid().
-  fprintf(stderr, "Spew[%d]: %s", getpid(), buf);
-}
-
 #define TRY(op) do { if (!(op)) MOZ_CRASH(#op); } while (false)
 
 /* static */ void
@@ -85,10 +66,6 @@ ReplayDebugger::NoteNewGlobalObject(JSContext* cx, GlobalObject* global)
         }
     }
 }
-
-// Magic constant for the kind to use for untracked debugger memory.
-// See UntrackedMemoryKind in ProcessRecordReplay.h
-static const size_t DebuggerAllocatedMemoryKind = 1;
 
 typedef AllocPolicy<TrackedMemoryKind> TrackedAllocPolicy;
 typedef AllocPolicy<DebuggerAllocatedMemoryKind> UntrackedAllocPolicy;
@@ -164,8 +141,7 @@ class NavigationPhase
         (void) sp.init();
         toString(sp);
 
-        AutoEnsurePassThroughThreadEvents pt;
-        fprintf(stderr, "Operation %s not supported: %s\n", operation, sp.string());
+        Print("Operation %s not supported: %s\n", operation, sp.string());
         MOZ_CRASH("Unsupported navigation operation");
     }
 
@@ -446,7 +422,7 @@ class NavigationState
     void setPhase(NavigationPhase* phase) {
         mPhase = phase;
 
-        if (gSpewEnabled) {
+        if (SpewEnabled()) {
             Sprinter sp(nullptr);
             (void) sp.init();
             mPhase->toString(sp);
@@ -1625,12 +1601,6 @@ ReplayDebugger::Initialize()
         JS::replay::hooks.setRecordingEndpoint = SetRecordingEndpointHook;
 
         SetCheckpointHooks(::BeforeCheckpointHook, ::AfterCheckpointHook);
-
-        {
-            AutoPassThroughThreadEvents pt;
-            const char* env = getenv("RECORD_REPLAY_SPEW");
-            gSpewEnabled = env && env[0];
-        }
     }
 }
 

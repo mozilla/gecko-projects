@@ -386,6 +386,14 @@ MFBT_API void DisallowUnhandledDivergeFromRecording();
 // checkpoint was just saved, and false if it was just restored.
 MFBT_API bool NewCheckpoint(bool aTemporary);
 
+// Print information about record/replay state. Printing is independent from
+// the recording and will be printed by any recording, replaying, or middleman
+// process. Spew is only printed when enabled via the RECORD_REPLAY_SPEW
+// environment variable.
+static inline void Print(const char* aFormat, ...);
+static inline void PrintSpew(const char* aFormat, ...);
+MFBT_API bool SpewEnabled();
+
 ///////////////////////////////////////////////////////////////////////////////
 // Allocation policies
 ///////////////////////////////////////////////////////////////////////////////
@@ -398,6 +406,9 @@ MFBT_API bool NewCheckpoint(bool aTemporary);
 // diagnosing leaks and reporting memory usage.
 typedef size_t AllocatedMemoryKind;
 static const AllocatedMemoryKind TrackedMemoryKind = 0;
+
+// Memory kind to use for untracked debugger memory.
+static const AllocatedMemoryKind DebuggerAllocatedMemoryKind = 1;
 
 // Allocate or deallocate a block of memory of a particular kind. Allocated
 // memory is initially zeroed.
@@ -526,6 +537,25 @@ RecordReplayAssert(const char* aFormat, ...)
     va_end(ap);
   }
 }
+
+MFBT_API void InternalPrint(const char* aFormat, va_list aArgs);
+
+#define MOZ_MakeRecordReplayPrinter(aName, aSpewing)            \
+  static inline void                                            \
+  aName(const char* aFormat, ...)                               \
+  {                                                             \
+    if ((IsRecordingOrReplaying() || IsMiddleman()) && (!aSpewing || SpewEnabled())) { \
+      va_list ap;                                               \
+      va_start(ap, aFormat);                                    \
+      InternalPrint(aFormat, ap);                               \
+      va_end(ap);                                               \
+    }                                                           \
+  }
+
+MOZ_MakeRecordReplayPrinter(Print, false)
+MOZ_MakeRecordReplayPrinter(PrintSpew, true)
+
+#undef MOZ_MakeRecordReplayPrinter
 
 } // recordreplay
 } // mozilla
