@@ -71,17 +71,12 @@ def make_repackage_signing_description(config, jobs):
             # we want the repack job, via the dependencies for the the chunking-dummy dep_job
             for dep in dep_job.dependencies:
                 if dep.startswith('release-partner-repack'):
-                    dependencies = {"repackage": dep}
+                    dependencies = {"repack": dep}
                     break
         else:
             # we have a genuine repackage job as our parent
             dependencies = {"repackage": dep_job.label}
 
-        signing_dependencies = dep_job.dependencies
-        # This is so we get the build task etc in our dependencies to
-        # have better beetmover support.
-        dependencies.update({k: v for k, v in signing_dependencies.items()
-                             if k != 'docker-image'})
         attributes = copy_attributes_from_dependent_job(dep_job)
         attributes['repackage_type'] = 'repackage-signing'
 
@@ -113,7 +108,7 @@ def make_repackage_signing_description(config, jobs):
             }]
         elif 'linux' in build_platform:
             upstream_artifacts = [{
-                "taskId": {"task-reference": "<repackage>"},
+                "taskId": {"task-reference": "<repack>"},
                 "taskType": "repackage",
                 "paths": [
                     get_artifact_path(dep_job, "{}/target.tar.bz2".format(repack_id)),
