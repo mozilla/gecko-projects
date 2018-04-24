@@ -13,6 +13,7 @@
 #include "base/task.h"
 #include "chrome/common/child_thread.h"
 #include "ipc/Channel.h"
+#include "mozilla/layers/ImageDataSerializer.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/VsyncDispatcher.h"
 
@@ -340,16 +341,18 @@ DrawTargetForRemoteDrawing(LayoutDeviceIntSize aSize)
 {
   MOZ_RELEASE_ASSERT(!NS_IsMainThread());
 
+  gfx::IntSize size(aSize.width, aSize.height);
+
   if (!gPaintMessage ||
       aSize.width != (int) gPaintMessage->mWidth ||
       aSize.height != (int) gPaintMessage->mHeight)
   {
     free(gPaintMessage);
-    gPaintMessage = PaintMessage::New(aSize.width, aSize.height);
+    size_t bufferSize = layers::ImageDataSerializer::ComputeRGBBufferSize(size, gSurfaceFormat);
+    gPaintMessage = PaintMessage::New(bufferSize, aSize.width, aSize.height);
   }
 
-  gfx::IntSize size(aSize.width, aSize.height);
-  size_t stride = aSize.width * 4;
+  size_t stride = layers::ImageDataSerializer::ComputeRGBStride(gSurfaceFormat, aSize.width);
   RefPtr<gfx::DrawTarget> drawTarget =
     gfx::Factory::CreateDrawTargetForData(gfx::BackendType::SKIA,
                                           gPaintMessage->Buffer(),

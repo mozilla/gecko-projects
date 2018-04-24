@@ -362,8 +362,9 @@ struct PaintMessage : public Message
   const unsigned char* Buffer() const { return Data<PaintMessage, unsigned char>(); }
   size_t BufferSize() const { return DataSize<PaintMessage, unsigned char>(); }
 
-  static PaintMessage* New(uint32_t aWidth, uint32_t aHeight) {
-    return NewWithData<PaintMessage, unsigned char>(aWidth * aHeight * 4, aWidth, aHeight);
+  static PaintMessage* New(uint32_t aBufferSize, uint32_t aWidth, uint32_t aHeight) {
+    MOZ_RELEASE_ASSERT(aBufferSize >= aWidth * aHeight * 4);
+    return NewWithData<PaintMessage, unsigned char>(aBufferSize, aWidth, aHeight);
   }
 };
 
