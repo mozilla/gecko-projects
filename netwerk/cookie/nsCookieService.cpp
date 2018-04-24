@@ -76,6 +76,7 @@ using namespace mozilla::net;
  ******************************************************************************/
 
 static StaticRefPtr<nsCookieService> gCookieService;
+bool nsCookieService::sSameSiteEnabled = false;
 
 // XXX_hack. See bug 178993.
 // This is a hack to hide HttpOnly cookies from older browsers
@@ -2137,7 +2138,7 @@ nsCookieService::SetCookieStringCommon(nsIURI *aHostURI,
   nsDependentCString cookieString(aCookieHeader);
   nsDependentCString serverTime(aServerTime ? aServerTime : "");
   SetCookieStringInternal(aHostURI, isForeign, cookieString,
-                          serverTime, aFromHttp, false, attrs, aChannel);
+                          serverTime, aFromHttp, attrs, aChannel);
   return NS_OK;
 }
 
@@ -2147,7 +2148,6 @@ nsCookieService::SetCookieStringInternal(nsIURI                 *aHostURI,
                                          nsDependentCString     &aCookieHeader,
                                          const nsCString        &aServerTime,
                                          bool                    aFromHttp,
-                                         bool                    aFromChild,
                                          const OriginAttributes &aOriginAttrs,
                                          nsIChannel             *aChannel)
 {
@@ -2215,7 +2215,7 @@ nsCookieService::SetCookieStringInternal(nsIURI                 *aHostURI,
 
   // process each cookie in the header
   while (SetCookieInternal(aHostURI, key, requireHostMatch, cookieStatus,
-                           aCookieHeader, serverTime, aFromHttp, aFromChild, aChannel)) {
+                           aCookieHeader, serverTime, aFromHttp, aChannel)) {
     // document.cookie can only set one cookie at a time
     if (!aFromHttp)
       break;
@@ -2298,8 +2298,7 @@ void
 nsCookieService::NotifyChanged(nsISupports     *aSubject,
                                const char16_t *aData,
                                bool aOldCookieIsSession,
-                               bool aFromHttp,
-                               bool aFromChild)
+                               bool aFromHttp)
 {
   const char* topic = mDBState == mPrivateDBState ?
       "private-cookie-changed" : "cookie-changed";
@@ -2310,9 +2309,6 @@ nsCookieService::NotifyChanged(nsISupports     *aSubject,
   // Notify for topic "private-cookie-changed" or "cookie-changed"
   os->NotifyObservers(aSubject, topic, aData);
 
-  if (!aFromChild) {
-    os->NotifyObservers(aSubject, "non-js-cookie-changed", aData);
-  }
   // Notify for topic "session-cookie-changed" to update the copy of session
   // cookies in session restore component.
   // Ignore private session cookies since they will not be restored.
@@ -3075,6 +3071,18 @@ nsCookieService::DomainMatches(nsCookie* aCookie,
 }
 
 bool
+nsCookieService::IsSameSiteEnabled()
+{
+  static bool prefInitialized = false;
+  if (!prefInitialized) {
+    Preferences::AddBoolVarCache(&sSameSiteEnabled,
+                                 "network.cookie.same-site.enabled", false);
+    prefInitialized = true;
+  }
+  return sSameSiteEnabled;
+}
+
+bool
 nsCookieService::PathMatches(nsCookie* aCookie,
                              const nsACString& aPath)
 {
@@ -3204,7 +3212,7 @@ nsCookieService::GetCookiesForURI(nsIURI *aHostURI,
 
     int32_t sameSiteAttr = 0;
     cookie->GetSameSite(&sameSiteAttr);
-    if (aIsSameSiteForeign) {
+    if (aIsSameSiteForeign && IsSameSiteEnabled()) {
       // it if's a cross origin request and the cookie is same site only (strict)
       // don't send it
       if (sameSiteAttr == nsICookie2::SAMESITE_STRICT) {
@@ -3471,14 +3479,29 @@ nsCookieService::CanSetCookie(nsIURI*             aHostURI,
 
   // If the new cookie is same-site but in a cross site context,
   // browser must ignore the cookie.
-  if (aCookieAttributes.sameSite != nsICookie2::SAMESITE_UNSET &&
-      aThirdPartyUtil) {
-    bool isThirdParty = false;
-    aThirdPartyUtil->IsThirdPartyChannel(aChannel, aHostURI, &isThirdParty);
-    if (isThirdParty) {
-      COOKIE_LOGFAILURE(SET_COOKIE, aHostURI, savedCookieHeader,
-                        "failed the samesite tests");
-      return newCookie;
+  if ((aCookieAttributes.sameSite != nsICookie2::SAMESITE_UNSET) &&
+      aThirdPartyUtil &&
+      IsSameSiteEnabled()) {
+
+    // Do not treat loads triggered by web extensions as foreign
+    bool addonAllowsLoad = false;
+    if (aChannel) {
+      nsCOMPtr<nsIURI> channelURI;
+      NS_GetFinalChannelURI(aChannel, getter_AddRefs(channelURI));
+      nsCOMPtr<nsILoadInfo> loadInfo = aChannel->GetLoadInfo();
+      addonAllowsLoad = loadInfo &&
+        BasePrincipal::Cast(loadInfo->TriggeringPrincipal())->
+          AddonAllowsLoad(channelURI);
+    }
+
+    if (!addonAllowsLoad) {
+      bool isThirdParty = false;
+      nsresult rv = aThirdPartyUtil->IsThirdPartyChannel(aChannel, aHostURI, &isThirdParty);
+      if (NS_FAILED(rv) || isThirdParty) {
+        COOKIE_LOGFAILURE(SET_COOKIE, aHostURI, savedCookieHeader,
+                          "failed the samesite tests");
+        return newCookie;
+      }
     }
   }
 
@@ -3496,7 +3519,6 @@ nsCookieService::SetCookieInternal(nsIURI                        *aHostURI,
                                    nsDependentCString            &aCookieHeader,
                                    int64_t                        aServerTime,
                                    bool                           aFromHttp,
-                                   bool                           aFromChild,
                                    nsIChannel                    *aChannel)
 {
   NS_ASSERTION(aHostURI, "null host!");
@@ -3554,7 +3576,7 @@ nsCookieService::SetCookieInternal(nsIURI                        *aHostURI,
   // add the cookie to the list. AddInternal() takes care of logging.
   // we get the current time again here, since it may have changed during prompting
   AddInternal(aKey, cookie, PR_Now(), aHostURI, savedCookieHeader.get(),
-              aFromHttp, aFromChild);
+              aFromHttp);
   return newCookie;
 }
 
@@ -3569,8 +3591,7 @@ nsCookieService::AddInternal(const nsCookieKey &aKey,
                              int64_t            aCurrentTimeInUsec,
                              nsIURI            *aHostURI,
                              const char        *aCookieHeader,
-                             bool               aFromHttp,
-                             bool               aFromChild)
+                             bool               aFromHttp)
 {
   MOZ_ASSERT(mInitializedDBStates);
   MOZ_ASSERT(mInitializedDBConn);
@@ -3688,7 +3709,7 @@ nsCookieService::AddInternal(const nsCookieKey &aKey,
       if (aCookie->Expiry() <= currentTime) {
         COOKIE_LOGFAILURE(SET_COOKIE, aHostURI, aCookieHeader,
           "previously stored cookie was deleted");
-        NotifyChanged(oldCookie, u"deleted", oldCookieIsSession, aFromHttp, aFromChild);
+        NotifyChanged(oldCookie, u"deleted", oldCookieIsSession, aFromHttp);
         return;
       }
 
@@ -3762,7 +3783,7 @@ nsCookieService::AddInternal(const nsCookieKey &aKey,
     NotifyChanged(purgedList, u"batch-deleted");
   }
 
-  NotifyChanged(aCookie, foundCookie ? u"changed" : u"added", oldCookieIsSession, aFromHttp, aFromChild);
+  NotifyChanged(aCookie, foundCookie ? u"changed" : u"added", oldCookieIsSession, aFromHttp);
 }
 
 /******************************************************************************
