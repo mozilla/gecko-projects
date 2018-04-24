@@ -80,6 +80,12 @@ PER_PROJECT_PARAMETERS = {
         'include_nightly': True,
     },
 
+    'jamun': {
+        'target_tasks_method': 'mozilla_esr60_tasks',
+        'optimize_target_tasks': True,
+        'include_nightly': True,
+    },
+
     'pine': {
         'target_tasks_method': 'pine_tasks',
         'optimize_target_tasks': True,
