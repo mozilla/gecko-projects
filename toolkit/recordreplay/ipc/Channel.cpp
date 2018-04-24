@@ -255,10 +255,10 @@ Channel::PrintMessage(const char* aPrefix, const Message& aMsg)
     data = WideCharString(nmsg.Buffer(), nmsg.BufferSize());
     break;
   }
-  case MessageType::SetSendPaints: {
-    const SetSendPaintsMessage& nmsg = (const SetSendPaintsMessage&) aMsg;
+  case MessageType::SetIsActive: {
+    const SetIsActiveMessage& nmsg = (const SetIsActiveMessage&) aMsg;
     data = new char[32];
-    snprintf(data, 32, "%d", nmsg.mSendPaints);
+    snprintf(data, 32, "%d", nmsg.mActive);
     break;
   }
   case MessageType::SetSaveCheckpoint: {

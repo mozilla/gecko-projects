@@ -13,6 +13,7 @@
 #include "ipc/Channel.h"
 #include "js/Proxy.h"
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/ProcessGlobal.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/ipc/IOThreadChild.h"
@@ -241,6 +242,7 @@ static void RecvHitBreakpoint(const HitBreakpointMessage& aMsg);
 static void RecvHitRecordingEndpoint();
 static void RecvDebuggerResponse(const DebuggerResponseMessage& aMsg);
 static void RecvRecordingFlushed();
+static void RecvAlwaysMarkMajorCheckpoints();
 
 // The role taken by the active child.
 class ChildRoleActive : public ChildRole
@@ -253,7 +255,7 @@ public:
   void Initialize() override {
     gActiveChild = mProcess;
 
-    mProcess->SendMessage(SetSendPaintsMessage(true));
+    mProcess->SendMessage(SetIsActiveMessage(true));
 
     // Always run forward from the primordial checkpoint. Otherwise, the
     // debugger hooks below determine how the active child changes.
@@ -282,6 +284,9 @@ public:
     case MessageType::RecordingFlushed:
       RecvRecordingFlushed();
       break;
+    case MessageType::AlwaysMarkMajorCheckpoints:
+      RecvAlwaysMarkMajorCheckpoints();
+      break;
     default:
       MOZ_CRASH();
     }
@@ -309,7 +314,7 @@ public:
 
   void Initialize() override {
     MOZ_RELEASE_ASSERT(mProcess->IsPausedAtCheckpoint());
-    mProcess->SendMessage(SetSendPaintsMessage(false));
+    mProcess->SendMessage(SetIsActiveMessage(false));
     Poke();
   }
 
@@ -481,6 +486,15 @@ static TimeDuration gTimeSinceLastMajorCheckpoint;
 // The replaying process that was given the last major checkpoint.
 static ChildProcess* gLastAssignedMajorCheckpoint;
 
+// For testing, mark new major checkpoints as frequently as possible.
+static bool gAlwaysMarkMajorCheckpoints;
+
+static void
+RecvAlwaysMarkMajorCheckpoints()
+{
+  gAlwaysMarkMajorCheckpoints = true;
+}
+
 static void
 AssignMajorCheckpoint(ChildProcess* aChild, size_t aId)
 {
@@ -503,7 +517,9 @@ UpdateCheckpointTimes(const HitCheckpointMessage& aMsg)
   gCheckpointTimes.append(TimeDuration::FromMicroseconds(aMsg.mDurationMicroseconds));
   //PrintSpew("Checkpoint #%d: %.2f seconds\n", aMsg.mCheckpointId, gCheckpointTimes.back().ToSeconds());
   gTimeSinceLastMajorCheckpoint += gCheckpointTimes.back();
-  if (gTimeSinceLastMajorCheckpoint >= TimeDuration::FromSeconds(MajorCheckpointSeconds)) {
+  if (gTimeSinceLastMajorCheckpoint >= TimeDuration::FromSeconds(MajorCheckpointSeconds) ||
+      gAlwaysMarkMajorCheckpoints)
+  {
     // Alternate back and forth between assigning major checkpoints to the
     // two replaying processes.
     MOZ_RELEASE_ASSERT(gLastAssignedMajorCheckpoint);
@@ -570,6 +586,22 @@ MaybeCreateCheckpointInRecordingChild()
   }
 }
 
+// Send a message to the message manager in the UI process. This is consumed by
+// various tests.
+static void
+SendMessageToUIProcess(const char* aMessage)
+{
+  AutoSafeJSContext cx;
+  dom::ProcessGlobal* cpmm = dom::ProcessGlobal::Get();
+  ErrorResult err;
+  nsAutoString message;
+  message.Append(NS_ConvertUTF8toUTF16(aMessage));
+  JS::Rooted<JS::Value> undefined(cx);
+  cpmm->SendAsyncMessage(cx, message, undefined, nullptr, nullptr, undefined, err);
+  MOZ_RELEASE_ASSERT(!err.Failed());
+  err.SuppressException();
+}
+
 static void
 SaveRecordingInternal(char* aFilename)
 {
@@ -598,6 +630,7 @@ SaveRecordingInternal(char* aFilename)
   DirectCloseFile(writefd);
 
   PrintSpew("Copied Recording %s\n", aFilename);
+  SendMessageToUIProcess("SaveRecordingFinished");
   free(aFilename);
 }
 
@@ -650,6 +683,7 @@ MarkActiveChildExplicitPause()
       if (!HasSavedCheckpointsInRange(gActiveChild, lastMajorCheckpoint, gLastExplicitPause)) {
         ChildProcess* otherChild = OtherReplayingChild(gActiveChild);
         ChildProcess* oldActiveChild = gActiveChild;
+        otherChild->WaitUntilPaused();
         otherChild->Recover(oldActiveChild);
         otherChild->SetRole(new ChildRoleActive());
         oldActiveChild->RecoverToCheckpoint(oldActiveChild->MostRecentSavedCheckpoint());
@@ -1222,6 +1256,7 @@ RecvHitRecordingEndpoint()
   // Look for a recording child we can transition into.
   if (!gRecordingChild) {
     MarkActiveChildExplicitPause();
+    SendMessageToUIProcess("HitRecordingEndpoint");
     return;
   }
 

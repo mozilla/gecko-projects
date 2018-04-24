@@ -497,6 +497,9 @@ RecordReplayInterface_InternalRecordReplayDirective(long aDirective)
   case Directive::AlwaysSaveTemporaryCheckpoints:
     JS::replay::hooks.alwaysSaveTemporaryCheckpoints();
     break;
+  case Directive::AlwaysMarkMajorCheckpoints:
+    child::NotifyAlwaysMarkMajorCheckpoints();
+    break;
   default:
     MOZ_CRASH("Unknown directive");
   }

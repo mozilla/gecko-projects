@@ -22,7 +22,7 @@ function test() {
   waitForExplicitFinish();
 
   var tab = gBrowser.addTab(null, { recordExecution: "*" });
-  addRecordingFinishedListener(() => runTest(tab));
+  addMessageListener("RecordingFinished", () => runTest(tab));
 
   gBrowser.selectedTab = tab;
   openUILinkIn(EXAMPLE_URL + "doc_rr_basic.html", "current");

@@ -1161,13 +1161,13 @@ async function takeScreenshot(dbg) {
   dump(`[SCREENSHOT] ${canvas.toDataURL()}\n`);
 }
 
-// Specify a callback to be invoked the next time the 'RecordingFinished'
-// message is sent by a test file.
-function addRecordingFinishedListener(callback) {
+// Specify a callback to be invoked the next time a particular message is sent
+// by a test file.
+function addMessageListener(message, callback) {
   const ppmm = Services.ppmm;
-  ppmm.addMessageListener("RecordingFinished",
+  ppmm.addMessageListener(message,
                           function listener() {
-                            ppmm.removeMessageListener("RecordingFinished", listener);
+                            ppmm.removeMessageListener(message, listener);
                             callback();
                           });
 }
@@ -1222,9 +1222,9 @@ var stepInToLine = resumeThenPauseAtLineFunctionFactory("stepIn");
 var reverseStepOutToLine = resumeThenPauseAtLineFunctionFactory("reverseStepOut");
 var stepOutToLine = resumeThenPauseAtLineFunctionFactory("stepOut");
 
-// Return a promise that resolves when a thread evaluates a string in the
-// topmost frame, ensuring the result matches the expected value.
-function checkEvaluateInTopFrame(threadClient, text, expected) {
+// Return a promise that resolves with the result of a thread evaluating a
+// string in the topmost frame.
+function evaluateInTopFrame(threadClient, text) {
   return new Promise(function(resolve) {
     threadClient.getFrames(0, 1).then(function({frames}) {
       ok(frames.length == 1, "Got one frame");
@@ -1236,10 +1236,19 @@ function checkEvaluateInTopFrame(threadClient, text, expected) {
            packet.why.type == "clientEvaluated" &&
            "return" in packet.why.frameFinished, "Eval returned a value");
         let rval = packet.why.frameFinished["return"];
-        let match = (expected == undefined) ? rval.type == "undefined" : rval == expected;
-        ok(match, "Eval returned " + expected);
-        resolve();
+        resolve((rval.type == "undefined") ? undefined : rval);
       });
+    });
+  });
+}
+
+// Return a promise that resolves when a thread evaluates a string in the
+// topmost frame, ensuring the result matches the expected value.
+function checkEvaluateInTopFrame(threadClient, text, expected) {
+  return new Promise(function(resolve) {
+    evaluateInTopFrame(threadClient, text).then(function(rval) {
+      ok(rval == expected, "Eval returned " + expected);
+      resolve();
     });
   });
 }
@@ -1261,6 +1270,11 @@ function checkEvaluateInTopFrameThrows(threadClient, text) {
       });
     });
   });
+}
+
+// Return a pathname that can be used for a new recording file.
+function newRecordingFile() {
+  return "/tmp/MochitestRecording" + Math.round(Math.random() * 1000000000);
 }
 
 // Several web replay mochitests are running into these rejections. See bug 1447411.

@@ -76,8 +76,9 @@ namespace recordreplay {
   /* Rewind to a particular saved checkpoint in the past. */   \
   Macro(RestoreCheckpoint)                                     \
                                                                \
-  /* Set whether to send paint messages to the middleman. */   \
-  Macro(SetSendPaints)                                         \
+  /* Notify the child whether it is the active child and should send paint and similar */ \
+  /* messages to the middleman. */                             \
+  Macro(SetIsActive)                                           \
                                                                \
   /* Set whether to perform intentional crashes, for testing. */ \
   Macro(SetAllowIntentionalCrashes)                            \
@@ -105,7 +106,10 @@ namespace recordreplay {
   Macro(HitRecordingEndpoint)                                  \
                                                                \
   /* Send a response to a DebuggerRequest message. */          \
-  Macro(DebuggerResponse)
+  Macro(DebuggerResponse)                                      \
+                                                               \
+  /* Notify that the 'AlwaysMarkMajorCheckpoints' directive was invoked. */ \
+  Macro(AlwaysMarkMajorCheckpoints)
 
 enum class MessageType
 {
@@ -288,14 +292,14 @@ struct RestoreCheckpointMessage : public Message
   {}
 };
 
-struct SetSendPaintsMessage : public Message
+struct SetIsActiveMessage : public Message
 {
-  // Whether to send paints in the future or not.
-  bool mSendPaints;
+  // Whether this is the active child process (see ParentIPC.cpp).
+  bool mActive;
 
-  explicit SetSendPaintsMessage(bool aSendPaints)
-    : Message(MessageType::SetSendPaints, sizeof(*this))
-    , mSendPaints(aSendPaints)
+  explicit SetIsActiveMessage(bool aActive)
+    : Message(MessageType::SetIsActive, sizeof(*this))
+    , mActive(aActive)
   {}
 };
 
@@ -399,6 +403,13 @@ struct HitRecordingEndpointMessage : public Message
 {
   HitRecordingEndpointMessage()
     : Message(MessageType::HitRecordingEndpoint, sizeof(*this))
+  {}
+};
+
+struct AlwaysMarkMajorCheckpointsMessage : public Message
+{
+  AlwaysMarkMajorCheckpointsMessage()
+    : Message(MessageType::AlwaysMarkMajorCheckpoints, sizeof(*this))
   {}
 };
 

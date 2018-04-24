@@ -62,6 +62,9 @@ already_AddRefed<gfx::DrawTarget> DrawTargetForRemoteDrawing(LayoutDeviceIntSize
 // Notify the middleman that the recording was flushed.
 void NotifyFlushedRecording();
 
+// Notify the middleman about an AlwaysMarkMajorCheckpoints directive.
+void NotifyAlwaysMarkMajorCheckpoints();
+
 // Report a fatal error to the middleman process.
 void ReportFatalError(const char* aFormat, ...);
 

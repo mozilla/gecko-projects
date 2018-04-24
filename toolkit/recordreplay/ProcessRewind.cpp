@@ -31,8 +31,8 @@ struct RewindInfo {
   // The most recent checkpoint which was encountered.
   CheckpointId mLastCheckpoint;
 
-  // Whether to send paint messages.
-  bool mSendPaints;
+  // Whether this is the active child process.
+  bool mIsActiveChild;
 
   // Checkpoints which have been saved. This includes only entries from
   // mShouldSaveCheckpoints, plus all temporary checkpoints.
@@ -350,15 +350,15 @@ RecordReplayInterface_ResumeExecution()
 } // extern "C"
 
 void
-SetSendPaints(bool aSendPaints)
+SetIsActiveChild(bool aActive)
 {
-  gRewindInfo->mSendPaints = aSendPaints;
+  gRewindInfo->mIsActiveChild = aActive;
 }
 
 bool
-ShouldSendPaints()
+IsActiveChild()
 {
-  return gRewindInfo->mSendPaints;
+  return gRewindInfo->mIsActiveChild;
 }
 
 } // namespace recordreplay

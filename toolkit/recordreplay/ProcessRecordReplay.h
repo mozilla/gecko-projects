@@ -117,6 +117,9 @@ enum class Directive
 
   // Always save temporary checkpoints when stepping around in the debugger.
   AlwaysSaveTemporaryCheckpoints = 3,
+
+  // Mark all future checkpoints as major checkpoints in the middleman.
+  AlwaysMarkMajorCheckpoints = 4
 };
 
 ///////////////////////////////////////////////////////////////////////////////

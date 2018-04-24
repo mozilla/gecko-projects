@@ -246,7 +246,7 @@ ChildProcess::Recover(bool aPaused, size_t aLastCheckpoint,
 {
   MOZ_RELEASE_ASSERT(IsPaused());
 
-  SendMessageRaw(SetSendPaintsMessage(false));
+  SendMessageRaw(SetIsActiveMessage(false));
 
   size_t mostRecentCheckpoint = MostRecentCheckpoint();
   bool pausedAtCheckpoint = IsPausedAtCheckpoint();

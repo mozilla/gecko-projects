@@ -75,9 +75,9 @@ ChannelMessageHandler(Message* aMsg)
     DirectWrite(gCheckpointWriteFd, &data, 1);
     break;
   }
-  case MessageType::SetSendPaints: {
-    const SetSendPaintsMessage& nmsg = (const SetSendPaintsMessage&) *aMsg;
-    PauseMainThreadAndInvokeCallback([=]() { SetSendPaints(nmsg.mSendPaints); });
+  case MessageType::SetIsActive: {
+    const SetIsActiveMessage& nmsg = (const SetIsActiveMessage&) *aMsg;
+    PauseMainThreadAndInvokeCallback([=]() { SetIsActiveChild(nmsg.mActive); });
     break;
   }
   case MessageType::SetAllowIntentionalCrashes: {
@@ -287,6 +287,14 @@ NotifyFlushedRecording()
 }
 
 void
+NotifyAlwaysMarkMajorCheckpoints()
+{
+  if (IsActiveChild()) {
+    gChannel->SendMessage(AlwaysMarkMajorCheckpointsMessage());
+  }
+}
+
+void
 NotifyHitRecordingEndpoint()
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
@@ -379,7 +387,7 @@ WaitForPaintToComplete()
   while (gPendingPaint) {
     gMonitor->Wait();
   }
-  if (ShouldSendPaints()) {
+  if (IsActiveChild()) {
     gChannel->SendMessage(*gPaintMessage);
   }
 }

@@ -6,7 +6,7 @@
 function test() {
   waitForExplicitFinish();
 
-  addRecordingFinishedListener(() => {
+  addMessageListener("RecordingFinished", () => {
     ok(true, "Finished");
     finish();
   });

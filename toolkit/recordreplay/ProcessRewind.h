@@ -112,10 +112,9 @@ CheckpointId GetLastSavedCheckpoint();
 // DivergeFromRecording, by rewinding to the last saved checkpoint if so.
 void EnsureNotDivergedFromRecording();
 
-// Access the flag for whether paints should be sent while playing forward or
-// after rewinding.
-void SetSendPaints(bool aSendPaints);
-bool ShouldSendPaints();
+// Access the flag for whether this is the active child process.
+void SetIsActiveChild(bool aActive);
+bool IsActiveChild();
 
 } // namespace recordreplay
 } // namespace mozilla
