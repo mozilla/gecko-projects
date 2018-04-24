@@ -11,7 +11,8 @@ transforms:
    - taskgraph.transforms.task:transforms
 
 kind-dependencies:
-   - release-eme-free-repack-repackage-signing
+   - release-eme-free-repack-repackage  # Mac
+   - release-eme-free-repack-repackage-signing  # Windows
 
 only-for-build-platforms:
    - macosx64-nightly/opt

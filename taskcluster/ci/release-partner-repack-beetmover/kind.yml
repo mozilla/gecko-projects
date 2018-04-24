@@ -11,7 +11,9 @@ transforms:
    - taskgraph.transforms.task:transforms
 
 kind-dependencies:
-   - release-partner-repack-repackage-signing
+   - release-partner-repack-chunking-dummy  # Linux
+   - release-partner-repack-repackage  # Mac
+   - release-partner-repack-repackage-signing  # Windows
 
 only-for-build-platforms:
    - linux-nightly/opt

@@ -54,10 +54,7 @@ def make_repackage_signing_description(config, jobs):
         repack_id = dep_job.task['extra']['repack_id']
         attributes = dep_job.attributes
 
-        # Mac & windows
         label = dep_job.label.replace("repackage-", "repackage-signing-")
-        # Linux
-        label = label.replace("chunking-dummy-", "repackage-signing-")
         description = (
             "Signing of repackaged artifacts for partner repack id '{repack_id}' for build '"
             "{build_platform}/{build_type}'".format(
@@ -67,16 +64,13 @@ def make_repackage_signing_description(config, jobs):
             )
         )
 
-        if 'linux' in dep_job.label:
-            # we want the repack job, via the dependencies for the the chunking-dummy dep_job
-            for dep in dep_job.dependencies:
-                if dep.startswith('release-partner-repack'):
-                    dependencies = {"repack": dep}
-                    break
-        else:
-            # we have a genuine repackage job as our parent
-            dependencies = {"repackage": dep_job.label}
+        dependencies = {"repackage": dep_job.label}
 
+        signing_dependencies = dep_job.dependencies
+        # This is so we get the build task etc in our dependencies to
+        # have better beetmover support.
+        dependencies.update({k: v for k, v in signing_dependencies.items()
+                             if k != 'docker-image'})
         attributes = copy_attributes_from_dependent_job(dep_job)
         attributes['repackage_type'] = 'repackage-signing'
 
@@ -85,36 +79,20 @@ def make_repackage_signing_description(config, jobs):
         signing_cert_scope = get_signing_cert_scope_per_platform(
             build_platform, is_nightly, config
         )
-        scopes = [signing_cert_scope, add_scope_prefix(config, 'signing:format:gpg')]
+        scopes = [signing_cert_scope]
 
-        if 'win' in build_platform:
-            upstream_artifacts = [{
-                "taskId": {"task-reference": "<repackage>"},
-                "taskType": "repackage",
-                "paths": [
-                    get_artifact_path(dep_job, "{}/target.installer.exe".format(repack_id)),
-                ],
-                "formats": ["sha2signcode", "gpg"]
-            }]
-            scopes.append(add_scope_prefix(config, "signing:format:sha2signcode"))
-        elif 'mac' in build_platform:
-            upstream_artifacts = [{
-                "taskId": {"task-reference": "<repackage>"},
-                "taskType": "repackage",
-                "paths": [
-                    get_artifact_path(dep_job, "{}/target.dmg".format(repack_id)),
-                ],
-                "formats": ["gpg"]
-            }]
-        elif 'linux' in build_platform:
-            upstream_artifacts = [{
-                "taskId": {"task-reference": "<repack>"},
-                "taskType": "repackage",
-                "paths": [
-                    get_artifact_path(dep_job, "{}/target.tar.bz2".format(repack_id)),
-                ],
-                "formats": ["gpg"]
-            }]
+        if 'win' not in build_platform:
+            raise Exception("Repackage signing is not supported for non-Windows partner repacks.")
+
+        upstream_artifacts = [{
+            "taskId": {"task-reference": "<repackage>"},
+            "taskType": "repackage",
+            "paths": [
+                get_artifact_path(dep_job, "{}/target.installer.exe".format(repack_id)),
+            ],
+            "formats": ["sha2signcode"]
+        }]
+        scopes.append(add_scope_prefix(config, "signing:format:sha2signcode"))
 
         task = {
             'label': label,
