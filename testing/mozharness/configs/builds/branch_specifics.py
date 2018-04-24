@@ -252,17 +252,19 @@ config = {
     'graphics': {},
     # 'holly': {},
     'jamun': {
-        'update_channel': 'beta',
-        'enable_release_promotion': 1,
+        'update_channel': 'esr-jamun',
+        'enable_release_promotion': True,
         'platform_overrides': {
             'linux': {
                 'mozconfig_variant': 'release',
+                'force_clobber': True,
             },
             'linux-debug': {
                 'update_channel': 'default',
             },
             'linux64': {
                 'mozconfig_variant': 'release',
+                'force_clobber': True,
             },
             'linux64-debug': {
                 'update_channel': 'default',
@@ -281,6 +283,7 @@ config = {
             },
             'macosx64': {
                 'mozconfig_variant': 'release',
+                'force_clobber': True,
             },
             'macosx64-debug': {
                 'update_channel': 'default',
@@ -293,12 +296,14 @@ config = {
             },
             'win32': {
                 'mozconfig_variant': 'release',
+                'force_clobber': True,
             },
             'win32-debug': {
                 'update_channel': 'default',
             },
             'win64': {
                 'mozconfig_variant': 'release',
+                'force_clobber': True,
             },
             'win64-debug': {
                 'update_channel': 'default',
