@@ -20,9 +20,7 @@ if test "$OS_ARCH" = "WINNT"; then
             "$MOZ_UPDATE_CHANNEL" = "nightly-try" -o \
             "$MOZ_UPDATE_CHANNEL" = "aurora" -o \
             "$MOZ_UPDATE_CHANNEL" = "beta" -o \
-            "$MOZ_UPDATE_CHANNEL" = "release" -o \
-            "$MOZ_UPDATE_CHANNEL" = "esr" -o \
-            "$MOZ_UPDATE_CHANNEL" = "esr-jamun"; then
+            "$MOZ_UPDATE_CHANNEL" = "release"; then
       if ! test "$MOZ_DEBUG"; then
         MOZ_STUB_INSTALLER=1
       fi
