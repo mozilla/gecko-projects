@@ -5,6 +5,7 @@ from copy import deepcopy
 import json
 import logging
 import os
+from redo import retry
 import requests
 import xml.etree.ElementTree as ET
 
@@ -131,7 +132,7 @@ TC_PLATFORM_PER_FTP = {
     'win64': 'win64-nightly',
 }
 
-TASKCLUSTER_PROXY_SECRET_ROOT = 'http://taskcluster/secrets/v1/secret/'
+TASKCLUSTER_PROXY_SECRET_ROOT = 'http://taskcluster/secrets/v1/secret'
 
 LOCALES_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
@@ -140,6 +141,30 @@ LOCALES_FILE = os.path.join(
 
 # cache data at the module level
 partner_configs = {}
+
+
+# TODO - grant private repo access to P.A.T.
+# TODO - add level-3 as well, cleanup as of level
+def get_token(params):
+    """ We use a Personal Access Token from Github to lookup partner config. No extra scopes are
+    needed on the token to read public repositories, but need the 'repo' scope to see private
+    repositories. This is not fine grained and also grants r/w access, but is revoked at the repo
+    level.
+    """
+
+    # The 'usual' method - via taskClusterProxy for decision tasks
+    # TODO use {level}? Or allow the token to level 1 and remove level from the path?
+    url = "{secret_root}/project/releng/gecko/build/level-2/partner-github-api".format(
+        secret_root=TASKCLUSTER_PROXY_SECRET_ROOT, **params
+    )
+    try:
+        resp = retry(requests.get, attempts=2, sleeptime=10,
+                     args=(url, ),
+                     kwargs={'timeout': 60, 'headers': ''})
+        j = resp.json()
+        return j['secret']['key']
+    except (requests.ConnectionError, ValueError, KeyError):
+        raise RuntimeError('Could not get Github API token to lookup partner data')
 
 
 def query_api(query, token):
