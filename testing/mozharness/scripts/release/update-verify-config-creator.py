@@ -167,7 +167,12 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
             config_options=self.config_options,
             config={
                 "virtualenv_modules": [
-                    "mozrelease",
+                    {
+                        'name': "mozrelease",
+                        'url': os.path.join('..',  # cwd is $topsrcdir/build/
+                                            'python', 'mozrelease'),
+                        'global_options': [],
+                    }
                 ],
                 "virtualenv_path": "venv",
             },
