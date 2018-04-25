@@ -8,6 +8,7 @@
 
 #include "mozilla/Maybe.h"
 
+#include "HashTable.h"
 #include "Lock.h"
 #include "MemorySnapshot.h"
 #include "ProcessRecordReplay.h"
@@ -153,6 +154,9 @@ namespace recordreplay {
   MACRO(sandbox_init)                           \
   MACRO(vm_copy)                                \
   MACRO(vm_purgable_control)                    \
+  /* NSPR functions */                          \
+  MACRO(PL_NewHashTable)                        \
+  MACRO(PL_HashTableDestroy)                    \
   /* Objective C functions */                   \
   MACRO(class_getClassMethod)                   \
   MACRO(class_getInstanceMethod)                \
@@ -1467,6 +1471,31 @@ RR_vm_copy(vm_map_t aTarget, vm_address_t aSourceAddress,
   // non-writable, so do the copy manually.
   memcpy((void*) aDestAddress, (void*) aSourceAddress, aSize);
   return KERN_SUCCESS;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// NSPR redirections
+///////////////////////////////////////////////////////////////////////////////
+
+// Even though NSPR is compiled as part of firefox, it is easier to just
+// redirect this stuff than get record/replay related changes into the source.
+
+static PLHashTable*
+RR_PL_NewHashTable(PRUint32 aNumBuckets, PLHashFunction aKeyHash,
+                   PLHashComparator aKeyCompare, PLHashComparator aValueCompare,
+                   const PLHashAllocOps *aAllocOps, void *aAllocPriv)
+{
+  GeneratePLHashTableCallbacks(&aKeyHash, &aKeyCompare, &aValueCompare, &aAllocOps, &aAllocPriv);
+  return OriginalCall(PL_NewHashTable, PLHashTable*,
+                      aNumBuckets, aKeyHash, aKeyCompare, aValueCompare, aAllocOps, aAllocPriv);
+}
+
+static void
+RR_PL_HashTableDestroy(PLHashTable* aTable)
+{
+  void* priv = aTable->allocPriv;
+  OriginalCall(PL_HashTableDestroy, void, aTable);
+  DestroyPLHashTableCallbacks(priv);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

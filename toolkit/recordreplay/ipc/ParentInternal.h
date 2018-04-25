@@ -23,9 +23,6 @@ class ChildProcess;
 // Get the message loop for the main thread.
 MessageLoop* MainThreadMessageLoop();
 
-// Get the file where the recording is stored.
-const char* RecordingFilename();
-
 // Return whether replaying processes are allowed to save checkpoints and
 // rewind.
 bool CanRewind();

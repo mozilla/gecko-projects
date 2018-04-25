@@ -365,6 +365,8 @@ XRE_InitChildProcess(int aArgc,
   NS_ENSURE_ARG_POINTER(aArgv[0]);
   MOZ_ASSERT(aChildData);
 
+  recordreplay::Initialize(aArgc, aArgv);
+
 #if defined(XP_LINUX) && defined(MOZ_SANDBOX)
   // This has to happen before glib thread pools are started.
   mozilla::SandboxEarlyInit();

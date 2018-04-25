@@ -31,19 +31,6 @@ namespace recordreplay {
 namespace parent {
 
 ///////////////////////////////////////////////////////////////////////////////
-// Recording Management
-///////////////////////////////////////////////////////////////////////////////
-
-// Location of the recording file.
-static char* gRecordingFilename;
-
-const char*
-RecordingFilename()
-{
-  return gRecordingFilename;
-}
-
-///////////////////////////////////////////////////////////////////////////////
 // Preferences
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -997,12 +984,12 @@ Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChild
   // Construct the message that will be sent to each child when starting up.
   gIntroductionMessage = IntroductionMessage::New(aParentPid, gShmemPrefs, gShmemPrefsLen, aArgc, aArgv);
 
-  bool recording = TestEnv("MIDDLEMAN_RECORD");
-  gRecordingFilename = strdup(getenv(recording ? "MIDDLEMAN_RECORD" : "MIDDLEMAN_REPLAY"));
+  MOZ_RELEASE_ASSERT(gProcessKind == ProcessKind::MiddlemanRecording ||
+                     gProcessKind == ProcessKind::MiddlemanReplaying);
 
   // Use a temporary file for the recording if the filename is unspecified.
   if (!strcmp(gRecordingFilename, "*")) {
-    MOZ_RELEASE_ASSERT(recording);
+    MOZ_RELEASE_ASSERT(gProcessKind == ProcessKind::MiddlemanRecording);
     free(gRecordingFilename);
     gRecordingFilename = mktemp(strdup("/tmp/RecordingXXXXXX"));
   }
@@ -1015,7 +1002,7 @@ Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChild
 
   gChildProtocol = new MiddlemanProtocol(ipc::ChildSide);
 
-  if (recording) {
+  if (gProcessKind == ProcessKind::MiddlemanRecording) {
     gParentProtocol = new MiddlemanProtocol(ipc::ParentSide);
     gParentProtocol->mOpposite = gChildProtocol;
     gChildProtocol->mOpposite = gParentProtocol;

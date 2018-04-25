@@ -100,12 +100,6 @@ void HitEndOfRecording();
 // about.
 bool HitRecordingEndpoint();
 
-// Print some text to stderr, bypassing the recording.
-void Print(const char* aFormat, ...);
-
-// Print some text to stderr if spew is enabled, bypassing the recording.
-void PrintSpew(const char* aFormat, ...);
-
 // Possible directives to give via the RecordReplayDirective function.
 enum class Directive
 {
@@ -121,6 +115,10 @@ enum class Directive
   // Mark all future checkpoints as major checkpoints in the middleman.
   AlwaysMarkMajorCheckpoints = 4
 };
+
+// Get the process kind and recording file specified at the command line.
+extern ProcessKind gProcessKind;
+extern char* gRecordingFilename;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Helper Functions

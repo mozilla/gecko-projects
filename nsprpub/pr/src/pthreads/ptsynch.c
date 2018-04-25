@@ -110,13 +110,13 @@ static void pt_PostNotifies(PRLock *lock, PRBool unlock)
             }
 #if defined(DEBUG)
             pt_debug.cvars_notified += 1;
-            if (0 > PR_ATOMIC_DECREMENT_NO_RECORD(&cv->notify_pending))
+            if (0 > PR_ATOMIC_DECREMENT(&cv->notify_pending))
             {
                 pt_debug.delayed_cv_deletes += 1;
                 PR_DestroyCondVar(cv);
             }
 #else  /* defined(DEBUG) */
-            if (0 > PR_ATOMIC_DECREMENT_NO_RECORD(&cv->notify_pending))
+            if (0 > PR_ATOMIC_DECREMENT(&cv->notify_pending))
                 PR_DestroyCondVar(cv);
 #endif  /* defined(DEBUG) */
         }
@@ -299,7 +299,7 @@ static void pt_PostNotifyToCvar(PRCondVar *cvar, PRBool broadcast)
     }
 
     /* A brand new entry in the array */
-    (void)PR_ATOMIC_INCREMENT_NO_RECORD(&cvar->notify_pending);
+    (void)PR_ATOMIC_INCREMENT(&cvar->notify_pending);
     notified->cv[index].times = (broadcast) ? -1 : 1;
     notified->cv[index].cv = cvar;
     notified->length += 1;
@@ -332,7 +332,7 @@ PR_IMPLEMENT(PRCondVar*) PR_NewCondVar(PRLock *lock)
 
 PR_IMPLEMENT(void) PR_DestroyCondVar(PRCondVar *cvar)
 {
-    if (0 > PR_ATOMIC_DECREMENT_NO_RECORD(&cvar->notify_pending))
+    if (0 > PR_ATOMIC_DECREMENT(&cvar->notify_pending))
     {
         PRIntn rv = pthread_cond_destroy(&cvar->cv);
 #if defined(DEBUG)
@@ -531,7 +531,7 @@ PR_IMPLEMENT(void) PR_DestroyMonitor(PRMonitor *mon)
     int rv;
 
     PR_ASSERT(mon != NULL);
-    if (PR_ATOMIC_DECREMENT_NO_RECORD(&mon->refCount) == 0)
+    if (PR_ATOMIC_DECREMENT(&mon->refCount) == 0)
     {
         rv = pthread_cond_destroy(&mon->waitCV); PR_ASSERT(0 == rv);
         rv = pthread_cond_destroy(&mon->entryCV); PR_ASSERT(0 == rv);
@@ -635,7 +635,7 @@ PR_IMPLEMENT(PRStatus) PR_ExitMonitor(PRMonitor *mon)
         mon->notifyTimes = 0;
         /* We will access the members of 'mon' after unlocking mon->lock.
          * Add a reference. */
-        PR_ATOMIC_INCREMENT_NO_RECORD(&mon->refCount);
+        PR_ATOMIC_INCREMENT(&mon->refCount);
     }
     rv = pthread_mutex_unlock(&mon->lock);
     PR_ASSERT(0 == rv);

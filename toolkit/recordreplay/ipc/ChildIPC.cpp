@@ -183,14 +183,19 @@ InitRecordingOrReplayingProcess(base::ProcessId aParentPid,
 
   gMiddlemanPid = aParentPid;
 
-  MOZ_RELEASE_ASSERT(*aArgc == 3);
-  MOZ_RELEASE_ASSERT(!strcmp((*aArgv)[1], "-recordReplayChannelID"));
-  int channelID = atoi((*aArgv)[2]);
+  Maybe<int> channelID;
+  for (int i = 0; i < *aArgc; i++) {
+    if (!strcmp((*aArgv)[i], gChannelIDOption)) {
+      MOZ_RELEASE_ASSERT(channelID.isNothing() && i + 1 < *aArgc);
+      channelID.emplace(atoi((*aArgv)[i + 1]));
+    }
+  }
+  MOZ_RELEASE_ASSERT(channelID.isSome());
 
   {
     AutoPassThroughThreadEvents pt;
     gMonitor = new Monitor();
-    gChannel = new Channel(channelID, ChannelMessageHandler);
+    gChannel = new Channel(channelID.ref(), ChannelMessageHandler);
   }
 
   DirectCreatePipe(&gCheckpointWriteFd, &gCheckpointReadFd);
@@ -248,7 +253,7 @@ ParentProcessId()
   return gParentPid;
 }
 
-static int32_t gSentFatalErrorMessage;
+static Atomic<bool, SequentiallyConsistent, Behavior::DontPreserve> gSentFatalErrorMessage;
 
 void
 ReportFatalError(const char* aFormat, ...)
@@ -262,7 +267,7 @@ ReportFatalError(const char* aFormat, ...)
   Print("***** Fatal Record/Replay Error *****\n%s\n", buf);
 
   // Only send one fatal error message per child process.
-  if (PR_ATOMIC_SET_NO_RECORD(&gSentFatalErrorMessage, 1) == 0) {
+  if (!gSentFatalErrorMessage.exchange(true)) {
     // Construct a FatalErrorMessage on the stack, to avoid touching the heap.
     char msgBuf[4096];
     size_t header = sizeof(FatalErrorMessage);

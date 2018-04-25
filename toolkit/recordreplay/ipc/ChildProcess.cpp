@@ -362,21 +362,20 @@ ChildProcess::LaunchSubprocess()
   mProcess = new ipc::GeckoChildProcessHost(GeckoProcessType_Content);
 
   std::vector<std::string> extraArgs;
-  extraArgs.push_back("-recordReplayChannelID");
-
   char buf[20];
+
   SprintfLiteral(buf, "%d", (int) GetId());
+  extraArgs.push_back(gChannelIDOption);
   extraArgs.push_back(buf);
 
-  ipc::GeckoChildProcessHost::RecordReplayKind recordReplayKind =
-    IsRecording()
-    ? ipc::GeckoChildProcessHost::RecordReplayKind::Record
-    : ipc::GeckoChildProcessHost::RecordReplayKind::Replay;
+  SprintfLiteral(buf, "%d", (int) IsRecording() ? ProcessKind::Recording : ProcessKind::Replaying);
+  extraArgs.push_back(gProcessKindOption);
+  extraArgs.push_back(buf);
 
-  nsAutoString recordReplayFile;
-  recordReplayFile.Append(NS_ConvertUTF8toUTF16(RecordingFilename()));
+  extraArgs.push_back(gRecordingFileOption);
+  extraArgs.push_back(gRecordingFilename);
 
-  if (!mProcess->LaunchAndWaitForProcessHandle(extraArgs, recordReplayKind, recordReplayFile)) {
+  if (!mProcess->LaunchAndWaitForProcessHandle(extraArgs)) {
     MOZ_CRASH("ChildProcess::LaunchSubprocess");
   }
 

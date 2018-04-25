@@ -31,7 +31,7 @@ class Lock
   size_t mId;
 
   // Whether this is locked.
-  int32_t mLocked;
+  Atomic<bool, SequentiallyConsistent, Behavior::DontPreserve> mLocked;
 
   // Owner of this lock, or zero if unlocked.
   int32_t mOwner;

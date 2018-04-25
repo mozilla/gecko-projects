@@ -45,20 +45,10 @@ public:
 
   static uint32_t GetUniqueID();
 
-  enum class RecordReplayKind {
-    None,
-    MiddlemanRecord,
-    MiddlemanReplay,
-    Record,
-    Replay
-  };
-
   // Block until the IPC channel for our subprocess is initialized,
   // but no longer.  The child process may or may not have been
   // created when this method returns.
-  bool AsyncLaunch(StringVector aExtraOpts=StringVector(),
-                   RecordReplayKind aRecordReplayKind=RecordReplayKind::None,
-                   const nsAString& aRecordReplayFile=nsString());
+  bool AsyncLaunch(StringVector aExtraOpts=StringVector());
 
   virtual bool WaitUntilConnected(int32_t aTimeoutMs = 0);
 
@@ -74,9 +64,7 @@ public:
   // executable image can be loaded.  On win32, we do know that when
   // we return.  But we don't know if dynamic linking succeeded on
   // either platform.
-  bool LaunchAndWaitForProcessHandle(StringVector aExtraOpts,
-                                     RecordReplayKind aRecordReplayKind,
-                                     const nsAString& aRecordReplayFile);
+  bool LaunchAndWaitForProcessHandle(StringVector aExtraOpts=StringVector());
 
   // Block until the child process has been created and it connects to
   // the IPC channel, meaning it's fully initialized.  (Or until an
@@ -84,9 +72,7 @@ public:
   bool SyncLaunch(StringVector aExtraOpts=StringVector(),
                   int32_t timeoutMs=0);
 
-  virtual bool PerformAsyncLaunch(StringVector aExtraOpts,
-                                  RecordReplayKind aRecordReplayKind,
-                                  const nsAString& aRecordReplayFile);
+  virtual bool PerformAsyncLaunch(StringVector aExtraOpts=StringVector());
 
   virtual void OnProcessHandleReady(ProcessHandle aProcessHandle);
   virtual void OnProcessLaunchError();
@@ -197,9 +183,7 @@ private:
   // Does the actual work for AsyncLaunch, on the IO thread.
   bool PerformAsyncLaunchInternal(std::vector<std::string>& aExtraOpts);
 
-  bool RunPerformAsyncLaunch(StringVector aExtraOpts,
-                             RecordReplayKind aRecordReplayKind,
-                             nsString aRecordReplayFile);
+  bool RunPerformAsyncLaunch(StringVector aExtraOpts=StringVector());
 
   enum class BinaryPathType {
     Self,

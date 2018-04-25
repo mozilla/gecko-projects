@@ -468,6 +468,9 @@ public:
   void SendMessage(const Message& aMsg);
 };
 
+// Command line option used to specify the channel ID for a child process.
+static const char* gChannelIDOption = "-recordReplayChannelID";
+
 } // namespace recordreplay
 } // namespace mozilla
 

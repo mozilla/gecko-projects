@@ -2070,19 +2070,22 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
     extraArgs.push_back("-safeMode");
   }
 
-  GeckoChildProcessHost::RecordReplayKind recordReplayKind =
-    GeckoChildProcessHost::RecordReplayKind::None;
-  nsAutoString recordReplayFile;
-  if (mRecordExecution.Length()) {
-    recordReplayFile.Append(mRecordExecution);
-    recordReplayKind = GeckoChildProcessHost::RecordReplayKind::MiddlemanRecord;
-  } else if (mReplayExecution.Length()) {
-    recordReplayFile.Append(mReplayExecution);
-    recordReplayKind = GeckoChildProcessHost::RecordReplayKind::MiddlemanReplay;
+  // Specify whether the process is recording or replaying an execution.
+  if (mRecordExecution.Length() || mReplayExecution.Length()) {
+    char buf[20];
+    SprintfLiteral(buf, "%d",
+                   (int) mRecordExecution.Length()
+                   ? recordreplay::ProcessKind::MiddlemanRecording
+                   : recordreplay::ProcessKind::MiddlemanReplaying);
+    extraArgs.push_back(recordreplay::gProcessKindOption);
+    extraArgs.push_back(buf);
+
+    extraArgs.push_back(recordreplay::gRecordingFileOption);
+    extraArgs.push_back(NS_ConvertUTF16toUTF8(mRecordExecution.Length() ? mRecordExecution : mReplayExecution).get());
   }
 
   SetOtherProcessId(kInvalidProcessId, ProcessIdState::ePending);
-  if (!mSubprocess->Launch(extraArgs, recordReplayKind, recordReplayFile)) {
+  if (!mSubprocess->Launch(extraArgs)) {
     NS_ERROR("failed to launch child in the parent");
     MarkAsDead();
     return false;

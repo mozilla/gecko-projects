@@ -107,10 +107,35 @@ LoadSymbol(const char* aName)
   return rv;
 }
 
-void
-InitializeCallbacks()
+static inline bool
+TestEnv(const char* env)
 {
-#define INIT_SYMBOL(aName, _1, _2, _3)                  \
+  const char* value = getenv(env);
+  return value && value[0];
+}
+
+void
+Initialize(int aArgc, char* aArgv[])
+{
+  // Only initialize if the right command line option was specified.
+  bool found = false;
+  for (int i = 0; i < aArgc; i++) {
+    if (!strcmp(aArgv[i], gProcessKindOption)) {
+      found = true;
+      break;
+    }
+  }
+  if (!found) {
+    return;
+  }
+
+  void (*initialize)(int, char**);
+  BitwiseCast(LoadSymbol("RecordReplayInterface_Initialize"), &initialize);
+  if (!initialize) {
+    return;
+  }
+
+#define INIT_SYMBOL(aName, _1, _2, _3)                                  \
   BitwiseCast(LoadSymbol("RecordReplayInterface_" #aName), &gPtr ##aName);
 #define INIT_SYMBOL_VOID(aName, _2, _3)  INIT_SYMBOL(aName, void, _2, _3)
 
@@ -119,6 +144,8 @@ FOR_EACH_INTERFACE_VOID(INIT_SYMBOL_VOID)
 
 #undef INIT_SYMBOL
 #undef INIT_SYMBOL_VOID
+
+  initialize(aArgc, aArgv);
 }
 
 #define DEFINE_WRAPPER(aName, aReturnType, aFormals, aActuals)  \

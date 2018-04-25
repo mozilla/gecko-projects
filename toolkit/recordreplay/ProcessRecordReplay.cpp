@@ -46,6 +46,8 @@ char* gInitializationFailureMessage;
 static void DumpRecordingAssertions();
 
 bool gInitialized;
+ProcessKind gProcessKind;
+char* gRecordingFilename;
 
 // Current process ID.
 static int gPid;
@@ -55,24 +57,43 @@ static bool gSpewEnabled;
 
 extern "C" {
 
-// This is called during NSPR initialization.
 MOZ_EXPORT void
-RecordReplayInterface_Initialize()
+RecordReplayInterface_Initialize(int aArgc, char* aArgv[])
 {
-  const char* recordingFile = nullptr;
-  if (TestEnv("RECORD")) {
-    gIsRecording = gIsRecordingOrReplaying = gPRIsRecordingOrReplaying = true;
-    recordingFile = getenv("RECORD");
-    fprintf(stderr, "RECORDING %d %s\n", getpid(), recordingFile);
-  } else if (TestEnv("REPLAY")) {
-    gIsReplaying = gIsRecordingOrReplaying = gPRIsRecordingOrReplaying = true;
-    recordingFile = getenv("REPLAY");
-    fprintf(stderr, "REPLAYING %d %s\n", getpid(), recordingFile);
-  } else if (TestEnv("MIDDLEMAN_RECORD") || TestEnv("MIDDLEMAN_REPLAY")) {
+  // Parse command line options for the process kind and recording file.
+  Maybe<ProcessKind> processKind;
+  Maybe<char*> recordingFile;
+  for (int i = 0; i < aArgc; i++) {
+    if (!strcmp(aArgv[i], gProcessKindOption)) {
+      MOZ_RELEASE_ASSERT(processKind.isNothing() && i + 1 < aArgc);
+      processKind.emplace((ProcessKind) atoi(aArgv[i + 1]));
+    }
+    if (!strcmp(aArgv[i], gRecordingFileOption)) {
+      MOZ_RELEASE_ASSERT(recordingFile.isNothing() && i + 1 < aArgc);
+      recordingFile.emplace(aArgv[i + 1]);
+    }
+  }
+  MOZ_RELEASE_ASSERT(processKind.isSome() && recordingFile.isSome());
+
+  gProcessKind = processKind.ref();
+  gRecordingFilename = strdup(recordingFile.ref());
+
+  switch (processKind.ref()) {
+  case ProcessKind::Recording:
+    gIsRecording = gIsRecordingOrReplaying = true;
+    fprintf(stderr, "RECORDING %d %s\n", getpid(), recordingFile.ref());
+    break;
+  case ProcessKind::Replaying:
+    gIsReplaying = gIsRecordingOrReplaying = true;
+    fprintf(stderr, "REPLAYING %d %s\n", getpid(), recordingFile.ref());
+    break;
+  case ProcessKind::MiddlemanRecording:
+  case ProcessKind::MiddlemanReplaying:
     gIsMiddleman = true;
     fprintf(stderr, "MIDDLEMAN %d\n", getpid());
-  } else {
-    MOZ_CRASH();
+    break;
+  default:
+    MOZ_CRASH("Bad ProcessKind");
   }
 
   if (IsRecordingOrReplaying() && TestEnv("WAIT_AT_START")) {
@@ -89,7 +110,6 @@ RecordReplayInterface_Initialize()
   }
 
   EarlyInitializeRedirections();
-  InitializeCallbacks();
 
   if (!IsRecordingOrReplaying()) {
     return;
@@ -102,7 +122,7 @@ RecordReplayInterface_Initialize()
   InitializeBacktraces();
 
   gRecordingFile = new File();
-  if (!gRecordingFile->Open(recordingFile, IsRecording() ? File::WRITE : File::READ)) {
+  if (!gRecordingFile->Open(recordingFile.ref(), IsRecording() ? File::WRITE : File::READ)) {
     gInitializationFailureMessage = strdup("Bad recording file");
     return;
   }

@@ -7,8 +7,8 @@
 #ifndef mozilla_toolkit_recordreplay_SpinLock_h
 #define mozilla_toolkit_recordreplay_SpinLock_h
 
-#include "pratom.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/Atomics.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/GuardObjects.h"
 
@@ -33,7 +33,7 @@ public:
   inline void Unlock();
 
 private:
-  int32_t mLocked;
+  Atomic<bool, SequentiallyConsistent, Behavior::DontPreserve> mLocked;
 };
 
 // A basic read/write spin lock. This lock permits either multiple readers and
@@ -129,7 +129,7 @@ ThreadYield()
 inline void
 SpinLock::Lock()
 {
-  while (PR_ATOMIC_SET_NO_RECORD(&mLocked, 1)) {
+  while (mLocked.exchange(true)) {
     ThreadYield();
   }
 }
@@ -137,7 +137,7 @@ SpinLock::Lock()
 inline void
 SpinLock::Unlock()
 {
-  DebugOnly<int32_t> rv = PR_ATOMIC_SET_NO_RECORD(&mLocked, 0);
+  DebugOnly<bool> rv = mLocked.exchange(false);
   MOZ_ASSERT(rv);
 }
 

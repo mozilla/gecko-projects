@@ -13,7 +13,6 @@
 
 #include "prtypes.h"
 #include "prlock.h"
-#include "prrecordreplay.h"
 
 PR_BEGIN_EXTERN_C
 
@@ -91,13 +90,11 @@ NSPR_API(PRInt32)	PR_AtomicAdd(PRInt32 *ptr, PRInt32 val);
 #pragma intrinsic(_InterlockedExchangeAdd)
 #endif
 
-#define PR_ATOMIC_INCREMENT_NO_RECORD(val) \
-        _InterlockedIncrement((long volatile *)(val))
-#define PR_ATOMIC_DECREMENT_NO_RECORD(val) \
-        _InterlockedDecrement((long volatile *)(val))
-#define PR_ATOMIC_SET_NO_RECORD(val, newval) \
+#define PR_ATOMIC_INCREMENT(val) _InterlockedIncrement((long volatile *)(val))
+#define PR_ATOMIC_DECREMENT(val) _InterlockedDecrement((long volatile *)(val))
+#define PR_ATOMIC_SET(val, newval) \
         _InterlockedExchange((long volatile *)(val), (long)(newval))
-#define PR_ATOMIC_ADD_NO_RECORD(ptr, val) \
+#define PR_ATOMIC_ADD(ptr, val) \
         (_InterlockedExchangeAdd((long volatile *)(ptr), (long)(val)) + (val))
 
 #elif ((__GNUC__ > 4) || (__GNUC__ == 4 && __GNUC_MINOR__ >= 1)) && \
@@ -120,10 +117,10 @@ NSPR_API(PRInt32)	PR_AtomicAdd(PRInt32 *ptr, PRInt32 val);
  * processors that we believe support a full atomic exchange operation.
  */
 
-#define PR_ATOMIC_INCREMENT_NO_RECORD(val) __sync_add_and_fetch(val, 1)
-#define PR_ATOMIC_DECREMENT_NO_RECORD(val) __sync_sub_and_fetch(val, 1)
-#define PR_ATOMIC_SET_NO_RECORD(val, newval) __sync_lock_test_and_set(val, newval)
-#define PR_ATOMIC_ADD_NO_RECORD(ptr, val) __sync_add_and_fetch(ptr, val)
+#define PR_ATOMIC_INCREMENT(val) __sync_add_and_fetch(val, 1)
+#define PR_ATOMIC_DECREMENT(val) __sync_sub_and_fetch(val, 1)
+#define PR_ATOMIC_SET(val, newval) __sync_lock_test_and_set(val, newval)
+#define PR_ATOMIC_ADD(ptr, val) __sync_add_and_fetch(ptr, val)
 
 #else
 
@@ -133,52 +130,6 @@ NSPR_API(PRInt32)	PR_AtomicAdd(PRInt32 *ptr, PRInt32 val);
 #define PR_ATOMIC_ADD(ptr, val) PR_AtomicAdd(ptr, val)
 
 #endif
-
-NSPR_API(void) PR_RecordReplayBeginOrderedAtomicAccess();
-static inline void PR_BeginOrderedAtomicAccess()
-{
-  if (PR_IsRecordingOrReplaying())
-    PR_RecordReplayBeginOrderedAtomicAccess();
-}
-
-NSPR_API(void) PR_RecordReplayEndOrderedAtomicAccess();
-static inline void PR_EndOrderedAtomicAccess()
-{
-  if (PR_IsRecordingOrReplaying())
-    PR_RecordReplayEndOrderedAtomicAccess();
-}
-
-static inline PRInt32 PR_ATOMIC_INCREMENT(PRInt32* val)
-{
-  PR_BeginOrderedAtomicAccess();
-  PRInt32 res = PR_ATOMIC_INCREMENT_NO_RECORD(val);
-  PR_EndOrderedAtomicAccess();
-  return res;
-}
-
-static inline PRInt32 PR_ATOMIC_DECREMENT(PRInt32* val)
-{
-  PR_BeginOrderedAtomicAccess();
-  PRInt32 res = PR_ATOMIC_DECREMENT_NO_RECORD(val);
-  PR_EndOrderedAtomicAccess();
-  return res;
-}
-
-static inline PRInt32 PR_ATOMIC_SET(PRInt32* val, PRInt32 newval)
-{
-  PR_BeginOrderedAtomicAccess();
-  PRInt32 res = PR_ATOMIC_SET_NO_RECORD(val, newval);
-  PR_EndOrderedAtomicAccess();
-  return res;
-}
-
-static inline PRInt32 PR_ATOMIC_ADD(PRInt32* ptr, PRInt32 val)
-{
-  PR_BeginOrderedAtomicAccess();
-  PRInt32 res = PR_ATOMIC_ADD_NO_RECORD(ptr, val);
-  PR_EndOrderedAtomicAccess();
-  return res;
-}
 
 /*
 ** LIFO linked-list (stack)

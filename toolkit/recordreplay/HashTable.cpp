@@ -8,12 +8,12 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/StaticMutex.h"
 
+#include "HashTable.h"
 #include "InfallibleVector.h"
 #include "ProcessRecordReplay.h"
 #include "ProcessRedirect.h"
 #include "ValueIndex.h"
 
-#include "plhash.h"
 #include "PLDHashTable.h"
 
 namespace mozilla {
@@ -264,14 +264,20 @@ static void*
 WrapPLHashAllocTable(void* aAllocPrivate, PRSize aSize)
 {
   PLHashTableInfo* info = PLHashTableInfo::FromPrivate(aAllocPrivate);
-  return info->mAllocOps->allocTable(info->mAllocPrivate, aSize);
+  return info->mAllocOps
+         ? info->mAllocOps->allocTable(info->mAllocPrivate, aSize)
+         : malloc(aSize);
 }
 
 static void
 WrapPLHashFreeTable(void* aAllocPrivate, void* aItem)
 {
   PLHashTableInfo* info = PLHashTableInfo::FromPrivate(aAllocPrivate);
-  info->mAllocOps->freeTable(info->mAllocPrivate, aItem);
+  if (info->mAllocOps) {
+    info->mAllocOps->freeTable(info->mAllocPrivate, aItem);
+  } else {
+    free(aItem);
+  }
 }
 
 static PLHashEntry*
@@ -279,19 +285,20 @@ WrapPLHashAllocEntry(void* aAllocPrivate, const void* aKey)
 {
   PLHashTableInfo* info = PLHashTableInfo::FromPrivate(aAllocPrivate);
 
-  // A few PLHashTables are manipulated directly by Gecko code, in which case
-  // the hashes are supplied directly to the table and we don't have a chance
-  // to modify them. Fortunately, none of these tables are iterated in a way
-  // that can cause the replay to diverge, so just punt in these cases.
-  if (!info->HasLastKey()) {
+  if (info->HasLastKey()) {
+    uint32_t originalHash = info->mKeyHash(aKey);
+    info->AddKey(originalHash, aKey, info->GetLastNewHash(aKey));
+  } else {
+    // A few PLHashTables are manipulated directly by Gecko code, in which case
+    // the hashes are supplied directly to the table and we don't have a chance
+    // to modify them. Fortunately, none of these tables are iterated in a way
+    // that can cause the replay to diverge, so just punt in these cases.
     MOZ_ASSERT(info->IsEmpty());
-    return info->mAllocOps->allocEntry(info->mAllocPrivate, aKey);
   }
 
-  uint32_t originalHash = info->mKeyHash(aKey);
-  info->AddKey(originalHash, aKey, info->GetLastNewHash(aKey));
-
-  return info->mAllocOps->allocEntry(info->mAllocPrivate, aKey);
+  return info->mAllocOps
+         ? info->mAllocOps->allocEntry(info->mAllocPrivate, aKey)
+         : (PLHashEntry*) malloc(sizeof(PLHashEntry));
 }
 
 static void
@@ -305,7 +312,11 @@ WrapPLHashFreeEntry(void *aAllocPrivate, PLHashEntry *he, PRUintn flag)
     info->RemoveKey(originalHash, he->key);
   }
 
-  info->mAllocOps->freeEntry(info->mAllocPrivate, he, flag);
+  if (info->mAllocOps) {
+    info->mAllocOps->freeEntry(info->mAllocPrivate, he, flag);
+  } else if (flag == HT_FREE_ENTRY) {
+    free(he);
+  }
 }
 
 static PLHashAllocOps gWrapPLHashAllocOps = {
@@ -327,14 +338,12 @@ PLHashComputeHash(void* aKey, PLHashTableInfo* aInfo)
   return aInfo->SetLastKey(aKey);
 }
 
-extern "C" {
-
-MOZ_EXPORT void
-RecordReplayInterface_GeneratePLHashTableCallbacks(PLHashFunction* aKeyHash,
-                                                   PLHashComparator* aKeyCompare,
-                                                   PLHashComparator* aValueCompare,
-                                                   const PLHashAllocOps** aAllocOps,
-                                                   void** aAllocPrivate)
+void
+GeneratePLHashTableCallbacks(PLHashFunction* aKeyHash,
+                             PLHashComparator* aKeyCompare,
+                             PLHashComparator* aValueCompare,
+                             const PLHashAllocOps** aAllocOps,
+                             void** aAllocPrivate)
 {
   PLHashTableInfo* info = new PLHashTableInfo(*aKeyHash, *aKeyCompare, *aValueCompare,
                                               *aAllocOps, *aAllocPrivate);
@@ -344,14 +353,12 @@ RecordReplayInterface_GeneratePLHashTableCallbacks(PLHashFunction* aKeyHash,
   *aAllocPrivate = info;
 }
 
-MOZ_EXPORT void
-RecordReplayInterface_DestroyPLHashTableCallbacks(void* aAllocPrivate)
+void
+DestroyPLHashTableCallbacks(void* aAllocPrivate)
 {
   PLHashTableInfo* info = PLHashTableInfo::FromPrivate(aAllocPrivate);
   delete info;
 }
-
-} // extern "C"
 
 ///////////////////////////////////////////////////////////////////////////////
 // PLDHashTable Stabilization

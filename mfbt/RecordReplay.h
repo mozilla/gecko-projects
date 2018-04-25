@@ -298,15 +298,30 @@ static inline void RecordReplayDirective(long aDirective);
 // with virtual methods based on its vtable.
 static inline const char* VirtualThingName(void* aThing);
 
-// Called during initialization, to set up record/replay function callbacks.
-MFBT_API void InitializeCallbacks();
-
 // Enum which describes whether to preserve behavior between recording and
 // replay sessions.
 enum class Behavior {
   DontPreserve,
   Preserve
 };
+
+// Determine whether this is a recording/replaying or middleman process, and
+// initialize record/replay state if so.
+MFBT_API void Initialize(int aArgc, char* aArgv[]);
+
+// Kinds of recording/replaying processes that can be spawned.
+enum class ProcessKind {
+  Recording,
+  Replaying,
+  MiddlemanRecording,
+  MiddlemanReplaying
+};
+
+// Command line option for specifying the record/replay kind of a process.
+static const char* gProcessKindOption = "-recordReplayKind";
+
+// Command line option for specifying the recording file to use.
+static const char* gRecordingFileOption = "-recordReplayFile";
 
 ///////////////////////////////////////////////////////////////////////////////
 // Debugger API

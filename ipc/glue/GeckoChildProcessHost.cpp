@@ -37,7 +37,6 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/ipc/BrowserProcessSubThread.h"
 #include "mozilla/ipc/EnvironmentMap.h"
-#include "mozilla/recordreplay/ParentIPC.h"
 #include "mozilla/Omnijar.h"
 #include "mozilla/Telemetry.h"
 #include "ProtocolUtils.h"
@@ -334,31 +333,27 @@ GeckoChildProcessHost::SyncLaunch(std::vector<std::string> aExtraOpts, int aTime
   MessageLoop* ioLoop = XRE_GetIOMessageLoop();
   NS_ASSERTION(MessageLoop::current() != ioLoop, "sync launch from the IO thread NYI");
 
-  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>,
-                                              RecordReplayKind, nsString>(
+  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>>(
     "ipc::GeckoChildProcessHost::RunPerformAsyncLaunch",
     this,
     &GeckoChildProcessHost::RunPerformAsyncLaunch,
-    aExtraOpts, RecordReplayKind::None, nsString()));
+    aExtraOpts));
 
   return WaitUntilConnected(aTimeoutMs);
 }
 
 bool
-GeckoChildProcessHost::AsyncLaunch(std::vector<std::string> aExtraOpts,
-                                   RecordReplayKind aRecordReplayKind,
-                                   const nsAString& aRecordReplayFile)
+GeckoChildProcessHost::AsyncLaunch(std::vector<std::string> aExtraOpts)
 {
   PrepareLaunch();
 
   MessageLoop* ioLoop = XRE_GetIOMessageLoop();
 
-  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>,
-                                              RecordReplayKind, nsString>(
+  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>>(
     "ipc::GeckoChildProcessHost::RunPerformAsyncLaunch",
     this,
     &GeckoChildProcessHost::RunPerformAsyncLaunch,
-    aExtraOpts, aRecordReplayKind, aRecordReplayFile));
+    aExtraOpts));
 
   // This may look like the sync launch wait, but we only delay as
   // long as it takes to create the channel.
@@ -409,19 +404,16 @@ GeckoChildProcessHost::WaitUntilConnected(int32_t aTimeoutMs)
 }
 
 bool
-GeckoChildProcessHost::LaunchAndWaitForProcessHandle(StringVector aExtraOpts,
-                                                     RecordReplayKind aRecordReplayKind,
-                                                     const nsAString& aRecordReplayFile)
+GeckoChildProcessHost::LaunchAndWaitForProcessHandle(StringVector aExtraOpts)
 {
   PrepareLaunch();
 
   MessageLoop* ioLoop = XRE_GetIOMessageLoop();
-  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>,
-                                              RecordReplayKind, nsString>(
+  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>>(
     "ipc::GeckoChildProcessHost::RunPerformAsyncLaunch",
     this,
     &GeckoChildProcessHost::RunPerformAsyncLaunch,
-    aExtraOpts, aRecordReplayKind, nsString(aRecordReplayFile)));
+    aExtraOpts));
 
   MonitorAutoLock lock(mMonitor);
   while (mProcessState < PROCESS_CREATED) {
@@ -501,50 +493,12 @@ GeckoChildProcessHost::GetChildLogName(const char* origLogName,
   buffer.AppendInt(mChildCounter);
 }
 
-static bool
-TestEnv(const char* aEnv)
-{
-  const char* value = getenv(aEnv);
-  return value && value[0];
-}
-
-// FIXME why does PR_SetEnv not work in opt builds here?
-static void
-SetEnv(const char* aEnv, const char* aValue)
-{
-  if (aValue) {
-    int rv = setenv(aEnv, aValue, 1);
-    MOZ_RELEASE_ASSERT(rv == 0);
-  } else {
-    int rv = unsetenv(aEnv);
-    MOZ_RELEASE_ASSERT(rv == 0);
-  }
-}
-
 bool
-GeckoChildProcessHost::PerformAsyncLaunch(std::vector<std::string> aExtraOpts,
-                                          RecordReplayKind aRecordReplayKind,
-                                          const nsAString& aRecordReplayFile)
+GeckoChildProcessHost::PerformAsyncLaunch(std::vector<std::string> aExtraOpts)
 {
 #ifdef MOZ_GECKO_PROFILER
   AutoSetProfilerEnvVarsForChildProcess profilerEnvironment;
 #endif
-
-  // Set environment variables if we want the child process to record or replay
-  // its behavior.
-  const char* recordReplayEnv;
-  switch (aRecordReplayKind) {
-  case RecordReplayKind::None: recordReplayEnv = nullptr; break;
-  case RecordReplayKind::MiddlemanRecord: recordReplayEnv = "MIDDLEMAN_RECORD"; break;
-  case RecordReplayKind::MiddlemanReplay: recordReplayEnv = "MIDDLEMAN_REPLAY"; break;
-  case RecordReplayKind::Record: recordReplayEnv = "RECORD"; break;
-  case RecordReplayKind::Replay: recordReplayEnv = "REPLAY"; break;
-  }
-  if (recordReplayEnv) {
-    nsAutoCString cmd;
-    cmd.Append(NS_ConvertUTF16toUTF8(aRecordReplayFile));
-    SetEnv(recordReplayEnv, cmd.get());
-  }
 
   // - Note: this code is not called re-entrantly, nor are restoreOrig*LogName
   //   or mChildCounter touched by any other thread, so this is safe.
@@ -585,23 +539,15 @@ GeckoChildProcessHost::PerformAsyncLaunch(std::vector<std::string> aExtraOpts,
   }
 #endif
 
-  bool retval = PerformAsyncLaunchInternal(aExtraOpts);
-
-  if (recordReplayEnv) {
-    SetEnv(recordReplayEnv, nullptr);
-  }
-
-  return retval;
+  return PerformAsyncLaunchInternal(aExtraOpts);
 }
 
 bool
-GeckoChildProcessHost::RunPerformAsyncLaunch(std::vector<std::string> aExtraOpts,
-                                             RecordReplayKind aRecordReplayKind,
-                                             nsString aRecordReplayFile)
+GeckoChildProcessHost::RunPerformAsyncLaunch(std::vector<std::string> aExtraOpts)
 {
   InitializeChannel();
 
-  bool ok = PerformAsyncLaunch(aExtraOpts, aRecordReplayKind, aRecordReplayFile);
+  bool ok = PerformAsyncLaunch(aExtraOpts);
   if (!ok) {
     // WaitUntilConnected might be waiting for us to signal.
     // If something failed let's set the error state and notify.
@@ -874,8 +820,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
 
 # ifdef MOZ_WIDGET_COCOA
   // Wait for the child process to send us its 'task_t' data.
-  const int kTimeoutMs =
-    (TestEnv("WAIT_AT_START") || TestEnv("MIDDLEMAN_WAIT_AT_START")) ? 1000000 : 10000;
+  const int kTimeoutMs = 10000;
 
   MachReceiveMessage child_message;
   ReceivePort parent_recv_port(mach_connection_name.c_str());

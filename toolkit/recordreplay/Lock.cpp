@@ -191,11 +191,11 @@ Lock::EnterHelper(bool aBlockUntilAcquired)
     }
   } else if (!aBlockUntilAcquired && IsRecording()) {
     // Make one attempt to acquire the lock.
-    acquired = PR_ATOMIC_SET_NO_RECORD(&mLocked, 1) == 0;
+    acquired = !mLocked.exchange(true);
   } else {
     // Wait until we are able to acquire the lock.
     thread->SetWaitLock(this);
-    while (PR_ATOMIC_SET_NO_RECORD(&mLocked, 1)) {
+    while (mLocked.exchange(true)) {
       Thread::Wait();
     }
     thread->SetWaitLock(nullptr);
@@ -232,7 +232,8 @@ Lock::Leave()
     mReentrantEnters--;
   } else {
     mOwner = 0;
-    DebugOnly<int32_t> rv = PR_ATOMIC_SET_NO_RECORD(&mLocked, 0);
+    DebugOnly<bool> rv = mLocked.exchange(false);
+    MOZ_ASSERT(rv);
     Thread::NotifyThreadsWaitingForLock(this);
   }
 }

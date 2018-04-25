@@ -268,52 +268,28 @@ void _PR_InitAtomic(void)
     _PR_MD_INIT_ATOMIC();
 }
 
-PR_IMPLEMENT(void)
-PR_RecordReplayBeginOrderedAtomicAccess()
-{
-    PR_CALL_RECORD_REPLAY_INTERFACE("RecordReplayInterface_InternalBeginOrderedAtomicAccess", ());
-}
-
-PR_IMPLEMENT(void)
-PR_RecordReplayEndOrderedAtomicAccess()
-{
-    PR_CALL_RECORD_REPLAY_INTERFACE("RecordReplayInterface_InternalEndOrderedAtomicAccess", ());
-}
-
 PR_IMPLEMENT(PRInt32)
 PR_AtomicIncrement(PRInt32 *val)
 {
-    PR_BeginOrderedAtomicAccess();
-    PRInt32 res = _PR_MD_ATOMIC_INCREMENT(val);
-    PR_EndOrderedAtomicAccess();
-    return res;
+    return _PR_MD_ATOMIC_INCREMENT(val);
 }
 
 PR_IMPLEMENT(PRInt32)
 PR_AtomicDecrement(PRInt32 *val)
 {
-    PR_BeginOrderedAtomicAccess();
-    PRInt32 res = _PR_MD_ATOMIC_DECREMENT(val);
-    PR_EndOrderedAtomicAccess();
-    return res;
+    return _PR_MD_ATOMIC_DECREMENT(val);
 }
 
 PR_IMPLEMENT(PRInt32)
 PR_AtomicSet(PRInt32 *val, PRInt32 newval)
 {
-    PR_BeginOrderedAtomicAccess();
-    PRInt32 res = _PR_MD_ATOMIC_SET(val, newval);
-    PR_EndOrderedAtomicAccess();
-    return res;
+    return _PR_MD_ATOMIC_SET(val, newval);
 }
 
 PR_IMPLEMENT(PRInt32)
 PR_AtomicAdd(PRInt32 *ptr, PRInt32 val)
 {
-    PR_BeginOrderedAtomicAccess();
-    PRInt32 res = _PR_MD_ATOMIC_ADD(ptr, val);
-    PR_EndOrderedAtomicAccess();
-    return res;
+    return _PR_MD_ATOMIC_ADD(ptr, val);
 }
 /*
  * For platforms, which don't support the CAS (compare-and-swap) instruction
