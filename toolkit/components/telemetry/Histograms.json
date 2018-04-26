@@ -9912,42 +9912,63 @@
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "boolean",
+    "bug_numbers": [916804, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "Did WebIDE runtime connection succeed?"
   },
   "DEVTOOLS_WEBIDE_USB_CONNECTION_RESULT": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "boolean",
+    "bug_numbers": [916804, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "Did WebIDE USB runtime connection succeed?"
   },
   "DEVTOOLS_WEBIDE_WIFI_CONNECTION_RESULT": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "boolean",
+    "bug_numbers": [916804, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "Did WebIDE WiFi runtime connection succeed?"
   },
   "DEVTOOLS_WEBIDE_SIMULATOR_CONNECTION_RESULT": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "boolean",
+    "bug_numbers": [916804, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "Did WebIDE simulator runtime connection succeed?"
   },
   "DEVTOOLS_WEBIDE_REMOTE_CONNECTION_RESULT": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "boolean",
+    "bug_numbers": [916804, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "Did WebIDE remote runtime connection succeed?"
   },
   "DEVTOOLS_WEBIDE_LOCAL_CONNECTION_RESULT": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "boolean",
+    "bug_numbers": [916804, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "Did WebIDE local runtime connection succeed?"
   },
   "DEVTOOLS_WEBIDE_OTHER_CONNECTION_RESULT": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "boolean",
+    "bug_numbers": [1069552, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "Did WebIDE other runtime connection succeed?"
   },
   "DEVTOOLS_WEBIDE_CONNECTION_TIME_SECONDS": {
@@ -9975,6 +9996,9 @@
     "expires_in_version": "never",
     "kind": "boolean",
     "keyed": true,
+    "bug_numbers": [1159043, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "What runtime type did WebIDE connect to?"
   },
   "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_ID": {
@@ -9982,6 +10006,9 @@
     "expires_in_version": "never",
     "kind": "boolean",
     "keyed": true,
+    "bug_numbers": [1159043, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "What runtime ID did WebIDE connect to?"
   },
   "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_PROCESSOR": {
@@ -9989,6 +10016,9 @@
     "expires_in_version": "never",
     "kind": "boolean",
     "keyed": true,
+    "bug_numbers": [1159043, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "What runtime processor did WebIDE connect to?"
   },
   "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_OS": {
@@ -9996,6 +10026,9 @@
     "expires_in_version": "never",
     "kind": "boolean",
     "keyed": true,
+    "bug_numbers": [1159043, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "What runtime OS did WebIDE connect to?"
   },
   "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_PLATFORM_VERSION": {
@@ -10003,6 +10036,9 @@
     "expires_in_version": "never",
     "kind": "boolean",
     "keyed": true,
+    "bug_numbers": [1159043, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "What runtime platform version did WebIDE connect to?"
   },
   "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_APP_TYPE": {
@@ -10010,6 +10046,9 @@
     "expires_in_version": "never",
     "kind": "boolean",
     "keyed": true,
+    "bug_numbers": [1159043, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "What runtime app type did WebIDE connect to?"
   },
   "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_VERSION": {
@@ -10017,6 +10056,9 @@
     "expires_in_version": "never",
     "kind": "boolean",
     "keyed": true,
+    "bug_numbers": [1159043, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "What runtime version did WebIDE connect to?"
   },
   "DEVTOOLS_SCREEN_RESOLUTION_ENUMERATED_PER_USER": {
@@ -11525,12 +11567,15 @@
     "description": "Sanitize: Time it takes to sanitize the open windows list (ms). On Android, this is the time it takes to close all open tabs (ms)."
   },
   "PWMGR_BLOCKLIST_NUM_SITES": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 100,
     "n_buckets" : 10,
-    "description": "The number of sites for which the user has explicitly rejected saving logins"
+    "description": "The number of sites for which the user has explicitly rejected saving logins",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_FORM_AUTOFILL_RESULT": {
     "record_in_processes": ["main", "content"],
@@ -11543,12 +11588,15 @@
     "description": "The result of auto-filling a login form. See http://mzl.la/1Mbs6jL for bucket descriptions."
   },
   "PWMGR_LOGIN_LAST_USED_DAYS": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 750,
     "n_buckets" : 40,
-    "description": "Time in days each saved login was last used"
+    "description": "Time in days each saved login was last used",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_LOGIN_PAGE_SAFETY": {
     "record_in_processes": ["main", "content"],
@@ -11564,19 +11612,28 @@
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "count",
-    "description": "Count of passwords copied from the password management interface"
+    "description": "Count of passwords copied from the password management interface",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_MANAGE_COPIED_USERNAME": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "count",
-    "description": "Count of usernames copied from the password management interface"
+    "description": "Count of usernames copied from the password management interface",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_MANAGE_DELETED": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "count",
-    "description": "Count of passwords deleted from the password management interface (including via Remove All)"
+    "description": "Count of passwords deleted from the password management interface (including via Remove All)",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_MANAGE_DELETED_ALL": {
     "record_in_processes": ["main", "content"],
@@ -11585,11 +11642,14 @@
     "description": "Count of times that Remove All was used from the password management interface"
   },
   "PWMGR_MANAGE_OPENED": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values" : 5,
-    "description": "Accumulates how the password management interface was opened. (0=Preferences, 1=Page Info)"
+    "description": "Accumulates how the password management interface was opened. (0=Preferences, 1=Page Info)",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_MANAGE_SORTED": {
     "record_in_processes": ["main", "content"],
@@ -11599,26 +11659,35 @@
     "description": "Reports the column that logins are sorted by"
   },
   "PWMGR_MANAGE_VISIBILITY_TOGGLED": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "boolean",
-    "description": "Whether the visibility of passwords was toggled (0=Hide, 1=Show)"
+    "description": "Whether the visibility of passwords was toggled (0=Hide, 1=Show)",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_NUM_PASSWORDS_PER_HOSTNAME": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "linear",
     "high": 21,
     "n_buckets" : 20,
-    "description": "The number of passwords per hostname"
+    "description": "The number of passwords per hostname",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_NUM_SAVED_PASSWORDS": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 750,
     "n_buckets" : 50,
-    "description": "Total number of saved logins, including those that cannot be decrypted"
+    "description": "Total number of saved logins, including those that cannot be decrypted",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_NUM_HTTPAUTH_PASSWORDS": {
     "record_in_processes": ["main", "content"],
@@ -11635,24 +11704,33 @@
     "description": "Whether an <input type=password> is associated with a <form> when it is added to a document"
   },
   "PWMGR_PROMPT_REMEMBER_ACTION" : {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 5,
-    "description": "Action taken by user through prompt for creating a login. (0=Prompt displayed [always recorded], 1=Add login, 2=Don't save now, 3=Never save)"
+    "description": "Action taken by user through prompt for creating a login. (0=Prompt displayed [always recorded], 1=Add login, 2=Don't save now, 3=Never save)",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_PROMPT_UPDATE_ACTION" : {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 5,
-    "description": "Action taken by user through prompt for modifying a login. (0=Prompt displayed [always recorded], 1=Update login)"
+    "description": "Action taken by user through prompt for modifying a login. (0=Prompt displayed [always recorded], 1=Update login)",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_SAVING_ENABLED": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "boolean",
-    "description": "Number of users who have password saving on globally"
+    "description": "Number of users who have password saving on globally",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_USERNAME_PRESENT": {
     "record_in_processes": ["main", "content"],
