@@ -10,25 +10,23 @@ async function runTest(tab) {
   await client.interrupt();
   await setBreakpoint(client, "doc_rr_continuous.html", 14);
   await resumeToLine(client, 14);
-  // Note: we currently can't eval while still recording. This test will be
-  // udpated when that is fixed.
-  await checkEvaluateInTopFrameThrows(client, "number");
-  await rewindToLine(client, 14);
   let value = await evaluateInTopFrame(client, "number");
   // Hopefully we attached late enough that the page had time to run a little.
   ok(value > 3);
   await rewindToLine(client, 14);
+  await checkEvaluateInTopFrame(client, "number", value - 1);
+  await rewindToLine(client, 14);
+  await checkEvaluateInTopFrame(client, "number", value - 2);
+  await resumeToLine(client, 14);
   await checkEvaluateInTopFrame(client, "number", value - 1);
   await resumeToLine(client, 14);
   await checkEvaluateInTopFrame(client, "number", value);
   await resumeToLine(client, 14);
   await checkEvaluateInTopFrame(client, "number", value + 1);
   await resumeToLine(client, 14);
-  await checkEvaluateInTopFrameThrows(client, "number");
-  await resumeToLine(client, 14);
-  await checkEvaluateInTopFrameThrows(client, "number");
-  await rewindToLine(client, 14);
   await checkEvaluateInTopFrame(client, "number", value + 2);
+  await rewindToLine(client, 14);
+  await checkEvaluateInTopFrame(client, "number", value + 1);
   finish();
 }
 

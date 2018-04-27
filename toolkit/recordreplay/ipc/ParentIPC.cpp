@@ -64,11 +64,8 @@ CanRewind()
 // Child Roles
 ///////////////////////////////////////////////////////////////////////////////
 
-static const double FlushSeconds = 1;
+static const double FlushSeconds = .5;
 static const double MajorCheckpointSeconds = 2;
-
-// The last time the recording was flushed.
-static TimeStamp gLastFlushTime;
 
 // This section describes the strategy used for managing child processes. When
 // recording, there is a single recording process and two replaying processes.
@@ -83,12 +80,11 @@ static TimeStamp gLastFlushTime;
 // switches from one to another.
 //
 // When the recording process is actively recording, flushes are issued to it
-// every FlushSeconds (in real time) to keep the recording reasonably current.
-// Additionally, one of the replaying processes saves a checkpoint every
-// MajorCheckpointSeconds (per gCheckpointTimes), with the process saving
-// the checkpoint alternating back and forth so that individual processes save
-// checkpoints every MajorCheckpointSeconds*2. These are the major
-// checkpoints for each replaying process.
+// every FlushSeconds to keep the recording reasonably current. Additionally,
+// one replaying process saves a checkpoint every MajorCheckpointSeconds
+// with the process saving the checkpoint alternating back and forth so that
+// individual processes save checkpoints every MajorCheckpointSeconds*2. These
+// are the major checkpoints for each replaying process.
 //
 // Active  Recording:    -----------------------
 // Standby Replaying #1: *---------*---------*
@@ -464,8 +460,9 @@ ChildRoleStandby::Poke()
 // for the active child (excluding idle time) to run from N to N+1.
 static StaticInfallibleVector<TimeDuration> gCheckpointTimes;
 
-// How much time has elapsed (per gCheckpointTimes) since the last major
-// checkpoint was noted.
+// How much time has elapsed (per gCheckpointTimes) since the last flush or
+// major checkpoint was noted.
+static TimeDuration gTimeSinceLastFlush;
 static TimeDuration gTimeSinceLastMajorCheckpoint;
 
 // The replaying process that was given the last major checkpoint.
@@ -493,6 +490,8 @@ AssignMajorCheckpoint(ChildProcess* aChild, size_t aId)
   gLastAssignedMajorCheckpoint = aChild;
 }
 
+static void FlushRecording();
+
 static void
 UpdateCheckpointTimes(const HitCheckpointMessage& aMsg)
 {
@@ -500,7 +499,20 @@ UpdateCheckpointTimes(const HitCheckpointMessage& aMsg)
     return;
   }
   gCheckpointTimes.append(TimeDuration::FromMicroseconds(aMsg.mDurationMicroseconds));
-  //PrintSpew("Checkpoint #%d: %.2f seconds\n", aMsg.mCheckpointId, gCheckpointTimes.back().ToSeconds());
+
+  if (gActiveChild->IsRecording()) {
+    gTimeSinceLastFlush += gCheckpointTimes.back();
+
+    // Occasionally flush while recording so replaying processes stay
+    // reasonably current.
+    if (aMsg.mCheckpointId == FirstCheckpointId ||
+        gTimeSinceLastFlush >= TimeDuration::FromSeconds(FlushSeconds))
+    {
+      FlushRecording();
+      gTimeSinceLastFlush = 0;
+    }
+  }
+
   gTimeSinceLastMajorCheckpoint += gCheckpointTimes.back();
   if (gTimeSinceLastMajorCheckpoint >= TimeDuration::FromSeconds(MajorCheckpointSeconds) ||
       gAlwaysMarkMajorCheckpoints)
@@ -513,6 +525,10 @@ UpdateCheckpointTimes(const HitCheckpointMessage& aMsg)
     gTimeSinceLastMajorCheckpoint = 0;
   }
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// Role Management
+///////////////////////////////////////////////////////////////////////////////
 
 static void
 SpawnRecordingChild()
@@ -540,6 +556,25 @@ SpawnReplayingChildren()
   AssignMajorCheckpoint(gSecondReplayingChild, FirstCheckpointId);
 }
 
+// Change the current active child, and select a new role for the old one.
+static void
+SwitchActiveChild(ChildProcess* aChild)
+{
+  MOZ_RELEASE_ASSERT(aChild != gActiveChild);
+  ChildProcess* oldActiveChild = gActiveChild;
+  aChild->WaitUntilPaused();
+  if (!aChild->IsRecording()) {
+    aChild->Recover(gActiveChild);
+  }
+  aChild->SetRole(new ChildRoleActive());
+  if (oldActiveChild->IsRecording()) {
+    oldActiveChild->SetRole(new ChildRoleInert());
+  } else {
+    oldActiveChild->RecoverToCheckpoint(oldActiveChild->MostRecentSavedCheckpoint());
+    oldActiveChild->SetRole(new ChildRoleStandby());
+  }
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Saving Recordings
 ///////////////////////////////////////////////////////////////////////////////
@@ -559,7 +594,6 @@ FlushRecording()
   gActiveChild->WaitUntilPaused();
 
   gLastRecordingCheckpoint = gActiveChild->LastCheckpoint();
-  gLastFlushTime = TimeStamp::Now();
 
   // We now have a usable recording for replaying children.
   static bool gHasFlushed = false;
@@ -667,31 +701,41 @@ HasSavedCheckpointsInRange(ChildProcess* aChild, size_t aStart, size_t aEnd)
 static void
 MarkActiveChildExplicitPause()
 {
-  gLastExplicitPause = gActiveChild->RewindTargetCheckpoint();
-  PrintSpew("MarkActiveChildExplicitPause %d\n", (int) gLastExplicitPause);
+  size_t targetCheckpoint = gActiveChild->RewindTargetCheckpoint();
 
   if (gActiveChild->IsRecording()) {
     // Make sure any replaying children can play forward to the same point as
     // the recording.
     FlushRecording();
+
+    // When paused at a breakpoint, the JS debugger may (indeed, will) send
+    // requests to the recording child which can affect the recording. These
+    // side effects won't be replayed later on, so the C++ side of the debugger
+    // will not provide a useful answer to these requests, reporting an
+    // unhandled divergence instead. To avoid this issue and provide a
+    // consistent debugger experience whether still recording or replaying, we
+    // switch the active child to a replaying child when pausing at a
+    // breakpoint.
+    if (CanRewind() && !gActiveChild->IsPausedAtCheckpoint()) {
+      ChildProcess* child =
+        OtherReplayingChild(ReplayingChildResponsibleForSavingCheckpoint(targetCheckpoint));
+      SwitchActiveChild(child);
+    }
   } else if (CanRewind()) {
     // Make sure we have a replaying child that can rewind from this point.
     // Switch to the other one if (a) this process is responsible for rewinding
     // from this point, and (b) this process has not saved all intermediate
     // checkpoints going back to its last major checkpoint.
-    if (gActiveChild == ReplayingChildResponsibleForSavingCheckpoint(gLastExplicitPause)) {
-      size_t lastMajorCheckpoint = LastMajorCheckpointPreceding(gActiveChild, gLastExplicitPause);
-      if (!HasSavedCheckpointsInRange(gActiveChild, lastMajorCheckpoint, gLastExplicitPause)) {
-        ChildProcess* otherChild = OtherReplayingChild(gActiveChild);
-        ChildProcess* oldActiveChild = gActiveChild;
-        otherChild->WaitUntilPaused();
-        otherChild->Recover(oldActiveChild);
-        otherChild->SetRole(new ChildRoleActive());
-        oldActiveChild->RecoverToCheckpoint(oldActiveChild->MostRecentSavedCheckpoint());
-        oldActiveChild->SetRole(new ChildRoleStandby());
+    if (gActiveChild == ReplayingChildResponsibleForSavingCheckpoint(targetCheckpoint)) {
+      size_t lastMajorCheckpoint = LastMajorCheckpointPreceding(gActiveChild, targetCheckpoint);
+      if (!HasSavedCheckpointsInRange(gActiveChild, lastMajorCheckpoint, targetCheckpoint)) {
+        SwitchActiveChild(OtherReplayingChild(gActiveChild));
       }
     }
   }
+
+  gLastExplicitPause = targetCheckpoint;
+  PrintSpew("MarkActiveChildExplicitPause %d\n", (int) gLastExplicitPause);
 
   PokeChildren();
 }
@@ -1134,39 +1178,17 @@ HookResume(bool aForward)
     // Find the replaying child responsible for saving the target checkpoint.
     // We should have explicitly paused before rewinding and given fill roles
     // to the replaying children.
-    ChildProcess* targetProcess = ReplayingChildResponsibleForSavingCheckpoint(targetCheckpoint);
-    MOZ_RELEASE_ASSERT(targetProcess != gActiveChild);
+    ChildProcess* targetChild = ReplayingChildResponsibleForSavingCheckpoint(targetCheckpoint);
+    MOZ_RELEASE_ASSERT(targetChild != gActiveChild);
 
     // This process will be the new active child, make sure it has saved the
     // checkpoint we need it to.
-    targetProcess->WaitUntil([=]() {
-        return targetProcess->HasSavedCheckpoint(targetCheckpoint)
-            && targetProcess->IsPaused();
+    targetChild->WaitUntil([=]() {
+        return targetChild->HasSavedCheckpoint(targetCheckpoint)
+            && targetChild->IsPaused();
       });
 
-    // Switch to the new active child.
-    ChildProcess* oldActiveChild = gActiveChild;
-    targetProcess->Recover(oldActiveChild);
-    targetProcess->SetRole(new ChildRoleActive());
-
-    // Assign a new role to the old active child.
-    if (oldActiveChild->IsRecording()) {
-      oldActiveChild->SetRole(new ChildRoleInert());
-    } else {
-      size_t lastCheckpoint = LastMajorCheckpointPreceding(oldActiveChild, targetCheckpoint);
-      oldActiveChild->RecoverToCheckpoint(lastCheckpoint
-                                          ? lastCheckpoint
-                                          : oldActiveChild->MostRecentSavedCheckpoint());
-      oldActiveChild->SetRole(new ChildRoleStandby());
-    }
-  }
-
-  // Occasionally flush while recording so replaying processes stay reasonably
-  // current.
-  if (gActiveChild->IsRecording()) {
-    if ((TimeStamp::Now() - gLastFlushTime).ToSeconds() >= FlushSeconds) {
-      FlushRecording();
-    }
+    SwitchActiveChild(targetChild);
   }
 
   if (aForward) {
@@ -1265,11 +1287,8 @@ RecvHitRecordingEndpoint()
     return;
   }
 
-  // Switch to the recording child as the active child.
-  ChildProcess* oldActiveChild = gActiveChild;
-  gRecordingChild->SetRole(new ChildRoleActive());
-  oldActiveChild->RecoverToCheckpoint(oldActiveChild->MostRecentSavedCheckpoint());
-  oldActiveChild->SetRole(new ChildRoleStandby());
+  // Switch to the recording child as the active child and continue execution.
+  SwitchActiveChild(gRecordingChild);
   gActiveChild->SendMessage(ResumeMessage(/* aForward = */ true));
 }
 
