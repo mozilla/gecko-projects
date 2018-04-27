@@ -178,6 +178,8 @@ static ChildProcess* gActiveChild;
 static ChildProcess* gRecordingChild;
 
 // The two replaying child processes, null if they haven't been spawned yet.
+// When rewinding is disabled, there is only a single replaying child, and zero
+// replaying children if there is a recording child.
 static ChildProcess* gFirstReplayingChild;
 static ChildProcess* gSecondReplayingChild;
 
@@ -191,25 +193,20 @@ Shutdown()
   _exit(0);
 }
 
-static bool
-HasReplayingChildren()
-{
-  MOZ_RELEASE_ASSERT(!!gFirstReplayingChild == !!gSecondReplayingChild);
-  return !!gFirstReplayingChild;
-}
-
 static ChildProcess*
 OtherReplayingChild(ChildProcess* aChild)
 {
-  MOZ_RELEASE_ASSERT(!aChild->IsRecording());
+  MOZ_RELEASE_ASSERT(!aChild->IsRecording() && gFirstReplayingChild && gSecondReplayingChild);
   return aChild == gFirstReplayingChild ? gSecondReplayingChild : gFirstReplayingChild;
 }
 
 static void
 ForEachReplayingChild(const std::function<void(ChildProcess*)>& aCallback)
 {
-  if (HasReplayingChildren()) {
+  if (gFirstReplayingChild) {
     aCallback(gFirstReplayingChild);
+  }
+  if (gSecondReplayingChild) {
     aCallback(gSecondReplayingChild);
   }
 }
@@ -349,6 +346,7 @@ LastMajorCheckpointPreceding(ChildProcess* aChild, size_t aId)
 static ChildProcess*
 ReplayingChildResponsibleForSavingCheckpoint(size_t aId)
 {
+  MOZ_RELEASE_ASSERT(CanRewind() && gFirstReplayingChild && gSecondReplayingChild);
   size_t firstMajor = LastMajorCheckpointPreceding(gFirstReplayingChild, aId);
   size_t secondMajor = LastMajorCheckpointPreceding(gSecondReplayingChild, aId);
   return (firstMajor < secondMajor) ? gSecondReplayingChild : gFirstReplayingChild;
@@ -498,7 +496,7 @@ AssignMajorCheckpoint(ChildProcess* aChild, size_t aId)
 static void
 UpdateCheckpointTimes(const HitCheckpointMessage& aMsg)
 {
-  if (aMsg.mCheckpointId != gCheckpointTimes.length() + 1) {
+  if (!CanRewind() || (aMsg.mCheckpointId != gCheckpointTimes.length() + 1)) {
     return;
   }
   gCheckpointTimes.append(TimeDuration::FromMicroseconds(aMsg.mDurationMicroseconds));
@@ -517,9 +515,23 @@ UpdateCheckpointTimes(const HitCheckpointMessage& aMsg)
 }
 
 static void
+SpawnRecordingChild()
+{
+  MOZ_RELEASE_ASSERT(!gRecordingChild && !gFirstReplayingChild && !gSecondReplayingChild);
+  gRecordingChild = new ChildProcess(new ChildRoleActive(), /* aRecording = */ true);
+}
+
+static void
+SpawnSingleReplayingChild()
+{
+  MOZ_RELEASE_ASSERT(!gRecordingChild && !gFirstReplayingChild && !gSecondReplayingChild);
+  gFirstReplayingChild = new ChildProcess(new ChildRoleActive(), /* aRecording = */ false);
+}
+
+static void
 SpawnReplayingChildren()
 {
-  MOZ_RELEASE_ASSERT(!HasReplayingChildren());
+  MOZ_RELEASE_ASSERT(CanRewind() && !gFirstReplayingChild && !gSecondReplayingChild);
   ChildRole* firstRole = gRecordingChild
                          ? (ChildRole*) new ChildRoleStandby()
                          : (ChildRole*) new ChildRoleActive();
@@ -550,9 +562,11 @@ FlushRecording()
   gLastFlushTime = TimeStamp::Now();
 
   // We now have a usable recording for replaying children.
-  if (!HasReplayingChildren()) {
+  static bool gHasFlushed = false;
+  if (!gHasFlushed && CanRewind()) {
     SpawnReplayingChildren();
   }
+  gHasFlushed = true;
 }
 
 static void
@@ -660,7 +674,7 @@ MarkActiveChildExplicitPause()
     // Make sure any replaying children can play forward to the same point as
     // the recording.
     FlushRecording();
-  } else {
+  } else if (CanRewind()) {
     // Make sure we have a replaying child that can rewind from this point.
     // Switch to the other one if (a) this process is responsible for rewinding
     // from this point, and (b) this process has not saved all intermediate
@@ -757,7 +771,11 @@ HandleMessageInMiddleman(ipc::Side aSide, const IPC::Message& aMessage)
       PreferencesLoaded();
 
       if (!gRecordingChild) {
-        SpawnReplayingChildren();
+        if (CanRewind()) {
+          SpawnReplayingChildren();
+        } else {
+          SpawnSingleReplayingChild();
+        }
       }
     }
     if (type == dom::PBrowser::Msg_Destroy__ID) {
@@ -1009,7 +1027,7 @@ Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChild
 
     gParentProtocol->mOppositeMessageLoop = gMainThreadMessageLoop;
 
-    gRecordingChild = new ChildProcess(new ChildRoleActive(), /* aRecording = */ true);
+    SpawnRecordingChild();
 
     if (!PR_CreateThread(PR_USER_THREAD, ForwardingMessageLoopMain, nullptr,
                          PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD, PR_JOINABLE_THREAD, 0)) {
