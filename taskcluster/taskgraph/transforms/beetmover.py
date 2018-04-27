@@ -394,7 +394,7 @@ def generate_upstream_artifacts(job, signing_task_ref, build_task_ref, platform,
         artifact_prefix = '{}/{}'.format(artifact_prefix, locale)
         platform = "{}-l10n".format(platform)
 
-    if platform.endswith("-release"):
+    if platform.endswith("-source"):
         return [
             {
                 "taskId": {"task-reference": signing_task_ref},
@@ -449,6 +449,8 @@ def craft_release_properties(config, job):
     params = config.params
     build_platform = job['attributes']['build_platform']
     build_platform = build_platform.replace('-nightly', '')
+    if build_platform.endswith("-source"):
+        build_platform = build_platform.replace('-source', '-release')
 
     # XXX This should be explicitly set via build attributes or something
     if 'android' in job['label'] or 'fennec' in job['label']:
