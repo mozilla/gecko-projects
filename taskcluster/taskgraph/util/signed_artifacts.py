@@ -57,7 +57,7 @@ def generate_specifications_of_artifacts_to_sign(
             'formats': ['sha2signcode', 'widevine'],
         }]
         no_stub = ("mozilla-esr60", "jamun")
-        if 'win32' in build_platform and is_nightly and not project in no_stub:
+        if 'win32' in build_platform and is_nightly and project not in no_stub:
             # TODO: fix the project hint to be a better design
             # We don't build stub installer on esr, so we don't want to sign it
             artifacts_specifications[0]['artifacts'] += [
