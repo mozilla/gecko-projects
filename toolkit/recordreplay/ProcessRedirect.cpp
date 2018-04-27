@@ -466,7 +466,7 @@ Redirect(Redirection& aRedirection, Assembler& aAssembler, bool aFirstPass)
 
   if (!functionStart) {
     if (aFirstPass) {
-      fprintf(stderr, "Note: Could not find symbol %s for redirecting.\n", aRedirection.mName);
+      PrintSpew("Could not find symbol %s for redirecting.\n", aRedirection.mName);
     }
     return;
   }
@@ -643,8 +643,8 @@ EarlyInitializeRedirections()
       // We will get confused if we try to redirect the same address in multiple places.
       for (size_t j = 0; j < i; j++) {
         if (gRedirections[j].mBaseFunction == redirection.mBaseFunction) {
-          fprintf(stderr, "Note: Redirection %s shares the same address as %s, skipping.\n",
-                  redirection.mName, gRedirections[j].mName);
+          PrintSpew("Redirection %s shares the same address as %s, skipping.\n",
+                    redirection.mName, gRedirections[j].mName);
           redirection.mBaseFunction = nullptr;
           break;
         }
