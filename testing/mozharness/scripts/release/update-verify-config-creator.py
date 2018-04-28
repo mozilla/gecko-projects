@@ -12,7 +12,6 @@ sys.path.insert(1, os.path.dirname(os.path.dirname(sys.path[0])))
 
 from mozharness.base.log import DEBUG, INFO, FATAL
 from mozharness.base.script import BaseScript
-from mozharness.base.python import VirtualenvMixin
 
 
 def is_triangualar(x):
@@ -38,7 +37,7 @@ def is_triangualar(x):
     return n == int(n)
 
 
-class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
+class UpdateVerifyConfigCreator(BaseScript):
     config_options = [
         [["--product"], {
             "dest": "product",
@@ -165,27 +164,13 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
         BaseScript.__init__(
             self,
             config_options=self.config_options,
-            config={
-                "virtualenv_modules": [
-                    {
-                        'name': "mozrelease",
-                        'url': os.path.join('..',  # cwd is $topsrcdir/build/
-                                            'python', 'mozrelease'),
-                        'global_options': [],
-                    }
-                ],
-                "virtualenv_path": "venv",
-            },
+            config={},
             all_actions=[
-                "create-virtualenv",
-                "activate-virtualenv",
                 "gather-info",
                 "create-config",
                 "write-config",
             ],
             default_actions=[
-                "create-virtualenv",
-                "activate-virtualenv",
                 "gather-info",
                 "create-config",
                 "write-config",
