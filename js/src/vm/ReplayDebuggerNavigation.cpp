@@ -1416,8 +1416,10 @@ class DebuggerHandlerManager
             mInstalledEnterFrameHandler = true;
             break;
           }
-        default:
-          MOZ_CRASH("Bad execution position kind");
+          case ExecutionPosition::NewScript:
+            break;
+          default:
+            MOZ_CRASH("Bad execution position kind");
         }
         return true;
     }
@@ -1468,9 +1470,18 @@ EnsurePositionHandler(const ExecutionPosition& position)
 }
 
 /* static */ void
-ReplayDebugger::MaybeSetupBreakpointsForScript(size_t scriptId)
+ReplayDebugger::HandleBreakpointsForNewScript(JSScript* script, size_t scriptId, bool toplevel)
 {
     gHandlerManager->onNewScript(scriptId);
+
+    // NewScript breakpoints are only hit for top level scripts (as for the
+    // normal debugger).
+    if (toplevel) {
+        gNavigation->positionHit(
+            [=](const ExecutionPosition& position) {
+                return position.kind == ExecutionPosition::NewScript;
+            }, /* updateEndpointConsumed = */ true);
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////

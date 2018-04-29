@@ -268,7 +268,7 @@ public:
       RecvAlwaysMarkMajorCheckpoints();
       break;
     default:
-      MOZ_CRASH();
+      MOZ_CRASH("Unexpected message");
     }
   }
 };
@@ -701,6 +701,7 @@ HasSavedCheckpointsInRange(ChildProcess* aChild, size_t aStart, size_t aEnd)
 static void
 MarkActiveChildExplicitPause()
 {
+  MOZ_RELEASE_ASSERT(gActiveChild->IsPaused());
   size_t targetCheckpoint = gActiveChild->RewindTargetCheckpoint();
 
   if (gActiveChild->IsRecording()) {
@@ -866,18 +867,18 @@ public:
   }
 
   virtual void RemoveManagee(int32_t, IProtocol*) override {
-    MOZ_CRASH();
+    MOZ_CRASH("MiddlemanProtocol::RemoveManagee");
   }
 
   virtual const char* ProtocolName() const override {
-    MOZ_CRASH();
+    MOZ_CRASH("MiddlemanProtocol::ProtocolName");
   }
 
   static void ForwardMessageAsync(MiddlemanProtocol* aProtocol, Message* aMessage) {
     if (gActiveChild->IsRecording()) {
       PrintSpew("ForwardAsyncMsg %s\n", IPC::StringFromIPCMessageType(aMessage->type()));
       if (!aProtocol->mChannel.Send(aMessage)) {
-        MOZ_CRASH();
+        MOZ_CRASH("MiddlemanProtocol::ForwardMessageAsync");
       }
     } else {
       delete aMessage;
@@ -914,7 +915,7 @@ public:
     MOZ_RELEASE_ASSERT(!*aReply);
     Message* nReply = new Message();
     if (!aProtocol->mChannel.Send(aMessage, nReply)) {
-      MOZ_CRASH();
+      MOZ_CRASH("MiddlemanProtocol::ForwardMessageSync");
     }
 
     MonitorAutoLock lock(*gCommunicationMonitor);
@@ -944,7 +945,7 @@ public:
     MOZ_RELEASE_ASSERT(!*aReply);
     Message* nReply = new Message();
     if (!aProtocol->mChannel.Call(aMessage, nReply)) {
-      MOZ_CRASH();
+      MOZ_CRASH("MiddlemanProtocol::ForwardCallMessage");
     }
 
     MonitorAutoLock lock(*gCommunicationMonitor);
@@ -968,7 +969,7 @@ public:
   }
 
   virtual int32_t GetProtocolTypeId() override {
-    MOZ_CRASH();
+    MOZ_CRASH("MiddlemanProtocol::GetProtocolTypeId");
   }
 
   virtual void OnChannelClose() override {
@@ -977,7 +978,7 @@ public:
   }
 
   virtual void OnChannelError() override {
-    MOZ_CRASH();
+    MOZ_CRASH("MiddlemanProtocol::OnChannelError");
   }
 };
 
@@ -1075,7 +1076,7 @@ Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChild
 
     if (!PR_CreateThread(PR_USER_THREAD, ForwardingMessageLoopMain, nullptr,
                          PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD, PR_JOINABLE_THREAD, 0)) {
-      MOZ_CRASH();
+      MOZ_CRASH("parent::Initialize");
     }
 
     // Wait for the forwarding message loop thread to finish initialization.
@@ -1089,7 +1090,7 @@ Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChild
 
   if (!aContentChild->Init(ipc::IOThreadChild::message_loop(), aParentPid,
                            ipc::IOThreadChild::channel(), aChildID, /* aIsForBrowser = */ true)) {
-    MOZ_CRASH();
+    MOZ_CRASH("parent::Initialize");
   }
 }
 
@@ -1105,7 +1106,7 @@ RecvDebuggerResponse(const DebuggerResponseMessage& aMsg)
 {
   MOZ_RELEASE_ASSERT(gResponseBuffer && gResponseBuffer->empty());
   if (!gResponseBuffer->append(aMsg.Buffer(), aMsg.BufferSize())) {
-    MOZ_CRASH();
+    MOZ_CRASH("RecvDebuggerResponse");
   }
 }
 
@@ -1172,6 +1173,7 @@ HookResume(bool aForward)
 
     // Don't rewind if we are at the beginning of the recording.
     if (targetCheckpoint == InvalidCheckpointId) {
+      SendMessageToUIProcess("HitRecordingBeginning");
       return;
     }
 

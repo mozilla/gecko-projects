@@ -1673,11 +1673,21 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     // ExtensionContent.jsm and ThreadActor would ignore them on a page reload
     // because it finds them in the _debuggerSourcesSeen WeakSet,
     // and so we also need to be sure that there is still a source actor for the source.
+    let sourceActor;
     if (this._debuggerSourcesSeen.has(source) && this.sources.hasSourceActor(source)) {
-      return false;
+      // When replaying, fall through and try to setup breakpoints, even for
+      // sources we have seen before. When replaying, we can have actors for
+      // sources that have not been created yet, and trying to set breakpoints
+      // in them will not produce any scripts. When execution proceeds to the
+      // point where the source is created (and we readd the source), we will
+      // be able to get its scripts.
+      if (!this.dbg.replaying) {
+        return false;
+      }
+      sourceActor = this.sources.getSourceActor(source);
+    } else {
+      sourceActor = this.sources.createNonSourceMappedActor(source);
     }
-
-    let sourceActor = this.sources.createNonSourceMappedActor(source);
     let bpActors = [...this.breakpointActorMap.findActors()];
 
     if (this._options.useSourceMaps) {

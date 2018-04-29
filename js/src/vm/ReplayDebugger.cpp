@@ -1595,18 +1595,55 @@ SetReplayBreakpoint(JSContext* cx, JSObject* debugger, JSObject* handler,
     return true;
 }
 
-static bool
-ClearReplayBreakpoint(JSContext* cx, size_t breakpointId)
+static void
+ClearReplayBreakpoints(JSContext* cx, Debugger* debugger,
+                       const std::function<bool(const ReplayDebugger::Breakpoint&)> match)
 {
     // Make sure we are always on the process main thread when using gReplayBreakpoints.
     MOZ_RELEASE_ASSERT(!cx->runtime()->parentRuntime);
 
-    js_delete(gReplayBreakpoints[breakpointId]);
-    gReplayBreakpoints[breakpointId] = nullptr;
-
-    JS::replay::hooks.setBreakpointMiddleman(breakpointId, ExecutionPosition());
-    return true;
+    for (size_t id = 0; id < gReplayBreakpoints.length(); id++) {
+        if (gReplayBreakpoints[id] &&
+            gReplayBreakpoints[id]->debugger == debugger->toJSObject() &&
+            match(*gReplayBreakpoints[id]))
+        {
+            js_delete(gReplayBreakpoints[id]);
+            gReplayBreakpoints[id] = nullptr;
+            JS::replay::hooks.setBreakpointMiddleman(id, ExecutionPosition());
+        }
+    }
 }
+
+bool
+ReplayDebugger::setHook(JSContext* cx, Debugger::Hook hook, HandleValue handler)
+{
+    ExecutionPosition::Kind kind;
+    switch (hook) {
+      case Debugger::OnEnterFrame:
+        kind = ExecutionPosition::EnterFrame;
+        break;
+      case Debugger::OnNewScript:
+        kind = ExecutionPosition::NewScript;
+        break;
+      default:
+        return true;
+    }
+
+    if (handler.isUndefined()) {
+        ClearReplayBreakpoints(cx, debugger, [=](const Breakpoint& breakpoint) {
+                return breakpoint.position.kind == kind;
+            });
+        return true;
+    }
+    if (!handler.isObject()) {
+        JS_ReportErrorASCII(cx, "onEnterFrame handler must be an object");
+        return false;
+    }
+
+    ExecutionPosition position(kind);
+    return SetReplayBreakpoint(cx, debugger->toJSObject(), &handler.toObject(), position);
+}
+
 
 /* static */ bool
 ReplayDebugger::hitBreakpointMiddleman(JSContext* cx, size_t id)
@@ -1660,18 +1697,11 @@ ReplayDebugger::clearScriptBreakpoint(JSContext* cx, HandleObject obj, CallArgs&
     if (!a.success())
         return false;
 
-    for (size_t id = 0; id < gReplayBreakpoints.length(); id++) {
-        Breakpoint* breakpoint = gReplayBreakpoints[id];
-        if (breakpoint &&
-            breakpoint->debugger == debugger->toJSObject() &&
-            breakpoint->handler == handler &&
-            breakpoint->position.kind == ExecutionPosition::Break &&
-            breakpoint->position.script == scriptId)
-        {
-            if (!ClearReplayBreakpoint(cx, id))
-                return false;
-        }
-    }
+    ClearReplayBreakpoints(cx, debugger, [&](const Breakpoint& breakpoint) {
+            return breakpoint.handler == handler
+                && breakpoint.position.kind == ExecutionPosition::Break
+                && breakpoint.position.script == scriptId;
+        });
     return true;
 }
 
@@ -1771,18 +1801,11 @@ ReplayDebugger::setFrameOnStep(JSContext* cx, HandleObject obj, CallArgs& args)
 
     if (handler.isUndefined()) {
         // Clear any OnStep breakpoints for this frame.
-        for (size_t i = 0; i < gReplayBreakpoints.length(); i++) {
-            Breakpoint* breakpoint = gReplayBreakpoints[i];
-            if (breakpoint &&
-                breakpoint->debugger == debugger->toJSObject() &&
-                breakpoint->position.script == scriptId &&
-                breakpoint->position.frameIndex == frameIndex &&
-                breakpoint->position.kind == ExecutionPosition::OnStep)
-            {
-                if (!ClearReplayBreakpoint(cx, i))
-                    return false;
-            }
-        }
+        ClearReplayBreakpoints(cx, debugger, [=](const Breakpoint& breakpoint) {
+                return breakpoint.position.script == scriptId
+                    && breakpoint.position.frameIndex == frameIndex
+                    && breakpoint.position.kind == ExecutionPosition::OnStep;
+            });
         return true;
     }
     MOZ_RELEASE_ASSERT(handler.isObject());
@@ -1872,18 +1895,11 @@ ReplayDebugger::setFrameOnPop(JSContext* cx, HandleObject obj, CallArgs& args)
         return false;
 
     if (handler.isUndefined()) {
-        for (size_t i = 0; i < gReplayBreakpoints.length(); i++) {
-            Breakpoint* breakpoint = gReplayBreakpoints[i];
-            if (breakpoint &&
-                breakpoint->debugger == debugger->toJSObject() &&
-                breakpoint->position.script == scriptId &&
-                breakpoint->position.frameIndex == frameIndex &&
-                breakpoint->position.kind == ExecutionPosition::OnPop)
-            {
-                if (!ClearReplayBreakpoint(cx, i))
-                    return false;
-            }
-        }
+        ClearReplayBreakpoints(cx, debugger, [=](const Breakpoint& breakpoint) {
+                return breakpoint.position.script == scriptId
+                    && breakpoint.position.frameIndex == frameIndex
+                    && breakpoint.position.kind == ExecutionPosition::OnPop;
+            });
         return true;
     }
     MOZ_RELEASE_ASSERT(handler.isObject());
@@ -1918,31 +1934,6 @@ ReplayDebugger::getFrameOnPop(JSContext* cx, HandleObject obj, CallArgs& args)
 }
 
 bool
-ReplayDebugger::setOnEnterFrame(JSContext* cx, HandleValue handler)
-{
-    if (handler.isUndefined()) {
-        for (size_t i = 0; i < gReplayBreakpoints.length(); i++) {
-            Breakpoint* breakpoint = gReplayBreakpoints[i];
-            if (breakpoint &&
-                breakpoint->debugger == debugger->toJSObject() &&
-                breakpoint->position.kind == ExecutionPosition::EnterFrame)
-            {
-                if (!ClearReplayBreakpoint(cx, i))
-                    return false;
-            }
-        }
-        return true;
-    }
-    if (!handler.isObject()) {
-        JS_ReportErrorASCII(cx, "onEnterFrame handler must be an object");
-        return false;
-    }
-
-    ExecutionPosition position(ExecutionPosition::EnterFrame);
-    return SetReplayBreakpoint(cx, debugger->toJSObject(), &handler.toObject(), position);
-}
-
-bool
 ReplayDebugger::getOnPopFrame(JSContext* cx, MutableHandleValue rv)
 {
     JS_ReportErrorASCII(cx, "get onPopFrame is NYI on replay debuggers");
@@ -1953,17 +1944,10 @@ bool
 ReplayDebugger::setOnPopFrame(JSContext* cx, HandleValue handler)
 {
     if (handler.isUndefined()) {
-        for (size_t i = 0; i < gReplayBreakpoints.length(); i++) {
-            Breakpoint* breakpoint = gReplayBreakpoints[i];
-            if (breakpoint &&
-                breakpoint->debugger == debugger->toJSObject() &&
-                breakpoint->position.kind == ExecutionPosition::OnPop &&
-                breakpoint->position.script == ExecutionPosition::EMPTY_SCRIPT)
-            {
-                if (!ClearReplayBreakpoint(cx, i))
-                    return false;
-            }
-        }
+        ClearReplayBreakpoints(cx, debugger, [=](const Breakpoint& breakpoint) {
+                return breakpoint.position.kind == ExecutionPosition::OnPop
+                    && breakpoint.position.script == ExecutionPosition::EMPTY_SCRIPT;
+            });
         return true;
     }
     if (!handler.isObject()) {
@@ -2021,6 +2005,23 @@ ReplayDebugger::hitBreakpoint(JSContext* cx, Breakpoint* breakpoint)
         if (!Call(cx, handlerValue, debuggerValue, frameValue, &rv))
             return false;
         break;
+      case ExecutionPosition::NewScript: {
+        Activity a(cx);
+        HandleObject request = a.newRequestObject("getNewScript");
+        HandleObject script = a.sendRequest(request);
+        size_t id = a.getScalarProperty(script, "id");
+        if (!a.success())
+            return false;
+
+        JSObject* obj = addScript(cx, id, script);
+        if (!obj)
+            return false;
+        RootedValue scriptValue(cx, ObjectValue(*obj));
+
+        if (!Call(cx, handlerValue, debuggerValue, scriptValue, &rv))
+            return false;
+        break;
+      }
       default:
         MOZ_CRASH("Bad breakpoint kind");
     }
@@ -2231,7 +2232,7 @@ ConsiderScript(JSScript* script)
 }
 
 /* static */ void
-ReplayDebugger::onNewScript(JSContext* cx, HandleScript script)
+ReplayDebugger::onNewScript(JSContext* cx, HandleScript script, bool toplevel)
 {
     MOZ_RELEASE_ASSERT(mozilla::recordreplay::IsRecordingOrReplaying());
 
@@ -2254,7 +2255,7 @@ ReplayDebugger::onNewScript(JSContext* cx, HandleScript script)
                     RootedScript script(cx, JSFunction::getOrCreateScript(cx, fun));
                     if (!script)
                         oomUnsafe.crash("ReplayDebugger::onNewScript");
-                    onNewScript(cx, script);
+                    onNewScript(cx, script, false);
                 }
             }
         }
@@ -2281,7 +2282,7 @@ ReplayDebugger::onNewScript(JSContext* cx, HandleScript script)
     if (!found && !gDebuggerScriptSources.append(sso))
         oomUnsafe.crash("ReplayDebugger::onNewScript");
 
-    MaybeSetupBreakpointsForScript(gDebuggerScripts.length() - 1);
+    HandleBreakpointsForNewScript(script, gDebuggerScripts.length() - 1, toplevel);
 }
 
 /* static */ void
@@ -2448,31 +2449,42 @@ ConvertValueFromJSON(ReplayDebugger::Activity& a, HandleObject jsonValue)
 }
 
 static HandleObject
+ScriptDescriptorObject(ReplayDebugger::Activity& a, size_t id)
+{
+    RootedScript script(a.cx, gDebuggerScripts[id]);
+
+    HandleObject entry = a.newObject();
+    a.defineProperty(entry, "id", id);
+    a.defineProperty(entry, "sourceId", ScriptSourceId(&script->scriptSourceUnwrap()));
+    a.defineProperty(entry, "startLine", script->lineno());
+    a.defineProperty(entry, "lineCount", GetScriptLineExtent(script));
+    a.defineProperty(entry, "sourceStart", script->sourceStart());
+    a.defineProperty(entry, "sourceLength", script->sourceEnd() - script->sourceStart());
+
+    JSFunction* func = script->functionNonDelazifying();
+    if (func && func->displayAtom())
+        a.defineProperty(entry, "displayName", a.handlify(func->displayAtom()));
+
+    if (script->filename())
+        a.defineProperty(entry, "url", script->filename());
+
+    return entry;
+}
+
+static HandleObject
 Respond_findScripts(ReplayDebugger::Activity& a, HandleObject request)
 {
     HandleObject response = a.newArray();
-
-    for (size_t i = 1; i < gDebuggerScripts.length(); i++) {
-        JSScript* script = gDebuggerScripts[i];
-        HandleObject entry = a.newObject();
-        a.pushArray(response, entry);
-
-        a.defineProperty(entry, "id", i);
-        a.defineProperty(entry, "sourceId", ScriptSourceId(&script->scriptSourceUnwrap()));
-        a.defineProperty(entry, "startLine", script->lineno());
-        a.defineProperty(entry, "lineCount", GetScriptLineExtent(script));
-        a.defineProperty(entry, "sourceStart", script->sourceStart());
-        a.defineProperty(entry, "sourceLength", script->sourceEnd() - script->sourceStart());
-
-        JSFunction* func = script->functionNonDelazifying();
-        if (func && func->displayAtom())
-            a.defineProperty(entry, "displayName", a.handlify(func->displayAtom()));
-
-        if (script->filename())
-            a.defineProperty(entry, "url", script->filename());
-    }
-
+    for (size_t i = 1; i < gDebuggerScripts.length(); i++)
+        a.pushArray(response, ScriptDescriptorObject(a, i));
     return response;
+}
+
+static HandleObject
+Respond_getNewScript(ReplayDebugger::Activity& a, HandleObject request)
+{
+    MOZ_RELEASE_ASSERT(gDebuggerScripts.length() > 1);
+    return ScriptDescriptorObject(a, gDebuggerScripts.length() - 1);
 }
 
 static HandleObject
@@ -3006,6 +3018,7 @@ Respond_popFrameResult(ReplayDebugger::Activity& a, HandleObject request)
 
 #define FOR_EACH_REQUEST(Macro)                 \
     Macro(findScripts)                          \
+    Macro(getNewScript)                         \
     Macro(getContent)                           \
     Macro(getSource)                            \
     Macro(getStructure)                         \

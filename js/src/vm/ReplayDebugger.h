@@ -32,7 +32,7 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
     ~ReplayDebugger();
     bool init();
 
-    static void onNewScript(JSContext* cx, HandleScript script);
+    static void onNewScript(JSContext* cx, HandleScript script, bool toplevel = true);
 
     // Debugger methods.
     bool findScripts(JSContext* cx, MutableHandle<GCVector<JSObject*>> scriptObjects);
@@ -44,6 +44,7 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
     // Generic methods.
     bool notYetImplemented(JSContext* cx, HandleObject obj, CallArgs& args);
     bool notAllowed(JSContext* cx, HandleObject obj, CallArgs& args);
+    bool setHook(JSContext* cx, Debugger::Hook hook, HandleValue handler);
 
     // Script methods.
     bool scriptDisplayName(JSContext* cx, HandleObject obj, CallArgs& args);
@@ -96,7 +97,6 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
     bool getFrameOnStep(JSContext* cx, HandleObject obj, CallArgs& args);
     bool setFrameOnPop(JSContext* cx, HandleObject obj, CallArgs& args);
     bool getFrameOnPop(JSContext* cx, HandleObject obj, CallArgs& args);
-    bool setOnEnterFrame(JSContext* cx, HandleValue handler);
     bool setOnPopFrame(JSContext* cx, HandleValue handler);
     bool getOnPopFrame(JSContext* cx, MutableHandleValue rv);
 
@@ -216,8 +216,9 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
     static JSScript* IdScript(size_t id);
     static size_t ScriptId(JSScript* script);
 
-    // Install any necessary breakpoints on a newly created script.
-    static void MaybeSetupBreakpointsForScript(size_t id);
+    // Install any necessary breakpoints on a newly created script, and hit any
+    // installed OnNewScript breakpoints.
+    static void HandleBreakpointsForNewScript(JSScript* script, size_t id, bool toplevel);
 
     // Clear the mapping from IDs to objects used when paused at a breakpoint.
     static void ClearDebuggerPausedObjects();

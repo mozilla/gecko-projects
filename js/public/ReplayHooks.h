@@ -28,6 +28,7 @@ struct ExecutionPosition
         OnStep,
         OnPop,       // No offset, script/frameIndex is optional
         EnterFrame,  // No offset/script/frameIndex
+        NewScript,   // No offset/script/frameIndex
     } kind;
     size_t script;
     size_t offset;
@@ -71,6 +72,7 @@ struct ExecutionPosition
           case OnStep: return "OnStep";
           case OnPop: return "OnPop";
           case EnterFrame: return "EnterFrame";
+          case NewScript: return "NewScript";
         }
         MOZ_CRASH("Bad ExecutionPosition kind");
     }
@@ -129,8 +131,7 @@ struct Hooks
     void (*resumeReplay)(bool forward);
     void (*pauseMiddleman)();
 
-    // Notify the middleman about breakpoints (or intra-checkpoint endpoints)
-    // that were hit.
+    // Notify the middleman about breakpoints that were hit.
     void (*hitBreakpointReplay)(const uint32_t* breakpoints, size_t numBreakpoints);
     bool (*hitBreakpointMiddleman)(JSContext* cx, size_t id);
 
@@ -149,6 +150,8 @@ struct Hooks
     void (*pauseAndRespondAfterRecoveringFromDivergence)();
     void (*respondAfterRecoveringFromDivergence)();
 
+    // Keep track of the recording endpoint while recording, and notify the
+    // middleman when it has been hit while replaying.
     typedef mozilla::recordreplay::AllocPolicy<mozilla::recordreplay::TrackedMemoryKind>
         TrackedAllocPolicy;
     void (*getRecordingEndpoint)(ExecutionPoint<TrackedAllocPolicy>* endpoint);
@@ -156,7 +159,8 @@ struct Hooks
     bool (*hitCurrentRecordingEndpointReplay)();
     void (*hitLastRecordingEndpointReplay)();
 
-    // Notify the debugger that it should always save temporary checkpoints.
+    // Notify the debugger that it should always save temporary checkpoints,
+    // for testing.
     void (*alwaysSaveTemporaryCheckpoints)();
 };
 

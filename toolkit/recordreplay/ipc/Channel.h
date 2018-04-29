@@ -211,48 +211,36 @@ struct CreateCheckpointMessage : public Message
   {}
 };
 
-struct FlushRecordingMessage : public Message
+template <MessageType Type>
+struct EmptyMessage : public Message
 {
-  FlushRecordingMessage()
-    : Message(MessageType::FlushRecording, sizeof(*this))
+  EmptyMessage()
+    : Message(Type, sizeof(*this))
   {}
 };
 
-struct DebuggerRequestMessage : public Message
+typedef EmptyMessage<MessageType::FlushRecording> FlushRecordingMessage;
+
+template <MessageType Type>
+struct JSONMessage : public Message
 {
-  explicit DebuggerRequestMessage(uint32_t aSize)
-    : Message(MessageType::DebuggerRequest, aSize)
+  explicit JSONMessage(uint32_t aSize)
+    : Message(Type, aSize)
   {}
 
-  const char16_t* Buffer() const { return Data<DebuggerRequestMessage, char16_t>(); }
-  size_t BufferSize() const { return DataSize<DebuggerRequestMessage, char16_t>(); }
+  const char16_t* Buffer() const { return Data<JSONMessage<Type>, char16_t>(); }
+  size_t BufferSize() const { return DataSize<JSONMessage<Type>, char16_t>(); }
 
-  static DebuggerRequestMessage* New(const char16_t* aBuffer, size_t aBufferSize) {
-    DebuggerRequestMessage* res =
-      NewWithData<DebuggerRequestMessage, char16_t>(aBufferSize);
+  static JSONMessage<Type>* New(const char16_t* aBuffer, size_t aBufferSize) {
+    JSONMessage<Type>* res = NewWithData<JSONMessage<Type>, char16_t>(aBufferSize);
     MOZ_RELEASE_ASSERT(res->BufferSize() == aBufferSize);
-    PodCopy(res->Data<DebuggerRequestMessage, char16_t>(), aBuffer, aBufferSize);
+    PodCopy(res->Data<JSONMessage<Type>, char16_t>(), aBuffer, aBufferSize);
     return res;
   }
 };
 
-struct DebuggerResponseMessage : public Message
-{
-  explicit DebuggerResponseMessage(uint32_t aSize)
-    : Message(MessageType::DebuggerResponse, aSize)
-  {}
-
-  const char16_t* Buffer() const { return Data<DebuggerResponseMessage, char16_t>(); }
-  size_t BufferSize() const { return DataSize<DebuggerResponseMessage, char16_t>(); }
-
-  static DebuggerResponseMessage* New(const char16_t* aBuffer, size_t aBufferSize) {
-    DebuggerResponseMessage* res =
-      NewWithData<DebuggerResponseMessage, char16_t>(aBufferSize);
-    MOZ_RELEASE_ASSERT(res->BufferSize() == aBufferSize);
-    PodCopy(res->Data<DebuggerResponseMessage, char16_t>(), aBuffer, aBufferSize);
-    return res;
-  }
-};
+typedef JSONMessage<MessageType::DebuggerRequest> DebuggerRequestMessage;
+typedef JSONMessage<MessageType::DebuggerResponse> DebuggerResponseMessage;
 
 struct SetBreakpointMessage : public Message
 {
@@ -329,12 +317,7 @@ struct SetSaveCheckpointMessage : public Message
   {}
 };
 
-struct RecordingFlushedMessage : public Message
-{
-  RecordingFlushedMessage()
-    : Message(MessageType::RecordingFlushed, sizeof(*this))
-  {}
-};
+typedef EmptyMessage<MessageType::RecordingFlushed> RecordingFlushedMessage;
 
 struct FatalErrorMessage : public Message
 {
@@ -400,19 +383,8 @@ struct HitBreakpointMessage : public Message
   }
 };
 
-struct HitRecordingEndpointMessage : public Message
-{
-  HitRecordingEndpointMessage()
-    : Message(MessageType::HitRecordingEndpoint, sizeof(*this))
-  {}
-};
-
-struct AlwaysMarkMajorCheckpointsMessage : public Message
-{
-  AlwaysMarkMajorCheckpointsMessage()
-    : Message(MessageType::AlwaysMarkMajorCheckpoints, sizeof(*this))
-  {}
-};
+typedef EmptyMessage<MessageType::HitRecordingEndpoint> HitRecordingEndpointMessage;
+typedef EmptyMessage<MessageType::AlwaysMarkMajorCheckpoints> AlwaysMarkMajorCheckpointsMessage;
 
 class Channel
 {

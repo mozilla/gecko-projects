@@ -3456,10 +3456,8 @@ Debugger::setHookImpl(JSContext* cx, CallArgs& args, Debugger& dbg, Hook which)
         }
     }
     if (dbg.replayDebugger()) {
-        if (which == OnEnterFrame) {
-            if (!dbg.replayDebugger()->setOnEnterFrame(cx, args[0]))
-                return false;
-        }
+        if (!dbg.replayDebugger()->setHook(cx, which, args[0]))
+            return false;
     }
     args.rval().setUndefined();
     return true;
