@@ -30,7 +30,7 @@ ChildProcess::ChildProcess(ChildRole* aRole, bool aRecording)
   , mChannel(nullptr)
   , mRecording(aRecording)
   , mRecoveryStage(RecoveryStage::None)
-  , mPaused(false)
+  , mStatus(Status::Running)
   , mLastCheckpoint(InvalidCheckpointId)
   , mNumRecoveredMessages(0)
   , mNumRestarts(0)
@@ -141,14 +141,32 @@ ChildProcess::OnIncomingMessage(const Message& aMsg)
   }
 
   // Update paused state.
-  MOZ_RELEASE_ASSERT(!mPaused);
+  MOZ_RELEASE_ASSERT(!IsPaused());
   switch (aMsg.mType) {
   case MessageType::HitCheckpoint:
+    mStatus = Status::PausedAtCheckpoint;
+    break;
   case MessageType::HitBreakpoint:
+    mStatus = Status::PausedAtBreakpoint;
+    break;
   case MessageType::HitRecordingEndpoint:
+    mStatus = Status::PausedAtRecordingEndpoint;
+    break;
   case MessageType::DebuggerResponse:
   case MessageType::RecordingFlushed:
-    mPaused = true;
+    switch (mStatus) {
+    case Status::RunningAtCheckpoint:
+      mStatus = Status::PausedAtCheckpoint;
+      break;
+    case Status::RunningAtBreakpoint:
+      mStatus = Status::PausedAtBreakpoint;
+      break;
+    case Status::RunningAtRecordingEndpoint:
+      mStatus = Status::PausedAtRecordingEndpoint;
+      break;
+    default:
+      MOZ_CRASH("Unexpected process status");
+    }
     break;
   default:
     break;
@@ -198,13 +216,27 @@ ChildProcess::SendMessage(const Message& aMsg)
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
   // Update paused state.
-  MOZ_RELEASE_ASSERT(mPaused || aMsg.mType == MessageType::CreateCheckpoint);
+  MOZ_RELEASE_ASSERT(IsPaused() || aMsg.mType == MessageType::CreateCheckpoint);
   switch (aMsg.mType) {
   case MessageType::Resume:
   case MessageType::RestoreCheckpoint:
+    mStatus = Status::Running;
+    break;
   case MessageType::DebuggerRequest:
   case MessageType::FlushRecording:
-    mPaused = false;
+    switch (mStatus) {
+    case Status::PausedAtCheckpoint:
+      mStatus = Status::RunningAtCheckpoint;
+      break;
+    case Status::PausedAtBreakpoint:
+      mStatus = Status::RunningAtBreakpoint;
+      break;
+    case Status::PausedAtRecordingEndpoint:
+      mStatus = Status::RunningAtRecordingEndpoint;
+      break;
+    default:
+      MOZ_CRASH("Unexpected process status");
+    }
     break;
   default:
     break;
@@ -241,7 +273,7 @@ ChildProcess::SendMessageRaw(const Message& aMsg)
 }
 
 void
-ChildProcess::Recover(bool aPaused, size_t aLastCheckpoint,
+ChildProcess::Recover(Status aStatus, size_t aLastCheckpoint,
                       Message** aMessages, size_t aNumMessages)
 {
   MOZ_RELEASE_ASSERT(IsPaused());
@@ -261,7 +293,7 @@ ChildProcess::Recover(bool aPaused, size_t aLastCheckpoint,
   }
   mMessages.clear();
 
-  mPaused = aPaused;
+  mStatus = aStatus;
   mLastCheckpoint = aLastCheckpoint;
   for (size_t i = 0; i < aNumMessages; i++) {
     mMessages.append(aMessages[i]->Clone());
@@ -327,7 +359,7 @@ ChildProcess::SendNextRecoveryMessage()
   do {
     // Check if we have recovered to the desired paused state.
     if (mNumRecoveredMessages == mMessages.length()) {
-      MOZ_RELEASE_ASSERT(mPaused);
+      MOZ_RELEASE_ASSERT(IsPaused());
       mRecoveryStage = RecoveryStage::None;
       return;
     }
@@ -337,7 +369,7 @@ ChildProcess::SendNextRecoveryMessage()
 
   // If we have sent all messages and are in an unpaused state, we are done
   // recovering.
-  if (mNumRecoveredMessages == mMessages.length() && !mPaused) {
+  if (mNumRecoveredMessages == mMessages.length() && !IsPaused()) {
     mRecoveryStage = RecoveryStage::None;
   }
 }
@@ -450,6 +482,9 @@ ChildProcess::AttemptRestart(const char* aWhy)
 
   TerminateSubprocess();
 
+  Status newStatus = mStatus;
+  mStatus = Status::Running;
+
   size_t newLastCheckpoint = mLastCheckpoint;
   mLastCheckpoint = InvalidCheckpointId;
 
@@ -475,8 +510,7 @@ ChildProcess::AttemptRestart(const char* aWhy)
     SendMessage(SetSaveCheckpointMessage(checkpoint, true));
   }
 
-  Recover(/* aPaused = */ false, newLastCheckpoint,
-          newMessages.begin(), newMessages.length());
+  Recover(newStatus, newLastCheckpoint, newMessages.begin(), newMessages.length());
 }
 
 ///////////////////////////////////////////////////////////////////////////////

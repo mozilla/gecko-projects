@@ -1201,6 +1201,19 @@ HookResume(bool aForward)
   }
 
   if (aForward) {
+    // Don't send a replaying process past the recording endpoint.
+    if (gActiveChild->IsPausedAtRecordingEndpoint()) {
+      // Look for a recording child we can transition into.
+      if (!gRecordingChild) {
+        MarkActiveChildExplicitPause();
+        SendMessageToUIProcess("HitRecordingEndpoint");
+        return;
+      }
+
+      // Switch to the recording child as the active child and continue execution.
+      SwitchActiveChild(gRecordingChild);
+    }
+
     MaybeClearSavedNonMajorCheckpoint(gActiveChild, gActiveChild->LastCheckpoint() + 1);
 
     // Idle children might change their behavior as we run forward.
@@ -1235,10 +1248,8 @@ ResumeForwardOrBackward()
 }
 
 static void
-RecvHitCheckpoint(const HitCheckpointMessage& aMsg)
+ResumeForwardOrBackwardSoon()
 {
-  UpdateCheckpointTimes(aMsg);
-
   // Resume either forwards or backwards. Break the resume off into a separate
   // runnable, to avoid starving any code already on the stack and waiting for
   // the process to pause.
@@ -1247,6 +1258,13 @@ RecvHitCheckpoint(const HitCheckpointMessage& aMsg)
     gMainThreadMessageLoop->PostTask(NewRunnableFunction("ResumeForwardOrBackward",
                                                          ResumeForwardOrBackward));
   }
+}
+
+static void
+RecvHitCheckpoint(const HitCheckpointMessage& aMsg)
+{
+  UpdateCheckpointTimes(aMsg);
+  ResumeForwardOrBackwardSoon();
 }
 
 static void
@@ -1288,17 +1306,7 @@ RecvHitRecordingEndpoint()
 {
   // The active replaying child tried to run off the end of the recording.
   MOZ_RELEASE_ASSERT(!gActiveChild->IsRecording());
-
-  // Look for a recording child we can transition into.
-  if (!gRecordingChild) {
-    MarkActiveChildExplicitPause();
-    SendMessageToUIProcess("HitRecordingEndpoint");
-    return;
-  }
-
-  // Switch to the recording child as the active child and continue execution.
-  SwitchActiveChild(gRecordingChild);
-  gActiveChild->SendMessage(ResumeMessage(/* aForward = */ true));
+  ResumeForwardOrBackwardSoon();
 }
 
 static void

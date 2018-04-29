@@ -117,8 +117,17 @@ class ChildProcess
   };
   RecoveryStage mRecoveryStage;
 
-  // Whether this process is paused at a checkpoint or breakpoint.
-  bool mPaused;
+  // What this process is currently doing.
+  enum class Status {
+    PausedAtCheckpoint,
+    PausedAtBreakpoint,
+    PausedAtRecordingEndpoint,
+    Running,
+    RunningAtCheckpoint,
+    RunningAtBreakpoint,
+    RunningAtRecordingEndpoint,
+  };
+  Status mStatus;
 
   // The last checkpoint which the child process reached. The child is
   // somewhere between this and either the next or previous checkpoint,
@@ -168,7 +177,7 @@ class ChildProcess
   };
   Disposition GetDisposition();
 
-  void Recover(bool aPaused, size_t aLastCheckpoint,
+  void Recover(Status aStatus, size_t aLastCheckpoint,
                Message** aMessages, size_t aNumMessages);
 
   bool CanRestart();
@@ -184,16 +193,23 @@ public:
   ipc::GeckoChildProcessHost* Process() { return mProcess; }
   size_t GetId() { return mChannel->GetId(); }
   bool IsRecording() { return mRecording; }
-  bool IsPaused() { return mPaused; }
   size_t LastCheckpoint() { return mLastCheckpoint; }
   bool IsRecovering() { return mRecoveryStage != RecoveryStage::None; }
   bool PauseNeeded() { return mPauseNeeded; }
   const InfallibleVector<size_t>& MajorCheckpoints() { return mMajorCheckpoints; }
 
-  // Return whether the process is paused at its last checkpoint.
-  bool IsPausedAtCheckpoint() {
-    return IsPaused() && GetDisposition() == AtLastCheckpoint;
+  bool IsPaused() {
+    switch (mStatus) {
+    case Status::PausedAtCheckpoint:
+    case Status::PausedAtBreakpoint:
+    case Status::PausedAtRecordingEndpoint:
+      return true;
+    default:
+      return false;
+    }
   }
+  bool IsPausedAtCheckpoint() { return mStatus == Status::PausedAtCheckpoint; }
+  bool IsPausedAtRecordingEndpoint() { return mStatus == Status::PausedAtRecordingEndpoint; }
 
   // Get the checkpoint at or earlier to the process' position. This is either
   // the last reached checkpoint or the previous one.
@@ -252,11 +268,11 @@ public:
   void SendMessage(const Message& aMessage);
 
   void Recover(ChildProcess* aTargetProcess) {
-    Recover(aTargetProcess->mPaused, aTargetProcess->mLastCheckpoint,
+    Recover(aTargetProcess->mStatus, aTargetProcess->mLastCheckpoint,
             aTargetProcess->mMessages.begin(), aTargetProcess->mMessages.length());
   }
   void RecoverToCheckpoint(size_t aCheckpoint) {
-    Recover(true, aCheckpoint, nullptr, 0);
+    Recover(Status::PausedAtCheckpoint, aCheckpoint, nullptr, 0);
   }
 
   // Handle incoming messages from this process (and no others) until the
