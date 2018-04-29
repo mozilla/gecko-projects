@@ -224,6 +224,8 @@ static void RecvDebuggerResponse(const DebuggerResponseMessage& aMsg);
 static void RecvRecordingFlushed();
 static void RecvAlwaysMarkMajorCheckpoints();
 
+static PaintMessage* gLastPaint;
+
 // The role taken by the active child.
 class ChildRoleActive : public ChildRole
 {
@@ -248,6 +250,8 @@ public:
     switch (aMsg.mType) {
     case MessageType::Paint:
       UpdateGraphicsInUIProcess((const PaintMessage&) aMsg);
+      free(gLastPaint);
+      gLastPaint = (PaintMessage*) aMsg.Clone();
       break;
     case MessageType::HitCheckpoint:
       RecvHitCheckpoint((const HitCheckpointMessage&) aMsg);
@@ -825,6 +829,9 @@ HandleMessageInMiddleman(ipc::Side aSide, const IPC::Message& aMessage)
     }
     if (type == dom::PBrowser::Msg_Destroy__ID) {
       gDeadBrowsers.append(aMessage.routing_id());
+    }
+    if (type == dom::PBrowser::Msg_RenderLayers__ID && gLastPaint) {
+      UpdateGraphicsInUIProcess(*gLastPaint);
     }
     return false;
   }
