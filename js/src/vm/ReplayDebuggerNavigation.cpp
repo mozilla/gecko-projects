@@ -599,6 +599,12 @@ GetAllBreakpointHits(const std::function<bool(const ExecutionPosition&)>& match,
 // BreakpointPaused Phase
 ///////////////////////////////////////////////////////////////////////////////
 
+static bool
+ThisProcessCanRewind()
+{
+    return JS::replay::hooks.canRewindReplay();
+}
+
 void
 BreakpointPausedPhase::enter(const ExecutionPoint& point, const BreakpointVector& breakpoints,
                              const std::function<bool(const ExecutionPosition&)>& match)
@@ -620,10 +626,8 @@ BreakpointPausedPhase::enter(const ExecutionPoint& point, const BreakpointVector
 
     gNavigation->setPhase(this);
 
-    if (IsRecording()) {
-        TRY(mPoint.copyFrom(point));
-    } else {
-        // Immediately take a temporary checkpoint and upate the point to be
+    if (ThisProcessCanRewind()) {
+        // Immediately save a temporary checkpoint and upate the point to be
         // in relation to this checkpoint. If we rewind due to a recording
         // divergence we will end up here.
         mPoint.checkpoint = NextTemporaryCheckpoint(point.checkpoint);
@@ -653,6 +657,8 @@ BreakpointPausedPhase::enter(const ExecutionPoint& point, const BreakpointVector
             gNavigation->positionHit(match, /* updateEndpointConsumed = */ false);
             return;
         }
+    } else {
+        TRY(mPoint.copyFrom(point));
     }
 
     if (!breakpoints.empty())
@@ -660,8 +666,8 @@ BreakpointPausedPhase::enter(const ExecutionPoint& point, const BreakpointVector
     else
         JS::replay::hooks.hitLastRecordingEndpointReplay();
 
-    // When replaying we will rewind before resuming to erase side effects.
-    MOZ_RELEASE_ASSERT(IsRecording());
+    // When rewinding is allowed we will rewind before resuming to erase side effects.
+    MOZ_RELEASE_ASSERT(!ThisProcessCanRewind());
 }
 
 void
@@ -791,12 +797,11 @@ BreakpointPausedPhase::respondAfterRecoveringFromDivergence()
 bool
 BreakpointPausedPhase::maybeDivergeFromRecording()
 {
-    if (IsRecording()) {
-        // Recording divergence is not supported if we are still recording.
-        // We don't rewind processes that are recording, and can't simply allow
-        // execution to proceed from here as if we were not diverged, since any
-        // events or other activity that show up afterwards won't occur when we
-        // are replaying later.
+    if (!ThisProcessCanRewind()) {
+        // Recording divergence is not supported if we can't rewind. We can't
+        // simply allow execution to proceed from here as if we were not
+        // diverged, since any events or other activity that show up afterwards
+        // will not be reflected in the recording.
         return false;
     }
     if (mRequests[mRequestIndex].unhandledDivergence)

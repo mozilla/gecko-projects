@@ -1169,7 +1169,7 @@ extern "C" {
 MOZ_EXPORT void*
 RecordReplayInterface_AllocateMemory(size_t aSize, AllocatedMemoryKind aKind)
 {
-  if (!CanSaveCheckpoints()) {
+  if (!IsReplaying()) {
     return DirectAllocateMemory(nullptr, aSize);
   }
   return AllocateMemoryTryAddress(nullptr, aSize, aKind);
@@ -1193,7 +1193,7 @@ RecordReplayInterface_DeallocateMemory(void* aAddress, size_t aSize, AllocatedMe
 
   // Memory is returned to the system before saving the first checkpoint.
   if (!HasSavedCheckpoint()) {
-    if (CanSaveCheckpoints() && aKind != TrackedMemoryKind) {
+    if (IsReplaying() && aKind != TrackedMemoryKind) {
       RemoveInitialUntrackedRegion((uint8_t*) aAddress, aSize);
     }
     DirectDeallocateMemory(aAddress, aSize);

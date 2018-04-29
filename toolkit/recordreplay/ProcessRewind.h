@@ -27,7 +27,7 @@ namespace recordreplay {
 // initialization and every time compositor updates are performed. Each
 // checkpoint has an ID, which monotonically increases during the execution.
 // Checkpoints form a basis for identifying a particular point in execution,
-// and in allowing the process to rewind itself.
+// and in allowing replaying processes to rewind themselves.
 //
 // A subset of checkpoints are saved: the contents of each thread's stack is
 // copied, along with enough information to restore the contents of heap memory
@@ -98,9 +98,6 @@ bool MainThreadShouldPause();
 // Pause the current main thread and service any callbacks until the thread no
 // longer needs to pause.
 void PauseMainThreadAndServiceCallbacks();
-
-// Return whether this process can save checkpoints.
-bool CanSaveCheckpoints();
 
 // Return whether any checkpoints have been saved.
 bool HasSavedCheckpoint();

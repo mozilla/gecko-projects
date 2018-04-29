@@ -141,8 +141,12 @@ struct Hooks
     // Direct the child process to rewind to a specific checkpoint.
     void (*restoreCheckpointReplay)(size_t id);
 
-    // Return whether the middleman is able to rewind the replayed process.
+    // Return whether the middleman is able to restore earlier checkpoints
+    // (possibly by changing the active child process).
     bool (*canRewindMiddleman)();
+
+    // Return whether this process is able to restore earlier checkpoints.
+    bool (*canRewindReplay)();
 
     // After recovering from an unhandled recording divergence, enter the
     // correct pause state for being at a breakpoint and then send a response

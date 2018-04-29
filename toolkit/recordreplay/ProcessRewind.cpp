@@ -254,12 +254,6 @@ EnsureNotDivergedFromRecording()
 }
 
 bool
-CanSaveCheckpoints()
-{
-  return IsReplaying();
-}
-
-bool
 HasSavedCheckpoint()
 {
   return gRewindInfo && !gRewindInfo->mSavedCheckpoints.empty();

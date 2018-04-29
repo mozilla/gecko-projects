@@ -506,6 +506,7 @@ InitDebuggerHooks()
   JS::replay::hooks.pauseAndRespondAfterRecoveringFromDivergence = PauseAfterRecoveringFromDivergence;
   JS::replay::hooks.hitCurrentRecordingEndpointReplay = HitRecordingEndpoint;
   JS::replay::hooks.hitLastRecordingEndpointReplay = NotifyHitRecordingEndpoint;
+  JS::replay::hooks.canRewindReplay = HasSavedCheckpoint;
 }
 
 } // namespace child
