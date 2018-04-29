@@ -444,10 +444,11 @@ RecordReplayInterface_InternalRecordReplayAssert(const char* aFormat, va_list aA
     }
 
     if (!match) {
-      for (size_t i = 0; i < Thread::NumRecentAsserts; i++) {
-        if (thread->RecentAssert(i)) {
-          Print("Thread %d Recent %d: %s\n",
-                (int) thread->Id(), (int) i, thread->RecentAssert(i));
+      for (int i = Thread::NumRecentAsserts - 1; i >= 0; i--) {
+        if (thread->RecentAssert(i).mText) {
+          Print("Thread %d Recent %d: %s [%d]\n",
+                (int) thread->Id(), (int) i,
+                thread->RecentAssert(i).mText, (int) thread->RecentAssert(i).mPosition);
         }
       }
 
@@ -467,11 +468,12 @@ RecordReplayInterface_InternalRecordReplayAssert(const char* aFormat, va_list aA
     thread->RestoreBuffer(buffer);
 
     // Push this assert onto the recent assertions in the thread.
-    free(thread->RecentAssert(Thread::NumRecentAsserts - 1));
+    free(thread->RecentAssert(Thread::NumRecentAsserts - 1).mText);
     for (size_t i = Thread::NumRecentAsserts - 1; i >= 1; i--) {
       thread->RecentAssert(i) = thread->RecentAssert(i - 1);
     }
-    thread->RecentAssert(0) = strdup(text);
+    thread->RecentAssert(0).mText = strdup(text);
+    thread->RecentAssert(0).mPosition = thread->Events().StreamPosition();
   }
 #endif // INCLUDE_RECORD_REPLAY_ASSERTIONS
 }

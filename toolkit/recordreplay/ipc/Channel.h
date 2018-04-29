@@ -183,13 +183,15 @@ struct IntroductionMessage : public Message
   const char* PrefsData() const { return Data<IntroductionMessage, char>(); }
   const char* ArgvString() const { return Data<IntroductionMessage, char>() + mPrefsLen; }
 
-  static IntroductionMessage* New(base::ProcessId aParentPid, char* aPrefs, size_t aPrefsLen, int aArgc, char* aArgv[]) {
+  static IntroductionMessage* New(base::ProcessId aParentPid, char* aPrefs, size_t aPrefsLen,
+                                  int aArgc, char* aArgv[]) {
     size_t argsLen = 0;
     for (int i = 0; i < aArgc; i++) {
       argsLen += strlen(aArgv[i]) + 1;
     }
 
-    IntroductionMessage* res = NewWithData<IntroductionMessage, char>(aPrefsLen + argsLen, aParentPid, aPrefsLen, aArgc);
+    IntroductionMessage* res =
+      NewWithData<IntroductionMessage, char>(aPrefsLen + argsLen, aParentPid, aPrefsLen, aArgc);
 
     memcpy(res->PrefsData(), aPrefs, aPrefsLen);
 

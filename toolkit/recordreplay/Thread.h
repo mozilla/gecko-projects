@@ -84,6 +84,11 @@ public:
   // Number of recent assertions remembered.
   static const size_t NumRecentAsserts = 128;
 
+  struct RecentAssertInfo {
+    char* mText;
+    size_t mPosition;
+  };
+
 private:
   // Monitor used to protect various thread information (see Thread.h) and to
   // wait on or signal progress for a thread.
@@ -122,7 +127,7 @@ private:
   Stream* mAsserts;
 
   // Recent assertions that have been encountered, for debugging.
-  char* mRecentAsserts[NumRecentAsserts];
+  RecentAssertInfo mRecentAsserts[NumRecentAsserts];
 
   // Buffer for general use. This is only used by the associated thread.
   char* mBuffer;
@@ -212,7 +217,7 @@ public:
   }
 
   // Access the array of recent assertions in the thread.
-  char*& RecentAssert(size_t i) {
+  RecentAssertInfo& RecentAssert(size_t i) {
     MOZ_ASSERT(i < NumRecentAsserts);
     return mRecentAsserts[i];
   }

@@ -214,12 +214,21 @@ InitRecordingOrReplayingProcess(base::ProcessId aParentPid,
 
   gParentPid = gIntroductionMessage->mParentPid;
 
-  gShmemPrefs = new char[gIntroductionMessage->mPrefsLen];
-  memcpy(gShmemPrefs, gIntroductionMessage->PrefsData(), gIntroductionMessage->mPrefsLen);
-  gShmemPrefsLen = gIntroductionMessage->mPrefsLen;
+  // Record/replay the introduction message itself so we get consistent args
+  // and prefs between recording and replaying.
+  size_t introductionSize = RecordReplayValue(gIntroductionMessage->mSize);
+  IntroductionMessage* msg = (IntroductionMessage*) malloc(introductionSize);
+  if (IsRecording()) {
+    memcpy(msg, gIntroductionMessage, introductionSize);
+  }
+  RecordReplayBytes(msg, introductionSize);
 
-  const char* pos = gIntroductionMessage->ArgvString();
-  for (size_t i = 0; i < gIntroductionMessage->mArgc; i++) {
+  gShmemPrefs = new char[msg->mPrefsLen];
+  memcpy(gShmemPrefs, msg->PrefsData(), msg->mPrefsLen);
+  gShmemPrefsLen = msg->mPrefsLen;
+
+  const char* pos = msg->ArgvString();
+  for (size_t i = 0; i < msg->mArgc; i++) {
     gParentArgv.append(strdup(pos));
     pos += strlen(pos) + 1;
   }

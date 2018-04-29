@@ -136,6 +136,7 @@ namespace recordreplay {
   MACRO(fseek)                                  \
   MACRO(ftell)                                  \
   MACRO(fwrite)                                 \
+  MACRO(getenv)                                 \
   MACRO(localtime_r)                            \
   MACRO(gmtime_r)                               \
   MACRO(localtime)                              \
@@ -1295,6 +1296,21 @@ RR_fread(void *aBuf, size_t aElemSize, size_t aCapacity, FILE *aFile)
 RRFunctionNegError3(fseek)
 RRFunctionNegError1(ftell)
 RRFunction4(fwrite)
+
+static char*
+RR_getenv(char* aName)
+{
+  RecordReplayFunction(getenv, char*, aName);
+  size_t len = (IsRecording() && rval) ? strlen(rval) + 1 : 0;
+  events.RecordOrReplayValue(&len);
+  if (IsReplaying()) {
+    rval = len ? NewLeakyArray<char>(len) : nullptr;
+  }
+  if (len) {
+    events.RecordOrReplayBytes(rval, len);
+  }
+  return rval;
+}
 
 #define RecordReplayTimeFunction(aName)                                 \
   static struct tm*                                                     \
