@@ -729,6 +729,7 @@ Thread::SaveAllThreads(const CheckpointId& aCheckpoint)
 
   char filename[1024];
   SnapshotStackFilename(aCheckpoint, filename);
+  AddSnapshotFile(filename);
 
   UntrackedFile file;
   file.Open(filename, UntrackedFile::WRITE);

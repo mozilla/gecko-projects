@@ -179,10 +179,17 @@ static ChildProcess* gRecordingChild;
 static ChildProcess* gFirstReplayingChild;
 static ChildProcess* gSecondReplayingChild;
 
+// Whether to delete the recording file when finishing.
+static bool gRecordingFileIsTemporary;
+
 // Terminate all children and kill this process.
 static void
 Shutdown()
 {
+  if (gRecordingFileIsTemporary) {
+    DirectDeleteFile(gRecordingFilename);
+  }
+
   delete gRecordingChild;
   delete gFirstReplayingChild;
   delete gSecondReplayingChild;
@@ -1062,6 +1069,7 @@ Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChild
     MOZ_RELEASE_ASSERT(gProcessKind == ProcessKind::MiddlemanRecording);
     free(gRecordingFilename);
     gRecordingFilename = mktemp(strdup("/tmp/RecordingXXXXXX"));
+    gRecordingFileIsTemporary = true;
   }
 
   InitDebuggerHooks();

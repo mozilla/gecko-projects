@@ -850,7 +850,10 @@ ContentParent::GetNewOrUsedBrowserProcess(Element* aFrameElement,
     return nullptr;
   }
 
-  contentParents.AppendElement(p);
+  if (!recordExecution.Length() && !replayExecution.Length()) {
+    contentParents.AppendElement(p);
+  }
+
   p->mActivateTS = TimeStamp::Now();
   return p.forget();
 }

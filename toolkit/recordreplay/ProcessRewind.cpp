@@ -41,6 +41,9 @@ struct RewindInfo {
   // Unsorted list of checkpoints which the middleman has instructed us to
   // save. All those equal to or prior to mLastCheckpoint will have been saved.
   InfallibleVector<size_t, 1024, AllocPolicy<UntrackedMemoryKind::Generic>> mShouldSaveCheckpoints;
+
+  // All files that have ever been written to for memory or thread snapshots.
+  InfallibleVector<char*, 1024, AllocPolicy<UntrackedMemoryKind::Generic>> mSnapshotFiles;
 };
 
 static RewindInfo* gRewindInfo;
@@ -353,6 +356,22 @@ bool
 IsActiveChild()
 {
   return gRewindInfo->mIsActiveChild;
+}
+
+void
+AddSnapshotFile(const char* aFilename)
+{
+  char* copy = (char*) AllocateMemory(strlen(aFilename + 1), UntrackedMemoryKind::Generic);
+  strcpy(copy, aFilename);
+  gRewindInfo->mSnapshotFiles.append(copy);
+}
+
+void
+DeleteSnapshotFiles()
+{
+  for (char* filename : gRewindInfo->mSnapshotFiles) {
+    DirectDeleteFile(filename);
+  }
 }
 
 } // namespace recordreplay

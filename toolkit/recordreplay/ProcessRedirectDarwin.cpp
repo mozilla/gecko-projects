@@ -2633,6 +2633,13 @@ DirectCloseFile(FileHandle aFd)
 }
 
 void
+DirectDeleteFile(const char* aFilename)
+{
+  ssize_t rv = unlink(aFilename);
+  MOZ_RELEASE_ASSERT(rv >= 0 || errno == ENOENT);
+}
+
+void
 DirectWrite(FileHandle aFd, const void* aData, size_t aSize)
 {
   ssize_t rv = HANDLE_EINTR(OriginalCall(write, int, aFd, aData, aSize));

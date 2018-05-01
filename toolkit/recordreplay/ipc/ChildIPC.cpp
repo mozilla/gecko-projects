@@ -288,6 +288,7 @@ ReportFatalError(const char* aFormat, ...)
     // Don't take the message lock when sending this, to avoid touching the heap.
     gChannel->SendMessage(*msg);
 
+    DeleteSnapshotFiles();
     UnrecoverableSnapshotFailure();
   }
 

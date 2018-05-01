@@ -511,6 +511,7 @@ InitializeFiles(const char* aTempFile)
     stream->ReadBytes(&token, sizeof(uint32_t));
     MOZ_RELEASE_ASSERT(token == 0xDEADBEEF);
   }
+  DirectDeleteFile(aTempFile);
 }
 
 } // namespace recordreplay

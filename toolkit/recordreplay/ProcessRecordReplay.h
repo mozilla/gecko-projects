@@ -282,8 +282,9 @@ FileHandle DirectOpenFile(const char* aFilename, bool aWriting);
 // Seek to an offset within a file open for reading.
 void DirectSeekFile(FileHandle aFd, uint64_t aOffset);
 
-// Close a file.
+// Close or delete a file.
 void DirectCloseFile(FileHandle aFd);
+void DirectDeleteFile(const char* aFilename);
 
 // Append data to a file open for writing, blocking until the write completes.
 void DirectWrite(FileHandle aFd, const void* aData, size_t aSize);

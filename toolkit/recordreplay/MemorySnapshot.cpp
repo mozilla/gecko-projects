@@ -1378,6 +1378,8 @@ SnapshotThreadMain(void* aArgument)
     if (activeIndex == 0) {
       char filename[1024];
       MemorySnapshotFilename(set->mCheckpoint, threadIndex, filename);
+      AddSnapshotFile(filename);
+
       file.Open(filename, UntrackedFile::WRITE);
       stream = file.OpenStream(StreamName::Main, 0);
       SnapshotThreadWriteDirtyPageIndex(*stream, set);
@@ -1459,14 +1461,6 @@ InitializeMemorySnapshots()
 
   // Mark gMemoryInfo as untracked. See AddInitialUntrackedMemoryRegion.
   AddInitialUntrackedMemoryRegion(reinterpret_cast<uint8_t*>(memory), sizeof(MemoryInfo));
-
-  // Call some library functions so that no dynamic name lookups are performed
-  // at a later time when heap writes are not allowed.
-  {
-    File file;
-    file.Open(gSnapshotMemoryPrefix, File::WRITE);
-    file.OpenStream(StreamName::Main, 0)->WriteScalar(0);
-  }
 }
 
 void

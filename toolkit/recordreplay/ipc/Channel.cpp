@@ -50,6 +50,8 @@ Channel::Channel(size_t aId, const MessageHandler& aHandler)
 
     int rv = connect(mFd, (sockaddr*) &addr, SUN_LEN(&addr));
     MOZ_RELEASE_ASSERT(rv >= 0);
+
+    DirectDeleteFile(addr.sun_path);
   } else {
     MOZ_RELEASE_ASSERT(IsMiddleman());
 
@@ -174,6 +176,9 @@ Channel::WaitForMessage()
         return nullptr;
       }
       PrintSpew("Channel disconnected, exiting...\n");
+      if (IsRecordingOrReplaying()) {
+        DeleteSnapshotFiles();
+      }
       _exit(0);
     }
 

@@ -113,6 +113,10 @@ void EnsureNotDivergedFromRecording();
 void SetIsActiveChild(bool aActive);
 bool IsActiveChild();
 
+// Manage the temporary files created for memory and thread snapshots.
+void AddSnapshotFile(const char* aFilename);
+void DeleteSnapshotFiles();
+
 } // namespace recordreplay
 } // namespace mozilla
 
