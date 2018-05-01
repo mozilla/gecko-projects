@@ -1442,6 +1442,7 @@ class DebuggerFrame : public NativeObject
 
     static MOZ_MUST_USE bool evalMethod(JSContext* cx, unsigned argc, Value* vp);
     static MOZ_MUST_USE bool evalWithBindingsMethod(JSContext* cx, unsigned argc, Value* vp);
+    static MOZ_MUST_USE bool setReplayingOnStepMethod(JSContext* cx, unsigned argc, Value* vp);
 
     Debugger* owner() const;
   public:
@@ -1891,6 +1892,9 @@ bool EnvIsOptimizedOut(Env* env);
 bool GetEnvVariable(JSContext* cx, Handle<Env*> env, HandleId id, MutableHandleValue rval);
 bool GetFunctionParameterNames(JSContext* cx, HandleFunction fun, MutableHandle<StringVector> names);
 bool GetFrameActualArg(JSContext* cx, AbstractFramePtr frame, size_t i, MutableHandleValue rv);
+
+bool ScriptOffset(JSContext* cx, const Value& v, size_t* offsetp);
+bool EnsureScriptOffsetIsValid(JSContext* cx, jsbytecode* code, size_t length, size_t offset);
 
 // Given a Debugger instance dbg, if it is enabled, prevents all its debuggee
 // compartments from executing scripts. Attempts to run script will throw an

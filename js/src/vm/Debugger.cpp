@@ -5673,6 +5673,17 @@ DebuggerScript_getStartLine(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+static bool
+DebuggerScript_getMainOffset(JSContext* cx, unsigned argc, Value* vp)
+{
+    THIS_DEBUGSCRIPT_STRUCTURE(cx, argc, vp, "(get mainOffset)", dbg, args, obj, _, structure);
+    if (!DebuggerScript_checkThis<JSScript*>(cx, obj, "(get mainOffset)", "a JS script"))
+        return false;
+
+    args.rval().setNumber((uint32_t) structure.mainOffset);
+    return true;
+}
+
 struct DebuggerScriptGetLineCountMatcher
 {
     JSContext* cx_;
@@ -5835,8 +5846,8 @@ DebuggerScript_getChildScripts(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-ScriptOffset(JSContext* cx, const Value& v, size_t* offsetp)
+bool
+js::ScriptOffset(JSContext* cx, const Value& v, size_t* offsetp)
 {
     double d;
     size_t off;
@@ -5854,8 +5865,8 @@ ScriptOffset(JSContext* cx, const Value& v, size_t* offsetp)
     return true;
 }
 
-static bool
-EnsureScriptOffsetIsValid(JSContext* cx, jsbytecode* code, size_t length, size_t offset)
+bool
+js::EnsureScriptOffsetIsValid(JSContext* cx, jsbytecode* code, size_t length, size_t offset)
 {
     if (IsValidBytecodeOffset(cx, code, length, offset))
         return true;
@@ -6271,6 +6282,59 @@ DebuggerScript_getOffsetLocation(JSContext* cx, unsigned argc, Value* vp)
 
     args.rval().setObject(*result);
     return true;
+}
+
+static bool
+DebuggerScript_getSuccessorOrPredecessorOffsets(JSContext* cx, unsigned argc, Value* vp,
+                                                const char* name, bool successor)
+{
+    THIS_DEBUGSCRIPT_STRUCTURE(cx, argc, vp, name, dbg, args, obj, referent, structure);
+    if (!args.requireAtLeast(cx, name, 1))
+        return false;
+    size_t offset;
+    if (!ScriptOffset(cx, args[0], &offset))
+        return false;
+
+    PcVector adjacent;
+    if (successor) {
+        if (!GetSuccessorBytecodes(structure.code + offset, adjacent)) {
+            ReportOutOfMemory(cx);
+            return false;
+        }
+    } else {
+        if (!GetPredecessorBytecodes(structure.code, structure.code + structure.codeLength,
+                                     structure.code + offset, adjacent))
+        {
+            ReportOutOfMemory(cx);
+            return false;
+        }
+    }
+
+    RootedObject result(cx, NewDenseEmptyArray(cx));
+    if (!result)
+        return false;
+
+    for (jsbytecode* pc : adjacent) {
+        if (!NewbornArrayPush(cx, result, NumberValue(pc - structure.code)))
+            return false;
+    }
+
+    args.rval().setObject(*result);
+    return true;
+}
+
+static bool
+DebuggerScript_getSuccessorOffsets(JSContext* cx, unsigned argc, Value* vp)
+{
+    return DebuggerScript_getSuccessorOrPredecessorOffsets(cx, argc, vp,
+                                                           "getSuccessorOffsets", true);
+}
+
+static bool
+DebuggerScript_getPredecessorOffsets(JSContext* cx, unsigned argc, Value* vp)
+{
+    return DebuggerScript_getSuccessorOrPredecessorOffsets(cx, argc, vp,
+                                                           "getPredecessorOffsets", false);
 }
 
 static bool
@@ -7111,6 +7175,7 @@ static const JSPropertySpec DebuggerScript_properties[] = {
     JS_PSG("displayName", DebuggerScript_getDisplayName, 0),
     JS_PSG("url", DebuggerScript_getUrl, 0),
     JS_PSG("startLine", DebuggerScript_getStartLine, 0),
+    JS_PSG("mainOffset", DebuggerScript_getMainOffset, 0),
     JS_PSG("lineCount", DebuggerScript_getLineCount, 0),
     JS_PSG("source", DebuggerScript_getSource, 0),
     JS_PSG("sourceStart", DebuggerScript_getSourceStart, 0),
@@ -7126,6 +7191,8 @@ static const JSFunctionSpec DebuggerScript_methods[] = {
     JS_FN("getAllColumnOffsets", DebuggerScript_getAllColumnOffsets, 0, 0),
     JS_FN("getLineOffsets", DebuggerScript_getLineOffsets, 1, 0),
     JS_FN("getOffsetLocation", DebuggerScript_getOffsetLocation, 0, 0),
+    JS_FN("getSuccessorOffsets", DebuggerScript_getSuccessorOffsets, 1, 0),
+    JS_FN("getPredecessorOffsets", DebuggerScript_getPredecessorOffsets, 1, 0),
     JS_FN("setBreakpoint", DebuggerScript_setBreakpoint, 2, 0),
     JS_FN("getBreakpoints", DebuggerScript_getBreakpoints, 1, 0),
     JS_FN("clearBreakpoint", DebuggerScript_clearBreakpoint, 1, 0),
@@ -9005,6 +9072,14 @@ DebuggerFrame::evalWithBindingsMethod(JSContext* cx, unsigned argc, Value* vp)
 }
 
 /* static */ bool
+DebuggerFrame::setReplayingOnStepMethod(JSContext* cx, unsigned argc, Value* vp)
+{
+    THIS_FRAME_THISOBJ(cx, argc, vp, "setReplayingOnStep", dbg, setFrameOnStep, args, frame);
+    JS_ReportErrorASCII(cx, "setReplayingOnStep requires a replaying debugger");
+    return false;
+}
+
+/* static */ bool
 DebuggerFrame::construct(JSContext* cx, unsigned argc, Value* vp)
 {
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_NO_CONSTRUCTOR,
@@ -9033,6 +9108,7 @@ const JSPropertySpec DebuggerFrame::properties_[] = {
 const JSFunctionSpec DebuggerFrame::methods_[] = {
     JS_FN("eval", DebuggerFrame::evalMethod, 1, 0),
     JS_FN("evalWithBindings", DebuggerFrame::evalWithBindingsMethod, 1, 0),
+    JS_FN("setReplayingOnStep", DebuggerFrame::setReplayingOnStepMethod, 2, 0),
     JS_FS_END
 };
 

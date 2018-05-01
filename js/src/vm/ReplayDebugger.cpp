@@ -1705,81 +1705,6 @@ ReplayDebugger::clearScriptBreakpoint(JSContext* cx, HandleObject obj, CallArgs&
     return true;
 }
 
-static void
-GetSuccessorsOrPredecessors(const ScriptStructure& structure,
-                            jsbytecode* pc, bool successors, PcVector& list)
-{
-    if (successors) {
-        TRY(GetSuccessorBytecodes(pc, list));
-    } else {
-        jsbytecode* end = structure.code + structure.codeLength;
-        TRY(GetPredecessorBytecodes(structure.code, end, pc, list));
-    }
-}
-
-static void
-PcVectorAppendNoDuplicate(PcVector& list, jsbytecode* pc)
-{
-    for (size_t i = 0; i < list.length(); i++) {
-        if (list[i] == pc)
-            return;
-    }
-    TRY(list.append(pc));
-}
-
-enum OpcodeSearchKind {
-    DifferentLine,
-    SameLinePredecessorOnDifferentLine
-};
-
-static bool
-BytecodeMatchesSearch(const ScriptStructure& structure,
-                      jsbytecode* startPc, jsbytecode* pc, OpcodeSearchKind search)
-{
-    jssrcnote* notes = structure.code + structure.codeLength;
-    size_t startLine = PCToLineNumber(structure.lineno, notes, structure.code, startPc);
-    switch (search) {
-      case DifferentLine:
-        return PCToLineNumber(structure.lineno, notes, structure.code, pc) != startLine;
-      case SameLinePredecessorOnDifferentLine: {
-        MOZ_RELEASE_ASSERT(PCToLineNumber(structure.lineno, notes, structure.code, pc) == startLine);
-        PcVector predecessors;
-        GetSuccessorsOrPredecessors(structure, pc, false, predecessors);
-        if (predecessors.length() == 0)
-            return true;
-        for (size_t i = 0; i < predecessors.length(); i++) {
-            if (predecessors[i] > pc)
-                return true;
-            if (PCToLineNumber(structure.lineno, notes, structure.code, predecessors[i]) != startLine)
-                return true;
-        }
-        return false;
-      }
-    }
-    MOZ_CRASH("Bad OpcodeSearchKind");
-}
-
-static void
-GetSuccessorsOrPredecessorsMatchingSearch(const ScriptStructure& structure,
-                                          jsbytecode* startPc, OpcodeSearchKind search,
-                                          bool successors, PcVector& list)
-{
-    PcVector worklist;
-    GetSuccessorsOrPredecessors(structure, startPc, successors, worklist);
-
-    for (size_t i = 0; i < worklist.length(); i++) {
-        jsbytecode* pc = worklist[i];
-        if (BytecodeMatchesSearch(structure, startPc, pc, search)) {
-            PcVectorAppendNoDuplicate(list, pc);
-        } else {
-            PcVector adjacent;
-            GetSuccessorsOrPredecessors(structure, pc, successors, adjacent);
-            for (size_t j = 0; j < adjacent.length(); j++)
-                PcVectorAppendNoDuplicate(worklist, adjacent[j]);
-        }
-    }
-}
-
 bool
 ReplayDebugger::setFrameOnStep(JSContext* cx, HandleObject obj, CallArgs& args)
 {
@@ -1794,56 +1719,46 @@ ReplayDebugger::setFrameOnStep(JSContext* cx, HandleObject obj, CallArgs& args)
     Activity a(cx);
     HandleObject data = a.getObjectData(obj);
     size_t scriptId = a.getScalarProperty(data, "script");
-    size_t offset = a.getScalarProperty(data, "offset");
     size_t frameIndex = a.getScalarProperty(data, "index");
     if (!a.success())
         return false;
 
-    if (handler.isUndefined()) {
-        // Clear any OnStep breakpoints for this frame.
-        ClearReplayBreakpoints(cx, debugger, [=](const Breakpoint& breakpoint) {
-                return breakpoint.position.script == scriptId
-                    && breakpoint.position.frameIndex == frameIndex
-                    && breakpoint.position.kind == ExecutionPosition::OnStep;
-            });
+    // Clear existing OnStep breakpoints for this frame.
+    ClearReplayBreakpoints(cx, debugger, [=](const Breakpoint& breakpoint) {
+            return breakpoint.position.script == scriptId
+                && breakpoint.position.frameIndex == frameIndex
+                && breakpoint.position.kind == ExecutionPosition::OnStep;
+        });
+
+    if (handler.isUndefined())
         return true;
-    }
     MOZ_RELEASE_ASSERT(handler.isObject());
+
+    RootedValue offsetsValue(cx, args.get(1));
+    if (!offsetsValue.isObject()) {
+        JS_ReportErrorASCII(cx, "setFrameOnStep requires offset list");
+        return false;
+    }
+    RootedObject offsets(cx, &offsetsValue.toObject());
 
     HandleObject scriptObj = getScript(a, scriptId);
     ScriptStructure structure;
     if (!getScriptStructure(cx, scriptObj, &structure))
         return false;
 
-    jsbytecode* startPc = structure.code + std::max(offset, structure.mainOffset);
+    uint32_t length;
+    if (!GetLengthProperty(cx, offsets, &length))
+        return false;
 
-    // Find all successor or predecessor bytecodes in a script with a different
-    // line number from the starting bytecode. The normal debugger relies on
-    // server side scripts to decide when to stop when going through successor
-    // opcodes, but we short circuit this process both for efficiency (less
-    // back and forth IPC) and because the tests performed by the script do not
-    // currently work as expected when new DebuggerFrame objects are returned
-    // after the replaying process does any execution.
-
-    PcVector adjacent;
-    GetSuccessorsOrPredecessorsMatchingSearch(structure, startPc, DifferentLine, true, adjacent);
-
-    PcVector predecessors;
-    GetSuccessorsOrPredecessorsMatchingSearch(structure, startPc, DifferentLine, false, predecessors);
-    for (size_t i = 0; i < predecessors.length(); i++) {
-        // Continue walking backwards to find the first bytecode on this
-        // line. This is the one the user will expect the line break to
-        // indicate.
-        jsbytecode* pc = predecessors[i];
-        GetSuccessorsOrPredecessorsMatchingSearch(structure, pc,
-                                                  SameLinePredecessorOnDifferentLine, false,
-                                                  adjacent);
-    }
-
-    for (size_t i = 0; i < adjacent.length(); i++) {
-        size_t offset = adjacent[i] - structure.code;
-        if (offset < structure.mainOffset)
-            continue;
+    for (size_t i = 0; i < length; i++) {
+        RootedValue elem(cx);
+        size_t offset;
+        if (!JS_GetElement(cx, offsets, i, &elem) ||
+            !ScriptOffset(cx, elem, &offset) ||
+            !EnsureScriptOffsetIsValid(cx, structure.code, structure.codeLength, offset))
+        {
+            return false;
+        }
         ExecutionPosition position(ExecutionPosition::OnStep, scriptId, offset, frameIndex);
         if (!SetReplayBreakpoint(cx, debugger->toJSObject(), &handler.toObject(), position))
             return false;

@@ -468,6 +468,56 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     return result;
   },
 
+  // Return whether reaching a script offset should be considered a distinct
+  // "step" from another location in the same frame.
+  _intraFrameLocationIsStepTarget: function(startLocation, script, offset) {
+    // Only allow stepping stops at entry points for the line.
+    if (!script.getOffsetLocation(offset).isEntryPoint) {
+      return false;
+    }
+
+    // Cases when we have executed enough within a frame to consider a "step"
+    // to have occured:
+    //
+    // 1. We change URLs (can happen without changing frames thanks to
+    //    source mapping).
+    // 2. The source has pause points and we change locations.
+    // 3. The source does not have pause points and we change lines.
+
+    const generatedLocation = this.sources.getScriptOffsetLocation(script, offset);
+    const newLocation = this.unsafeSynchronize(this.sources.getOriginalLocation(
+      generatedLocation));
+
+    // Case 1.
+    if (startLocation.originalUrl !== newLocation.originalUrl) {
+      return true;
+    }
+
+    const pausePoints = newLocation.originalSourceActor.pausePoints;
+
+    if (!pausePoints) {
+      // Case 3.
+      return startLocation.originalLine !== newLocation.originalLine;
+    }
+
+    // Case 2.
+    if (
+      startLocation.originalLine === newLocation.originalLine
+      && startLocation.originalColumn === newLocation.originalColumn
+    ) {
+      return false;
+    }
+
+    // When pause points are specified for the source,
+    // we should pause when we are at a stepOver pause point
+    const pausePoint = findPausePointForLocation(pausePoints, newLocation);
+    if (pausePoint && pausePoint.types.stepOver) {
+      return true;
+    }
+
+    return false;
+  },
+
   _makeOnStep: function({ thread, pauseAndRespond, startFrame,
                            startLocation, steppingType }) {
     // Breaking in place: we should always pause.
@@ -481,70 +531,27 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     return function() {
       // onStep is called with 'this' set to the current frame.
 
-      // Only allow stepping stops at entry points for the line, when
-      // the stepping occurs in a single frame.  The "same frame"
-      // check makes it so a sequence of steps can step out of a frame
-      // and into subsequent calls in the outer frame.  E.g., if there
-      // is a call "a(b())" and the user steps into b, then this
-      // condition makes it possible to step out of b and into a.
-      if (this === startFrame &&
-          !this.script.getOffsetLocation(this.offset).isEntryPoint) {
-        return undefined;
-      }
-
       const generatedLocation = thread.sources.getFrameLocation(this);
       const newLocation = thread.unsafeSynchronize(thread.sources.getOriginalLocation(
         generatedLocation));
 
-      // Cases when we should pause because we have executed enough to consider
-      // a "step" to have occured:
+      // Always continue execution if either:
       //
-      // 1.1. We change frames.
-      // 1.2. We change URLs (can happen without changing frames thanks to
-      //      source mapping).
-      // 1.3. The source has pause points and we change locations.
-      // 1.4  The source does not have pause points and We change lines.
-      //
-      // Cases when we should always continue execution, even if one of the
-      // above cases is true:
-      //
-      // 2.1. We are in a source mapped region, but inside a null mapping
-      //      (doesn't correlate to any region of original source)
-      // 2.2. The source we are in is black boxed.
-
-      // Cases 2.1 and 2.2
+      // 1. We are in a source mapped region, but inside a null mapping
+      //    (doesn't correlate to any region of original source)
+      // 2. The source we are in is black boxed.
       if (newLocation.originalUrl == null
           || thread.sources.isBlackBoxed(newLocation.originalUrl)) {
         return undefined;
       }
 
-      // Cases 1.1, 1.2
-      if (this !== startFrame || startLocation.originalUrl !== newLocation.originalUrl) {
+      // A step has occurred if we have changed frames.
+      if (this !== startFrame) {
         return pauseAndRespond(this);
       }
 
-      const pausePoints = newLocation.originalSourceActor.pausePoints;
-
-      if (!pausePoints) {
-        // Case 1.4
-        if (startLocation.originalLine !== newLocation.originalLine) {
-          return pauseAndRespond(this);
-        }
-        return undefined;
-      }
-
-      // Case 1.3
-      if (
-        startLocation.originalLine === newLocation.originalLine
-        && startLocation.originalColumn === newLocation.originalColumn
-      ) {
-        return undefined;
-      }
-
-      // When pause points are specified for the source,
-      // we should pause when we are at a stepOver pause point
-      const pausePoint = findPausePointForLocation(pausePoints, newLocation);
-      if (pausePoint && pausePoint.types.stepOver) {
+      // A step has occurred if we reached a step target.
+      if (thread._intraFrameLocationIsStepTarget(startLocation, this.script, this.offset)) {
         return pauseAndRespond(this);
       }
 
@@ -552,6 +559,34 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       // consider this a "step" yet).
       return undefined;
     };
+  },
+
+  /**
+   * Find the offsets in a frame for a replaying process where the onStep hook
+   * should fire at.
+   */
+  _findReplayingStepOffsets: function(startLocation, frame, rewinding) {
+    let worklist = [frame.offset], seen = [], result = [];
+    while (worklist.length) {
+      let offset = worklist.pop();
+      if (seen.some((n) => n == offset)) {
+        continue;
+      }
+      seen.push(offset);
+      if (this._intraFrameLocationIsStepTarget(startLocation, frame.script, offset)) {
+        if (!result.some((n) => offset == n)) {
+          result.push(offset);
+        }
+      } else {
+        let neighbors = rewinding
+            ? frame.script.getPredecessorOffsets(offset)
+            : frame.script.getSuccessorOffsets(offset);
+        for (let n of neighbors) {
+          worklist.push(n);
+        }
+      }
+    }
+    return result;
   },
 
   /**
@@ -621,21 +656,27 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
             case "break":
             case "next":
               if (stepFrame.script) {
-                stepFrame.onStep = onStep;
+                if (this.dbg.replaying) {
+                  let offsets = this._findReplayingStepOffsets(originalLocation, stepFrame, rewinding);
+                  stepFrame.setReplayingOnStep(onStep, offsets);
+                } else {
+                  stepFrame.onStep = onStep;
+                }
               }
-              if (!rewinding) {
-                  stepFrame.onPop = onPop;
-              }
-              break;
+              // Fall through.
             case "finish":
               if (rewinding) {
-                  let olderFrame = (stepFrame == this.youngestFrame) ? stepFrame.older : stepFrame;
-                  if (olderFrame && olderFrame.script) {
-                      olderFrame.onStep = onStep;
+                  let olderFrame = stepFrame.older;
+                  while (olderFrame && !olderFrame.script) {
+                    olderFrame = olderFrame.older;
+                  }
+                  if (olderFrame) {
+                    olderFrame.setReplayingOnStep(onStep, [olderFrame.offset]);
                   }
               } else {
                   stepFrame.onPop = onPop;
               }
+              break;
           }
         }
 
@@ -915,7 +956,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
    * Helper method that returns the next frame when stepping.
    */
   _getNextStepFrame: function(frame, rewinding) {
-    let endOfFrame = rewinding ? (frame.offset == 0) : frame.reportedPop;
+    let endOfFrame = rewinding ? (frame.offset == frame.script.mainOffset) : frame.reportedPop;
     let stepFrame = endOfFrame ? frame.older : frame;
     if (!stepFrame || !stepFrame.script) {
       stepFrame = null;
