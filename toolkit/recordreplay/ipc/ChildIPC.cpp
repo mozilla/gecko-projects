@@ -273,8 +273,6 @@ ReportFatalError(const char* aFormat, ...)
   VsprintfLiteral(buf, aFormat, ap);
   va_end(ap);
 
-  Print("***** Fatal Record/Replay Error *****\n%s\n", buf);
-
   // Only send one fatal error message per child process.
   if (!gSentFatalErrorMessage.exchange(true)) {
     // Construct a FatalErrorMessage on the stack, to avoid touching the heap.
@@ -287,6 +285,10 @@ ReportFatalError(const char* aFormat, ...)
 
     // Don't take the message lock when sending this, to avoid touching the heap.
     gChannel->SendMessage(*msg);
+
+    DirectPrint("***** Fatal Record/Replay Error *****\n");
+    DirectPrint(buf);
+    DirectPrint("\n");
 
     DeleteSnapshotFiles();
     UnrecoverableSnapshotFailure();
