@@ -35,9 +35,6 @@ enum class ThreadEvent : uint32_t
   // Acquired a recorded lock.
   Lock,
 
-  // Make a non-blocking attempt to acquire a recorded lock.
-  TryLock,
-
   // Wait for a condition variable with a timeout.
   WaitForCvarUntil,
 

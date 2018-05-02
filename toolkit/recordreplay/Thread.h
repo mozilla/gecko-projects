@@ -153,10 +153,6 @@ private:
   // Whether the thread is waiting on idlefd.
   Atomic<bool, SequentiallyConsistent, Behavior::DontPreserve> mIdle;
 
-  // Any lock/cvar which the thread is waiting on.
-  Atomic<Lock*, SequentiallyConsistent, Behavior::DontPreserve> mWaitLock;
-  Atomic<void*, SequentiallyConsistent, Behavior::DontPreserve> mWaitCvar;
-
   // Any callback which should be invoked so the thread can make progress,
   // and whether the callback has been invoked yet while the main thread is
   // waiting for threads to become idle. Protected by the thread monitor.
@@ -294,26 +290,6 @@ public:
 
   // Wait indefinitely, without allowing this thread to be rewound.
   static void WaitForeverNoIdle();
-
-  // Set the lock which this thread is waiting for.
-  void SetWaitLock(Lock* aLock) {
-    MOZ_RELEASE_ASSERT(!!aLock == !mWaitLock);
-    mWaitLock = aLock;
-  }
-
-  // Wake up all threads which are waiting for a lock.
-  static void NotifyThreadsWaitingForLock(Lock* aLock);
-
-  // Release the lock and block this thread until the given cvar is notified.
-  static void WaitForCvar(void* aCvar, const std::function<void()>& aReleaseLock);
-
-  // Release the lock and block this thread until the given cvar is notified or
-  // aCallback returns true, returning whether the cvar was notified.
-  static bool WaitForCvarUntil(void* aCvar, const std::function<void()>& aReleaseLock,
-                               const std::function<bool()>& aCallback);
-
-  // Wake up one or all threads waiting on a cvar.
-  static void SignalCvar(void* aCvar, bool aBroadcast);
 
   // See RecordReplay.h.
   void NotifyUnrecordedWait(const std::function<void()>& aCallback);

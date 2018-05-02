@@ -30,37 +30,24 @@ class Lock
   // Unique ID for this lock.
   size_t mId;
 
-  // Whether this is locked.
-  Atomic<bool, SequentiallyConsistent, Behavior::DontPreserve> mLocked;
-
-  // Owner of this lock, or zero if unlocked.
-  int32_t mOwner;
-
-  // The number of times this lock has been reentered by its owner, or -1 if
-  // the lock is not reentrant.
-  int32_t mReentrantEnters;
-
-  bool EnterHelper(bool aBlockUntilAcquired);
-
 public:
-  Lock(size_t aId, bool aReentrant)
-    : mId(aId), mLocked(0), mOwner(0), mReentrantEnters(aReentrant ? 0 : -1)
+  Lock(size_t aId)
+    : mId(aId)
   {
     MOZ_ASSERT(aId);
   }
 
-  bool IsReentrant() { return mReentrantEnters >= 0; }
+  size_t Id() { return mId; }
 
-  void Enter() { MOZ_ALWAYS_TRUE(EnterHelper(true)); }
-  bool TryEnter() { return EnterHelper(false); }
-  void Leave();
-
-  // Return whether the lock is currently locked. This is only meaningful if
-  // the current thread owns the lock.
-  bool IsLocked() { return mLocked; }
+  // When recording, this is called after the lock has been acquired, and
+  // records the acquire in the lock's acquire order stream. When replaying,
+  // this is called before the lock has been acquired, and blocks the thread
+  // until it is next in line to acquire the lock before acquiring it via
+  // aCallback.
+  void Enter(const std::function<void()>& aCallback);
 
   // Create a new Lock corresponding to a native lock, with a fresh ID.
-  static void New(void* aNativeLock, bool aReentrant);
+  static void New(void* aNativeLock);
 
   // Destroy any Lock associated with a native lock.
   static void Destroy(void* aNativeLock);

@@ -66,7 +66,7 @@ static LockMap* gLocks;
 static ReadWriteSpinLock gLocksLock;
 
 /* static */ void
-Lock::New(void* aNativeLock, bool aReentrant)
+Lock::New(void* aNativeLock)
 {
   if (AreThreadEventsPassedThrough() || HasDivergedFromRecording()) {
     Destroy(aNativeLock); // Clean up any old lock, as below.
@@ -104,7 +104,7 @@ Lock::New(void* aNativeLock, bool aReentrant)
   // was no DestroyLock call for the old one.
   gLocks->erase(aNativeLock);
 
-  gLocks->insert(LockMap::value_type(aNativeLock, new Lock(id, aReentrant)));
+  gLocks->insert(LockMap::value_type(aNativeLock, new Lock(id)));
 
   thread->EndDisallowEvents();
 }
@@ -136,6 +136,10 @@ Lock::Find(void* aNativeLock)
   if (gLocks) {
     LockMap::iterator iter = gLocks->find(aNativeLock);
     if (iter != gLocks->end()) {
+      // Now that we know the lock is recorded, check whether thread events
+      // should be generated right now. Doing things in this order avoids
+      // reentrancy issues when initializing the thread-local state used by
+      // these calls.
       if (AreThreadEventsPassedThrough() || HasDivergedFromRecording()) {
         return nullptr;
       }
@@ -146,95 +150,33 @@ Lock::Find(void* aNativeLock)
   return nullptr;
 }
 
-bool
-Lock::EnterHelper(bool aBlockUntilAcquired)
+void
+Lock::Enter(const std::function<void()>& aCallback)
 {
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough() && !HasDivergedFromRecording());
   MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
 
-  Thread* thread = Thread::Current();
-
-  LockAcquires* acquires = gLockAcquires.Get(mId);
-
-  RecordReplayAssert("%s %d", aBlockUntilAcquired ? "Lock" : "TryLock", (int) mId);
+  RecordReplayAssert("Lock %d", (int) mId);
 
   // Include an event in each thread's record when a lock acquire begins. This
   // is not required by the replay but is used to check that lock acquire order
   // is consistent with the recording and that we will fail explicitly instead
   // of deadlocking.
-  thread->Events().RecordOrReplayThreadEvent(aBlockUntilAcquired
-                                             ? ThreadEvent::Lock
-                                             : ThreadEvent::TryLock);
+  Thread* thread = Thread::Current();
+  thread->Events().RecordOrReplayThreadEvent(ThreadEvent::Lock);
   thread->Events().CheckInput(mId);
 
-  if (IsReplaying()) {
-    // If this is an unsuccessful trylock then we are done.
-    if (!aBlockUntilAcquired && !thread->Events().ReadScalar()) {
-      return false;
-    }
-
+  LockAcquires* acquires = gLockAcquires.Get(mId);
+  if (IsRecording()) {
+    acquires->mAcquires->WriteScalar(thread->Id());
+  } else {
     // Wait until this thread is next in line to acquire the lock.
     while (thread->Id() != acquires->mNextOwner) {
       Thread::Wait();
     }
-  }
-
-  bool acquired = false;
-  if (mOwner == (int32_t) thread->Id()) {
-    // This thread already owns the lock.
-    if (IsReentrant()) {
-      acquired = true;
-      mReentrantEnters++;
-      MOZ_RELEASE_ASSERT(mReentrantEnters < INT32_MAX);
-    } else if (aBlockUntilAcquired) {
-      MOZ_CRASH();
-    }
-  } else if (!aBlockUntilAcquired && IsRecording()) {
-    // Make one attempt to acquire the lock.
-    acquired = !mLocked.exchange(true);
-  } else {
-    // Wait until we are able to acquire the lock.
-    thread->SetWaitLock(this);
-    while (mLocked.exchange(true)) {
-      Thread::Wait();
-    }
-    thread->SetWaitLock(nullptr);
-    acquired = true;
-  }
-
-  if (IsRecording() && !aBlockUntilAcquired) {
-    thread->Events().WriteScalar(acquired);
-    if (!acquired) {
-      return false;
-    }
-  }
-
-  MOZ_RELEASE_ASSERT(acquired);
-  mOwner = thread->Id();
-
-  if (IsRecording()) {
-    acquires->mAcquires->WriteScalar(thread->Id());
-  } else {
-    MOZ_RELEASE_ASSERT(thread->Id() == acquires->mNextOwner);
+    // Acquire the lock before updating the next owner.
+    aCallback();
     acquires->ReadAndNotifyNextOwner(thread);
-  }
-
-  return true;
-}
-
-void
-Lock::Leave()
-{
-  MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough() && !HasDivergedFromRecording());
-  MOZ_RELEASE_ASSERT(mOwner == (int32_t) Thread::Current()->Id());
-
-  if (mReentrantEnters > 0) {
-    mReentrantEnters--;
-  } else {
-    mOwner = 0;
-    DebugOnly<bool> rv = mLocked.exchange(false);
-    MOZ_ASSERT(rv);
-    Thread::NotifyThreadsWaitingForLock(this);
   }
 }
 

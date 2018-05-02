@@ -112,13 +112,9 @@ namespace recordreplay {
   MACRO(__workq_kernreturn)                     \
   MACRO(start_wqthread)                         \
   /* pthreads interface functions */            \
-  MACRO(pthread_cond_init)                      \
-  MACRO(pthread_cond_destroy)                   \
   MACRO(pthread_cond_wait)                      \
   MACRO(pthread_cond_timedwait)                 \
   MACRO(pthread_cond_timedwait_relative_np)     \
-  MACRO(pthread_cond_signal)                    \
-  MACRO(pthread_cond_broadcast)                 \
   MACRO(pthread_create)                         \
   MACRO(pthread_join)                           \
   MACRO(pthread_mutex_init)                     \
@@ -1086,90 +1082,74 @@ RR_start_wqthread(size_t a0, size_t a1, size_t a2, size_t a3, size_t a4, size_t 
 // pthreads redirections
 ///////////////////////////////////////////////////////////////////////////////
 
-static ssize_t
-RR_pthread_cond_init(pthread_cond_t* aCond, const pthread_condattr_t* aAttr)
+static void
+DirectLockMutex(pthread_mutex_t* aMutex)
 {
-  return OriginalCall(pthread_cond_init, ssize_t, aCond, aAttr);
+  AutoPassThroughThreadEvents pt;
+  ssize_t rv = OriginalCall(pthread_mutex_lock, ssize_t, aMutex);
+  MOZ_RELEASE_ASSERT(rv == 0);
 }
 
-static ssize_t
-RR_pthread_cond_destroy(pthread_cond_t* aCond)
+static void
+DirectUnlockMutex(pthread_mutex_t* aMutex)
 {
-  return OriginalCall(pthread_cond_destroy, ssize_t, aCond);
+  AutoPassThroughThreadEvents pt;
+  ssize_t rv = OriginalCall(pthread_mutex_unlock, ssize_t, aMutex);
+  MOZ_RELEASE_ASSERT(rv == 0);
+}
+
+// Handle a redirection which releases a mutex, waits in some way for a cvar,
+// and reacquires the mutex before returning.
+static ssize_t
+WaitForCvar(pthread_mutex_t* aMutex, bool aRecordReturnValue,
+            const std::function<ssize_t()>& aCallback)
+{
+  Lock* lock = Lock::Find(aMutex);
+  if (!lock) {
+    AutoEnsurePassThroughThreadEvents pt;
+    return aCallback();
+  }
+  RecordReplayAssert("WaitForCvar %d", (int) lock->Id());
+  ssize_t rv = 0;
+  if (IsRecording()) {
+    {
+      AutoPassThroughThreadEvents pt;
+      rv = aCallback();
+    }
+  } else {
+    DirectUnlockMutex(aMutex);
+  }
+  lock->Enter([=]() { DirectLockMutex(aMutex); });
+  if (aRecordReturnValue) {
+    return RecordReplayValue(rv);
+  }
+  MOZ_RELEASE_ASSERT(rv == 0);
+  return 0;
 }
 
 static ssize_t
 RR_pthread_cond_wait(pthread_cond_t* aCond, pthread_mutex_t* aMutex)
 {
-  Lock* lock = Lock::Find(aMutex);
-  if (!lock) {
-    return OriginalCall(pthread_cond_wait, ssize_t, aCond, aMutex);
-  }
-  MOZ_ALWAYS_TRUE(OriginalCall(pthread_mutex_unlock, ssize_t, aMutex) == 0);
-  Thread::WaitForCvar(aCond, [=]() { lock->Leave(); });
-  lock->Enter();
-  MOZ_ALWAYS_TRUE(OriginalCall(pthread_mutex_lock, ssize_t, aMutex) == 0);
-  return 0;
-}
-
-static void
-GetCurrentTime(timespec* aCurrent)
-{
-  AutoPassThroughThreadEvents pt;
-
-  // See https://gist.github.com/jbenet/1087739.
-  clock_serv_t cclock;
-  mach_timespec_t mts;
-  host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
-  clock_get_time(cclock, &mts);
-  mach_port_deallocate(mach_task_self(), cclock);
-  aCurrent->tv_sec = mts.tv_sec;
-  aCurrent->tv_nsec = mts.tv_nsec;
+  return WaitForCvar(aMutex, false,
+                     [=]() { return OriginalCall(pthread_cond_wait, ssize_t, aCond, aMutex); });
 }
 
 static ssize_t
 RR_pthread_cond_timedwait(pthread_cond_t* aCond, pthread_mutex_t* aMutex,
                           timespec* aTimeout)
 {
-  Lock* lock = Lock::Find(aMutex);
-  if (!lock) {
-    return OriginalCall(pthread_cond_timedwait, ssize_t, aCond, aMutex, aTimeout);
-  }
-  MOZ_ALWAYS_TRUE(OriginalCall(pthread_mutex_unlock, ssize_t, aMutex) == 0);
-  bool notified = Thread::WaitForCvarUntil(aCond, [=]() { lock->Leave(); }, [=]() -> bool {
-      timespec current;
-      GetCurrentTime(&current);
-      return current.tv_sec > aTimeout->tv_sec
-          || (current.tv_sec == aTimeout->tv_sec && current.tv_nsec >= aTimeout->tv_nsec);
-    });
-  lock->Enter();
-  MOZ_ALWAYS_TRUE(OriginalCall(pthread_mutex_lock, ssize_t, aMutex) == 0);
-  return notified ? 0 : ETIMEDOUT;
+  return WaitForCvar(aMutex, true,
+                     [=]() { return OriginalCall(pthread_cond_timedwait, ssize_t,
+                                                 aCond, aMutex, aTimeout); });
 }
 
 static ssize_t
 RR_pthread_cond_timedwait_relative_np(pthread_cond_t* aCond, pthread_mutex_t* aMutex,
                                       timespec* aTimeout)
 {
-  timespec current;
-  GetCurrentTime(&current);
-  current.tv_sec += aTimeout->tv_sec;
-  current.tv_nsec += aTimeout->tv_nsec;
-  return RR_pthread_cond_timedwait(aCond, aMutex, &current);
-}
-
-static ssize_t
-RR_pthread_cond_signal(pthread_cond_t* aCond)
-{
-  Thread::SignalCvar(aCond, false);
-  return OriginalCall(pthread_cond_signal, ssize_t, aCond);
-}
-
-static ssize_t
-RR_pthread_cond_broadcast(pthread_cond_t* aCond)
-{
-  Thread::SignalCvar(aCond, true);
-  return OriginalCall(pthread_cond_broadcast, ssize_t, aCond);
+  return WaitForCvar(aMutex, true,
+                     [=]() { return OriginalCall(pthread_cond_timedwait_relative_np, ssize_t,
+                                                 aCond, aMutex, aTimeout); });
 }
 
 static ssize_t
@@ -1206,13 +1186,7 @@ RR_pthread_join(pthread_t aToken, void** aPtr)
 static ssize_t
 RR_pthread_mutex_init(pthread_mutex_t* aMutex, const pthread_mutexattr_t* aAttr)
 {
-  bool reentrant = false;
-  if (aAttr) {
-    int type;
-    MOZ_ALWAYS_TRUE(pthread_mutexattr_gettype(aAttr, &type) == 0);
-    reentrant = type == PTHREAD_MUTEX_RECURSIVE;
-  }
-  Lock::New(aMutex, reentrant);
+  Lock::New(aMutex);
   return OriginalCall(pthread_mutex_init, ssize_t, aMutex, aAttr);
 }
 
@@ -1226,31 +1200,43 @@ RR_pthread_mutex_destroy(pthread_mutex_t* aMutex)
 static ssize_t
 RR_pthread_mutex_lock(pthread_mutex_t* aMutex)
 {
-  if (Lock* lock = Lock::Find(aMutex)) {
-    lock->Enter();
+  Lock* lock = Lock::Find(aMutex);
+  if (!lock) {
+    AutoEnsurePassThroughThreadEventsUseStackPointer pt;
+    return OriginalCall(pthread_mutex_lock, ssize_t, aMutex);
   }
-  return OriginalCall(pthread_mutex_lock, ssize_t, aMutex);
+  if (IsRecording()) {
+    DirectLockMutex(aMutex);
+  }
+  lock->Enter([=]() { DirectLockMutex(aMutex); });
+  return 0;
 }
 
 static ssize_t
 RR_pthread_mutex_trylock(pthread_mutex_t* aMutex)
 {
-  if (Lock* lock = Lock::Find(aMutex)) {
-    if (lock->TryEnter()) {
-      MOZ_ALWAYS_TRUE(OriginalCall(pthread_mutex_lock, ssize_t, aMutex) == 0);
-      return 0;
-    }
-    return EBUSY;
+  Lock* lock = Lock::Find(aMutex);
+  if (!lock) {
+    AutoEnsurePassThroughThreadEvents pt;
+    return OriginalCall(pthread_mutex_trylock, ssize_t, aMutex);
   }
-  return OriginalCall(pthread_mutex_trylock, ssize_t, aMutex);
+  ssize_t rv = 0;
+  if (IsRecording()) {
+    AutoPassThroughThreadEvents pt;
+    rv = OriginalCall(pthread_mutex_trylock, ssize_t, aMutex);
+  }
+  rv = RecordReplayValue(rv);
+  MOZ_RELEASE_ASSERT(rv == 0 || rv == EBUSY);
+  if (rv == 0) {
+    lock->Enter([=]() { DirectLockMutex(aMutex); });
+  }
+  return rv;
 }
 
 static ssize_t
 RR_pthread_mutex_unlock(pthread_mutex_t* aMutex)
 {
-  if (Lock* lock = Lock::Find(aMutex)) {
-    lock->Leave();
-  }
+  AutoEnsurePassThroughThreadEventsUseStackPointer pt;
   return OriginalCall(pthread_mutex_unlock, ssize_t, aMutex);
 }
 
