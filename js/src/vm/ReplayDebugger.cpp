@@ -1597,7 +1597,7 @@ SetReplayBreakpoint(JSContext* cx, JSObject* debugger, JSObject* handler,
 
 static void
 ClearReplayBreakpoints(JSContext* cx, Debugger* debugger,
-                       const std::function<bool(const ReplayDebugger::Breakpoint&)> match)
+                       const std::function<bool(const ReplayDebugger::Breakpoint&)>& match)
 {
     // Make sure we are always on the process main thread when using gReplayBreakpoints.
     MOZ_RELEASE_ASSERT(!cx->runtime()->parentRuntime);
