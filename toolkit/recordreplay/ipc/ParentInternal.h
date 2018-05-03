@@ -156,14 +156,14 @@ class ChildProcess
 
   static void Terminate(ipc::GeckoChildProcessHost* aProcess);
 
-  void OnIncomingMessage(const Message& aMsg);
+  void OnIncomingMessage(size_t aChannelId, const Message& aMsg);
   void OnIncomingRecoveryMessage(const Message& aMsg);
   void SendNextRecoveryMessage();
   void SendMessageRaw(const Message& aMsg);
 
   static bool MaybeProcessPendingMessage(ChildProcess* aProcess);
   static void MaybeProcessPendingMessageRunnable();
-  void ReceiveChildMessageOnMainThread(Message* aMsg);
+  void ReceiveChildMessageOnMainThread(size_t aChannelId, Message* aMsg);
 
   // Get the position of this process relative to its last checkpoint.
   enum Disposition {

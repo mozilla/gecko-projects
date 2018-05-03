@@ -155,9 +155,14 @@ ChildProcess::SetRole(ChildRole* aRole)
 }
 
 void
-ChildProcess::OnIncomingMessage(const Message& aMsg)
+ChildProcess::OnIncomingMessage(size_t aChannelId, const Message& aMsg)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
+
+  // Ignore messages from channels for subprocesses we terminated already.
+  if (aChannelId != mChannel->GetId()) {
+    return;
+  }
 
   // Always handle fatal errors in the same way.
   if (aMsg.mType == MessageType::FatalError) {
@@ -411,8 +416,9 @@ ChildProcess::LaunchSubprocess()
   // deleting or tearing down the old one's state. This is pretty lame and it
   // would be nice if we could do something better here, especially because
   // with restarts we could create any number of channels over time.
-  mChannel = new Channel(gNumChannels++, [&](Message* aMsg) {
-      ReceiveChildMessageOnMainThread(aMsg);
+  size_t channelId = gNumChannels++;
+  mChannel = new Channel(channelId, [=](Message* aMsg) {
+      ReceiveChildMessageOnMainThread(channelId, aMsg);
     });
 
   mProcess = new ipc::GeckoChildProcessHost(GeckoProcessType_Content);
@@ -554,6 +560,7 @@ ChildProcess::AttemptRestart(const char* aWhy)
 struct PendingMessage
 {
   ChildProcess* mProcess;
+  size_t mChannelId;
   Message* mMsg;
 };
 static StaticInfallibleVector<PendingMessage> gPendingMessages;
@@ -576,7 +583,7 @@ ChildProcess::MaybeProcessPendingMessage(ChildProcess* aProcess)
       gPendingMessages.erase(&gPendingMessages[i]);
 
       MonitorAutoUnlock unlock(*gChildProcessMonitor);
-      copy.mProcess->OnIncomingMessage(*copy.mMsg);
+      copy.mProcess->OnIncomingMessage(copy.mChannelId, *copy.mMsg);
       free(copy.mMsg);
       return true;
     }
@@ -623,7 +630,7 @@ ChildProcess::MaybeProcessPendingMessageRunnable()
 // called on a channel thread, and the function executes asynchronously on
 // the main thread.
 void
-ChildProcess::ReceiveChildMessageOnMainThread(Message* aMsg)
+ChildProcess::ReceiveChildMessageOnMainThread(size_t aChannelId, Message* aMsg)
 {
   MOZ_RELEASE_ASSERT(!NS_IsMainThread());
 
@@ -631,6 +638,7 @@ ChildProcess::ReceiveChildMessageOnMainThread(Message* aMsg)
 
   PendingMessage pending;
   pending.mProcess = this;
+  pending.mChannelId = aChannelId;
   pending.mMsg = aMsg;
   gPendingMessages.append(pending);
 
