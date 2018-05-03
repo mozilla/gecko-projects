@@ -117,17 +117,13 @@ class ChildProcess
   };
   RecoveryStage mRecoveryStage;
 
-  // What this process is currently doing.
-  enum class Status {
-    PausedAtCheckpoint,
-    PausedAtBreakpoint,
-    PausedAtRecordingEndpoint,
-    Running,
-    RunningAtCheckpoint,
-    RunningAtBreakpoint,
-    RunningAtRecordingEndpoint,
-  };
-  Status mStatus;
+  // Whether the process is currently paused.
+  bool mPaused;
+
+  // If the process is paused, or if it is running while handling a message
+  // that won't cause it to change its execution point, the last message which
+  // caused it to pause.
+  Message* mPausedMessage;
 
   // The last checkpoint which the child process reached. The child is
   // somewhere between this and either the next or previous checkpoint,
@@ -177,7 +173,7 @@ class ChildProcess
   };
   Disposition GetDisposition();
 
-  void Recover(Status aStatus, size_t aLastCheckpoint,
+  void Recover(bool aPaused, Message* aPausedMessage, size_t aLastCheckpoint,
                Message** aMessages, size_t aNumMessages);
 
   bool CanRestart();
@@ -198,18 +194,18 @@ public:
   bool PauseNeeded() { return mPauseNeeded; }
   const InfallibleVector<size_t>& MajorCheckpoints() { return mMajorCheckpoints; }
 
-  bool IsPaused() {
-    switch (mStatus) {
-    case Status::PausedAtCheckpoint:
-    case Status::PausedAtBreakpoint:
-    case Status::PausedAtRecordingEndpoint:
-      return true;
-    default:
-      return false;
-    }
+  bool IsPaused() { return mPaused; }
+  bool IsPausedAtCheckpoint() {
+    return IsPaused() && mPausedMessage->mType == MessageType::HitCheckpoint;
   }
-  bool IsPausedAtCheckpoint() { return mStatus == Status::PausedAtCheckpoint; }
-  bool IsPausedAtRecordingEndpoint() { return mStatus == Status::PausedAtRecordingEndpoint; }
+  bool IsPausedAtRecordingEndpoint() {
+    return IsPaused() && mPausedMessage->mType == MessageType::HitRecordingEndpoint;
+  }
+
+  // Return whether this process is paused at a breakpoint whose kind matches
+  // the supplied filter.
+  typedef std::function<bool(JS::replay::ExecutionPosition::Kind)> BreakpointFilter;
+  bool IsPausedAtMatchingBreakpoint(const BreakpointFilter& aFilter);
 
   // Get the checkpoint at or earlier to the process' position. This is either
   // the last reached checkpoint or the previous one.
@@ -267,13 +263,11 @@ public:
   void SetRole(ChildRole* aRole);
   void SendMessage(const Message& aMessage);
 
-  void Recover(ChildProcess* aTargetProcess) {
-    Recover(aTargetProcess->mStatus, aTargetProcess->mLastCheckpoint,
-            aTargetProcess->mMessages.begin(), aTargetProcess->mMessages.length());
-  }
-  void RecoverToCheckpoint(size_t aCheckpoint) {
-    Recover(Status::PausedAtCheckpoint, aCheckpoint, nullptr, 0);
-  }
+  // Recover to the same state as another process.
+  void Recover(ChildProcess* aTargetProcess);
+
+  // Recover to be paused at a checkpoint with no breakpoints set.
+  void RecoverToCheckpoint(size_t aCheckpoint);
 
   // Handle incoming messages from this process (and no others) until the
   // callback succeeds.

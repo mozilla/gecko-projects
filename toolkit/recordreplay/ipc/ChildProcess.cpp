@@ -30,7 +30,8 @@ ChildProcess::ChildProcess(ChildRole* aRole, bool aRecording)
   , mChannel(nullptr)
   , mRecording(aRecording)
   , mRecoveryStage(RecoveryStage::None)
-  , mStatus(Status::Running)
+  , mPaused(false)
+  , mPausedMessage(nullptr)
   , mLastCheckpoint(InvalidCheckpointId)
   , mNumRecoveredMessages(0)
   , mNumRestarts(0)
@@ -85,6 +86,38 @@ ChildProcess::GetDisposition()
     }
   }
   return AtLastCheckpoint;
+}
+
+bool
+ChildProcess::IsPausedAtMatchingBreakpoint(const BreakpointFilter& aFilter)
+{
+  if (!IsPaused() || mPausedMessage->mType != MessageType::HitBreakpoint) {
+    return false;
+  }
+
+  HitBreakpointMessage* npaused = (HitBreakpointMessage*) mPausedMessage;
+  for (size_t i = 0; i < npaused->NumBreakpoints(); i++) {
+    uint32_t breakpointId = npaused->Breakpoints()[i];
+
+    // Find the last time we sent a SetBreakpoint message to this process for
+    // this breakpoint ID.
+    SetBreakpointMessage* lastSet = nullptr;
+    for (Message* msg : mMessages) {
+      if (msg->mType == MessageType::SetBreakpoint) {
+        SetBreakpointMessage* nmsg = (SetBreakpointMessage*) msg;
+        if (nmsg->mId == breakpointId) {
+          lastSet = nmsg;
+        }
+      }
+    }
+    MOZ_RELEASE_ASSERT(lastSet &&
+                       lastSet->mPosition.kind != JS::replay::ExecutionPosition::Invalid);
+    if (aFilter(lastSet->mPosition.kind)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 void
@@ -144,29 +177,15 @@ ChildProcess::OnIncomingMessage(const Message& aMsg)
   MOZ_RELEASE_ASSERT(!IsPaused());
   switch (aMsg.mType) {
   case MessageType::HitCheckpoint:
-    mStatus = Status::PausedAtCheckpoint;
-    break;
   case MessageType::HitBreakpoint:
-    mStatus = Status::PausedAtBreakpoint;
-    break;
   case MessageType::HitRecordingEndpoint:
-    mStatus = Status::PausedAtRecordingEndpoint;
-    break;
+    MOZ_RELEASE_ASSERT(!mPausedMessage);
+    mPausedMessage = aMsg.Clone();
+    MOZ_FALLTHROUGH;
   case MessageType::DebuggerResponse:
   case MessageType::RecordingFlushed:
-    switch (mStatus) {
-    case Status::RunningAtCheckpoint:
-      mStatus = Status::PausedAtCheckpoint;
-      break;
-    case Status::RunningAtBreakpoint:
-      mStatus = Status::PausedAtBreakpoint;
-      break;
-    case Status::RunningAtRecordingEndpoint:
-      mStatus = Status::PausedAtRecordingEndpoint;
-      break;
-    default:
-      MOZ_CRASH("Unexpected process status");
-    }
+    MOZ_RELEASE_ASSERT(mPausedMessage);
+    mPaused = true;
     break;
   default:
     break;
@@ -220,23 +239,12 @@ ChildProcess::SendMessage(const Message& aMsg)
   switch (aMsg.mType) {
   case MessageType::Resume:
   case MessageType::RestoreCheckpoint:
-    mStatus = Status::Running;
-    break;
+    free(mPausedMessage);
+    mPausedMessage = nullptr;
+    MOZ_FALLTHROUGH;
   case MessageType::DebuggerRequest:
   case MessageType::FlushRecording:
-    switch (mStatus) {
-    case Status::PausedAtCheckpoint:
-      mStatus = Status::RunningAtCheckpoint;
-      break;
-    case Status::PausedAtBreakpoint:
-      mStatus = Status::RunningAtBreakpoint;
-      break;
-    case Status::PausedAtRecordingEndpoint:
-      mStatus = Status::RunningAtRecordingEndpoint;
-      break;
-    default:
-      MOZ_CRASH("Unexpected process status");
-    }
+    mPaused = false;
     break;
   default:
     break;
@@ -273,7 +281,7 @@ ChildProcess::SendMessageRaw(const Message& aMsg)
 }
 
 void
-ChildProcess::Recover(Status aStatus, size_t aLastCheckpoint,
+ChildProcess::Recover(bool aPaused, Message* aPausedMessage, size_t aLastCheckpoint,
                       Message** aMessages, size_t aNumMessages)
 {
   MOZ_RELEASE_ASSERT(IsPaused());
@@ -293,7 +301,8 @@ ChildProcess::Recover(Status aStatus, size_t aLastCheckpoint,
   }
   mMessages.clear();
 
-  mStatus = aStatus;
+  mPaused = aPaused;
+  mPausedMessage = aPausedMessage;
   mLastCheckpoint = aLastCheckpoint;
   for (size_t i = 0; i < aNumMessages; i++) {
     mMessages.append(aMessages[i]->Clone());
@@ -321,6 +330,21 @@ ChildProcess::Recover(Status aStatus, size_t aLastCheckpoint,
   }
 
   WaitUntil([=]() { return !IsRecovering(); });
+}
+
+void
+ChildProcess::Recover(ChildProcess* aTargetProcess)
+{
+  MOZ_RELEASE_ASSERT(aTargetProcess->IsPaused());
+  Recover(true, aTargetProcess->mPausedMessage->Clone(),
+          aTargetProcess->mLastCheckpoint,
+          aTargetProcess->mMessages.begin(), aTargetProcess->mMessages.length());
+}
+
+void
+ChildProcess::RecoverToCheckpoint(size_t aCheckpoint)
+{
+  Recover(true, HitCheckpointMessage(aCheckpoint, 0).Clone(), aCheckpoint, nullptr, 0);
 }
 
 void
@@ -482,8 +506,11 @@ ChildProcess::AttemptRestart(const char* aWhy)
 
   TerminateSubprocess();
 
-  Status newStatus = mStatus;
-  mStatus = Status::Running;
+  bool newPaused = mPaused;
+  Message* newPausedMessage = mPausedMessage;
+
+  mPaused = false;
+  mPausedMessage = nullptr;
 
   size_t newLastCheckpoint = mLastCheckpoint;
   mLastCheckpoint = InvalidCheckpointId;
@@ -510,7 +537,8 @@ ChildProcess::AttemptRestart(const char* aWhy)
     SendMessage(SetSaveCheckpointMessage(checkpoint, true));
   }
 
-  Recover(newStatus, newLastCheckpoint, newMessages.begin(), newMessages.length());
+  Recover(newPaused, newPausedMessage, newLastCheckpoint,
+          newMessages.begin(), newMessages.length());
 }
 
 ///////////////////////////////////////////////////////////////////////////////

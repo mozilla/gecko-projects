@@ -709,6 +709,17 @@ HasSavedCheckpointsInRange(ChildProcess* aChild, size_t aStart, size_t aEnd)
   return true;
 }
 
+// Return whether a child is paused at a breakpoint set by the user or by
+// stepping around, at which point the debugger will send requests to the
+// child to inspect its state. This excludes breakpoints set for things
+// internal to the debugger.
+static bool
+IsUserBreakpoint(JS::replay::ExecutionPosition::Kind aKind)
+{
+  MOZ_RELEASE_ASSERT(aKind != JS::replay::ExecutionPosition::Invalid);
+  return aKind != JS::replay::ExecutionPosition::NewScript;
+}
+
 static void
 MarkActiveChildExplicitPause()
 {
@@ -728,7 +739,7 @@ MarkActiveChildExplicitPause()
     // consistent debugger experience whether still recording or replaying, we
     // switch the active child to a replaying child when pausing at a
     // breakpoint.
-    if (CanRewind() && !gActiveChild->IsPausedAtCheckpoint()) {
+    if (CanRewind() && gActiveChild->IsPausedAtMatchingBreakpoint(IsUserBreakpoint)) {
       ChildProcess* child =
         OtherReplayingChild(ReplayingChildResponsibleForSavingCheckpoint(targetCheckpoint));
       SwitchActiveChild(child);
