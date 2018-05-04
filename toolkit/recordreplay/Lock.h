@@ -31,7 +31,7 @@ class Lock
   size_t mId;
 
 public:
-  Lock(size_t aId)
+  explicit Lock(size_t aId)
     : mId(aId)
   {
     MOZ_ASSERT(aId);
