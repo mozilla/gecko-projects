@@ -19,9 +19,16 @@ transforms = TransformSequence()
 @transforms.add
 def resolve_properties(config, tasks):
     for task in tasks:
-        for property in ("REPACK_MANIFESTS_URL", ):
-            property = "worker.env.{}".format(property)
-            resolve_keyed_by(task, property, property, **config.params)
+        for prop in ("environment", ):
+            resolve_keyed_by(task, prop, prop, **config.params)
+
+        for k in config.graph_config['partner'][task['environment']]:
+            if config.kind.startswith(k):
+                task['worker']['env']['REPACK_MANIFESTS_URL'] = \
+                    config.graph_config['partner'][task['environment']][k]
+        else:
+            raise Exception("Can't find partner REPACK_MANIFESTS_URL")
+        del(task['environment'])
 
         if task['worker']['env']['REPACK_MANIFESTS_URL'].startswith('git@'):
             task.setdefault('scopes', []).append(
