@@ -63,7 +63,8 @@ static void
 ChannelMessageHandler(Message* aMsg)
 {
   MOZ_RELEASE_ASSERT(MainThreadShouldPause() ||
-                     aMsg->mType == MessageType::CreateCheckpoint);
+                     aMsg->mType == MessageType::CreateCheckpoint ||
+                     aMsg->mType == MessageType::Terminate);
 
   switch (aMsg->mType) {
   case MessageType::Introduction: {
@@ -75,6 +76,11 @@ ChannelMessageHandler(Message* aMsg)
     uint8_t data = 0;
     DirectWrite(gCheckpointWriteFd, &data, 1);
     break;
+  }
+  case MessageType::Terminate: {
+    PrintSpew("Terminate message received, exiting...\n");
+    MOZ_RELEASE_ASSERT(IsRecording());
+    _exit(0);
   }
   case MessageType::SetIsActive: {
     const SetIsActiveMessage& nmsg = (const SetIsActiveMessage&) *aMsg;

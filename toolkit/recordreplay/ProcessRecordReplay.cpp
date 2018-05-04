@@ -26,7 +26,7 @@
 namespace mozilla {
 namespace recordreplay {
 
-static MOZ_NEVER_INLINE void
+MOZ_NEVER_INLINE void
 BusyWait()
 {
   static volatile int value = 1;
@@ -151,6 +151,7 @@ RecordReplayInterface_Initialize(int aArgc, char* aArgv[])
   InitializeMemorySnapshots();
   Thread::SpawnAllThreads();
   InitializeCountdownThread();
+  SetupDirtyMemoryHandler();
 
   thread->SetPassThrough(false);
 

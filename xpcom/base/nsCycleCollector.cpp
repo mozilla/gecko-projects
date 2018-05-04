@@ -2865,9 +2865,13 @@ public:
     void* o = aEntry->mObject;
     nsCycleCollectionParticipant* cp = aEntry->mParticipant;
     ToParticipant(o, &cp);
-    if (aEntry->mRefCnt->IsPurple() && !cp->CanSkip(o, false) &&
-        (!mRemoveChildlessNodes || MayHaveChild(o, cp))) {
-      return true;
+    if (aEntry->mRefCnt->IsPurple()) {
+      recordreplay::RecordReplayAssert("RemoveSkippableVisitor #1 %s", recordreplay::VirtualThingName(cp));
+      bool canSkip = cp->CanSkip(o, false);
+      recordreplay::RecordReplayAssert("RemoveSkippableVisitor #2");
+      if (!canSkip && (!mRemoveChildlessNodes || MayHaveChild(o, cp))) {
+        return true;
+      }
     }
     aBuffer.Remove(aEntry);
     return true;

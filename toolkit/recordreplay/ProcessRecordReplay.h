@@ -121,6 +121,9 @@ extern char* gRecordingFilename;
 // Helper Functions
 ///////////////////////////////////////////////////////////////////////////////
 
+// Wait indefinitely for a debugger to be attached.
+void BusyWait();
+
 static inline void Unreachable() { MOZ_CRASH("Unreachable"); }
 
 // Get the symbol name for a function pointer address, if available.

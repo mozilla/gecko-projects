@@ -1485,8 +1485,6 @@ TakeFirstMemorySnapshot()
       Thread* thread = Thread::SpawnNonRecordedThread(SnapshotThreadMain, (void*) i);
       gMemoryInfo->mSnapshotWorklists[i].mThreadId = thread->Id();
     }
-
-    SetupDirtyMemoryHandler();
   }
 
   // All threads should have been created by now.

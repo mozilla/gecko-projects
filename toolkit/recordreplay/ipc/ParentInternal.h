@@ -259,7 +259,6 @@ public:
   }
 
   void AddMajorCheckpoint(size_t aId);
-  Maybe<TimeStamp> HangDeadline();
   void SetRole(ChildRole* aRole);
   void SendMessage(const Message& aMessage);
 

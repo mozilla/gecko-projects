@@ -71,6 +71,9 @@ ChildProcess::ChildProcess(ChildRole* aRole, bool aRecording)
 ChildProcess::~ChildProcess()
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
+  if (IsRecording()) {
+    SendMessage(TerminateMessage());
+  }
   TerminateSubprocess();
 }
 
@@ -126,19 +129,6 @@ ChildProcess::AddMajorCheckpoint(size_t aId)
   // Major checkpoints should be listed in order.
   MOZ_RELEASE_ASSERT(mMajorCheckpoints.empty() || aId > mMajorCheckpoints.back());
   mMajorCheckpoints.append(aId);
-}
-
-// How many seconds to wait without hearing from an unpaused child before
-// considering that child to be hung.
-static const size_t HangSeconds = 5;
-
-Maybe<TimeStamp>
-ChildProcess::HangDeadline()
-{
-  if (!CanRestart() || gChildrenAreDebugging) {
-    return Nothing();
-  }
-  return Some(mLastMessageTime + TimeDuration::FromSeconds(HangSeconds));
 }
 
 void
@@ -240,7 +230,9 @@ ChildProcess::SendMessage(const Message& aMsg)
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
   // Update paused state.
-  MOZ_RELEASE_ASSERT(IsPaused() || aMsg.mType == MessageType::CreateCheckpoint);
+  MOZ_RELEASE_ASSERT(IsPaused() ||
+                     aMsg.mType == MessageType::CreateCheckpoint ||
+                     aMsg.mType == MessageType::Terminate);
   switch (aMsg.mType) {
   case MessageType::Resume:
   case MessageType::RestoreCheckpoint:
@@ -456,7 +448,7 @@ ChildProcess::TerminateSubprocess()
   gWaitingOnTerminateChildProcess = true;
 
   // Child processes need to be destroyed on the correct thread.
-  XRE_GetIOMessageLoop()->PostTask(NewRunnableFunction("TerminateChildProcess", Terminate, mProcess));
+  XRE_GetIOMessageLoop()->PostTask(NewRunnableFunction("TerminateSubprocess", Terminate, mProcess));
 
   MonitorAutoLock lock(*gChildProcessMonitor);
   while (gWaitingOnTerminateChildProcess) {
@@ -592,6 +584,10 @@ ChildProcess::MaybeProcessPendingMessage(ChildProcess* aProcess)
   return false;
 }
 
+// How many seconds to wait without hearing from an unpaused child before
+// considering that child to be hung.
+static const size_t HangSeconds = 5;
+
 void
 ChildProcess::WaitUntil(const std::function<bool()>& aCallback)
 {
@@ -600,15 +596,16 @@ ChildProcess::WaitUntil(const std::function<bool()>& aCallback)
   while (!aCallback()) {
     MonitorAutoLock lock(*gChildProcessMonitor);
     if (!MaybeProcessPendingMessage(this)) {
-      Maybe<TimeStamp> deadline = HangDeadline();
-      if (deadline.isSome()) {
-        if (TimeStamp::Now() >= deadline.ref()) {
+      if (gChildrenAreDebugging) {
+        // Don't watch for hangs when children are being debugged.
+        gChildProcessMonitor->Wait();
+      } else {
+        TimeStamp deadline = mLastMessageTime + TimeDuration::FromSeconds(HangSeconds);
+        if (TimeStamp::Now() >= deadline) {
           MonitorAutoUnlock unlock(*gChildProcessMonitor);
           AttemptRestart("Child process non-responsive");
         }
-        gChildProcessMonitor->WaitUntil(deadline.ref());
-      } else {
-        gChildProcessMonitor->Wait();
+        gChildProcessMonitor->WaitUntil(deadline);
       }
     }
   }

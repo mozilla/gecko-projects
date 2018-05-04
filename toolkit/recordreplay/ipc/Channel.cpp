@@ -176,9 +176,7 @@ Channel::WaitForMessage()
         return nullptr;
       }
       PrintSpew("Channel disconnected, exiting...\n");
-      if (IsRecordingOrReplaying()) {
-        DeleteSnapshotFiles();
-      }
+      DeleteSnapshotFiles();
       _exit(0);
     }
 

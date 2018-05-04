@@ -2378,7 +2378,8 @@ DOMGCSliceCallback(JSContext* aCx, JS::GCProgress aProgress, const JS::GCDescrip
         nsJSContext::KillFullGCTimer();
       }
 
-      if (ShouldTriggerCC(nsCycleCollector_suspectedCount())) {
+      if (!recordreplay::IsRecordingOrReplaying() &&
+          ShouldTriggerCC(nsCycleCollector_suspectedCount())) {
         nsCycleCollector_dispatchDeferredDeletion();
       }
 
@@ -2410,7 +2411,8 @@ DOMGCSliceCallback(JSContext* aCx, JS::GCProgress aProgress, const JS::GCDescrip
              TaskCategory::GarbageCollection);
       }
 
-      if (ShouldTriggerCC(nsCycleCollector_suspectedCount())) {
+      if (!recordreplay::IsRecordingOrReplaying() &&
+          ShouldTriggerCC(nsCycleCollector_suspectedCount())) {
         nsCycleCollector_dispatchDeferredDeletion();
       }
 

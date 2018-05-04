@@ -54,6 +54,9 @@ namespace recordreplay {
   /* Sent at startup. */                                       \
   Macro(Introduction)                                          \
                                                                \
+  /* Sent to recording processes when exiting. */              \
+  Macro(Terminate)                                             \
+                                                               \
   /* Flush the current recording to disk. */                   \
   Macro(FlushRecording)                                        \
                                                                \
@@ -206,13 +209,6 @@ struct IntroductionMessage : public Message
   }
 };
 
-struct CreateCheckpointMessage : public Message
-{
-  CreateCheckpointMessage()
-    : Message(MessageType::CreateCheckpoint, sizeof(*this))
-  {}
-};
-
 template <MessageType Type>
 struct EmptyMessage : public Message
 {
@@ -221,6 +217,8 @@ struct EmptyMessage : public Message
   {}
 };
 
+typedef EmptyMessage<MessageType::Terminate> TerminateMessage;
+typedef EmptyMessage<MessageType::CreateCheckpoint> CreateCheckpointMessage;
 typedef EmptyMessage<MessageType::FlushRecording> FlushRecordingMessage;
 
 template <MessageType Type>
