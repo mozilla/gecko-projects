@@ -258,6 +258,7 @@ namespace recordreplay {
   MACRO(CGContextClipToRects)                   \
   MACRO(CGContextConcatCTM)                     \
   MACRO(CGContextDrawImage)                     \
+  MACRO(CGContextFillRect)                      \
   MACRO(CGContextGetClipBoundingBox)            \
   MACRO(CGContextGetCTM)                        \
   MACRO(CGContextGetType)                       \
@@ -270,6 +271,7 @@ namespace recordreplay {
   MACRO(CGContextSetBaseCTM)                    \
   MACRO(CGContextSetCTM)                        \
   MACRO(CGContextSetGrayFillColor)              \
+  MACRO(CGContextSetRGBFillColor)               \
   MACRO(CGContextSetShouldAntialias)            \
   MACRO(CGContextSetShouldSmoothFonts)          \
   MACRO(CGContextSetShouldSubpixelPositionFonts) \
@@ -310,10 +312,12 @@ namespace recordreplay {
   MACRO(CGPathGetCurrentPoint)                  \
   MACRO(CGPathIsEmpty)                          \
   MACRO(CGSSetDebugOptions)                     \
-  MACRO(CTFontCopyGraphicsFont)                 \
+  MACRO(CTFontCopyFamilyName)                   \
   MACRO(CTFontCopyFontDescriptor)               \
+  MACRO(CTFontCopyGraphicsFont)                 \
   MACRO(CTFontCopyTable)                        \
   MACRO(CTFontCopyVariationAxes)                \
+  MACRO(CTFontCreateForString)                  \
   MACRO(CTFontCreatePathForGlyph)               \
   MACRO(CTFontCreateWithFontDescriptor)         \
   MACRO(CTFontCreateWithGraphicsFont)           \
@@ -361,6 +365,18 @@ namespace recordreplay {
   MACRO(GetEventAttributes)                     \
   MACRO(GetEventDispatcherTarget)               \
   MACRO(GetEventKind)                           \
+  MACRO(HIThemeDrawButton)                      \
+  MACRO(HIThemeDrawFrame)                       \
+  MACRO(HIThemeDrawGroupBox)                    \
+  MACRO(HIThemeDrawGrowBox)                     \
+  MACRO(HIThemeDrawMenuBackground)              \
+  MACRO(HIThemeDrawMenuItem)                    \
+  MACRO(HIThemeDrawMenuSeparator)               \
+  MACRO(HIThemeDrawSeparator)                   \
+  MACRO(HIThemeDrawTabPane)                     \
+  MACRO(HIThemeDrawTrack)                       \
+  MACRO(HIThemeGetGrowBoxBounds)                \
+  MACRO(HIThemeSetFill)                         \
   MACRO(IORegistryEntrySearchCFProperty)        \
   MACRO(LSCopyAllHandlersForURLScheme)          \
   MACRO(LSCopyApplicationForMIMEType)           \
@@ -2084,6 +2100,13 @@ RR_CGContextDrawImage(CGContextRef aCx, CGRect aRect, CGImageRef aImage)
   FlushContext(aCx);
 }
 
+static void
+RR_CGContextFillRect(CGContextRef aCx, CGRect aRect)
+{
+  RecordReplayFunctionVoid(CGContextFillRect, aCx, aRect);
+  FlushContext(aCx);
+}
+
 RRFunctionTypes1(CGContextGetClipBoundingBox, CGRect, CGContextRef)
 RRFunctionTypes1(CGContextGetCTM, CGAffineTransform, CGContextRef)
 RRFunction1(CGContextGetType)
@@ -2108,6 +2131,7 @@ RRFunctionTypesVoid2(CGContextSetAlpha, CGContextRef, CGFloat)
 RRFunctionTypesVoid2(CGContextSetBaseCTM, CGContextRef, CGAffineTransform)
 RRFunctionTypesVoid2(CGContextSetCTM, CGContextRef, CGAffineTransform)
 RRFunctionTypesVoid3(CGContextSetGrayFillColor, CGContextRef, CGFloat, CGFloat)
+RRFunctionTypesVoid5(CGContextSetRGBFillColor, CGContextRef, CGFloat, CGFloat, CGFloat, CGFloat)
 RRFunctionVoid2(CGContextSetShouldAntialias)
 RRFunctionVoid2(CGContextSetShouldSmoothFonts)
 RRFunctionVoid2(CGContextSetShouldSubpixelPositionFonts)
@@ -2214,10 +2238,13 @@ RR_CTFontGetBoundingRectsForGlyphs(CTFontRef aFont, CTFontOrientation aOrientati
 RRFunctionTypes1(CGPathGetCurrentPoint, CGPoint, CGPathRef)
 RRFunction1(CGPathIsEmpty)
 RRFunction1(CGSSetDebugOptions)
+RRFunction1(CTFontCopyFamilyName)
 RRFunction1(CTFontCopyFontDescriptor)
 RRFunction2(CTFontCopyGraphicsFont)
 RRFunction3(CTFontCopyTable)
 RRFunction1(CTFontCopyVariationAxes)
+RRFunctionTypes3(CTFontCreateForString, CTFontRef,
+                 CTFontRef, CFStringRef, CFRange)
 RRFunction3(CTFontCreatePathForGlyph)
 RRFunctionTypes3(CTFontCreateWithFontDescriptor, CTFontRef,
                  CTFontDescriptorRef, CGFloat, CGAffineTransform*)
@@ -2425,6 +2452,28 @@ RR_GetCurrentProcess(ProcessSerialNumber* aPSN)
 RRFunction1(GetEventAttributes)
 RRFunction0(GetEventDispatcherTarget)
 RRFunction1(GetEventKind)
+RRFunction5(HIThemeDrawButton)
+RRFunction4(HIThemeDrawFrame)
+RRFunction4(HIThemeDrawGroupBox)
+RRFunction4(HIThemeDrawGrowBox)
+RRFunction4(HIThemeDrawMenuBackground)
+RRFunction6(HIThemeDrawMenuItem)
+RRFunction5(HIThemeDrawMenuSeparator)
+RRFunction4(HIThemeDrawSeparator)
+RRFunction4(HIThemeDrawTabPane)
+RRFunction4(HIThemeDrawTrack)
+
+static OSStatus
+RR_HIThemeGetGrowBoxBounds(const HIPoint* aOrigin, const HIThemeGrowBoxDrawInfo* aDrawInfo,
+                           HIRect* aBounds)
+{
+  RecordReplayFunction(HIThemeGetGrowBoxBounds, OSStatus, aOrigin, aDrawInfo, aBounds);
+  events.RecordOrReplayValue(&rval);
+  events.RecordOrReplayBytes(aBounds, sizeof(*aBounds));
+  return rval;
+}
+
+RRFunction4(HIThemeSetFill)
 RRFunction5(IORegistryEntrySearchCFProperty)
 RRFunction1(LSCopyAllHandlersForURLScheme)
 

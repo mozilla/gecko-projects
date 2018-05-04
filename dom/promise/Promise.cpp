@@ -93,8 +93,11 @@ Promise::Create(nsIGlobalObject* aGlobal, ErrorResult& aRv)
     aRv.Throw(NS_ERROR_UNEXPECTED);
     return nullptr;
   }
+  recordreplay::RecordReplayAssert("Promise::Create #1");
   RefPtr<Promise> p = new Promise(aGlobal);
+  recordreplay::RecordReplayAssert("Promise::Create #2");
   p->CreateWrapper(nullptr, aRv);
+  recordreplay::RecordReplayAssert("Promise::Create #3");
   if (aRv.Failed()) {
     return nullptr;
   }
@@ -226,13 +229,17 @@ Promise::Then(JSContext* aCx,
 void
 Promise::CreateWrapper(JS::Handle<JSObject*> aDesiredProto, ErrorResult& aRv)
 {
+  recordreplay::RecordReplayAssert("Promise::CreateWrapper #1");
   AutoJSAPI jsapi;
+  recordreplay::RecordReplayAssert("Promise::CreateWrapper #2");
   if (!jsapi.Init(mGlobal)) {
     aRv.Throw(NS_ERROR_UNEXPECTED);
     return;
   }
   JSContext* cx = jsapi.cx();
+  recordreplay::RecordReplayAssert("Promise::CreateWrapper #3");
   mPromiseObj = JS::NewPromiseObject(cx, nullptr, aDesiredProto);
+  recordreplay::RecordReplayAssert("Promise::CreateWrapper #4");
   if (!mPromiseObj) {
     JS_ClearPendingException(cx);
     aRv.Throw(NS_ERROR_OUT_OF_MEMORY);

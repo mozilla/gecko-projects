@@ -40,7 +40,7 @@ SymbolNameRaw(void* aPtr)
 size_t
 GetBacktrace(const char* aAssertion, void** aAddresses, size_t aAddressesCount)
 {
-  size_t frameStart = 6;
+  size_t frameStart = 2;
   size_t frameCount = 12;
 
   // Locking operations usually have extra stack goop.
