@@ -1,4 +1,3 @@
-# TODO - redo errors to keep in style ??
 from __future__ import absolute_import, print_function, unicode_literals
 
 from copy import deepcopy
@@ -235,6 +234,7 @@ def parse_config(data):
     data is contents of the file, in "foo=bar\nbaz=buzz" style. We do some translation on
     locales and platforms data, otherewise passthrough
     """
+    ALLOWED_KEYS = ('locales', 'upload_to_candidates', 'platforms')
     config = {'platforms': []}
     for l in data.splitlines():
         if '=' in l:
@@ -244,6 +244,8 @@ def parse_config(data):
             if key in ('linux-i686', 'linux-x86_64', 'mac', 'win32', 'win64'):
                 if value.lower() == 'true':
                     config['platforms'].append(TC_PLATFORM_PER_FTP[key])
+                continue
+            if key not in ALLOWED_KEYS:
                 continue
             if key == 'locales':
                 # a list please
@@ -267,11 +269,6 @@ def get_repack_configs(repackRepo, token):
             if file['name'] != 'repack.cfg':
                 continue
             configs[name] = parse_config(file['object']['text'])
-    ALLOWED_KEYS = ('locales', 'upload_to_candidates', 'platforms')
-    for subpartner, sub_config in configs.items():
-        for key in sub_config.keys():
-            if key not in ALLOWED_KEYS:
-                del(sub_config[key])
     return configs
 
 
@@ -292,19 +289,9 @@ def get_partner_config_by_url(manifest_url, kind, token, partner_subset=None):
 
         partner_configs[kind] = {}
         for partner, partner_url in partners.items():
+            if partner_subset and partner not in partner_subset:
+                continue
             partner_configs[kind][partner] = get_repack_configs(partner_url, token)
-
-        # if we're only interested in a subset of partners we remove the rest
-        if partner_subset:
-            new_config = {}
-            for partner in partner_subset:
-                if partner not in partner_configs[kind]:
-                    # TODO - should be fatal ?
-                    log.warning('Partner config for %s not found, skipping', partner)
-                    partner_subset.remove(partner)
-                else:
-                    new_config[partner] = partner_configs[kind][partner]
-            partner_configs[kind] = new_config
 
     return partner_configs[kind]
 
