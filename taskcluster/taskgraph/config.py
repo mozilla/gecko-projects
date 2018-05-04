@@ -8,7 +8,6 @@ import os
 import logging
 import attr
 import yaml
-from mozpack import path
 
 from mozpack import path
 
