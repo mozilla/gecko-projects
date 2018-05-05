@@ -24,7 +24,7 @@ def resolve_properties(config, tasks):
 
         for k in config.graph_config['partner'][task['environment']]:
             if config.kind.startswith(k):
-                task['worker']['env']['REPACK_MANIFESTS_URL'] = \
+                task['worker'].setdefault('env', {})['REPACK_MANIFESTS_URL'] = \
                     config.graph_config['partner'][task['environment']][k]
         else:
             raise Exception("Can't find partner REPACK_MANIFESTS_URL")
