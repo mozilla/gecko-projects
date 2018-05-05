@@ -26,6 +26,7 @@ def resolve_properties(config, tasks):
             if config.kind.startswith(k):
                 task['worker'].setdefault('env', {})['REPACK_MANIFESTS_URL'] = \
                     config.graph_config['partner'][task['environment']][k]
+                break
         else:
             raise Exception("Can't find partner REPACK_MANIFESTS_URL")
         del(task['environment'])
