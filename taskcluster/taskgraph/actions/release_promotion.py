@@ -15,7 +15,11 @@ from .util import (find_decision_task, find_existing_tasks_from_previous_kinds,
                    find_hg_revision_pushlog_id)
 from taskgraph.util.taskcluster import get_artifact
 from taskgraph.util.partials import populate_release_history
-from taskgraph.util.partners import fix_partner_config
+from taskgraph.util.partners import (
+    fix_partner_config,
+    get_partner_config_by_url,
+    get_token
+)
 from taskgraph.taskgraph import TaskGraph
 from taskgraph.decision import taskgraph_decision
 from taskgraph.parameters import Parameters
@@ -100,13 +104,45 @@ PARTIAL_UPDATES_FLAVORS = (
     'ship_firefox_rc',
     'ship_devedition',
 )
-
-PARTNER_BRANCHES = ('mozilla-beta', 'mozilla-release', 'maple', 'birch', 'jamun')
-EMEFREE_BRANCHES = ('mozilla-beta', 'mozilla-release', 'maple', 'birch', 'jamun')
+PARTNER_BRANCHES = {
+    'mozilla-beta': 'release',
+    'mozilla-release': 'release',
+    'maple': 'release',
+    'birch': 'release',
+    'jamun': 'release',
+}
+EMEFREE_BRANCHES = {
+    'mozilla-beta': 'release',
+    'mozilla-release': 'release',
+    'maple': 'release',
+    'birch': 'release',
+    'jamun': 'release',
+}
 
 
 def is_release_promotion_available(parameters):
     return parameters['project'] in RELEASE_PROMOTION_PROJECTS
+
+
+def get_partner_url_config(parameters, graph_config, enable_emefree=True, enable_partners=True):
+    partner_url_config = {}
+    project = parameters['project']
+    if enable_emefree:
+        alias = EMEFREE_BRANCHES[project]
+        partner_url_config['release-eme-free-repack'] = \
+            graph_config['partner'][alias]['release-eme-free-repack']
+    if enable_partners:
+        alias = PARTNER_BRANCHES[project]
+        partner_url_config['release-partner-repack'] = \
+            graph_config['partner'][alias]['release-partner-repack']
+    return partner_url_config
+
+
+def get_partner_config(partner_url_config, github_token):
+    partner_config = {}
+    for kind, url in partner_url_config.items():
+        partner_config[kind] = get_partner_config_by_url(url, kind, github_token)
+    return partner_config
 
 
 @register_callback_action(
@@ -344,9 +380,19 @@ def release_promotion_action(parameters, graph_config, input, task_group_id, tas
     parameters['release_eta'] = input.get('release_eta', '')
     parameters['release_enable_partners'] = release_enable_partners
     parameters['release_partners'] = input.get('release_partners')
-    if input.get('release_partner_config'):
-        parameters['release_partner_config'] = fix_partner_config(input['release_partner_config'])
     parameters['release_enable_emefree'] = release_enable_emefree
+
+    partner_config = input.get('release_partner_config')
+    if not partner_config and (release_enable_emefree or release_enable_partners):
+        partner_url_config = get_partner_url_config(
+            parameters, graph_config, enable_emefree=release_enable_emefree,
+            enable_partners=release_enable_partners
+        )
+        github_token = get_token(parameters)
+        partner_config = get_partner_config(partner_url_config, github_token)
+
+    if partner_config:
+        parameters['release_partner_config'] = fix_partner_config(partner_config)
 
     if input['version']:
         parameters['version'] = input['version']
