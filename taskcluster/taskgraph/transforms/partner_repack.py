@@ -8,7 +8,6 @@ Transform the partner repack task into an actual task description.
 from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
-from taskgraph.util.schema import resolve_keyed_by
 from taskgraph.util.scriptworker import get_release_config
 from taskgraph.util.partners import (
     check_if_partners_enabled,
@@ -20,7 +19,7 @@ transforms = TransformSequence()
 
 
 @transforms.add
-def resolve_properties(config, tasks):
+def populate_repack_manifests_url(config, tasks):
     for task in tasks:
         partner_url_config = get_partner_url_config(config.params, config.graph_config)
 
