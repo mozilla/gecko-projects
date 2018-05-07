@@ -306,7 +306,6 @@ def get_partner_config_by_url(manifest_url, kind, token, partner_subset=None):
             if partner_subset and partner not in partner_subset:
                 continue
             partner_configs[kind][partner] = get_repack_configs(partner_url, token)
-
     return partner_configs[kind]
 
 
@@ -401,3 +400,17 @@ def locales_per_build_platform(build_platform, locales):
     else:
         exclude = ['ja-JP-mac']
     return [locale for locale in locales if locale not in exclude]
+
+
+def get_partner_url_config(parameters, graph_config, enable_emefree=True, enable_partners=True):
+    partner_url_config = {}
+    project = parameters['project']
+    if enable_emefree:
+        alias = EMEFREE_BRANCHES[project]
+        partner_url_config['release-eme-free-repack'] = \
+            graph_config['partner'][alias]['release-eme-free-repack']
+    if enable_partners:
+        alias = PARTNER_BRANCHES[project]
+        partner_url_config['release-partner-repack'] = \
+            graph_config['partner'][alias]['release-partner-repack']
+    return partner_url_config
