@@ -10,7 +10,10 @@ from __future__ import absolute_import, print_function, unicode_literals
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import resolve_keyed_by
 from taskgraph.util.scriptworker import get_release_config
-from taskgraph.util.partners import check_if_partners_enabled
+from taskgraph.util.partners import (
+    check_if_partners_enabled,
+    get_partner_url_config,
+)
 
 
 transforms = TransformSequence()
@@ -19,17 +22,15 @@ transforms = TransformSequence()
 @transforms.add
 def resolve_properties(config, tasks):
     for task in tasks:
-        for prop in ("environment", ):
-            resolve_keyed_by(task, prop, prop, **config.params)
+        partner_url_config = get_partner_url_config(config.params, config.graph_config)
 
-        for k in config.graph_config['partner'][task['environment']]:
+        for k in partner_url_config:
             if config.kind.startswith(k):
                 task['worker'].setdefault('env', {})['REPACK_MANIFESTS_URL'] = \
-                    config.graph_config['partner'][task['environment']][k]
+                    partner_url_config[k]
                 break
         else:
             raise Exception("Can't find partner REPACK_MANIFESTS_URL")
-        del(task['environment'])
 
         if task['worker']['env']['REPACK_MANIFESTS_URL'].startswith('git@'):
             task.setdefault('scopes', []).append(

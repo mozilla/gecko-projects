@@ -15,6 +15,20 @@ logging.getLogger("requests").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 
 GITHUB_API_ENDPOINT = "https://api.github.com/graphql"
+PARTNER_BRANCHES = {
+    'mozilla-beta': 'release',
+    'mozilla-release': 'release',
+    'maple': 'release',
+    'birch': 'release',
+    'jamun': 'release',
+}
+EMEFREE_BRANCHES = {
+    'mozilla-beta': 'release',
+    'mozilla-release': 'release',
+    'maple': 'release',
+    'birch': 'release',
+    'jamun': 'release',
+}
 
 """
 LOGIN_QUERY, MANIFEST_QUERY, and REPACK_CFG_QUERY are all written to the Github v4 API,

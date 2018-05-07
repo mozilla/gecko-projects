@@ -27,12 +27,6 @@ job-defaults:
          in-tree: "partner-repack"
       chain-of-trust: true
       max-run-time: 7200
-   environment:
-      by-project:
-         mozilla-beta: release
-         mozilla-release: release
-         maple: release
-         default: staging
    run:
       using: mozharness
       config:

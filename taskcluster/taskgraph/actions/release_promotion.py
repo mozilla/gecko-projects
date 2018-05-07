@@ -16,8 +16,11 @@ from .util import (find_decision_task, find_existing_tasks_from_previous_kinds,
 from taskgraph.util.taskcluster import get_artifact
 from taskgraph.util.partials import populate_release_history
 from taskgraph.util.partners import (
+    EMEFREE_BRANCHES,
+    PARTNER_BRANCHES,
     fix_partner_config,
     get_partner_config_by_url,
+    get_partner_url_config,
     get_token
 )
 from taskgraph.taskgraph import TaskGraph
@@ -104,38 +107,10 @@ PARTIAL_UPDATES_FLAVORS = (
     'ship_firefox_rc',
     'ship_devedition',
 )
-PARTNER_BRANCHES = {
-    'mozilla-beta': 'release',
-    'mozilla-release': 'release',
-    'maple': 'release',
-    'birch': 'release',
-    'jamun': 'release',
-}
-EMEFREE_BRANCHES = {
-    'mozilla-beta': 'release',
-    'mozilla-release': 'release',
-    'maple': 'release',
-    'birch': 'release',
-    'jamun': 'release',
-}
 
 
 def is_release_promotion_available(parameters):
     return parameters['project'] in RELEASE_PROMOTION_PROJECTS
-
-
-def get_partner_url_config(parameters, graph_config, enable_emefree=True, enable_partners=True):
-    partner_url_config = {}
-    project = parameters['project']
-    if enable_emefree:
-        alias = EMEFREE_BRANCHES[project]
-        partner_url_config['release-eme-free-repack'] = \
-            graph_config['partner'][alias]['release-eme-free-repack']
-    if enable_partners:
-        alias = PARTNER_BRANCHES[project]
-        partner_url_config['release-partner-repack'] = \
-            graph_config['partner'][alias]['release-partner-repack']
-    return partner_url_config
 
 
 def get_partner_config(partner_url_config, github_token):
