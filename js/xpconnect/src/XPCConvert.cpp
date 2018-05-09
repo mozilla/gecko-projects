@@ -750,9 +750,6 @@ XPCConvert::NativeInterface2JSObject(MutableHandleValue d,
     // object will create (and fill the cache) from its WrapObject call.
     nsWrapperCache* cache = aHelper.GetWrapperCache();
 
-    recordreplay::RecordReplayAssert("XPCConvert::NativeInterface2JSObject %d",
-                                     recordreplay::ThingIndex(cache));
-
     RootedObject flat(cx, cache ? cache->GetWrapper() : nullptr);
     if (!flat && cache && cache->IsDOMBinding()) {
         RootedObject global(cx, xpcscope->GetGlobalJSObject());
